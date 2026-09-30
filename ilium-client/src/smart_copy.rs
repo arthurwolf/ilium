@@ -131,23 +131,32 @@ impl SmartCopySnapshot {
             || spec.label.chars().count() > MAXIMUM_CANDIDATE_LABEL_CHARACTERS
             || unsafe_display_text(&spec.label)
         {
-            return Err("candidate label is invalid".to_string());
+            return Err(
+                ilium_prompts::naming::NAMING_SMART_COPY_CANDIDATE_LABEL_IS_INVALID.to_string(),
+            );
         }
         if spec.kind.trim().is_empty()
             || spec.kind.chars().count() > MAXIMUM_CANDIDATE_KIND_CHARACTERS
             || unsafe_display_text(&spec.kind)
         {
-            return Err("candidate kind is invalid".to_string());
+            return Err(
+                ilium_prompts::naming::NAMING_SMART_COPY_CANDIDATE_KIND_IS_INVALID.to_string(),
+            );
         }
         if spec.parts.is_empty() || spec.parts.len() > MAXIMUM_PARTS_PER_CANDIDATE {
-            return Err("candidate has an invalid part count".to_string());
+            return Err(
+                ilium_prompts::naming::NAMING_SMART_COPY_CANDIDATE_HAS_AN_INVALID_PART_COUNT
+                    .to_string(),
+            );
         }
         let mut spans = Vec::new();
         for part in spec.parts {
             match part {
                 CandidatePartSpec::Lines { lines } => {
                     if lines.is_empty() {
-                        return Err("line list is empty".to_string());
+                        return Err(
+                            ilium_prompts::naming::NAMING_SMART_COPY_LINE_LIST_IS_EMPTY.to_string()
+                        );
                     }
                     for line_id in lines {
                         spans.push(self.whole_line_span(line_id)?);
@@ -170,7 +179,10 @@ impl SmartCopySnapshot {
             .collect::<Vec<_>>()
             .join("\n");
         if text.trim().is_empty() {
-            return Err("candidate resolves only to whitespace".to_string());
+            return Err(
+                ilium_prompts::naming::NAMING_SMART_COPY_CANDIDATE_RESOLVES_ONLY_TO_WHITESPACE
+                    .to_string(),
+            );
         }
         let cell_count = spans
             .iter()
@@ -187,14 +199,21 @@ impl SmartCopySnapshot {
     }
 
     fn whole_line_span(&self, line_id: u16) -> Result<CellSpan, String> {
-        let row = line_id
-            .checked_sub(1)
-            .ok_or_else(|| "line IDs start at 1".to_string())?;
-        self.lines
-            .get(usize::from(row))
-            .ok_or_else(|| format!("line {line_id} is outside the snapshot"))?;
-        let end_column =
-            line_end_column(&self.screen, row).ok_or_else(|| format!("line {line_id} is blank"))?;
+        let row = line_id.checked_sub(1).ok_or_else(|| {
+            ilium_prompts::naming::NAMING_SMART_COPY_LINE_IDS_START_AT_1.to_string()
+        })?;
+        self.lines.get(usize::from(row)).ok_or_else(|| {
+            ilium_prompts::render_value(
+                "naming/smart_copy/line-v0-is-outside-the-snapshot",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            )
+        })?;
+        let end_column = line_end_column(&self.screen, row).ok_or_else(|| {
+            ilium_prompts::render_value(
+                "naming/smart_copy/line-v0-is-blank",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            )
+        })?;
         Ok(CellSpan {
             row,
             start_column: 0,
@@ -211,13 +230,15 @@ impl SmartCopySnapshot {
         if from.is_none() && through.is_none() {
             return self.whole_line_span(line_id);
         }
-        let row = line_id
-            .checked_sub(1)
-            .ok_or_else(|| "line IDs start at 1".to_string())?;
-        let words = self
-            .words
-            .get(usize::from(row))
-            .ok_or_else(|| format!("line {line_id} is outside the snapshot"))?;
+        let row = line_id.checked_sub(1).ok_or_else(|| {
+            ilium_prompts::naming::NAMING_SMART_COPY_LINE_IDS_START_AT_1.to_string()
+        })?;
+        let words = self.words.get(usize::from(row)).ok_or_else(|| {
+            ilium_prompts::render_value(
+                "naming/smart_copy/line-v0-is-outside-the-snapshot",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            )
+        })?;
         let first = from
             .and_then(|id| words.iter().position(|word| word.id == id))
             .unwrap_or(0);
@@ -225,13 +246,22 @@ impl SmartCopySnapshot {
             .and_then(|id| words.iter().position(|word| word.id == id))
             .unwrap_or_else(|| words.len().saturating_sub(1));
         if words.is_empty() || first > last {
-            return Err(format!("invalid word range on line {line_id}"));
+            return Err(ilium_prompts::render_value(
+                "naming/smart_copy/invalid-word-range-on-line",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            ));
         }
         if from.is_some() && !words.iter().any(|word| Some(word.id.as_str()) == from) {
-            return Err(format!("unknown starting word on line {line_id}"));
+            return Err(ilium_prompts::render_value(
+                "naming/smart_copy/unknown-starting-word-on-line",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            ));
         }
         if through.is_some() && !words.iter().any(|word| Some(word.id.as_str()) == through) {
-            return Err(format!("unknown ending word on line {line_id}"));
+            return Err(ilium_prompts::render_value(
+                "naming/smart_copy/unknown-ending-word-on-line",
+                &serde_json::json!({"v0": (line_id).to_string()}),
+            ));
         }
         Ok(CellSpan {
             row,
@@ -406,7 +436,10 @@ fn row_draft(
         })
         .collect();
     let label = if clipped_end < end {
-        format!("{label} (visible excerpt)")
+        ilium_prompts::render_value(
+            "naming/smart_copy/v0-visible-excerpt",
+            &serde_json::json!({"v0": (label).to_string()}),
+        )
     } else {
         label
     };
@@ -615,19 +648,25 @@ fn is_list(text: &str) -> bool {
 
 fn is_command(text: &str) -> bool {
     let text = text.trim_start();
-    ["$ ", "❯ ", "› ", "PS> ", "C:\\> "]
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
+    [
+        "$ ",
+        "❯ ",
+        "› ",
+        ilium_prompts::naming::NAMING_SMART_COPY_PS,
+        ilium_prompts::naming::NAMING_SMART_COPY_C,
+    ]
+    .iter()
+    .any(|prefix| text.starts_with(prefix))
         || text.split_once("$ ").is_some_and(|(prompt, _)| {
             prompt.contains('@') && prompt.len() <= 60 && !prompt.contains(' ')
         })
 }
 
 fn is_diff_start(text: &str) -> bool {
-    text.starts_with("diff --git ")
+    text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_DIFF_GIT)
         || text.starts_with("@@ ")
-        || text.starts_with("--- a/")
-        || text.starts_with("*** Begin Patch")
+        || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_A)
+        || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_BEGIN_PATCH)
 }
 
 fn is_diagnostic_start(text: &str) -> bool {
@@ -636,10 +675,10 @@ fn is_diagnostic_start(text: &str) -> bool {
         "error:",
         "warning:",
         "error[",
-        "Traceback ",
+        ilium_prompts::naming::NAMING_SMART_COPY_TRACEBACK,
         "Exception:",
-        "Caused by:",
-        "thread '",
+        ilium_prompts::naming::NAMING_SMART_COPY_CAUSED_BY,
+        ilium_prompts::naming::NAMING_SMART_COPY_THREAD,
     ]
     .iter()
     .any(|prefix| text.starts_with(prefix))
@@ -694,7 +733,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 &lines,
                 row,
                 end,
-                format!("Visible fenced block L{}", row + 1),
+                ilium_prompts::render_value(
+                    "naming/smart_copy/visible-fenced-block-l",
+                    &serde_json::json!({"v0": (row + 1).to_string()}),
+                ),
                 "fenced-code",
                 true,
             );
@@ -705,7 +747,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                     &lines,
                     row + 1,
                     content_end,
-                    format!("Code contents L{}", row + 1),
+                    ilium_prompts::render_value(
+                        "naming/smart_copy/code-contents-l",
+                        &serde_json::json!({"v0": (row + 1).to_string()}),
+                    ),
                     "code",
                     true,
                 );
@@ -744,7 +789,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             row,
             end,
-            format!("Visible table L{}", row + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-table-l",
+                &serde_json::json!({"v0": (row + 1).to_string()}),
+            ),
             "table",
             true,
         );
@@ -753,7 +801,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 if let Some(span) = lines[table_row].content_span(table_row, start, stop) {
                     draft(
                         &mut details,
-                        format!("Table cell L{} C{}", table_row + 1, column + 1),
+                        ilium_prompts::render_value(
+                            "naming/smart_copy/table-cell-l-v0-c",
+                            &serde_json::json!({"v0": (table_row + 1).to_string(), "v1": (column + 1).to_string()}),
+                        ),
                         "table-cell",
                         vec![span],
                     );
@@ -796,7 +847,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             row,
-            format!("Visible terminal frame L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-terminal-frame-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "box",
             true,
         );
@@ -806,7 +860,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             .collect();
         draft(
             &mut details,
-            format!("Frame contents L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/frame-contents-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "box-contents",
             interior,
         );
@@ -827,10 +884,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                     .chars()
                     .next()
                     .is_some_and(|character| matches!(character, ' ' | '+' | '-' | '@' | '\\'))
-                    || text.starts_with("diff ")
-                    || text.starts_with("index ")
-                    || text.starts_with("new file ")
-                    || text.starts_with("deleted file "))
+                    || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_DIFF)
+                    || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_INDEX)
+                    || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_NEW_FILE)
+                    || text.starts_with(ilium_prompts::naming::NAMING_SMART_COPY_DELETED_FILE))
             {
                 break;
             }
@@ -842,7 +899,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             row,
-            format!("Visible diff L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-diff-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "diff",
             false,
         );
@@ -862,9 +922,13 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 .chars()
                 .next()
                 .is_some_and(|character| matches!(character, ' ' | '\t' | '|' | '^'))
-                || ["at ", "Caused by:", "--> "]
-                    .iter()
-                    .any(|prefix| text.trim_start().starts_with(prefix)))
+                || [
+                    ilium_prompts::naming::NAMING_SMART_COPY_AT,
+                    ilium_prompts::naming::NAMING_SMART_COPY_CAUSED_BY,
+                    "--> ",
+                ]
+                .iter()
+                .any(|prefix| text.trim_start().starts_with(prefix)))
             {
                 break;
             }
@@ -876,7 +940,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             row,
-            format!("Visible diagnostic L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-diagnostic-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "diagnostic",
             false,
         );
@@ -915,7 +982,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             end,
-            format!("Visible tree L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-tree-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "tree",
             false,
         );
@@ -947,7 +1017,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 &lines,
                 start,
                 row,
-                format!("Visible indented code L{}", start + 1),
+                ilium_prompts::render_value(
+                    "naming/smart_copy/visible-indented-code-l",
+                    &serde_json::json!({"v0": (start + 1).to_string()}),
+                ),
                 "code",
                 false,
             );
@@ -969,7 +1042,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 &lines,
                 row,
                 row + 1,
-                format!("Heading L{}", row + 1),
+                ilium_prompts::render_value(
+                    "naming/smart_copy/heading-l",
+                    &serde_json::json!({"v0": (row + 1).to_string()}),
+                ),
                 "heading",
                 false,
             );
@@ -983,7 +1059,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                     &lines,
                     row,
                     row + 2,
-                    format!("Heading L{}", row + 1),
+                    ilium_prompts::render_value(
+                        "naming/smart_copy/heading-l",
+                        &serde_json::json!({"v0": (row + 1).to_string()}),
+                    ),
                     "heading",
                     false,
                 );
@@ -1007,7 +1086,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 &lines,
                 *start,
                 end,
-                format!("Visible section L{}", start + 1),
+                ilium_prompts::render_value(
+                    "naming/smart_copy/visible-section-l",
+                    &serde_json::json!({"v0": (start + 1).to_string()}),
+                ),
                 "section",
                 true,
             );
@@ -1026,7 +1108,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             row,
             row + 1,
-            format!("Prompt line L{}", row + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/prompt-line-l",
+                &serde_json::json!({"v0": (row + 1).to_string()}),
+            ),
             "command",
             false,
         );
@@ -1060,10 +1145,9 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             row,
-            format!(
-                "Visible {} L{}",
-                if list { "list" } else { "quote" },
-                start + 1
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-v0-l",
+                &serde_json::json!({"v0": (if list { "list" } else { "quote" }).to_string(), "v1": (start + 1).to_string()}),
             ),
             if list { "list" } else { "quote" },
             false,
@@ -1085,7 +1169,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             &lines,
             start,
             row,
-            format!("Visible paragraph L{}", start + 1),
+            ilium_prompts::render_value(
+                "naming/smart_copy/visible-paragraph-l",
+                &serde_json::json!({"v0": (start + 1).to_string()}),
+            ),
             "paragraph",
             false,
         );
@@ -1109,7 +1196,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
                 if let Some(span) = line.content_span(line_row, index + width, close) {
                     draft(
                         &mut details,
-                        format!("Inline code L{}", line_row + 1),
+                        ilium_prompts::render_value(
+                            "naming/smart_copy/inline-code-l",
+                            &serde_json::json!({"v0": (line_row + 1).to_string()}),
+                        ),
                         "inline-code",
                         vec![span],
                     );
@@ -1141,7 +1231,10 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             if let Some(span) = line.content_span(line_row, start, end) {
                 draft(
                     &mut details,
-                    format!("URL L{}", line_row + 1),
+                    ilium_prompts::render_value(
+                        "naming/smart_copy/url-l",
+                        &serde_json::json!({"v0": (line_row + 1).to_string()}),
+                    ),
                     "url",
                     vec![span],
                 );
@@ -1319,11 +1412,16 @@ impl SmartCopySession {
         }
         if line.len() > MAXIMUM_JSONL_LINE_BYTES {
             self.invalid_lines += 1;
-            return Err("JSONL record exceeds 64 KiB".to_string());
+            return Err(
+                ilium_prompts::naming::NAMING_SMART_COPY_JSONL_RECORD_EXCEEDS_64_KIB.to_string(),
+            );
         }
         let spec: CandidateSpec = serde_json::from_str(line).map_err(|error| {
             self.invalid_lines += 1;
-            format!("invalid JSONL candidate: {error}")
+            ilium_prompts::render_value(
+                "naming/smart_copy/invalid-jsonl-candidate",
+                &serde_json::json!({"v0": (error).to_string()}),
+            )
         })?;
         let candidate = self.snapshot.resolve_candidate(spec).inspect_err(|_| {
             self.invalid_lines += 1;
@@ -1442,7 +1540,7 @@ pub fn user_prompt(snapshot: &SmartCopySnapshot) -> Result<String, serde_json::E
         screen: &snapshot.lines,
         already_detected,
     };
-    Ok(ilium_prompts::render_value("naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a", &serde_json::json!({"v0": format!("{}", serde_json::to_string(&input)?)})))
+    Ok(ilium_prompts::render_value("naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a", &serde_json::json!({"v0": (serde_json::to_string(&input)?).to_string()})))
 }
 
 #[cfg(test)]

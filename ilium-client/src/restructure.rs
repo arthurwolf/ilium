@@ -66,8 +66,6 @@ const MAXIMUM_CONTENT_CHARACTERS_PER_ITEM: usize = 2_000;
 const CONTEXT_HEAD_LINES: usize = 60;
 const CONTEXT_TAIL_LINES: usize = 60;
 
-const RESTRUCTURE_TEMPLATE: &str = ilium_prompts::naming::RESTRUCTURE;
-
 /// One pane or folder's current identity and content, as sent to the LLM.
 /// `agent_lookup` is intentionally excluded from the rendered prompt
 /// (`#[serde(skip)]`). It carries each agent's launch directory across the
@@ -306,7 +304,10 @@ pub fn gather_project_split_view_contexts(
         .get(project_id)
         .is_some_and(ilium_core::Node::is_project)
     {
-        anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_PROJECT_PROJECT_ID_NO_LONGER_EXISTS);
+        anyhow::bail!(ilium_prompts::render_value(
+            "naming/restructure/project-project-id-no-longer-exists",
+            &serde_json::json!({"v0": format!("{:?}", project_id)})
+        ));
     }
 
     let mut split_views = Vec::new();
@@ -320,19 +321,28 @@ fn gather_split_view_contexts_recursive(
     split_views: &mut Vec<ProtectedSplitViewContext>,
 ) -> anyhow::Result<()> {
     for child_id in tree.children_of(parent_id)? {
-        let child = tree
-            .get(*child_id)
-            .ok_or_else(|| anyhow::anyhow!(ilium_prompts::naming::NAMING_RESTRUCTURE_TREE_CHILD_CHILD_ID_NO_LONGER_EXISTS))?;
+        let child = tree.get(*child_id).ok_or_else(|| {
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/restructure/tree-child-child-id-no-longer-exists",
+                &serde_json::json!({"v0": format!("{:?}", child_id)})
+            ))
+        })?;
         if child.is_split_view() {
-            let orientation = tree
-                .split_orientation(*child_id)
-                .ok_or_else(|| anyhow::anyhow!(ilium_prompts::naming::NAMING_RESTRUCTURE_SPLIT_VIEW_CHILD_ID_HAS_NO_ORIENTATION))?;
+            let orientation = tree.split_orientation(*child_id).ok_or_else(|| {
+                anyhow::anyhow!(ilium_prompts::render_value(
+                    "naming/restructure/split-view-child-id-has-no-orientation",
+                    &serde_json::json!({"v0": format!("{:?}", child_id)})
+                ))
+            })?;
             let ordered_pane_ids = tree.children_of(*child_id)?.to_vec();
             if ordered_pane_ids
                 .iter()
                 .any(|pane_id| !tree.get(*pane_id).is_some_and(ilium_core::Node::is_pane))
             {
-                anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_SPLIT_VIEW_CHILD_ID_CONTAINS_A_NON_PANE_CHILD);
+                anyhow::bail!(ilium_prompts::render_value(
+                    "naming/restructure/split-view-child-id-contains-a-non-pane-child",
+                    &serde_json::json!({"v0": format!("{:?}", child_id)})
+                ));
             }
             split_views.push(ProtectedSplitViewContext {
                 id: *child_id,
@@ -357,8 +367,16 @@ pub fn render_project_structure(tree: &Tree, project_id: NodeId) -> anyhow::Resu
     let project = tree
         .get(project_id)
         .filter(|node| node.is_project())
-        .ok_or_else(|| anyhow::anyhow!(ilium_prompts::naming::NAMING_RESTRUCTURE_PROJECT_PROJECT_ID_NO_LONGER_EXISTS))?;
-    let mut lines = vec![ilium_prompts::render_value("naming/restructure/project-id-v0-title-v1-source", &serde_json::json!({"v0": format!("{}", project_id.0), "v1": format!("{}", project.name), "v2": format!("{}", project.structure_source.prompt_label())}))];
+        .ok_or_else(|| {
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/restructure/project-project-id-no-longer-exists",
+                &serde_json::json!({"v0": format!("{:?}", project_id)})
+            ))
+        })?;
+    let mut lines = vec![ilium_prompts::render_value(
+        "naming/restructure/project-id-v0-title-v1-source",
+        &serde_json::json!({"v0": (project_id.0).to_string(), "v1": (project.name).to_string(), "v2": (project.structure_source.prompt_label()).to_string()}),
+    )];
     render_structure_children(tree, project_id, 1, &mut lines)?;
     Ok(lines.join("\n"))
 }
@@ -370,9 +388,12 @@ fn render_structure_children(
     lines: &mut Vec<String>,
 ) -> anyhow::Result<()> {
     for child_id in tree.children_of(parent_id)? {
-        let child = tree
-            .get(*child_id)
-            .ok_or_else(|| anyhow::anyhow!(ilium_prompts::naming::NAMING_RESTRUCTURE_TREE_CHILD_CHILD_ID_NO_LONGER_EXISTS))?;
+        let child = tree.get(*child_id).ok_or_else(|| {
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/restructure/tree-child-child-id-no-longer-exists",
+                &serde_json::json!({"v0": format!("{:?}", child_id)})
+            ))
+        })?;
         let kind = match &child.kind {
             NodeKind::Container(container) if container.is_group() => "group".to_string(),
             NodeKind::Container(container) if container.is_split_view() => {
@@ -389,7 +410,7 @@ fn render_structure_children(
             NodeKind::Folder { .. } => "folder".to_string(),
             NodeKind::Container(_) => "container".to_string(),
         };
-        lines.push(ilium_prompts::render_value("naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", &serde_json::json!({"v0": format!("{}", "  ".repeat(depth)), "v1": format!("{}", kind), "v2": format!("{}", child.id.0), "v3": format!("{}", child.name), "v4": format!("{}", child.inferred_icon.as_deref().unwrap_or("")), "v5": format!("{}", child.structure_source.prompt_label()), "v6": format!("{}", child.is_name_fixed)})));
+        lines.push(ilium_prompts::render_value("naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", &serde_json::json!({"v0": ("  ".repeat(depth)).to_string(), "v1": (kind).to_string(), "v2": (child.id.0).to_string(), "v3": (child.name).to_string(), "v4": (child.inferred_icon.as_deref().unwrap_or("")).to_string(), "v5": (child.structure_source.prompt_label()).to_string(), "v6": (child.is_name_fixed).to_string()})));
         if child.is_container() {
             render_structure_children(tree, *child_id, depth + 1, lines)?;
         }
@@ -420,7 +441,7 @@ pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
             Some(entries) if !entries.is_empty() => {
                 clip_lines(&format_transcript_entries(&entries))
             }
-            _ => ilium_prompts::naming::RESTRUCTURE_FRAGMENT_1.to_string(),
+            _ => ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT.to_string(),
         };
     }
 }
@@ -431,7 +452,12 @@ pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
 fn format_transcript_entries(entries: &[crate::transcript_context::TranscriptEntry]) -> String {
     entries
         .iter()
-        .map(|entry| format!("[{}] {}", entry.kind.prompt_label(), entry.content))
+        .map(|entry| {
+            ilium_prompts::render_value(
+                "naming/transcript-row",
+                &serde_json::json!({"role": entry.kind.prompt_label(), "content": entry.content}),
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -439,9 +465,10 @@ fn format_transcript_entries(entries: &[crate::transcript_context::TranscriptEnt
 fn describe_pane_status(status: &PaneStatus) -> String {
     match status {
         PaneStatus::PlainShell => ilium_prompts::naming::NAMING_RESTRUCTURE_PLAIN_SHELL.to_string(),
-        PaneStatus::Agent(agent) => {
-            ilium_prompts::render_value("naming/restructure/v0-agent", &serde_json::json!({"v0": format!("{}", agent.class.label()), "v1": format!("{}", describe_activity(&agent.activity()))}))
-        }
+        PaneStatus::Agent(agent) => ilium_prompts::render_value(
+            "naming/clipped-lines-agent",
+            &serde_json::json!({"v0": (agent.class.label()).to_string(), "v1": (describe_activity(&agent.activity())).to_string()}),
+        ),
         PaneStatus::Editor { .. } => "Editor".to_string(),
         PaneStatus::Board => "Board".to_string(),
     }
@@ -450,9 +477,15 @@ fn describe_pane_status(status: &PaneStatus) -> String {
 fn describe_activity(activity: &AgentActivity) -> &'static str {
     match activity {
         AgentActivity::Working => "working",
-        AgentActivity::WaitingBackground => ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_ON_BACKGROUND_TASKS,
-        AgentActivity::BackgroundTaskStillRunning => ilium_prompts::naming::NAMING_SESSION_NAMING_A_BACKGROUND_TASK_IS_STILL_FINISHING_UP,
-        AgentActivity::WaitingApproval => ilium_prompts::naming::NAMING_RESTRUCTURE_WAITING_FOR_YOUR_APPROVAL,
+        AgentActivity::WaitingBackground => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_ON_BACKGROUND_TASKS
+        }
+        AgentActivity::BackgroundTaskStillRunning => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_A_BACKGROUND_TASK_IS_STILL_FINISHING_UP
+        }
+        AgentActivity::WaitingApproval => {
+            ilium_prompts::naming::NAMING_RESTRUCTURE_WAITING_FOR_YOUR_APPROVAL
+        }
         AgentActivity::Done => "done",
         AgentActivity::Idle => "idle",
     }
@@ -469,7 +502,10 @@ fn clip_lines(text: &str) -> String {
     }
     let head = lines[..CONTEXT_HEAD_LINES].join("\n");
     let tail = lines[lines.len() - CONTEXT_TAIL_LINES..].join("\n");
-    ilium_prompts::render_value("naming/restructure/v0", &serde_json::json!({"v0": format!("{}", head), "v1": format!("{}", tail)}))
+    ilium_prompts::render_value(
+        "naming/clipped-lines",
+        &serde_json::json!({"v0": (head).to_string(), "v1": (tail).to_string()}),
+    )
 }
 
 #[derive(Serialize)]
@@ -515,11 +551,11 @@ impl RestructurePromptContext {
         Self {
             title_instructions: match title_style {
                 TitleStyle::Labeling => crate::session_naming::LABEL_INSTRUCTIONS,
-                TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_FRAGMENT_2,
+                TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_SUMMARY,
             },
             output_example: match title_style {
-                TitleStyle::Labeling => ilium_prompts::naming::RESTRUCTURE_FRAGMENT_3,
-                TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_FRAGMENT_4,
+                TitleStyle::Labeling => ilium_prompts::naming::RESTRUCTURE_LABEL_EXAMPLE,
+                TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_SUMMARY_EXAMPLE,
             },
             items: items
                 .iter()
@@ -619,7 +655,7 @@ fn clip_restructure_evidence(value: &str, maximum_characters: usize) -> String {
         return String::new();
     }
 
-    let omitted_marker = ilium_prompts::naming::RESTRUCTURE_FRAGMENT_5;
+    let omitted_marker = ilium_prompts::naming::CONTENT_OMISSION_MARKER;
     let marker_characters = omitted_marker.chars().count();
     if maximum_characters <= marker_characters {
         return value.chars().take(maximum_characters).collect();
@@ -633,7 +669,10 @@ fn clip_restructure_evidence(value: &str, maximum_characters: usize) -> String {
         .chars()
         .skip(character_count - tail_characters)
         .collect();
-    format!("{head}{omitted_marker}{tail}")
+    ilium_prompts::render_value(
+        "naming/clipped-context",
+        &serde_json::json!({"head": head, "marker": omitted_marker, "tail": tail}),
+    )
 }
 
 /// Renders one bounded prompt from the exact current project state. Encoding
@@ -668,9 +707,7 @@ fn render_restructure_prompt(
         structure_evidence_budget = structure_evidence_budget.saturating_mul(3) / 4;
     }
 
-    anyhow::bail!(
-        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_PROMPT_EXCEEDED_THE_MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS_CHARACTER_SAFET
-    )
+    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet", &serde_json::json!({"v0": (MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS).to_string()})))
 }
 
 /// LLM-facing mirror of `ilium_core::RestructureNode`, tagged for a clean
@@ -798,12 +835,12 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             prompt_characters = prompt.chars().count(),
             item_count = contexts.len(),
             is_corrective_retry = retry_feedback.is_some(),
-            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_STARTED
+            "restructure inference started"
         );
         // The Debug setting explicitly promises complete LLM evidence. This
         // logger writes only while that setting is on, so retain the exact
         // bounded request here instead of hiding it behind `RUST_LOG=debug`.
-        tracing::info!(operation_id, attempt, prompt = %prompt, ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_PROMPT);
+        tracing::info!(operation_id, attempt, prompt = %prompt, "restructure inference prompt");
         let response = match generator.complete_restructure_prompt(&prompt) {
             Ok(response) => response,
             Err(error) => {
@@ -811,9 +848,9 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
                     operation_id,
                     attempt,
                     error_characters = error.to_string().chars().count(),
-                    ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_REQUEST_FAILED
+                    "restructure inference request failed"
                 );
-                tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_REQUEST_FAILURE_DETAILS);
+                tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, "restructure inference request failure details");
                 return Err(error);
             }
         };
@@ -821,9 +858,9 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             operation_id,
             attempt,
             response_characters = response.chars().count(),
-            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_RESPONSE_RECEIVED
+            "restructure inference response received"
         );
-        tracing::info!(operation_id, attempt, response = %response, ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_RESPONSE);
+        tracing::info!(operation_id, attempt, response = %response, "restructure inference response");
 
         match parse_restructure_response(
             &response,
@@ -835,7 +872,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
                 tracing::info!(
                     operation_id,
                     attempt,
-                    ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_RESPONSE_PARSED
+                    "restructure inference response"_PARSED
                 );
                 return Ok(plan);
             }
@@ -844,7 +881,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
                     operation_id,
                     attempt,
                     error_characters = error.to_string().chars().count(),
-                    ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_INFERENCE_RESPONSE_COULD_NOT_BE_PARSED
+                    "restructure inference response"_COULD_NOT_BE_PARSED
                 );
                 tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, response = %response, ilium_prompts::naming::NAMING_RESTRUCTURE_UNPARSEABLE_RESTRUCTURE_INFERENCE_RESPONSE);
                 retry_feedback = Some(error.to_string());
@@ -869,7 +906,10 @@ fn parse_restructure_response(
 ) -> anyhow::Result<RestructurePlan> {
     let candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
     let mut parsed: LlmRestructurePlan = serde_json::from_value(candidate).map_err(|error| {
-        anyhow::anyhow!(ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_HAD_THE_WRONG_JSON_SHAPE_ERROR)
+        anyhow::anyhow!(ilium_prompts::render_value(
+            "naming/restructure/restructure-response-had-the-wrong-json-shape-error",
+            &serde_json::json!({"v0": (error).to_string()})
+        ))
     })?;
 
     let mut referenced = Vec::new();
@@ -877,7 +917,10 @@ fn parse_restructure_response(
     let mut referenced_set = HashSet::new();
     for id in &referenced {
         if !referenced_set.insert(*id) {
-            anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_ID_ID_MORE_THAN_ONCE);
+            anyhow::bail!(ilium_prompts::render_value(
+                "naming/restructure/restructure-response-referenced-id-id-more-than-once",
+                &serde_json::json!({"v0": format!("{:?}", id)})
+            ));
         }
     }
     let expected_set: HashSet<NodeId> = contexts.iter().map(|context| context.id).collect();
@@ -886,9 +929,7 @@ fn parse_restructure_response(
         let mut unexpected: Vec<_> = referenced_set.difference(&expected_set).copied().collect();
         missing.sort_by_key(|id| id.0);
         unexpected.sort_by_key(|id| id.0);
-        anyhow::bail!(
-            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_THE_WRONG_LEAF_SET_MISSING_MISSING_UNEXPECTED_UNEXPEC
-        );
+        anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec", &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})));
     }
     let expected_kinds: HashMap<NodeId, ExpectedLeafKind> = contexts
         .iter()
@@ -907,10 +948,10 @@ fn parse_restructure_response(
             .insert(split_view.id, split_view)
             .is_some()
         {
-            anyhow::bail!(
-                ilium_prompts::naming::NAMING_RESTRUCTURE_PROTECTED_SPLIT_VIEW_CONTEXT_DUPLICATED_ID,
-                split_view.id
-            );
+            anyhow::bail!(ilium_prompts::render_value(
+                "naming/restructure/protected-split-view-context-duplicated-id",
+                &serde_json::json!({"v0": format!("{:?}", split_view.id)})
+            ));
         }
     }
     let mut referenced_split_views = HashSet::new();
@@ -934,9 +975,7 @@ fn parse_restructure_response(
             .collect();
         missing.sort_unstable();
         unexpected.sort_unstable();
-        anyhow::bail!(
-            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_CHANGED_THE_PROTECTED_SPLIT_VIEW_SET_MISSING_MISSING_UNEXPECTED
-        );
+        anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-changed-the-protected-split-view-set-missing-missing-unexpected", &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})));
     }
     // A restructure may reorganize existing leaves, but it must never
     // arbitrarily rebrand them. Keep each already-persisted icon authoritative
@@ -959,7 +998,9 @@ fn parse_restructure_response(
     // not the model's own claim -- is what actually gates the prefix.
     let terminal_pane_ids: HashSet<NodeId> = contexts
         .iter()
-        .filter(|context| context.kind_label == ilium_prompts::naming::NAMING_RESTRUCTURE_PLAIN_SHELL)
+        .filter(|context| {
+            context.kind_label == ilium_prompts::naming::NAMING_RESTRUCTURE_PLAIN_SHELL
+        })
         .map(|context| context.id)
         .collect();
     Ok(RestructurePlan {
@@ -990,28 +1031,20 @@ fn validate_model_contract(
         match node {
             LlmRestructureNode::Pane { id, .. } => {
                 if expected_kinds.get(id) != Some(&ExpectedLeafKind::Pane) {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_CLAIMED_ID_WAS_A_PANE_BUT_THE_EXISTING_ITEM_IS_A_FOLDE
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-claimed-id-was-a-pane-but-the-existing-item-is-a-folde", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
                 }
             }
             LlmRestructureNode::Folder { id, .. } => {
                 if in_split_view {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_PLACED_FOLDER_ID_INSIDE_A_SPLIT_VIEW
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-folder-id-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
                 }
                 if expected_kinds.get(id) != Some(&ExpectedLeafKind::Folder) {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_CLAIMED_ID_WAS_A_FOLDER_BUT_THE_EXISTING_ITEM_IS_A_PAN
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-claimed-id-was-a-folder-but-the-existing-item-is-a-pan", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
                 }
             }
             LlmRestructureNode::Group { children, .. } => {
                 if in_split_view {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_PLACED_A_GROUP_INSIDE_A_SPLIT_VIEW
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-a-group-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
                 }
                 validate_model_contract(
                     children,
@@ -1024,9 +1057,7 @@ fn validate_model_contract(
             }
             LlmRestructureNode::ExistingGroup { children, .. } => {
                 if in_split_view {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_PLACED_AN_EXISTING_GROUP_INSIDE_A_SPLIT_VIEW
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-an-existing-group-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
                 }
                 validate_model_contract(
                     children,
@@ -1039,19 +1070,13 @@ fn validate_model_contract(
             }
             LlmRestructureNode::SplitView { id, children } => {
                 if in_split_view {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_NESTED_A_SPLIT_VIEW_INSIDE_ANOTHER_SPLIT_VIEW
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-nested-a-split-view-inside-another-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
                 }
                 let Some(expected_split_view) = expected_split_views.get(id) else {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_INVENTED_UNKNOWN_SPLIT_VIEW_ID
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-invented-unknown-split-view-id", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
                 };
                 if !referenced_split_views.insert(*id) {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_PROTECTED_SPLIT_VIEW_ID_MORE_THAN_ONCE
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-referenced-protected-split-view-id-more-than-once", &serde_json::json!({"v0": format!("{:?}", id)})));
                 }
                 let actual_pane_ids = children
                     .iter()
@@ -1060,17 +1085,11 @@ fn validate_model_contract(
                         LlmRestructureNode::Folder { .. }
                         | LlmRestructureNode::Group { .. }
                         | LlmRestructureNode::ExistingGroup { .. }
-                        | LlmRestructureNode::SplitView { .. } => anyhow::bail!(
-                            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_NODE_PATH_PLACED_A_NON_PANE_INSIDE_PROTECTED_SPLIT_VIEW_ID
-                        ),
+                        | LlmRestructureNode::SplitView { .. } => anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-a-non-pane-inside-protected-split-view-id", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)}))),
                     })
                     .collect::<anyhow::Result<Vec<_>>>()?;
                 if actual_pane_ids != expected_split_view.ordered_pane_ids {
-                    anyhow::bail!(
-                        ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_CHANGED_PROTECTED_SPLIT_VIEW_ID_PANE_ORDER_OR_MEMBERSHIP_EXPECTE,
-                        expected_split_view.ordered_pane_ids,
-                        actual_pane_ids,
-                    );
+                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-changed-protected-split-view-id-pane-order-or-membership-expecte", &serde_json::json!({"v0": format!("{:?}", id), "v1": format!("{:?}", expected_split_view.ordered_pane_ids), "v2": format!("{:?}", actual_pane_ids)})));
                 }
                 validate_model_contract(
                     children,
@@ -1251,7 +1270,9 @@ fn validate_label_pair(title: &str, short_title: &Option<String>) -> anyhow::Res
 /// `ilium_core::Node::name` and be rendered verbatim in the tree UI.
 fn validate_title_field(title: &str) -> anyhow::Result<()> {
     if title.trim().is_empty() {
-        anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_CONTAINED_AN_EMPTY_TITLE);
+        anyhow::bail!(
+            ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_CONTAINED_AN_EMPTY_TITLE
+        );
     }
     if title.chars().any(char::is_control) {
         anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_CONTAINED_A_CONTROL_CHARACTER_IN_A_TITLE);
@@ -2239,7 +2260,10 @@ mod tests {
 
         resolve_content_extracts(&mut contexts, &home);
 
-        assert_eq!(contexts[0].content_extract, ilium_prompts::naming::RESTRUCTURE_FRAGMENT_6);
+        assert_eq!(
+            contexts[0].content_extract,
+            ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT
+        );
         assert!(contexts[0].agent_lookup.is_none());
     }
 

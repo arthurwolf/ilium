@@ -136,6 +136,15 @@ impl ConversionDialogState {
     }
 }
 
+/// Where a replaced pane sat, for handing it focus to the new pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplacementFocus {
+    pub old_pane_id: NodeId,
+    pub parent: NodeId,
+    pub index: usize,
+    pub was_focused: bool,
+}
+
 /// Work the event loop hands to a blocking worker.
 #[derive(Debug, Clone)]
 pub struct ConversionJob {
@@ -496,6 +505,7 @@ impl App {
                         state.phase = ConversionPhase::Starting;
                         state.progress = 1.0;
                         state.push_log(format!("Starting: {command}"));
+                        self.remember_replacement_focus(pane_id);
                         self.queue_request(ClientRequest::ReplacePaneWithCommand {
                             pane_id,
                             command_line: command,
@@ -509,6 +519,50 @@ impl App {
                     Err(message) => state.fail(message),
                 }
             }
+        }
+    }
+
+    fn remember_replacement_focus(&mut self, pane_id: NodeId) {
+        let Some(parent) = self.tree.parent_of(pane_id) else {
+            return;
+        };
+        let Some(index) = self
+            .tree
+            .children_of(parent)
+            .ok()
+            .and_then(|children| children.iter().position(|child| *child == pane_id))
+        else {
+            return;
+        };
+        self.pending_replacement_focus = Some(ReplacementFocus {
+            old_pane_id: pane_id,
+            parent,
+            index,
+            was_focused: self.active_pane_id() == Some(pane_id),
+        });
+    }
+
+    /// Called after every tree snapshot: once the replaced pane is gone, the
+    /// pane now at its position takes over focus when the old one had it.
+    pub fn apply_pending_replacement_focus(&mut self) {
+        let Some(pending) = self.pending_replacement_focus else {
+            return;
+        };
+        if self.tree.get(pending.old_pane_id).is_some() {
+            return;
+        }
+        self.pending_replacement_focus = None;
+        if !pending.was_focused {
+            return;
+        }
+        let replacement = self
+            .tree
+            .children_of(pending.parent)
+            .ok()
+            .and_then(|children| children.get(pending.index).copied())
+            .filter(|id| self.tree.get(*id).is_some_and(|node| node.is_pane()));
+        if let Some(replacement) = replacement {
+            self.focus_pane(replacement);
         }
     }
 
@@ -532,6 +586,7 @@ impl App {
                     ConversionDialogState::resume_command(state.source, &state.source_session_id);
                 let pane_id = state.pane_id;
                 let label = state.source.label();
+                self.remember_replacement_focus(pane_id);
                 self.queue_request(ClientRequest::ReplacePaneWithCommand {
                     pane_id,
                     command_line: command,
@@ -628,5 +683,186 @@ mod tests {
             ConversionDialogState::resume_command(BuiltinAgentProvider::Claude, "abc"),
             "claude --resume abc"
         );
+    }
+
+    mod app_flow {
+        use super::*;
+        use ilium_core::{AgentActivity, AgentClass, PaneContentKind, PaneStatus};
+        use ilium_session_convert::ConversionOutcome;
+
+        const SESSION_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+        fn app_with_agent(class: AgentClass) -> (App, NodeId) {
+            let mut app = App::new("test".to_string(), std::env::temp_dir());
+            let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+            let pane = app
+                .tree
+                .add_pane(group, "agent", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(class, AgentActivity::Idle, None),
+                )
+                .unwrap();
+            app.agent_session_ids.insert(pane, SESSION_ID.to_string());
+            (app, pane)
+        }
+
+        fn begin(app: &mut App, pane: NodeId, source: BuiltinAgentProvider, target: BuiltinAgentProvider) {
+            app.frozen_panes.insert(pane);
+            app.conversion = Some(Box::new(ConversionDialogState::new(
+                pane,
+                source,
+                target,
+                SESSION_ID.to_string(),
+                std::env::temp_dir(),
+            )));
+            app.mode = Mode::ConvertSession;
+        }
+
+        #[test]
+        fn only_the_opposite_builtin_provider_is_offered() {
+            let (app, pane) = app_with_agent(AgentClass::Claude);
+            assert_eq!(app.conversion_target_for(pane), Some(BuiltinAgentProvider::Codex));
+            let (app, pane) = app_with_agent(AgentClass::Codex);
+            assert_eq!(app.conversion_target_for(pane), Some(BuiltinAgentProvider::Claude));
+            let (app, pane) = app_with_agent(AgentClass::Antigravity);
+            assert_eq!(app.conversion_target_for(pane), None);
+        }
+
+        #[test]
+        fn a_pane_without_a_resolved_session_is_not_convertible() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            app.agent_session_ids.remove(&pane);
+            assert_eq!(app.conversion_target_for(pane), None);
+        }
+
+        #[test]
+        fn no_second_conversion_is_offered_while_one_is_active() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            assert_eq!(app.conversion_target_for(pane), None);
+        }
+
+        #[test]
+        fn a_stopped_agent_starts_the_worker_and_a_failed_stop_does_not() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            app.apply_pane_process_terminated(pane, Ok(()));
+            let job = app.take_pending_conversion_start().expect("worker requested");
+            assert_eq!(job.pane_id, pane);
+            assert_eq!(job.request.source, BuiltinAgentProvider::Claude);
+            assert_eq!(job.request.target, BuiltinAgentProvider::Codex);
+            assert_eq!(job.request.source_session_id, SESSION_ID);
+            let dialog = app.conversion.as_ref().unwrap();
+            assert!(dialog.is_agent_stopped);
+            assert_eq!(dialog.phase, ConversionPhase::Converting);
+
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            app.apply_pane_process_terminated(pane, Err("still running".to_string()));
+            assert!(app.take_pending_conversion_start().is_none());
+            let dialog = app.conversion.as_ref().unwrap();
+            assert!(dialog.is_failed());
+            assert!(!dialog.is_agent_stopped);
+        }
+
+        #[test]
+        fn success_replaces_the_pane_with_the_converted_session_and_closes_the_dialog() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            app.apply_pane_process_terminated(pane, Ok(()));
+            let _ = app.take_outbound_requests();
+            app.apply_conversion_worker_event(ConversionWorkerEvent::Finished {
+                pane_id: pane,
+                result: Ok(ConversionOutcome {
+                    new_session_id: "22222222-2222-4222-8222-222222222222".to_string(),
+                    target_transcript_path: PathBuf::from("/tmp/x.jsonl"),
+                    converted_items: 2,
+                    dropped_items: 0,
+                }),
+            });
+            let requests = app.take_outbound_requests();
+            assert_eq!(
+                requests,
+                vec![ClientRequest::ReplacePaneWithCommand {
+                    pane_id: pane,
+                    command_line: "codex resume 22222222-2222-4222-8222-222222222222".to_string(),
+                }]
+            );
+            assert!(app.conversion.is_none());
+            assert!(matches!(app.mode, Mode::Normal));
+        }
+
+        #[test]
+        fn failure_after_the_stop_offers_resuming_the_original_session() {
+            let (mut app, pane) = app_with_agent(AgentClass::Codex);
+            begin(&mut app, pane, BuiltinAgentProvider::Codex, BuiltinAgentProvider::Claude);
+            app.apply_pane_process_terminated(pane, Ok(()));
+            app.apply_conversion_worker_event(ConversionWorkerEvent::Finished {
+                pane_id: pane,
+                result: Err("transcript unreadable".to_string()),
+            });
+            assert!(app.conversion.as_ref().unwrap().is_failed());
+            let _ = app.take_outbound_requests();
+            app.handle_conversion_key(KeyCode::Enter);
+            assert_eq!(
+                app.take_outbound_requests(),
+                vec![ClientRequest::ReplacePaneWithCommand {
+                    pane_id: pane,
+                    command_line: format!("codex resume {SESSION_ID}"),
+                }]
+            );
+            assert!(app.conversion.is_none());
+        }
+
+        #[test]
+        fn escape_closes_a_failed_dialog_and_unfreezes_the_pane() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            app.apply_pane_process_terminated(pane, Err("nope".to_string()));
+            app.handle_conversion_key(KeyCode::Enter);
+            assert!(app.conversion.is_some(), "Enter must not resume a live agent");
+            app.handle_conversion_key(KeyCode::Esc);
+            assert!(app.conversion.is_none());
+            assert!(!app.frozen_panes.contains(&pane));
+            assert!(matches!(app.mode, Mode::Normal));
+        }
+
+        #[test]
+        fn escape_while_converting_requests_cancellation() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            app.apply_pane_process_terminated(pane, Ok(()));
+            app.handle_conversion_key(KeyCode::Esc);
+            assert!(app.take_pending_conversion_cancel());
+            assert!(app.conversion.is_some());
+        }
+
+        #[test]
+        fn the_replacement_takes_focus_when_the_old_pane_had_it() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            let parent = app.tree.parent_of(pane).unwrap();
+            app.pending_replacement_focus = Some(ReplacementFocus {
+                old_pane_id: pane,
+                parent,
+                index: 0,
+                was_focused: true,
+            });
+            app.apply_pending_replacement_focus();
+            assert!(
+                app.pending_replacement_focus.is_some(),
+                "the old pane still exists, so the handoff must wait"
+            );
+            let replacement = app
+                .tree
+                .add_pane(parent, "new", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree.remove_node(pane).unwrap();
+            app.apply_pending_replacement_focus();
+            assert!(app.pending_replacement_focus.is_none());
+            assert_eq!(app.active_pane_id(), Some(replacement));
+        }
     }
 }

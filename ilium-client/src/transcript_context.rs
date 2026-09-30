@@ -109,7 +109,7 @@ impl KindEntries {
                 sequence: last_earliest.sequence + 1,
                 entry: TranscriptEntry {
                     kind: last_earliest.entry.kind,
-                    content: ilium_prompts::render_value("naming/transcript_context/v0-earlier-v1-entries-omitted", &serde_json::json!({"v0": format!("{}", self.dropped_count), "v1": format!("{}", last_earliest.entry.kind.prompt_label())})),
+                    content: ilium_prompts::render_value("naming/transcript_context/v0-earlier-v1-entries-omitted", &serde_json::json!({"v0": (self.dropped_count).to_string(), "v1": (last_earliest.entry.kind.prompt_label()).to_string()})),
                 },
             }
         });
@@ -370,9 +370,11 @@ pub(crate) fn is_codex_context_envelope(message: &str) -> bool {
     let message = message.trim_start();
     message.starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_AGENTS_MD_INSTRUCTIONS_FOR)
         || message.starts_with("<environment_context>")
-        || message.starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_CODEX_INTERNAL_CONTEXT)
+        || message
+            .starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_CODEX_INTERNAL_CONTEXT)
         || message.starts_with("<task-notification>")
-        || message.starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_ILIUM_PROGRESS_MONITOR)
+        || message
+            .starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_ILIUM_PROGRESS_MONITOR)
 }
 
 /// Extracts text from the string/array/block shapes used by Claude and Codex

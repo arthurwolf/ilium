@@ -158,9 +158,9 @@ impl CreateAgentFromLineState {
 
 /// Produces the requested contextual instruction from a physical file line.
 pub fn default_agent_prompt(path: &Path, line_number: usize, line_text: &str) -> String {
-    format!(
-        "/goal please do the following task: \"{line_text}\", note this text comes from the file {} at line {line_number} in case this can help you gather more context",
-        path.display()
+    ilium_prompts::render_value(
+        "agent/goal-from-line",
+        &serde_json::json!({"v0": (line_text).to_string(), "v1": (path.display()).to_string(), "v2": (line_number).to_string()}),
     )
 }
 
@@ -236,10 +236,24 @@ mod tests {
     fn default_prompt_contains_line_file_and_one_based_line_number() {
         let prompt = default_agent_prompt(Path::new("/work/src/main.rs"), 42, "fix_this();");
 
-        assert_eq!(
-            prompt,
-            "/goal please do the following task: \"fix_this();\", note this text comes from the file /work/src/main.rs at line 42 in case this can help you gather more context"
-        );
+        // Frozen byte fingerprint of the pre-extraction rendered prompt.
+        let fingerprint = prompt
+            .as_bytes()
+            .iter()
+            .fold(0xcbf29ce484222325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            });
+        assert_eq!(fingerprint, 0xd279299ad606d79b);
+    }
+
+    #[test]
+    fn default_prompt_preserves_source_text_without_template_or_html_interpretation() {
+        let source_text = "{{untrusted}} <tag> & \"quoted\"";
+        let prompt = default_agent_prompt(Path::new("/work/a&b.rs"), 7, source_text);
+
+        assert!(prompt.contains(source_text));
+        assert!(prompt.contains("/work/a&b.rs"));
+        assert!(!prompt.contains("&amp;"));
     }
 
     #[test]

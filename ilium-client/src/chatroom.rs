@@ -116,7 +116,14 @@ pub fn append_message(project_root: &Path, author: &str, content: &str) -> anyho
         if needs_leading_newline {
             writeln!(file)?;
         }
-        writeln!(file, "- {timestamp} | {author} | {content}")?;
+        writeln!(
+            file,
+            "{}",
+            ilium_prompts::render_value(
+                "agent/chatroom-record-row",
+                &serde_json::json!({"v0": (timestamp).to_string(), "v1": (author).to_string(), "v2": (content).to_string()})
+            )
+        )?;
         file.sync_data()?;
         Ok(())
     })
@@ -144,20 +151,17 @@ pub fn read_messages(project_root: &Path, limit: usize) -> anyhow::Result<Vec<Ch
 pub fn context(project_root: &Path, limit: usize) -> anyhow::Result<String> {
     let messages = read_messages(project_root, limit)?;
     if messages.is_empty() {
-        return Ok(format!(
-            "Ilium chatroom is enabled. No messages have been posted yet. {COORDINATION_POSTING_GUIDANCE} Use `ilium chat send --message \"...\"` only when that threshold is met."
+        return Ok(ilium_prompts::render_value(
+            "agent/chatroom-empty-context",
+            &serde_json::json!({"v0": (COORDINATION_POSTING_GUIDANCE).to_string()}),
         ));
     }
-    let mut output = format!(
-        "Ilium chatroom is enabled for this project. {COORDINATION_POSTING_GUIDANCE} Read these recent coordination messages; use `ilium chat send --message \"...\"` only when that threshold is met:\n"
+    let mut output = ilium_prompts::render_value(
+        "agent/chatroom-context",
+        &serde_json::json!({"v0": (COORDINATION_POSTING_GUIDANCE).to_string()}),
     );
     for message in messages {
-        output.push_str(&format!(
-            "- {} | {} | {}\n",
-            flatten_for_hook_output(&message.timestamp),
-            flatten_for_hook_output(&message.author),
-            flatten_for_hook_output(&message.content)
-        ));
+        output.push_str(&ilium_prompts::render_value("agent/chatroom-context-row", &serde_json::json!({"v0": (flatten_for_hook_output(&message.timestamp)).to_string(), "v1": (flatten_for_hook_output(&message.author)).to_string(), "v2": (flatten_for_hook_output(&message.content)).to_string()})));
     }
     Ok(output)
 }
@@ -184,12 +188,19 @@ fn flatten_for_hook_output(value: &str) -> String {
 
 fn write_new_chatroom(path: &Path) -> anyhow::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    writeln!(file, "# ILIUM CHATROOM")?;
+    writeln!(file, "{}", ilium_prompts::agent::CHATROOM_TITLE)?;
     writeln!(file, "{CHATROOM_MARKER}")?;
     writeln!(file)?;
-    writeln!(file, "Agents and the user coordinate here. {COORDINATION_POSTING_GUIDANCE} Add qualifying messages with `ilium chat send --message \"...\"`; do not rewrite prior records.")?;
+    writeln!(
+        file,
+        "{}",
+        ilium_prompts::render_value(
+            "agent/chatroom-header-guidance",
+            &serde_json::json!({"v0": (COORDINATION_POSTING_GUIDANCE).to_string()})
+        )
+    )?;
     writeln!(file)?;
-    writeln!(file, "## Messages")?;
+    writeln!(file, "{}", ilium_prompts::agent::CHATROOM_MESSAGES_HEADING)?;
     file.sync_all()?;
     Ok(())
 }

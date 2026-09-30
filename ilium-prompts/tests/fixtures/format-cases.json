@@ -1,0 +1,886 @@
+[
+  {
+    "name": "naming/naming/v0-v1-characters-omitted",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "8bbc76fc67a9aeea0dd376ef2af7bf5498c8c5d4e36c7545549b63a9108fc0f5"
+  },
+  {
+    "name": "naming/naming/v0",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "c48868ddeb0d36eee43c4dbd8ec8e64b71cabaa8aabc2482d767501cfa7d7352"
+  },
+  {
+    "name": "naming/naming/context-label-response-missing-string-field-field",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "4d02ea51ba3e049c68ac30d081cc61fc65c6fb0d2b2b42390377c4eb3af71154"
+  },
+  {
+    "name": "naming/naming/context-label-response-field-field-must-be-one-compact-utf-8-icon-or-emoticon",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "f7944bbe34d351ca0718c99f9c03e1b58e7c49d13aa5e892b68dfb6266af17df"
+  },
+  {
+    "name": "naming/naming/context-label-response-did-not-contain-one-complete-json-object",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "2a603f05077a1d629414e46627a237309ba01ece20fddbf2c8f8108cdc8f35d9"
+  },
+  {
+    "name": "naming/naming/context-label-response-contained-multiple-json-objects",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "935800d0d6688fada7b730ed20724592e1bf123e8606ba3816f9d94462f4e618"
+  },
+  {
+    "name": "naming/naming/context-label-response-field-field-must-contain-min-words-to-max-words-short-non-empt",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "eecd08eb2395568ff8fafca38dfe28fcdbe173cad4bf99843e52f4f6d7f2075d"
+  },
+  {
+    "name": "naming/restructure/project-id-v0-title-v1-source",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "783219b708b5f855854ebd73e0492d51696cd25ad6611f6cb5ba26effa1f9d07"
+  },
+  {
+    "name": "naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v4": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v5": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v6": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "d8b49770537fc4d49e1fb9e4a810d017d87dd2c1b0497c590171632d20898c21"
+  },
+  {
+    "name": "naming/clipped-lines-agent",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "7f9efcf0ecf9e2f7bb1dcaaad203afcce69a84dcfb46416ce65d8e8cf72a8b1e"
+  },
+  {
+    "name": "naming/clipped-lines",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6abde98367df9b5cdca3f3267c4ab366eebb160670fd3a68ebaf9c8979a00a65"
+  },
+  {
+    "name": "naming/restructure/project-project-id-no-longer-exists",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "157686c2f7d48dbb4399ac5eb35d4db1d59d2d7a26308b40d544fc0399da4b2b"
+  },
+  {
+    "name": "naming/restructure/tree-child-child-id-no-longer-exists",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "994d5d0f670838b3791b0bb96c8e59a4aa91fd795810f456c43811d26ee354d6"
+  },
+  {
+    "name": "naming/restructure/split-view-child-id-has-no-orientation",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "672eedbbfaea5d4659e67e454e88b931da236dff1ec051d37eeed1560761fa2b"
+  },
+  {
+    "name": "naming/restructure/split-view-child-id-contains-a-non-pane-child",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "82f0f2cbf3bb146706501ba1214c2aa9b9432f06ce0e258332e2a200e9a0ec71"
+  },
+  {
+    "name": "naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "fb9a5a088fddac3039e51a15c0e5805a7c6e31e217fb1f90cf8a0f729f4ddf6e"
+  },
+  {
+    "name": "naming/restructure/restructure-response-had-the-wrong-json-shape-error",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "74fd2fa58cc939299d001e6c230c0ae18e911220d90e16403b7ba76343dda65c"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-id-id-more-than-once",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "af0f14e3ad83f0fdd60063d7ea8eb0ec2a8660579ee22f73f6d79d1697266447"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "d4a7657f8ecfb7da54abf7d694ae71c7343defb3e83e7db2447226954c67963e"
+  },
+  {
+    "name": "naming/restructure/protected-split-view-context-duplicated-id",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "ec1cb987aa2fdccee66e330166b315982c4d5682e90582e6375c51d8ca7a128a"
+  },
+  {
+    "name": "naming/restructure/restructure-response-changed-the-protected-split-view-set-missing-missing-unexpected",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "95088d7d75ba1a614ac4f9ee01ad06f8cb981802721f07e0d93360e378a6a56b"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-claimed-id-was-a-pane-but-the-existing-item-is-a-folde",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "26b1d889a7b7c749be7f9159ff5aece6e26782925b43ea7e349589ea69abf1eb"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-folder-id-inside-a-split-view",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "0e96af684845e90a475f9c168bb1d8d90146c4117b966977a8391af0916f54e3"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-claimed-id-was-a-folder-but-the-existing-item-is-a-pan",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "b64396c4016ee0e77356b38f6ffe493e3a335f577632f4959b6c1f0ac1e593d9"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-a-group-inside-a-split-view",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "05e83a784cd332024a52399e34f0c1478cd27ec59a59b3dc1c662763ef3c045c"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-an-existing-group-inside-a-split-view",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "2cc5ee9b42cb75e50e51fa9b26c71205ab7da0ee0063b8d3e97bd60f83bbc730"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-nested-a-split-view-inside-another-split-view",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "2cd9d47436f1c1cbeaec5f76f6df660c77644d0634d4dd7c1ad33f3fc4fb8922"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-invented-unknown-split-view-id",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "1e800b8fc9cf52fc39863549080c56b60892612a3cf7eb9786ded28bfcd55e5d"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-protected-split-view-id-more-than-once",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "dea7f7fcb8bcb505d9bd5bad246a3186817e0fa574ce1b02179d82cb0a51654f"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-a-non-pane-inside-protected-split-view-id",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "77394ccc55ee6e32077b41232684a1e7c845c36708adb6a09a0fa3a1e370d27a"
+  },
+  {
+    "name": "naming/restructure/restructure-response-changed-protected-split-view-id-pane-order-or-membership-expecte",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "7fa83c3ed90689b4567d92636ce6f395b6ceeb8764458741c3ccff1c7a568da0"
+  },
+  {
+    "name": "naming/transcript_context/v0-earlier-v1-entries-omitted",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "9d862c334738d13f654e9731a46fe062510584b97706b0c3719a440d24309bf5"
+  },
+  {
+    "name": "naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "f4aa683a7fc3156ef4970ae89fea964afbb15ef3cd7f3ae30f4642e0585e8339"
+  },
+  {
+    "name": "naming/smart_copy/line-v0-is-outside-the-snapshot",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "357d4f2d849f16066b36b8e3462aec497b6f3de0d94d62b7bccf2d27fc34707b"
+  },
+  {
+    "name": "naming/smart_copy/line-v0-is-blank",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "8d680e1ddc27ed13688a6b6528c1922546138fb9123af6c34ca1148d6bd1fe7c"
+  },
+  {
+    "name": "naming/smart_copy/invalid-word-range-on-line",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "fba760ac9d88ea8e8b6b7a7370b1a719251a7911cc9949f6d70b5aa22058fbe2"
+  },
+  {
+    "name": "naming/smart_copy/unknown-starting-word-on-line",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "838331e267029e8a9c01fc385a648b3f8e9b52359c673d20420af08eb3b046fb"
+  },
+  {
+    "name": "naming/smart_copy/unknown-ending-word-on-line",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "8244e9010dea5863fe975723f2cee4682bb049e87ba15ee09cd49c98acf847a3"
+  },
+  {
+    "name": "naming/smart_copy/v0-visible-excerpt",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "db4c8000ff3d1287ebfcf0eac8e4c22fd05b125747f7daa6802635bfa2da64f6"
+  },
+  {
+    "name": "naming/smart_copy/visible-fenced-block-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "54ad32ad2320b2614e87aa433c9c21b0f279d58d9c93213ea09d0bf0d826ef10"
+  },
+  {
+    "name": "naming/smart_copy/code-contents-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "aafb37e7eea54e4e5bfb238053646b63261113d345f866550d90f3d7413f0c2a"
+  },
+  {
+    "name": "naming/smart_copy/visible-table-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "f84b5dddb69b024a1aba9ede9104daba72d62e3d2d14a0c5b4742492aeaf3054"
+  },
+  {
+    "name": "naming/smart_copy/table-cell-l-v0-c",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "46b24f00d0076aac541add8a6081dd4455ca1cf057cd18b23bfef93fc253c250"
+  },
+  {
+    "name": "naming/smart_copy/visible-terminal-frame-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "ddf7ee3718b9df44004af539802873232271fb0adedce0cfbdda8957857e73f1"
+  },
+  {
+    "name": "naming/smart_copy/frame-contents-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "9dabbf51afb89212ddb4fa47888e9abbf83d3d7f34fea9e71dc4341cfcf0dd3c"
+  },
+  {
+    "name": "naming/smart_copy/visible-diff-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "9b5f85a93e1e14dc6e06fec6c565c47687943a76bce2df08286f09bb452ed833"
+  },
+  {
+    "name": "naming/smart_copy/visible-diagnostic-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "2146904669104a8fb2f64e24b6c3d775147c3248d5e161877bbe3aaf81e32cac"
+  },
+  {
+    "name": "naming/smart_copy/visible-tree-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "142164c13f769f46f2574bb695f146681f18480db887174ed3dd600cc5536365"
+  },
+  {
+    "name": "naming/smart_copy/visible-indented-code-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "3ec86db47872caa35e64ac60c5a5db5e1d7b428ff095afd28014ad9ad3cd8552"
+  },
+  {
+    "name": "naming/smart_copy/heading-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "432ea9694898cdd9a3c2747554abc05bf618c203caf321caabe5f5adc287716b"
+  },
+  {
+    "name": "naming/smart_copy/visible-section-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "166e1ab32f478f1764181572afcb8fb41cf0a225653af8afd604f546b6df4000"
+  },
+  {
+    "name": "naming/smart_copy/prompt-line-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6e806a4417b7cbb8fba7357e6785ba8a11ad543dc66dce1abc0a4a1d2ed08723"
+  },
+  {
+    "name": "naming/smart_copy/visible-v0-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "bd5bd60902dafbfc6942a8b493b4e19f305bd209ef5b42a313c5533ea324edd0"
+  },
+  {
+    "name": "naming/smart_copy/visible-paragraph-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "70fa250a7892c33f6ad37d019607d3ed3575370e2db05c4d70efc81ad443ae39"
+  },
+  {
+    "name": "naming/smart_copy/inline-code-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "7c5abb3a555bdfca48a160de06f0a51abb6d07e1083a8d54d0e0c6ccbff913d8"
+  },
+  {
+    "name": "naming/smart_copy/url-l",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "ed371e28eede164635553985058f5fd5c7f83e20740c7c2e5f907859c5de18ca"
+  },
+  {
+    "name": "naming/smart_copy/invalid-jsonl-candidate",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "3a2084c9b986e080a4ffce8cb07a8bb0f3a731014a027d53d9b16e82402c9e77"
+  },
+  {
+    "name": "voice/mod/system-instructions",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "45c89724fb712d9fcdcc8093a76413a36e462f3424cd9d84e480db146574eaf1"
+  },
+  {
+    "name": "voice/mod/unknown-ilium-tool",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "215c600275e040a56ba2d927f54f04d2024357c05c76384df1cd93712284bebc"
+  },
+  {
+    "name": "voice/mod/invalid-tool-arguments",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "11bdd7945346c289ab248ac2bf96bc411e7ce78d8f149d8003b57c4c1a2bb5c4"
+  },
+  {
+    "name": "voice/policy/run-the-shell-command-v0-in-a",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "dec6e56b6dec07873f85b7909e07b6bd629d09ee889c1287335189e2f65cd21e"
+  },
+  {
+    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "75f67c9e2863d058d3e421ee8a061ef7e93d6bc0365e0517e128d770d34bc401"
+  },
+  {
+    "name": "voice/policy/board-has-no-column",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "1f99db818d2270960a883bcf6f3828bc3cef795a7e07eab5f9679a5bb5a03722"
+  },
+  {
+    "name": "voice/policy/board-has-no-card-v0-in-column",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "30e86810b3a38e82dcd31938ed30c6ab34b9a55543694404d7656a85c6f672d4"
+  },
+  {
+    "name": "voice/policy/permanently-delete-the-card-v0-from-column",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "9052cd0cb241f0bd27e6d7fd93348ddd5b9e045def4c6cd991454501df8f7ec2"
+  },
+  {
+    "name": "voice/policy/permanently-delete-the-column-v0-and-its",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "d792f8a27b3c43355782ac2d17392a6f83d88c093e30e79e40a632ad3627a33a"
+  },
+  {
+    "name": "voice/executor/search-result-index-v0-does-not-exist",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6415b73e01c8d589cc4539e4d344ab5dfccd802b69c417f6e58df927ebc95615"
+  },
+  {
+    "name": "voice/executor/found-v0-workspace-results-for",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "0ced4ecbd1ce9d4a555ea5a2fbf147a5906f23e6ba3a0eaaa9831bc284d2ac79"
+  },
+  {
+    "name": "voice/executor/focused-pane",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "77b8389a71994b210f20ba544df89aad5873dc046ec261b84f3bccca5e457929"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-split-view",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "69d5d7bbdf685e2dff31e8bcc035099b2f0d81fdf02ff53ed61aebca06c063e3"
+  },
+  {
+    "name": "voice/executor/showing-split",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "49a8f1e4eb818163fcf8de5f3d19b5625bd1bb3a1b2f25093497019cb69933b4"
+  },
+  {
+    "name": "voice/executor/opened-v0-settings",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "b564a26cfbb89d33fbf8a2add23b30022e62dfe92f84b27d4d52025e47a5d9eb"
+  },
+  {
+    "name": "voice/executor/invalid-workspace-branch",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "c2fd7641a9f72d03a4362e8137d233fceb1f6b096c8c1c9e5baf6f6d6e581e6a"
+  },
+  {
+    "name": "voice/executor/creating-a-v0-agent-in-a-git",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "b6f300a35f2eba7563c6fdb48a9f3f64d9f7cd8ed1c5afeedf8bdf57aaaadf1f"
+  },
+  {
+    "name": "voice/executor/creating-a-v0-agent-pane",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "1358dd630434fb63c0e623ef80d2d196c125a441312280913192106a620b63fb"
+  },
+  {
+    "name": "voice/executor/a-split-view-can-contain-at-most",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "34547a7a1534edffe06c5928df91279425af6a0be1c13bf19454404010751c26"
+  },
+  {
+    "name": "voice/executor/node-v0-cannot-be-expanded",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "0a6dd15208f59408521f6a20be54453c7b9dbe350385dab26fbac8d5294f5ed4"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-live",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "80417c2e2820dc5ba238ac0d51f91c872ae2932eb683481ca3d15e7bca9c51f5"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-terminal-pane",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "649ed8dad5b1d85200bb2f4b6ffcca4b706234a1d169870f0c6abe8a6cf753ed"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-an-editor-pane",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "bd6ea77612a569726f4930e1de6e8c6f8df2be71ccbcda05257bdabebb985fc5"
+  },
+  {
+    "name": "voice/executor/v0-is-required",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "e5a21b9de4821686a360a83f7ef1ebd1a48323ce69f4d113efed1c8acfd26950"
+  },
+  {
+    "name": "voice/executor/v0-must-not-be-empty",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6b790c39bec29e7147371e98ebff8dcd436522c5fd1a03679b201de1a88bf557"
+  },
+  {
+    "name": "voice/executor/unknown-settings-tab",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "0f11079730de3869e64a4a7badea8564c3089bb4b7c8935fdb88cd189f9b5cc7"
+  },
+  {
+    "name": "voice/resolver/no-ilium-node-has-id",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "92bcc8355b1c38b799755a05ac28c63fb6b71741c32135c0a0a5cb7f7ee27f44"
+  },
+  {
+    "name": "voice/resolver/node-v0-cannot-contain-ordinary-ilium-items",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "1bfdffa9ae0759daaf68ab3dfcfb658778be21a47a7a1ac3233548204b5ae16b"
+  },
+  {
+    "name": "voice/resolver/no-ilium-node-is-named",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "dc87b24a3618755ee9254fb1d3f3ec87b8374a4ed3c1d881c87ee9afc8283fc2"
+  },
+  {
+    "name": "voice/resolver/the-name-v0-is-ambiguous-use-one",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "cb2c08ce4199a6c619b5dfefa4f49639f3c0b1d3be52a4acb7405078192b66fe"
+  },
+  {
+    "name": "voice/resolver/v0-is-not-a-container",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "e5e344e3ca960f0d524b02246a70063771e5b3ddc52e05eec1331857bf2cf6da"
+  },
+  {
+    "name": "voice/resolver/no-child-named-v0-exists-under",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "a56c1aa1ac35daa979e1d0236e8c0e93179d79ff7a56250c4da41cf9f070536a"
+  },
+  {
+    "name": "voice/resolver/path-component-v0-is-ambiguous-under",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "3f8cfb30b57b3ca97217ab0fd4796aace6783b27b266bb54dfcda8b9219e5258"
+  },
+  {
+    "name": "voice/settings/updated",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "5e9cbab05f0d4687979edfed6f847c3695ec7a12c4066c2c3783fec1be9b0647"
+  },
+  {
+    "name": "voice/settings/adjusted",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "34fb3bf95deba9b4ce99288e8c303f5879626d00a8a90d03acbcb4f2937f7c12"
+  },
+  {
+    "name": "voice/settings/unknown-configurable-icon",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "49ce1766bbebafb564e72775cf4b0860e834d8d830b562099e4ad5d0f35bde5b"
+  },
+  {
+    "name": "voice/settings/unknown-keyboard-action",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "4e09c2a0854f2f991b0c229da987a696564796e292daa1d6dce9036b38769cb9"
+  },
+  {
+    "name": "voice/settings/unknown-trigger-event",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6babfeb7da0bbace77477804f182d0c69f854225cc6ab5dbe64a911f27e2758d"
+  },
+  {
+    "name": "voice/settings/unknown-trigger-action",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "668c9add04071057955ab08346df3c5e3c0e079b656c6e18ac34127923b67c69"
+  },
+  {
+    "name": "voice/settings/kilo-gateway-model-v0-is-not-in",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "aab677c7d6dc6554294f7a1bd5a076599515ea4db9f486a2e2d025a070e8ad9e"
+  },
+  {
+    "name": "voice/settings/unknown-or-read-only-setting-path",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "51062dc855ae78527636cb9a07ca7aaca6201ede6d8a27e1c46b665ac20d3c2e"
+  },
+  {
+    "name": "voice/settings/setting-v0-is-not-adjustable-use-set",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "e5826d2c03778fa58f5c7cd1b889b202d7397bebb68521fc6bd61e22a61c83df"
+  },
+  {
+    "name": "agent/managed-block",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v4": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "f3135ebf34a13489276d626f657e9eab510b15c62c2087d06f1071c1c85729b5"
+  },
+  {
+    "name": "agent/goal-from-line",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "5749f771885b2a49866af62d8ae092e131f155e66269c505fa07e1bf0c503b48"
+  },
+  {
+    "name": "agent/chatroom-record-row",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "83635eb73115fd1a1961db7960032b5c172b247f00ad52aebb71363a24ae7532"
+  },
+  {
+    "name": "agent/chatroom-empty-context",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "74b8b7db642f014e0e34e87d7f57cffb3bae65ac075d3338f34316f0a29cb805"
+  },
+  {
+    "name": "agent/chatroom-context",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "7db10b3fd638ee397872a1fc534a23189bcbf416c62fc6ff8de0b504e05c38b9"
+  },
+  {
+    "name": "agent/chatroom-context-row",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "9145df4136b308a21dc549dab650b425b03319b0d7a14f50b94eda2e0f647611"
+  },
+  {
+    "name": "agent/chatroom-header-guidance",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "003f8e52b61e4d1f4b74a6317580dbf4fa48ad13aba0fe8b9a89a819fb77191e"
+  },
+  {
+    "name": "agent/progress-done",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "6219e768ee0e0ce13e413fa10944b4561288466acce0f16fff1d5c0f2d5fc1f3"
+  },
+  {
+    "name": "agent/progress-error",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v4": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "b53531d2d2050c87740a3416a90b062283a13999b281c18165593f8ab6b155cb"
+  },
+  {
+    "name": "agent/progress-unknown",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "a408ed2f8afb961f02cce9cd557576ac994d5ec30aeba6d57bd3743662b68e02"
+  },
+  {
+    "name": "agent/progress-monitor-failure",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
+      "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "09c943b13fd3666a8d968a1cf45c56086fdbf14db49146be69d2ab5d264846ab"
+  },
+  {
+    "name": "conversion/truncated-result",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "7cbcb60d4be728008b9a0099a64147648962e5ac0b802b6322fbe93cee34d06c"
+  },
+  {
+    "name": "conversion/bash-description-workdir",
+    "context": {
+      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
+    },
+    "sha256": "d2f8aada80fa2fdc1142ab55f31a634d058169254e14f2f4821fd7b03681fdcc"
+  },
+  {
+    "name": "naming/close-container",
+    "context": {
+      "name": "quotes \" {{literal}} <x>& 🦀\nnext",
+      "count": 3
+    },
+    "sha256": "d2bccec5acbb9d105fa346f867706d402f649b9d401137280317b7c9af489db1"
+  },
+  {
+    "name": "naming/close-dirty-editor",
+    "context": {
+      "name": "quotes \" {{literal}} <x>& 🦀\nnext"
+    },
+    "sha256": "7b8bbd472eb6ea44baa1174675825d665c346bd93d724e306f50ae8ebc8c055f"
+  },
+  {
+    "name": "naming/progress-restoration-failure",
+    "context": {
+      "details": "quotes \" {{literal}} <x>& 🦀\nnext"
+    },
+    "sha256": "84c798bb2806fafb26e62aa584d7e4d8f4ae4e89cbe249ef7d3a8385259bc26b"
+  },
+  {
+    "name": "naming/transcript-row",
+    "context": {
+      "role": "user",
+      "content": "quotes \" {{literal}} <x>& 🦀\nnext"
+    },
+    "sha256": "244855b802e086b3bfd319dbf6f5cdf0341f7e6077c260c76223b6e80916d21d"
+  },
+  {
+    "name": "naming/clipped-context",
+    "context": {
+      "head": "quotes \" {{literal}} <x>& 🦀\nnext",
+      "marker": "… [content omitted] …",
+      "tail": "quotes \" {{literal}} <x>& 🦀\nnext"
+    },
+    "sha256": "6efd6df9958154f8c671440e6b7d83226cbeebcba133e6983c9aef19c108b0dd"
+  }
+]

@@ -2516,16 +2516,16 @@ pub(crate) async fn restore_persisted_progress_monitor(
         runtime.set_progress_monitor_task(task);
     } else if should_deliver {
         let message = if let Some(restoration_failure) = restoration_failure {
-            format!(
-                "Ilium could not restore this task's progress observation or identity. The task outcome is unknown. Details: {}",
-                bounded_restoration_failure(&restoration_failure)
+            ilium_prompts::render_value(
+                "naming/progress-restoration-failure",
+                &serde_json::json!({"details": bounded_restoration_failure(&restoration_failure)}),
             )
         } else if progress.is_terminal() {
             crate::agent_delivery::terminal_result_message(&progress)
         } else {
             let error = match &progress.monitor_health {
                 ilium_core::ProgressMonitorHealth::Failed { last_error, .. } => last_error.as_str(),
-                _ => "progress observation stopped",
+                _ => ilium_prompts::agent::PROGRESS_OBSERVATION_STOPPED,
             };
             crate::agent_delivery::monitor_failure_message(&progress, error)
         };
@@ -3107,8 +3107,11 @@ async fn handle_replace_pane_with_command(
         Err(error) => {
             drop(tree);
             drop(publish_guard);
-            send_direct_error(direct_tx, format!("failed to create replacement pane: {error}"))
-                .await;
+            send_direct_error(
+                direct_tx,
+                format!("failed to create replacement pane: {error}"),
+            )
+            .await;
             return;
         }
     };
@@ -3119,7 +3122,11 @@ async fn handle_replace_pane_with_command(
         let _ = tree.remove_node(new_pane_id);
         drop(tree);
         drop(publish_guard);
-        send_direct_error(direct_tx, format!("failed to place replacement pane: {error}")).await;
+        send_direct_error(
+            direct_tx,
+            format!("failed to place replacement pane: {error}"),
+        )
+        .await;
         return;
     }
     drop(tree);

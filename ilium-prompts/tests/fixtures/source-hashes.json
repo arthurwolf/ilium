@@ -1,0 +1,1362 @@
+[
+  {
+    "name": "naming/project-name",
+    "sha256": "36d1428d837bacaad17cb699f950ff972203c874b62e60abefce6e52e5e73e51"
+  },
+  {
+    "name": "naming/label-instructions",
+    "sha256": "ec078f3458db330484b9ca15e33fee1482a81be61c8f3c04e060999de13ae74d"
+  },
+  {
+    "name": "naming/session-summary",
+    "sha256": "61e6fe75ab1ba541968763ffd03b42d84f1a313b6693a387d4b155831deabcaa"
+  },
+  {
+    "name": "naming/session-title",
+    "sha256": "663d1c1fcf941ac2176182403f47985af921c646b489f0624628792ab8cecc7d"
+  },
+  {
+    "name": "naming/terminal-summary",
+    "sha256": "ac1c3ed2e26af55770a26816ea1cb63d7843cbcbad6e69a89405c7d9be1aa16f"
+  },
+  {
+    "name": "naming/terminal-title",
+    "sha256": "6198dd146e274d81981df971bb8030c59e6519bb8c4bff4dc8b420a518a75630"
+  },
+  {
+    "name": "naming/restructure",
+    "sha256": "3d4618dc3a155f23c3fec0c661dc4682f5c2e400c6f4bd486d5998b772ee4756"
+  },
+  {
+    "name": "naming/inference-test",
+    "sha256": "45a380a4245cd370b8df085279a4055ab1774f29988aa5d80b1e258c6215892b"
+  },
+  {
+    "name": "agent/chatroom-instructions",
+    "sha256": "3afec336ae1c8f710a7cbd3a6fd27982090613afc551e686cfd51640c42638fe"
+  },
+  {
+    "name": "agent/progress-instructions",
+    "sha256": "4e6c1d96fc87877740cbacbe5d70cc8d4704d2c467218dd6c1cf93241aada6c7"
+  },
+  {
+    "name": "agent/coordination-guidance",
+    "sha256": "de1123d4e73552c2aa1712d8b456a7743f619dc362451864b1a6d2264d772e95"
+  },
+  {
+    "name": "agent/ask-for-update",
+    "sha256": "5ec7738a9565da351bf4c9cd76251d480d753c2d644023d780bb588f67efdc9e"
+  },
+  {
+    "name": "conversion/missing-result",
+    "sha256": "1ca5bbfd27db1383d12cc60fc3205ea379b29135bd6735a8c16dfad603e841a1"
+  },
+  {
+    "name": "conversion/empty-result",
+    "sha256": "d5a7dc0a797102f00642cbb169b1574d789111c7c3118c7bd7cc14c2facb3b15"
+  },
+  {
+    "name": "conversion/synthetic-first-prompt",
+    "sha256": "336c041610d218d9ed25b6af96eb3b5a7a6fe6092dd4f1015f4d46b9f485ac82"
+  },
+  {
+    "name": "naming/session-label-example",
+    "sha256": "d8ca5aa413c6b97e26a44eaaf2996a2b86cede72736bb2a37c48c9fc11b3fd96"
+  },
+  {
+    "name": "naming/session-summary-example",
+    "sha256": "3984431b3d7d8dd052dfad9fc0d184f6d367d747f117bb3d4346ac316f36e331"
+  },
+  {
+    "name": "naming/unavailable-process",
+    "sha256": "09de8b35a7cef76a171a27b4e2367db61fa6b291faa2a537bc0919d2441e85bf"
+  },
+  {
+    "name": "naming/absent-context",
+    "sha256": "457700515a083dbde3e7a19d9d3712b8dfbc1ac602807d7528f5eb4386fc0b42"
+  },
+  {
+    "name": "naming/terminal-label-example",
+    "sha256": "a49cb36743ad4fcfb2f67e75429f40432aa6a0f4150071159a2b805b97b8f5b9"
+  },
+  {
+    "name": "naming/terminal-summary-example",
+    "sha256": "1c2248db8f32dea2ea4e3060c8c10dcad8a49dec6d9b9bfcda100ede820d3816"
+  },
+  {
+    "name": "naming/unavailable-transcript",
+    "sha256": "56480a67c31dbdfacfb174fc951567ee64373dc7e29dad4a5a68ae7170f2a517"
+  },
+  {
+    "name": "naming/restructure-summary",
+    "sha256": "efa9b76b0d81940d41613ca5219e71183d90bc18ccd53782377f5347c221cb04"
+  },
+  {
+    "name": "naming/restructure-label-example",
+    "sha256": "6caf86bb244d9a85c4219dcab00416891ede1d16510f47bb7afd43dd2392c71c"
+  },
+  {
+    "name": "naming/restructure-summary-example",
+    "sha256": "8c8e34baed2d20de9f00057a320761f8afaf631e91746cfa9dd548932152eb8a"
+  },
+  {
+    "name": "naming/content-omission-marker",
+    "sha256": "5ea871d676c502de59edd9d335b228bd4af34f991efa11dc9e16d6b65cb22602"
+  },
+  {
+    "name": "naming/json-only",
+    "sha256": "dfc5a54c34045d446e6bf7bedff746b6921c328bb62f0076d60ab7ac577ce08f"
+  },
+  {
+    "name": "naming/smart-copy-system",
+    "sha256": "bcc0e5145bb716ed7e2760e3d73cb2c374a4c962cc297d5a2a083df659e82b23"
+  },
+  {
+    "name": "naming/naming/v0-v1-characters-omitted",
+    "sha256": "1092ffceb7c75f0030aaa46d32f7403084be71cb5edff6880724ddd1d8467852"
+  },
+  {
+    "name": "naming/naming/v0",
+    "sha256": "336269779696c846ecb08fe85ccce3aba360448d76c951d12b4eeb4c0d01877d"
+  },
+  {
+    "name": "naming/naming/context-label-response-missing-string-field-field",
+    "sha256": "6fac3ef8e080ece4295943e6b0da2a069856df82825e370c5ec4214a4b9950db"
+  },
+  {
+    "name": "naming/naming/context-label-response-field-field-must-be-one-compact-utf-8-icon-or-emoticon",
+    "sha256": "56d8fbe1cac5208d3ad1c4efe2e01d64d4539ef69290bc0353dd00056cdd2111"
+  },
+  {
+    "name": "naming/naming/context-label-response-did-not-contain-one-complete-json-object",
+    "sha256": "239673d7a3e025263eb1d47980e585be63fc96d1a550364cf0a3d64cfe8c8da7"
+  },
+  {
+    "name": "naming/naming/context-label-response-contained-multiple-json-objects",
+    "sha256": "89ed0742671ef0f08ff184e07f8de260fdde5287c5bc51de884a6d89c7d65317"
+  },
+  {
+    "name": "naming/naming/context-label-response-field-field-must-contain-min-words-to-max-words-short-non-empt",
+    "sha256": "3469b004bcb1d150f026528ca39493a1c3a08abeaba4f08bd671bf829050fdd9"
+  },
+  {
+    "name": "naming/session_naming/no-project-verified-transcript-found-for-session",
+    "sha256": "8fa80f3e6c18591d81348bec84cdbeb762c42496da889d7c60622ad4c54d1280"
+  },
+  {
+    "name": "naming/session_naming/no-user-transcript-entries-available-to-infer-a-session-title-from",
+    "sha256": "e0fd3a06af422ce1f0ab4c822155d0585d5145820d61ed2b80e4484c8d51891d"
+  },
+  {
+    "name": "naming/session_naming/session-title-only-names-the-agent-provider",
+    "sha256": "b2327c97c5cd3c9036c91b076453a4535f70471542e7d63f9414fd7533f6aeb3"
+  },
+  {
+    "name": "naming/session_naming/claude-code",
+    "sha256": "246ef8c1130d56f5d9df740a4b26c033a8b9c064daba9bb0a052d18993e87373"
+  },
+  {
+    "name": "naming/session_naming/user-specified",
+    "sha256": "b47adf2055e5b640d20dbcd2746f26fb8e62396c224546f721a1348fd207b407"
+  },
+  {
+    "name": "naming/session_naming/waiting-on-background-tasks",
+    "sha256": "38c6d367d46e74eaa52ee28f04c7e4c1ad53dae3aa9215d5ca6be891abbcc2a7"
+  },
+  {
+    "name": "naming/session_naming/a-background-task-is-still-finishing-up",
+    "sha256": "233c7a8411a568874c0ae637c5073bd60c98517caa10a812ab0449f0027cc727"
+  },
+  {
+    "name": "naming/session_naming/waiting-for-user-approval",
+    "sha256": "923e330abeec622a0ae193dd369cb1ffe604472781635e29be7228aaf93dbe46"
+  },
+  {
+    "name": "naming/terminal_naming/no-screen-content-available-to-infer-a-terminal-title-from",
+    "sha256": "34fe18e7eeb0759058200767443887f2117e93496a86a50e2bf0cf43db83dc9d"
+  },
+  {
+    "name": "naming/project_naming/not-present",
+    "sha256": "1c0a488886032df50bd027fa9886399cfd72fc5334d8bd55c2d72f75746253e7"
+  },
+  {
+    "name": "naming/restructure/project-id-v0-title-v1-source",
+    "sha256": "a44fe88b5eae33a4aaf27bd866d39522897c2e1194c82de97f75e5a0db90b3cd"
+  },
+  {
+    "name": "naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
+    "sha256": "8d6b11938da6914d43914c59693b578d5a34b8feecb24864528cf453b39ea2fa"
+  },
+  {
+    "name": "naming/clipped-lines-agent",
+    "sha256": "6ee625ef75c444b729a8ec458d4aed5f7b05ae96db8eec4e47be95ba702f6033"
+  },
+  {
+    "name": "naming/clipped-lines",
+    "sha256": "4048a5e7613993897c065ab60fa06659bd5975b034e66b137d827187b230e3a7"
+  },
+  {
+    "name": "naming/restructure/project-project-id-no-longer-exists",
+    "sha256": "3888fa2824dad4edb1af136a162cb02d9816eb976a583a6418858b2ba6eeece0"
+  },
+  {
+    "name": "naming/restructure/tree-child-child-id-no-longer-exists",
+    "sha256": "d5b0d99f9124d11961edad0b980159c428a07b5b0ff4e9adb640f91811d82895"
+  },
+  {
+    "name": "naming/restructure/split-view-child-id-has-no-orientation",
+    "sha256": "ac6cf3d3b426defda83f288f8b5951b6d97c77bb7657bd3e5ca1e22d536577ab"
+  },
+  {
+    "name": "naming/restructure/split-view-child-id-contains-a-non-pane-child",
+    "sha256": "243fae2f76257a0fdbc33850b0a347ff611ecd1726a58ef552b0921658302338"
+  },
+  {
+    "name": "naming/restructure/plain-shell",
+    "sha256": "b231aaf8589bb05bf7c87d7e9b7c314ac4ed74b3d7004a2a288b59fb2db4044c"
+  },
+  {
+    "name": "naming/restructure/waiting-for-your-approval",
+    "sha256": "4a690810b873cb8e2eff48c171f490b7373597749f15d1d8e66435dd3e69cc43"
+  },
+  {
+    "name": "naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet",
+    "sha256": "6c13fa360b78efdffeeca069dd419b32561aac0da0a7f9f9a2e3f6de37ae2935"
+  },
+  {
+    "name": "naming/restructure/no-prior-structure-available",
+    "sha256": "f23586a5bce57afc37686944764e84bde656316dfe26a92a6206324478e36435"
+  },
+  {
+    "name": "naming/restructure/no-panes-or-folders-to-restructure",
+    "sha256": "3b230c8778ee4cd7d7388e66307d001ae1f75b623f26e50817d69b94d337efa2"
+  },
+  {
+    "name": "naming/restructure/unparseable-restructure-inference-response",
+    "sha256": "19d347ced26b7aa2def73a016254e0436c63db44d58fa3ca8baddbe645430253"
+  },
+  {
+    "name": "naming/restructure/restructure-response-had-the-wrong-json-shape-error",
+    "sha256": "7b523695805655c151e733d0773d9ce06c45769e378ceede1f56e33ef6b87e26"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-id-id-more-than-once",
+    "sha256": "46fce09c6fb229420e0157d37f49527622b68eb591ff64579d8a890f043108f0"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec",
+    "sha256": "74311c98897029ea48003ab5fe1c934a5e9e0b241d89998d67c68ec015680d94"
+  },
+  {
+    "name": "naming/restructure/protected-split-view-context-duplicated-id",
+    "sha256": "a853cb28ac952d5aff23538a934dc7a2b343b019022e0e2e429b305d285458f4"
+  },
+  {
+    "name": "naming/restructure/restructure-response-changed-the-protected-split-view-set-missing-missing-unexpected",
+    "sha256": "17f952edc36177e12791bf8a02059daf950c0c0c48811fa6880c50cd80a087b2"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-claimed-id-was-a-pane-but-the-existing-item-is-a-folde",
+    "sha256": "a48630fbd4ea50920bf60e85ffaf050502b77556fc3b0bb5e1c323aa1fbb3684"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-folder-id-inside-a-split-view",
+    "sha256": "686dd30bc3acfa3d2c7e9d3d8e4095dd18e78b9a8c9978bdb60f2c157372b9dc"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-claimed-id-was-a-folder-but-the-existing-item-is-a-pan",
+    "sha256": "f6f8de9d21f2cb0848860d9ea81caf1607e8a299cc62aa39576f2175da6e5737"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-a-group-inside-a-split-view",
+    "sha256": "8a5e06990d8f62bb85cd720e02a070342d38e877b3882664d34abcf71043c13f"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-an-existing-group-inside-a-split-view",
+    "sha256": "88dfcafb130dabba274b10aff9558661237482ddce3051dde49a3ca1dbb9c6b6"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-nested-a-split-view-inside-another-split-view",
+    "sha256": "bfe0d3cef90e1ab3ed42826764f9e73c382167db768cb4e601527fb198858354"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-invented-unknown-split-view-id",
+    "sha256": "47568c79603931aaed781c5c867f3bf4a041210165e4af0bf4649851ac2ac65d"
+  },
+  {
+    "name": "naming/restructure/restructure-response-referenced-protected-split-view-id-more-than-once",
+    "sha256": "ccf89ad6d394bbcbab3a93544e776886dbc2b7ac8af5c0d7c147c7c6004cd508"
+  },
+  {
+    "name": "naming/restructure/restructure-response-node-path-placed-a-non-pane-inside-protected-split-view-id",
+    "sha256": "571b9ae1ec89a0cbc4bdfbcc8dd122882b049264b30177a0007720786611c6f4"
+  },
+  {
+    "name": "naming/restructure/restructure-response-changed-protected-split-view-id-pane-order-or-membership-expecte",
+    "sha256": "a77ea86625563a489807d2e4a4af67277577dde580604cfa0990613a873ef767"
+  },
+  {
+    "name": "naming/restructure/restructure-label-title-must-contain-1-to-7-words-and-at-most-64-characters",
+    "sha256": "fc443f864a5883b822bbaa862060a8eb0f6c902e68d84a57af1f137aacc0b709"
+  },
+  {
+    "name": "naming/restructure/restructure-short-label-must-contain-1-to-3-words-and-at-most-64-characters",
+    "sha256": "1f04d9f009686254fdca819fdce81097bb1483e9b83e1dc26145e363cd178f55"
+  },
+  {
+    "name": "naming/restructure/restructure-response-contained-an-empty-title",
+    "sha256": "29cabd352e2039b242ee2cddc7fa58eb7a2b0fa068afbe4bea4916854cf76bb3"
+  },
+  {
+    "name": "naming/restructure/restructure-response-contained-a-control-character-in-a-title",
+    "sha256": "47bf2f1570bb6c89458e7d47d316002cb1b2d1b26e54eb7e0effc3a5db2f8652"
+  },
+  {
+    "name": "naming/restructure/restructure-response-contained-a-control-character-in-a-short-title",
+    "sha256": "a02dcbd9befa3c4fb26e972d9c6433cdac35d8b89c68645cc5eedb926bf8db1a"
+  },
+  {
+    "name": "naming/transcript_context/v0-earlier-v1-entries-omitted",
+    "sha256": "8630ab10717243103449c700f3846d743938f29dab73576412c2825b614c9b57"
+  },
+  {
+    "name": "naming/transcript_context/agents-md-instructions-for",
+    "sha256": "e7bf00436cacb25719aad480209c137612640b44c722ef4152d832f27673783a"
+  },
+  {
+    "name": "naming/transcript_context/codex-internal-context",
+    "sha256": "42330b6999d2dfe9b65adbcdd7dab0d5956c6efb86e91986458bb5376a0aa093"
+  },
+  {
+    "name": "naming/transcript_context/ilium-progress-monitor",
+    "sha256": "e1ad18542b145a33cef8ebfa881ada981ac6f505b999de4ce16dfa4d25df9936"
+  },
+  {
+    "name": "naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a",
+    "sha256": "91fc1bb8de7acb5f8d27c5e6d0c78415ac5efc2b8f9ac28f2691f9a29000e8fb"
+  },
+  {
+    "name": "naming/smart_copy/line-v0-is-outside-the-snapshot",
+    "sha256": "7eae21717ccde46a34b69d2b97356155efa5a1aa8856fbc303f80490101c8546"
+  },
+  {
+    "name": "naming/smart_copy/line-v0-is-blank",
+    "sha256": "72d58667cb2fc1d34adc75805b398d8d491f8368f6f8aa7a08e833025464d589"
+  },
+  {
+    "name": "naming/smart_copy/invalid-word-range-on-line",
+    "sha256": "011da67c85629b7969f7f44b10bdda0be1ef3bb991d6d5d6a3a3f9291abfd133"
+  },
+  {
+    "name": "naming/smart_copy/unknown-starting-word-on-line",
+    "sha256": "7aaa8d160b6ec2cd035f1e1d453e97f2da5030548ff9f82995f52e2871b6512b"
+  },
+  {
+    "name": "naming/smart_copy/unknown-ending-word-on-line",
+    "sha256": "6ee217cbb6a1f111f64e91891098381669d07e4ce70397597ecc6000508e6a57"
+  },
+  {
+    "name": "naming/smart_copy/v0-visible-excerpt",
+    "sha256": "a0d868dda6a1ea3545c209b8ff653b7d9302bbf27c56dea5517b9978852174cb"
+  },
+  {
+    "name": "naming/smart_copy/visible-fenced-block-l",
+    "sha256": "68415a7ba4c421f9b3df181d8850299c68f27983566573971b10ff65d23b56c8"
+  },
+  {
+    "name": "naming/smart_copy/code-contents-l",
+    "sha256": "3e3109e340c224ff9aba04673e77b93f6ea05195290e3c9dd68067f7dce9b833"
+  },
+  {
+    "name": "naming/smart_copy/visible-table-l",
+    "sha256": "73fcd53556da7cf6c717c5b69d9dc7fddd07aa111ac308ef9723c5c4a894afe1"
+  },
+  {
+    "name": "naming/smart_copy/table-cell-l-v0-c",
+    "sha256": "f716dbfd4d9ff33cd2015b095f3de8f72afb2d75151d2291d8666791e04ebb0b"
+  },
+  {
+    "name": "naming/smart_copy/visible-terminal-frame-l",
+    "sha256": "39cf7d8b7a69ac42d26f171d2c8d81eddfdfb339e38821afdf585e847060fd89"
+  },
+  {
+    "name": "naming/smart_copy/frame-contents-l",
+    "sha256": "db371139244657c2df5a00358298de924663705a20bf8f50e7688623b129ef2b"
+  },
+  {
+    "name": "naming/smart_copy/visible-diff-l",
+    "sha256": "8dd4acef8ae48c1918011509bfb288dfc998adf7107d1381f3525a0e1e8c48d9"
+  },
+  {
+    "name": "naming/smart_copy/visible-diagnostic-l",
+    "sha256": "a6f5d78d81e555dcb93a1d7023feb0da4dd00d252aac29340e6301a8c378d12f"
+  },
+  {
+    "name": "naming/smart_copy/visible-tree-l",
+    "sha256": "71668610d60a136ddb1e3042de35c933ba8b085986c6362adf07a01a3217ce8b"
+  },
+  {
+    "name": "naming/smart_copy/visible-indented-code-l",
+    "sha256": "5a2b6d349be60a3c5116486136882a5f2ca3b864946ac6e76b4b25e1e7588f03"
+  },
+  {
+    "name": "naming/smart_copy/heading-l",
+    "sha256": "3b427e427bdc38f9e376873f1355eff55f3b99db61ad50738d14ef424bd44aac"
+  },
+  {
+    "name": "naming/smart_copy/visible-section-l",
+    "sha256": "1bad5e01b9363deb6ada56b8017f7e996f16bac987e7c44cd7dc10a0d213b929"
+  },
+  {
+    "name": "naming/smart_copy/prompt-line-l",
+    "sha256": "538ae089bf7233685f95632a469155698c407c3cab089e3b34ae95e507ef7824"
+  },
+  {
+    "name": "naming/smart_copy/visible-v0-l",
+    "sha256": "7d2b07e39af69aed1d8a1639ef9390ca9fdebc683a24c2e7c5148ddb4113b0ec"
+  },
+  {
+    "name": "naming/smart_copy/visible-paragraph-l",
+    "sha256": "c88be20f969f6fcc7f1bb211babbcd343e20972bbbcc77730c287913589261a8"
+  },
+  {
+    "name": "naming/smart_copy/inline-code-l",
+    "sha256": "b237a9673e6f88038be2d678b17287de8e1aa3f13fad3b43af541be717213546"
+  },
+  {
+    "name": "naming/smart_copy/url-l",
+    "sha256": "5673f3745cdae0d2bc8dd65f80620681476d00e686cc1aa205eb7d6ef9f8b42d"
+  },
+  {
+    "name": "naming/smart_copy/invalid-jsonl-candidate",
+    "sha256": "8178a205d5900c05c1178e92b2ecc4de9436c5d991570fabb2f0c4e32924b90b"
+  },
+  {
+    "name": "naming/smart_copy/candidate-label-is-invalid",
+    "sha256": "8668105f823b4f24dc3aeaa94477cb58c576c4bccf78962cb07f3a9ba333be76"
+  },
+  {
+    "name": "naming/smart_copy/candidate-kind-is-invalid",
+    "sha256": "f0452841ca871d90337e93d6a02c4bdfa01b7e8640632d9dedda1a959018471f"
+  },
+  {
+    "name": "naming/smart_copy/candidate-has-an-invalid-part-count",
+    "sha256": "926e6336852bd5e23ce4cd5c4a644ebae5585b45f4ed3f3599620b905d7d45f6"
+  },
+  {
+    "name": "naming/smart_copy/line-list-is-empty",
+    "sha256": "436600d06addfb917bb9abcfc8cc52cba2030fb22ddf505af2e1465cd0c9c885"
+  },
+  {
+    "name": "naming/smart_copy/candidate-resolves-only-to-whitespace",
+    "sha256": "898b3e1bdfe47673d335bcf03dffc5c7fe3fb06026e1503fb8990b5d3706ce36"
+  },
+  {
+    "name": "naming/smart_copy/line-ids-start-at-1",
+    "sha256": "bed70cc6a311a9bb90f031bf169716b52839443d185c3ff29c1118c15025b32a"
+  },
+  {
+    "name": "naming/smart_copy/ps",
+    "sha256": "f552bd87a9ba7e88ba8382b94102d6f746364d34c73f1b9d6b01e90fbf61af01"
+  },
+  {
+    "name": "naming/smart_copy/c",
+    "sha256": "3358227e38d39df9f11724e9024c64b2aac71290adfa82a498b8938bd57edc6b"
+  },
+  {
+    "name": "naming/smart_copy/diff-git",
+    "sha256": "42a5776fee465d39720d877ea561ce162ea4c9c0c292ec4adc69cc308b29e673"
+  },
+  {
+    "name": "naming/smart_copy/a",
+    "sha256": "879d849a1be1213c23405ac43548bb0398b263cd635a42925110f20b4908bf29"
+  },
+  {
+    "name": "naming/smart_copy/begin-patch",
+    "sha256": "d7075d60cad8f0fd34f43cd2ea6972636ab3ad4b630ac82be7d60402dc049c0a"
+  },
+  {
+    "name": "naming/smart_copy/traceback",
+    "sha256": "537fa2a60731c50c87a09ed706b5a1871f8477eb335b083abb326a022b6e75b2"
+  },
+  {
+    "name": "naming/smart_copy/caused-by",
+    "sha256": "e08a974f69e9a5021a0f9e2f748409fb2dd9451e4c449eb809a6e7b3c4235b97"
+  },
+  {
+    "name": "naming/smart_copy/thread",
+    "sha256": "a88724d09cb1dc070572600afeed4141556b412adfad8cfb1f950cd8e0d67c95"
+  },
+  {
+    "name": "naming/smart_copy/diff",
+    "sha256": "b90d4961030965e514a649c8c7ee77151e7dffb5ff340887f543a140d99aea78"
+  },
+  {
+    "name": "naming/smart_copy/index",
+    "sha256": "f6bbd91ab58883b92ec6df7397e97b886a545e084abb83591971e56a4b652134"
+  },
+  {
+    "name": "naming/smart_copy/new-file",
+    "sha256": "8557bbc28c499485f9c5c0d04dd2669248ce9fc57aaa92acd51f8f65cbea5edf"
+  },
+  {
+    "name": "naming/smart_copy/deleted-file",
+    "sha256": "3210357d586292fcdd2f54ba731eb277c6ba2a7b77ebdac24aff7ebc371016ed"
+  },
+  {
+    "name": "naming/smart_copy/at",
+    "sha256": "c6841a08f37db3c496639ac1d8effc3fc0389e063bc728cf44604e2ca686f227"
+  },
+  {
+    "name": "naming/smart_copy/jsonl-record-exceeds-64-kib",
+    "sha256": "6cb52cbcf049489e42ba8b57a91ad282a4eadc9df77d1014636edae7db892679"
+  },
+  {
+    "name": "voice/mod/system-instructions",
+    "sha256": "6890bcae2bbeb8b02f12d7208931e8b169c7e052c7a58168fa4d797659bcb6db"
+  },
+  {
+    "name": "voice/mod/unknown-ilium-tool",
+    "sha256": "5293283f6ab9f7b4f5e38fa0d485137d9d3609691deb5cde627d1d96a0a96680"
+  },
+  {
+    "name": "voice/mod/invalid-tool-arguments",
+    "sha256": "ce9898fc3498e104e9171841d4d8bb7ed57d95af672dda4601767277af6dc368"
+  },
+  {
+    "name": "voice/mod/the-active-pane-is-currently-a-detected",
+    "sha256": "e5f80c04d35b6fd0dc5a150ef356c89deb542ad4b4e8203d4a47aa9522969d8d"
+  },
+  {
+    "name": "voice/mod/the-active-pane-is-not-currently-a",
+    "sha256": "b30402100b7a4fe76f870578595e1734fa360fb1bc564d70e163a62ceacac610"
+  },
+  {
+    "name": "voice/mod/ask-only-the-exact-question-do-not",
+    "sha256": "978117bd3412c0c1f510e31a51ae7f1ae26b7d539dfb5a78def231112af1e735"
+  },
+  {
+    "name": "voice/mod/that-confirmation-token-is-missing-expired-or",
+    "sha256": "7a85929703ced9c19c51b508a37802cde8aeb9e981d3a9e09284d769ab49a6ce"
+  },
+  {
+    "name": "voice/tools/inspect-the-current-ilium-session-tree-focus",
+    "sha256": "9b94d018385d7735c0d9fca06c9d6f6f0f1236d359d4b0c6b8ab67b8cd011b60"
+  },
+  {
+    "name": "voice/tools/immediately-stop-and-disable-the-current-ilium",
+    "sha256": "b822471721484b2bcb867740c27609a37a346dc292c35fb9b4eb28b8811fd3b9"
+  },
+  {
+    "name": "voice/tools/navigate-global-ui-surfaces-focus-tree-or",
+    "sha256": "6aee50d61b6600f81f01af8eed6169df0952f5019ac2c118ff1b826786dabbf6"
+  },
+  {
+    "name": "voice/tools/create-open-organize-rename-move-reparent-split",
+    "sha256": "bc6bafd901193588617ed7725363be2109e84e79e51cdaaea0fb037112efde92"
+  },
+  {
+    "name": "voice/tools/primary-voice-dictation-action-send-the-exact",
+    "sha256": "d276e146921bea94dad62af0a06f7b879c45bceac7e8f6c6bb34dac99390a6d2"
+  },
+  {
+    "name": "voice/tools/exact-text-to-type-preserving-slash-commands",
+    "sha256": "b1f11ee2129c6d90fd9cf32e12228ff06ee3c73f5d2a435555fec8df6b015449"
+  },
+  {
+    "name": "voice/tools/type-exact-text-into-a-terminal-without",
+    "sha256": "9bcd4c7116bee69888349051d03c77100aa690d21256661c36145f9455682587"
+  },
+  {
+    "name": "voice/tools/exact-text-to-leave-visible-and-unsubmitted",
+    "sha256": "49a6ac1ea9dd158607d5d9b7abdaf963f7c60556e202fd208b0182faa12764c1"
+  },
+  {
+    "name": "voice/tools/control-non-dictation-terminal-behavior-press-a",
+    "sha256": "1d0cc58aca6ee9383376e519e40d10d477e92a17a6eabe93ec69c0f064da94ba"
+  },
+  {
+    "name": "voice/tools/operate-a-built-in-editor-pane-save",
+    "sha256": "1467263b81aa27f4524166d5b2008457a4a1364b77592630ed5ab13696951bef"
+  },
+  {
+    "name": "voice/tools/operate-every-kanban-surface-select-open-cards",
+    "sha256": "5a1d6971a3970c71863a99129ad8096135f84a3e15b2b79e1e4a55b7773bcf09"
+  },
+  {
+    "name": "voice/tools/get-set-or-adjust-any-persisted-setting",
+    "sha256": "b3db60bc4c68bb64ff67e836b6a668531550db48ab9f939f786b4a23f7c59d9b"
+  },
+  {
+    "name": "voice/tools/search-all-retained-terminal-output-open-editor",
+    "sha256": "dfa09339cb40e75949e895b93185060b0804f330f3759381b16289d06e11bee9"
+  },
+  {
+    "name": "voice/tools/detach-restart-the-tui-client-restart-the",
+    "sha256": "623982900f07155e56bed20e43557a02a4c08a16ff8ba9e6b10cd1a89043f6bc"
+  },
+  {
+    "name": "voice/tools/confirm-or-cancel-one-pending-ilium-action",
+    "sha256": "52b4a1dd074b7bc308fb0e9e7acd321607aa4451bc83e8440e6561b754cbfa69"
+  },
+  {
+    "name": "voice/tools/slash-separated-node-name-path-from-the",
+    "sha256": "871f44116f600742f1d15e7b88c257b8cf88c631055edc606e931e0a468c7dcd"
+  },
+  {
+    "name": "voice/policy/run-the-shell-command-v0-in-a",
+    "sha256": "e93da11fa32e705a4e15ccff40504e057a642f1aaee81d6a5608316f42453489"
+  },
+  {
+    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically",
+    "sha256": "15746ee6570fb5222609946924088ceacb15cf146401ef39fd8aa41ac5e9f027"
+  },
+  {
+    "name": "voice/policy/board-has-no-column",
+    "sha256": "f40513ae11c6ed547d371f6d38db2244bb93c39ad53758da0d2c608a887e9464"
+  },
+  {
+    "name": "voice/policy/board-has-no-card-v0-in-column",
+    "sha256": "d052202c97e58d57ecdab39286df79bcac6f9bcad4d396d56459dc75f69cb6b1"
+  },
+  {
+    "name": "voice/policy/permanently-delete-the-card-v0-from-column",
+    "sha256": "b054f48542e6dd1231660e260691d81c4b97046dffaef5c572534c3a445f30aa"
+  },
+  {
+    "name": "voice/policy/permanently-delete-the-column-v0-and-its",
+    "sha256": "181d4bb9ec8557d99e761472391f3754cf8561361b50d35ef36b631a41b6f6ab"
+  },
+  {
+    "name": "voice/policy/command-line-is-required",
+    "sha256": "d70e9be1ab395af404de10d27dbf2bacdec30e395432eceb83798c96291407e7"
+  },
+  {
+    "name": "voice/policy/replace-the-editor-s-entire-current-document",
+    "sha256": "6be9ec5339f528563f31e48ffba6d6e62a6f5b908a315ba93aab5574cfa8385d"
+  },
+  {
+    "name": "voice/policy/press-enter-and-submit-what-you-see",
+    "sha256": "179f0965edc213fb51bf23e85f24c86e91384015e7fb1ed53dd7450aaf27860b"
+  },
+  {
+    "name": "voice/policy/schedule-this-terminal-input-for-automatic-submission",
+    "sha256": "29d28944872428c60dea60c12d809dbc694bb8da466831e2fd42a1774b7a7f74"
+  },
+  {
+    "name": "voice/policy/queue-this-prompt-to-be-submitted-automatically-2",
+    "sha256": "7ee97ee72aee15a4dc761fbf9101bda0b583de67e8fd71048043536aa9e1f829"
+  },
+  {
+    "name": "voice/policy/runs-is-required-and-must-be-positive",
+    "sha256": "442833dbacf24b4f9ec61ed7352f387e4821b0d70dd518127326aa05233ab011"
+  },
+  {
+    "name": "voice/policy/queue-this-prompt-for-automatic-submission-after",
+    "sha256": "bec2de31beb02571432ca4b772d83def5005d4e3422170e5c38b644ced7ae45c"
+  },
+  {
+    "name": "voice/policy/kill-the-entire-ilium-session-and-every",
+    "sha256": "b6d80854f9f7ff75142474242a7f2502919e2adab7cd20f63375a84bc4ad0d06"
+  },
+  {
+    "name": "voice/policy/restart-the-detached-ilium-server-and-temporarily",
+    "sha256": "20c61ca805501b6246dc1cb4466f1d8a640b7ba9d2a2ec6f10187e4ef1baa9cd"
+  },
+  {
+    "name": "voice/policy/cancelled-the-pending-action",
+    "sha256": "8397273d36a848250782bd456783ecc5cd6f9439fa576b372efc6d68cf6513bb"
+  },
+  {
+    "name": "voice/policy/target-is-not-a-board-pane",
+    "sha256": "e2712273d71fcbceddc061f2432531a1a896cc481a9c565325ae55e5d012b742"
+  },
+  {
+    "name": "voice/policy/column-is-required",
+    "sha256": "1efa80e33a0b7f46cda4c9f968d1fbaa5e31b63e12a2e42c8faf5e0d24da015d"
+  },
+  {
+    "name": "voice/policy/card-is-required",
+    "sha256": "095e4d9cec1ca39e78a92f4e02ec87ab25315fd0c4b8d388229a6325f125bb68"
+  },
+  {
+    "name": "voice/policy/i-typed-it-into-the-target-terminal",
+    "sha256": "64775c229d80446bb226eabeccb1e00d8077259310e8d80ad658932d7e73f457"
+  },
+  {
+    "name": "voice/policy/left-the-staged-terminal-text-visible-and",
+    "sha256": "a8ba752de28698ec61442342d4cc253ec4b9985febd65966922d644c8c2a85e4"
+  },
+  {
+    "name": "voice/executor/search-result-index-v0-does-not-exist",
+    "sha256": "ac3c66a559ea726a4dcce899e5ee3ac7a53246d8001f0a7fc87139bb81e32361"
+  },
+  {
+    "name": "voice/executor/found-v0-workspace-results-for",
+    "sha256": "057d2d6741e87cb3dff2a880d620c5e636a79a5bde218463fd7d0c67555c1228"
+  },
+  {
+    "name": "voice/executor/focused-pane",
+    "sha256": "d4021d672c6646deec399181029f37b48ee87a44bfe3a9b75ce6b45f2b5bc3c9"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-split-view",
+    "sha256": "9f7c914cc6a7423bc4ea85ef46b6d0fb37c5c47c83d06968ce06a787b4964094"
+  },
+  {
+    "name": "voice/executor/showing-split",
+    "sha256": "a93486a35726f4e173b56206b94f34ae41a13f59f6e2d676dafa716f460cfb9f"
+  },
+  {
+    "name": "voice/executor/opened-v0-settings",
+    "sha256": "53eb52ea8c6ab8cdcc1ed500bc3d0954d4252de4eb48184cf0370e6739cbd8e9"
+  },
+  {
+    "name": "voice/executor/invalid-workspace-branch",
+    "sha256": "4292057f365233ab4c7feaf59e54131f53c2d874477bc3f18113701ec9f64580"
+  },
+  {
+    "name": "voice/executor/creating-a-v0-agent-in-a-git",
+    "sha256": "64e16d957af031f3a659570896b575f87d46f60728d9c52ddc0fb8a92f4944db"
+  },
+  {
+    "name": "voice/executor/creating-a-v0-agent-pane",
+    "sha256": "c56e81be97adcc465271bbebae96dcf4666698c477c065c61e1d3e4b7f7eb11e"
+  },
+  {
+    "name": "voice/executor/a-split-view-can-contain-at-most",
+    "sha256": "e8283ad41484a3dfd2f7bc27b1430e396eac0b22d616ae50baf846d7a1345c46"
+  },
+  {
+    "name": "voice/executor/node-v0-cannot-be-expanded",
+    "sha256": "068bd99f60acaed12906d2165f42ec29121e6b8efec6c6820472d02b12ab8af8"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-live",
+    "sha256": "c07b8c11fa40366f0b00739e6d382102d84aadb7ea32b3169e68edcb95623a2d"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-a-terminal-pane",
+    "sha256": "a86e6b7da83d347286c127822d9c12d7ba72bfccd2fc78ad8d9c02b0ac130703"
+  },
+  {
+    "name": "voice/executor/node-v0-is-not-an-editor-pane",
+    "sha256": "1e60a182854e87a47a2da415fd94f2a292aa4923b3c697866a4f4b89b2d8170a"
+  },
+  {
+    "name": "voice/executor/v0-is-required",
+    "sha256": "6af376374a60d2d4016ceedb51a45bc4b4e113eee67cbd3816d492fa21377873"
+  },
+  {
+    "name": "voice/executor/v0-must-not-be-empty",
+    "sha256": "8c09eecd9d599e1d4c957bb40cbb4b6813031684ca392b67b6741523a6cb861f"
+  },
+  {
+    "name": "voice/executor/unknown-settings-tab",
+    "sha256": "5e40787a3454ec029530f643bda8cda1bfe59dada60362fc47bd4a509abca279"
+  },
+  {
+    "name": "voice/executor/read-ilium-get-state-after-the-server",
+    "sha256": "8df981d4792d2f49e3731e9b74c18f70a1033987cef47ae23fea1cb920c7c28c"
+  },
+  {
+    "name": "voice/executor/current-ilium-state",
+    "sha256": "bb947b8ed1b4d4fcda79b8a525fd6448178deb8bcaed194f4182054d82c396ef"
+  },
+  {
+    "name": "voice/executor/queued-text-and-enter-for-the-terminal",
+    "sha256": "f918a74814733211811f4ce5189db8a799ff38d6530d874a96bea08e34060456"
+  },
+  {
+    "name": "voice/executor/staged-text-in-the-terminal",
+    "sha256": "91bd78b00d46852742da66cd954523dff2c44909af5f3c196bfa161bb046ec35"
+  },
+  {
+    "name": "voice/executor/there-is-no-selected-search-result",
+    "sha256": "10633ecdcdcbd1763ef1006d129fa99a0ff7004392b0cb67286e2212db3a5dcb"
+  },
+  {
+    "name": "voice/executor/opened-the-selected-search-result",
+    "sha256": "f536e9d0af04566aedc3ee14362139d076be73128dbde049bc32f3283e9f3522"
+  },
+  {
+    "name": "voice/executor/closed-workspace-search",
+    "sha256": "8d58413c5cf8041ba5e246ff8756812bf055ed350cffaac28dd9ef663016788e"
+  },
+  {
+    "name": "voice/executor/focused-the-left-tree-panel",
+    "sha256": "1462f8e2370dff8c4b3cd3061ad8f2aca2e7fee6abfdec8bb1ea1bab78b451c6"
+  },
+  {
+    "name": "voice/executor/focused-the-next-visible-pane",
+    "sha256": "f25c1ade5a35460d00783f524a0a73e5459cb487ceb75d93929fbf770ab15e94"
+  },
+  {
+    "name": "voice/executor/focused-the-previous-visible-pane",
+    "sha256": "db59358d1ea9362e2515af25bd43479765d9f426c4393ec116e91c4d40be2405"
+  },
+  {
+    "name": "voice/executor/direction-is-required",
+    "sha256": "d8f941f9898d48d6b8313d15e3097e2c36426c7bd75904ae30adbdee4e33c28f"
+  },
+  {
+    "name": "voice/executor/moved-focus-within-the-visible-split",
+    "sha256": "f1f961f73910fbbb7ac1907cf4fdb4a37e02b72a4d1b7a3fa5c52affe33308ff"
+  },
+  {
+    "name": "voice/executor/opened-settings",
+    "sha256": "37ffd0db79f386fb591ff9de04f1ad04b822550c347731e685bd7740a91ba46f"
+  },
+  {
+    "name": "voice/executor/tab-is-required",
+    "sha256": "ec00c9b3ba9358e1d2bfad08362a56f8885c1b98a1b7c7f7bcc309f06c01476f"
+  },
+  {
+    "name": "voice/executor/opened-workspace-search",
+    "sha256": "1f8ae3369ccb99ee0fbd2d4dc7fbb6534954e416f24225198c7bfa3209fcd86f"
+  },
+  {
+    "name": "voice/executor/opened-help",
+    "sha256": "c278f4b33547388a2ede465b5fd834dc6544f01fe5e11a4f50a21d466a54bbe8"
+  },
+  {
+    "name": "voice/executor/closed-the-current-overlay",
+    "sha256": "ec6a918b748fd379b0783d6242908d6a7c2162ad0d90f1cf375573397db436b7"
+  },
+  {
+    "name": "voice/executor/creating-a-terminal-pane",
+    "sha256": "e01cec4fd6f8b5c2dff7fff583273e146e4f4a4a5f0c43a4368ecc79fc0fe6cf"
+  },
+  {
+    "name": "voice/executor/provider-is-required",
+    "sha256": "134c76eebb7910c1f30e935ec126a747f35fef524ded79c3bac75dde5162ef0f"
+  },
+  {
+    "name": "voice/executor/workspace-base-must-not-be-empty",
+    "sha256": "4f45ce0dad1b8104c985d97bb9d967d42fdb566ae2c4aa757f420ed0c4e2096c"
+  },
+  {
+    "name": "voice/executor/creating-the-command-pane",
+    "sha256": "9d677389c20a80864d73dcb282820f58243b4edc1859c37c2c05dbe5781ac145"
+  },
+  {
+    "name": "voice/executor/opening-the-file-in-an-editor-pane",
+    "sha256": "198868152285107f0aa440e862b90f4591839cd585a0ccd178415b5d27c6ea1e"
+  },
+  {
+    "name": "voice/executor/adding-the-folder-to-the-left-panel",
+    "sha256": "841e92a2dc05cf0c33c48b9c2c6aa22cbfec864dc8855d6873b7c9d02bc7ec51"
+  },
+  {
+    "name": "voice/executor/adding-the-project",
+    "sha256": "871628d318378f88d60a9a0f9f1a4f741bbc0d73179a97c978a6f8e08b5b0890"
+  },
+  {
+    "name": "voice/executor/changing-the-project-s-folder",
+    "sha256": "7a92f704cd12f769a96aec58cdc7b0ccead1c790f28b45adbb482b67b56e9ba3"
+  },
+  {
+    "name": "voice/executor/creating-the-group",
+    "sha256": "8c6c96515260075a11a6df9f2782932c8796aa27da0c6dec388706fc445b72d0"
+  },
+  {
+    "name": "voice/executor/board-creation-failed",
+    "sha256": "c6f838597a272ec91c347aec865b94195709b09c1035aee52075ad5c77465d5f"
+  },
+  {
+    "name": "voice/executor/creating-the-board",
+    "sha256": "ecfd4bd89e01c1a88e76f23fc1131571a1151a12326b0c610db6aa768a0fbf22"
+  },
+  {
+    "name": "voice/executor/creating-the-split-view",
+    "sha256": "a5b81d792ce6f30a80d03dbd8497da9141226a682585236118e1c62939f78478"
+  },
+  {
+    "name": "voice/executor/renaming-the-tree-item",
+    "sha256": "367bd25201a73fe3a223cbf76e83a680b9c4a22b2dfdf88d3382aa533fe04e86"
+  },
+  {
+    "name": "voice/executor/moving-the-tree-item",
+    "sha256": "4c7f884cae670280c82627d7b391d2bf578615ca0a72815ca7b9a22446c0d06c"
+  },
+  {
+    "name": "voice/executor/reparenting-the-tree-item",
+    "sha256": "17d1c93484bd12ac53a48e4bcbb1b230508231c63bf118ea14b3e941c6420460"
+  },
+  {
+    "name": "voice/executor/closing-the-tree-item",
+    "sha256": "bfb0943f73cb3e7ac9e6c54399794cd582138275b16ca1eee0b6b72e591fdbcd"
+  },
+  {
+    "name": "voice/executor/toggled-the-left-panel-group",
+    "sha256": "20d7fc7571cda8ab1547df17a6f192d69c048bd954d8696535e46069104a8ce3"
+  },
+  {
+    "name": "voice/executor/started-automatic-retitling",
+    "sha256": "38b55ef97b089d6187f01053b8c5d25e268953ca6ff9ced0486df9fec7bdc7bb"
+  },
+  {
+    "name": "voice/executor/requested-project-restructuring",
+    "sha256": "7a8dbc0f7bc8f04c1711954fe8684e5a2507ee7f07830383ae4ff7206b398e4d"
+  },
+  {
+    "name": "voice/executor/reverting-the-project-s-latest-restructure",
+    "sha256": "201350bd2ee974e35f58fc67102dff20ff67da3711137f8013d6105e6bdc9519"
+  },
+  {
+    "name": "voice/executor/key-is-required",
+    "sha256": "3908de7448cfea187a864c06e7f87d880dcba2d737b2a9055600a016fb866661"
+  },
+  {
+    "name": "voice/executor/sent-the-key-to-the-terminal",
+    "sha256": "35f5bc916cebd48a36e16ae72f52a594ec4096245781a81f3ffb893ccf57fe69"
+  },
+  {
+    "name": "voice/executor/target-is-not-a-terminal-pane",
+    "sha256": "045665db944b47eba3b1dd4cfb4488f679b44ffe7b0d69c3dce43fc8ea3f8180"
+  },
+  {
+    "name": "voice/executor/scrolled-the-terminal",
+    "sha256": "ebbd029a0ec348048ff36fba9d373ead9526c55fd9ffe2da2473dc3835344db9"
+  },
+  {
+    "name": "voice/executor/returned-to-live-terminal-output",
+    "sha256": "05bc33b74a96837eed054202d7d8a7004ac5bf6e8b382a3f7ce3f98d95cd8c98"
+  },
+  {
+    "name": "voice/executor/scheduled-terminal-input",
+    "sha256": "9d7e9e7299e81b78604abd9a714ab5b04cdd06e4e72fbe6ad51b9bfa3644be93"
+  },
+  {
+    "name": "voice/executor/queued-the-prompt-for-the-agent-s",
+    "sha256": "100fc183840f92931e620f4b6e147f4a0e0bbf9b10fc11317479add5d972a46f"
+  },
+  {
+    "name": "voice/executor/clearing-the-pane-s-prompt-queue",
+    "sha256": "ac5d79cda119b8d12d98832c0b44a32681a0161cd1df2f13b7d05b5dc3ee2536"
+  },
+  {
+    "name": "voice/executor/target-is-not-an-editor-pane",
+    "sha256": "a9114d682114a493a70792ffaee1747b4d83ae3a8df7f625d6012956ad2eb09a"
+  },
+  {
+    "name": "voice/executor/this-editor-has-no-file-path-yet",
+    "sha256": "48f980098d1ee26c744cfc41d185868b6c7a42385e227bbb7095066c2c989e18"
+  },
+  {
+    "name": "voice/executor/editor-updated",
+    "sha256": "d0db9162246ba62438dc514259904c4c4d4f79db2d308f30beea778a7cd3be4b"
+  },
+  {
+    "name": "voice/executor/text-is-required",
+    "sha256": "027122632bd2e45950a95d23e29692f007a9e1cee360a6a542cb95dcc79acd4e"
+  },
+  {
+    "name": "voice/executor/inserted-text-into-the-editor",
+    "sha256": "f6b7eadf64519a0a174ade240dc0fec9ef15ae5aefaed3e4f7037404d73f055d"
+  },
+  {
+    "name": "voice/executor/replaced-the-editor-s-document",
+    "sha256": "34c4f911b9b0cc5a51c2c31ed19342e36fe26dc57aeb8aea09e0069ae849aab7"
+  },
+  {
+    "name": "voice/executor/line-is-required",
+    "sha256": "0c48e32750070cf50b5d5ec9b0152c4dbdab5d1b4c7f90ca2ff2ef710cfc8264"
+  },
+  {
+    "name": "voice/executor/moved-the-editor-cursor",
+    "sha256": "dbec6d0f4c7d3343d9115f555aa695d9ae37868d39ce4b73b348c1be70a1a183"
+  },
+  {
+    "name": "voice/executor/toggled-the-rendered-source-view",
+    "sha256": "0a5c7713ba239d9f410ea0552d6e99812be0c98da65e317472503048686eff38"
+  },
+  {
+    "name": "voice/executor/toggled-line-numbers",
+    "sha256": "521e51005fa970708d8be107ff23af834a7d4d11fb53741b1796ee5b9980237c"
+  },
+  {
+    "name": "voice/executor/toggled-the-minimap",
+    "sha256": "3cb7514ecd550f8c8c7e6d857e8a42a45ae0925d5f47753c84f110d64741ffdb"
+  },
+  {
+    "name": "voice/executor/toggled-autosave",
+    "sha256": "65054c94526e4443ccbfd36dc23abfeee7149eb0d957f2b64635c86f36bc9caa"
+  },
+  {
+    "name": "voice/executor/destination-column-is-required",
+    "sha256": "afd51f3f80018f74f58e61ecbc398b5cfbc2ff3f139240f1e48d327c9109819d"
+  },
+  {
+    "name": "voice/executor/checkbox-is-required",
+    "sha256": "052bece3834b0dd6a08d1c47b99d7d2767ce5c4dd631491b626fec9576413bac"
+  },
+  {
+    "name": "voice/executor/board-updated-and-persisted",
+    "sha256": "4bce49e88366eb9e4707b18289a1c4446f4ed2d6efb1ff064b379d0c58219db6"
+  },
+  {
+    "name": "voice/executor/session-lifecycle-request-queued",
+    "sha256": "7aed53c47881366be16ec9d3b24c0728ae46e39c17de282699675ed091e37a26"
+  },
+  {
+    "name": "voice/executor/voice-mode-stopped",
+    "sha256": "04b13392ed49b40f5f83992a749fd20a117c3fc884eeed9c48ec95d6c80c8a59"
+  },
+  {
+    "name": "voice/resolver/no-ilium-node-has-id",
+    "sha256": "2bcb40a117907fec6c2e1ba51ec1ab157076661e2d2e7237524f3a56c2c1eb43"
+  },
+  {
+    "name": "voice/resolver/node-v0-cannot-contain-ordinary-ilium-items",
+    "sha256": "ecbb37b86017f6d90d513b72ff3c538bb377c35beb4adf2537b987dc86c65f6c"
+  },
+  {
+    "name": "voice/resolver/no-ilium-node-is-named",
+    "sha256": "8787e1280d5660e5dfe66ae98efff8b81a23e3ca8912b8885bdcff84ded6bcb6"
+  },
+  {
+    "name": "voice/resolver/the-name-v0-is-ambiguous-use-one",
+    "sha256": "ff8ccf80cdbe8abb908ca3ba024dd596ce55003417ecb3022a2e6bfa794c15b7"
+  },
+  {
+    "name": "voice/resolver/v0-is-not-a-container",
+    "sha256": "90856ee71690660dab1143d931fca215338aaa09406e5b3a0375a0f4fc089093"
+  },
+  {
+    "name": "voice/resolver/no-child-named-v0-exists-under",
+    "sha256": "b605a64998ee527060a55560faa280aaf5a77de7d350af392c2fe2365bebaad6"
+  },
+  {
+    "name": "voice/resolver/path-component-v0-is-ambiguous-under",
+    "sha256": "b273531569060d5b649868a07b8665366f2b4a7f4156e2408832d47fc42e6d98"
+  },
+  {
+    "name": "voice/resolver/no-active-or-selected-ilium-node",
+    "sha256": "ee1be2f1f5cae6e3ec11bef46047d8dafcd947cfefcda6be063415c22408e121"
+  },
+  {
+    "name": "voice/resolver/no-destination-group-is-available",
+    "sha256": "841c1ac917ee2bb220db5595241f5aac1ec490072c7608687dfc1ea682875218"
+  },
+  {
+    "name": "voice/settings/updated",
+    "sha256": "c3a9751bf80a63f8d1d3acfff643d20681e1d030a7e5ca59973888d55ef2138b"
+  },
+  {
+    "name": "voice/settings/adjusted",
+    "sha256": "8a05fb5f8741823ee1c9980edd5ef4616bea83d7f75e3429973f92d006dbc6d2"
+  },
+  {
+    "name": "voice/settings/unknown-configurable-icon",
+    "sha256": "91f543ff94a8a6d59ff984ebe8ed0216d57686c9667ab8de190b0b839ee99e3b"
+  },
+  {
+    "name": "voice/settings/unknown-keyboard-action",
+    "sha256": "e5828cadc8cbf0e79be11cd4f858f396dd81d208c8b6e7cdb302ad902934412f"
+  },
+  {
+    "name": "voice/settings/unknown-trigger-event",
+    "sha256": "ffdc437cfb3d3857fec03d4368ee6ef61e2dccb765e9194afbdbfd69cd3774e6"
+  },
+  {
+    "name": "voice/settings/unknown-trigger-action",
+    "sha256": "3f449bd2d5da085d22e9a67a60ed6e455d0d49c1e61a2962a51aa950db67ec59"
+  },
+  {
+    "name": "voice/settings/kilo-gateway-model-v0-is-not-in",
+    "sha256": "dceb05f1ad9107ca5de4e1f3da3862a3fa98cb7b69ccd986c258632eb6c81daf"
+  },
+  {
+    "name": "voice/settings/unknown-or-read-only-setting-path",
+    "sha256": "ab591b13b55ae21e831742a7311aeeef321b7b095217f00f9adeac0e28bc032e"
+  },
+  {
+    "name": "voice/settings/setting-v0-is-not-adjustable-use-set",
+    "sha256": "ecf8de3ed0a2a9ebb5a3d58008476c978a12d5499b19891344214a799b61b4cc"
+  },
+  {
+    "name": "voice/settings/current-redacted-ilium-settings",
+    "sha256": "f56567b7b14e363c3ca4d6a45030b0edd6ca138d947447c4dc3b8cef2a839204"
+  },
+  {
+    "name": "voice/settings/path-is-required",
+    "sha256": "ad92630a1a27503ad1793ad32652c1c93ce2ad0d4539ab15b526fd1804ef2239"
+  },
+  {
+    "name": "voice/settings/value-is-required",
+    "sha256": "5f5bf673f65f390d4585c2e6eec029c2bd6a323f42946a0d5ff2599c7b9c6f01"
+  },
+  {
+    "name": "voice/settings/started-the-inference-provider-test",
+    "sha256": "95e29a158ca72d64d19eaa09f006a06f6adad5c05062f0e47ec5b4ed79c4ed46"
+  },
+  {
+    "name": "voice/settings/started-model-discovery",
+    "sha256": "b4b37c323a366fcda88a7e6336ce48a816f652abb855266ec2a11dfcb9410400"
+  },
+  {
+    "name": "voice/settings/requested-a-sound-preview",
+    "sha256": "3a2d25773230489a32b9102dcc1749691850b10afd9737136ae3bbf214d3cb83"
+  },
+  {
+    "name": "voice/settings/unfocused-width-cannot-exceed-focused-width",
+    "sha256": "719a5928f7dc4464ffa590fbfd59cc78eff3a8a23a7110b8f68906a6a82198d5"
+  },
+  {
+    "name": "voice/settings/focused-width-cannot-be-smaller-than-unfocused",
+    "sha256": "feb041be923c52fbc571d5c84cff9ec0d50228684c3c8cb7b17b241ed3690ac1"
+  },
+  {
+    "name": "voice/settings/minimum-terminal-width-is-outside-ilium-s",
+    "sha256": "2cb7a1d5e423af26007a2722a31c4f5e90ba9f775b8c84e8c5def04b0227920f"
+  },
+  {
+    "name": "voice/settings/color-scheme-must-be-dark-or-light",
+    "sha256": "d6abd30e04c0650c94c6fba91c59a6e95d407dc91de4aed1ffe788ee977cfdec"
+  },
+  {
+    "name": "voice/settings/task-progress-style-must-be-braille-blocks",
+    "sha256": "e3e9abf0b19ed6d081c9b68fbdf96a9d472a696a73ef6c687c98af7fee7d4553"
+  },
+  {
+    "name": "voice/settings/scrollback-budget-is-too-large",
+    "sha256": "ef816dbe1081964751584a4b36b241fdc548cb389a78c0af98633850cc0ce946"
+  },
+  {
+    "name": "voice/settings/scrollback-budget-must-be-4-512-mib",
+    "sha256": "ee3e717734c8b89ea7d402750815b56e69ab779556bf1d497f94f31116f8f013"
+  },
+  {
+    "name": "voice/settings/autosave-delay-is-too-large",
+    "sha256": "571c04c8c35677ba1fb71b3979efd247491707d8511f5a1fccf5aa85d5cd38e6"
+  },
+  {
+    "name": "voice/settings/autosave-delay-must-be-250-500-1000",
+    "sha256": "876316344db2f5b642a357be00ebc0e7fcd34c60493d44d9fe4ebc8cffc642f8"
+  },
+  {
+    "name": "voice/settings/shortcut-base-must-be-one-ascii-letter",
+    "sha256": "04aac6a0d3c6cb3220fbb0f06741b50c852039a8a7dca3e65bd668848146b561"
+  },
+  {
+    "name": "voice/settings/keyboard-preset-must-be-screen-or-tmux",
+    "sha256": "456cd228884db808db54f848d43bece21767029d141df974e4b74514e7489e51"
+  },
+  {
+    "name": "voice/settings/keyboard-binding-must-be-one-printable-key",
+    "sha256": "f657b14ccb9b252236e2b10aa0cc45cddbd32e9cd2199ca195951877494d1002"
+  },
+  {
+    "name": "voice/settings/keyboard-binding-was-rejected",
+    "sha256": "88157b4ddd55e227aa7c2dddf8358df5cab6ff89c229bc1fe9e3276434e17e6f"
+  },
+  {
+    "name": "voice/settings/card-preview-line-count-is-too-large",
+    "sha256": "dc03b559317c2a075b909f3b1a70078b0e7149dcf588904e83a0725d83c2424f"
+  },
+  {
+    "name": "voice/settings/card-preview-lines-must-be-between-1",
+    "sha256": "4421fb443e707668e350a3ba88419ca3a2358b96aeb1da0af73fb671be57940b"
+  },
+  {
+    "name": "voice/settings/column-width-is-too-large",
+    "sha256": "3dee0ae408ac493e4d05a0dcc1993370a9471e5bef06d1af05508a28d5cf6b7a"
+  },
+  {
+    "name": "voice/settings/minimum-column-width-must-be-between-10",
+    "sha256": "a6f3b8b7f8d0d2900b62d456540a9a0e0dc1efe747e5da1da5defb496ea0f436"
+  },
+  {
+    "name": "voice/settings/sound-source-must-be-system-beep-or",
+    "sha256": "26cd3aafafd0d5ba0229e6ca3788dccdaad3018498ef152a4bae24b1d9fd3dbc"
+  },
+  {
+    "name": "voice/settings/sound-file-is-not-in-ilium-s",
+    "sha256": "701f3e3198bb90d2a498ebb74d3716d8136b2ad2b34a5bf3fe0ed19f3239a3cb"
+  },
+  {
+    "name": "voice/settings/trigger-actions-must-be-an-array-of",
+    "sha256": "069a531c1f0a7f41b15b9450d99642a93d6afd879299feba24307546ac78f911"
+  },
+  {
+    "name": "voice/settings/voice-output-volume-must-be-between-0",
+    "sha256": "563e6939f2549a2ccb978dd9cc3e2e7edf2382ed2e8b475eb6ac180acf9cb1a1"
+  },
+  {
+    "name": "voice/settings/reset-planning-time-style-must-be-exact",
+    "sha256": "b2e2a8b0d7a46996f34f9cbc050582d6f6f602e52e12645a13ad57fda335fa7c"
+  },
+  {
+    "name": "voice/settings/git-default-where-must-be-here-new",
+    "sha256": "6a208a891b94648408b3799e8f8162fec640e34121e6a928dd8b7ab0873eff65"
+  },
+  {
+    "name": "voice/settings/git-default-base-must-be-current-or",
+    "sha256": "f3a1dfaf2702988f25bfc183b04ed8d2b345f4edcdb0dab9486242fc4957914f"
+  },
+  {
+    "name": "voice/settings/git-branch-line-must-be-worktree-only",
+    "sha256": "69083befff849534733d6ee4d19f4366f5e8d271ffef4893d49fd0529e759357"
+  },
+  {
+    "name": "voice/settings/git-default-close-policy-must-be-keep",
+    "sha256": "be78c0038e50cc9a7b8d7cbae19980c7392503a4525584bab204d2c215d009e3"
+  },
+  {
+    "name": "voice/settings/setting-registry-could-not-reach-the-requested",
+    "sha256": "a5b4012742c0d30a90a1bfe77e92a3fc8782de3f2345fe41ad03facf7f01622b"
+  },
+  {
+    "name": "voice/settings/value-must-be-a-boolean",
+    "sha256": "63cfa6470f172f5d0afd794e380ec8e9ad6f164ca80393eb5d008f35580987f1"
+  },
+  {
+    "name": "voice/settings/value-must-be-a-non-negative-integer",
+    "sha256": "86f556f8fca48798b02783665db5a2ccd9a84fadea5cc22c737055c4a8607c23"
+  },
+  {
+    "name": "voice/settings/value-must-be-a-string",
+    "sha256": "025f60f756cd11205a85d928c82e4043bd3623ac3f57c59111ac1c0fd8eff5de"
+  },
+  {
+    "name": "voice/settings/left-panel-width-is-outside-ilium-s",
+    "sha256": "205039eb27a3fa3642a5b53f7f61dd7c632d5094d4f8be5bb8411216fd5d5ede"
+  },
+  {
+    "name": "voice/settings/left-panel-sizing-mode-must-be-fixed",
+    "sha256": "2ea75486607729356576d168d1b6fa482954c75761fc97ff32efb99a5dfe08f0"
+  },
+  {
+    "name": "voice/settings/invalid-tree-order",
+    "sha256": "bbebbedec5f7a7042beaaf578f1f689bc8f73b0cf89e882e8b3135fc1fa130ea"
+  },
+  {
+    "name": "voice/settings/invalid-agent-identifier-mode",
+    "sha256": "a9dd9dedd3a6c29cc22596c9ecdc3a342084c00f27cf260434daaa0fa391cc24"
+  },
+  {
+    "name": "voice/settings/motion-level-must-be-full-reduced-or",
+    "sha256": "be96c9953a22b89c31f3e4be4eefcf6dcbcf919a0f133846f2663131e0898983"
+  },
+  {
+    "name": "voice/settings/sidebar-density-must-be-compact-standard-or",
+    "sha256": "da899710d1695060cb1ab8f09c99dbeeb5fccf78233a30eb865f00254b2a1654"
+  },
+  {
+    "name": "voice/settings/invalid-new-pane-directory-policy",
+    "sha256": "922dc5039981c3a1119dca26e7c94f83f4c7ae2c04a81f4460a7adb0047e2b0b"
+  },
+  {
+    "name": "voice/settings/invalid-session-recovery-policy",
+    "sha256": "05d57dd4be46f0faa7ac68a78f1cbc95896932b79b0e8da25f86e9edf68c9998"
+  },
+  {
+    "name": "voice/settings/invalid-inference-provider",
+    "sha256": "06f162100abc1f2c73c5cde2e9cb02f9e4b561ccd48743c9f134663b4c117972"
+  },
+  {
+    "name": "voice/settings/invalid-title-style",
+    "sha256": "dee708727e936c877da4b883a4e1f713e01f430308b1effe727d933386980112"
+  },
+  {
+    "name": "voice/settings/invalid-realtime-voice-model",
+    "sha256": "b8e35a16f0a05050869b9991c147d16b615a28ecc660bc405647bcf5663a4cc7"
+  },
+  {
+    "name": "voice/settings/invalid-realtime-voice",
+    "sha256": "ebc525ed482cc425e0af1742c3c8c9e75775f63fa47ef4ada332ef26f0a52cff"
+  },
+  {
+    "name": "voice/settings/reasoning-effort-must-be-minimal-low-or",
+    "sha256": "23e78498155794aede70143662314a3bbd9fc6f479ee47be3558792d13940fff"
+  },
+  {
+    "name": "voice/settings/voice-input-mode-must-be-semantic-vad",
+    "sha256": "2a3e2a45be45f2df4f7a8c6a49e0213b1b9761cd2d0efe2e41a24a51161c00e8"
+  },
+  {
+    "name": "voice/settings/vad-eagerness-must-be-auto-low-medium",
+    "sha256": "cd0e09a142b9755471b68dc99b8d1296d0d7d334c1e8b0d2d52217536297f798"
+  },
+  {
+    "name": "agent/managed-block",
+    "sha256": "46ff89c55561772fc5e2a4b202cf441f2139555385c2500397561605f12287dd"
+  },
+  {
+    "name": "agent/goal-from-line",
+    "sha256": "f3f4d083f0c2a7bff2cbd42a673f884820fee48204eb69114f9be125bc807001"
+  },
+  {
+    "name": "agent/chatroom-record-row",
+    "sha256": "153fc18682e3158b4f5c23fca52209f67c2b1a6f207db6ffec5f5d0ae37c7458"
+  },
+  {
+    "name": "agent/chatroom-empty-context",
+    "sha256": "115f37baafaf9124410a429def09280abcba385fd085ebe505d9faf300864305"
+  },
+  {
+    "name": "agent/chatroom-context",
+    "sha256": "caaf7d3b694223b5568c74c6f7adb072bfe95c6cb0bc0c10f6418f1c85c70a33"
+  },
+  {
+    "name": "agent/chatroom-context-row",
+    "sha256": "a25912a18ec27329a26e4b34d5a8aab2a601e8f7252e1fc764d279c384e3fbc7"
+  },
+  {
+    "name": "agent/chatroom-title",
+    "sha256": "fea286df95b63b8ac95faedd4b5da1b77f1fdce86fd8eb25adb7923849cadfd8"
+  },
+  {
+    "name": "agent/chatroom-header-guidance",
+    "sha256": "60333a727f1d27b28ced9369095cef3647142e7f7e565148507d5057b2063050"
+  },
+  {
+    "name": "agent/chatroom-messages-heading",
+    "sha256": "c8335e70f67279e96621753db3540135764227f3b1cc2d70e15dbfd1cc0d1c6c"
+  },
+  {
+    "name": "agent/progress-done",
+    "sha256": "d5091e02b1aec211cafbf6507c9a5716796c725fc16d609ec37a7c25e2ca3626"
+  },
+  {
+    "name": "agent/progress-error",
+    "sha256": "e6350758ea342fac3195b7effad4e88085d82ce6e47630c1a001b1ec366d2a15"
+  },
+  {
+    "name": "agent/progress-unspecified-error",
+    "sha256": "5048d4cba3a2b509c2ccf1612baa3ecdfa3111ffebac0bfecbb887580ef92e1b"
+  },
+  {
+    "name": "agent/progress-unknown",
+    "sha256": "c3fd23aac0579cf17f4bc9af03107b345251d2b16662f1013571ffef6c902451"
+  },
+  {
+    "name": "agent/progress-monitor-failure",
+    "sha256": "e8a368e516ca0e529a10a72e6c4d4bb6ee904e0e3d66e4f57a7cb3948d3464f1"
+  },
+  {
+    "name": "agent/progress-empty-status",
+    "sha256": "51d76409563032b515310beb83e00e0ef4a7314ef7063fc3e1346305d5722e7a"
+  },
+  {
+    "name": "conversion/truncated-result",
+    "sha256": "c27236ffc9d5f1f52e9e78b0ab4f3fdea8b3362e88e5fb19aa6ec657bbcf574c"
+  },
+  {
+    "name": "conversion/bash-description-workdir",
+    "sha256": "fee88a6d39d9511a7186ebc6ea35623cf82aa4a51798841445b86e806eceb3fb"
+  },
+  {
+    "name": "conversion/bash-description",
+    "sha256": "840fb55e847dfe4b7732d5325f4082c3450833ea905027f74998957e4c211ac0"
+  },
+  {
+    "name": "agent/progress-observation-stopped",
+    "sha256": "ff1cddc299e4c439b89174be131982bfbc8e10423b5587d108aeb521d6902b21"
+  },
+  {
+    "name": "naming/unavailable-context",
+    "sha256": "6693c3c6fa600a6edf77298663095d90b677abc3edd97dd619a60b4b7e31f9c7"
+  }
+]

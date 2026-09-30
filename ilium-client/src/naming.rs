@@ -96,7 +96,11 @@ fn render_prompt<T: Serialize>(
     template: &str,
     context: &T,
 ) -> anyhow::Result<String> {
-    Ok(ilium_prompts::render_source(template_name, template, context)?)
+    Ok(ilium_prompts::render_source(
+        template_name,
+        template,
+        context,
+    )?)
 }
 
 /// Bounds one independently meaningful LLM context value by keeping its first
@@ -118,7 +122,10 @@ pub fn clip_llm_context_value(value: &str) -> String {
         .skip(character_count - LLM_CONTEXT_EDGE_CHARS)
         .collect();
     let omitted_character_count = character_count - retained_character_count;
-    ilium_prompts::render_value("naming/naming/v0-v1-characters-omitted", &serde_json::json!({"v0": format!("{}", head), "v1": format!("{}", omitted_character_count), "v2": format!("{}", tail)}))
+    ilium_prompts::render_value(
+        "naming/naming/v0-v1-characters-omitted",
+        &serde_json::json!({"v0": (head).to_string(), "v1": (omitted_character_count).to_string(), "v2": (tail).to_string()}),
+    )
 }
 
 /// Encodes untrusted prompt data as one JSON string literal and neutralizes
@@ -127,7 +134,7 @@ pub fn clip_llm_context_value(value: &str) -> String {
 /// and masquerade as instructions.
 pub fn encode_untrusted_context(value: &str) -> String {
     serde_json::to_string(value)
-        .unwrap_or_else(|_| "\"[unavailable]\"".to_string())
+        .unwrap_or_else(|_| ilium_prompts::naming::UNAVAILABLE_CONTEXT.to_string())
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026")
@@ -215,12 +222,13 @@ pub fn extract_icon_field(
         .get(field)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            anyhow::anyhow!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_MISSING_STRING_FIELD_FIELD)
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/naming/context-label-response-missing-string-field-field",
+                &serde_json::json!({"v0": (context_label).to_string(), "v1": (field).to_string()})
+            ))
         })?;
     normalize_icon(raw_value).ok_or_else(|| {
-        anyhow::anyhow!(
-            ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_FIELD_FIELD_MUST_BE_ONE_COMPACT_UTF_8_ICON_OR_EMOTICON
-        )
+        anyhow::anyhow!(ilium_prompts::render_value("naming/naming/context-label-response-field-field-must-be-one-compact-utf-8-icon-or-emoticon", &serde_json::json!({"v0": (context_label).to_string(), "v1": (field).to_string()})))
     })
 }
 
@@ -267,7 +275,10 @@ pub fn normalize_command_hint(value: Option<&str>) -> Option<String> {
 /// on-screen command alongside its title.
 pub fn format_with_command_hint(title: String, command_hint: Option<&str>) -> String {
     match normalize_command_hint(command_hint) {
-        Some(command) => ilium_prompts::render_value("naming/naming/v0", &serde_json::json!({"v0": format!("{}", command), "v1": format!("{}", title)})),
+        Some(command) => ilium_prompts::render_value(
+            "naming/naming/v0",
+            &serde_json::json!({"v0": (command).to_string(), "v1": (title).to_string()}),
+        ),
         None => title,
     }
 }
@@ -296,10 +307,16 @@ pub fn parse_structured_json_object(
     context_label: &str,
 ) -> anyhow::Result<serde_json::Value> {
     let Some((object, consumed_end)) = first_complete_json_object(response) else {
-        anyhow::bail!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_DID_NOT_CONTAIN_ONE_COMPLETE_JSON_OBJECT);
+        anyhow::bail!(ilium_prompts::render_value(
+            "naming/naming/context-label-response-did-not-contain-one-complete-json-object",
+            &serde_json::json!({"v0": (context_label).to_string()})
+        ));
     };
     if first_complete_json_object(&response[consumed_end..]).is_some() {
-        anyhow::bail!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_CONTAINED_MULTIPLE_JSON_OBJECTS);
+        anyhow::bail!(ilium_prompts::render_value(
+            "naming/naming/context-label-response-contained-multiple-json-objects",
+            &serde_json::json!({"v0": (context_label).to_string()})
+        ));
     }
     Ok(object)
 }
@@ -330,12 +347,13 @@ fn extract_bounded_word_field(
         .get(field)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            anyhow::anyhow!(ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_MISSING_STRING_FIELD_FIELD)
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/naming/context-label-response-missing-string-field-field",
+                &serde_json::json!({"v0": (context_label).to_string(), "v1": (field).to_string()})
+            ))
         })?;
     normalize_word_bounded(raw_value, min_words, max_words).ok_or_else(|| {
-        anyhow::anyhow!(
-            ilium_prompts::naming::NAMING_NAMING_CONTEXT_LABEL_RESPONSE_FIELD_FIELD_MUST_CONTAIN_MIN_WORDS_TO_MAX_WORDS_SHORT_NON_EMPT
-        )
+        anyhow::anyhow!(ilium_prompts::render_value("naming/naming/context-label-response-field-field-must-contain-min-words-to-max-words-short-non-empt", &serde_json::json!({"v0": (context_label).to_string(), "v1": (field).to_string(), "v2": (min_words).to_string(), "v3": (max_words).to_string()})))
     })
 }
 

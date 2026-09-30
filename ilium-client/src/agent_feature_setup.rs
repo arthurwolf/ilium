@@ -176,11 +176,9 @@ pub fn install(path: &Path, feature: AgentFeature) -> std::io::Result<()> {
         } else {
             "\n\n"
         };
-        Ok(format!(
-            "{without_previous}{separator}{}\n{}\n{}\n",
-            feature.opening_marker(),
-            feature.instruction(),
-            feature.closing_marker()
+        Ok(ilium_prompts::render_value(
+            "agent/managed-block",
+            &serde_json::json!({"v0": (without_previous).to_string(), "v1": (separator).to_string(), "v2": (feature.opening_marker()).to_string(), "v3": (feature.instruction()).to_string(), "v4": (feature.closing_marker()).to_string()}),
         ))
     })
 }

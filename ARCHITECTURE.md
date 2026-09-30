@@ -83,6 +83,10 @@ One raw Idle sample after an active agent turn is provisional: the server keeps 
 
 The blocked/waiting-for-approval state wasn't explicitly requested but falls out of the same detection pass at near-zero extra cost, and it's the state you most want a distinct color for in practice (herdr treats it as a 4th state for the same reason).
 
+Claude activity classification treats the latest recognized completed-turn summary as a boundary: earlier working and background-wait rows belong to the previous turn. The summary's own still-running suffix and newer activity stay eligible; approval checks retain the full screen. Goal completion remains independent of current activity.
+
+Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output, and their rows return to the terminal. Expiry does not clear reports, acknowledge results, change sidebar signals or affect queued notification delivery.
+
 ## Ambient animation rendering
 
 Two scene families share one dot raster (`ilium_ambient::Raster`, 2×4 dots per terminal cell) and one packing step (fixed ordered or stippled thresholds, then Unicode Braille):
@@ -291,3 +295,7 @@ Each milestone is meant to be independently runnable/demoable, not a big-bang in
 - No WASM plugin system (Zellij already owns that niche well).
 - No built-in SSH/remote-session sharing (RMUX already owns that niche).
 - No general-purpose external agent-driving SDK or remotely callable automation surface. The explicitly user-operated local voice controller can send terminal input through the same guarded client request path as keyboard input, and `ilium voice say` lets a local process add sentences to that voice conversation, but the model, not the CLI, decides what they mean and the policy layer still applies; neither exposes ilium as an orchestration server.
+
+## Embedded application prompts
+
+`ilium-prompts` owns the application prompt catalog, editable `.hbs` sources, build validation and shared plain-text Handlebars rendering. Client, inference, server and session conversion depend on this pure crate; it performs no runtime file I/O. Typed contracts, serialization, clipping and runtime user values remain with their callers. See [`ilium-prompts/README.md`](ilium-prompts/README.md) for maintenance and [`ilium-prompts/CATALOG.md`](ilium-prompts/CATALOG.md) for the extraction mapping.

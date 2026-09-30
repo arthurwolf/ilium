@@ -133,37 +133,27 @@ pub(crate) async fn deliver_result(
 pub(crate) fn terminal_result_message(progress: &PaneProgress) -> String {
     let report = &progress.report;
     match report.status {
-        ProgressTaskStatus::Done => format!(
-            "Ilium progress monitor {} reports that {} completed successfully.\nFinal progress: 100%.\nStatus: {}.",
-            progress.monitor_id,
-            report.job_id,
-            nonempty_status(&report.message)
+        ProgressTaskStatus::Done => ilium_prompts::render_value(
+            "agent/progress-done",
+            &serde_json::json!({"v0": (progress.monitor_id).to_string(), "v1": (report.job_id).to_string(), "v2": (nonempty_status(&report.message)).to_string()}),
         ),
-        ProgressTaskStatus::Error => format!(
-            "Ilium progress monitor {} reports that {} failed.\nFinal progress: {:.1}%.\nStatus: {}.\nError: {}.",
-            progress.monitor_id,
-            report.job_id,
-            report.percent,
-            nonempty_status(&report.message),
-            report.error.as_deref().unwrap_or("the task reported an unspecified error")
+        ProgressTaskStatus::Error => ilium_prompts::render_value(
+            "agent/progress-error",
+            &serde_json::json!({"v0": (progress.monitor_id).to_string(), "v1": (report.job_id).to_string(), "v2": format!("{:.1}", report.percent), "v3": (nonempty_status(&report.message)).to_string(), "v4": (report.error.as_deref().unwrap_or(ilium_prompts::agent::PROGRESS_UNSPECIFIED_ERROR)).to_string()}),
         ),
-        ProgressTaskStatus::NotStartedYet | ProgressTaskStatus::Running => format!(
-            "Ilium progress monitor {} stopped before {} reached a terminal task status. The task outcome is unknown.\nLast progress: {:.1}%.\nStatus: {}.",
-            progress.monitor_id,
-            report.job_id,
-            report.percent,
-            nonempty_status(&report.message)
-        ),
+        ProgressTaskStatus::NotStartedYet | ProgressTaskStatus::Running => {
+            ilium_prompts::render_value(
+                "agent/progress-unknown",
+                &serde_json::json!({"v0": (progress.monitor_id).to_string(), "v1": (report.job_id).to_string(), "v2": format!("{:.1}", report.percent), "v3": (nonempty_status(&report.message)).to_string()}),
+            )
+        }
     }
 }
 
 pub(crate) fn monitor_failure_message(progress: &PaneProgress, error: &str) -> String {
-    format!(
-        "Ilium progress monitor {} could no longer observe {}. The task outcome is unknown.\nLast progress: {:.1}%.\nMonitor error: {}.",
-        progress.monitor_id,
-        progress.report.job_id,
-        progress.report.percent,
-        sanitize_delivery_text(error)
+    ilium_prompts::render_value(
+        "agent/progress-monitor-failure",
+        &serde_json::json!({"v0": (progress.monitor_id).to_string(), "v1": (progress.report.job_id).to_string(), "v2": format!("{:.1}", progress.report.percent), "v3": (sanitize_delivery_text(error)).to_string()}),
     )
 }
 
@@ -396,7 +386,7 @@ async fn queue_result_delivery(
 
 fn nonempty_status(message: &str) -> &str {
     if message.trim().is_empty() {
-        "no additional status was reported"
+        ilium_prompts::agent::PROGRESS_EMPTY_STATUS
     } else {
         message
     }

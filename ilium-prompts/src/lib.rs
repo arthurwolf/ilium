@@ -53,7 +53,9 @@ pub fn render_source<T: Serialize>(
     source: &str,
     context: &T,
 ) -> Result<String, PromptError> {
-    if catalog().any(|&(catalog_name, catalog_source)| catalog_name == name && catalog_source == source) {
+    if catalog()
+        .any(|&(catalog_name, catalog_source)| catalog_name == name && catalog_source == source)
+    {
         return render(name, context);
     }
     let mut registry = new_registry()?;

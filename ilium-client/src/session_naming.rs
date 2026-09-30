@@ -88,10 +88,10 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
     let transcript = TranscriptLocator::new(home, &input.project_path)
         .transcript_for_session(&input.agent_class, &input.session_id)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                ilium_prompts::naming::NAMING_SESSION_NAMING_NO_PROJECT_VERIFIED_TRANSCRIPT_FOUND_FOR_SESSION,
-                input.session_id
-            )
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/session_naming/no-project-verified-transcript-found-for-session",
+                &serde_json::json!({"v0": (input.session_id).to_string()})
+            ))
         })?;
     let transcript_entries =
         transcript_context::recent_transcript_entries(&input.agent_class, &transcript.path)?;
@@ -217,8 +217,8 @@ impl SessionTitleContext {
                 TitleStyle::Summarization => SUMMARY_INSTRUCTIONS,
             },
             output_example: match style {
-                TitleStyle::Labeling => ilium_prompts::naming::SESSION_NAMING_FRAGMENT_1,
-                TitleStyle::Summarization => ilium_prompts::naming::SESSION_NAMING_FRAGMENT_2,
+                TitleStyle::Labeling => ilium_prompts::naming::SESSION_LABEL_EXAMPLE,
+                TitleStyle::Summarization => ilium_prompts::naming::SESSION_SUMMARY_EXAMPLE,
             },
             is_labeling: style == TitleStyle::Labeling,
             agent_label: clipped(agent_label(&input.agent_class)),
@@ -238,12 +238,17 @@ impl SessionTitleContext {
                 &input
                     .process_id
                     .map(|process_id| process_id.to_string())
-                    .unwrap_or_else(|| ilium_prompts::naming::SESSION_NAMING_FRAGMENT_3.to_string()),
+                    .unwrap_or_else(|| ilium_prompts::naming::UNAVAILABLE_PROCESS.to_string()),
             ),
             project_name: clipped(optional_context(Some(input.project_name.as_str()))),
             project_path: clipped(&input.project_path.display().to_string()),
             parent_group: clipped(&input.parent_group),
-            nearby_titles: input.nearby_titles.iter().take(40).map(|title| clipped(title)).collect(),
+            nearby_titles: input
+                .nearby_titles
+                .iter()
+                .take(40)
+                .map(|title| clipped(title))
+                .collect(),
             transcript_path: clipped(&transcript_path.display().to_string()),
             terminal_screen: clipped(&input.terminal_screen),
             transcript_entries: transcript_entries
@@ -271,7 +276,7 @@ fn clipped(value: &str) -> String {
 fn optional_context(value: Option<&str>) -> &str {
     value
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or(ilium_prompts::naming::SESSION_NAMING_FRAGMENT_4)
+        .unwrap_or(ilium_prompts::naming::ABSENT_CONTEXT)
 }
 
 fn agent_label(class: &AgentClass) -> &str {
@@ -284,16 +289,24 @@ fn agent_label(class: &AgentClass) -> &str {
 fn title_source_label(source: PaneTitleSource) -> &'static str {
     match source {
         PaneTitleSource::Automatic => "automatic",
-        PaneTitleSource::UserSpecified => ilium_prompts::naming::NAMING_SESSION_NAMING_USER_SPECIFIED,
+        PaneTitleSource::UserSpecified => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_USER_SPECIFIED
+        }
     }
 }
 
 fn activity_label(activity: AgentActivity) -> &'static str {
     match activity {
         AgentActivity::Working => "working",
-        AgentActivity::WaitingBackground => ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_ON_BACKGROUND_TASKS,
-        AgentActivity::BackgroundTaskStillRunning => ilium_prompts::naming::NAMING_SESSION_NAMING_A_BACKGROUND_TASK_IS_STILL_FINISHING_UP,
-        AgentActivity::WaitingApproval => ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_FOR_USER_APPROVAL,
+        AgentActivity::WaitingBackground => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_ON_BACKGROUND_TASKS
+        }
+        AgentActivity::BackgroundTaskStillRunning => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_A_BACKGROUND_TASK_IS_STILL_FINISHING_UP
+        }
+        AgentActivity::WaitingApproval => {
+            ilium_prompts::naming::NAMING_SESSION_NAMING_WAITING_FOR_USER_APPROVAL
+        }
         AgentActivity::Done => "done",
         AgentActivity::Idle => "idle",
     }

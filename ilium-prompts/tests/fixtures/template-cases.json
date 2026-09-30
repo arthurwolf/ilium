@@ -1,0 +1,659 @@
+[
+  {
+    "name": "naming/project-name",
+    "case": "project_naming-summary",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null
+    },
+    "sha256": "7b5e2240dda23f156d1b280aa8f854374b5c5f558dca04e3b3587cc8f24ac002"
+  },
+  {
+    "name": "naming/project-name",
+    "case": "project_naming-labeling",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null
+    },
+    "sha256": "7b5e2240dda23f156d1b280aa8f854374b5c5f558dca04e3b3587cc8f24ac002"
+  },
+  {
+    "name": "naming/project-name",
+    "case": "project_naming-empty",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [],
+      "user_requests": [],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [],
+      "items": [],
+      "retry_feedback": null
+    },
+    "sha256": "7b5e2240dda23f156d1b280aa8f854374b5c5f558dca04e3b3587cc8f24ac002"
+  },
+  {
+    "name": "naming/session-title",
+    "case": "session_naming-summary",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "9aea0135112290b7ae75f1b43099f6ea1289b5e67a36fd584f37fc708e5c5325"
+  },
+  {
+    "name": "naming/session-title",
+    "case": "session_naming-labeling",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null,
+      "is_labeling": true
+    },
+    "sha256": "499940800110b98ab563c702e349d15be91d83604fdf1d095bffd5f6a5c22140"
+  },
+  {
+    "name": "naming/session-title",
+    "case": "session_naming-empty",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [],
+      "user_requests": [],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [],
+      "items": [],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "8bc8f23e2db7088ffe03dddad03ddd8c5a4b340af092f51bd9629164057da0f4"
+  },
+  {
+    "name": "naming/terminal-title",
+    "case": "terminal_naming-summary",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "ad7b413d3180f58d9eae5ebfc86e71c9f1b463b43f865de104d07a276ca283f4"
+  },
+  {
+    "name": "naming/terminal-title",
+    "case": "terminal_naming-labeling",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null,
+      "is_labeling": true
+    },
+    "sha256": "62cb6d001a569a071667cbce4701d8f9246c758848c0bc64c0e781f4f7bf86f7"
+  },
+  {
+    "name": "naming/terminal-title",
+    "case": "terminal_naming-empty",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [],
+      "user_requests": [],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [],
+      "items": [],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "ad7b413d3180f58d9eae5ebfc86e71c9f1b463b43f865de104d07a276ca283f4"
+  },
+  {
+    "name": "naming/restructure",
+    "case": "restructure-summary",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "85ddc8d956b0a1de01c5188acd4128098c70e7cf1eda46480c81fca3a6ec6af6"
+  },
+  {
+    "name": "naming/restructure",
+    "case": "restructure-labeling",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [
+        {
+          "role": "\"user\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        },
+        {
+          "role": "\"tool\"",
+          "content": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "user_requests": [
+        "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+      ],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [
+        {
+          "id": 12,
+          "orientation": "vertical",
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "ordered_pane_ids": "1,2"
+        }
+      ],
+      "items": [
+        {
+          "id": 1,
+          "kind_label": "\"Plain shell\"",
+          "is_name_fixed": false,
+          "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "filename": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+          "content_extract": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\""
+        }
+      ],
+      "retry_feedback": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "is_labeling": true
+    },
+    "sha256": "b2a05754da45ed3c5c16bae0b4ece0de3c34f728fc7db4f1f9598e2af08506ff"
+  },
+  {
+    "name": "naming/restructure",
+    "case": "restructure-empty",
+    "context": {
+      "project_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "root_listing": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "claude_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "readme_md": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "agent_label": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "pane_id": "42",
+      "current_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_short_title": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "current_icon": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "title_source": "\"automatic\"",
+      "activity": "\"working\"",
+      "has_persistent_goal": "\"true\"",
+      "session_id": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "process_id": "\"123\"",
+      "project_name": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "parent_group": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "nearby_titles": [],
+      "transcript_path": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "terminal_screen": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "screen_text": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "transcript_entries": [],
+      "user_requests": [],
+      "output_example": "{\"icon\":\"🦀\",\"name\":\"example\"}",
+      "current_structure": "\"quotes \\\" /tmp/a b {{> missing}} <x>& 🦀\\nsecond line\"",
+      "protected_split_views": [],
+      "items": [],
+      "retry_feedback": null,
+      "is_labeling": false
+    },
+    "sha256": "4b5d0acfe23c94d738962494e223e70ca8a551a2d040125146f5a43b92add2c8"
+  }
+]

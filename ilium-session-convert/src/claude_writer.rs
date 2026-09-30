@@ -313,9 +313,9 @@ fn bounded_result_text(text: &str) -> (String, bool) {
         return (text.to_string(), false);
     }
     let mut kept: String = text.chars().take(MAX_TOOL_RESULT_CHARS).collect();
-    kept.push_str(&format!(
-        "\n[... output truncated by session conversion: {} more characters]",
-        total - MAX_TOOL_RESULT_CHARS
+    kept.push_str(&ilium_prompts::render_value(
+        "conversion/truncated-result",
+        &serde_json::json!({"v0": (total - MAX_TOOL_RESULT_CHARS).to_string()}),
     ));
     (kept, true)
 }
@@ -370,8 +370,11 @@ fn shell_input(arguments: &ToolArguments) -> Option<Value> {
         .find_map(|key| parsed.get(*key))
         .and_then(command_text)?;
     let description = match parsed.get("workdir").and_then(Value::as_str) {
-        Some(workdir) if !workdir.is_empty() => format!("Run shell command in {workdir}"),
-        _ => "Run shell command".to_string(),
+        Some(workdir) if !workdir.is_empty() => ilium_prompts::render_value(
+            "conversion/bash-description-workdir",
+            &serde_json::json!({"v0": (workdir).to_string()}),
+        ),
+        _ => ilium_prompts::conversion::BASH_DESCRIPTION.to_string(),
     };
     Some(json!({"command": command, "description": description}))
 }

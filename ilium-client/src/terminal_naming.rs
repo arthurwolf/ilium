@@ -72,9 +72,9 @@ pub fn infer_terminal_title<G: PromptCompletionClient>(
             SUMMARY_INSTRUCTIONS
         },
         output_example: if generator.title_style() == TitleStyle::Labeling {
-            ilium_prompts::naming::TERMINAL_NAMING_FRAGMENT_1
+            ilium_prompts::naming::TERMINAL_LABEL_EXAMPLE
         } else {
-            ilium_prompts::naming::TERMINAL_NAMING_FRAGMENT_2
+            ilium_prompts::naming::TERMINAL_SUMMARY_EXAMPLE
         },
         is_labeling: generator.title_style() == TitleStyle::Labeling,
         pane_id: naming::encode_untrusted_context(&input.pane_id.0.to_string()),
