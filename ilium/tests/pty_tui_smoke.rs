@@ -882,11 +882,35 @@ fn logged_prompt_submissions(contents: &str) -> Vec<String> {
 /// signature it compared, and what it concluded. Reading that back is the
 /// difference between "detection did not happen" and knowing which step
 /// declined.
+/// Process table rows (pid, ppid, state, command) for `codex`/`ilium` processes,
+/// so a detection timeout shows whether the agent process existed and where.
+#[cfg(unix)]
+fn process_table_diagnostics() -> String {
+    let output = std::process::Command::new("ps")
+        .args(["-axo", "pid,ppid,stat,comm"])
+        .output();
+    let Ok(output) = output else {
+        return "process table unavailable".to_string();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let rows: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("codex") || line.contains("ilium"))
+        .collect();
+    format!("process table (codex/ilium rows):\n{}", rows.join("\n"))
+}
+
+#[cfg(not(unix))]
+fn process_table_diagnostics() -> String {
+    String::new()
+}
+
 fn detection_diagnostics(log_root: &Path, project_dir: &Path) -> String {
     let Some((log_path, contents)) = process_log_for_project(log_root, project_dir) else {
         return format!(
-            "no process log found for {project_dir:?}\n{}",
-            process_log_diagnostics(log_root, project_dir)
+            "no process log found for {project_dir:?}\n{}\n{}",
+            process_log_diagnostics(log_root, project_dir),
+            process_table_diagnostics()
         );
     };
     let decisions: Vec<&str> = contents
