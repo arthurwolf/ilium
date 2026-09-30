@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Mode, PaneRuntime, RightPanelTarget};
@@ -214,10 +214,39 @@ fn panel_inner(area: Rect) -> Rect {
     )
 }
 
+/// Modifiers that leave a blank cell visually empty. Underline, reverse and
+/// strike-through draw ink or a filled block even on a space, so they stay out.
+const INKLESS_MODIFIERS: Modifier = Modifier::BOLD
+    .union(Modifier::DIM)
+    .union(Modifier::ITALIC);
+
+/// A symbol that draws nothing: an ordinary space, NBSP and other width-1
+/// Unicode whitespace, or the empty Braille pattern. Agent TUIs emit these
+/// (for example Claude Code's `>` prompt is followed by NBSP) instead of
+/// leaving the cell untouched.
+fn is_inkless_symbol(symbol: &str) -> bool {
+    !symbol.is_empty()
+        && symbol
+            .chars()
+            .all(|character| character.is_whitespace() || character == '\u{2800}')
+}
+
+/// An explicit black fill that agent TUIs paint over their "empty" rows. On
+/// the dark terminals ilium targets it is indistinguishable from the default
+/// background, so it counts as void; any other fill is intentional colour.
+fn is_void_background(color: Color) -> bool {
+    matches!(
+        color,
+        Color::Reset | Color::Black | Color::Indexed(0 | 16) | Color::Rgb(0, 0, 0)
+    )
+}
+
+/// A cell the animation may overwrite: nothing visible is drawn there, whether
+/// the program left it untouched or wrote a styled-but-inkless blank.
 fn is_safe_blank(cell: &Cell) -> bool {
-    cell.symbol() == " "
-        && cell.bg == Color::Reset
-        && cell.modifier.is_empty()
+    is_inkless_symbol(cell.symbol())
+        && is_void_background(cell.bg)
+        && (cell.modifier - INKLESS_MODIFIERS).is_empty()
         && cell.diff_option == CellDiffOption::None
 }
 
@@ -291,7 +320,10 @@ fn paint_region_with_colors(
             let color =
                 cell_color(column - buffer.area.x, row - buffer.area.y).unwrap_or(foreground);
             let cell = &mut buffer[(column, row)];
-            cell.set_char(character).set_fg(color);
+            // Drop the blank's bold/dim/italic so the field keeps one look, and
+            // reset an explicit black fill to the default background.
+            cell.set_char(character).set_fg(color).set_bg(Color::Reset);
+            cell.modifier = Modifier::empty();
         }
     }
 }
@@ -303,7 +335,6 @@ mod tests {
     use crate::terminal_selection::{SelectionPoint, TerminalSelection};
     use crate::terminal_view::TerminalView;
     use ilium_core::NodeId;
-    use ratatui::style::Modifier;
     use ratatui::widgets::{Clear, Widget};
 
     fn paint_all(buffer: &mut Buffer) {
@@ -313,30 +344,87 @@ mod tests {
 
     #[test]
     fn protected_cells_retain_symbols_styles_and_diff_controls() {
-        let area = Rect::new(0, 0, 10, 1);
+        let area = Rect::new(0, 0, 8, 1);
         let mut buffer = Buffer::empty(area);
         buffer[(1, 0)].set_symbol("T");
-        buffer[(2, 0)].set_bg(Color::Black);
+        buffer[(2, 0)].set_bg(Color::Rgb(33, 58, 43));
         buffer[(3, 0)].modifier = Modifier::REVERSED;
-        buffer[(4, 0)].modifier = Modifier::BOLD;
+        buffer[(4, 0)].modifier = Modifier::UNDERLINED;
         buffer[(5, 0)].set_diff_option(CellDiffOption::Skip);
         buffer[(6, 0)].set_diff_option(CellDiffOption::AlwaysUpdate);
-        buffer[(7, 0)].set_symbol("\u{2800}");
-        buffer[(8, 0)].set_symbol("\u{a0}");
-        buffer[(9, 0)].set_fg(Color::Cyan);
+        buffer[(7, 0)].set_bg(Color::Indexed(4));
         let original = buffer.clone();
 
         paint_all(&mut buffer);
 
-        for column in 1..=8 {
+        for column in 1..=7 {
             assert_eq!(buffer[(column, 0)], original[(column, 0)]);
         }
-        for column in [0, 9] {
-            assert_eq!(buffer[(column, 0)].symbol(), "\u{28ff}");
-            assert_eq!(buffer[(column, 0)].fg, Color::White);
-            assert_eq!(buffer[(column, 0)].bg, Color::Reset);
-            assert!(buffer[(column, 0)].modifier.is_empty());
+        assert_eq!(buffer[(0, 0)].symbol(), "\u{28ff}");
+        assert_eq!(buffer[(0, 0)].fg, Color::White);
+        assert_eq!(buffer[(0, 0)].bg, Color::Reset);
+    }
+
+    #[test]
+    fn inkless_blanks_are_painted_and_restyled_like_void() {
+        let area = Rect::new(0, 0, 12, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(0, 0)].set_bg(Color::Black);
+        buffer[(1, 0)].set_bg(Color::Indexed(0));
+        buffer[(2, 0)].set_bg(Color::Indexed(16));
+        buffer[(3, 0)].set_bg(Color::Rgb(0, 0, 0));
+        buffer[(4, 0)].modifier = Modifier::BOLD;
+        buffer[(5, 0)].modifier = Modifier::DIM;
+        buffer[(6, 0)].modifier = Modifier::ITALIC | Modifier::DIM;
+        buffer[(7, 0)].set_symbol("\u{a0}");
+        buffer[(8, 0)].set_symbol("\u{2800}");
+        buffer[(9, 0)].set_symbol("\u{2009}");
+        buffer[(10, 0)].set_fg(Color::Cyan);
+
+        paint_all(&mut buffer);
+
+        for column in 0..=10 {
+            let cell = &buffer[(column, 0)];
+            assert_eq!(cell.symbol(), "\u{28ff}", "column {column}");
+            assert_eq!(cell.fg, Color::White, "column {column}");
+            assert_eq!(cell.bg, Color::Reset, "column {column}");
+            assert!(cell.modifier.is_empty(), "column {column}");
         }
+    }
+
+    #[test]
+    fn agent_tui_blanks_from_a_real_vt100_screen_are_painted() {
+        let mut parser = vt100::Parser::new(3, 20, 0);
+        // Dim and bold spaces, NBSP after a prompt glyph, an explicit black
+        // fill, then a tinted diff row and an underlined space that must stay.
+        parser.process(
+            b"\x1b[2m     \x1b[0m\x1b[1m   \x1b[0m\r\n\
+              >\xc2\xa0\x1b[40m   \x1b[0m\r\n\
+              \x1b[48;2;33;58;43m   \x1b[0m\x1b[4m \x1b[0m",
+        );
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buffer = Buffer::empty(area);
+        tui_term::widget::PseudoTerminal::new(parser.screen()).render(area, &mut buffer);
+        paint_region(
+            &mut buffer,
+            area,
+            Some(parser.screen()),
+            Color::White,
+            |_, _| '\u{28ff}',
+        );
+
+        for column in 0..8 {
+            assert_eq!(buffer[(column, 0)].symbol(), "\u{28ff}", "row 0 col {column}");
+        }
+        assert_eq!(buffer[(0, 1)].symbol(), ">");
+        for column in 1..6 {
+            assert_eq!(buffer[(column, 1)].symbol(), "\u{28ff}", "row 1 col {column}");
+            assert_eq!(buffer[(column, 1)].bg, Color::Reset);
+        }
+        for column in 0..4 {
+            assert_ne!(buffer[(column, 2)].symbol(), "\u{28ff}", "row 2 col {column}");
+        }
+        assert_eq!(buffer[(10, 2)].symbol(), "\u{28ff}");
     }
 
     #[test]
