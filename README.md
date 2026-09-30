@@ -9,8 +9,10 @@
 Linux and macOS:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
+curl -fsSL https://ilium-setup.pages.dev/install.sh | sh
 ```
+
+If you prefer package installers, use the [.deb](#deb-package), [.rpm](#rpm-package), [AppImage](#appimage), [Snap](#snap-package) or [Flatpak](#flatpak-bundle) (Linux).
 
 Windows PowerShell:
 
@@ -463,13 +465,25 @@ The [installer](#quick-start) selects your architecture and verifies downloads. 
 
 Each release also carries native Linux packages for both architectures. They hold the same audited files as the archive, under stable names: `ilium-linux-<arch>.<extension>` with `<arch>` of `x86_64` or `aarch64`. Every package needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 41 or later) and is unsigned; check the asset digest on the release page.
 
-| Format | Install | Notes |
-| --- | --- | --- |
-| `.deb` | `sudo apt install ./ilium-linux-x86_64.deb` | Debian, Ubuntu, Mint. Installs to `/usr/lib/ilium`, links `ilium` into `/usr/bin`. |
-| `.rpm` | `sudo dnf install ./ilium-linux-x86_64.rpm` | Fedora, openSUSE (`zypper install`). Same layout as the deb. |
-| `.AppImage` | `chmod +x ilium-linux-x86_64.AppImage && ./ilium-linux-x86_64.AppImage` | Needs FUSE. The first run copies Ilium to `~/.local/share/ilium/appimage` so the session server outlives the mount. |
-| `.snap` | `sudo snap install --dangerous --classic ilium-linux-x86_64.snap` | Classic confinement, so it is not on the Snap Store. Commands: `ilium` and `ilium.server`. |
-| `.flatpak` | `flatpak install --user ilium-linux-x86_64.flatpak` | Experimental. Panes run inside the sandbox, so your host `git`, `claude` and `codex` are not visible. |
+##### deb package
+
+Debian, Ubuntu and Mint: `sudo apt install ./ilium-linux-x86_64.deb`. It installs to `/usr/lib/ilium` and links `ilium` into `/usr/bin`.
+
+##### rpm package
+
+Fedora: `sudo dnf install ./ilium-linux-x86_64.rpm`. openSUSE: `sudo zypper install ./ilium-linux-x86_64.rpm`. Same layout as the deb.
+
+##### AppImage
+
+`chmod +x ilium-linux-x86_64.AppImage && ./ilium-linux-x86_64.AppImage`. It needs FUSE. The first run copies Ilium to `~/.local/share/ilium/appimage` so the session server outlives the mount.
+
+##### Snap package
+
+`sudo snap install --dangerous --classic ilium-linux-x86_64.snap`. It uses classic confinement, so it is not on the Snap Store. Commands: `ilium` and `ilium.server`.
+
+##### Flatpak bundle
+
+Experimental: `flatpak install --user ilium-linux-x86_64.flatpak`. Panes run inside the sandbox, so your host `git`, `claude` and `codex` are not visible.
 
 Packages are installed, run and removed in containers or disposable virtual machines before a release is published. To remove one, use your package manager (`apt remove ilium`, `dnf remove ilium`, `snap remove ilium`, `flatpak uninstall io.github.arthurwolf.Ilium`) or delete the AppImage and `~/.local/share/ilium/appimage`.
 
