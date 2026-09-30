@@ -1313,8 +1313,12 @@ fn initialize_cli_logging(log_path: &Path) -> Result<(), CliError> {
 /// that need it keeps the overwhelmingly common single bare-token case
 /// (`claude`, `codex`, `cat`, ...) rendering unquoted.
 fn shell_join(args: &[String]) -> String {
+    join_for_shell(args, pane_shell_is_cmd())
+}
+
+fn join_for_shell(args: &[String], cmd_shell: bool) -> String {
     args.iter()
-        .map(|argument| shell_quote_if_needed(argument))
+        .map(|argument| quote_for_shell(argument, cmd_shell))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -1354,10 +1358,9 @@ fn is_shell_safe_bare_word(argument: &str, cmd_shell: bool) -> bool {
         })
 }
 
-/// Quotes `argument` for the pane shell only if `is_shell_safe_bare_word`
+/// Quotes `argument` for the chosen shell only if `is_shell_safe_bare_word`
 /// says it needs it; otherwise returns it unchanged.
-fn shell_quote_if_needed(argument: &str) -> String {
-    let cmd_shell = pane_shell_is_cmd();
+fn quote_for_shell(argument: &str, cmd_shell: bool) -> String {
     if is_shell_safe_bare_word(argument, cmd_shell) {
         return argument.to_string();
     }
@@ -1380,9 +1383,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, default_workspace_path, json_string,
-        pane_identity_from_values, pane_progress_json, progress_report_json, session, shell_join,
-        workspace_provider, Cli, Command, ProgressCommand,
+        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
+        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
+        shell_join, workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
 
@@ -1548,7 +1551,7 @@ mod tests {
     #[test]
     fn arguments_with_spaces_are_quoted_so_they_stay_one_word() {
         assert_eq!(
-            shell_join(&["ls".to_string(), "my folder".to_string()]),
+            join_for_shell(&["ls".to_string(), "my folder".to_string()], false),
             "ls 'my folder'"
         );
     }
@@ -1556,7 +1559,7 @@ mod tests {
     #[test]
     fn embedded_single_quotes_are_escaped() {
         assert_eq!(
-            shell_join(&["echo".to_string(), "it's here".to_string()]),
+            join_for_shell(&["echo".to_string(), "it's here".to_string()], false),
             "echo 'it'\\''s here'"
         );
     }

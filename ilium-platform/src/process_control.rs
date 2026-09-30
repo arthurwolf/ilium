@@ -779,6 +779,13 @@ impl ProcessTreeGuard {
             self.process_group_id = None;
             return Ok(());
         }
+        // Darwin reports EPERM, not ESRCH, when every remaining member of the
+        // group is an exited-but-unreaped zombie. The group was created by this
+        // guard's own child, so there is nothing left to kill.
+        if cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EPERM) {
+            self.process_group_id = None;
+            return Ok(());
+        }
         Err(error)
     }
 

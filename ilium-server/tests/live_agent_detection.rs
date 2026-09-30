@@ -1857,10 +1857,12 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
                 pane_id: changed_id,
                 session_id,
                 process_id,
-                title_generation: 1,
+                title_generation,
             } if *changed_id == pane_id
                 && session_id == new_session_id
                 && *process_id == initial_process_id
+                // The replay carries whatever generation the live resolution did.
+                && *title_generation == replacement_title_generation
         )
     })
     .await;

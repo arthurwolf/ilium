@@ -430,7 +430,12 @@ fn ilium_binary() -> String {
 /// fixtures involved run until killed, so their state does not expire while
 /// this waits: a longer bound cannot mask a regression here, it can only stop
 /// reporting one that isn't there.
-const DETECTION_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// macOS gets a longer bound: the first execution of a freshly copied,
+/// unsigned fixture binary is scanned by the OS and can take tens of seconds
+/// on a shared runner before the agent process exists to be detected.
+const DETECTION_TIMEOUT: Duration =
+    Duration::from_secs(if cfg!(target_os = "macos") { 90 } else { 30 });
 
 /// How long a one-shot `ilium` subcommand gets to finish.
 ///
@@ -1993,7 +1998,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 /// `final_path` is where it will end up, which the Windows form needs because
 /// a fixture resolves its behaviour from its own executable path.
 #[cfg(unix)]
-fn write_restart_shim(staged_path: &Path, final_path: &Path) {
+fn write_restart_shim(staged_path: &Path, final_path: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let _ = final_path;
@@ -2004,10 +2009,11 @@ fn write_restart_shim(staged_path: &Path, final_path: &Path) {
     .expect("write replacement client shim");
     std::fs::set_permissions(staged_path, std::fs::Permissions::from_mode(0o755))
         .expect("make replacement client shim executable");
+    staged_path.to_path_buf()
 }
 
 #[cfg(not(unix))]
-fn write_restart_shim(staged_path: &Path, final_path: &Path) {
+fn write_restart_shim(staged_path: &Path, final_path: &Path) -> PathBuf {
     let staged = ilium_test_fixtures::install(
         staged_path
             .parent()
@@ -2030,6 +2036,8 @@ fn write_restart_shim(staged_path: &Path, final_path: &Path) {
         ilium_test_fixtures::behavior_file_for(final_path),
     )
     .expect("install the replacement's behaviour under its final name");
+    // The fixture installer may add an executable suffix; rename what exists.
+    staged
 }
 
 /// Replaces the executable path underneath a live client with a marker shim,
@@ -2151,7 +2159,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     // cannot produce that observation, so using one here would have quietly
     // weakened the Unix assertion to buy a Windows one.
     let staged_replacement = binary_directory.join("ilium-client-replacement-stage");
-    write_restart_shim(&staged_replacement, &restartable_binary);
+    let staged_replacement = write_restart_shim(&staged_replacement, &restartable_binary);
     std::fs::rename(&staged_replacement, &restartable_binary)
         .expect("atomically replace running client path");
 
@@ -4884,6 +4892,13 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
 /// Regression coverage for `last_prompt_banner::truncate_middle`, which used
 /// to treat this whole six-line paste as one unsplit line because
 /// `str::lines()` alone does not recognize a lone `\r` as a boundary.
+// crossterm cannot enable bracketed paste on the Windows console, so the paste
+// arrives as individual Enter key presses there and never forms one multi-line
+// prompt; the lone-CR splitting this covers is exercised on Unix.
+#[cfg_attr(
+    windows,
+    ignore = "Windows console input has no bracketed paste (crossterm)"
+)]
 #[tokio::test]
 async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
