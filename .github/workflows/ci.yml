@@ -130,3 +130,7 @@ jobs:
             # first failure.
             - name: cargo test
               run: cargo test --workspace --no-fail-fast
+              env:
+                # Real-PTY and live-detection tests spawn many processes; on the small
+                # macOS runner parallel execution starves agent detection (first-exec scans).
+                RUST_TEST_THREADS: '1'

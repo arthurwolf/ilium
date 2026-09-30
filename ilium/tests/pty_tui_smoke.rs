@@ -5452,6 +5452,39 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
         "the second icon cell must hold the big dot"
     );
 
+    // Park the pointer on empty terminal area first so a hover tooltip left by
+    // the preceding tree-row click (the Windows console keeps reporting that
+    // position) cannot overlap the popover's footer hint.
+    tui.write(&sgr_mouse_move(icon_column + 60, 42))
+        .expect("park the pointer away from the tree");
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("matched registry signature"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the tree-row detection tooltip must dismiss: {:?}",
+        tui.screen_text()
+    );
+    // The layout animates as the pointer leaves the tree; locate the icon again.
+    let (icon_column, icon_row) = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                (0..screen.size().1)
+                    .rev()
+                    .find(|column| {
+                        screen
+                            .cell(0, *column)
+                            .is_some_and(|cell| cell.contents() == "≡")
+                    })
+                    .map(|column| (column + 2, 0))
+            })
+        },
+        Duration::from_millis(500),
+        WAIT_TIMEOUT,
+    )
+    .await
+    .expect("the pane header icon settles after the pointer leaves the tree");
     // Hover previews the popover and says how to pin it.
     tui.write(&sgr_mouse_move(icon_column, icon_row))
         .expect("hover the second header icon");

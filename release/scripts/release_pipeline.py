@@ -223,6 +223,10 @@ def native(arguments):
             raise release_tool.ReleaseError('Windows native contract tests require real symlink privilege or developer mode: ' + str(error)) from error
         require(probe_link.is_symlink(), 'Windows symlink prerequisite did not create a real link')
         probe_link.unlink(); probe_target.unlink()
+    if target['os'] == 'macos':
+        # Parallel PTY/live-detection tests starve agent detection on the small
+        # macOS runners (first execution of each fresh fixture is OS-scanned).
+        environment['RUST_TEST_THREADS'] = '1'
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
         # The bundled libonnxruntime sits beside the executables; the installed
