@@ -123,13 +123,12 @@ def main(argv=None):
             if copied.returncode != 0:
                 emit('error', message='scp failed: ' + copied.stderr[-500:])
                 return 1
-        ssh(port, key, 'cp /home/tester/repo/release/scripts/../../LICENSE /dev/null 2>/dev/null; true')
-        scp_license = run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, ROOT / 'LICENSE', 'tester@127.0.0.1:repo/LICENSE'])
+        run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, ROOT / 'LICENSE', 'tester@127.0.0.1:repo/LICENSE'])
         run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, ROOT / 'Cargo.toml', 'tester@127.0.0.1:repo/Cargo.toml'])
         for subcommand in ('inspect', 'host'):
             extra = ' --log /home/tester/log-%s' % subcommand if subcommand == 'host' else ''
             result = ssh(port, key, 'python3 /home/tester/repo/release/scripts/smoke_linux_packages.py %s --arch %s --packages /home/tester/packages --formats %s%s' % (
-                subcommand, arguments.arch, arguments.formats if subcommand == 'host' else arguments.formats.replace('snap', 'snap'), extra))
+                subcommand, arguments.arch, arguments.formats, extra))
             (log / ('vm-%s.jsonl' % subcommand)).write_text(result.stdout + result.stderr, encoding='utf-8')
             for line in result.stdout.splitlines():
                 print(line, flush=True)

@@ -13,7 +13,6 @@ installs and runs the results.
 """
 from __future__ import annotations
 
-import gzip
 import hashlib
 import io
 import json
@@ -607,7 +606,6 @@ def build(arguments):
 
 
 def parser():
-    import argparse
     result = release_tool.JsonArgumentParser(description=__doc__, allow_abbrev=False)
     commands = result.add_subparsers(dest='command', required=True)
     command = commands.add_parser('build', allow_abbrev=False)

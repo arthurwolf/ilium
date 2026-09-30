@@ -1,8 +1,7 @@
 """Offline contracts for the Linux deb, rpm, AppImage, Flatpak and Snap packaging."""
-import gzip
 import hashlib
 import io
-import json
+import lzma
 from pathlib import Path
 import shutil
 import struct
@@ -16,7 +15,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'release/scripts'))
 import build_linux_packages as packages
-import release_pipeline
 import release_tool
 import smoke_linux_packages as smoke
 
@@ -172,10 +170,10 @@ class BuildTests(unittest.TestCase):
             tree = Path(temporary) / 'tree'
             smoke.unpack('deb', deb, tree)
             self.assertEqual((tree / 'usr/bin/ilium').readlink().as_posix(), '../lib/ilium/ilium')
-            with tarfile.open(fileobj=io.BytesIO(__import__('lzma').decompress(self.member(data, 'data.tar.xz')))) as archive:
+            with tarfile.open(fileobj=io.BytesIO(lzma.decompress(self.member(data, 'data.tar.xz')))) as archive:
                 for member in archive:
                     self.assertEqual((member.uid, member.gid, member.uname, member.gname, member.mtime), (0, 0, 'root', 'root', packages.EPOCH))
-            with tarfile.open(fileobj=io.BytesIO(__import__('lzma').decompress(self.member(data, 'control.tar.xz')))) as archive:
+            with tarfile.open(fileobj=io.BytesIO(lzma.decompress(self.member(data, 'control.tar.xz')))) as archive:
                 control = archive.extractfile('./control').read().decode()
             self.assertIn('Depends: libasound2t64 | libasound2, libc6 (>= 2.35)', control)
             self.assertIn('Architecture: amd64', control)

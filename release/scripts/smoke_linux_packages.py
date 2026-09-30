@@ -12,7 +12,7 @@ and the AppImage a real FUSE mount. Every install runs the same lifecycle test
 """
 from __future__ import annotations
 
-import json
+import io
 import os
 from pathlib import Path
 import platform
@@ -76,7 +76,7 @@ def unpack(package_format, path, destination):
             members[name] = data[position + 60:position + 60 + size]
             position += 60 + size + size % 2
         require(list(members)[:1] == ['debian-binary'] and members['debian-binary'] == b'2.0\n', 'deb member order is wrong')
-        with tarfile.open(fileobj=__import__('io').BytesIO(members['data.tar.xz']), mode='r:xz') as archive:
+        with tarfile.open(fileobj=io.BytesIO(members['data.tar.xz']), mode='r:xz') as archive:
             archive.extractall(destination, filter='tar')
     elif package_format == 'rpm':
         require(shutil.which('rpm2cpio') and shutil.which('cpio'), 'rpm2cpio and cpio are required to inspect an rpm')
@@ -245,6 +245,7 @@ def host_snap(arguments, receipt, log):
     version = receipt['version']
     script = f'''
 set -eu
+{shlex.join(sudo())} snap wait system seed.loaded
 {shlex.join(sudo())} snap install --dangerous --classic {shlex.quote(str(name))}
 trap '{shlex.join(sudo())} snap remove ilium >/dev/null 2>&1 || true' EXIT
 test "$(ilium --version)" = "ilium {version}"
