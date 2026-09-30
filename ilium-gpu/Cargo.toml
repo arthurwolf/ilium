@@ -1,0 +1,20 @@
+[package]
+name = "ilium-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+gpu = ["dep:wgpu", "dep:pollster"]
+
+[dependencies]
+ilium-ambient = { path = "../ilium-ambient" }
+pollster = { version = "1.0.1", optional = true }
+tracing = "0.1.44"
+wgpu = { version = "30.0.1", optional = true, default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan", "metal", "dx12"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

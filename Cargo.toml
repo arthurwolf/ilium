@@ -8,6 +8,7 @@ members = [
     "ilium-core",
     "ilium-detect",
     "ilium-git",
+    "ilium-gpu",
     "ilium-ipc",
     "ilium-inference",
     "ilium-kilo-gateway",

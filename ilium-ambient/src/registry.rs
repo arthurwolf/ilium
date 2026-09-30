@@ -117,6 +117,14 @@ impl AmbientKind {
         }
     }
 
+    /// Scenes with an optional GPU renderer (the `render_backend` row).
+    pub fn has_gpu_backend(self) -> bool {
+        matches!(
+            self,
+            Self::FbmClouds | Self::DitheredWaves | Self::DithrPatterns
+        )
+    }
+
     /// Whether the shared observer location matters to this scene.
     pub fn uses_location(self) -> bool {
         matches!(self, Self::Stars | Self::NightLights | Self::Clouds)
@@ -239,6 +247,17 @@ impl AmbientSettings {
             AmbientKind::DithrPatterns => serde_json::to_string(&normalized.dithr_patterns),
         }
         .unwrap_or_default();
+        // The GPU scenes must be rebuilt when the background probe finishes, or
+        // a scene built while it was still checking would never get a runner.
+        let settings = if kind.has_gpu_backend() {
+            let ready = matches!(
+                crate::gpu::gpu_availability(),
+                crate::gpu::GpuAvailability::Ready { .. }
+            );
+            format!("{settings}|gpu_ready={ready}")
+        } else {
+            settings
+        };
         if kind.uses_location() {
             let location = serde_json::to_string(&normalized.location).unwrap_or_default();
             format!("{kind:?}|{settings}|{location}")

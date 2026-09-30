@@ -81,6 +81,7 @@ impl AmbientHost {
         let env = SceneEnv {
             location: normalized.location.clone(),
             cache_dir: ilium_ambient::source::default_cache_dir(),
+            gpu: ilium_gpu::runner(),
         };
         let scene = catch_unwind(AssertUnwindSafe(|| (self.factory)(kind, &normalized, &env)))
             .unwrap_or_else(|payload| {

@@ -8,7 +8,9 @@
 //!
 //! The software renderer is the default and the fallback. Selecting the GPU
 //! backend starts a `GpuFrameWorker` (see `gpu`) when the host provides a
-//! device; until the kernel is ported the scene still draws software output.
+//! device; the `FbmClouds` kernel computes the same final dot field on the
+//! GPU, and the scene draws software output until the first GPU frame arrives
+//! or whenever the newest one does not match the raster size.
 
 mod field;
 mod gpu;
@@ -18,6 +20,7 @@ pub use settings::FbmCloudsSettings;
 
 use crate::control::SceneSettings;
 use crate::gpu::GpuBackend;
+use crate::raster::Raster;
 use crate::scene::{Frame, Scene, SceneEnv};
 use field::{CloudShape, NoiseLattice};
 use settings::{DitherPattern, RenderBackend};
@@ -42,8 +45,8 @@ const GLOW_SHARE: f32 = 0.15;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Engine {
     Software,
-    /// GPU selected: the clock and cadence of the GPU path, software pixels
-    /// until the kernel is ported.
+    /// GPU selected: the clock and cadence of the GPU path; software pixels
+    /// are the fallback while no matching GPU frame is available.
     GpuSelected,
 }
 
@@ -75,6 +78,8 @@ pub struct FbmCloudsScene {
     settings: FbmCloudsSettings,
     engine: Engine,
     gpu: GpuBackend,
+    /// True while the last render drew a GPU frame.
+    is_showing_gpu: bool,
     lattice: NoiseLattice,
     dither_tile: Vec<f32>,
     /// Tone per sample block, reused across frames.
@@ -87,6 +92,7 @@ impl FbmCloudsScene {
         Self {
             engine: Engine::of(settings.render_backend),
             gpu: GpuBackend::new(settings.render_backend == RenderBackend::Gpu, env),
+            is_showing_gpu: false,
             lattice: NoiseLattice::new(settings.seed),
             dither_tile: dither_tile(settings.dither, settings.seed),
             tones: Vec::new(),
@@ -129,6 +135,21 @@ impl FbmCloudsScene {
         }
         columns
     }
+
+    /// Copies the newest GPU frame into `raster` when one of the same size
+    /// exists. Returns whether it did.
+    fn copy_gpu_frame(&self, raster: &mut Raster) -> bool {
+        let Some(gpu_frame) = self.gpu.latest_frame() else {
+            return false;
+        };
+        let is_matching = gpu_frame.width as usize == raster.width
+            && gpu_frame.height as usize == raster.height
+            && gpu_frame.dots.len() == raster.dots.len();
+        if is_matching {
+            raster.dots.copy_from_slice(&gpu_frame.dots);
+        }
+        is_matching
+    }
 }
 
 impl Scene for FbmCloudsScene {
@@ -142,6 +163,10 @@ impl Scene for FbmCloudsScene {
         let settings = &self.settings;
         self.gpu
             .drive(|| gpu::build_job(settings, width, height, seconds));
+        self.is_showing_gpu = self.copy_gpu_frame(frame.raster);
+        if self.is_showing_gpu {
+            return;
+        }
         let columns = self.sample_tones(width, height, seconds);
         let block = self.settings.block as usize;
         let brightness = self.settings.brightness as f32 / 100.0;
@@ -169,7 +194,7 @@ impl Scene for FbmCloudsScene {
     }
 
     fn status(&self) -> Option<String> {
-        self.gpu.status()
+        self.gpu.ported_status(self.is_showing_gpu)
     }
 }
 

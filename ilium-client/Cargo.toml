@@ -10,6 +10,10 @@ repository.workspace = true
 name = "ilium_client"
 path = "src/lib.rs"
 
+[features]
+# Optional GPU rendering for the GPU-capable background scenes (pulls in wgpu).
+gpu = ["ilium-gpu/gpu"]
+
 [dependencies]
 ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
 anyhow = "1.0.103"
@@ -23,6 +27,7 @@ fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-
 ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-ambient = { version = "0.1.0", path = "../ilium-ambient" }
+ilium-gpu = { version = "0.1.0", path = "../ilium-gpu" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-inference = { version = "0.1.0", path = "../ilium-inference" }

@@ -351,6 +351,34 @@ impl GpuBackend {
             },
         }
     }
+
+    /// The newest finished GPU frame, `None` until the first arrives or when
+    /// the GPU is not in use.
+    pub(crate) fn latest_frame(&self) -> Option<GpuFrame> {
+        self.worker.as_ref().and_then(GpuFrameWorker::latest)
+    }
+
+    /// Status line for a scene whose kernel is ported: `is_displaying` says
+    /// the scene is currently drawing GPU frames.
+    pub(crate) fn ported_status(&self, is_displaying: bool) -> Option<String> {
+        if !self.requested {
+            return None;
+        }
+        if let GpuAvailability::Unavailable(reason) = gpu_availability() {
+            return Some(reason.summary());
+        }
+        let (Some(worker), Some(runner)) = (&self.worker, &self.runner) else {
+            return Some("No GPU device was provided by the host; using software".to_owned());
+        };
+        if let Some(error) = worker.last_error() {
+            return Some(format!("GPU error: {error}; using software"));
+        }
+        if is_displaying {
+            let adapter = runner.adapter_name();
+            return Some(format!("Rendering on GPU ({adapter})"));
+        }
+        Some("Starting the GPU renderer; using software until the first frame".to_owned())
+    }
 }
 
 /// Serialises tests that touch the process-wide availability.

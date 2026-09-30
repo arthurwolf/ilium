@@ -3,9 +3,10 @@ use super::*;
 use crate::control::{ControlKind, ControlValue};
 use crate::debug::{render_frame, Rendered};
 use crate::gpu::test_support::{scripted_runner, AvailabilityGuard};
-use crate::gpu::GpuUnavailable;
+use crate::gpu::{GpuJob, GpuKernel, GpuRunner, GpuUnavailable};
 use crate::raster::DitherMode;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &FbmCloudsSettings) -> FbmCloudsScene {
@@ -522,44 +523,227 @@ fn set_control_rejects_gpu_when_unavailable_and_accepts_it_when_ready() {
     assert_eq!(settings.render_backend, RenderBackend::Gpu);
 }
 
-#[test]
-fn ready_gpu_reports_the_seam_status_and_keeps_drawing_software() {
-    let _guard = AvailabilityGuard::ready();
-    let settings = FbmCloudsSettings {
+/// CPU stand-in for a device: fills every dot with `fill`. Jobs at least
+/// `hold_from_width` wide wait for `gate` (closed gate = error).
+struct FakeRunner {
+    fill: f32,
+    hold_from_width: u32,
+    gate: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    jobs: std::sync::Mutex<Vec<GpuJob>>,
+}
+
+impl GpuRunner for FakeRunner {
+    fn adapter_name(&self) -> String {
+        "Fake".to_owned()
+    }
+
+    fn run(&self, job: &GpuJob, out: &mut [f32]) -> Result<(), String> {
+        if let Ok(mut jobs) = self.jobs.lock() {
+            jobs.push(job.clone());
+        }
+        if job.width >= self.hold_from_width {
+            let gate = self.gate.lock().map_err(|_| "gate poisoned".to_owned())?;
+            gate.recv().map_err(|_| "gate closed".to_owned())?;
+        }
+        out.fill(self.fill);
+        Ok(())
+    }
+}
+
+fn fake_runner(fill: f32, hold_from_width: u32) -> (Arc<FakeRunner>, std::sync::mpsc::Sender<()>) {
+    let (release, gate) = std::sync::mpsc::channel();
+    let runner = Arc::new(FakeRunner {
+        fill,
+        hold_from_width,
+        gate: std::sync::Mutex::new(gate),
+        jobs: std::sync::Mutex::new(Vec::new()),
+    });
+    (runner, release)
+}
+
+fn gpu_settings() -> FbmCloudsSettings {
+    FbmCloudsSettings {
         render_backend: RenderBackend::Gpu,
         ..FbmCloudsSettings::default()
-    };
-    let without = scene_with(&settings);
+    }
+}
+
+fn render_until_status(
+    scene: &mut FbmCloudsScene,
+    width: u16,
+    height: u16,
+    wanted: &str,
+) -> Rendered {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let rendered = render_frame(scene, width, height, Duration::from_secs(1));
+        if scene.status().as_deref() == Some(wanted) || Instant::now() > deadline {
+            return rendered;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn gpu_frames_replace_software_once_they_arrive() {
+    let _guard = AvailabilityGuard::ready();
+    let without = scene_with(&gpu_settings());
     assert_eq!(
         without.status().as_deref(),
         Some("No GPU device was provided by the host; using software")
     );
 
+    // Until the first GPU frame arrives the software picture is drawn.
+    let (runner, release) = fake_runner(0.25, 1);
     let mut env = SceneEnv::for_test(std::env::temp_dir());
-    env.gpu = Some(scripted_runner(false));
-    let mut scene = FbmCloudsScene::new(&settings, &env);
-    let rendered = render_frame(&mut scene, 20, 10, Duration::from_secs(1));
-    assert!(rendered.raster.dots.iter().any(|dot| *dot > 0.0));
+    env.gpu = Some(runner.clone());
+    let mut scene = FbmCloudsScene::new(&gpu_settings(), &env);
+    let before = render_frame(&mut scene, 20, 10, Duration::from_secs(1));
     assert_eq!(
         scene.status().as_deref(),
-        Some("GPU kernel not ported yet; using software")
+        Some("Starting the GPU renderer; using software until the first frame")
     );
+    let expected_software = frame_of(&gpu_settings(), 20, 10, 1.0);
+    assert_eq!(before.raster.dots, expected_software.raster.dots);
+    assert!(before.raster.dots.iter().any(|dot| *dot > 0.0));
 
-    env.gpu = Some(scripted_runner(true));
-    let mut failing = FbmCloudsScene::new(&settings, &env);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut rendered = render_frame(&mut failing, 20, 10, Duration::from_secs(1));
-    while failing.status().as_deref() != Some("GPU error: fake kernel not ported; using software")
-        && Instant::now() < deadline
-    {
-        rendered = render_frame(&mut failing, 20, 10, Duration::from_secs(1));
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    assert!(release.send(()).is_ok());
+    let after = render_until_status(&mut scene, 20, 10, "Rendering on GPU (Fake)");
+    assert_eq!(scene.status().as_deref(), Some("Rendering on GPU (Fake)"));
+    assert!(after.raster.dots.iter().all(|dot| *dot == 0.25));
+    assert!(!scene.uses_cell_colors());
+    let jobs = runner
+        .jobs
+        .lock()
+        .map(|jobs| jobs.clone())
+        .unwrap_or_default();
+    assert!(!jobs.is_empty());
+    assert!(jobs.iter().all(|job| {
+        job.kernel == GpuKernel::FbmClouds
+            && (job.width, job.height) == (40, 40)
+            && job.uniforms.len() == gpu::UNIFORM_COUNT
+    }));
+}
+
+#[test]
+fn a_gpu_frame_of_another_size_keeps_software_on_screen() {
+    let _guard = AvailabilityGuard::ready();
+    // Jobs from 60 dots wide (30 cells) on are held back by the gate, so the
+    // only finished frame stays the 40x40 one.
+    let (runner, release) = fake_runner(0.25, 60);
+    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    env.gpu = Some(runner);
+    let mut scene = FbmCloudsScene::new(&gpu_settings(), &env);
+    let small = render_until_status(&mut scene, 20, 10, "Rendering on GPU (Fake)");
+    assert!(small.raster.dots.iter().all(|dot| *dot == 0.25));
+
+    let large = render_frame(&mut scene, 30, 12, Duration::from_secs(1));
+    let software = frame_of(&gpu_settings(), 30, 12, 1.0);
+    assert_eq!(large.raster.dots, software.raster.dots);
     assert_eq!(
-        failing.status().as_deref(),
-        Some("GPU error: fake kernel not ported; using software")
+        scene.status().as_deref(),
+        Some("Starting the GPU renderer; using software until the first frame")
     );
+    drop(release);
+}
+
+#[test]
+fn failing_gpu_keeps_drawing_software_and_reports_the_error() {
+    let _guard = AvailabilityGuard::ready();
+    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    env.gpu = Some(scripted_runner(true));
+    let mut failing = FbmCloudsScene::new(&gpu_settings(), &env);
+    let wanted = "GPU error: fake kernel not ported; using software";
+    let rendered = render_until_status(&mut failing, 20, 10, wanted);
+    assert_eq!(failing.status().as_deref(), Some(wanted));
     assert!(rendered.raster.dots.iter().any(|dot| *dot > 0.0));
+}
+
+#[test]
+fn gpu_job_uniforms_follow_the_settings() {
+    use gpu::{
+        build_job, UNIFORM_COUNT, U_BLOCK, U_BRIGHTNESS, U_CONTRAST, U_DITHER, U_FLIP,
+        U_INVERSE_HEIGHT, U_INVERT, U_OCTAVES, U_PAN, U_PHASE, U_SCALE, U_SEED, U_WARP,
+    };
+    let settings = FbmCloudsSettings {
+        scale: 200,
+        drift: 200,
+        pan: -20,
+        warp: 50,
+        octaves: 3,
+        contrast: 150,
+        block: 3,
+        dither: DitherPattern::White,
+        brightness: 60,
+        invert: true,
+        seed: 42,
+        render_backend: RenderBackend::Gpu,
+    };
+    let job = build_job(&settings, 80, 40, 8.0);
+    assert_eq!(job.kernel, GpuKernel::FbmClouds);
+    assert_eq!((job.width, job.height), (80, 40));
+    assert_eq!(job.uniforms.len(), UNIFORM_COUNT);
+    let values = &job.uniforms;
+    assert_eq!(values[U_BLOCK], 3.0);
+    assert_eq!(values[U_OCTAVES], 3.0);
+    assert_eq!(values[U_WARP], 0.5);
+    // GPU clock is real time: 8 s * 0.1875 * 2.0
+    assert!((values[U_PHASE] - 3.0).abs() < 1e-6);
+    assert!((values[U_PAN] - (8.0 * -20.0 * 0.0025)).abs() < 1e-6);
+    assert!((values[U_SCALE] - 6.0).abs() < 1e-6);
+    assert_eq!(values[U_CONTRAST], 1.5);
+    assert_eq!(values[U_BRIGHTNESS], 0.6);
+    assert_eq!(values[U_INVERT], 1.0);
+    assert_eq!(values[U_DITHER], 2.0);
+    assert_eq!(values[U_SEED], 42.0);
+    assert!((values[U_FLIP] - -(1.0 + 0.0625 * 2.0)).abs() < 1e-6);
+    assert!((values[U_INVERSE_HEIGHT] - 0.025).abs() < 1e-6);
+    assert!(values[13..].iter().all(|value| *value == 0.0));
+    // Deterministic.
+    assert_eq!(job, build_job(&settings, 80, 40, 8.0));
+    // Every dither choice maps to its own index.
+    let index_of = |dither| {
+        build_job(
+            &FbmCloudsSettings {
+                dither,
+                ..settings.clone()
+            },
+            80,
+            40,
+            0.0,
+        )
+        .uniforms[U_DITHER]
+    };
+    assert_eq!(index_of(DitherPattern::Bayer), 0.0);
+    assert_eq!(index_of(DitherPattern::Gradient), 1.0);
+}
+
+#[test]
+fn gpu_job_uniforms_are_clamped_to_the_documented_ranges() {
+    use gpu::{build_job, U_BLOCK, U_BRIGHTNESS, U_CONTRAST, U_OCTAVES, U_SCALE, U_SEED, U_WARP};
+    let wild = FbmCloudsSettings {
+        scale: 9_999,
+        drift: 9_999,
+        pan: 999,
+        warp: 9_999,
+        octaves: 99,
+        contrast: 9_999,
+        block: 99,
+        brightness: 0,
+        seed: 100_000,
+        ..FbmCloudsSettings::default()
+    };
+    let values = build_job(&wild, 10, 10, 1.0).uniforms;
+    assert_eq!(values[U_SCALE], 9.0);
+    assert_eq!(values[U_WARP], 1.5);
+    assert_eq!(values[U_OCTAVES], 4.0);
+    assert_eq!(values[U_CONTRAST], 3.0);
+    assert_eq!(values[U_BLOCK], 4.0);
+    assert_eq!(values[U_BRIGHTNESS], 0.05);
+    assert_eq!(values[U_SEED], 999.0);
+    // A zero-sized raster never divides by zero.
+    let empty = build_job(&FbmCloudsSettings::default(), 0, 0, 0.0);
+    assert!(empty.uniforms.iter().all(|value| value.is_finite()));
 }
 
 #[test]

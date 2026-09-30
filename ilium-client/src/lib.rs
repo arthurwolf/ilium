@@ -54,9 +54,9 @@ pub mod config;
 pub mod connection;
 pub mod control;
 pub mod cost_app;
+pub mod cost_history;
 pub mod cost_model;
 pub mod cost_overlay;
-pub mod cost_history;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
@@ -83,7 +83,6 @@ pub mod modal;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
-pub mod session_conversion;
 pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
@@ -103,6 +102,7 @@ pub mod scheduled_input;
 pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
+pub mod session_conversion;
 pub mod session_naming;
 pub mod session_stats;
 pub mod session_stats_popover;
@@ -374,6 +374,10 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     if !options.session_cwd.is_dir() {
         return Err(ClientError::InvalidSessionCwd(options.session_cwd));
     }
+
+    // One background probe per process decides whether the GPU option of the
+    // animation scenes is usable; it never blocks start-up.
+    ilium_gpu::start_probe();
 
     // Resolved and installed once, before the terminal enters raw/
     // alternate-screen mode and before any render call -- see
@@ -823,6 +827,11 @@ async fn run_inner(
                 }
             }
         }
+
+        // Continuous IPC/input can starve the sleep branch. Presentation
+        // expiry must advance on every pass, including those busy passes.
+        needs_redraw |=
+            app.tick_completed_progress_display(crate::scheduled_input::unix_millis_now());
 
         if *reset_settings_tx.borrow() != app.reset_planning_settings {
             let _ = reset_settings_tx.send(app.reset_planning_settings.clone());

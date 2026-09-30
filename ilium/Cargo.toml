@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Optional GPU rendering for background animations: cargo build --release --features gpu
+gpu = ["ilium-client/gpu"]
+
 [dependencies]
 anyhow = "1.0.103"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
