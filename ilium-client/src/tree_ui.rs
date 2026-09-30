@@ -486,6 +486,7 @@ fn build_tree_items(
 /// visible in the sidebar. Virtual filesystem descendants are deliberately
 /// omitted: they cannot be closed through IPC and never survive the removal
 /// of their owning [`NodeKind::Folder`] as independent tree nodes.
+#[cfg(test)]
 pub(crate) fn visible_tree_node_ids(
     tree: &Tree,
     state: &TreeState<NodeId>,

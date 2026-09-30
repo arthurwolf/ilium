@@ -537,9 +537,11 @@ mod tests {
 
     #[test]
     fn title_suffix_follows_its_visibility_and_needs_agents() {
-        let mut overlay = CostOverlay::default();
-        overlay.agent_count = 2;
-        overlay.total_usd = 52.34;
+        let mut overlay = CostOverlay {
+            agent_count: 2,
+            total_usd: 52.34,
+            ..CostOverlay::default()
+        };
         assert_eq!(
             title_suffix(&overlay, true),
             None,

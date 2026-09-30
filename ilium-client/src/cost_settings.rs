@@ -557,8 +557,10 @@ mod tests {
 
     #[test]
     fn sparkline_cells_are_clamped() {
-        let mut settings = CostSettings::default();
-        settings.sparkline_cells = SPARKLINE_CELL_RANGE.1;
+        let mut settings = CostSettings {
+            sparkline_cells: SPARKLINE_CELL_RANGE.1,
+            ..CostSettings::default()
+        };
         assert!(!settings.adjust(CostRow::SparklineCells, 1));
         settings.sparkline_cells = SPARKLINE_CELL_RANGE.0;
         assert!(!settings.adjust(CostRow::SparklineCells, -1));
