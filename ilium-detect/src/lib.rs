@@ -238,16 +238,24 @@ fn classify_screen_activity(
     class: Option<&AgentClass>,
     screen_text: &str,
 ) -> ActivityClassification {
-    let (turn, evidence) = if screen_text.contains(WORKING_MARKER) {
+    let status_text = current_status_text(class, screen_text);
+    let (turn, evidence) = if looks_like_bottom_anchored_question_dialog(screen_text) {
+        // A modal question dialog blocks the turn no matter what stale status
+        // chrome ("esc to interrupt", a spinner row) is still drawn above it.
+        (
+            AgentTurn::WaitingApproval,
+            ActivityEvidence::SelectionPrompt,
+        )
+    } else if status_text.contains(WORKING_MARKER) {
         (AgentTurn::Working, ActivityEvidence::InterruptMarker)
-    } else if let Some(live_status) = live_status_evidence(class, screen_text) {
+    } else if let Some(live_status) = live_status_evidence(class, status_text) {
         (AgentTurn::Working, live_status)
-    } else if looks_like_background_wait_line(screen_text) {
+    } else if looks_like_background_wait_line(status_text) {
         (
             AgentTurn::WaitingSubagents,
             ActivityEvidence::BackgroundWait,
         )
-    } else if looks_like_background_task_wait_line(screen_text) {
+    } else if looks_like_background_task_wait_line(status_text) {
         (AgentTurn::Settling, ActivityEvidence::BackgroundTaskWait)
     } else if looks_like_confirmation_prompt(screen_text) {
         (
@@ -267,10 +275,16 @@ fn classify_screen_activity(
     } else {
         (AgentTurn::Idle, ActivityEvidence::NoActiveMarker)
     };
+    let evidence_text = match evidence {
+        ActivityEvidence::ConfirmationPrompt
+        | ActivityEvidence::SelectionPrompt
+        | ActivityEvidence::FolderTrustPrompt => screen_text,
+        _ => status_text,
+    };
     ActivityClassification {
         turn,
         evidence,
-        matched_line: activity_evidence_line(evidence, screen_text),
+        matched_line: activity_evidence_line(evidence, evidence_text),
     }
 }
 
@@ -320,10 +334,15 @@ fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Opti
         ActivityEvidence::FolderTrustPrompt => is_claude_folder_trust_choice_line,
         ActivityEvidence::NoActiveMarker => return None,
     };
-    screen_text
-        .lines()
-        .find(|line| line_matches_evidence(line))
-        .map(bounded_terminal_evidence)
+    let mut matching_lines = screen_text.lines().filter(|line| line_matches_evidence(line));
+    let matched_line = match evidence {
+        ActivityEvidence::ConfirmationPrompt
+        | ActivityEvidence::SelectionPrompt
+        | ActivityEvidence::FolderTrustPrompt => matching_lines.next(),
+        // Report the newest eligible activity row, matching the chronology rule.
+        _ => matching_lines.next_back(),
+    };
+    matched_line.map(bounded_terminal_evidence)
 }
 
 /// Keeps durable diagnostic excerpts useful and safe for terminal rendering.
@@ -1081,6 +1100,92 @@ fn has_status_boundary_before(line: &str, marker_index: usize) -> bool {
             .is_some_and(|character| matches!(character, '·' | '│' | '|' | '•' | '—' | '–' | '…'))
 }
 
+/// A completed Claude turn supersedes status chrome above its summary, not
+/// the summary itself: it can still report background work after the turn.
+/// This is a text-order boundary, not a goal-state or task-delivery decision.
+/// Other identified providers retain their own existing status semantics.
+fn current_status_text<'screen>(
+    class: Option<&AgentClass>,
+    screen_text: &'screen str,
+) -> &'screen str {
+    if !matches!(class, None | Some(AgentClass::Claude)) {
+        return screen_text;
+    }
+    let mut start = screen_text.len();
+    for line in screen_text.split_inclusive('\n').rev() {
+        start -= line.len();
+        if is_claude_completed_turn_status_line(line) {
+            return &screen_text[start..];
+        }
+    }
+    screen_text
+}
+
+/// Recognizes the supplied Claude summary shape, without enumerating verbs:
+/// `✻ <word> for <duration> [· done <12-hour clock>] [· N ... still running]`.
+/// A prose mention, an individual `● Agent ... finished` event, or an
+/// incomplete/unknown suffix is not evidence that earlier waits ended.
+/// An exact verbatim copy of terminal chrome is indistinguishable in plain
+/// text; this predicate is not proof of provider provenance by itself.
+fn is_claude_completed_turn_status_line(line: &str) -> bool {
+    let Some(body) = line.trim().strip_prefix("✻ ") else {
+        return false;
+    };
+    let mut segments = body.split('·');
+    let Some(header) = segments.next() else {
+        return false;
+    };
+    let mut words = header.split_whitespace();
+    let Some(verb) = words.next() else {
+        return false;
+    };
+    if !verb.bytes().all(|byte| byte.is_ascii_alphabetic()) || words.next() != Some("for") {
+        return false;
+    }
+    let Some(first_duration) = words.next() else {
+        return false;
+    };
+    if !is_claude_summary_duration(first_duration) || !words.all(is_claude_summary_duration) {
+        return false;
+    }
+    segments.all(|segment| {
+        let segment = segment.trim();
+        is_claude_summary_done_time(segment) || is_background_task_wait_line(segment)
+    })
+}
+
+fn is_claude_summary_duration(token: &str) -> bool {
+    let Some(digits) = token.strip_suffix(['h', 'm', 's']) else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn is_claude_summary_done_time(segment: &str) -> bool {
+    let mut words = segment.split_whitespace();
+    if words.next() != Some("done") {
+        return false;
+    }
+    let Some(clock) = words.next() else {
+        return false;
+    };
+    let Some((hour, minute)) = clock.split_once(':') else {
+        return false;
+    };
+    let Some(period) = words.next() else {
+        return false;
+    };
+    (1..=2).contains(&hour.len())
+        && hour.bytes().all(|byte| byte.is_ascii_digit())
+        && hour.parse::<u8>().is_ok_and(|hour| (1..=12).contains(&hour))
+        && minute.len() == 2
+        && minute.bytes().all(|byte| byte.is_ascii_digit())
+        && minute.parse::<u8>().is_ok_and(|minute| minute < 60)
+        && (period.eq_ignore_ascii_case("AM") || period.eq_ignore_ascii_case("PM"))
+        && words.next().is_none()
+}
+
+
 /// True if a line reads as "the agent is waiting on background
 /// subagents/tasks it dispatched" -- e.g. Claude Code's
 /// `"✻ Waiting for 2 background agents to finish"`. Requires "waiting for"
@@ -1102,7 +1207,7 @@ fn looks_like_background_wait_line(screen_text: &str) -> bool {
 fn is_background_wait_line(line: &str) -> bool {
     // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
     let lower = line.to_ascii_lowercase();
-    lower.contains("waiting for")
+    normalize_goal_status_line(line).starts_with("waiting for ")
         && lower.contains("background")
         && (lower.contains("agent") || lower.contains("task"))
 }
@@ -1326,6 +1431,30 @@ fn looks_like_selection_prompt(screen_text: &str) -> bool {
         has_cursor_on_option_line |= starts_with_selection_cursor(line);
     }
     numbered_option_lines >= 2 && has_cursor_on_option_line
+}
+
+/// How many rows above the footer hint a dialog's "Chat about this" option may
+/// sit. Claude Code's question dialog is a header, a question, up to four
+/// options with descriptions, then the two fixed trailing options.
+const QUESTION_DIALOG_OPTION_WINDOW: usize = 12;
+
+/// True if the screen ends in Claude Code's question dialog (AskUserQuestion):
+/// the last non-blank row is the "Enter to select ... Esc to cancel" hint and
+/// a numbered "Chat about this" option sits just above it. Both are fixed
+/// dialog chrome, so together they are strong enough to outrank stale working
+/// markers; anchoring to the bottom keeps a transcript that merely quotes the
+/// dialog from matching.
+fn looks_like_bottom_anchored_question_dialog(screen_text: &str) -> bool {
+    let mut rows = screen_text
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty());
+    if !rows.next().is_some_and(is_selection_footer_line) {
+        return false;
+    }
+    rows.take(QUESTION_DIALOG_OPTION_WINDOW).any(|line| {
+        is_numbered_option_line(line) && line.to_ascii_lowercase().contains("chat about this")
+    })
 }
 
 /// The per-line half of [`looks_like_selection_prompt`]: either signal, on
@@ -1942,6 +2071,38 @@ mod tests {
     }
 
     #[test]
+    fn claude_ask_user_question_with_goal_history_is_waiting_approval() {
+        let screen = fixture("claude_ask_user_question_with_goal_history.txt");
+        assert_eq!(classify_activity(&screen), AgentTurn::WaitingApproval);
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, &screen),
+            AgentTurn::WaitingApproval
+        );
+    }
+
+    #[test]
+    fn question_dialog_outranks_stale_working_marker() {
+        let stale = format!(
+            "✻ Herding… (3m 2s · esc to interrupt)\n{}",
+            fixture("claude_ask_user_question_with_goal_history.txt")
+        );
+        assert_eq!(classify_activity(&stale), AgentTurn::WaitingApproval);
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, &stale),
+            AgentTurn::WaitingApproval
+        );
+    }
+
+    #[test]
+    fn quoted_question_dialog_above_live_work_stays_working() {
+        let quoted = format!(
+            "{}\n✻ Herding… (3m 2s · esc to interrupt)\n",
+            fixture("claude_ask_user_question_with_goal_history.txt")
+        );
+        assert_eq!(classify_activity(&quoted), AgentTurn::Working);
+    }
+
+    #[test]
     fn claude_code_resume_full_session_prompt_yields_key_2() {
         assert_eq!(
             interstitial_prompt_response(
@@ -1980,6 +2141,33 @@ mod tests {
             interstitial_prompt_response(&AgentClass::Claude, &fixture("plain_shell.txt")),
             None
         );
+    }
+
+    #[test]
+    fn completed_goal_does_not_wait_on_historical_background_agent() {
+        let screen = fixture("claude_completed_goal_after_background_wait.txt");
+        assert_eq!(classify_activity(&screen), AgentTurn::Idle);
+        let classified = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+        assert_eq!(classified.turn, AgentTurn::Idle);
+        assert_ne!(classified.evidence, ActivityEvidence::BackgroundWait);
+    }
+
+    #[test]
+    fn new_background_wait_after_completed_turn_remains_waiting() {
+        let screen = "✻ Cooked for 12s · done 4:57 PM\n✻ Waiting for 1 background agent to finish";
+        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::WaitingSubagents);
+    }
+
+    #[test]
+    fn latest_completed_turn_supersedes_historical_running_suffix() {
+        let screen = "✻ Cooked for 12s · 1 shell still running\n● Shell finished\n✻ Cooked for 3s · done 5:00 PM";
+        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::Idle);
+    }
+
+    #[test]
+    fn background_wait_in_explanatory_prose_is_not_live_status() {
+        let screen = "The detector says waiting for background agents when it sees this sentence.\n❯";
+        assert_eq!(classify_activity_for_agent(&AgentClass::Claude, screen), AgentTurn::Idle);
     }
 
     #[test]

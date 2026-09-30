@@ -1,0 +1,40 @@
+     
+  ⎿  Goal set: please contine the work from /home/arthur/.codex/sessions/2026/09/28/rollout-2026-09-28T05-04-41-01a0e5f8-c59f-76b3-abc4-6c0e1dba2221.jsonl , as a reminder the goal was: «  ok I'd like all the OSes
+     (win/linux/mac) to have a one line install command. ideally it'd be the same command for all 3, but if it can't be, then one command per OS type. you know, like how yo install claude
+       with « curl -fsSL https://claude.ai/install.sh | bash » etc. except here we don't have a domain for ilium, so it'd be something like https://ilium-setup.pages.dev using our cloudflare API key you should have 
+     access
+       to. please figure out how to make this a thing (maybe you need to set up "releases" and "packages" for the ilium repo, using the acitons stuff? if you need to, do that, do everything you need to, to make the ilium
+       install as trivial and as easy as possible for users. then add it to the top of the readme. then give me a report on what you did. and test everything you do, ideally in virtual machines for all 3 oses. go. » ...
+     check how far we got, and improve it/fix it/finish it/test it/etc.
+       
+● Route: Heavy — multi-boundary (CI, installers, Pages, GitHub releases, cross-OS verification) with remote-mutation risk. Reasoning: Base / main — first step is read-only state audit.
+       
+  Goal ack: finish one-line installers, verify how far repo got.
+     
+  Ran 6 shell commands 
+
+● Checking why all five native release jobs failed in run 36571516031. Reading the tail of each job log now.
+  
+  Ran 1 shell command 
+
+● Now the macOS product-test failures. Checking how process names are resolved.
+
+  Ran 9 shell commands 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Scope+git 
+
+│ Release run 36571516031 failed on all 5 native targets. I fixed the Linux loader bug locally, but Windows has ~50 failing product tests (worktree, progress-monitor, PTY) and macOS has 3-4 flaky ones. How do I proceed, 
+│ and may I commit+push the fixes?
+
+❯ 1. Ship 3 targets first (Recommended)
+     Linux x64+arm64 and macOS arm64 now (Linux fix + macOS test fixes). Windows and Intel macOS follow once their tests are fixed. Get one-line installers live soonest. You authorize commit+push of only my release/test 
+     files.
+  2. Fix all 5 before release
+     Keep the approved 5-target gate. I fix every Windows/macOS test over many ~1h45 CI rounds. Slow, but matches the spec. You authorize commit+push of only my files.
+  3. Local only for now
+     No git commit/push. I keep fixing locally and report; you push later.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
