@@ -5885,7 +5885,7 @@ mod tests {
                 Position::new(37, KEYBOARD_TABLE_FIRST_ROW),
                 &bindings,
             ),
-            Some(KeyboardTableAction::Assign('i'))
+            Some(KeyboardTableAction::Assign(keymap::available_keys(&bindings)[0]))
         );
         assert_eq!(
             keyboard_table_hit(

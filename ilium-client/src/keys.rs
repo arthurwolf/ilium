@@ -3404,7 +3404,7 @@ mod indent_outdent_tests {
     }
 
     #[test]
-    fn ctrl_b_arrow_and_page_defaults_dispatch_group_navigation_actions() {
+    fn ctrl_b_tmux_defaults_dispatch_group_navigation_actions() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         let first_group = app.tree.add_group(ROOT_ID, "first").unwrap();
         let first = app
@@ -3429,7 +3429,7 @@ mod indent_outdent_tests {
         );
         handle_event(
             &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
         );
         assert_eq!(app.active_pane_id(), Some(second));
 
@@ -3439,9 +3439,33 @@ mod indent_outdent_tests {
         );
         handle_event(
             &mut app,
-            Event::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char(')'), KeyModifiers::NONE)),
         );
         assert_eq!(app.active_pane_id(), Some(next));
+    }
+
+    #[test]
+    fn doubled_prefix_sends_one_literal_prefix_to_the_focused_terminal() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "group").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.focus_pane(pane);
+        app.take_outbound_requests();
+
+        let ctrl_b = Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        handle_event(&mut app, ctrl_b.clone());
+        assert!(matches!(app.mode, Mode::LeaderPending));
+        handle_event(&mut app, ctrl_b);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        let requests = format!("{:?}", app.take_outbound_requests());
+        assert!(
+            requests.contains("[2]") || requests.contains("\\u{2}") || requests.contains("\\x02"),
+            "expected one literal Ctrl+B byte to reach the pane, got {requests}"
+        );
     }
 
     #[test]
