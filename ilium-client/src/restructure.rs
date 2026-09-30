@@ -410,7 +410,7 @@ fn render_structure_children(
             NodeKind::Folder { .. } => "folder".to_string(),
             NodeKind::Container(_) => "container".to_string(),
         };
-        lines.push(ilium_prompts::render_value("naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", &serde_json::json!({"v0": ("  ".repeat(depth)).to_string(), "v1": (kind).to_string(), "v2": (child.id.0).to_string(), "v3": (child.name).to_string(), "v4": (child.inferred_icon.as_deref().unwrap_or("")).to_string(), "v5": (child.structure_source.prompt_label()).to_string(), "v6": (child.is_name_fixed).to_string()})));
+        lines.push(ilium_prompts::render_value("naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", &serde_json::json!({"v0": ("  ".repeat(depth)).to_string(), "v1": (kind).to_string(), "v2": (child.id.0).to_string(), "v3": (child.name).to_string(), "v4": (child.inferred_icon.as_deref().unwrap_or("")).to_string(), "v5": (child.structure_source.prompt_label()).to_string(), "v6": (child.is_name_fixed).to_string()})));
         if child.is_container() {
             render_structure_children(tree, *child_id, depth + 1, lines)?;
         }
@@ -466,7 +466,7 @@ fn describe_pane_status(status: &PaneStatus) -> String {
     match status {
         PaneStatus::PlainShell => ilium_prompts::naming::NAMING_RESTRUCTURE_PLAIN_SHELL.to_string(),
         PaneStatus::Agent(agent) => ilium_prompts::render_value(
-            "naming/clipped-lines-agent",
+            "naming/restructure/v0-agent",
             &serde_json::json!({"v0": (agent.class.label()).to_string(), "v1": (describe_activity(&agent.activity())).to_string()}),
         ),
         PaneStatus::Editor { .. } => "Editor".to_string(),
@@ -872,7 +872,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
                 tracing::info!(
                     operation_id,
                     attempt,
-                    "restructure inference response"_PARSED
+                    "restructure inference response parsed"
                 );
                 return Ok(plan);
             }
@@ -881,9 +881,9 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
                     operation_id,
                     attempt,
                     error_characters = error.to_string().chars().count(),
-                    "restructure inference response"_COULD_NOT_BE_PARSED
+                    "restructure inference response could not be parsed"
                 );
-                tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, response = %response, ilium_prompts::naming::NAMING_RESTRUCTURE_UNPARSEABLE_RESTRUCTURE_INFERENCE_RESPONSE);
+                tracing::debug!(operation_id, attempt, error = %error, error_debug = ?error, response = %response, "unparseable restructure inference response");
                 retry_feedback = Some(error.to_string());
                 last_parse_error = Some(error);
             }

@@ -168,12 +168,12 @@ pub const NAMING_RESTRUCTURE_PROJECT_ID_V0_TITLE_V1_SOURCE: &str = include_str!(
 pub const CLIPPED_LINES_V1_ID_V2_TITLE_V3_ICON_V4_SOURCE_V5_NAME_FIXED: &str =
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/templates/naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed.hbs"
+        "/templates/naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed.hbs"
     ));
 
 pub const CLIPPED_LINES_AGENT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/templates/naming/clipped-lines-agent.hbs"
+    "/templates/naming/restructure/v0-agent.hbs"
 ));
 
 pub const CLIPPED_LINES: &str = include_str!(concat!(
@@ -223,12 +223,6 @@ pub const NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE: &str = include_
     env!("CARGO_MANIFEST_DIR"),
     "/templates/naming/restructure/no-panes-or-folders-to-restructure.hbs"
 ));
-
-pub const NAMING_RESTRUCTURE_UNPARSEABLE_RESTRUCTURE_INFERENCE_RESPONSE: &str =
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/templates/naming/restructure/unparseable-restructure-inference-response.hbs"
-    ));
 
 pub const NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_HAD_THE_WRONG_JSON_SHAPE_ERROR: &str =
     include_str!(concat!(
@@ -634,7 +628,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec", NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_THE_WRONG_LEAF_SET_MISSING_MISSING_UNEXPECTED_UNEXPEC),
     ("naming/restructure/restructure-response-referenced-id-id-more-than-once", NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_ID_ID_MORE_THAN_ONCE),
     ("naming/restructure/restructure-response-had-the-wrong-json-shape-error", NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_HAD_THE_WRONG_JSON_SHAPE_ERROR),
-    ("naming/restructure/unparseable-restructure-inference-response", NAMING_RESTRUCTURE_UNPARSEABLE_RESTRUCTURE_INFERENCE_RESPONSE),
     ("naming/restructure/no-panes-or-folders-to-restructure", NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE),
     ("naming/restructure/no-prior-structure-available", NAMING_RESTRUCTURE_NO_PRIOR_STRUCTURE_AVAILABLE),
     ("naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet", NAMING_RESTRUCTURE_RESTRUCTURE_PROMPT_EXCEEDED_THE_MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS_CHARACTER_SAFET),
@@ -645,8 +638,8 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("naming/restructure/tree-child-child-id-no-longer-exists", NAMING_RESTRUCTURE_TREE_CHILD_CHILD_ID_NO_LONGER_EXISTS),
     ("naming/restructure/project-project-id-no-longer-exists", NAMING_RESTRUCTURE_PROJECT_PROJECT_ID_NO_LONGER_EXISTS),
     ("naming/clipped-lines", CLIPPED_LINES),
-    ("naming/clipped-lines-agent", CLIPPED_LINES_AGENT),
-    ("naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", CLIPPED_LINES_V1_ID_V2_TITLE_V3_ICON_V4_SOURCE_V5_NAME_FIXED),
+    ("naming/restructure/v0-agent", CLIPPED_LINES_AGENT),
+    ("naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed", CLIPPED_LINES_V1_ID_V2_TITLE_V3_ICON_V4_SOURCE_V5_NAME_FIXED),
     ("naming/restructure/project-id-v0-title-v1-source", NAMING_RESTRUCTURE_PROJECT_ID_V0_TITLE_V1_SOURCE),
     ("naming/project_naming/not-present", NAMING_PROJECT_NAMING_NOT_PRESENT),
     ("naming/terminal_naming/no-screen-content-available-to-infer-a-terminal-title-from", NAMING_TERMINAL_NAMING_NO_SCREEN_CONTENT_AVAILABLE_TO_INFER_A_TERMINAL_TITLE_FROM),

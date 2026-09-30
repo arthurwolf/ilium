@@ -66,7 +66,7 @@
     "sha256": "783219b708b5f855854ebd73e0492d51696cd25ad6611f6cb5ba26effa1f9d07"
   },
   {
-    "name": "naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
+    "name": "naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
@@ -79,7 +79,7 @@
     "sha256": "d8b49770537fc4d49e1fb9e4a810d017d87dd2c1b0497c590171632d20898c21"
   },
   {
-    "name": "naming/clipped-lines-agent",
+    "name": "naming/restructure/v0-agent",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
       "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"

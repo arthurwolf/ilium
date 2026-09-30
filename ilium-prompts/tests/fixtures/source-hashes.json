@@ -184,11 +184,11 @@
     "sha256": "a44fe88b5eae33a4aaf27bd866d39522897c2e1194c82de97f75e5a0db90b3cd"
   },
   {
-    "name": "naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
+    "name": "naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed",
     "sha256": "8d6b11938da6914d43914c59693b578d5a34b8feecb24864528cf453b39ea2fa"
   },
   {
-    "name": "naming/clipped-lines-agent",
+    "name": "naming/restructure/v0-agent",
     "sha256": "6ee625ef75c444b729a8ec458d4aed5f7b05ae96db8eec4e47be95ba702f6033"
   },
   {
@@ -230,10 +230,6 @@
   {
     "name": "naming/restructure/no-panes-or-folders-to-restructure",
     "sha256": "3b230c8778ee4cd7d7388e66307d001ae1f75b623f26e50817d69b94d337efa2"
-  },
-  {
-    "name": "naming/restructure/unparseable-restructure-inference-response",
-    "sha256": "19d347ced26b7aa2def73a016254e0436c63db44d58fa3ca8baddbe645430253"
   },
   {
     "name": "naming/restructure/restructure-response-had-the-wrong-json-shape-error",

@@ -19,18 +19,18 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-session-convert/src/claude_writer.rs:26 MISSING_RESULT_TEXT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |
 | `ilium-session-convert/src/claude_writer.rs:27 EMPTY_RESULT_TEXT` | [conversion/empty-result](templates/conversion/empty-result.hbs) | `EMPTY_RESULT` |
 | `ilium-session-convert/src/claude_writer.rs:28 SYNTHETIC_FIRST_PROMPT` | [conversion/synthetic-first-prompt](templates/conversion/synthetic-first-prompt.hbs) | `SYNTHETIC_FIRST_PROMPT` |
-| `ilium-client/src/session_naming.rs:279` | [naming/session-label-example](templates/naming/session-label-example.hbs) | `SESSION_NAMING_FRAGMENT_1` |
-| `ilium-client/src/session_naming.rs:280` | [naming/session-summary-example](templates/naming/session-summary-example.hbs) | `SESSION_NAMING_FRAGMENT_2` |
-| `ilium-client/src/session_naming.rs:300` | [naming/unavailable-process](templates/naming/unavailable-process.hbs) | `SESSION_NAMING_FRAGMENT_3` |
-| `ilium-client/src/session_naming.rs:333` | [naming/absent-context](templates/naming/absent-context.hbs) | `SESSION_NAMING_FRAGMENT_4` |
-| `ilium-client/src/terminal_naming.rs:108` | [naming/terminal-label-example](templates/naming/terminal-label-example.hbs) | `TERMINAL_NAMING_FRAGMENT_1` |
-| `ilium-client/src/terminal_naming.rs:110` | [naming/terminal-summary-example](templates/naming/terminal-summary-example.hbs) | `TERMINAL_NAMING_FRAGMENT_2` |
-| `ilium-client/src/restructure.rs:490` | [naming/unavailable-transcript](templates/naming/unavailable-transcript.hbs) | `RESTRUCTURE_FRAGMENT_1` |
-| `ilium-client/src/restructure.rs:589` | [naming/restructure-summary](templates/naming/restructure-summary.hbs) | `RESTRUCTURE_FRAGMENT_2` |
-| `ilium-client/src/restructure.rs:592` | [naming/restructure-label-example](templates/naming/restructure-label-example.hbs) | `RESTRUCTURE_FRAGMENT_3` |
-| `ilium-client/src/restructure.rs:593` | [naming/restructure-summary-example](templates/naming/restructure-summary-example.hbs) | `RESTRUCTURE_FRAGMENT_4` |
-| `ilium-client/src/restructure.rs:693` | [naming/content-omission-marker](templates/naming/content-omission-marker.hbs) | `RESTRUCTURE_FRAGMENT_5` |
-| `ilium-client/src/restructure.rs:2316` | [naming/unavailable-transcript](templates/naming/unavailable-transcript.hbs) | `RESTRUCTURE_FRAGMENT_6` |
+| `ilium-client/src/session_naming.rs:279` | [naming/session-label-example](templates/naming/session-label-example.hbs) | `SESSION_LABEL_EXAMPLE` |
+| `ilium-client/src/session_naming.rs:280` | [naming/session-summary-example](templates/naming/session-summary-example.hbs) | `SESSION_SUMMARY_EXAMPLE` |
+| `ilium-client/src/session_naming.rs:300` | [naming/unavailable-process](templates/naming/unavailable-process.hbs) | `UNAVAILABLE_PROCESS` |
+| `ilium-client/src/session_naming.rs:333` | [naming/absent-context](templates/naming/absent-context.hbs) | `ABSENT_CONTEXT` |
+| `ilium-client/src/terminal_naming.rs:108` | [naming/terminal-label-example](templates/naming/terminal-label-example.hbs) | `TERMINAL_LABEL_EXAMPLE` |
+| `ilium-client/src/terminal_naming.rs:110` | [naming/terminal-summary-example](templates/naming/terminal-summary-example.hbs) | `TERMINAL_SUMMARY_EXAMPLE` |
+| `ilium-client/src/restructure.rs:490` | [naming/unavailable-transcript](templates/naming/unavailable-transcript.hbs) | `UNAVAILABLE_TRANSCRIPT` |
+| `ilium-client/src/restructure.rs:589` | [naming/restructure-summary](templates/naming/restructure-summary.hbs) | `RESTRUCTURE_SUMMARY` |
+| `ilium-client/src/restructure.rs:592` | [naming/restructure-label-example](templates/naming/restructure-label-example.hbs) | `RESTRUCTURE_LABEL_EXAMPLE` |
+| `ilium-client/src/restructure.rs:593` | [naming/restructure-summary-example](templates/naming/restructure-summary-example.hbs) | `RESTRUCTURE_SUMMARY_EXAMPLE` |
+| `ilium-client/src/restructure.rs:693` | [naming/content-omission-marker](templates/naming/content-omission-marker.hbs) | `CONTENT_OMISSION_MARKER` |
+| `ilium-client/src/restructure.rs:2316` | [naming/unavailable-transcript](templates/naming/unavailable-transcript.hbs) | `UNAVAILABLE_TRANSCRIPT` |
 | `ilium-inference/src/lib.rs:299; restructure.rs:176` | [naming/json-only](templates/naming/json-only.hbs) | `JSON_ONLY` |
 | `ilium-client/src/smart_copy.rs:1403` | [naming/smart-copy-system](templates/naming/smart-copy-system.hbs) | `SMART_COPY_SYSTEM` |
 | `ilium-client/src/naming.rs:129` | [naming/naming/v0-v1-characters-omitted](templates/naming/naming/v0-v1-characters-omitted.hbs) | `NAMING_NAMING_V0_V1_CHARACTERS_OMITTED` |
@@ -52,9 +52,9 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/terminal_naming.rs:98` | [naming/terminal_naming/no-screen-content-available-to-infer-a-terminal-title-from](templates/naming/terminal_naming/no-screen-content-available-to-infer-a-terminal-title-from.hbs) | `NAMING_TERMINAL_NAMING_NO_SCREEN_CONTENT_AVAILABLE_TO_INFER_A_TERMINAL_TITLE_FROM` |
 | `ilium-client/src/project_naming.rs:305` | [naming/project_naming/not-present](templates/naming/project_naming/not-present.hbs) | `NAMING_PROJECT_NAMING_NOT_PRESENT` |
 | `ilium-client/src/restructure.rs:415` | [naming/restructure/project-id-v0-title-v1-source](templates/naming/restructure/project-id-v0-title-v1-source.hbs) | `NAMING_RESTRUCTURE_PROJECT_ID_V0_TITLE_V1_SOURCE` |
-| `ilium-client/src/restructure.rs:451` | [naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed](templates/naming/clipped-lines-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed.hbs) | `NAMING_RESTRUCTURE_V0_V1_ID_V2_TITLE_V3_ICON_V4_SOURCE_V5_NAME_FIXED` |
-| `ilium-client/src/restructure.rs:511` | [naming/clipped-lines-agent](templates/naming/clipped-lines-agent.hbs) | `NAMING_RESTRUCTURE_V0_AGENT` |
-| `ilium-client/src/restructure.rs:543` | [naming/clipped-lines](templates/naming/clipped-lines.hbs) | `NAMING_RESTRUCTURE_V0` |
+| `ilium-client/src/restructure.rs:451` | [naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed](templates/naming/restructure/v0-v1-id-v2-title-v3-icon-v4-source-v5-name-fixed.hbs) | `NAMING_RESTRUCTURE_V0_V1_ID_V2_TITLE_V3_ICON_V4_SOURCE_V5_NAME_FIXED` |
+| `ilium-client/src/restructure.rs:511` | [naming/restructure/v0-agent](templates/naming/restructure/v0-agent.hbs) | `NAMING_RESTRUCTURE_V0_AGENT` |
+| `ilium-client/src/restructure.rs:543` | [naming/clipped-lines](templates/naming/clipped-lines.hbs) | `CLIPPED_LINES` |
 | `ilium-client/src/restructure.rs:413` | [naming/restructure/project-project-id-no-longer-exists](templates/naming/restructure/project-project-id-no-longer-exists.hbs) | `NAMING_RESTRUCTURE_PROJECT_PROJECT_ID_NO_LONGER_EXISTS` |
 | `ilium-client/src/restructure.rs:433` | [naming/restructure/tree-child-child-id-no-longer-exists](templates/naming/restructure/tree-child-child-id-no-longer-exists.hbs) | `NAMING_RESTRUCTURE_TREE_CHILD_CHILD_ID_NO_LONGER_EXISTS` |
 | `ilium-client/src/restructure.rs:382` | [naming/restructure/split-view-child-id-has-no-orientation](templates/naming/restructure/split-view-child-id-has-no-orientation.hbs) | `NAMING_RESTRUCTURE_SPLIT_VIEW_CHILD_ID_HAS_NO_ORIENTATION` |
@@ -68,7 +68,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/restructure.rs:746` | [naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet](templates/naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet.hbs) | `NAMING_RESTRUCTURE_RESTRUCTURE_PROMPT_EXCEEDED_THE_MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS_CHARACTER_SAFET` |
 | `ilium-client/src/restructure.rs:827` | [naming/restructure/no-prior-structure-available](templates/naming/restructure/no-prior-structure-available.hbs) | `NAMING_RESTRUCTURE_NO_PRIOR_STRUCTURE_AVAILABLE` |
 | `ilium-client/src/restructure.rs:854` | [naming/restructure/no-panes-or-folders-to-restructure](templates/naming/restructure/no-panes-or-folders-to-restructure.hbs) | `NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE` |
-| `ilium-client/src/restructure.rs:923` | [naming/restructure/unparseable-restructure-inference-response](templates/naming/restructure/unparseable-restructure-inference-response.hbs) | `NAMING_RESTRUCTURE_UNPARSEABLE_RESTRUCTURE_INFERENCE_RESPONSE` |
 | `ilium-client/src/restructure.rs:946` | [naming/restructure/restructure-response-had-the-wrong-json-shape-error](templates/naming/restructure/restructure-response-had-the-wrong-json-shape-error.hbs) | `NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_HAD_THE_WRONG_JSON_SHAPE_ERROR` |
 | `ilium-client/src/restructure.rs:954` | [naming/restructure/restructure-response-referenced-id-id-more-than-once](templates/naming/restructure/restructure-response-referenced-id-id-more-than-once.hbs) | `NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_ID_ID_MORE_THAN_ONCE` |
 | `ilium-client/src/restructure.rs:964` | [naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec](templates/naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec.hbs) | `NAMING_RESTRUCTURE_RESTRUCTURE_RESPONSE_REFERENCED_THE_WRONG_LEAF_SET_MISSING_MISSING_UNEXPECTED_UNEXPEC` |
@@ -388,10 +387,10 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-session-convert/src/claude_writer.rs:317` | [conversion/truncated-result](templates/conversion/truncated-result.hbs) | `TRUNCATED_RESULT` |
 | `ilium-session-convert/src/claude_writer.rs:373` | [conversion/bash-description-workdir](templates/conversion/bash-description-workdir.hbs) | `BASH_DESCRIPTION_WORKDIR` |
 | `ilium-session-convert/src/claude_writer.rs:374` | [conversion/bash-description](templates/conversion/bash-description.hbs) | `BASH_DESCRIPTION` |
-| `ilium-client/src/app.rs close_confirmation_message` | [naming/close-container](templates/naming/close-container.hbs) | `render` |
-| `ilium-client/src/app.rs close_confirmation_message` | [naming/close-dirty-editor](templates/naming/close-dirty-editor.hbs) | `render` |
-| `ilium-server/src/ipc/handlers.rs` | [naming/progress-restoration-failure](templates/naming/progress-restoration-failure.hbs) | `render` |
-| `ilium-client/src/restructure.rs format_transcript_entries` | [naming/transcript-row](templates/naming/transcript-row.hbs) | `render` |
-| `ilium-client/src/restructure.rs clip_restructure_evidence` | [naming/clipped-context](templates/naming/clipped-context.hbs) | `render` |
-| `ilium-client/src/naming.rs encode_untrusted_context` | [naming/unavailable-context](templates/naming/unavailable-context.hbs) | `render` |
-| `ilium-server/src/ipc/handlers.rs` monitor restoration fallback | [agent/progress-observation-stopped](templates/agent/progress-observation-stopped.hbs) | `PROGRESS_OBSERVATION_STOPPED` |
+| `ilium-client/src/app.rs close_confirmation_message` | [naming/close-container](templates/naming/close-container.hbs) | `render by name` |
+| `ilium-client/src/app.rs close_confirmation_message` | [naming/close-dirty-editor](templates/naming/close-dirty-editor.hbs) | `render by name` |
+| `ilium-server/src/ipc/handlers.rs` | [naming/progress-restoration-failure](templates/naming/progress-restoration-failure.hbs) | `render by name` |
+| `ilium-client/src/restructure.rs format_transcript_entries` | [naming/transcript-row](templates/naming/transcript-row.hbs) | `render by name` |
+| `ilium-client/src/restructure.rs clip_restructure_evidence` | [naming/clipped-context](templates/naming/clipped-context.hbs) | `render by name` |
+| `ilium-client/src/naming.rs encode_untrusted_context` | [naming/unavailable-context](templates/naming/unavailable-context.hbs) | `render by name` |
+| `ilium-server/src/ipc/handlers.rs monitor restoration fallback` | [agent/progress-observation-stopped](templates/agent/progress-observation-stopped.hbs) | `PROGRESS_OBSERVATION_STOPPED` |
