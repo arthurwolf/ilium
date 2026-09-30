@@ -646,6 +646,21 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         Mode::LeaderPending | Mode::NavigationLeaderPending
     ) {
         let only_navigation_actions = matches!(app.mode, Mode::NavigationLeaderPending);
+        // tmux's `send-prefix`: pressing the prefix twice delivers one literal
+        // prefix keystroke to the focused pane, so a nested tmux/ilium (or a
+        // shell's own Ctrl+B) stays reachable.
+        let pending_base = if only_navigation_actions {
+            app.keyboard_settings.navigation_shortcut_base
+        } else {
+            app.keyboard_settings.shortcut_base
+        };
+        if keymap::is_leader_key(&key, pending_base) {
+            app.mode = Mode::Normal;
+            if app.focus == FocusTarget::Pane {
+                app.handle_pane_key(key);
+            }
+            return;
+        }
         if let Some(binding_key) = keymap::BindingKey::from_key_event(&key) {
             if let Some(action) = keymap::action_for_table(&app.keybindings, binding_key) {
                 if !only_navigation_actions || action.uses_navigation_prefix() {
@@ -3724,7 +3739,10 @@ mod indent_outdent_tests {
         assert!(app.cost_settings.sparkline.enabled);
         press(&mut app, KeyCode::Down);
         press(&mut app, KeyCode::Right);
-        assert_eq!(app.cost_settings.sparkline.visibility, CostVisibility::Always);
+        assert_eq!(
+            app.cost_settings.sparkline.visibility,
+            CostVisibility::Always
+        );
 
         // Right/Left step a numeric row through its ladder.
         let window = row_index(&app, CostRow::SparklineWindow);
@@ -3767,7 +3785,11 @@ mod indent_outdent_tests {
             press(&mut app, KeyCode::Char(character));
         }
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.cost_window_input.as_deref(), Some("5x"), "typo keeps the field");
+        assert_eq!(
+            app.cost_window_input.as_deref(),
+            Some("5x"),
+            "typo keeps the field"
+        );
         assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
 
         press(&mut app, KeyCode::Backspace);
@@ -3784,8 +3806,14 @@ mod indent_outdent_tests {
         press(&mut app, KeyCode::Char('9'));
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.cost_window_input, None);
-        assert_eq!(app.cost_settings.sparkline_window_minutes, 600, "Esc cancels");
-        assert!(matches!(app.mode, Mode::Settings(_)), "Esc closed only the field");
+        assert_eq!(
+            app.cost_settings.sparkline_window_minutes, 600,
+            "Esc cancels"
+        );
+        assert!(
+            matches!(app.mode, Mode::Settings(_)),
+            "Esc closed only the field"
+        );
     }
 
     #[test]

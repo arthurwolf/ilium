@@ -33,7 +33,8 @@ mod tests {
                 error: (status == ProgressTaskStatus::Error).then(|| "task failed".into()),
             },
             1000,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     #[test]
@@ -48,12 +49,26 @@ mod tests {
 
     #[test]
     fn zero_duration_keeps_completed_results_visible() {
-        assert!(footer_is_visible(Some(&report(ProgressTaskStatus::Done)), 0, u64::MAX));
+        assert!(footer_is_visible(
+            Some(&report(ProgressTaskStatus::Done)),
+            0,
+            u64::MAX
+        ));
     }
 
     #[test]
     fn running_at_one_hundred_percent_is_not_completion() {
-        assert!(footer_is_visible(Some(&report(ProgressTaskStatus::Running)), 60, u64::MAX));
+        assert!(footer_is_visible(
+            Some(&report(ProgressTaskStatus::Running)),
+            60,
+            u64::MAX
+        ));
+        let mut unknown_outcome = report(ProgressTaskStatus::Running);
+        unknown_outcome.monitor_health = ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe unavailable; task outcome unknown".into(),
+        };
+        assert!(footer_is_visible(Some(&unknown_outcome), 60, u64::MAX));
     }
 
     #[test]
@@ -66,6 +81,10 @@ mod tests {
     #[test]
     fn absent_report_is_hidden_and_future_timestamp_does_not_underflow() {
         assert!(!footer_is_visible(None, 60, 0));
-        assert!(footer_is_visible(Some(&report(ProgressTaskStatus::Done)), 60, 0));
+        assert!(footer_is_visible(
+            Some(&report(ProgressTaskStatus::Done)),
+            60,
+            0
+        ));
     }
 }

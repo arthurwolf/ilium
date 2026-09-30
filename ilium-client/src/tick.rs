@@ -37,8 +37,6 @@ pub fn on_tick(
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let session_stats_changed = app.tick_session_stats(now);
-    let progress_display_changed =
-        app.tick_completed_progress_display(crate::scheduled_input::unix_millis_now());
     let cost_changed = app.tick_cost(now);
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
@@ -56,7 +54,6 @@ pub fn on_tick(
         || workspace_search_started
         || chatroom_changed
         || session_stats_changed
-        || progress_display_changed
         || cost_changed
         || context_menu_hover_changed
         || agent_popover_changed

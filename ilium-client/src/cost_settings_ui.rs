@@ -259,7 +259,14 @@ fn param_value(row: CostRow, app: &App) -> String {
             format_cuts(&settings.burn_cuts, true),
         ),
         CostRow::HistoryDays => format!("{} days", settings.history_days),
-        CostRow::Budget => format_usd(settings.budget_usd, false).replace(".00", ""),
+        CostRow::Budget => {
+            // Whole dollars stay whole; cents only when the budget has them.
+            if settings.budget_usd.fract() == 0.0 {
+                format!("${:.0}", settings.budget_usd)
+            } else {
+                format!("${:.2}", settings.budget_usd)
+            }
+        }
         CostRow::SparklineWindow => format_window(settings.sparkline_window_minutes),
         CostRow::SparklineCells => format!("{} cells", settings.sparkline_cells),
         CostRow::SortByCost => {

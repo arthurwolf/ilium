@@ -77,7 +77,7 @@ pub fn confirmation_plan(
                             ilium_prompts::voice::VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE
                                 .to_owned()
                         })?;
-                        ilium_prompts::render_value("voice/policy/queue-this-prompt-to-be-submitted-automatically", &serde_json::json!({"v0": format!("{}", runs)}))
+                        ilium_prompts::render_value("voice/policy/queue-this-prompt-to-be-submitted-automatically", &serde_json::json!({"v0": (runs).to_string()}))
                     }
                     Some(PromptDeliveryChoice::Once) | None => {
                         ilium_prompts::voice::VOICE_POLICY_QUEUE_THIS_PROMPT_FOR_AUTOMATIC_SUBMISSION_AFTER.to_owned()
@@ -168,7 +168,7 @@ fn pinned_board_delete_plan(
     let column = board.columns.get(column_index).ok_or_else(|| {
         ilium_prompts::render_value(
             "voice/policy/board-has-no-column",
-            &serde_json::json!({"v0": format!("{}", column_index)}),
+            &serde_json::json!({"v0": (column_index).to_string()}),
         )
     })?;
 
@@ -180,7 +180,7 @@ fn pinned_board_delete_plan(
             let card = column
                 .cards
                 .get(card_index)
-                .ok_or_else(|| ilium_prompts::render_value("voice/policy/board-has-no-card-v0-in-column", &serde_json::json!({"v0": format!("{}", card_index), "v1": format!("{}", column_index)})))?;
+                .ok_or_else(|| ilium_prompts::render_value("voice/policy/board-has-no-card-v0-in-column", &serde_json::json!({"v0": (card_index).to_string(), "v1": (column_index).to_string()})))?;
             ilium_prompts::render_value(
                 "voice/policy/permanently-delete-the-card-v0-from-column",
                 &serde_json::json!({"v0": format!("{:?}", card.title), "v1": format!("{:?}", column.title)}),
@@ -188,7 +188,7 @@ fn pinned_board_delete_plan(
         }
         BoardAction::DeleteColumn => ilium_prompts::render_value(
             "voice/policy/permanently-delete-the-column-v0-and-its",
-            &serde_json::json!({"v0": format!("{:?}", column.title), "v1": format!("{}", column.cards.len())}),
+            &serde_json::json!({"v0": format!("{:?}", column.title), "v1": (column.cards.len()).to_string()}),
         ),
         // `confirmation_plan` only routes DeleteCard/DeleteColumn here.
         _ => return Ok(None),

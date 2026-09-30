@@ -112,7 +112,7 @@ fn expected_ids() -> BTreeSet<String> {
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }
-    add_range(&mut ids, "AM", 1, 22);
+    add_range(&mut ids, "AM", 1, 23);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 2);

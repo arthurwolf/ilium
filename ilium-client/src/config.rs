@@ -25,6 +25,7 @@ use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, Voi
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
+use crate::cost_settings::CostSettings;
 use crate::error::ClientError;
 use crate::icon_settings::{IconSettings, IconTarget};
 use crate::keymap::{
@@ -35,7 +36,6 @@ use crate::layout::{
     DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
     MIN_TREE_WIDTH,
 };
-use crate::cost_settings::CostSettings;
 use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
@@ -1627,7 +1627,8 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             Some(lines) => return Err(ConfigLoadError::InvalidProgressMaxLines(lines)),
             None => defaults.progress_max_lines,
         },
-        completed_progress_hide_after_seconds: raw.completed_progress_hide_after_seconds
+        completed_progress_hide_after_seconds: raw
+            .completed_progress_hide_after_seconds
             .unwrap_or(defaults.completed_progress_hide_after_seconds),
         terminal_text_selection_enabled: raw
             .terminal_text_selection_enabled
@@ -3170,6 +3171,8 @@ mod tests {
                 "cycle_previous_in_group = \"page_up\"\n",
                 "jump_next_group = \"down\"\n",
                 "jump_previous_group = \"up\"\n",
+                "focus_pane_up = \"k\"\n",
+                "focus_pane_down = \"j\"\n",
             ),
         )
         .unwrap();
@@ -3611,7 +3614,10 @@ mod tests {
 
         let loaded = load(&dir).unwrap();
         assert_eq!(loaded.cost, settings);
-        assert!(!loaded.ui.show_context_menu_icons, "other tables survive the save");
+        assert!(
+            !loaded.ui.show_context_menu_icons,
+            "other tables survive the save"
+        );
     }
 
     #[test]
@@ -3662,7 +3668,8 @@ mod tests {
             std::fs::write(
                 directory.join("config.toml"),
                 format!("[ui]\ncompleted_progress_hide_after_seconds = {seconds}\n"),
-            ).unwrap();
+            )
+            .unwrap();
             let settings = load(&directory).unwrap();
             save_ui_settings(&directory, &settings.ui).unwrap();
             let reloaded = load(&directory).unwrap();
@@ -3672,6 +3679,19 @@ mod tests {
                     .and_then(toml::Value::as_integer),
                 Some(seconds)
             );
+        }
+    }
+
+    #[test]
+    fn completed_progress_expiry_rejects_invalid_toml_values() {
+        let directory = scratch_dir();
+        for value in ["-1", "4294967296", "1.5", "\"soon\""] {
+            std::fs::write(
+                directory.join("config.toml"),
+                format!("[ui]\ncompleted_progress_hide_after_seconds = {value}\n"),
+            )
+            .unwrap();
+            assert!(load(&directory).is_err(), "accepted {value}");
         }
     }
 

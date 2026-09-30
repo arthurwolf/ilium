@@ -559,8 +559,12 @@ fn build_children(
     context: &TreeItemBuildContext<'_>,
     ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
-    let children =
-        tree_ordering::ordered_children_ranked(tree, parent, context.tree_order, context.cost_ranks);
+    let children = tree_ordering::ordered_children_ranked(
+        tree,
+        parent,
+        context.tree_order,
+        context.cost_ranks,
+    );
     let preceding_project_ids = if parent == ROOT_ID {
         let project_ids = children
             .iter()
@@ -2165,8 +2169,7 @@ pub fn render(
     if let Some(hit) = hovered {
         // The whole item gets the highlight, like the selection does: the
         // action buttons alone would otherwise tint only the row's right end.
-        if let Some((_, first_row, height)) =
-            rendered_rows.iter().find(|(id, _, _)| *id == hit.id)
+        if let Some((_, first_row, height)) = rendered_rows.iter().find(|(id, _, _)| *id == hit.id)
         {
             paint_highlight_rows(frame, list, *first_row, *height);
         }
@@ -2301,20 +2304,26 @@ fn draw_cost_indicators(
         }
         let right_edge = match hover_hit.filter(|hit| hit.line == 0) {
             Some(_) => {
-                let actions = applicable_row_actions(
-                    tree,
-                    *id,
-                    options.hover.show_management_actions,
-                );
+                let actions =
+                    applicable_row_actions(tree, *id, options.hover.show_management_actions);
                 match TreeRowActionStrip::for_actions(area, actions.len()) {
-                    // One blank column keeps the strip off the first button.
-                    Some(strip) => strip.area.x.saturating_sub(1),
+                    // One blank column keeps the strip off the first button;
+                    // it is cleared here so no title glyph survives in it.
+                    Some(strip) => {
+                        let gap = strip.area.x.saturating_sub(1);
+                        if gap >= list.x {
+                            let buffer = frame.buffer_mut();
+                            let background = buffer[(gap, *first_row)].bg;
+                            let cell = &mut buffer[(gap, *first_row)];
+                            cell.reset();
+                            cell.set_symbol(" ").set_bg(background);
+                        }
+                        gap
+                    }
                     None => list.right(),
                 }
             }
-            None => list
-                .right()
-                .saturating_sub(u16::from(has_scrollbar)),
+            None => list.right().saturating_sub(u16::from(has_scrollbar)),
         };
         crate::cost_overlay::draw_segments(
             frame.buffer_mut(),
@@ -3574,7 +3583,9 @@ mod tests {
     fn tree_labels_use_action_columns_until_that_specific_row_is_hovered() {
         let area = Rect::new(0, 0, 40, 8);
         let list = list_area(area);
-        let action_strip = TreeRowActionStrip::for_actions(area, usize::from(ROW_ACTION_COUNT)).unwrap().area;
+        let action_strip = TreeRowActionStrip::for_actions(area, usize::from(ROW_ACTION_COUNT))
+            .unwrap()
+            .area;
         assert_eq!(action_strip.right(), list.right());
         assert_eq!(action_strip.width, ROW_ACTION_TOTAL_WIDTH);
 
@@ -3775,7 +3786,8 @@ mod tests {
             Style::default(),
         );
         let mut next = previous.clone();
-        let action_strip = TreeRowActionStrip::for_actions(area, usize::from(ROW_ACTION_COUNT)).unwrap();
+        let action_strip =
+            TreeRowActionStrip::for_actions(area, usize::from(ROW_ACTION_COUNT)).unwrap();
         action_strip.draw(
             &mut next,
             row,
@@ -5122,7 +5134,9 @@ mod tests {
         let exact_width = Rect::new(0, 0, ROW_ACTION_TOTAL_WIDTH + 2, 8);
 
         assert_eq!(list_area(too_narrow).width, ROW_ACTION_TOTAL_WIDTH - 1);
-        assert!(TreeRowActionStrip::for_actions(too_narrow, usize::from(ROW_ACTION_COUNT)).is_none());
+        assert!(
+            TreeRowActionStrip::for_actions(too_narrow, usize::from(ROW_ACTION_COUNT)).is_none()
+        );
         assert_eq!(list_area(exact_width).width, ROW_ACTION_TOTAL_WIDTH);
         assert_eq!(
             TreeRowActionStrip::for_actions(exact_width, usize::from(ROW_ACTION_COUNT))
@@ -5413,10 +5427,18 @@ mod cost_indicator_tests {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let shell = tree
-            .add_pane(group, "a-shell-with-a-rather-long-title", ilium_core::PaneContentKind::Terminal)
+            .add_pane(
+                group,
+                "a-shell-with-a-rather-long-title",
+                ilium_core::PaneContentKind::Terminal,
+            )
             .unwrap();
         let second_shell = tree
-            .add_pane(group, "another-long-named-shell-pane", ilium_core::PaneContentKind::Terminal)
+            .add_pane(
+                group,
+                "another-long-named-shell-pane",
+                ilium_core::PaneContentKind::Terminal,
+            )
             .unwrap();
         Fixture {
             tree,
@@ -5525,7 +5547,12 @@ mod cost_indicator_tests {
     #[test]
     fn hover_highlight_covers_the_whole_row_and_only_that_row() {
         let fixture = fixture();
-        let (_, state) = render_frame(&fixture.tree, TreeHoverState::default(), None, TreeOrder::Manual);
+        let (_, state) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            None,
+            TreeOrder::Manual,
+        );
         let row = row_of(&state, fixture.shell);
         let (buffer, _) = render_frame(
             &fixture.tree,
@@ -5534,7 +5561,14 @@ mod cost_indicator_tests {
             TreeOrder::Manual,
         );
         let list = list_area(AREA);
+        let mut covered_until = list.x;
         for x in list.x..list.right() {
+            // Cells a wide glyph spills into carry no style of their own.
+            if x < covered_until {
+                continue;
+            }
+            covered_until = x
+                + (unicode_width::UnicodeWidthStr::width(buffer[(x, row)].symbol()) as u16).max(1);
             assert_eq!(
                 buffer[(x, row)].bg,
                 theme::accent_bg(),
@@ -5554,7 +5588,12 @@ mod cost_indicator_tests {
     #[test]
     fn close_and_retitle_are_flush_right_and_adjacent() {
         let fixture = fixture();
-        let (_, state) = render_frame(&fixture.tree, TreeHoverState::default(), None, TreeOrder::Manual);
+        let (_, state) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            None,
+            TreeOrder::Manual,
+        );
         let row = row_of(&state, fixture.shell);
         let (buffer, _) = render_frame(
             &fixture.tree,
@@ -5570,14 +5609,15 @@ mod cost_indicator_tests {
             "retitle is the rightmost control"
         );
         assert_eq!(
-            buffer[(right - 2 * ROW_ACTION_WIDTH, row)].symbol().trim_end(),
+            buffer[(right - 2 * ROW_ACTION_WIDTH, row)]
+                .symbol()
+                .trim_end(),
             TreeRowAction::Close.glyph(&icons, false),
             "close sits immediately left of retitle"
         );
         assert!(
-            !row_text(&buffer, row)[..usize::from(right - 2 * ROW_ACTION_WIDTH)].contains(
-                TreeRowAction::Close.glyph(&icons, false)
-            ),
+            !row_text(&buffer, row)[..usize::from(right - 2 * ROW_ACTION_WIDTH)]
+                .contains(TreeRowAction::Close.glyph(&icons, false)),
             "no control is centred in the row"
         );
     }
@@ -5585,12 +5625,28 @@ mod cost_indicator_tests {
     #[test]
     fn hovered_meter_sits_immediately_left_of_the_buttons() {
         let fixture = fixture();
-        let cost = overlay(CostSettings::default(), &[(fixture.shell, row_cost(2, 6.0))]);
-        let (_, state) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::Manual);
+        let cost = overlay(
+            CostSettings::default(),
+            &[(fixture.shell, row_cost(2, 6.0))],
+        );
+        let (_, state) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::Manual,
+        );
         let row = row_of(&state, fixture.shell);
 
-        let (idle, _) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::Manual);
-        assert!(!row_text(&idle, row).contains('▰'), "meter is hover-only by default");
+        let (idle, _) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::Manual,
+        );
+        assert!(
+            !row_text(&idle, row).contains('▰'),
+            "meter is hover-only by default"
+        );
 
         let (hovered, _) = render_frame(
             &fixture.tree,
@@ -5606,7 +5662,11 @@ mod cost_indicator_tests {
         let meter: String = text[usize::from(strip_x - 6)..usize::from(strip_x - 1)].concat();
         assert_eq!(meter, "▰▰▰▱▱", "row: {}", row_text(&hovered, row));
         assert_eq!(text[usize::from(strip_x - 1)], " ");
-        assert_eq!(hovered[(strip_x - 6, row)].bg, theme::accent_bg(), "drawn on the highlight");
+        assert_eq!(
+            hovered[(strip_x - 6, row)].bg,
+            theme::accent_bg(),
+            "drawn on the highlight"
+        );
     }
 
     #[test]
@@ -5621,10 +5681,21 @@ mod cost_indicator_tests {
                 (fixture.second_shell, row_cost(4, 80.0)),
             ],
         );
-        let (_, state) = render_frame(&fixture.tree, TreeHoverState::default(), None, TreeOrder::Manual);
-        let (buffer, _) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::Manual);
+        let (_, state) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            None,
+            TreeOrder::Manual,
+        );
+        let (buffer, _) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::Manual,
+        );
         let right = list_area(AREA).right();
-        for (id, expected) in [(fixture.shell, "▰▱▱▱▱"), (fixture.second_shell, "▰▰▰▰▰")] {
+        for (id, expected) in [(fixture.shell, "▰▱▱▱▱"), (fixture.second_shell, "▰▰▰▰▰")]
+        {
             let row = row_of(&state, id);
             let meter: String = (right - 5..right)
                 .map(|x| buffer[(x, row)].symbol().to_owned())
@@ -5639,17 +5710,32 @@ mod cost_indicator_tests {
         let mut settings = CostSettings::default();
         settings.adjust(CostRow::Display(CostDisplay::Meter), 0);
         let rows = [(fixture.group, row_cost(3, 12.4))];
-        let (_, state) = render_frame(&fixture.tree, TreeHoverState::default(), None, TreeOrder::Manual);
+        let (_, state) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            None,
+            TreeOrder::Manual,
+        );
         let group_row = row_of(&state, fixture.group);
 
         let off = overlay(settings.clone(), &rows);
-        let (buffer, _) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&off), TreeOrder::Manual);
+        let (buffer, _) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&off),
+            TreeOrder::Manual,
+        );
         assert!(!row_text(&buffer, group_row).contains("$12.4"));
 
         settings.adjust(CostRow::Display(CostDisplay::GroupTotals), 0);
         settings.adjust(CostRow::Visibility(CostDisplay::GroupTotals), 0);
         let on = overlay(settings, &rows);
-        let (buffer, _) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&on), TreeOrder::Manual);
+        let (buffer, _) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&on),
+            TreeOrder::Manual,
+        );
         assert!(row_text(&buffer, group_row).trim_end().contains("▆ $12.4"));
     }
 
@@ -5662,8 +5748,17 @@ mod cost_indicator_tests {
         let mut cost = overlay(settings, &[(fixture.shell, row_cost(1, 52.3))]);
         cost.agent_count = 1;
         cost.total_usd = 52.3;
-        let (buffer, _) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::Manual);
-        assert!(row_text(&buffer, 0).contains("Σ $52.3"), "title: {}", row_text(&buffer, 0));
+        let (buffer, _) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::Manual,
+        );
+        assert!(
+            row_text(&buffer, 0).contains("Σ $52.3"),
+            "title: {}",
+            row_text(&buffer, 0)
+        );
     }
 
     #[test]
@@ -5677,9 +5772,19 @@ mod cost_indicator_tests {
             ],
         );
         cost.ranks = cost.rows.iter().map(|(id, row)| (*id, row.usd)).collect();
-        let (_, manual) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::Manual);
+        let (_, manual) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::Manual,
+        );
         assert!(row_of(&manual, fixture.shell) < row_of(&manual, fixture.second_shell));
-        let (_, by_cost) = render_frame(&fixture.tree, TreeHoverState::default(), Some(&cost), TreeOrder::CostDescending);
+        let (_, by_cost) = render_frame(
+            &fixture.tree,
+            TreeHoverState::default(),
+            Some(&cost),
+            TreeOrder::CostDescending,
+        );
         assert!(row_of(&by_cost, fixture.second_shell) < row_of(&by_cost, fixture.shell));
     }
 }

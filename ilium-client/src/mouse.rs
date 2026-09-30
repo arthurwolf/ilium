@@ -2162,12 +2162,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Cost {
-                if let Some(hit) = crate::cost_settings_ui::hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    app,
-                ) {
+                if let Some(hit) =
+                    crate::cost_settings_ui::hit(layout.content_area, state.scroll, position, app)
+                {
                     state.selected_row = hit.index;
                     app.mode = Mode::Settings(state);
                     app.settings_adjust_cost_row(hit.row, hit.direction);
@@ -3900,7 +3897,11 @@ mod cost_settings_mouse_tests {
         );
     }
 
-    fn span_of(app: &App, content: ratatui::layout::Rect, row: CostRow) -> crate::cost_settings_ui::RowSpan {
+    fn span_of(
+        app: &App,
+        content: ratatui::layout::Rect,
+        row: CostRow,
+    ) -> crate::cost_settings_ui::RowSpan {
         *crate::cost_settings_ui::view(app, 0, content.width)
             .rows
             .iter()
@@ -3921,7 +3922,10 @@ mod cost_settings_mouse_tests {
         // Its visibility selector.
         let visibility = span_of(&app, content, CostRow::Visibility(CostDisplay::Sparkline));
         click(&mut app, content.x + 8, content.y + visibility.first_line);
-        assert_eq!(app.cost_settings.sparkline.visibility, CostVisibility::Always);
+        assert_eq!(
+            app.cost_settings.sparkline.visibility,
+            CostVisibility::Always
+        );
 
         // A radio card anywhere inside it.
         let budget = span_of(&app, content, CostRow::Calibration(Calibration::Budget));
@@ -3931,13 +3935,25 @@ mod cost_settings_mouse_tests {
         // The parameter row that appeared: increment and decrement halves.
         let amount = span_of(&app, content, CostRow::Budget);
         assert_eq!(app.cost_settings.budget_usd, 10.0);
-        click(&mut app, content.x + amount.control_x + 6, content.y + amount.control_line);
+        click(
+            &mut app,
+            content.x + amount.control_x + 6,
+            content.y + amount.control_line,
+        );
         assert_eq!(app.cost_settings.budget_usd, 20.0);
-        click(&mut app, content.x + amount.control_x, content.y + amount.control_line);
+        click(
+            &mut app,
+            content.x + amount.control_x,
+            content.y + amount.control_line,
+        );
         assert_eq!(app.cost_settings.budget_usd, 10.0);
 
         // A click on a stepper's description changes nothing.
-        click(&mut app, content.x + amount.control_x + 6, content.y + amount.control_line + 1);
+        click(
+            &mut app,
+            content.x + amount.control_x + 6,
+            content.y + amount.control_line + 1,
+        );
         assert_eq!(app.cost_settings.budget_usd, 10.0);
 
         let Mode::Settings(state) = &app.mode else {

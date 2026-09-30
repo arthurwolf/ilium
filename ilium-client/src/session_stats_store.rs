@@ -110,7 +110,10 @@ impl Default for SessionStatsStore {
 impl SessionStatsStore {
     /// Transcript readers currently running.
     pub fn in_flight_count(&self) -> usize {
-        self.entries.values().filter(|entry| entry.in_flight).count()
+        self.entries
+            .values()
+            .filter(|entry| entry.in_flight)
+            .count()
     }
 
     pub fn entry(&self, pane_id: NodeId) -> Option<&StatsEntry> {
@@ -255,7 +258,10 @@ impl SessionStatsStore {
 fn claude_subagent_files(main_transcript: &std::path::Path) -> Vec<PathBuf> {
     const MAX_DEPTH: usize = 6;
     let mut files = Vec::new();
-    let mut pending = vec![(main_transcript.with_extension("").join("subagents"), 0_usize)];
+    let mut pending = vec![(
+        main_transcript.with_extension("").join("subagents"),
+        0_usize,
+    )];
     while let Some((directory, depth)) = pending.pop() {
         let Ok(children) = std::fs::read_dir(&directory) else {
             continue;
@@ -267,7 +273,10 @@ fn claude_subagent_files(main_transcript: &std::path::Path) -> Vec<PathBuf> {
             };
             if kind.is_dir() && depth < MAX_DEPTH {
                 pending.push((path, depth + 1));
-            } else if path.extension().is_some_and(|extension| extension == "jsonl") {
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+            {
                 files.push(path);
             }
         }
@@ -476,7 +485,11 @@ mod tests {
         store.request_refresh(pane_id, request.clone(), started);
         wait_for(&mut store, pane_id);
         let stats = store.entry(pane_id).unwrap().stats.clone().unwrap();
-        assert_eq!(stats.tokens.output, 9 + 1000, "main file plus the sub-agent");
+        assert_eq!(
+            stats.tokens.output,
+            9 + 1000,
+            "main file plus the sub-agent"
+        );
 
         // A second pass reads only what the sub-agent file gained, and never
         // counts the same message id twice.
@@ -485,7 +498,23 @@ mod tests {
         grown.push_str(&side_call("msg_side_2", 500));
         std::fs::write(&agent_file, grown).unwrap();
         assert!(store.request_refresh(pane_id, request, started + REFRESH_INTERVAL));
-        wait_for(&mut store, pane_id);
+        // The entry is already Ready from the first pass, so wait for the
+        // second pass's result itself rather than for a state change.
+        for _ in 0..250 {
+            store.drain_events();
+            let output = store
+                .entry(pane_id)
+                .unwrap()
+                .stats
+                .as_ref()
+                .unwrap()
+                .tokens
+                .output;
+            if output != 9 + 1000 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let stats = store.entry(pane_id).unwrap().stats.clone().unwrap();
         assert_eq!(stats.tokens.output, 9 + 1000 + 500);
     }

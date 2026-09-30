@@ -277,7 +277,7 @@ fn diagnostic_tool_arguments(arguments_json: &str) -> String {
 pub fn system_instructions(custom_prompt: &str, target_context: VoiceTargetContext) -> String {
     ilium_prompts::render_value(
         "voice/mod/system-instructions",
-        &serde_json::json!({"v0": format!("{}", target_context.prompt_status()), "v1": format!("{}", custom_prompt.trim())}),
+        &serde_json::json!({"v0": (target_context.prompt_status()).to_string(), "v1": (custom_prompt.trim()).to_string()}),
     )
 }
 
@@ -331,7 +331,7 @@ fn decode_arguments<T: DeserializeOwned>(arguments_json: &str) -> Result<T, Stri
     serde_json::from_str(arguments_json).map_err(|error| {
         ilium_prompts::render_value(
             "voice/mod/invalid-tool-arguments",
-            &serde_json::json!({"v0": format!("{}", error)}),
+            &serde_json::json!({"v0": (error).to_string()}),
         )
     })
 }

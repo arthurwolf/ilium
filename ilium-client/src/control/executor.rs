@@ -135,7 +135,7 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
                     app.mode = Mode::Search(state);
                     return Err(ilium_prompts::render_value(
                         "voice/executor/search-result-index-v0-does-not-exist",
-                        &serde_json::json!({"v0": format!("{}", index)}),
+                        &serde_json::json!({"v0": (index).to_string()}),
                     ));
                 }
                 state.selected_index = index;
@@ -149,7 +149,7 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
                     app.mode = Mode::Search(state);
                     return Err(ilium_prompts::render_value(
                         "voice/executor/search-result-index-v0-does-not-exist",
-                        &serde_json::json!({"v0": format!("{}", index)}),
+                        &serde_json::json!({"v0": (index).to_string()}),
                     ));
                 }
                 state.selected_index = index;
@@ -195,7 +195,7 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
         status: "ok",
         message: ilium_prompts::render_value(
             "voice/executor/found-v0-workspace-results-for",
-            &serde_json::json!({"v0": format!("{}", results.len()), "v1": format!("{:?}", query)}),
+            &serde_json::json!({"v0": (results.len()).to_string(), "v1": format!("{:?}", query)}),
         ),
         data: json!({ "query": query, "results": results }),
         terminate_session_after_delivery: false,
@@ -216,7 +216,7 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
             app.focus_pane(pane_id);
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/executor/focused-pane",
-                &serde_json::json!({"v0": format!("{}", pane_id.0)}),
+                &serde_json::json!({"v0": (pane_id.0).to_string()}),
             )))
         }
         UiAction::FocusNextPane => {
@@ -255,13 +255,13 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
             {
                 return Err(ilium_prompts::render_value(
                     "voice/executor/node-v0-is-not-a-split-view",
-                    &serde_json::json!({"v0": format!("{}", split_id.0)}),
+                    &serde_json::json!({"v0": (split_id.0).to_string()}),
                 ));
             }
             app.show_split_view(split_id);
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/executor/showing-split",
-                &serde_json::json!({"v0": format!("{}", split_id.0)}),
+                &serde_json::json!({"v0": (split_id.0).to_string()}),
             )))
         }
         UiAction::OpenSettings => {
@@ -287,7 +287,7 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
             app.mode = Mode::Settings(state);
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/executor/opened-v0-settings",
-                &serde_json::json!({"v0": format!("{}", tab.label())}),
+                &serde_json::json!({"v0": (tab.label()).to_string()}),
             )))
         }
         UiAction::OpenSearch => {
@@ -334,7 +334,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                 ilium_core::validate_branch_name(&workspace.branch).map_err(|error| {
                     ilium_prompts::render_value(
                         "voice/executor/invalid-workspace-branch",
-                        &serde_json::json!({"v0": format!("{}", error)}),
+                        &serde_json::json!({"v0": (error).to_string()}),
                     )
                 })?;
                 if workspace
@@ -358,7 +358,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                 );
                 return Ok(ExecutionReceipt::queued(ilium_prompts::render_value(
                     "voice/executor/creating-a-v0-agent-in-a-git",
-                    &serde_json::json!({"v0": format!("{}", provider.label())}),
+                    &serde_json::json!({"v0": (provider.label()).to_string()}),
                 )));
             }
             if let Some(initial_input) = command.initial_input {
@@ -372,7 +372,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             }
             Ok(ExecutionReceipt::queued(ilium_prompts::render_value(
                 "voice/executor/creating-a-v0-agent-pane",
-                &serde_json::json!({"v0": format!("{}", provider.label())}),
+                &serde_json::json!({"v0": (provider.label()).to_string()}),
             )))
         }
         TreeAction::CreateCommandPane => {
@@ -471,7 +471,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             if pane_ids.len() > MAXIMUM_SPLIT_VIEW_PANES {
                 return Err(ilium_prompts::render_value(
                     "voice/executor/a-split-view-can-contain-at-most",
-                    &serde_json::json!({"v0": format!("{}", MAXIMUM_SPLIT_VIEW_PANES)}),
+                    &serde_json::json!({"v0": (MAXIMUM_SPLIT_VIEW_PANES).to_string()}),
                 ));
             }
             app.queue_request(ClientRequest::CreateSplitView {
@@ -528,7 +528,7 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             {
                 return Err(ilium_prompts::render_value(
                     "voice/executor/node-v0-cannot-be-expanded",
-                    &serde_json::json!({"v0": format!("{}", node_id.0)}),
+                    &serde_json::json!({"v0": (node_id.0).to_string()}),
                 ));
             }
             app.select_node(node_id);
@@ -929,7 +929,7 @@ fn require_runtime_kind(app: &App, pane_id: ilium_core::NodeId, label: &str) -> 
         .ok_or_else(|| {
             ilium_prompts::render_value(
                 "voice/executor/node-v0-is-not-a-live",
-                &serde_json::json!({"v0": format!("{}", pane_id.0), "v1": format!("{}", label)}),
+                &serde_json::json!({"v0": (pane_id.0).to_string(), "v1": (label).to_string()}),
             )
         })
 }
@@ -940,7 +940,7 @@ fn require_terminal(app: &App, pane_id: ilium_core::NodeId) -> Result<(), String
         .ok_or_else(|| {
             ilium_prompts::render_value(
                 "voice/executor/node-v0-is-not-a-terminal-pane",
-                &serde_json::json!({"v0": format!("{}", pane_id.0)}),
+                &serde_json::json!({"v0": (pane_id.0).to_string()}),
             )
         })
 }
@@ -951,7 +951,7 @@ fn require_editor(app: &App, pane_id: ilium_core::NodeId) -> Result<(), String> 
         .ok_or_else(|| {
             ilium_prompts::render_value(
                 "voice/executor/node-v0-is-not-an-editor-pane",
-                &serde_json::json!({"v0": format!("{}", pane_id.0)}),
+                &serde_json::json!({"v0": (pane_id.0).to_string()}),
             )
         })
 }
@@ -981,7 +981,7 @@ fn select_column(board: &mut BoardPane, column_index: usize) -> Result<(), Strin
     } else {
         Err(ilium_prompts::render_value(
             "voice/policy/board-has-no-column",
-            &serde_json::json!({"v0": format!("{}", column_index)}),
+            &serde_json::json!({"v0": (column_index).to_string()}),
         ))
     }
 }
@@ -1000,7 +1000,7 @@ fn select_card(
     } else {
         Err(ilium_prompts::render_value(
             "voice/policy/board-has-no-card-v0-in-column",
-            &serde_json::json!({"v0": format!("{}", card_index), "v1": format!("{}", column_index)}),
+            &serde_json::json!({"v0": (card_index).to_string(), "v1": (column_index).to_string()}),
         ))
     }
 }
@@ -1009,13 +1009,13 @@ fn required_nonempty(value: Option<String>, field: &str) -> Result<String, Strin
     let value = value.ok_or_else(|| {
         ilium_prompts::render_value(
             "voice/executor/v0-is-required",
-            &serde_json::json!({"v0": format!("{}", field)}),
+            &serde_json::json!({"v0": (field).to_string()}),
         )
     })?;
     if value.trim().is_empty() {
         return Err(ilium_prompts::render_value(
             "voice/executor/v0-must-not-be-empty",
-            &serde_json::json!({"v0": format!("{}", field)}),
+            &serde_json::json!({"v0": (field).to_string()}),
         ));
     }
     Ok(value)

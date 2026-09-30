@@ -265,6 +265,19 @@
     ]
   },
   {
+    "id": "AM-23",
+    "title": "Hide completed progress after",
+    "explanation": "Choose how long a completed or failed task footer stays visible. The default is 60 seconds; left and right adjust the delay in 30-second steps. Never keeps the footer visible.",
+    "specimen": "Synthetic task outcome:\nDone 100% → 60 seconds pass → footer disappears\nThe terminal regains the footer rows.\nNever → footer remains visible.",
+    "states": "Running tasks remain visible even at 100%. Done and Error footers expire after the selected delay. Zero seconds means Never. Increasing the delay or selecting Never can show a retained result again.",
+    "motion": "The footer disappears once its deadline passes, including while another pane is producing output.",
+    "caveat": "This changes presentation only. Retained results, error details, unread indicators and queued notifications are preserved. The delay starts from the server's final observation and does not restart when the client reconnects.",
+    "frames": [
+      "Done 100%\nFooter visible before the configured deadline.",
+      "Deadline reached\nFooter hidden; terminal rows reclaimed. Result retained."
+    ]
+  },
+  {
     "id": "AN-01",
     "title": "Wave washing up sand",
     "explanation": "A diagonal tide leaves narrow foam and sparse wet-sand detail. Adjust tide reach, foam width, sand grains and wash-cycle length for this scene. Changes save immediately to this project.",

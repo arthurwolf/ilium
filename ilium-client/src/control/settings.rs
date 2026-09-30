@@ -45,7 +45,7 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             set_setting(app, path, value)?;
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/settings/updated",
-                &serde_json::json!({"v0": format!("{}", path)}),
+                &serde_json::json!({"v0": (path).to_string()}),
             )))
         }
         SettingsAction::Adjust => {
@@ -60,7 +60,7 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             adjust_setting(app, path, direction)?;
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/settings/adjusted",
-                &serde_json::json!({"v0": format!("{}", path)}),
+                &serde_json::json!({"v0": (path).to_string()}),
             )))
         }
         SettingsAction::TestInference => {

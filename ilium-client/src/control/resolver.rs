@@ -12,7 +12,7 @@ pub fn resolve_node(app: &App, target: &NodeTarget) -> Result<NodeId, String> {
         return app.tree.get(node_id).map(|_| node_id).ok_or_else(|| {
             ilium_prompts::render_value(
                 "voice/resolver/no-ilium-node-has-id",
-                &serde_json::json!({"v0": format!("{}", id)}),
+                &serde_json::json!({"v0": (id).to_string()}),
             )
         });
     }
@@ -75,7 +75,7 @@ pub fn resolve_parent(app: &App, target: &NodeTarget) -> Result<NodeId, String> 
     }
     Err(ilium_prompts::render_value(
         "voice/resolver/node-v0-cannot-contain-ordinary-ilium-items",
-        &serde_json::json!({"v0": format!("{}", node_id.0)}),
+        &serde_json::json!({"v0": (node_id.0).to_string()}),
     ))
 }
 
@@ -150,11 +150,11 @@ fn resolve_unique_name(app: &App, requested_name: &str) -> Result<NodeId, String
         )),
         _ => Err(ilium_prompts::render_value(
             "voice/resolver/the-name-v0-is-ambiguous-use-one",
-            &serde_json::json!({"v0": format!("{:?}", requested_name), "v1": format!("{}", matches
+            &serde_json::json!({"v0": format!("{:?}", requested_name), "v1": (matches
                 .iter()
                 .map(|id| node_path(app, *id))
                 .collect::<Vec<_>>()
-                .join(", "))}),
+                .join(", ")).to_string()}),
         )),
     }
 }
@@ -170,7 +170,7 @@ fn resolve_path(app: &App, requested_path: &str) -> Result<NodeId, String> {
         let children = app.tree.children_of(current).map_err(|_| {
             ilium_prompts::render_value(
                 "voice/resolver/v0-is-not-a-container",
-                &serde_json::json!({"v0": format!("{}", node_path(app, current))}),
+                &serde_json::json!({"v0": (node_path(app, current)).to_string()}),
             )
         })?;
         let matches = children
@@ -192,13 +192,13 @@ fn resolve_path(app: &App, requested_path: &str) -> Result<NodeId, String> {
             [] => {
                 return Err(ilium_prompts::render_value(
                     "voice/resolver/no-child-named-v0-exists-under",
-                    &serde_json::json!({"v0": format!("{:?}", component), "v1": format!("{}", node_path(app, current))}),
+                    &serde_json::json!({"v0": format!("{:?}", component), "v1": (node_path(app, current)).to_string()}),
                 ))
             }
             _ => {
                 return Err(ilium_prompts::render_value(
                     "voice/resolver/path-component-v0-is-ambiguous-under",
-                    &serde_json::json!({"v0": format!("{:?}", component), "v1": format!("{}", node_path(app, current))}),
+                    &serde_json::json!({"v0": format!("{:?}", component), "v1": (node_path(app, current)).to_string()}),
                 ))
             }
         }

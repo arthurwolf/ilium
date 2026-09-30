@@ -144,10 +144,18 @@ mod tests {
     fn cost_descending_sorts_by_rank_and_keeps_manual_order_for_ties() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let cheap = tree.add_pane(group, "cheap", PaneContentKind::Terminal).unwrap();
-        let free_first = tree.add_pane(group, "free-a", PaneContentKind::Terminal).unwrap();
-        let pricey = tree.add_pane(group, "pricey", PaneContentKind::Terminal).unwrap();
-        let free_second = tree.add_pane(group, "free-b", PaneContentKind::Terminal).unwrap();
+        let cheap = tree
+            .add_pane(group, "cheap", PaneContentKind::Terminal)
+            .unwrap();
+        let free_first = tree
+            .add_pane(group, "free-a", PaneContentKind::Terminal)
+            .unwrap();
+        let pricey = tree
+            .add_pane(group, "pricey", PaneContentKind::Terminal)
+            .unwrap();
+        let free_second = tree
+            .add_pane(group, "free-b", PaneContentKind::Terminal)
+            .unwrap();
         let ranks = HashMap::from([(cheap, 1.5), (pricey, 40.0)]);
 
         let ordered = ordered_children_ranked(&tree, group, TreeOrder::CostDescending, &ranks);
@@ -159,7 +167,10 @@ mod tests {
         let _ = (free_first, free_second);
         // Without ranks the mode degrades to the manual order.
         assert_eq!(
-            names(&tree, &ordered_children(&tree, group, TreeOrder::CostDescending)),
+            names(
+                &tree,
+                &ordered_children(&tree, group, TreeOrder::CostDescending)
+            ),
             ["cheap", "free-a", "pricey", "free-b"]
         );
     }

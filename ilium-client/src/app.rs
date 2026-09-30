@@ -36,6 +36,7 @@ use crate::config::{
     KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings,
     TreeOrder, UiSettings, VoiceSettings,
 };
+use crate::cost_settings::{CostRow, CostSettings};
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
 use crate::explorer_overlay::ExplorerOverlay;
 use crate::icon_search_workers::{IconSearchRequest, IconSemanticSearchEvent};
@@ -44,7 +45,6 @@ use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
 use crate::popover::AgentPopover;
 use crate::prompt_queue::PromptQueueDialogState;
-use crate::cost_settings::{CostRow, CostSettings};
 use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeStyle};
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
@@ -2007,6 +2007,9 @@ pub struct App {
     pub pending_conversion_start: Option<crate::session_conversion::ConversionJob>,
     /// Set when the user cancels a running conversion.
     pub pending_conversion_cancel: bool,
+    /// Position of a pane being swapped for its converted replacement, and
+    /// whether the user was looking at it, so the replacement can take over.
+    pub pending_replacement_focus: Option<crate::session_conversion::ReplacementFocus>,
     /// Exact detected process owning each verified agent session. Kept beside
     /// `agent_session_ids` because title prompts need the PID while process
     /// discovery remains server-owned.
@@ -2303,6 +2306,7 @@ impl App {
             conversion: None,
             pending_conversion_start: None,
             pending_conversion_cancel: false,
+            pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
             restored_editor_paths: HashMap::new(),
             title_inference_attempts: HashMap::new(),
@@ -2968,11 +2972,14 @@ impl App {
     /// Reclaims footer rows once a retained result expires, even when no
     /// server event or user input arrives. Never mutates monitor/result state.
     pub(crate) fn tick_completed_progress_display(&mut self, now_unix_millis: u64) -> bool {
-        let previous = self.displayed_pane_ids().into_iter()
+        let previous = self
+            .displayed_pane_ids()
+            .into_iter()
             .map(|pane_id| (pane_id, self.shows_progress_footer(pane_id)))
             .collect::<Vec<_>>();
         self.progress_display_now_unix_millis = now_unix_millis;
-        let changed = previous.into_iter()
+        let changed = previous
+            .into_iter()
             .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id));
         if changed {
             self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
@@ -3802,9 +3809,8 @@ impl App {
             return;
         };
         let Some(minutes) = crate::cost_model::parse_window_minutes(&input) else {
-            self.status_message = Some(
-                "Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).".to_owned(),
-            );
+            self.status_message =
+                Some("Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).".to_owned());
             return;
         };
         self.cost_window_input = None;
@@ -7524,11 +7530,12 @@ impl App {
     pub fn close_confirmation_message(&self, target: NodeId) -> Option<String> {
         let node = self.tree.get(target)?;
         match &node.kind {
-            NodeKind::Container(container) if !container.children.is_empty() => Some(format!(
-                "\"{}\" contains {} item(s). Close it and everything inside?",
-                node.name,
-                container.children.len()
-            )),
+            NodeKind::Container(container) if !container.children.is_empty() => {
+                Some(ilium_prompts::render_value(
+                    "naming/close-container",
+                    &serde_json::json!({"name": node.name, "count": container.children.len()}),
+                ))
+            }
             NodeKind::Pane {
                 content: PaneContentKind::Editor,
                 ..
@@ -7537,7 +7544,12 @@ impl App {
                     self.panes.get(&target),
                     Some(PaneRuntime::Editor(editor)) if editor.dirty
                 );
-                is_dirty.then(|| format!("\"{}\" has unsaved changes. Close anyway?", node.name))
+                is_dirty.then(|| {
+                    ilium_prompts::render_value(
+                        "naming/close-dirty-editor",
+                        &serde_json::json!({"name": node.name}),
+                    )
+                })
             }
             _ => None,
         }
@@ -12439,25 +12451,45 @@ mod tests {
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "tasks").unwrap();
-        let pane_id = app.tree.add_pane(group, "task", PaneContentKind::Terminal).unwrap();
-        app.panes.insert(pane_id, PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))));
+        let pane_id = app
+            .tree
+            .add_pane(group, "task", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.progress_display_now_unix_millis = 1000;
-        let progress = PaneProgress::new(17, ProgressTaskReport {
-            job_id: "expiry-proof".to_owned(),
-            status: ProgressTaskStatus::Done,
-            percent: 100.0,
-            message: "retained expiry footer marker".to_owned(),
-            error: None,
-        }, 1000).unwrap();
-        app.tree.set_pane_progress(pane_id, Some(progress.clone())).unwrap();
+        let progress = PaneProgress::new(
+            17,
+            ProgressTaskReport {
+                job_id: "expiry-proof".to_owned(),
+                status: ProgressTaskStatus::Done,
+                percent: 100.0,
+                message: "retained expiry footer marker".to_owned(),
+                error: None,
+            },
+            1000,
+        )
+        .unwrap();
+        app.tree
+            .set_pane_progress(pane_id, Some(progress.clone()))
+            .unwrap();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let before = app.pane_viewport(pane_id).unwrap();
         assert!(before.progress_area.is_some());
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-        terminal.draw(|frame| crate::ui::draw(frame, &mut app)).unwrap();
-        let rendered = terminal.backend().buffer().content().iter()
-            .map(|cell| cell.symbol()).collect::<String>();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
         assert!(rendered.contains("retained expiry footer marker"));
         app.take_outbound_requests();
 
@@ -12469,9 +12501,16 @@ mod tests {
             request, ClientRequest::ResizePane { pane_id: resized, rows, .. }
                 if *resized == pane_id && *rows == after.content_area.height
         )));
-        terminal.draw(|frame| crate::ui::draw(frame, &mut app)).unwrap();
-        let rendered = terminal.backend().buffer().content().iter()
-            .map(|cell| cell.symbol()).collect::<String>();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
         assert!(!rendered.contains("retained expiry footer marker"));
         assert_eq!(app.tree.pane_progress(pane_id), Some(&progress));
         assert!(!app.tick_completed_progress_display(62_000));
@@ -12483,6 +12522,78 @@ mod tests {
         app.tree.set_pane_progress(pane_id, Some(running)).unwrap();
         app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
         assert!(app.pane_viewport(pane_id).unwrap().progress_area.is_some());
+    }
+
+    #[test]
+    fn completed_progress_expiry_is_independent_in_both_split_orientations() {
+        use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
+        for orientation in [SplitOrientation::Vertical, SplitOrientation::Horizontal] {
+            let mut app = app();
+            let group = app.tree.add_group(ROOT_ID, "tasks").unwrap();
+            let done = app
+                .tree
+                .add_pane(group, "done", PaneContentKind::Terminal)
+                .unwrap();
+            let busy = app
+                .tree
+                .add_pane(group, "busy", PaneContentKind::Terminal)
+                .unwrap();
+            for pane_id in [done, busy] {
+                app.panes.insert(
+                    pane_id,
+                    PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+                );
+                let progress = PaneProgress::new(
+                    if pane_id == done { 17 } else { 18 },
+                    ProgressTaskReport {
+                        job_id: format!("split-{pane_id:?}"),
+                        status: if pane_id == done {
+                            ProgressTaskStatus::Done
+                        } else {
+                            ProgressTaskStatus::Running
+                        },
+                        percent: 100.0,
+                        message: "retained split result".into(),
+                        error: None,
+                    },
+                    1000,
+                )
+                .unwrap();
+                app.tree.set_pane_progress(pane_id, Some(progress)).unwrap();
+            }
+            let split_id = app
+                .tree
+                .create_split_view(group, "split", orientation, &[done, busy])
+                .unwrap();
+            app.right_panel_target = RightPanelTarget::SplitView {
+                split_id,
+                active_pane_id: Some(busy),
+            };
+            app.progress_display_now_unix_millis = 1000;
+            app.set_screen_area(Rect::new(0, 0, 120, 40));
+            let done_before = app.pane_viewport(done).unwrap();
+            let busy_before = app.pane_viewport(busy).unwrap();
+            assert!(done_before.progress_area.is_some());
+            assert!(busy_before.progress_area.is_some());
+            app.take_outbound_requests();
+            assert!(app.tick_completed_progress_display(61_000));
+            let done_after = app.pane_viewport(done).unwrap();
+            let busy_after = app.pane_viewport(busy).unwrap();
+            assert!(done_after.progress_area.is_none());
+            assert!(done_after.content_area.height > done_before.content_area.height);
+            assert_eq!(busy_after, busy_before);
+            assert!(app.tree.pane_progress(done).is_some());
+            let requests = app.take_outbound_requests();
+            assert_eq!(requests.len(), 1);
+            assert!(matches!(
+                requests[0], ClientRequest::ResizePane { pane_id, rows, cols, .. }
+                    if pane_id == done && rows == done_after.content_area.height
+                        && cols == done_after.content_area.width
+            ));
+            app.ui_settings.completed_progress_hide_after_seconds = 0;
+            app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+            assert!(app.pane_viewport(done).unwrap().progress_area.is_some());
+        }
     }
 
     #[test]
@@ -17140,7 +17251,12 @@ mod tests {
         app.restore_manual_tree_order_for_mutation();
         assert!(!app.cost_settings.sort_by_cost);
         assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
-        assert!(!crate::config::load(config_dir.path()).unwrap().cost.sort_by_cost);
+        assert!(
+            !crate::config::load(config_dir.path())
+                .unwrap()
+                .cost
+                .sort_by_cost
+        );
     }
 
     #[test]

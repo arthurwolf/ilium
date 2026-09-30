@@ -2209,7 +2209,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mode_label: &'static str = match &app.mode {
         Mode::Normal => "NORMAL",
         Mode::LeaderPending => "LEADER (press a letter — ? for help)",
-        Mode::NavigationLeaderPending => "TREE NAVIGATION (↓ ↑ Pg↓ Pg↑)",
+        Mode::NavigationLeaderPending => "TREE NAVIGATION (n p ( ))",
         Mode::Move => "MOVE",
         // The buffer itself is shown in the modal popup (see `draw`), not
         // here -- the status bar only names the mode while one is open.

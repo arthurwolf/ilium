@@ -3,7 +3,8 @@
 //! The task's own status and Ilium's ability to observe it are deliberately
 //! distinct. A degraded/failed monitor therefore changes the leading label
 //! and adds a warning without repainting the task itself as failed. Terminal
-//! task evidence remains visible until it is explicitly cleared or replaced.
+//! task evidence stays retained; the client may hide its footer after the
+//! configured delay without clearing or acknowledging it.
 
 use ilium_core::{PaneProgress, ProgressMonitorHealth, ProgressTaskStatus};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

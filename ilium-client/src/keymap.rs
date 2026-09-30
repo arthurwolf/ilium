@@ -137,17 +137,28 @@ pub enum BindingKey {
     Character(char),
     Up,
     Down,
+    Left,
+    Right,
     PageUp,
     PageDown,
 }
 
 impl BindingKey {
-    pub const SPECIAL: [Self; 4] = [Self::Up, Self::Down, Self::PageUp, Self::PageDown];
+    pub const SPECIAL: [Self; 6] = [
+        Self::Up,
+        Self::Down,
+        Self::Left,
+        Self::Right,
+        Self::PageUp,
+        Self::PageDown,
+    ];
 
     pub const fn character(self) -> Option<char> {
         match self {
             Self::Character(character) => Some(character),
-            Self::Up | Self::Down | Self::PageUp | Self::PageDown => None,
+            Self::Up | Self::Down | Self::Left | Self::Right | Self::PageUp | Self::PageDown => {
+                None
+            }
         }
     }
 
@@ -157,6 +168,8 @@ impl BindingKey {
             Self::Character(character) => character.to_string(),
             Self::Up => "up".to_string(),
             Self::Down => "down".to_string(),
+            Self::Left => "left".to_string(),
+            Self::Right => "right".to_string(),
             Self::PageUp => "page_up".to_string(),
             Self::PageDown => "page_down".to_string(),
         }
@@ -168,6 +181,8 @@ impl BindingKey {
         match value.trim().to_ascii_lowercase().as_str() {
             "up" | "arrow_up" => Some(Self::Up),
             "down" | "arrow_down" => Some(Self::Down),
+            "left" | "arrow_left" => Some(Self::Left),
+            "right" | "arrow_right" => Some(Self::Right),
             "page_up" | "pageup" => Some(Self::PageUp),
             "page_down" | "pagedown" => Some(Self::PageDown),
             _ => {
@@ -188,6 +203,8 @@ impl BindingKey {
             KeyCode::Char(character) => Some(Self::Character(character)),
             KeyCode::Up if key.modifiers.is_empty() => Some(Self::Up),
             KeyCode::Down if key.modifiers.is_empty() => Some(Self::Down),
+            KeyCode::Left if key.modifiers.is_empty() => Some(Self::Left),
+            KeyCode::Right if key.modifiers.is_empty() => Some(Self::Right),
             KeyCode::PageUp if key.modifiers.is_empty() => Some(Self::PageUp),
             KeyCode::PageDown if key.modifiers.is_empty() => Some(Self::PageDown),
             _ => None,
@@ -263,7 +280,7 @@ impl Action {
 
 /// The dedicated default prefix for tree traversal. It is intentionally
 /// separate from the general leader so a user who moves the general leader
-/// (for example to `Ctrl+A`) keeps `Ctrl+B ↓/↑/Pg↓/Pg↑` for tree traversal.
+/// (for example to `Ctrl+A`) keeps `Ctrl+B n/p/(/)` for tree traversal.
 pub const DEFAULT_NAVIGATION_SHORTCUT_BASE: ShortcutBase = ShortcutBase::B;
 
 /// Chooses the prefix rendered for one action in Help. Navigation actions
@@ -322,6 +339,8 @@ pub fn key_label(key: BindingKey) -> String {
         BindingKey::Character(character) => character.to_string(),
         BindingKey::Up => "↑".to_string(),
         BindingKey::Down => "↓".to_string(),
+        BindingKey::Left => "←".to_string(),
+        BindingKey::Right => "→".to_string(),
         BindingKey::PageUp => "Pg↑".to_string(),
         BindingKey::PageDown => "Pg↓".to_string(),
     }
@@ -360,24 +379,26 @@ impl KeymapPreset {
 pub const LEADER_BINDINGS: &[KeyBinding] = &[
     // Keep tree traversal at the top of Settings and Help: it is a distinct
     // navigation system with a dedicated prefix, rather than an incidental
-    // pane-focus action buried among general commands.
+    // pane-focus action buried among general commands. The defaults follow
+    // tmux: `n`/`p` are next/previous window (here: pane in the group) and
+    // `(`/`)` are previous/next session (here: group).
     KeyBinding {
-        key: BindingKey::Down,
+        key: BindingKey::Character('n'),
         action: Action::CycleNextInGroup,
         description: "Cycle to the next pane in the current group",
     },
     KeyBinding {
-        key: BindingKey::Up,
+        key: BindingKey::Character('p'),
         action: Action::CyclePreviousInGroup,
         description: "Cycle to the previous pane in the current group",
     },
     KeyBinding {
-        key: BindingKey::PageDown,
+        key: BindingKey::Character(')'),
         action: Action::JumpNextGroup,
         description: "Jump to the first pane in the next group",
     },
     KeyBinding {
-        key: BindingKey::PageUp,
+        key: BindingKey::Character('('),
         action: Action::JumpPreviousGroup,
         description: "Jump to the first pane in the previous group",
     },
@@ -432,7 +453,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Toggle move mode for the selected node (up/down to reorder, left/right to outdent/indent)",
     },
     KeyBinding {
-        key: BindingKey::Character('t'),
+        key: BindingKey::Character('w'),
         action: Action::FocusTree,
         description: "Focus the tree panel",
     },
@@ -452,22 +473,22 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Focus the previous visible pane",
     },
     KeyBinding {
-        key: BindingKey::Character('h'),
+        key: BindingKey::Left,
         action: Action::FocusPaneLeft,
         description: "Focus the visible pane to the left",
     },
     KeyBinding {
-        key: BindingKey::Character('l'),
+        key: BindingKey::Right,
         action: Action::FocusPaneRight,
         description: "Focus the visible pane to the right",
     },
     KeyBinding {
-        key: BindingKey::Character('k'),
+        key: BindingKey::Up,
         action: Action::FocusPaneUp,
         description: "Focus the visible pane above",
     },
     KeyBinding {
-        key: BindingKey::Character('j'),
+        key: BindingKey::Down,
         action: Action::FocusPaneDown,
         description: "Focus the visible pane below",
     },
@@ -482,7 +503,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Scroll the focused terminal one page down",
     },
     KeyBinding {
-        key: BindingKey::Character('s'),
+        key: BindingKey::Character('S'),
         action: Action::Save,
         description: "Save the focused editor pane",
     },
@@ -502,7 +523,7 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Toggle the focused editor pane between Source and Rendered (markdown files only)",
     },
     KeyBinding {
-        key: BindingKey::Character('n'),
+        key: BindingKey::Character('N'),
         action: Action::ToggleLineNumbers,
         description: "Toggle line numbers in the focused editor pane",
     },
@@ -810,6 +831,10 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "navigation",
             },
             Mnemonic {
+                key: 'w',
+                word: "workspace",
+            },
+            Mnemonic {
                 key: 't',
                 word: "tree",
             },
@@ -908,12 +933,17 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "south",
             },
         ],
-        // Arrow/page defaults intentionally have no printable-key mnemonic.
-        // The Keyboard settings view renders their actual keycap instead.
-        Action::CycleNextInGroup
-        | Action::CyclePreviousInGroup
-        | Action::JumpNextGroup
-        | Action::JumpPreviousGroup => &[],
+        Action::CycleNextInGroup => &[Mnemonic {
+            key: 'n',
+            word: "next",
+        }],
+        Action::CyclePreviousInGroup => &[Mnemonic {
+            key: 'p',
+            word: "previous",
+        }],
+        // Bracket defaults have no honest letter mnemonic; Settings renders
+        // the actual keycap.
+        Action::JumpNextGroup | Action::JumpPreviousGroup => &[],
         Action::ScrollbackUp => &[
             Mnemonic {
                 key: 'b',
@@ -1246,10 +1276,10 @@ pub fn preset_bindings(preset: KeymapPreset) -> Vec<KeyBinding> {
             (Action::FocusPane, 'P'),
             (Action::FocusNextPane, 'o'),
             (Action::FocusPreviousPane, ';'),
-            (Action::FocusPaneLeft, 'h'),
-            (Action::FocusPaneRight, 'l'),
-            (Action::FocusPaneUp, 'k'),
-            (Action::FocusPaneDown, 'j'),
+            (Action::CycleNextInGroup, 'n'),
+            (Action::CyclePreviousInGroup, 'p'),
+            (Action::JumpNextGroup, ')'),
+            (Action::JumpPreviousGroup, '('),
             (Action::ScrollbackUp, '['),
             (Action::ScrollbackDown, ']'),
             (Action::Help, '?'),
@@ -1261,24 +1291,43 @@ pub fn preset_bindings(preset: KeymapPreset) -> Vec<KeyBinding> {
             (Action::NewBoard, 'B'),
             (Action::NewFolder, 'F'),
             (Action::ToggleMove, 'm'),
-            (Action::FocusTree, 't'),
-            (Action::Save, 's'),
+            (Action::FocusTree, 'w'),
+            (Action::Save, 'S'),
             (Action::RunCommand, '!'),
             (Action::Search, 'f'),
             (Action::ToggleEditorViewMode, 'v'),
-            (Action::ToggleLineNumbers, 'n'),
+            (Action::ToggleLineNumbers, 'N'),
             (Action::ToggleMinimap, 'b'),
             (Action::ToggleAutosave, 'a'),
         ],
     };
-    for (action, key) in assignments {
+    // Arrow/page keys are not printable characters, so they are listed apart.
+    let special_assignments: &[(Action, BindingKey)] = match preset {
+        KeymapPreset::Screen => &[
+            (Action::CycleNextInGroup, BindingKey::Down),
+            (Action::CyclePreviousInGroup, BindingKey::Up),
+            (Action::JumpNextGroup, BindingKey::PageDown),
+            (Action::JumpPreviousGroup, BindingKey::PageUp),
+        ],
+        KeymapPreset::Tmux => &[
+            (Action::FocusPaneLeft, BindingKey::Left),
+            (Action::FocusPaneRight, BindingKey::Right),
+            (Action::FocusPaneUp, BindingKey::Up),
+            (Action::FocusPaneDown, BindingKey::Down),
+        ],
+    };
+    let typed_assignments = assignments
+        .iter()
+        .map(|(action, character)| (*action, BindingKey::Character(*character)))
+        .chain(special_assignments.iter().copied());
+    for (action, key) in typed_assignments {
         // Preset literals are maintained alongside the bindable catalogue and
         // every map starts one-action-per-row, so this cannot conflict.
         let binding = bindings
             .iter_mut()
-            .find(|binding| binding.action == *action)
+            .find(|binding| binding.action == action)
             .expect("every preset action is registered in LEADER_BINDINGS");
-        binding.key = BindingKey::Character(*key);
+        binding.key = key;
     }
     bindings
 }
@@ -1382,24 +1431,30 @@ mod tests {
     }
 
     #[test]
-    fn default_navigation_actions_use_the_requested_arrow_and_page_keys() {
+    fn default_keys_follow_tmux_for_navigation() {
         assert_eq!(ShortcutBase::default(), ShortcutBase::B);
         assert_eq!(DEFAULT_NAVIGATION_SHORTCUT_BASE, ShortcutBase::B);
+        for (key, action) in [
+            (BindingKey::Character('n'), Action::CycleNextInGroup),
+            (BindingKey::Character('p'), Action::CyclePreviousInGroup),
+            (BindingKey::Character(')'), Action::JumpNextGroup),
+            (BindingKey::Character('('), Action::JumpPreviousGroup),
+            (BindingKey::Left, Action::FocusPaneLeft),
+            (BindingKey::Right, Action::FocusPaneRight),
+            (BindingKey::Up, Action::FocusPaneUp),
+            (BindingKey::Down, Action::FocusPaneDown),
+            (BindingKey::Character('o'), Action::FocusNextPane),
+            (BindingKey::Character(';'), Action::FocusPreviousPane),
+        ] {
+            assert_eq!(action_for_table(LEADER_BINDINGS, key), Some(action));
+        }
+    }
+
+    #[test]
+    fn tmux_preset_equals_the_default_table() {
         assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::Down),
-            Some(Action::CycleNextInGroup)
-        );
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::Up),
-            Some(Action::CyclePreviousInGroup)
-        );
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::PageDown),
-            Some(Action::JumpNextGroup)
-        );
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::PageUp),
-            Some(Action::JumpPreviousGroup)
+            preset_bindings(KeymapPreset::Tmux).as_slice(),
+            LEADER_BINDINGS
         );
     }
 

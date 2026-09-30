@@ -689,7 +689,9 @@ pub fn settings_help_anchors(
                     | crate::app::AgentMonitoringRow::AddCustomSignature => "AM-04".to_owned(),
                     crate::app::AgentMonitoringRow::ProgressMonitor => "AP-20".to_owned(),
                     crate::app::AgentMonitoringRow::ProgressMonitorMaxLines => "AP-21".to_owned(),
-                    crate::app::AgentMonitoringRow::CompletedProgressHideAfter => "AM-23".to_owned(),
+                    crate::app::AgentMonitoringRow::CompletedProgressHideAfter => {
+                        "AM-23".to_owned()
+                    }
                     crate::app::AgentMonitoringRow::ProgressFillStyle => "AP-22".to_owned(),
                     crate::app::AgentMonitoringRow::StatusIcon(target) => {
                         let offset = crate::agent_monitoring::STATUS_ICON_TARGETS
@@ -3096,7 +3098,7 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
         Line::from(format!("  {}", advice.explanation)),
         Line::from(""),
         Line::from(Span::styled(
-            "Tree navigation is listed first: cycle ↓/↑ within a group; jump Pg↓/Pg↑ between groups. Open a row, then press a printable, arrow, or Page key to remap it live.",
+            "Tree navigation is listed first: cycle n/p within a group; jump (/) between groups (tmux window/session keys). Open a row, then press a printable, arrow, or Page key to remap it live.",
             Style::new().add_modifier(Modifier::DIM),
         )),
     ]);
@@ -4349,7 +4351,7 @@ fn monitoring_row_value(row: crate::app::AgentMonitoringRow, app: &App) -> Strin
             } else {
                 format!("{seconds} s")
             }
-        },
+        }
         Row::ProgressFillStyle => crate::icon_settings::task_progress_preset_index(
             &app.ui_settings.icons.task_progress_frames,
         )
@@ -4887,6 +4889,21 @@ mod tests {
                         );
                     }
                 }
+                SettingsTab::Cost => {
+                    // A calibration's parameter row exists only while it is chosen.
+                    for calibration in crate::cost_model::Calibration::ALL {
+                        app.cost_settings.calibration = calibration;
+                        let state = SettingsState {
+                            tab,
+                            ..SettingsState::default()
+                        };
+                        reachable.extend(
+                            settings_help_anchors(&layout, &app, &state)
+                                .into_iter()
+                                .map(|anchor| anchor.topic_id),
+                        );
+                    }
+                }
                 SettingsTab::Icons => {
                     for scroll in 0..crate::agent_monitoring::general_icon_targets().len() as u16 {
                         let state = SettingsState {
@@ -4927,14 +4944,17 @@ mod tests {
 
     #[test]
     fn tab_at_maps_each_row_to_its_tab() {
-        let area = Rect::new(0, 0, 30, 22);
+        // Compact: one row per tab below one row of padding, so the rail is
+        // sized from the tab count rather than a constant that goes stale.
+        let tab_count = SettingsTab::ALL.len() as u16;
+        let area = Rect::new(0, 0, 30, tab_count + 2);
         for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
             assert_eq!(tab_at(area, Position::new(2, index as u16 + 1)), Some(tab));
         }
         // Row 0 is the top-padding blank line -- no tab there.
         assert_eq!(tab_at(area, Position::new(2, 0)), None);
 
-        let spacious = Rect::new(0, 0, 30, 50);
+        let spacious = Rect::new(0, 0, 30, tab_count * 2 + 2);
         // Spacious layouts retain the blank row after each tab.
         assert_eq!(tab_at(spacious, Position::new(2, 2)), None);
         for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {

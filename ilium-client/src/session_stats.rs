@@ -969,7 +969,9 @@ impl StatsAccumulator {
 // --------------------------------------------------------------------- helpers
 
 /// Collects per-minute spend, sharing one allocation per distinct model name.
-fn spend_buckets<'a>(entries: impl Iterator<Item = ((i64, &'a str), TokenTotals)>) -> Vec<SpendBucket> {
+fn spend_buckets<'a>(
+    entries: impl Iterator<Item = ((i64, &'a str), TokenTotals)>,
+) -> Vec<SpendBucket> {
     let mut names: HashMap<&'a str, Arc<str>> = HashMap::new();
     entries
         .map(|((minute_ms, model), tokens)| SpendBucket {
