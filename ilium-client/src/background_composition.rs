@@ -216,9 +216,7 @@ fn panel_inner(area: Rect) -> Rect {
 
 /// Modifiers that leave a blank cell visually empty. Underline, reverse and
 /// strike-through draw ink or a filled block even on a space, so they stay out.
-const INKLESS_MODIFIERS: Modifier = Modifier::BOLD
-    .union(Modifier::DIM)
-    .union(Modifier::ITALIC);
+const INKLESS_MODIFIERS: Modifier = Modifier::BOLD.union(Modifier::DIM).union(Modifier::ITALIC);
 
 /// A symbol that draws nothing: an ordinary space, NBSP and other width-1
 /// Unicode whitespace, or the empty Braille pattern. Agent TUIs emit these
@@ -414,15 +412,27 @@ mod tests {
         );
 
         for column in 0..8 {
-            assert_eq!(buffer[(column, 0)].symbol(), "\u{28ff}", "row 0 col {column}");
+            assert_eq!(
+                buffer[(column, 0)].symbol(),
+                "\u{28ff}",
+                "row 0 col {column}"
+            );
         }
         assert_eq!(buffer[(0, 1)].symbol(), ">");
         for column in 1..6 {
-            assert_eq!(buffer[(column, 1)].symbol(), "\u{28ff}", "row 1 col {column}");
+            assert_eq!(
+                buffer[(column, 1)].symbol(),
+                "\u{28ff}",
+                "row 1 col {column}"
+            );
             assert_eq!(buffer[(column, 1)].bg, Color::Reset);
         }
         for column in 0..4 {
-            assert_ne!(buffer[(column, 2)].symbol(), "\u{28ff}", "row 2 col {column}");
+            assert_ne!(
+                buffer[(column, 2)].symbol(),
+                "\u{28ff}",
+                "row 2 col {column}"
+            );
         }
         assert_eq!(buffer[(10, 2)].symbol(), "\u{28ff}");
     }

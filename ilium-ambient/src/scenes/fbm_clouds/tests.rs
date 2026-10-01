@@ -543,7 +543,10 @@ impl GpuRunner for FakeRunner {
         }
         if job.width >= self.hold_from_width {
             let gate = self.gate.lock().map_err(|_| "gate poisoned".to_owned())?;
-            gate.recv().map_err(|_| "gate closed".to_owned())?;
+            // Bounded: a scene dropped while a later job waits would otherwise
+            // deadlock its worker join (the sender outlives the scene).
+            gate.recv_timeout(Duration::from_secs(10))
+                .map_err(|_| "gate closed".to_owned())?;
         }
         out.fill(self.fill);
         Ok(())

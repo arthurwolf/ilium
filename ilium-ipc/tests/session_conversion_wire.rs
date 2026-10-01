@@ -10,9 +10,7 @@ where
 
 #[test]
 fn terminate_and_replace_requests_round_trip_with_stable_names() {
-    let terminate = ClientRequest::TerminatePaneProcess {
-        pane_id: NodeId(4),
-    };
+    let terminate = ClientRequest::TerminatePaneProcess { pane_id: NodeId(4) };
     assert_eq!(round_trip(&terminate), terminate);
     assert_eq!(terminate.diagnostic_name(), "terminate_pane_process");
 
@@ -46,9 +44,7 @@ fn new_variants_do_not_shift_the_previous_last_variant() {
             custom_signatures: Vec::new(),
         },
     };
-    let terminate = ClientRequest::TerminatePaneProcess {
-        pane_id: NodeId(1),
-    };
+    let terminate = ClientRequest::TerminatePaneProcess { pane_id: NodeId(1) };
     let previous_index = bincode::serialize(&previous).expect("serialize")[..4].to_vec();
     let terminate_index = bincode::serialize(&terminate).expect("serialize")[..4].to_vec();
     let previous_value = u32::from_le_bytes(previous_index.try_into().expect("4 bytes"));

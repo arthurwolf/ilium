@@ -168,7 +168,9 @@ test ! -e /usr/lib/ilium/ilium && test ! -e /usr/bin/ilium
 def rpm_script(image, name, version):
     install = 'zypper --non-interactive --no-gpg-checks install --allow-unsigned-rpm /packages/%s >/dev/null' % name if 'suse' in image else 'dnf install -y -q --setopt=tsflags= /packages/%s' % name
     remove = 'zypper --non-interactive remove ilium >/dev/null' if 'suse' in image else 'dnf remove -y -q ilium'
+    prelude = '' if 'suse' in image else 'dnf install -y -q util-linux >/dev/null'
     return f'''
+{prelude}
 {install}
 rpm -q ilium
 rpm -V ilium

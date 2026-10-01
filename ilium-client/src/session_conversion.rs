@@ -280,8 +280,7 @@ fn step_lines(state: &ConversionDialogState) -> Vec<Line<'static>> {
     ]));
     for (index, title) in state.steps.iter().enumerate() {
         let step_number = index + 1;
-        let marker = if state.phase == ConversionPhase::Starting
-            || step_number < state.current_step
+        let marker = if state.phase == ConversionPhase::Starting || step_number < state.current_step
         {
             Span::styled("✓ ", Style::new().fg(Color::Green))
         } else if step_number == state.current_step && !state.is_failed() {
@@ -425,9 +424,8 @@ impl App {
         )
         .is_none()
         {
-            self.status_message = Some(
-                "Cannot convert: this session has no verified transcript yet".to_string(),
-            );
+            self.status_message =
+                Some("Cannot convert: this session has no verified transcript yet".to_string());
             return;
         }
         self.frozen_panes.insert(pane_id);
@@ -709,7 +707,12 @@ mod tests {
             (app, pane)
         }
 
-        fn begin(app: &mut App, pane: NodeId, source: BuiltinAgentProvider, target: BuiltinAgentProvider) {
+        fn begin(
+            app: &mut App,
+            pane: NodeId,
+            source: BuiltinAgentProvider,
+            target: BuiltinAgentProvider,
+        ) {
             app.frozen_panes.insert(pane);
             app.conversion = Some(Box::new(ConversionDialogState::new(
                 pane,
@@ -724,9 +727,15 @@ mod tests {
         #[test]
         fn only_the_opposite_builtin_provider_is_offered() {
             let (app, pane) = app_with_agent(AgentClass::Claude);
-            assert_eq!(app.conversion_target_for(pane), Some(BuiltinAgentProvider::Codex));
+            assert_eq!(
+                app.conversion_target_for(pane),
+                Some(BuiltinAgentProvider::Codex)
+            );
             let (app, pane) = app_with_agent(AgentClass::Codex);
-            assert_eq!(app.conversion_target_for(pane), Some(BuiltinAgentProvider::Claude));
+            assert_eq!(
+                app.conversion_target_for(pane),
+                Some(BuiltinAgentProvider::Claude)
+            );
             let (app, pane) = app_with_agent(AgentClass::Antigravity);
             assert_eq!(app.conversion_target_for(pane), None);
         }
@@ -741,16 +750,28 @@ mod tests {
         #[test]
         fn no_second_conversion_is_offered_while_one_is_active() {
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             assert_eq!(app.conversion_target_for(pane), None);
         }
 
         #[test]
         fn a_stopped_agent_starts_the_worker_and_a_failed_stop_does_not() {
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             app.apply_pane_process_terminated(pane, Ok(()));
-            let job = app.take_pending_conversion_start().expect("worker requested");
+            let job = app
+                .take_pending_conversion_start()
+                .expect("worker requested");
             assert_eq!(job.pane_id, pane);
             assert_eq!(job.request.source, BuiltinAgentProvider::Claude);
             assert_eq!(job.request.target, BuiltinAgentProvider::Codex);
@@ -760,7 +781,12 @@ mod tests {
             assert_eq!(dialog.phase, ConversionPhase::Converting);
 
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             app.apply_pane_process_terminated(pane, Err("still running".to_string()));
             assert!(app.take_pending_conversion_start().is_none());
             let dialog = app.conversion.as_ref().unwrap();
@@ -771,7 +797,12 @@ mod tests {
         #[test]
         fn success_replaces_the_pane_with_the_converted_session_and_closes_the_dialog() {
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             app.apply_pane_process_terminated(pane, Ok(()));
             let _ = app.take_outbound_requests();
             app.apply_conversion_worker_event(ConversionWorkerEvent::Finished {
@@ -798,7 +829,12 @@ mod tests {
         #[test]
         fn failure_after_the_stop_offers_resuming_the_original_session() {
             let (mut app, pane) = app_with_agent(AgentClass::Codex);
-            begin(&mut app, pane, BuiltinAgentProvider::Codex, BuiltinAgentProvider::Claude);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Codex,
+                BuiltinAgentProvider::Claude,
+            );
             app.apply_pane_process_terminated(pane, Ok(()));
             app.apply_conversion_worker_event(ConversionWorkerEvent::Finished {
                 pane_id: pane,
@@ -820,10 +856,18 @@ mod tests {
         #[test]
         fn escape_closes_a_failed_dialog_and_unfreezes_the_pane() {
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             app.apply_pane_process_terminated(pane, Err("nope".to_string()));
             app.handle_conversion_key(KeyCode::Enter);
-            assert!(app.conversion.is_some(), "Enter must not resume a live agent");
+            assert!(
+                app.conversion.is_some(),
+                "Enter must not resume a live agent"
+            );
             app.handle_conversion_key(KeyCode::Esc);
             assert!(app.conversion.is_none());
             assert!(!app.frozen_panes.contains(&pane));
@@ -833,7 +877,12 @@ mod tests {
         #[test]
         fn escape_while_converting_requests_cancellation() {
             let (mut app, pane) = app_with_agent(AgentClass::Claude);
-            begin(&mut app, pane, BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
             app.apply_pane_process_terminated(pane, Ok(()));
             app.handle_conversion_key(KeyCode::Esc);
             assert!(app.take_pending_conversion_cancel());

@@ -442,7 +442,7 @@ Download packages from [GitHub Releases](https://github.com/arthurwolf/ilium/rel
 
 No releases were published when checked on 2026-09-30. Until then, [build from source](#building-from-source). [Actions artifacts](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases.
 
-Download your archive and `SHA256SUMS` from the same release. Verify the checksum before extracting.
+Download your archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS) from the same release. Verify the checksum before extracting.
 
 Keep the client, server, and runtime libraries together. Add the extracted package directory to `PATH`, then run `ilium` in your project.
 
@@ -450,8 +450,8 @@ Keep the client, server, and runtime libraries together. Add the extracted packa
 
 Choose your archive:
 
-- Intel/AMD: `ilium-linux-x86_64.tar.gz`
-- ARM64: `ilium-linux-aarch64.tar.gz`
+- Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz)
+- ARM64: [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz)
 
 Verify it in the download directory:
 
@@ -463,25 +463,35 @@ Confirm the selected archive reports `OK`. Extract with `tar -xzf <archive>` int
 
 The [installer](#quick-start) selects your architecture and verifies downloads. It stores packages under `~/.local/share/ilium` and launchers in `~/.local/bin`, respecting XDG overrides.
 
-Each release also carries native Linux packages for both architectures. They hold the same audited files as the archive, under stable names: `ilium-linux-<arch>.<extension>` with `<arch>` of `x86_64` or `aarch64`. Every package needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 41 or later) and is unsigned; check the asset digest on the release page.
+Each release also carries native Linux packages for both architectures (downloads below use the newest release). They hold the same audited files as the archive, under stable names: `ilium-linux-<arch>.<extension>` with `<arch>` of `x86_64` or `aarch64`. Every package needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 41 or later) and is unsigned; check the asset digest on the release page.
 
 ##### deb package
+
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb).
 
 Debian, Ubuntu and Mint: `sudo apt install ./ilium-linux-x86_64.deb`. It installs to `/usr/lib/ilium` and links `ilium` into `/usr/bin`.
 
 ##### rpm package
 
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm).
+
 Fedora: `sudo dnf install ./ilium-linux-x86_64.rpm`. openSUSE: `sudo zypper install ./ilium-linux-x86_64.rpm`. Same layout as the deb.
 
 ##### AppImage
+
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage).
 
 `chmod +x ilium-linux-x86_64.AppImage && ./ilium-linux-x86_64.AppImage`. It needs FUSE. The first run copies Ilium to `~/.local/share/ilium/appimage` so the session server outlives the mount.
 
 ##### Snap package
 
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap).
+
 `sudo snap install --dangerous --classic ilium-linux-x86_64.snap`. It uses classic confinement, so it is not on the Snap Store. Commands: `ilium` and `ilium.server`.
 
 ##### Flatpak bundle
+
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak).
 
 Experimental: `flatpak install --user ilium-linux-x86_64.flatpak`. Panes run inside the sandbox, so your host `git`, `claude` and `codex` are not visible.
 
@@ -491,8 +501,8 @@ Packages are installed, run and removed in containers or disposable virtual mach
 
 Choose your archive:
 
-- Apple Silicon: `ilium-macos-aarch64.tar.gz`
-- Intel: `ilium-macos-x86_64.tar.gz`
+- Apple Silicon: [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.tar.gz)
+- Intel: [`ilium-macos-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.tar.gz)
 
 Compare this output with the archive's entry in `SHA256SUMS`:
 
@@ -506,7 +516,7 @@ The [installer](#quick-start) selects your architecture and uses the same layout
 
 #### Windows packages
 
-For a guided install use `ilium-windows-x86_64-setup.exe` or `ilium-windows-x86_64.msi` from the same release. To unpack by hand, choose `ilium-windows-x86_64.zip`. Compare this output with its entry in `SHA256SUMS`:
+For a guided install use [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) from the same release. To unpack by hand, choose [`ilium-windows-x86_64.zip`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip). Compare this output with its entry in `SHA256SUMS`:
 
 ```powershell
 Get-FileHash .\ilium-windows-x86_64.zip -Algorithm SHA256
@@ -632,10 +642,13 @@ Outside Ilium, pass `--cwd` and `--session-name`. An attached client is required
 
 **Settings → Animations** adds a Braille background, with a full-screen preview (`f`). Choose landscapes, space scenes, video, images, or an audio spectrum.
 
-Backgrounds are off by default. Ilium saves your choice per project in `.ilium/config.yaml`.
+Backgrounds are off by default. Ilium saves your choice per project in `.ilium/config.yaml`. The settings put scenes beside grouped controls; Loop playback builds 30 fps frames in the background and shows packed-frame RAM usage.
 
 - **Stars, Earth, and satellite clouds** share a location set by address, coordinates, or map. Earth and cloud imagery need network access.
-- **Video** needs `ffmpeg`; random scenes also need `ffprobe`.
+- **Solar system** offers all eight planets, orbit paths, distance and size realism, and speeds up to ten simulated years per second.
+- **Stars** offers hour/day-per-second speeds, optional constellation lines and simulated satellites. Turning the horizon off includes the whole sky.
+- **Lily pads** supports up to 64 opaque leaves, with optional rooted placement.
+- **Video** needs `ffmpeg`; random scenes also need `ffprobe`. Folder scans, decoding and cleanup run away from input handling, with limits and timeouts.
 - **Audio spectrum** uses `pw-record` or `parec` on Linux and WASAPI on Windows. macOS needs a loopback device such as BlackHole.
 - **Images** accepts files, folders, or URLs, with slideshow and pan/zoom options.
 

@@ -164,10 +164,7 @@ async fn terminating_an_unknown_pane_reports_the_failure() {
     .await;
     assert!(matches!(
         event,
-        ServerEvent::PaneProcessTerminated {
-            result: Err(_),
-            ..
-        }
+        ServerEvent::PaneProcessTerminated { result: Err(_), .. }
     ));
 
     write_frame(&mut client, &ClientRequest::KillSession)

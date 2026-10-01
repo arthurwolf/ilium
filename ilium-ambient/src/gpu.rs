@@ -506,7 +506,11 @@ mod tests {
         fn run(&self, job: &GpuJob, out: &mut [f32]) -> Result<(), String> {
             if let Some(gate) = &self.gate {
                 let receiver = gate.lock().map_err(|_| "gate poisoned".to_owned())?;
-                receiver.recv().map_err(|_| "gate closed".to_owned())?;
+                // Bounded: a scene dropped while a later job waits would
+                // otherwise deadlock its worker join.
+                receiver
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .map_err(|_| "gate closed".to_owned())?;
             }
             self.runs.fetch_add(1, Ordering::SeqCst);
             if self.fail {

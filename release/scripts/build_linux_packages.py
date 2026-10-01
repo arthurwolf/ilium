@@ -40,6 +40,8 @@ ARCHITECTURES = {
     'aarch64': {'deb': 'arm64', 'rpm': 'aarch64', 'snap': 'arm64', 'flatpak': 'aarch64', 'appimage': 'aarch64', 'interpreter': 'ld-linux-aarch64.so.1'},
 }
 APP_ID = 'io.github.arthurwolf.Ilium'
+# flatpak 1.12/1.14 (Ubuntu 22.04/24.04) resolve an unqualified `flatpak run APP` to the `master` branch only.
+FLATPAK_BRANCH = 'master'
 PUBLISHER = 'Arthur Wolf'
 MAINTAINER = 'Arthur Wolf <noreply@github.com>'
 HOMEPAGE = 'https://github.com/arthurwolf/ilium'
@@ -558,8 +560,8 @@ def build_flatpak(package_directory, architecture, version, work, destination):
     repository = Path(work) / 'flatpak-repo'
     flatpak = find_tool('flatpak')
     arch = ARCHITECTURES[architecture]['flatpak']
-    run([flatpak, 'build-export', '--arch=' + arch, '--timestamp=' + EPOCH_DATE + 'T00:00:00Z', str(repository), str(application), 'stable'])
-    run([flatpak, 'build-bundle', '--arch=' + arch, '--runtime-repo=' + tools['runtime_repository'], str(repository), str(destination), APP_ID, 'stable'])
+    run([flatpak, 'build-export', '--arch=' + arch, '--timestamp=' + EPOCH_DATE + 'T00:00:00Z', str(repository), str(application), FLATPAK_BRANCH])
+    run([flatpak, 'build-bundle', '--arch=' + arch, '--runtime-repo=' + tools['runtime_repository'], str(repository), str(destination), APP_ID, FLATPAK_BRANCH])
     return {'runtime': '%s//%s' % (tools['runtime'], tools['runtime_version'])}
 
 
