@@ -172,6 +172,24 @@
       "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
       "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
     },
+    "objc2-quartz-core@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
+    "objc2-metal@0.3.2": {
+      "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
+      "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
+      "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "reviewed_by": "publisher declaration and original notice retained; separate SPDX MIT reference, no attributed copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MIT.json",
+      "reference_license_source_sha256": "ff6b1bdaf34abe3a1299a34bca1bd15f8a721d2b1853cc7da32d5c0d99818c75"
+    },
     "objc2-audio-toolbox@0.3.2": {
       "file": "licences/eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff.txt",
       "sha256": "eed2d30fe2237430ee3234413396bea3e84829f3aea64d14899d8c03728e27ff",
@@ -352,6 +370,20 @@
       "source": "https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-APACHE; https://raw.githubusercontent.com/retep998/winapi-rs/796a8e6c2971dc2ff1bcff166e6671284f9b5b6b/LICENSE-MIT",
       "source_commit": "796a8e6c2971dc2ff1bcff166e6671284f9b5b6b",
       "reviewed_by": "official repository at crate-publisher VCS identity; SPDX declaration retained"
+    },
+    "profiling@1.0.18": {
+      "file": "licences/23d080356925634420432addd30c00708f15efdc876db12d71348fcd4a0a1d8b.txt",
+      "sha256": "23d080356925634420432addd30c00708f15efdc876db12d71348fcd4a0a1d8b",
+      "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE; https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "source_commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "reviewed_by": "official repository at the Release 1.0.18 commit (publisher VCS identity); SPDX declaration MIT OR Apache-2.0 retained"
+    },
+    "spirv@0.4.0+sdk-1.4.341.0": {
+      "file": "licences/f121a78a50726ee3cbaeb269d20e3b7790e709a3cc6cc26f5a173ad392d3c394.txt",
+      "sha256": "f121a78a50726ee3cbaeb269d20e3b7790e709a3cc6cc26f5a173ad392d3c394",
+      "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "source_commit": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4",
+      "reviewed_by": "official repository at the crate-publisher VCS identity (.cargo_vcs_info.json sha1, path spirv); SPDX declaration Apache-2.0 retained"
     }
   }
 }
