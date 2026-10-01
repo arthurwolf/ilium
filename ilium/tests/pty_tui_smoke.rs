@@ -3362,6 +3362,13 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
         "expected the departing pane row to disappear after its exit transition, got: {:?}",
         tui.screen_text()
     );
+    // The row count drops as soon as the exit frame is drawn; let the whole
+    // transition and the successor's activation settle before typing into it,
+    // or the keystrokes land before the pane is focused and are lost.
+    let transition_duration_ms =
+        u64::try_from(ilium_client::tree_transitions::TREE_ENTRY_TRANSITION_MS)
+            .expect("tree-entry transition duration should fit u64");
+    tokio::time::sleep(Duration::from_millis(transition_duration_ms + 100)).await;
 
     // Closing the selected first pane must also activate the surviving row
     // below it. Input now goes straight to that pane without another tree
