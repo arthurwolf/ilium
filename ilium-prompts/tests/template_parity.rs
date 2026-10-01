@@ -25,6 +25,17 @@ fn full_prompt_templates_preserve_frozen_original_output() {
         };
         case["context"][field] = Value::String(instructions.to_owned());
         let rendered = ilium_prompts::render(&name, &case["context"]).unwrap();
+        let source = ilium_prompts::catalog()
+            .find(|&&(catalog_name, _)| catalog_name == name)
+            .unwrap()
+            .1;
+        let legacy_rendered = ilium_prompts::render_source(
+            name.strip_prefix("naming/").unwrap(),
+            source,
+            &case["context"],
+        )
+        .unwrap();
+        assert_eq!(legacy_rendered, rendered, "legacy label: {}", case["case"]);
         assert_eq!(
             format!("{:x}", Sha256::digest(rendered.as_bytes())),
             case["sha256"].as_str().unwrap(),

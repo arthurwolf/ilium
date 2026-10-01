@@ -53,10 +53,13 @@ pub fn render_source<T: Serialize>(
     source: &str,
     context: &T,
 ) -> Result<String, PromptError> {
-    if catalog()
-        .any(|&(catalog_name, catalog_source)| catalog_name == name && catalog_source == source)
+    if let Some(&(catalog_name, _)) =
+        catalog().find(|&&(_, catalog_source)| catalog_source == source)
     {
-        return render(name, context);
+        // Existing callers use human-readable labels such as "session-title".
+        // The embedded source identifies the cached entry independently of that
+        // diagnostic label; custom sources retain their supplied name below.
+        return render(catalog_name, context);
     }
     let mut registry = new_registry()?;
     registry.register_template_string(name, source)?;
