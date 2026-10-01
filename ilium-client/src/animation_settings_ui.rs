@@ -458,9 +458,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let model = app.animation_row_model();
     frame.render_widget(Clear, panel);
     frame.render_widget(Block::default().style(ink), panel);
+    let scenes = layout(area).scenes;
+    let scene_heading = if scenes.width >= 27 {
+        "Scenes \u{2014} select to preview"
+    } else {
+        "Scenes"
+    };
     frame.render_widget(
-        Paragraph::new("Scenes \u{2014} select to preview").style(ink.add_modifier(Modifier::BOLD)),
-        Rect::new(panel.x, panel.y, panel.width, 1),
+        Paragraph::new(fit(scene_heading, usize::from(scenes.width)))
+            .style(ink.add_modifier(Modifier::BOLD)),
+        Rect::new(scenes.x, scenes.y, scenes.width, 1),
     );
     let controls = layout(area).controls;
     frame.render_widget(
@@ -655,6 +662,23 @@ mod tests {
     use ratatui::{backend::TestBackend, Terminal};
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+
+    #[test]
+    fn narrow_scene_heading_stays_inside_its_column() {
+        let project = tempfile::tempdir().unwrap();
+        let app = App::new("animation-heading-test".into(), project.path().into());
+        for width in [28, 48] {
+            let area = Rect::new(0, 0, width, 24);
+            let columns = layout(area);
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal
+                .draw(|frame| render(frame, area, &app, &SettingsState::default()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(columns.scenes.right(), 0)].symbol(), " ");
+            assert_eq!(buffer[(columns.controls.x + 8, 0)].symbol(), " ");
+        }
+    }
 
     #[test]
     fn overhaul_scene_and_controls_use_separate_columns_with_wide_tracks() {
