@@ -5754,6 +5754,17 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
         "hovering the icon should preview the popover: {:?}",
         tui.screen_text()
     );
+    // The popover paints over several frames; a slow terminal (ConPTY) can
+    // show its title before its body and footer, so wait for the footer hint.
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("click ● to pin"),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "the preview footer should finish painting: {:?}",
+        tui.screen_text()
+    );
     let hovered = tui.screen_text();
     assert!(
         hovered.contains("Waiting for the agent's session"),
