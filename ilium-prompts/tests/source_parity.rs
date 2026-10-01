@@ -12,7 +12,10 @@ fn extracted_sources_match_frozen_original_bytes_and_format_skeletons() {
             .unwrap()
             .1;
         assert_eq!(
-            format!("{:x}", Sha256::digest(baseline_source(name, source).as_bytes())),
+            format!(
+                "{:x}",
+                Sha256::digest(baseline_source(name, source).as_bytes())
+            ),
             case["sha256"].as_str().unwrap(),
             "{name}"
         );
@@ -25,14 +28,20 @@ fn baseline_source(name: &str, source: &str) -> String {
     let fields: &[&str] = match name {
         "agent/ask-for-update" => &["custom_instructions"],
         "naming/project-name" => &["project_naming", "naming_and_organization"],
-        "naming/session-title" | "naming/terminal-title" => &["entry_naming", "naming_and_organization"],
+        "naming/session-title" | "naming/terminal-title" => {
+            &["entry_naming", "naming_and_organization"]
+        }
         "naming/restructure" => &["entry_naming", "organization", "naming_and_organization"],
         "naming/smart-copy-system" => &["smart_copy"],
         _ => &[],
     };
     let mut baseline = source.to_owned();
     for field in fields {
-        let purpose = if *field == "custom_instructions" { "ask-for-update" } else { field };
+        let purpose = if *field == "custom_instructions" {
+            "ask-for-update"
+        } else {
+            field
+        };
         let block = format!("{{{{#if {field}}}}}\n<custom-instructions purpose=\"{purpose}\">\n{{{{{field}}}}}\n</custom-instructions>{{{{/if}}}}");
         baseline = baseline.replace(&block, "");
     }
