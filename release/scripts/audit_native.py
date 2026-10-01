@@ -152,11 +152,11 @@ def validate_intel_toolchain(toolchain):
 
 def validate_intel_commands(receipt, workspace=None):
     ort = receipt.get("ort_command")
-    require(isinstance(ort, list) and len(ort) == 12 and all(isinstance(value, str) for value in ort), "Intel ORT build command evidence is missing/malformed")
-    source, build_directory = PurePosixPath(ort[0]), PurePosixPath(ort[9])
+    require(isinstance(ort, list) and len(ort) == 13 and all(isinstance(value, str) for value in ort), "Intel ORT build command evidence is missing/malformed")
+    source, build_directory = PurePosixPath(ort[0]), PurePosixPath(ort[10])
     require(source.is_absolute() and source.name == "build.sh" and source.parent.name == "onnxruntime-058787ceead760166e3c50a0a4cba8a833a6f53f" and ".." not in source.parts, "Intel ORT command is not from the pinned source tree")
     require(build_directory.is_absolute() and ".." not in build_directory.parts and re.fullmatch(r"[1-9][0-9]?", ort[5]) and 1 <= int(ort[5]) <= 64, "Intel ORT build directory/parallel evidence differs")
-    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--build_dir", ort[9], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
+    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", ort[10], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
     require(ort == expected_ort, "Intel ORT command differs from the reviewed Xcode/x86_64 recipe")
     cargo = receipt.get("cargo_command")
     require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Intel Cargo command evidence is missing/malformed")
@@ -429,8 +429,11 @@ def validate_process_mapping(observed_client, mappings, client, runtime):
     require(observed_client.strip() == str(client), "embedding process is not the installed client")
     require(re.search(re.escape(str(client)) + r"(?=\s|$)", mappings), "native mapping has no installed client executable")
     require(re.search(re.escape(str(runtime)) + r"(?=\s|$)", mappings), "installed client did not map the shipped runtime")
-    onnx_paths = re.findall(r"(/[^\n]*?libonnxruntime[^\s]*\.dylib)(?=\s|$)", mappings)
-    require(bool(onnx_paths) and all(path == str(runtime) for path in onnx_paths), "installed client mapped an unshipped ONNX Runtime")
+    # A vmmap row reads "... r-x/r-x SM=COW  /path/lib.dylib": anchor the path at a
+    # whitespace boundary so the "/" inside the protection column is not its start.
+    onnx_paths = re.findall(r"(?<!\S)(/[^\n]*?libonnxruntime[^\s]*\.dylib)(?=\s|$)", mappings)
+    unexpected = sorted({path for path in onnx_paths if path != str(runtime)})
+    require(bool(onnx_paths) and not unexpected, "installed client mapped an unshipped ONNX Runtime: " + ", ".join(unexpected[:3]))
     return [str(runtime)]
 
 

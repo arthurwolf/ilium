@@ -45,7 +45,7 @@ class NativeAuditTests(unittest.TestCase):
             "toolchain": {**{name: {"command": command, "stdout": output, "stderr": ""} for name, (command, output) in toolchains.items()}, "python": "3.11.7 (synthetic fixture)"},
             "runtime": {"path": str(native / "build/Release/Release/libonnxruntime.1.24.2.dylib"), "version": "1.24.2", "sha256": "b" * 64},
             "environment": {"ORT_LIB_LOCATION": str(native / "build/Release/Release"), "ORT_LIB_PATH": str(native / "build/Release/Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target")},
-            "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
+            "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
             "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"],
         }
 
@@ -193,6 +193,18 @@ class NativeAuditTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     audit.validate_process_mapping(observed_client, mapping, client, runtime)
 
+    def test_process_mapping_accepts_real_vmmap_rows_with_a_protection_column(self):
+        audit = self.module("audit_native")
+        for directory in ("/Users/runner/work/ilium/native-output/candidate", "/candidate with spaces"):
+            client = Path(directory) / "ilium"
+            runtime = Path(directory) / "libonnxruntime.1.24.2.dylib"
+            maps = (f"__TEXT                  100f0c000-1010a4000  [ 1.6M 1.6M 0K 0K] r-x/r-x SM=COW  {client}\n"
+                    f"__TEXT                  1043c0000-1055c0000  [ 18.0M 18.0M 0K 0K] r-x/r-x SM=COW  {runtime}\n")
+            self.assertEqual(audit.validate_process_mapping(str(client), maps, client, runtime), [str(runtime)])
+            foreign = maps + "__TEXT 1-2 [ 1M 1M 0K 0K] r-x/r-x SM=COW  /opt/homebrew/lib/libonnxruntime.dylib\n"
+            with self.assertRaisesRegex(ValueError, "homebrew"):
+                audit.validate_process_mapping(str(client), foreign, client, runtime)
+
     def test_linux_rpaths_cannot_redirect_system_dependencies_to_build_host(self):
         audit = self.module("audit_native")
         self.assertTrue(hasattr(audit, "validate_linux_rpaths"), "ELF loader path gate is missing")
@@ -225,7 +237,7 @@ class NativeAuditTests(unittest.TestCase):
         with patch.object(os, "name", "nt"):
             receipt = self.intel_build_receipt()
         paths = [receipt["runtime"]["path"], receipt["ort_command"][0],
-                 receipt["ort_command"][9], receipt["cargo_command"][5],
+                 receipt["ort_command"][10], receipt["cargo_command"][5],
                  *[receipt["environment"][name] for name in
                    ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR")]]
         self.assertTrue(all(PurePosixPath(value).is_absolute() and "\\" not in value for value in paths))
