@@ -1,0 +1,5 @@
+# Byte-exact inputs: template and fixture hashes, and the POSIX installer, must
+# not gain CRLF on Windows checkouts (core.autocrlf), or their SHA-256 pins fail.
+*.hbs text eol=lf
+ilium-prompts/tests/fixtures/** text eol=lf
+*.sh text eol=lf
