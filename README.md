@@ -609,6 +609,22 @@ Kilo's default free model was marked as permitting prompt training when checked 
 
 File logging is off by default. Enabled logs can retain project prompts and request bodies, with credentials redacted. Treat logs as sensitive.
 
+#### Custom instructions
+
+**Settings → LLM Instructions** collects seven optional instruction inputs. The same values are available in their feature tabs:
+
+| Instructions | Feature tab |
+|---|---|
+| Voice assistant | Voice control |
+| Entry naming | Titles |
+| Organization; shared naming and organization context | Inference |
+| Project naming; Smart Copy | Inference |
+| Ask for update | Agent Monitoring |
+
+Select an input and press Enter, or click it. In feature tabs, `i` focuses the instruction inputs. Apply with `Ctrl+S`; Esc cancels. Delete clears a selected input. Empty inputs use the built-in defaults. Shared context applies to entry names, project names, and tree organization.
+
+Instructions are added to new requests and saved globally. Both locations edit the same value. Voice instructions refine the assistant's behavior; the other inputs refine their specific task while preserving its required output format.
+
 ### Automation and agent setup
 
 Scheduled input and text triggers send commands to panes. Check the target before using them around confirmation prompts.

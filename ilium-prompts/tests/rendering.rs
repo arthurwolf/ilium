@@ -30,3 +30,25 @@ fn embedded_fragments_can_be_used_as_named_partials() {
         ilium_prompts::naming::JSON_ONLY
     );
 }
+
+#[test]
+fn status_update_instructions_are_additive_literal_and_optional() {
+    let original = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+    assert_eq!(
+        render("agent/ask-for-update", &json!({})).unwrap(),
+        original
+    );
+    assert_eq!(
+        render("agent/ask-for-update", &json!({"custom_instructions": ""})).unwrap(),
+        original
+    );
+    let extra = "Mention blockers. {{> nonexistent}} <xml>& 🦀\nThen next action.";
+    let prompt = render(
+        "agent/ask-for-update",
+        &json!({"custom_instructions": extra}),
+    )
+    .unwrap();
+    assert!(prompt.starts_with(original));
+    assert!(prompt.contains(extra));
+    assert_eq!(prompt.matches(extra).count(), 1);
+}

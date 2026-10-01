@@ -644,13 +644,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             );
         }
         Mode::AgentSetupPrompt(state) => crate::setup_prompt::render(frame, area, state),
-        Mode::VoicePromptEditor(state) => modal::render_multiline_prompt(
-            frame,
-            area,
-            "Voice control custom prompt",
-            &state.textarea,
-            "Apply",
-        ),
+        Mode::VoicePromptEditor(state) => crate::instruction_settings::render_editor(frame,area,state),
         Mode::SaveAs(_, state) => {
             modal::render_text_prompt(frame, area, "Save As", state, "Save");
         }

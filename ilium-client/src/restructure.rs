@@ -106,12 +106,20 @@ pub struct ProtectedSplitViewContext {
 pub trait RestructureCompletionClient {
     fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String>;
 
+    fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+        ilium_inference::PromptInstructions::default()
+    }
+
     fn title_style(&self) -> TitleStyle {
         TitleStyle::Summarization
     }
 }
 
 impl RestructureCompletionClient for InferenceSettings {
+    fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+        self.instructions.clone()
+    }
+
     fn title_style(&self) -> TitleStyle {
         self.title_style
     }
@@ -510,6 +518,9 @@ fn clip_lines(text: &str) -> String {
 
 #[derive(Serialize)]
 struct RestructurePromptContext {
+    entry_naming: String,
+    organization: String,
+    naming_and_organization: String,
     title_instructions: &'static str,
     output_example: &'static str,
     items: Vec<PromptLeafContext>,
@@ -549,6 +560,9 @@ impl RestructurePromptContext {
     ) -> Self {
         let evidence_budget_per_item = item_evidence_budget / items.len().max(1);
         Self {
+            entry_naming: String::new(),
+            organization: String::new(),
+            naming_and_organization: String::new(),
             title_instructions: match title_style {
                 TitleStyle::Labeling => crate::session_naming::LABEL_INSTRUCTIONS,
                 TitleStyle::Summarization => ilium_prompts::naming::RESTRUCTURE_SUMMARY,
@@ -678,8 +692,27 @@ fn clip_restructure_evidence(value: &str, maximum_characters: usize) -> String {
 /// Renders one bounded prompt from the exact current project state. Encoding
 /// can expand JSON/control characters, so render-and-measure rather than
 /// assuming raw input character budgets map one-to-one onto wire size.
+#[cfg(test)]
 fn render_restructure_prompt(
     title_style: TitleStyle,
+    items: &[LeafContext],
+    current_structure: &str,
+    protected_split_views: &[ProtectedSplitViewContext],
+    retry_feedback: Option<&str>,
+) -> anyhow::Result<String> {
+    render_restructure_prompt_with_instructions(
+        title_style,
+        &ilium_inference::PromptInstructions::default(),
+        items,
+        current_structure,
+        protected_split_views,
+        retry_feedback,
+    )
+}
+
+fn render_restructure_prompt_with_instructions(
+    title_style: TitleStyle,
+    instructions: &ilium_inference::PromptInstructions,
     items: &[LeafContext],
     current_structure: &str,
     protected_split_views: &[ProtectedSplitViewContext],
@@ -689,7 +722,7 @@ fn render_restructure_prompt(
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
 
     for _ in 0..12 {
-        let prompt_context = RestructurePromptContext::new(
+        let mut prompt_context = RestructurePromptContext::new(
             title_style,
             items,
             current_structure,
@@ -698,6 +731,10 @@ fn render_restructure_prompt(
             structure_evidence_budget,
             retry_feedback,
         );
+        prompt_context.entry_naming = instructions.entry_naming.trim().to_owned();
+        prompt_context.organization = instructions.organization.trim().to_owned();
+        prompt_context.naming_and_organization =
+            instructions.naming_and_organization.trim().to_owned();
         let prompt = ilium_prompts::render("naming/restructure", &prompt_context)?;
         if prompt.chars().count() <= MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS {
             return Ok(prompt);
@@ -822,8 +859,9 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     let mut last_parse_error = None;
     let mut retry_feedback = None;
     for attempt in 1..=RESTRUCTURE_MAX_ATTEMPTS {
-        let prompt = render_restructure_prompt(
+        let prompt = render_restructure_prompt_with_instructions(
             generator.title_style(),
+            &generator.prompt_instructions(),
             contexts,
             current_structure,
             protected_split_views,
@@ -2322,5 +2360,37 @@ mod tests {
         assert!(!contexts[0].content_extract.contains("worktree task"));
         assert!(contexts[1].content_extract.contains("worktree task"));
         assert!(!contexts[1].content_extract.contains("main checkout task"));
+    }
+
+    struct InstructionGenerator(FakeGenerator);
+    impl RestructureCompletionClient for InstructionGenerator {
+        fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String> {
+            self.0.complete_restructure_prompt(prompt)
+        }
+        fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+            ilium_inference::PromptInstructions {
+                entry_naming: "Entry {{> absent}} <x>&".into(),
+                organization: "Organize by feature".into(),
+                naming_and_organization: "Shared vocabulary".into(),
+                project_naming: "Project only".into(),
+                ..Default::default()
+            }
+        }
+    }
+    #[test]
+    fn custom_instructions_survive_corrective_retry() {
+        let generator = InstructionGenerator(FakeGenerator::sequence([
+            "invalid response".to_string(),
+            r#"{"children":[{"kind":"pane","id":1,"title":"Auth Bug","short_title":"Auth Bug","icon":"🔐"}]}"#.to_string(),
+        ]));
+        infer_restructure_plan(&generator, &[leaf(1, "Shell")]).unwrap();
+        let prompts = generator.0.prompts.borrow();
+        assert_eq!(prompts.len(), 2);
+        for prompt in prompts.iter() {
+            assert!(prompt.contains("Entry {{> absent}} <x>&"));
+            assert!(prompt.contains("Organize by feature"));
+            assert!(prompt.contains("Shared vocabulary"));
+            assert!(!prompt.contains("Project only"));
+        }
     }
 }

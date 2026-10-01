@@ -55,6 +55,7 @@ impl VoiceRow {
 /// Full-screen-safe multiline editor for the additive voice system prompt.
 #[derive(Debug, Clone)]
 pub struct VoicePromptEditorState {
+    pub instruction_field: crate::instruction_settings::InstructionField,
     pub textarea: TextArea<'static>,
 }
 
@@ -69,6 +70,7 @@ impl VoicePromptEditorState {
         // editor's one-empty-line-minimum invariant).
         let lines: Vec<String> = prompt.split('\n').map(str::to_owned).collect();
         Self {
+            instruction_field: crate::instruction_settings::InstructionField::Voice,
             textarea: TextArea::from(lines),
         }
     }

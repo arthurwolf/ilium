@@ -8,7 +8,13 @@ Use every context source below together, but weigh them differently. The transcr
 {{/if}}
 
 Choose one compact visual icon that helps recognize this pane. Prefer the shortest accurate wording for each title. Never expose raw commands, secrets, IDs, paths, logs, or implementation noise in the title. Do not return punctuation-only text or a generic phrase such as "coding session".
-</instructions>
+{{#if entry_naming}}
+<custom-instructions purpose="entry_naming">
+{{entry_naming}}
+</custom-instructions>{{/if}}{{#if naming_and_organization}}
+<custom-instructions purpose="naming_and_organization">
+{{naming_and_organization}}
+</custom-instructions>{{/if}}</instructions>
 <agent-session>
     <agent>{{agent_label}}</agent>
     <pane-id>{{pane_id}}</pane-id>

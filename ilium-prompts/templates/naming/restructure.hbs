@@ -21,7 +21,16 @@ Every "pane" entry whose item below has kind="Plain shell" (a plain terminal, no
 - Never include full argument lists, file paths, quoted strings, commit messages, URLs, environment variables, or anything piped/redirected after the first command.
 - Keep it under 20 characters. Do not wrap it in brackets yourself; that's done for you, and it is added in front of "title"/"short_title", so do not restate the command inside those two fields either.
 For every other pane kind (an agent, editor, or board), set "command_hint" to "" -- this rule is terminal-only. A pane's current-title above may already start with a "[...]" bracket from a previous restructure; ignore that bracket when writing the new "title"/"short_title" and let "command_hint" carry the command instead.
-</instructions>
+{{#if entry_naming}}
+<custom-instructions purpose="entry_naming">
+{{entry_naming}}
+</custom-instructions>{{/if}}{{#if organization}}
+<custom-instructions purpose="organization">
+{{organization}}
+</custom-instructions>{{/if}}{{#if naming_and_organization}}
+<custom-instructions purpose="naming_and_organization">
+{{naming_and_organization}}
+</custom-instructions>{{/if}}</instructions>
 <current-structure>
 The following is the project's current hierarchy. Use it as context and preserve useful continuity where it still matches the items' current work. Entries marked "manual" reflect deliberate user organization and deserve particular weight; entries marked "LLM restructure" came from a previous AI reorganization and may be retained when still useful. This is inspiration, not a constraint: do not reproduce it mechanically, and reorganize it whenever the current item content supports a clearer structure.
 {{{current_structure}}}

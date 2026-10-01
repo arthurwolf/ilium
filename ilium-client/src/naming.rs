@@ -27,6 +27,10 @@ const STRUCTURED_OUTPUT_MAX_ATTEMPTS: u8 = 2;
 pub trait PromptCompletionClient {
     fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError>;
 
+    fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+        ilium_inference::PromptInstructions::default()
+    }
+
     fn title_style(&self) -> ilium_inference::TitleStyle {
         ilium_inference::TitleStyle::Summarization
     }
@@ -35,6 +39,10 @@ pub trait PromptCompletionClient {
 /// Settings-backed adapter. The concrete provider is constructed only when a
 /// worker runs, keeping persisted configuration independent from transport.
 impl PromptCompletionClient for InferenceSettings {
+    fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+        self.instructions.clone()
+    }
+
     fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
         provider_from_settings(self)
             .complete(&InferenceRequest::json_only(prompt))

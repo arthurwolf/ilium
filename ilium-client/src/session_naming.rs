@@ -73,6 +73,10 @@ impl<G: PromptCompletionClient> PromptCompletionClient for TracingPromptCompleti
         Ok(response)
     }
 
+    fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+        self.inner.prompt_instructions()
+    }
+
     fn title_style(&self) -> TitleStyle {
         self.inner.title_style()
     }
@@ -136,7 +140,10 @@ fn infer_session_title<G: PromptCompletionClient>(
     transcript_entries: Vec<TranscriptEntry>,
 ) -> anyhow::Result<DualTitle> {
     let style = generator.title_style();
-    let context = SessionTitleContext::new(input, transcript_path, transcript_entries, style);
+    let mut context = SessionTitleContext::new(input, transcript_path, transcript_entries, style);
+    let instructions = generator.prompt_instructions();
+    context.entry_naming = instructions.entry_naming.trim().to_owned();
+    context.naming_and_organization = instructions.naming_and_organization.trim().to_owned();
     let title = naming::render_complete_and_parse(
         generator,
         "session-title",
@@ -155,6 +162,8 @@ fn infer_session_title<G: PromptCompletionClient>(
 
 #[derive(Debug, Serialize)]
 struct SessionTitleContext {
+    entry_naming: String,
+    naming_and_organization: String,
     style_instructions: &'static str,
     output_example: &'static str,
     is_labeling: bool,
@@ -212,6 +221,8 @@ impl SessionTitleContext {
             transcript_entries
         };
         Self {
+            entry_naming: String::new(),
+            naming_and_organization: String::new(),
             style_instructions: match style {
                 TitleStyle::Labeling => LABEL_INSTRUCTIONS,
                 TitleStyle::Summarization => SUMMARY_INSTRUCTIONS,
@@ -838,5 +849,43 @@ mod tests {
             r#"{"icon":"🔐","session_title_short":"Auth Bug","session_title_long":"Login"}"#
         )
         .is_ok());
+    }
+
+    struct InstructionGenerator(FakeGenerator);
+    impl PromptCompletionClient for InstructionGenerator {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
+            self.0.complete_prompt(prompt)
+        }
+        fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+            ilium_inference::PromptInstructions {
+                entry_naming: "Entry {{> absent}} <x>&".into(),
+                naming_and_organization: "Shared vocabulary".into(),
+                project_naming: "Project convention".into(),
+                organization: "Only organization".into(),
+                ..Default::default()
+            }
+        }
+    }
+    #[test]
+    fn custom_instructions_reach_real_inference_request() {
+        let generator = InstructionGenerator(FakeGenerator::success());
+        let tracer = TracingPromptCompletionClient {
+            inner: &generator,
+            rendered_prompt: RefCell::new(None),
+            raw_response: RefCell::new(None),
+        };
+        infer_session_title(
+            &tracer,
+            &input(PathBuf::from("/work/ilium")),
+            Path::new("/work/session.jsonl"),
+            Vec::new(),
+        )
+        .unwrap();
+        let prompt = generator.0.last_prompt.borrow();
+        let prompt = prompt.as_deref().unwrap();
+        assert!(prompt.contains("Shared vocabulary"));
+        assert!(!prompt.contains("Only organization"));
+        assert!(prompt.contains("Entry {{> absent}} <x>&"));
+        assert!(!prompt.contains("Project convention"));
     }
 }

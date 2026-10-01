@@ -1497,8 +1497,21 @@ impl SmartCopySession {
     }
 }
 
-pub fn system_prompt() -> &'static str {
-    ilium_prompts::naming::SMART_COPY_SYSTEM
+#[cfg(test)]
+pub fn system_prompt() -> String {
+    system_prompt_with_instructions(&ilium_inference::PromptInstructions::default())
+}
+
+/// Builds the system request with the current saved selection preferences.
+pub fn system_prompt_with_instructions(
+    instructions: &ilium_inference::PromptInstructions,
+) -> String {
+    ilium_prompts::render_value(
+        "naming/smart-copy-system",
+        &serde_json::json!({
+            "smart_copy": instructions.smart_copy.trim(),
+        }),
+    )
 }
 
 pub fn user_prompt(snapshot: &SmartCopySnapshot) -> Result<String, serde_json::Error> {
@@ -1917,5 +1930,20 @@ mod tests {
                 r#"{"label":"overflow","kind":"word","parts":[{"line":1,"from":"w2","through":"w2"}]}"#
             )
             .unwrap());
+    }
+
+    #[test]
+    fn custom_instructions_keep_smart_copy_source_contract_and_literal_text() {
+        let instructions = ilium_inference::PromptInstructions {
+            smart_copy: "Prefer commands {{> absent}} <x>&".into(),
+            ..Default::default()
+        };
+        let prompt = system_prompt_with_instructions(&instructions);
+        assert!(prompt.contains("Prefer commands {{> absent}} <x>&"));
+        assert!(prompt.contains("source"));
+        assert_eq!(
+            system_prompt_with_instructions(&Default::default()),
+            system_prompt()
+        );
     }
 }

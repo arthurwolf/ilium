@@ -409,6 +409,7 @@ pub enum SettingsTab {
     /// Managed Claude-instruction setup for Ilium agent features.
     Setup,
     Inference,
+    LlmInstructions,
     Titles,
     Triggers,
     TextTriggers,
@@ -586,7 +587,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 22] = [
+    pub const ALL: [SettingsTab; 23] = [
         Self::Appearance,
         Self::Icons,
         Self::AgentMonitoring,
@@ -602,6 +603,7 @@ impl SettingsTab {
         Self::VoiceControl,
         Self::ResetPlanning,
         Self::Inference,
+        Self::LlmInstructions,
         Self::Titles,
         Self::Triggers,
         Self::TextTriggers,
@@ -615,6 +617,7 @@ impl SettingsTab {
         match self {
             Self::Setup => "Setup",
             Self::Inference => "Inference",
+            Self::LlmInstructions => "LLM Instructions",
             Self::Titles => "Titles",
             Self::Triggers => "Triggers",
             Self::TextTriggers => "Text Triggers",
@@ -6526,7 +6529,9 @@ impl App {
             pane_id,
             inference_settings: self.inference_settings.clone(),
             request: ilium_inference::InferenceRequest {
-                system_prompt: crate::smart_copy::system_prompt().to_string(),
+                system_prompt: crate::smart_copy::system_prompt_with_instructions(
+                    &self.inference_settings.instructions,
+                ),
                 user_prompt,
                 max_tokens: ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
             },
@@ -9844,7 +9849,7 @@ impl App {
         for pane_id in pane_ids {
             self.send_terminal_submission(
                 pane_id,
-                Self::ASK_FOR_UPDATE_PROMPT.to_owned(),
+                ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({"custom_instructions": self.inference_settings.instructions.ask_for_update})),
                 PromptSubmissionSource::AskForUpdate,
             );
         }
@@ -13978,6 +13983,30 @@ mod tests {
     }
 
     #[test]
+    fn ask_for_update_includes_literal_custom_instructions() {
+        let mut app = app();
+        app.inference_settings.instructions.ask_for_update =
+            "Brief French update {{literal}} & 🦀".into();
+        let pane = app
+            .tree
+            .add_pane(ROOT_ID, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        app.action_ask_for_update(pane);
+        let requests = app.take_outbound_requests();
+        let ClientRequest::SubmitTerminalText { text, .. } = &requests[0] else {
+            panic!("submission missing")
+        };
+        assert!(text.contains("Brief French update {{literal}} & 🦀"));
+        assert!(text.starts_with(App::ASK_FOR_UPDATE_PROMPT.trim_end()));
+    }
+
+    #[test]
     fn manual_move_and_reparent_restore_and_persist_manual_tree_order() {
         let config_dir = std::env::temp_dir()
             .join("ilium-app-tree-order-tests")
@@ -16025,6 +16054,7 @@ mod tests {
     #[test]
     fn smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record() {
         let mut app = app();
+        app.inference_settings.instructions.smart_copy = "Prioritize URLs {{literal}} & 🦀".into();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -16041,6 +16071,10 @@ mod tests {
         let request = app
             .take_pending_smart_copy_request()
             .expect("toolbar action should queue inference");
+        assert!(request
+            .request
+            .system_prompt
+            .contains("Prioritize URLs {{literal}} & 🦀"));
         assert_eq!(
             request.request.max_tokens,
             ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
@@ -17188,7 +17222,8 @@ mod tests {
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::ResetPlanning);
         assert_eq!(SettingsTab::ResetPlanning.next(), SettingsTab::Inference);
-        assert_eq!(SettingsTab::Inference.next(), SettingsTab::Titles);
+        assert_eq!(SettingsTab::Inference.next(), SettingsTab::LlmInstructions);
+        assert_eq!(SettingsTab::LlmInstructions.next(), SettingsTab::Titles);
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::TextTriggers);
         assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::Debug);

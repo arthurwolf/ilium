@@ -65,7 +65,10 @@ pub fn infer_terminal_title<G: PromptCompletionClient>(
         anyhow::bail!(ilium_prompts::naming::NAMING_TERMINAL_NAMING_NO_SCREEN_CONTENT_AVAILABLE_TO_INFER_A_TERMINAL_TITLE_FROM);
     }
 
+    let instructions = generator.prompt_instructions();
     let context = TerminalTitleContext {
+        entry_naming: instructions.entry_naming.trim().to_owned(),
+        naming_and_organization: instructions.naming_and_organization.trim().to_owned(),
         style_instructions: if generator.title_style() == TitleStyle::Labeling {
             crate::session_naming::LABEL_INSTRUCTIONS
         } else {
@@ -109,6 +112,8 @@ pub fn infer_terminal_title<G: PromptCompletionClient>(
 
 #[derive(Debug, Serialize)]
 struct TerminalTitleContext {
+    entry_naming: String,
+    naming_and_organization: String,
     style_instructions: &'static str,
     output_example: &'static str,
     is_labeling: bool,
@@ -375,5 +380,34 @@ mod tests {
         let result = infer_terminal_title(&generator, &input("   \n  \t\n  "));
         assert!(result.is_err());
         assert_eq!(generator.calls.get(), 0);
+    }
+
+    struct InstructionGenerator(FakeGenerator);
+    impl PromptCompletionClient for InstructionGenerator {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
+            self.0.complete_prompt(prompt)
+        }
+        fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+            ilium_inference::PromptInstructions {
+                entry_naming: "Entry {{> absent}} <x>&".into(),
+                naming_and_organization: "Shared vocabulary".into(),
+                project_naming: "Project convention".into(),
+                organization: "Only organization".into(),
+                ..Default::default()
+            }
+        }
+    }
+    #[test]
+    fn custom_instructions_reach_real_inference_request() {
+        let generator = InstructionGenerator(FakeGenerator::new(
+            r#"{"icon":"🔐","terminal_title_short":"Auth Bug","terminal_title_long":"Fix Auth Bug In Login Flow"}"#,
+        ));
+        infer_terminal_title(&generator, &input("$ cargo test")).unwrap();
+        let prompt = generator.0.last_prompt.borrow();
+        let prompt = prompt.as_deref().unwrap();
+        assert!(prompt.contains("Shared vocabulary"));
+        assert!(!prompt.contains("Only organization"));
+        assert!(prompt.contains("Entry {{> absent}} <x>&"));
+        assert!(!prompt.contains("Project convention"));
     }
 }

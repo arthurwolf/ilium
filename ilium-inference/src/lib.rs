@@ -79,6 +79,18 @@ pub enum TitleStyle {
     Summarization,
 }
 
+/// Extra user guidance added to application prompts when inference runs.
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PromptInstructions {
+    pub entry_naming: String,
+    pub organization: String,
+    pub naming_and_organization: String,
+    pub project_naming: String,
+    pub smart_copy: String,
+    pub ask_for_update: String,
+}
+
 /// Complete durable settings. Switching providers preserves every other
 /// provider's endpoint, model, and credentials for a later switch back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +98,7 @@ pub enum TitleStyle {
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
     pub title_style: TitleStyle,
+    pub instructions: PromptInstructions,
     pub kilo_gateway: KiloGatewaySettings,
     pub ollama: OllamaSettings,
     pub openai: ApiKeyProviderSettings,
@@ -98,6 +111,7 @@ impl Default for InferenceSettings {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
             title_style: TitleStyle::default(),
+            instructions: PromptInstructions::default(),
             kilo_gateway: KiloGatewaySettings::default(),
             ollama: OllamaSettings::default(),
             openai: ApiKeyProviderSettings::new(DEFAULT_OPENAI_URL),
@@ -1197,6 +1211,28 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    #[test]
+    fn prompt_instructions_default_and_persist_all_six_fields() {
+        let old: InferenceSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.instructions, PromptInstructions::default());
+        let mut settings = old;
+        settings.instructions = PromptInstructions {
+            entry_naming: "entry".into(),
+            organization: "organization".into(),
+            naming_and_organization: "shared".into(),
+            project_naming: "project".into(),
+            smart_copy: "copy".into(),
+            ask_for_update: "update".into(),
+        };
+        let restored: InferenceSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.instructions, settings.instructions);
+        let partial: PromptInstructions =
+            serde_json::from_str(r#"{"entry_naming":"one"}"#).unwrap();
+        assert_eq!(partial.organization, "");
+        assert_eq!(partial.entry_naming, "one");
+    }
 
     #[test]
     fn title_style_defaults_to_labeling_and_round_trips_summarization() {

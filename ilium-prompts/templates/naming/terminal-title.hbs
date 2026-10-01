@@ -14,7 +14,13 @@ Also infer a "command_hint": the short form of whichever single command is curre
 - Never include full argument lists, file paths, quoted strings, commit messages, URLs, environment variables, or anything piped/redirected after the first command.
 - If several commands are visible, use the one currently running, or otherwise the most recently run one -- never an older one further up the screen.
 - Keep it under 20 characters. Do not wrap it in brackets yourself; that's done for you.
-</instructions>
+{{#if entry_naming}}
+<custom-instructions purpose="entry_naming">
+{{entry_naming}}
+</custom-instructions>{{/if}}{{#if naming_and_organization}}
+<custom-instructions purpose="naming_and_organization">
+{{naming_and_organization}}
+</custom-instructions>{{/if}}</instructions>
 <terminal-pane>
     <pane-id>{{pane_id}}</pane-id>
     <current-title>{{current_title}}</current-title>

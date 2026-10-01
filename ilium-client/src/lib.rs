@@ -71,6 +71,7 @@ pub mod help;
 pub mod icon_search_workers;
 pub mod icon_settings;
 pub mod inference_test;
+mod instruction_settings;
 pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;

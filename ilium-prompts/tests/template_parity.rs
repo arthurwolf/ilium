@@ -44,3 +44,40 @@ fn full_prompt_templates_preserve_frozen_original_output() {
         );
     }
 }
+
+#[test]
+fn custom_guidance_is_literal_and_isolated_to_its_template() {
+    let literal = "Prefer French {{> nonexistent}} <x>& 🦀";
+    for (name, fields) in [
+        (
+            "naming/session-title",
+            vec!["entry_naming", "naming_and_organization"],
+        ),
+        (
+            "naming/terminal-title",
+            vec!["entry_naming", "naming_and_organization"],
+        ),
+        (
+            "naming/project-name",
+            vec!["project_naming", "naming_and_organization"],
+        ),
+        (
+            "naming/restructure",
+            vec!["entry_naming", "organization", "naming_and_organization"],
+        ),
+        ("naming/smart-copy-system", vec!["smart_copy"]),
+    ] {
+        let baseline = ilium_prompts::render(name, &serde_json::json!({})).unwrap();
+        let mut context = serde_json::json!({});
+        for field in &fields {
+            context[*field] = Value::String(literal.to_owned());
+        }
+        let rendered = ilium_prompts::render(name, &context).unwrap();
+        assert_eq!(rendered.matches(literal).count(), fields.len(), "{name}");
+        assert!(rendered.contains("custom-instructions"), "{name}");
+        for field in fields {
+            context[field] = Value::String(String::new());
+        }
+        assert_eq!(ilium_prompts::render(name, &context).unwrap(), baseline);
+    }
+}

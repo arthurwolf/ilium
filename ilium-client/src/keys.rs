@@ -1380,7 +1380,7 @@ fn handle_voice_prompt_editor(
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => app.pop_modal(),
         (KeyCode::Char('s'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.settings_commit_voice_prompt(state.text());
+            app.settings_commit_instruction(state.instruction_field, state.text());
             app.pop_modal();
         }
         _ => {
@@ -2381,6 +2381,62 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
     }
 
+    let instruction_fields = crate::instruction_settings::fields(state.tab);
+    if !instruction_fields.is_empty() {
+        let base = crate::instruction_settings::SELECTION_BASE;
+        if matches!(key.code, KeyCode::Up | KeyCode::Char('k'))
+            && state.selected_row == 0
+            && state.tab != SettingsTab::LlmInstructions
+        {
+            state.selected_row = base + instruction_fields.len() - 1;
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if key.code == KeyCode::Char('i') {
+            state.selected_row = base;
+        } else if state.tab == SettingsTab::LlmInstructions || state.selected_row >= base {
+            let index = state
+                .selected_row
+                .saturating_sub(base)
+                .min(instruction_fields.len() - 1);
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.selected_row = base + index.saturating_sub(1)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.selected_row = if index + 1 == instruction_fields.len()
+                        && state.tab != SettingsTab::LlmInstructions
+                    {
+                        0
+                    } else {
+                        base + (index + 1).min(instruction_fields.len() - 1)
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let field = instruction_fields[index];
+                    app.mode = Mode::Settings(state);
+                    app.settings_open_instruction(field);
+                    return;
+                }
+                KeyCode::Delete | KeyCode::Backspace => {
+                    app.settings_commit_instruction(instruction_fields[index], String::new())
+                }
+                KeyCode::Esc if state.tab != SettingsTab::LlmInstructions => state.selected_row = 0,
+                _ => {}
+            }
+            if !matches!(
+                key.code,
+                KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('q') | KeyCode::Esc
+            ) {
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+        if key.code == KeyCode::Char('i') {
+            app.mode = Mode::Settings(state);
+            return;
+        }
+    }
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.mode = Mode::Normal;

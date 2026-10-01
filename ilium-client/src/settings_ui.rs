@@ -261,7 +261,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         );
     }
 
-    let layout = compute_layout(area);
+    let mut layout = compute_layout(area);
+    let instructions_height =
+        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+    if instructions_height > 0 {
+        let panel = Rect {
+            height: instructions_height,
+            ..layout.content_area
+        };
+        crate::instruction_settings::render(frame, panel, app, state.tab, state.selected_row);
+        layout.content_area.y += instructions_height;
+        layout.content_area.height = layout
+            .content_area
+            .height
+            .saturating_sub(instructions_height);
+    }
 
     render_header(frame, layout.header_area);
     render_tab_list(frame, layout.tab_list_area, state.tab);
@@ -271,6 +285,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     match state.tab {
+        SettingsTab::LlmInstructions => {}
         SettingsTab::Setup => render_scrollable(
             frame,
             layout.content_area,
@@ -471,6 +486,7 @@ pub fn settings_help_anchors(
             .collect::<Vec<_>>()
     };
     match state.tab {
+        SettingsTab::LlmInstructions => {}
         SettingsTab::About => {}
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
@@ -1171,6 +1187,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
+        SettingsTab::LlmInstructions => 0,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)

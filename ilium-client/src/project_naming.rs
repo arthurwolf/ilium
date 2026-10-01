@@ -79,7 +79,10 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
         });
     }
 
-    let context = ProjectContext::collect(cwd)?.encoded();
+    let mut context = ProjectContext::collect(cwd)?.encoded();
+    let instructions = generator.prompt_instructions();
+    context.project_naming = instructions.project_naming.trim().to_owned();
+    context.naming_and_organization = instructions.naming_and_organization.trim().to_owned();
     let (project_name, icon) = naming::render_complete_and_parse(
         generator,
         "project-name",
@@ -101,6 +104,8 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
 
 #[derive(Debug, Serialize)]
 struct ProjectContext {
+    project_naming: String,
+    naming_and_organization: String,
     project_path: String,
     root_listing: String,
     claude_md: String,
@@ -110,6 +115,8 @@ struct ProjectContext {
 impl ProjectContext {
     fn collect(cwd: &Path) -> anyhow::Result<Self> {
         Ok(Self {
+            project_naming: String::new(),
+            naming_and_organization: String::new(),
             project_path: cwd.display().to_string(),
             root_listing: root_listing(cwd)?,
             claude_md: read_document_or_marker(&cwd.join("CLAUDE.md"))?,
@@ -119,6 +126,8 @@ impl ProjectContext {
 
     fn encoded(self) -> Self {
         Self {
+            project_naming: self.project_naming,
+            naming_and_organization: self.naming_and_organization,
             project_path: naming::encode_untrusted_context(&self.project_path),
             root_listing: naming::encode_untrusted_context(&self.root_listing),
             claude_md: naming::encode_untrusted_context(&self.claude_md),
@@ -284,6 +293,8 @@ mod tests {
     #[test]
     fn prompt_is_xml_shaped_and_includes_the_json_output_example() {
         let context = ProjectContext {
+            project_naming: String::new(),
+            naming_and_organization: String::new(),
             project_path: "/work/example".to_string(),
             root_listing: "README.md".to_string(),
             claude_md: "[not present]".to_string(),
@@ -338,5 +349,34 @@ mod tests {
     fn rejects_non_json_and_more_than_two_words() {
         assert!(parse_project_name_response("Ilium").is_err());
         assert!(parse_project_name_response("{\"project_name\":\"One Two Three\"}").is_err());
+    }
+
+    struct InstructionGenerator(FakeGenerator);
+    impl PromptCompletionClient for InstructionGenerator {
+        fn complete_prompt(&self, prompt: String) -> Result<String, InferenceError> {
+            self.0.complete_prompt(prompt)
+        }
+        fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+            ilium_inference::PromptInstructions {
+                entry_naming: "Entry {{> absent}} <x>&".into(),
+                naming_and_organization: "Shared vocabulary".into(),
+                project_naming: "Project convention".into(),
+                organization: "Only organization".into(),
+                ..Default::default()
+            }
+        }
+    }
+    #[test]
+    fn custom_instructions_reach_real_inference_request() {
+        let generator = InstructionGenerator(FakeGenerator::new(
+            r#"{"project_name":"Ilium","icon":"🧭"}"#,
+        ));
+        bootstrap_project_name(&scratch_dir(), &generator).unwrap();
+        let prompt = generator.0.last_prompt.borrow();
+        let prompt = prompt.as_deref().unwrap();
+        assert!(prompt.contains("Shared vocabulary"));
+        assert!(!prompt.contains("Only organization"));
+        assert!(prompt.contains("Project convention"));
+        assert!(!prompt.contains("Entry {{> absent}} <x>&"));
     }
 }

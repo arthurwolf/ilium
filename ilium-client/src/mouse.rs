@@ -512,12 +512,13 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
             dispatch_multiline_prompt_action(app, action);
             return;
         }
-        if layout.editor_area.contains(position) {
+        let editor_area = crate::instruction_settings::editor_area(app.layout.screen_area);
+        if editor_area.contains(position) {
             let Mode::VoicePromptEditor(state) = &mut app.mode else {
                 unreachable!("the multiline dialog match above preserves its mode");
             };
-            let row = position.y.saturating_sub(layout.editor_area.y);
-            let column = position.x.saturating_sub(layout.editor_area.x);
+            let row = position.y.saturating_sub(editor_area.y);
+            let column = position.x.saturating_sub(editor_area.x);
             state
                 .textarea
                 .move_cursor(ratatui_textarea::CursorMove::Jump(row, column));
@@ -1789,7 +1790,56 @@ fn update_animation_hover(
 /// reproduces no arithmetic of its own from.
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
-    let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+    let mut layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+    let instruction_height =
+        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+    if instruction_height > 0 {
+        let panel = Rect {
+            height: instruction_height,
+            ..layout.content_area
+        };
+        if panel.contains(position)
+            && matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            let fields = crate::instruction_settings::fields(state.tab);
+            let index = state
+                .selected_row
+                .saturating_sub(crate::instruction_settings::SELECTION_BASE)
+                .min(fields.len() - 1);
+            let next = if mouse.kind == MouseEventKind::ScrollUp {
+                index.saturating_sub(1)
+            } else {
+                (index + 1).min(fields.len() - 1)
+            };
+            state.selected_row = crate::instruction_settings::SELECTION_BASE + next;
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if panel.contains(position) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        {
+            let index = usize::from(position.y.saturating_sub(panel.y + 1)) / 3
+                + crate::instruction_settings::first_visible(state.tab, panel, state.selected_row);
+            if position.y > panel.y {
+                if let Some(field) = crate::instruction_settings::fields(state.tab)
+                    .get(index)
+                    .copied()
+                {
+                    state.selected_row = crate::instruction_settings::SELECTION_BASE + index;
+                    app.mode = Mode::Settings(state);
+                    app.settings_open_instruction(field);
+                    return;
+                }
+            }
+        }
+        layout.content_area.y += instruction_height;
+        layout.content_area.height = layout
+            .content_area
+            .height
+            .saturating_sub(instruction_height);
+    }
 
     // The full-screen animation preview hides every control: any click returns.
     if state.tab == crate::app::SettingsTab::Animations && state.animation_fullscreen {
