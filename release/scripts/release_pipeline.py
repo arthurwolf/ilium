@@ -184,7 +184,14 @@ def logged(command, root, log, environment=None, timeout=10_800):
     emit('progress', operation=Path(str(command[0])).name, log=str(log))
     log = Path(log)
     with log.open('xb') as output:
-        result = subprocess.run(list(map(str, command)), cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+        try:
+            result = subprocess.run(list(map(str, command)), cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+        except subprocess.TimeoutExpired:
+            # A hung child must fail with evidence (which test was still running)
+            # rather than be cancelled hours later with nothing recorded.
+            emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code='timeout', timeout_seconds=timeout,
+                 log_tail=log.read_bytes()[-6000:].decode('utf-8', 'replace'))
+            raise release_tool.ReleaseError('command exceeded %d seconds; inspect owned log %s' % (timeout, log))
     if result.returncode != 0:
         # Diagnostic artifacts can fail to upload; keep the decisive lines in the job log.
         emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code=result.returncode,
@@ -231,6 +238,9 @@ def native(arguments):
         environment['RUST_TEST_THREADS'] = '1'
         # /var is a symlink to /private/var; tests compare resolved paths.
         environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
+    if target['os'] == 'windows':
+        # Bound ConPTY/process concurrency; plain CI (no static CRT) is unaffected.
+        environment['RUST_TEST_THREADS'] = '2'
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
         # The bundled libonnxruntime sits beside the executables; the installed
@@ -289,7 +299,7 @@ def native(arguments):
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
     logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
-    logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment)
+    logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment, timeout=3600)
     # Product tests above run in full on every native OS. POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.
