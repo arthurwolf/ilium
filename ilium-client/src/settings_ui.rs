@@ -270,11 +270,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             ..layout.content_area
         };
         crate::instruction_settings::render(frame, panel, app, state.tab, state.selected_row);
-        layout.content_area.y += instructions_height;
-        layout.content_area.height = layout
-            .content_area
-            .height
-            .saturating_sub(instructions_height);
+        if state.tab != SettingsTab::LlmInstructions {
+            layout.content_area.y += instructions_height;
+            layout.content_area.height = layout
+                .content_area
+                .height
+                .saturating_sub(instructions_height);
+        }
     }
 
     render_header(frame, layout.header_area);
@@ -486,7 +488,31 @@ pub fn settings_help_anchors(
             .collect::<Vec<_>>()
     };
     match state.tab {
-        SettingsTab::LlmInstructions => {}
+        SettingsTab::LlmInstructions => {
+            let first = crate::instruction_settings::first_visible(
+                state.tab,
+                layout.content_area,
+                state.selected_row,
+            );
+            for (index, _) in crate::instruction_settings::InstructionField::ALL
+                .iter()
+                .enumerate()
+                .skip(first)
+            {
+                let id = format!("LLM-{:02}", index + 1);
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    &id,
+                    1 + ((index - first) as u16) * 3,
+                    0,
+                    state
+                        .selected_row
+                        .saturating_sub(crate::instruction_settings::SELECTION_BASE)
+                        == index,
+                );
+            }
+        }
         SettingsTab::About => {}
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
@@ -770,6 +796,7 @@ pub fn settings_help_anchors(
             } else {
                 0
             };
+            let test_log_offset = inference_test_log_lines(&app.inference_test_state).len() as u16;
             for (i, row) in inference_rows(&app.inference_settings).iter().enumerate() {
                 let id = match row {
                     InferenceRow::Provider => "INF-01",
@@ -793,7 +820,7 @@ pub fn settings_help_anchors(
                     &mut anchors,
                     layout,
                     id,
-                    1 + warning + i as u16 * 3,
+                    1 + warning + test_log_offset + i as u16 * 3,
                     state.scroll,
                     state.selected_row == i,
                 );
@@ -2353,6 +2380,7 @@ fn inference_lines(
         lines.push(Line::from(Span::styled("  Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.", Style::new().fg(Color::Yellow))));
         lines.push(Line::from(""));
     }
+    lines.extend(inference_test_log_lines(test_state));
     for (index, row) in rows.into_iter().enumerate() {
         let label = inference_label(row);
         let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
@@ -2411,7 +2439,6 @@ fn inference_lines(
             };
         lines.extend(model_discovery_lines(settings, model_discovery, models));
     }
-    lines.extend(inference_test_log_lines(test_state));
     if let Some(result) = test_result {
         lines.push(Line::from(Span::styled(
             format!(
@@ -2715,6 +2742,30 @@ fn model_discovery_lines(
         }
     }
     lines
+}
+
+pub fn inference_content_hit_with_test(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    settings: &ilium_inference::InferenceSettings,
+    test_state: &InferenceTestState,
+) -> Option<(InferenceRow, i32)> {
+    if !content_area.contains(position) {
+        return None;
+    }
+    let line = position
+        .y
+        .saturating_sub(content_area.y)
+        .saturating_add(scroll);
+    let offset = inference_test_log_lines(test_state).len() as u16;
+    let adjusted = line.checked_sub(offset)?;
+    inference_content_hit(
+        content_area,
+        adjusted,
+        Position::new(position.x, content_area.y),
+        settings,
+    )
 }
 
 pub fn inference_content_hit(

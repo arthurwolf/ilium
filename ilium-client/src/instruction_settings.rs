@@ -336,6 +336,25 @@ mod interaction_tests {
         assert!(app.inference_settings.instructions.entry_naming.is_empty());
     }
     #[test]
+    fn editor_shows_full_shared_explanation_at_sixty_columns() {
+        let mut state = crate::voice_settings::VoicePromptEditorState::new("");
+        state.instruction_field = InstructionField::SharedContext;
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
+        terminal
+            .draw(|frame| render_editor(frame, Rect::new(0, 0, 60, 20), &state))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("Shared naming and organization context"));
+        assert!(text.contains("organization."));
+    }
+    #[test]
     fn wheel_reaches_the_last_shared_field_in_a_short_terminal() {
         let mut app = App::new("instructions".into(), std::env::temp_dir());
         app.layout.screen_area = Rect::new(0, 0, 60, 20);

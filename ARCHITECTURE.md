@@ -301,3 +301,7 @@ Each milestone is meant to be independently runnable/demoable, not a big-bang in
 ## Embedded application prompts
 
 `ilium-prompts` owns the application prompt catalog, editable `.hbs` sources, build validation and shared plain-text Handlebars rendering. Client, inference, server and session conversion depend on this pure crate; it performs no runtime file I/O. Typed contracts, serialization, clipping and runtime user values remain with their callers. See [`ilium-prompts/README.md`](ilium-prompts/README.md) for maintenance and [`ilium-prompts/CATALOG.md`](ilium-prompts/CATALOG.md) for the extraction mapping.
+
+### Additive user instructions
+
+`ilium-inference::PromptInstructions` persists six optional fields under `[inference.instructions]`; the existing voice field remains `[voice].custom_prompt`. `instruction_settings::InstructionField` maps both the central LLM Instructions tab and feature tabs to these same values and save paths. Editors preserve authored text; prompt builders trim surrounding whitespace and interpolate it once into optional `.hbs` sections. Naming workers copy current inference settings when dispatching new requests. Restructure includes guidance on every corrective retry, Smart Copy adds only its selection preferences to the system prompt, and Ask for update renders its instructions when invoked. Empty fields preserve the built-in prompt output.

@@ -1834,11 +1834,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 }
             }
         }
-        layout.content_area.y += instruction_height;
-        layout.content_area.height = layout
-            .content_area
-            .height
-            .saturating_sub(instruction_height);
+        if state.tab != crate::app::SettingsTab::LlmInstructions {
+            layout.content_area.y += instruction_height;
+            layout.content_area.height = layout
+                .content_area
+                .height
+                .saturating_sub(instruction_height);
+        }
     }
 
     // The full-screen animation preview hides every control: any click returns.
@@ -2073,11 +2075,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.settings_select_title_style(style);
                 }
             } else if state.tab == crate::app::SettingsTab::Inference {
-                if let Some((row, direction)) = crate::settings_ui::inference_content_hit(
+                if let Some((row, direction)) = crate::settings_ui::inference_content_hit_with_test(
                     layout.content_area,
                     state.scroll,
                     position,
                     &app.inference_settings,
+                    &app.inference_test_state,
                 ) {
                     if let Some(index) = crate::settings_ui::inference_rows(&app.inference_settings)
                         .iter()

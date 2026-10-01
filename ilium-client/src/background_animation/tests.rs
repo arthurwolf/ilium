@@ -796,6 +796,12 @@ fn shoreline_golden_hash(settings: &AnimationSettings, width: u16, height: u16) 
 
 #[test]
 fn shoreline_classic_output_is_byte_identical_to_the_original_renderer() {
+    // The golden hashes cover exact f32 bits, and the original renderer's
+    // `sin`/`cos` come from the platform libm: Windows and macOS round the last
+    // bit differently, so the bits are only pinned where they were recorded.
+    if !cfg!(target_os = "linux") {
+        return;
+    }
     const GOLDEN: [(&str, u16, u16, u64); 9] = [
         ("default", 40, 12, 0xe4f3127ad73b5666),
         ("default", 80, 24, 0x0e1789a538969ed5),
@@ -876,11 +882,14 @@ fn shoreline_defaults_to_rich_but_a_saved_mapping_without_style_is_classic() {
     )
     .unwrap();
     assert_eq!(old.shoreline.style, ShorelineStyle::Classic);
-    assert_eq!(
-        shoreline_golden_hash(&old, 40, 12),
-        0xe4f3127ad73b5666,
-        "an old four-key config renders the original pixels"
-    );
+    // Exact-bit golden: Linux libm only (see the byte-identical test above).
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            shoreline_golden_hash(&old, 40, 12),
+            0xe4f3127ad73b5666,
+            "an old four-key config renders the original pixels"
+        );
+    }
     // The style is always written, so a save/load round trip is stable.
     let saved = serde_json::to_value(AnimationSettings::default()).unwrap();
     assert_eq!(saved["shoreline"]["style"], "rich");

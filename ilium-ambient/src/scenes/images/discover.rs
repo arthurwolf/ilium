@@ -335,10 +335,11 @@ mod tests {
             .files
             .iter()
             .map(|path| {
+                // Separators are normalised so expectations read the same on Windows.
                 path.strip_prefix(root)
                     .unwrap_or(path)
                     .to_string_lossy()
-                    .into_owned()
+                    .replace('\\', "/")
             })
             .collect()
     }

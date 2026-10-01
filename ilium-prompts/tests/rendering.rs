@@ -52,3 +52,42 @@ fn status_update_instructions_are_additive_literal_and_optional() {
     assert!(prompt.contains(extra));
     assert_eq!(prompt.matches(extra).count(), 1);
 }
+
+#[test]
+fn instruction_templates_ignore_preferences_for_other_tasks() {
+    let all = json!({
+        "entry_naming": "ENTRY_ONLY",
+        "organization": "ORG_ONLY",
+        "naming_and_organization": "SHARED_ONLY",
+        "project_naming": "PROJECT_ONLY",
+        "smart_copy": "COPY_ONLY",
+        "custom_instructions": "UPDATE_ONLY",
+    });
+    for (name, expected) in [
+        ("naming/session-title", vec!["ENTRY_ONLY", "SHARED_ONLY"]),
+        ("naming/terminal-title", vec!["ENTRY_ONLY", "SHARED_ONLY"]),
+        ("naming/project-name", vec!["PROJECT_ONLY", "SHARED_ONLY"]),
+        (
+            "naming/restructure",
+            vec!["ENTRY_ONLY", "ORG_ONLY", "SHARED_ONLY"],
+        ),
+        ("naming/smart-copy-system", vec!["COPY_ONLY"]),
+        ("agent/ask-for-update", vec!["UPDATE_ONLY"]),
+    ] {
+        let prompt = render(name, &all).unwrap();
+        for marker in [
+            "ENTRY_ONLY",
+            "ORG_ONLY",
+            "SHARED_ONLY",
+            "PROJECT_ONLY",
+            "COPY_ONLY",
+            "UPDATE_ONLY",
+        ] {
+            assert_eq!(
+                prompt.contains(marker),
+                expected.contains(&marker),
+                "{name}: {marker}"
+            );
+        }
+    }
+}

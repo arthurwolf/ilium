@@ -3125,7 +3125,10 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             .position(|kind| *kind == app.animation_settings.kind)
             .unwrap_or(0);
     }
-    let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+    let mut content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+    let instruction_height = crate::instruction_settings::panel_height(state.tab, content_area);
+    content_area.y += instruction_height;
+    content_area.height = content_area.height.saturating_sub(instruction_height);
     if state.tab == SettingsTab::Animations {
         let model = app.animation_row_model();
         let row_count = model.len();

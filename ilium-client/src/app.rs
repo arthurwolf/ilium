@@ -1125,7 +1125,7 @@ pub enum ContextMenuAction {
     SchedulePaneInput,
     QueuePrompt,
     ClearPromptQueue,
-    /// Sends the fixed status-check prompt (see `App::ASK_FOR_UPDATE_PROMPT`)
+    /// Sends the rendered status-check prompt
     /// to every idle/done agent pane under the menu's target -- a single
     /// pane, every such pane in a project, or every such pane in the whole
     /// tree from `ROOT_ID`.
@@ -9832,10 +9832,7 @@ impl App {
         }
     }
 
-    /// Fixed status-check prompt sent by the "ask for update" tree action.
-    const ASK_FOR_UPDATE_PROMPT: &'static str = ilium_prompts::agent::ASK_FOR_UPDATE;
-
-    /// Sends `ASK_FOR_UPDATE_PROMPT` followed by Enter to every eligible pane
+    /// Sends the rendered status-check prompt followed by Enter to every eligible pane
     /// under `target` -- see `Tree::panes_eligible_for_update`. `target` may be a
     /// single pane, a project/group (every eligible pane inside it), or
     /// `ROOT_ID` (every eligible pane in the whole tree).
@@ -9849,7 +9846,7 @@ impl App {
         for pane_id in pane_ids {
             self.send_terminal_submission(
                 pane_id,
-                ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({"custom_instructions": self.inference_settings.instructions.ask_for_update})),
+                ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({"custom_instructions": self.inference_settings.instructions.ask_for_update.trim()})),
                 PromptSubmissionSource::AskForUpdate,
             );
         }
@@ -13975,7 +13972,10 @@ mod tests {
                 request,
                 ClientRequest::SubmitTerminalText {
                     pane_id,
-                    text: App::ASK_FOR_UPDATE_PROMPT.to_owned(),
+                    text: ilium_prompts::render_value(
+                        "agent/ask-for-update",
+                        &serde_json::json!({})
+                    ),
                     source: PromptSubmissionSource::AskForUpdate,
                 }
             );
@@ -13987,9 +13987,13 @@ mod tests {
         let mut app = app();
         app.inference_settings.instructions.ask_for_update =
             "Brief French update {{literal}} & 🦀".into();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-custom"))
+            .unwrap();
         let pane = app
             .tree
-            .add_pane(ROOT_ID, "agent", PaneContentKind::Terminal)
+            .add_pane(project, "agent", PaneContentKind::Terminal)
             .unwrap();
         app.tree
             .set_pane_status(
@@ -14003,7 +14007,20 @@ mod tests {
             panic!("submission missing")
         };
         assert!(text.contains("Brief French update {{literal}} & 🦀"));
-        assert!(text.starts_with(App::ASK_FOR_UPDATE_PROMPT.trim_end()));
+        assert!(text.starts_with(&ilium_prompts::render_value(
+            "agent/ask-for-update",
+            &serde_json::json!({})
+        )));
+        app.inference_settings.instructions.ask_for_update = " \n\t".into();
+        app.action_ask_for_update(pane);
+        let requests = app.take_outbound_requests();
+        let ClientRequest::SubmitTerminalText { text, .. } = &requests[0] else {
+            panic!("submission missing")
+        };
+        assert_eq!(
+            text,
+            &ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({}))
+        );
     }
 
     #[test]

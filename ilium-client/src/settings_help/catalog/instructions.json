@@ -1,0 +1,93 @@
+[
+  {
+    "id": "LLM-01",
+    "title": "Voice assistant instructions",
+    "explanation": "Language, vocabulary and response style for voice control. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-02",
+    "title": "Entry naming instructions",
+    "explanation": "Wording, language and terminology for entry titles and summaries. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-03",
+    "title": "Organization instructions",
+    "explanation": "How entries are grouped and ordered during restructure. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-04",
+    "title": "Shared naming and organization context",
+    "explanation": "Vocabulary and preferences applied to both naming and organization. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-05",
+    "title": "Project naming instructions",
+    "explanation": "Preferred language and abbreviations for project names. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-06",
+    "title": "Smart Copy instructions",
+    "explanation": "Which exact-source copy targets to prioritize. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  },
+  {
+    "id": "LLM-07",
+    "title": "Ask for update instructions",
+    "explanation": "What agents should emphasize when asked for a status update. The feature-specific tab and LLM Instructions edit the same saved value.",
+    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
+    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
+    "motion": "None.",
+    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
+    "frames": [
+      "Empty: built-in behavior",
+      "Custom: built-in behavior + your instructions"
+    ]
+  }
+]

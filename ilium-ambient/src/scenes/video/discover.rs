@@ -460,7 +460,7 @@ mod tests {
                     .strip_prefix(root)
                     .unwrap_or(path)
                     .to_string_lossy()
-                    .into_owned(),
+                    .replace('\\', "/"),
                 MediaInput::Url(url) => url.clone(),
             })
             .collect()
