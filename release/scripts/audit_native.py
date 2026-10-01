@@ -197,7 +197,7 @@ def validate_intel_build_receipt(receipt, runtimes, runner="macos-15-intel", wor
     return {"state": "passed", "source_tag": register["tag"], "source_commit": register["commit"], "source_sha256": register["source_sha256"], "built_runtime_sha256": matches[0]["sha256"]}
 
 
-def validate_windows_build_receipt(receipt, runtimes, runner="windows-2022", workspace=None):
+def validate_windows_build_receipt(receipt, runtimes, runner="windows-2025", workspace=None):
     from build_intel_ort import validate_source_register, verify_tag_commit
     def receipt_path(value):
         windows_path = PureWindowsPath(value)

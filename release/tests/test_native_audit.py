@@ -66,7 +66,7 @@ class NativeAuditTests(unittest.TestCase):
             "source_register_sha256": "b" * 64,
             "tag_resolution": {"reference_url": "https://api.github.com/repos/microsoft/onnxruntime/git/ref/tags/v1.24.2", "reference": {"ref": "refs/tags/v1.24.2", "object": {"type": "commit", "sha": commit}}, "tag_object": None},
             "native_identity": {"system": "Windows", "machine": "AMD64", "release": "10", "version": "Windows fixture"},
-            "runner_identity": "windows-2022",
+            "runner_identity": "windows-2025",
             "toolchain": {
                 "vswhere": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], "stdout": str(installation) + "\n", "stderr": ""},
                 "vswhere_version": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationVersion"], "stdout": "17.11.35222.181\n", "stderr": ""},

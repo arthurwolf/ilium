@@ -74,7 +74,7 @@ class TargetManifestTests(unittest.TestCase):
         expected = [
             ("linux", "x86_64", "x86_64-unknown-linux-gnu", "ubuntu-22.04", "ilium-linux-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
             ("linux", "aarch64", "aarch64-unknown-linux-gnu", "ubuntu-22.04-arm", "ilium-linux-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
-            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2022", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe"], "pinned-source-build"),
+            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2025", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe"], "pinned-source-build"),
             ("macos", "aarch64", "aarch64-apple-darwin", "macos-15", "ilium-macos-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
             ("macos", "x86_64", "x86_64-apple-darwin", "macos-15-intel", "ilium-macos-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "pinned-source-build"),
         ]
@@ -103,7 +103,7 @@ class TargetManifestTests(unittest.TestCase):
             "schema": 1, "state": "passed", "publication_allowed": True,
             "target": target["rust_target"], "tag": "v0.1.0", "version": "0.1.0",
             "os": "windows", "arch": "x86_64",
-            "native_identity": {"system": "Windows", "machine": "AMD64", "runner": "windows-2022"},
+            "native_identity": {"system": "Windows", "machine": "AMD64", "runner": "windows-2025"},
             "dependency_closure": {"complete": True},
             "binary_versions": {"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"},
             "files": {"ilium.exe": "a" * 64, "ilium-server.exe": "b" * 64,

@@ -126,7 +126,7 @@ the resulting shared `onnxruntime.dll`; the target manifest requires this source
 strategy. Retain source, toolchain, build flags, library hashes and original
 licence notices with native dependency and inference evidence.
 
-The Windows helper runs only on the native `windows-2022` runner. Its explicit
+The Windows helper runs only on the native `windows-2025` runner. Its explicit
 inputs are the source register/archive, new source-build and Cargo output paths,
 Cargo workspace/home, receipt and Cargo-environment output paths, runner identity
 and bounded parallelism. The workflow supplies these arguments. The helper

@@ -257,7 +257,7 @@ class PipelineTests(unittest.TestCase):
         return SimpleNamespace(manifest=source / 'release/targets.toml', workspace=source / 'Cargo.toml', tag='v0.1.0', artifacts=artifacts, windows_installers=installers_directory, linux_packages=self.root / 'linux-packages', output=self.root / 'aggregate')
 
     def test_windows_native_uses_pinned_source_builder_without_crt_pool_arguments(self):
-        arguments = pipeline.parser().parse_args(['native', '--tag', 'v0.1.0', '--target', 'x86_64-pc-windows-msvc', '--runner-identity', 'windows-2022', '--work', str(self.root / 'work'), '--output', str(self.root / 'output')])
+        arguments = pipeline.parser().parse_args(['native', '--tag', 'v0.1.0', '--target', 'x86_64-pc-windows-msvc', '--runner-identity', 'windows-2025', '--work', str(self.root / 'work'), '--output', str(self.root / 'output')])
         self.assertFalse(hasattr(arguments, 'runtime_directory'))
         self.assertFalse(hasattr(arguments, 'runtime_license_inventory'))
         code = (ROOT / 'release/scripts/release_pipeline.py').read_text()

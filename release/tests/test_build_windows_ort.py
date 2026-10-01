@@ -27,10 +27,10 @@ class WindowsOrtBuilderTests(unittest.TestCase):
 
     def test_host_gate_requires_windows_amd64_and_exact_runner(self):
         builder = load_builder()
-        builder.require_windows_host("Windows", "AMD64", "windows-2022")
+        builder.require_windows_host("Windows", "AMD64", "windows-2025")
         for system, machine, runner in (
-            ("Linux", "x86_64", "windows-2022"),
-            ("Windows", "ARM64", "windows-2022"),
+            ("Linux", "x86_64", "windows-2025"),
+            ("Windows", "ARM64", "windows-2025"),
             ("Windows", "AMD64", "windows-latest"),
         ):
             with self.subTest(system=system, machine=machine, runner=runner):
@@ -50,7 +50,7 @@ class WindowsOrtBuilderTests(unittest.TestCase):
                 "--cargo-workspace", str(root / "Cargo.toml"),
                 "--cargo-target-dir", str(root / "cargo-target"),
                 "--cargo-home", str(root / "cargo-home"),
-                "--runner-identity", "windows-2022",
+                "--runner-identity", "windows-2025",
                 "--parallel", "2",
             ])
             with patch.object(builder.platform, "system", return_value="Linux"), \

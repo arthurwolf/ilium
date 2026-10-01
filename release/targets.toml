@@ -28,12 +28,12 @@ minimum_tested_os = "ubuntu-22.04-arm"
 os = "windows"
 arch = "x86_64"
 rust_target = "x86_64-pc-windows-msvc"
-runner = "windows-2022"
+runner = "windows-2025"
 archive = "ilium-windows-x86_64.zip"
 format = "zip"
 executables = ["ilium.exe", "ilium-server.exe"]
 ort_strategy = "pinned-source-build"
-minimum_tested_os = "windows-2022"
+minimum_tested_os = "windows-2025"
 
 [[target]]
 os = "macos"

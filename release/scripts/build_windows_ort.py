@@ -31,7 +31,7 @@ from release_tool import JsonArgumentParser, ReleaseError, digest, emit, read_js
 
 
 TARGET = "x86_64-pc-windows-msvc"
-RUNNER = "windows-2022"
+RUNNER = "windows-2025"
 TARGET_RUSTFLAGS = "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS"
 STATIC_CRT_FLAG = "-Ctarget-feature=+crt-static"
 GENERATOR = "Visual Studio 17 2022"
@@ -46,7 +46,7 @@ def require(condition, message):
 def require_windows_host(system, machine, runner):
     require(
         system == "Windows" and machine == "AMD64" and runner == RUNNER,
-        "Windows ORT build requires native Windows AMD64 on windows-2022; no download/build is allowed on another host",
+        "Windows ORT build requires native Windows AMD64 on windows-2025; no download/build is allowed on another host",
     )
 
 

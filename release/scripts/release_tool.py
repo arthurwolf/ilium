@@ -79,7 +79,7 @@ def validate_policy(target):
     target_suffix = {
         "linux": "unknown-linux-gnu", "windows": "pc-windows-msvc", "macos": "apple-darwin",
     }[operating_system]
-    runner = {"linux": "ubuntu-22.04", "windows": "windows-2022", "macos": "macos-15"}[operating_system]
+    runner = {"linux": "ubuntu-22.04", "windows": "windows-2025", "macos": "macos-15"}[operating_system]
     if operating_system == "linux" and architecture == "aarch64":
         runner += "-arm"
     if operating_system == "macos" and architecture == "x86_64":

@@ -133,7 +133,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_installer_job_builds_on_windows_from_the_native_artifact_and_smoke_tests(self):
         job = self.workflow['jobs']['windows-installers']
-        self.assertEqual(job['runs-on'], 'windows-2022')
+        self.assertEqual(job['runs-on'], 'windows-2025')
         self.assertEqual(set(job['needs']), {'source', 'native'})
         text = json.dumps(job['steps'])
         for expected in ('native-x86_64-pc-windows-msvc', 'build_windows_installers.py build', 'build_windows_installers.py smoke', 'wix --version', 'innosetup --version'):
