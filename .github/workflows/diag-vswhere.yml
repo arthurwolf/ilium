@@ -1,0 +1,19 @@
+name: diag-vswhere
+# Temporary diagnostic: which Visual Studio installations does each image expose?
+on: workflow_dispatch
+jobs:
+    vs:
+        strategy:
+            fail-fast: false
+            matrix:
+                image: [windows-2022, windows-2025]
+        runs-on: ${{ matrix.image }}
+        steps:
+            - shell: pwsh
+              run: |
+                  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+                  & $vswhere -all -products * -format json | Out-String
+                  "--- query used by the builder ---"
+                  & $vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+                  "--- same without -latest ---"
+                  & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
