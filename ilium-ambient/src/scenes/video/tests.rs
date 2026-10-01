@@ -3,8 +3,10 @@
 
 use super::command::{
     ChildControl, ChildSlot, CommandRunner, CommandSpec, PixelFormat, PlayRequest, SpawnedChild,
-    SystemRunner,
 };
+// Only the Linux `SleepRunner` fixture spawns a real process.
+#[cfg(target_os = "linux")]
+use super::command::SystemRunner;
 use super::discover::MediaInput;
 use super::player::{FrameSource, FrameStream, OpenError, PlayerConfig};
 use super::render::{stream_options, VideoScene};
