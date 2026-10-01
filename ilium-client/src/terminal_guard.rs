@@ -132,7 +132,8 @@ pub(crate) fn skip_bottom_right_cell(frame: &mut ratatui::Frame, enabled: bool) 
     if !enabled || area.width == 0 || area.height == 0 {
         return;
     }
-    frame.buffer_mut()[(area.right() - 1, area.bottom() - 1)].set_skip(true);
+    frame.buffer_mut()[(area.right() - 1, area.bottom() - 1)]
+        .set_diff_option(ratatui::buffer::CellDiffOption::Skip);
 }
 
 #[cfg(test)]
@@ -151,7 +152,11 @@ mod skip_tests {
                     for y in 0..3u16 {
                         for x in 0..6u16 {
                             let expected = enabled && (x, y) == (5, 2);
-                            assert_eq!(buffer[(x, y)].skip, expected, "{x},{y} enabled={enabled}");
+                            assert_eq!(
+                                buffer[(x, y)].diff_option == ratatui::buffer::CellDiffOption::Skip,
+                                expected,
+                                "{x},{y} enabled={enabled}"
+                            );
                         }
                     }
                 })
