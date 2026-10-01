@@ -1185,8 +1185,11 @@ pub enum ConfigLoadError {
     InvalidGitSettings(String),
     #[error("failed to read config file: {0}")]
     Read(#[from] std::io::Error),
+    // Boxed: `toml::de::Error` alone is ~100 bytes, which pushes `ClientError`
+    // (via `ConfigLoad`) over clippy's large-`Err` threshold on Windows, where
+    // `PathBuf` is wider.
     #[error("failed to parse config file as TOML: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(Box<toml::de::Error>),
     /// A `[keybindings]` key isn't any known `Action`'s `action_name`.
     #[error("keybindings.{0:?} is not a known action")]
     UnknownAction(String),
@@ -1291,6 +1294,12 @@ pub enum ConfigLoadError {
     InvalidVoiceOutputVolume(u8),
 }
 
+impl From<toml::de::Error> for ConfigLoadError {
+    fn from(error: toml::de::Error) -> Self {
+        Self::Parse(Box::new(error))
+    }
+}
+
 /// Why persisting a settings-screen change to `config.toml` failed -- see
 /// [`save_ui_settings`].
 #[derive(Debug, thiserror::Error)]
@@ -1326,7 +1335,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     let raw: RawClientConfig =
         toml::from_str(&contents).map_err(|source| ClientError::ConfigLoad {
             path: path.clone(),
-            source: ConfigLoadError::Parse(source),
+            source: ConfigLoadError::Parse(Box::new(source)),
         })?;
 
     let keybindings =

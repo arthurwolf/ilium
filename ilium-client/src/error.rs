@@ -43,3 +43,13 @@ pub enum ClientError {
     #[error("failed to load Kilo Gateway paid proxies from MongoDB: {0}")]
     ProxyDatabase(#[from] crate::proxy_database::ProxyDatabaseError),
 }
+
+#[cfg(test)]
+mod size_probe {
+    #[test]
+    fn client_error_stays_well_under_the_large_err_threshold() {
+        let size = std::mem::size_of::<super::ClientError>();
+        eprintln!("ClientError size {size}");
+        assert!(size <= 104, "ClientError grew to {size} bytes");
+    }
+}
