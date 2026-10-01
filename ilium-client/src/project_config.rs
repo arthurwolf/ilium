@@ -70,6 +70,7 @@ fn animation_from_value(
     let Value::Mapping(mut mapping) = value else {
         return serde_norway::from_value(value);
     };
+    migrate_image_scene_name(&mut mapping)?;
     let mut ambient_mapping = serde_norway::Mapping::new();
     if let Value::Mapping(defaults) = serde_norway::to_value(AmbientSettings::default())? {
         for (key, _) in defaults {
@@ -82,6 +83,38 @@ fn animation_from_value(
     let mut settings: AnimationSettings = serde_norway::from_value(Value::Mapping(mapping))?;
     settings.ambient = ambient;
     Ok(settings)
+}
+
+/// Normalize the scene rename before splitting flattened hosted settings.
+/// Moving YAML values directly retains tagged image sources. Refuse conflicting
+/// blocks rather than choosing one and silently discarding authored settings.
+fn migrate_image_scene_name(
+    mapping: &mut serde_norway::Mapping,
+) -> Result<(), serde_norway::Error> {
+    use serde::de::Error;
+    let legacy_key = Value::String("static_image".into());
+    let current_key = Value::String("images".into());
+    if let Some(legacy) = mapping.remove(&legacy_key) {
+        if !matches!(&legacy, Value::Mapping(_)) {
+            return Err(serde_norway::Error::custom(
+                "animation.static_image must be a mapping",
+            ));
+        }
+        if let Some(current) = mapping.get(&current_key) {
+            if current != &legacy {
+                return Err(serde_norway::Error::custom(
+                    "animation contains conflicting static_image and images settings; retain one image settings block",
+                ));
+            }
+        } else {
+            mapping.insert(current_key, legacy);
+        }
+    }
+    let kind_key = Value::String("kind".into());
+    if mapping.get(&kind_key).and_then(Value::as_str) == Some("static_image") {
+        mapping.insert(kind_key, Value::String("images".into()));
+    }
+    Ok(())
 }
 
 fn animation_is_default(settings: &crate::background_animation::AnimationSettings) -> bool {
@@ -180,6 +213,144 @@ fn save_unlocked(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renamed_static_image_configuration_loads_and_saves_without_losing_settings() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".ilium")).unwrap();
+        std::fs::write(
+            project.path().join(RELATIVE_PATH),
+            r#"project name: Gallery
+custom: retained
+animation:
+  enabled: true
+  kind: static_image
+  speed_percent: 90
+  static_image:
+    source: !Builtin 0
+    brightness_percent: 71
+    contrast_percent: 59
+    saturation_percent: 153
+"#,
+        )
+        .unwrap();
+        let mut config = load(project.path()).unwrap();
+        assert_eq!(
+            config.animation.kind,
+            crate::background_animation::AnimationKind::Images
+        );
+        assert_eq!(config.animation.ambient.images.brightness_percent, 71);
+        assert_eq!(config.animation.ambient.images.contrast_percent, 59);
+        assert_eq!(config.animation.ambient.images.saturation_percent, 153);
+        config.animation.enabled = false;
+        config.animation.speed_percent = 95;
+        set_animation(project.path(), config.animation.clone()).unwrap();
+        let reloaded = load(project.path()).unwrap();
+        assert_eq!(reloaded.animation, config.animation.normalized());
+        assert_eq!(reloaded.project_name.as_deref(), Some("Gallery"));
+        assert_eq!(
+            reloaded.extra.get("custom"),
+            Some(&Value::String("retained".into()))
+        );
+        let yaml = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(yaml.contains("kind: images"));
+        assert!(!yaml.contains("static_image:"));
+    }
+
+    #[test]
+    fn legacy_image_parameters_survive_current_and_other_scene_selections() {
+        for kind in ["images", "shoreline"] {
+            let config: ProjectConfig = serde_norway::from_str(&format!(
+                "animation:\n  kind: {kind}\n  static_image:\n    source: !Builtin 0\n    contrast_percent: 59\n"
+            )).unwrap();
+            assert_eq!(config.animation.ambient.images.contrast_percent, 59);
+        }
+    }
+
+    #[test]
+    fn identical_old_and_new_image_blocks_are_canonicalized() {
+        let config: ProjectConfig = serde_norway::from_str(
+            "animation:\n  kind: static_image\n  static_image:\n    source: !Builtin 0\n    brightness_percent: 71\n  images:\n    source: !Builtin 0\n    brightness_percent: 71\n"
+        ).unwrap();
+        assert_eq!(config.animation.ambient.images.brightness_percent, 71);
+        assert_eq!(
+            config.animation.kind,
+            crate::background_animation::AnimationKind::Images
+        );
+    }
+
+    #[test]
+    fn conflicting_image_blocks_refuse_updates_without_changing_the_file() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".ilium")).unwrap();
+        let original = "project name: Gallery\nanimation:\n  kind: images\n  static_image:\n    brightness_percent: 71\n  images:\n    brightness_percent: 72\n";
+        let path = project.path().join(RELATIVE_PATH);
+        std::fs::write(&path, original).unwrap();
+        let error = set_show_project_separators(project.path(), true).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("conflicting static_image and images"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn image_rename_preserves_nondefault_tagged_sources_and_mixed_spellings() {
+        for (kind, block) in [
+            ("static_image", "static_image"),
+            ("static_image", "images"),
+            ("images", "static_image"),
+            ("images", "images"),
+        ] {
+            for source in [
+                "!Builtin 2",
+                "!Local /synthetic/static_image.png",
+                "!Url https://example.invalid/static_image.png",
+            ] {
+                let project = tempfile::tempdir().unwrap();
+                std::fs::create_dir(project.path().join(".ilium")).unwrap();
+                let path = project.path().join(RELATIVE_PATH);
+                let original = format!(
+                    "animation:\n  kind: {kind}\n  {block}:\n    source: {source}\n    contrast_percent: 59\n"
+                );
+                std::fs::write(&path, &original).unwrap();
+                let before = load(project.path()).unwrap().animation;
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+                let expected: Value = serde_norway::from_str(source).unwrap();
+                assert_eq!(
+                    serde_norway::to_value(&before.ambient.images.source).unwrap(),
+                    expected
+                );
+                assert_eq!(before.ambient.images.contrast_percent, 59);
+                set_animation(project.path(), before.clone()).unwrap();
+                let after = load(project.path()).unwrap().animation;
+                assert_eq!(
+                    serde_norway::to_value(&after.ambient.images.source).unwrap(),
+                    expected
+                );
+                assert_eq!(after.ambient.images.contrast_percent, 59);
+                assert_eq!(
+                    after.kind,
+                    crate::background_animation::AnimationKind::Images
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_legacy_image_blocks_fail_before_mutation_and_preserve_original_bytes() {
+        for value in ["null", "[]", "7"] {
+            let project = tempfile::tempdir().unwrap();
+            std::fs::create_dir(project.path().join(".ilium")).unwrap();
+            let path = project.path().join(RELATIVE_PATH);
+            let original = format!("animation:\n  static_image: {value}\n");
+            std::fs::write(&path, &original).unwrap();
+            let mut mutated = false;
+            let error = update(project.path(), |_| mutated = true).unwrap_err();
+            assert!(error.to_string().contains("must be a mapping"));
+            assert!(!mutated);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        }
+    }
 
     #[test]
     fn animation_round_trip_preserves_metadata_and_isolates_projects() {
@@ -404,7 +575,7 @@ mod tests {
         assert_eq!(reloaded.project_name.as_deref(), Some("Pond"));
         assert_eq!(reloaded.project_icon.as_deref(), Some("🧭"));
         let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: dithr_patterns"));
+        assert!(saved.contains("kind: solar_system"));
         assert!(!saved.contains("breathing_mountain"));
         assert!(saved.contains("custom: keep-me"));
         assert!(saved.contains("ratio: .inf"));

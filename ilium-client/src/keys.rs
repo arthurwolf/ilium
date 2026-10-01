@@ -3071,11 +3071,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     let content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
     if state.tab == SettingsTab::Animations {
-        let row_count = app.animation_row_model().len();
+        let model = app.animation_row_model();
+        let row_count = model.len();
         state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
         state.scroll = crate::animation_settings_ui::scroll_for_selection(
             content_area,
-            row_count,
+            &model,
             state.selected_row,
             state.scroll,
         );
@@ -3452,6 +3453,12 @@ mod indent_outdent_tests {
             .tree
             .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .unwrap();
+        app.panes.insert(
+            pane,
+            crate::app::PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(
+                24, 80,
+            ))),
+        );
         app.focus_pane(pane);
         app.take_outbound_requests();
 

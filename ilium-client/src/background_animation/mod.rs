@@ -60,10 +60,11 @@ pub enum AnimationKind {
     FbmClouds,
     DitheredWaves,
     DithrPatterns,
+    SolarSystem,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -89,12 +90,14 @@ impl AnimationKind {
         Self::FbmClouds,
         Self::DitheredWaves,
         Self::DithrPatterns,
+        Self::SolarSystem,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
     /// deterministic built-in scenes rendered by `scenes.rs`.
     pub const fn ambient(self) -> Option<AmbientKind> {
         match self {
+            Self::SolarSystem => Some(AmbientKind::SolarSystem),
             Self::Pipes => Some(AmbientKind::Pipes),
             Self::Stars => Some(AmbientKind::Stars),
             Self::NightLights => Some(AmbientKind::NightLights),
@@ -268,7 +271,7 @@ impl AnimationSettings {
     pub fn estimated_loop_bytes(&self, width: u16, height: u16) -> usize {
         usize::from(width)
             .saturating_mul(usize::from(height))
-            .saturating_mul(12)
+            .saturating_mul(cache::CACHE_FPS as usize)
             .saturating_mul(usize::from(self.loop_seconds.clamp(1, 120)))
     }
 
@@ -330,6 +333,7 @@ struct FrameKey {
     kind: AnimationKind,
     controls: [u16; 4],
     shoreline: Option<ShorelineSettings>,
+    quiet_pond: Option<QuietPondSettings>,
     speed_percent: u16,
     width: u16,
     height: u16,
@@ -359,6 +363,8 @@ pub struct AnimationFrame {
     cells: Vec<u8>,
     scene_cache: scenes::SceneCache,
     last_geometry: Option<FrameKey>,
+    #[cfg(test)]
+    pub(crate) geometry_render_count: usize,
     last_pack: Option<(u16, DitherMode)>,
     thresholds: Vec<f32>,
     threshold_key: Option<(u16, u16, DitherMode)>,
@@ -419,6 +425,7 @@ impl AnimationFrame {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
             shoreline: settings.scene_shoreline_key(),
+            quiet_pond: (settings.kind == AnimationKind::QuietPond).then_some(settings.quiet_pond),
             speed_percent: settings.speed_percent,
             width,
             height,
@@ -426,6 +433,10 @@ impl AnimationFrame {
         };
         let geometry_changed = self.last_geometry != Some(key);
         if geometry_changed {
+            #[cfg(test)]
+            {
+                self.geometry_render_count += 1;
+            }
             if width != self.width || height != self.height {
                 self.resize(width, height);
             } else {
@@ -534,6 +545,8 @@ impl AnimationFrame {
     }
 
     pub(crate) fn load_packed_cells(&mut self, width: u16, height: u16, cells: &[u8]) {
+        // Cached built-in frames replace any hosted scene and its worker ownership.
+        self.host.release();
         if width != self.width || height != self.height {
             self.resize(width, height);
         }

@@ -676,7 +676,7 @@
   {
     "id": "AN-34",
     "title": "Animation loop duration",
-    "explanation": "Choose a loop duration from 1 to 120 seconds. The settings panel previews the corresponding RAM estimate. The row appears only while Playback is Loop.",
+    "explanation": "Choose a loop duration from 1 to 120 seconds. The slider uses an exponential scale for finer control of short loops; arrow keys adjust one second at a time. The settings panel shows resident cache RAM and its projected size. The row appears only while Playback is Loop.",
     "specimen": "Loop seconds ─────●──── 60s",
     "frames": [
       "Loop seconds ─────●──── 60s"
@@ -688,7 +688,7 @@
   {
     "id": "AN-35",
     "title": "Animation cache status",
-    "explanation": "The cache status line shows the recomputation progress bar, elapsed work, ETA and estimated RAM. It appears only while Playback is Loop for a built-in scene.",
+    "explanation": "The cache status line starts with resident packed-frame RAM / projected RAM, then recomputation progress and ETA. Generation runs in a cancellable background worker at 30 frames per second. A 128 MiB packed-frame ceiling limits each cache; oversized requests remain editable and use Live playback. Scene scratch space and whole-process RAM are separate. It appears only while Playback is Loop for a built-in scene.",
     "specimen": "Cache [=====.....] 50% building ETA 4s RAM 1.7 MiB",
     "frames": [
       "Cache [=====.....] 50% building ETA 4s RAM 1.7 MiB"
@@ -852,6 +852,18 @@
     ],
     "motion": "The live preview follows the selected value.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources."
+  },
+  {
+    "id": "AN-49",
+    "title": "Solar system",
+    "explanation": "A heliocentric view of all eight planets. Choose visible planets, orbital-distance realism, body-size realism, simulation speed and orbit paths. Physical scales can make small bodies sub-dot; a minimum dot marker keeps them visible.",
+    "specimen": "Solar system\n\nDistance realism   0% → 100%\nSize realism       0% → 100%\nSimulation speed   1 hour/s → 10 years/s",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Solar system\n\nEight independently visible planets orbit the Sun."
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
   },
   {
     "id": "AP-01",

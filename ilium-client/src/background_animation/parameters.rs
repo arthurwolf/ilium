@@ -177,9 +177,61 @@ scene_parameters!(TwoRipplesSettings {
     damping_percent: ("Damping", 25, 0, 100, 5, "%"),
 });
 
-scene_parameters!(QuietPondSettings {
-    pad_count: ("Lily pads", 7, 3, 14, 1, ""),
-    pad_size_percent: ("Pad size", 100, 50, 175, 5, "%"),
-    ripple_strength_percent: ("Water ripples", 70, 0, 100, 5, "%"),
-    drift_percent: ("Surface drift", 100, 25, 200, 5, "%"),
-});
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QuietPondSettings {
+    pub pad_count: u16,
+    pub pad_size_percent: u16,
+    pub ripple_strength_percent: u16,
+    pub drift_percent: u16,
+    pub natural_placement: bool,
+}
+
+impl Default for QuietPondSettings {
+    fn default() -> Self {
+        Self {
+            pad_count: 7,
+            pad_size_percent: 100,
+            ripple_strength_percent: 70,
+            drift_percent: 100,
+            natural_placement: false,
+        }
+    }
+}
+
+impl QuietPondSettings {
+    pub fn normalized(self) -> Self {
+        Self {
+            pad_count: self.pad_count.clamp(3, 64),
+            pad_size_percent: self.pad_size_percent.clamp(50, 175),
+            ripple_strength_percent: self.ripple_strength_percent.min(100),
+            drift_percent: self.drift_percent.clamp(25, 200),
+            ..self
+        }
+    }
+    pub fn sliders(self) -> [Slider; 4] {
+        [
+            Slider::new("Lily pads", self.pad_count, 3, 64, 1, ""),
+            Slider::new("Pad size", self.pad_size_percent, 50, 175, 5, "%"),
+            Slider::new(
+                "Water ripples",
+                self.ripple_strength_percent,
+                0,
+                100,
+                5,
+                "%",
+            ),
+            Slider::new("Surface drift", self.drift_percent, 25, 200, 5, "%"),
+        ]
+    }
+    pub(super) fn set(&mut self, index: usize, value: u16) {
+        match index {
+            0 => self.pad_count = value,
+            1 => self.pad_size_percent = value,
+            2 => self.ripple_strength_percent = value,
+            3 => self.drift_percent = value,
+            _ => return,
+        }
+        *self = self.normalized();
+    }
+}

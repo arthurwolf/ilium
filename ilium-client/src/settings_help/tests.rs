@@ -176,7 +176,11 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
     }
     // Scene rows map one-to-one onto AN-01.. in catalog order and name their scene.
     for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
-        let id = format!("AN-{:02}", index + 1);
+        let id = if kind == AnimationKind::SolarSystem {
+            "AN-49".to_owned()
+        } else {
+            format!("AN-{:02}", index + 1)
+        };
         assert_eq!(
             AnimationRow::Scene(kind).help_id(&[]),
             id,
@@ -236,7 +240,7 @@ fn narrow_animation_settings_help_anchors_reach_every_lower_control() {
             selected_row: row,
             scroll: crate::animation_settings_ui::scroll_for_selection(
                 layout.content_area,
-                model.len(),
+                &model,
                 row,
                 0,
             ),

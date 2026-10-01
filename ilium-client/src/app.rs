@@ -588,7 +588,6 @@ impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
     pub const ALL: [SettingsTab; 22] = [
         Self::Appearance,
-        Self::Animations,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Cost,
@@ -598,6 +597,7 @@ impl SettingsTab {
         Self::Session,
         Self::Git,
         Self::KanbanBoard,
+        Self::Animations,
         Self::Sound,
         Self::VoiceControl,
         Self::ResetPlanning,
@@ -6007,7 +6007,7 @@ impl App {
     }
 
     /// The redraw cadence of the field on screen: the hosted scene's request,
-    /// or 12 frames per second for built-in scenes and before a scene exists.
+    /// or 30 frames per second for built-in scenes and before a scene exists.
     pub fn animation_frames_per_second(&self) -> u32 {
         if self.animation_settings.kind.is_ambient() {
             self.animation_frame
@@ -17174,8 +17174,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Animations);
-        assert_eq!(SettingsTab::Animations.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Cost.next(), SettingsTab::Keyboard);
@@ -17184,7 +17184,7 @@ mod tests {
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
         assert_eq!(SettingsTab::Session.next(), SettingsTab::Git);
         assert_eq!(SettingsTab::Git.next(), SettingsTab::KanbanBoard);
-        assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Sound);
+        assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Animations);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
         assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::ResetPlanning);
         assert_eq!(SettingsTab::ResetPlanning.next(), SettingsTab::Inference);

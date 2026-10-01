@@ -16,6 +16,7 @@ struct SceneKey {
     kind: AnimationKind,
     controls: [u16; 4],
     shoreline: Option<ShorelineSettings>,
+    quiet_pond: Option<QuietPondSettings>,
     width: usize,
     height: usize,
 }
@@ -199,6 +200,7 @@ impl SceneCache {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
             shoreline: settings.scene_shoreline_key(),
+            quiet_pond: (settings.kind == AnimationKind::QuietPond).then_some(settings.quiet_pond),
             width: raster.width,
             height: raster.height,
         };
@@ -1082,47 +1084,97 @@ fn two_ripples(
 
 fn prepare_pond(raster: &mut Raster, settings: QuietPondSettings) {
     let aspect = raster.aspect();
+    let pads = pond_pads(settings, aspect);
+    raster.field(|u, v| pond_light(&pads, aspect, u, v));
+}
+
+/// Deterministic leaf positions. Rooted mode is a visual spacing heuristic:
+/// rhizome groups constrain reach; bounded candidate selection avoids piling
+/// every leaf on one root without claiming a botanical growth simulation.
+fn pond_pads(settings: QuietPondSettings, aspect: f32) -> Vec<(f32, f32, f32, f32)> {
     let scale = f32::from(settings.pad_size_percent) / 100.0;
-    let pads: Vec<_> = (0..usize::from(settings.pad_count))
-        .map(|index| {
-            let seed = hash(index as i32, 723);
-            (
-                0.10 + hash(index as i32, 498) * 0.80,
-                0.13 + hash(index as i32, 931) * 0.73,
-                (0.038 + seed * 0.029) * scale,
-                hash(index as i32, 843) * TAU,
-            )
-        })
-        .collect();
-    raster.field(|u, v| {
-        let mut light: f32 = 0.0;
-        for &(cx, cy, radius, angle) in &pads {
-            let dx = (u - cx) * aspect;
-            let dy = (v - cy) * 1.13;
-            let distance = dx.hypot(dy) / radius;
-            if distance > 1.08 {
-                continue;
+    let count = usize::from(settings.pad_count);
+    let mut pads: Vec<(f32, f32, f32, f32)> = Vec::with_capacity(count);
+    let groups = count.div_ceil(8).clamp(2, 8);
+    for index in 0..count {
+        let seed = hash(index as i32, 723);
+        let radius = (0.038 + seed * 0.029) * scale;
+        let mut center = (
+            0.10 + hash(index as i32, 498) * 0.80,
+            0.13 + hash(index as i32, 931) * 0.73,
+        );
+        if settings.natural_placement {
+            let group = index % groups;
+            let root = (
+                0.18 + hash(group as i32, 1943) * 0.64,
+                0.19 + hash(group as i32, 2839) * 0.62,
+            );
+            let mut best_clearance = f32::NEG_INFINITY;
+            for candidate in 0..30 {
+                let key = (index * 30 + candidate) as i32;
+                let angle = hash(key, 1583) * TAU;
+                let reach = 0.025 + hash(key, 1709).sqrt() * 0.18;
+                let point = (
+                    (root.0 + angle.cos() * reach / aspect.max(0.5)).clamp(0.07, 0.93),
+                    (root.1 + angle.sin() * reach).clamp(0.08, 0.92),
+                );
+                let clearance = pads
+                    .iter()
+                    .map(|&(x, y, r, _)| {
+                        ((point.0 - x) * aspect).hypot((point.1 - y) * 1.13) - r - radius
+                    })
+                    .fold(f32::INFINITY, f32::min);
+                if clearance > best_clearance {
+                    best_clearance = clearance;
+                    center = point;
+                }
+                if clearance >= radius * 0.08 {
+                    break;
+                }
             }
-            let theta = dy.atan2(dx);
-            let relative = (theta - angle + PI).rem_euclid(TAU) - PI;
-            if relative.abs() < 0.22 && distance > 0.10 {
-                continue;
-            }
-            let edge = (1.0 - (distance - 1.0).abs() / 0.085).max(0.0) * 0.75;
-            let body = if distance < 1.0 {
-                0.11 + (1.0 - distance) * 0.08
-            } else {
-                0.0
-            };
-            let vein = if distance > 0.13 && distance < 0.89 {
-                smoothstep(0.994, 1.0, (theta * 9.0 + angle).cos()) * 0.36
-            } else {
-                0.0
-            };
-            light = light.max(edge.max(body + vein));
         }
-        light
-    });
+        pads.push((center.0, center.1, radius, hash(index as i32, 843) * TAU));
+    }
+    // Screen depth establishes which opaque leaf covers another.
+    pads.sort_by(|left, right| left.1.total_cmp(&right.1));
+    pads
+}
+
+fn pond_light(pads: &[(f32, f32, f32, f32)], aspect: f32, u: f32, v: f32) -> f32 {
+    let mut light: f32 = 0.0;
+    for &(cx, cy, radius, angle) in pads {
+        let dx = (u - cx) * aspect;
+        let dy = (v - cy) * 1.13;
+        let distance = dx.hypot(dy) / radius;
+        if distance > 1.08 {
+            continue;
+        }
+        let theta = dy.atan2(dx);
+        let relative = (theta - angle + PI).rem_euclid(TAU) - PI;
+        if relative.abs() < 0.22 && distance > 0.10 {
+            continue;
+        }
+        let edge = (1.0 - (distance - 1.0).abs() / 0.085).max(0.0) * 0.75;
+        let body = if distance < 1.0 {
+            0.11 + (1.0 - distance) * 0.08
+        } else {
+            0.0
+        };
+        let vein = if distance > 0.13 && distance < 0.89 {
+            smoothstep(0.994, 1.0, (theta * 9.0 + angle).cos()) * 0.36
+        } else {
+            0.0
+        };
+        let leaf = edge.max(body + vein);
+        // The front body is opaque even where its own veins are dim. Outside
+        // the body, retain the bright rim without erasing uncovered water.
+        light = if distance < 1.0 {
+            leaf
+        } else {
+            light.max(leaf)
+        };
+    }
+    light
 }
 
 fn quiet_pond(
@@ -1311,5 +1363,48 @@ mod optimization_fidelity_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pond_overhaul_tests {
+    use super::*;
+    #[test]
+    fn rooted_placement_is_repeatable_bounded_and_distinct() {
+        let settings = QuietPondSettings {
+            pad_count: 64,
+            natural_placement: true,
+            ..Default::default()
+        };
+        let pads = pond_pads(settings, 2.0);
+        assert_eq!(pads.len(), 64);
+        assert_eq!(pads, pond_pads(settings, 2.0));
+        assert!(pads
+            .iter()
+            .all(|&(x, y, radius, _)| (0.07..=0.93).contains(&x)
+                && (0.08..=0.92).contains(&y)
+                && radius > 0.0));
+        assert!(pads.windows(2).all(|pair| pair[0].1 <= pair[1].1));
+        assert_ne!(
+            pads,
+            pond_pads(
+                QuietPondSettings {
+                    natural_placement: false,
+                    ..settings
+                },
+                2.0
+            )
+        );
+    }
+    #[test]
+    fn overhaul_front_leaf_hides_the_rear_edge() {
+        let rear = (0.3, 0.5, 0.2, PI);
+        let front = (0.5, 0.5, 0.25, PI);
+        let front_only = pond_light(&[front], 1.0, 0.5, 0.5);
+        assert_eq!(
+            pond_light(&[rear, front], 1.0, 0.5, 0.5),
+            front_only,
+            "rear leaf edge must not show through the front leaf center"
+        );
     }
 }

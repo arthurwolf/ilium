@@ -20,7 +20,7 @@ use unicode_width::UnicodeWidthStr;
 
 /// Width of the controls panel; the field shows to its right and behind the
 /// settings chrome.
-pub const PANEL_WIDTH: u16 = 44;
+pub const PANEL_WIDTH: u16 = 108;
 /// Rows above the list (title and a separator).
 const HEADER_ROWS: u16 = 2;
 /// Rows below the list: two help lines, the status line and the key hint.
@@ -30,6 +30,8 @@ const FOOTER_ROWS: u16 = 4;
 pub struct AnimationLayout {
     /// The opaque controls panel, at the left edge of the settings content.
     pub panel: Rect,
+    pub scenes: Rect,
+    pub controls: Rect,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,27 +58,61 @@ pub enum AnimationHit {
 }
 
 pub fn layout(area: Rect) -> AnimationLayout {
+    let width = PANEL_WIDTH.min(area.width);
+    let scene_width = if width >= 100 {
+        32
+    } else if width >= 76 {
+        26
+    } else {
+        (width / 3).max(1).min(width)
+    };
+    let gap = u16::from(width > scene_width);
     AnimationLayout {
-        panel: Rect::new(area.x, area.y, PANEL_WIDTH.min(area.width), area.height),
+        panel: Rect::new(area.x, area.y, width, area.height),
+        scenes: Rect::new(area.x, area.y, scene_width, area.height),
+        controls: Rect::new(
+            area.x + scene_width + gap,
+            area.y,
+            width.saturating_sub(scene_width + gap),
+            area.height,
+        ),
     }
 }
 
-fn visible_rows(area: Rect) -> u16 {
-    layout(area)
-        .panel
-        .height
-        .saturating_sub(HEADER_ROWS + FOOTER_ROWS)
+fn footer_rows(area: Rect, model: &RowModel) -> u16 {
+    if area.height < 12 || area.width.saturating_sub(layout(area).panel.width) >= 16 {
+        return FOOTER_ROWS;
+    }
+    let credits = model
+        .rows()
+        .iter()
+        .zip(model.views())
+        .find_map(|(row, view)| match (row, &view.kind) {
+            (AnimationRow::Scene(kind), RowKind::Scene { is_active: true }) => {
+                Some(kind.inspired_by().len())
+            }
+            _ => None,
+        })
+        .unwrap_or(0);
+    FOOTER_ROWS + if credits > 0 { credits as u16 + 1 } else { 0 }
 }
 
-pub fn max_scroll(area: Rect, row_count: usize) -> u16 {
-    u16::try_from(row_count)
-        .unwrap_or(u16::MAX)
-        .saturating_sub(visible_rows(area))
+fn visible_rows(area: Rect, model: &RowModel) -> u16 {
+    area.height
+        .saturating_sub(HEADER_ROWS + footer_rows(area, model))
 }
 
-pub fn scroll_for_selection(area: Rect, row_count: usize, row: usize, scroll: u16) -> u16 {
-    let visible = visible_rows(area).max(1);
-    let row = row.min(row_count.saturating_sub(1)) as u16;
+pub fn max_scroll(area: Rect, model: &RowModel) -> u16 {
+    model
+        .visual_height()
+        .saturating_sub(visible_rows(area, model))
+}
+
+pub fn scroll_for_selection(area: Rect, model: &RowModel, row: usize, scroll: u16) -> u16 {
+    let visible = visible_rows(area, model).max(1);
+    let row = model
+        .visual_row(row.min(model.len().saturating_sub(1)))
+        .unwrap_or(0);
     let scroll = if row < scroll {
         row
     } else if row >= scroll.saturating_add(visible) {
@@ -84,19 +120,33 @@ pub fn scroll_for_selection(area: Rect, row_count: usize, row: usize, scroll: u1
     } else {
         scroll
     };
-    scroll.min(max_scroll(area, row_count))
+    scroll.min(max_scroll(area, model))
 }
 
-pub fn row_y(area: Rect, row_count: usize, row: usize, scroll: u16) -> Option<u16> {
-    let panel = layout(area).panel;
-    if panel.width == 0 || visible_rows(area) == 0 || row >= row_count {
+pub fn row_rect(area: Rect, model: &RowModel, row: usize, scroll: u16) -> Option<Rect> {
+    let geometry = layout(area);
+    let column = if matches!(model.row(row)?, AnimationRow::Scene(_)) {
+        geometry.scenes
+    } else {
+        geometry.controls
+    };
+    if column.width <= 1 || visible_rows(area, model) == 0 {
         return None;
     }
-    let relative = u16::try_from(row).ok()?.checked_sub(scroll)?;
-    if relative >= visible_rows(area) {
+    let relative = model.visual_row(row)?.checked_sub(scroll)?;
+    if relative >= visible_rows(area, model) {
         return None;
     }
-    panel.y.checked_add(HEADER_ROWS)?.checked_add(relative)
+    Some(Rect::new(
+        column.x,
+        column.y + HEADER_ROWS + relative,
+        column.width.saturating_sub(1),
+        1,
+    ))
+}
+
+pub fn row_y(area: Rect, model: &RowModel, row: usize, scroll: u16) -> Option<u16> {
+    row_rect(area, model, row, scroll).map(|rectangle| rectangle.y)
 }
 
 /// Labels and value readouts have their own rectangles. Only the track changes
@@ -108,8 +158,8 @@ pub fn slider_geometry(
     scroll: u16,
 ) -> Option<SliderGeometry> {
     model.view(row)?.slider()?;
-    let y = row_y(area, model.len(), row, scroll)?;
-    let panel = layout(area).panel;
+    let y = row_y(area, model, row, scroll)?;
+    let panel = layout(area).controls;
     let usable = panel.width.saturating_sub(1);
     if usable < 12 {
         return None;
@@ -154,17 +204,17 @@ pub fn hit(area: Rect, model: &RowModel, scroll: u16, position: Position) -> Opt
         return None;
     }
     let relative = position.y.checked_sub(panel.y + HEADER_ROWS)?;
-    let row = usize::from(relative + scroll);
-    if row >= model.len() || row_y(area, model.len(), row, scroll) != Some(position.y) {
-        return None;
-    }
-    let visible = visible_rows(area);
-    let maximum = max_scroll(area, model.len());
-    if position.x == panel.right().saturating_sub(1) && maximum > 0 {
+    let visible = visible_rows(area, model);
+    let maximum = max_scroll(area, model);
+    if position.x == panel.right().saturating_sub(1) && relative < visible && maximum > 0 {
         let target =
             u32::from(maximum) * u32::from(relative) / u32::from(visible.saturating_sub(1).max(1));
         return Some(AnimationHit::ScrollTo(target as u16));
     }
+    let row = (0..model.len()).find(|&row| {
+        row_rect(area, model, row, scroll).is_some_and(|rect| rect.contains(position))
+    })?;
+    let panel = row_rect(area, model, row, scroll)?;
     if let Some(geometry) = slider_geometry(area, model, row, scroll) {
         if geometry.track.contains(position) {
             return slider_value_at(area, model, row, scroll, position.x)
@@ -226,11 +276,11 @@ fn draw_slider(
     let Some(spec) = view.slider() else {
         return;
     };
-    let Some(y) = row_y(area, model.len(), row, scroll) else {
+    let Some(y) = row_y(area, model, row, scroll) else {
         return;
     };
     let Some(geometry) = slider_geometry(area, model, row, scroll) else {
-        let panel = layout(area).panel;
+        let panel = layout(area).controls;
         frame.render_widget(
             Paragraph::new(fit(
                 &format!("{} {}", view.label, view.value),
@@ -262,14 +312,16 @@ fn draw_slider(
     }
 }
 
-fn draw_scrollbar(frame: &mut Frame, area: Rect, row_count: usize, scroll: u16, ink: Style) {
+fn draw_scrollbar(frame: &mut Frame, area: Rect, model: &RowModel, scroll: u16, ink: Style) {
     let panel = layout(area).panel;
-    let visible = visible_rows(area);
-    let maximum = max_scroll(area, row_count);
+    let visible = visible_rows(area, model);
+    let maximum = max_scroll(area, model);
     if visible == 0 || maximum == 0 || panel.width == 0 {
         return;
     }
-    let thumb_size = (u32::from(visible) * u32::from(visible) / row_count as u32).max(1) as u16;
+    let thumb_size = (u32::from(visible) * u32::from(visible)
+        / u32::from(model.visual_height().max(1)))
+    .max(1) as u16;
     let travel = visible.saturating_sub(thumb_size);
     let thumb_start =
         (u32::from(scroll.min(maximum)) * u32::from(travel) / u32::from(maximum)) as u16;
@@ -297,6 +349,7 @@ struct DisabledMarker {
     text: String,
     /// Label column width this row needs so the marker fits.
     label_width: usize,
+    value_width: usize,
 }
 
 /// The `[ value ]` text of a choice, toggle, text or action row.
@@ -342,9 +395,30 @@ fn disabled_marker(view: &RowView, row_width: u16) -> Option<DisabledMarker> {
                     width: width as u16,
                     text,
                     label_width,
+                    value_width,
                 });
             }
         }
+    }
+    // Two-column compact layouts keep the unavailable choice discoverable.
+    // The selected row's footer carries the unabridged current value/reason.
+    let label_width = UnicodeWidthStr::width(view.label.as_str()).min(row_width / 3);
+    let text = view
+        .disabled_options
+        .iter()
+        .map(|option| format!("{} \u{2717}", option.label))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let width = UnicodeWidthStr::width(text.as_str());
+    let value_width = row_width.saturating_sub(label_width + width + 2);
+    if value_width >= 4 {
+        return Some(DisabledMarker {
+            offset: (label_width + value_width + 2) as u16,
+            width: width as u16,
+            text,
+            label_width,
+            value_width,
+        });
     }
     None
 }
@@ -356,7 +430,10 @@ fn draw_value_row(frame: &mut Frame, row_area: Rect, view: &RowView, style: Styl
         || LABEL_COLUMN_WIDTH.min(usize::from(row_area.width) / 2),
         |marker| marker.label_width,
     );
-    let value_width = usize::from(row_area.width).saturating_sub(label_width + 1);
+    let value_width = marker.as_ref().map_or_else(
+        || usize::from(row_area.width).saturating_sub(label_width + 1),
+        |marker| marker.value_width,
+    );
     let value = bracketed_value(view);
     let text = format!(
         "{:<label_width$} {}",
@@ -385,8 +462,42 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         Paragraph::new("Scenes \u{2014} select to preview").style(ink.add_modifier(Modifier::BOLD)),
         Rect::new(panel.x, panel.y, panel.width, 1),
     );
+    let controls = layout(area).controls;
+    frame.render_widget(
+        Paragraph::new("Settings").style(ink.add_modifier(Modifier::BOLD)),
+        Rect::new(controls.x, controls.y, controls.width, 1),
+    );
+    let mut previous_section = "";
+    for row in crate::background_animation::AnimationKind::ALL.len()..model.len() {
+        let section = model.section(row);
+        if section == previous_section {
+            continue;
+        }
+        previous_section = section;
+        if let Some(relative) = model
+            .visual_row(row)
+            .and_then(|offset| offset.checked_sub(1))
+            .and_then(|offset| offset.checked_sub(state.scroll))
+        {
+            if relative < visible_rows(area, &model) {
+                frame.render_widget(
+                    Paragraph::new(fit(
+                        &format!("─ {section} ─"),
+                        usize::from(controls.width.saturating_sub(1)),
+                    ))
+                    .style(ink.add_modifier(Modifier::BOLD | Modifier::DIM)),
+                    Rect::new(
+                        controls.x,
+                        controls.y + HEADER_ROWS + relative,
+                        controls.width.saturating_sub(1),
+                        1,
+                    ),
+                );
+            }
+        }
+    }
     for (row, view) in model.views().iter().enumerate() {
-        let Some(y) = row_y(area, model.len(), row, state.scroll) else {
+        let Some(row_area) = row_rect(area, &model, row, state.scroll) else {
             continue;
         };
         let style = if row == state.selected_row {
@@ -394,7 +505,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         } else {
             ink
         };
-        let row_area = Rect::new(panel.x, y, panel.width.saturating_sub(1), 1);
         frame.render_widget(
             Paragraph::new(" ".repeat(usize::from(row_area.width))).style(style),
             row_area,
@@ -421,19 +531,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             _ => draw_value_row(frame, row_area, view, style),
         }
     }
-    draw_scrollbar(frame, area, model.len(), state.scroll, ink);
-    if panel.height <= HEADER_ROWS + FOOTER_ROWS {
+    draw_scrollbar(frame, area, &model, state.scroll, ink);
+    let footer_height = footer_rows(area, &model);
+    if panel.height <= HEADER_ROWS + footer_height {
         return;
     }
-    let footer_top = panel.bottom() - FOOTER_ROWS;
+    let footer_top = panel.bottom() - footer_height;
     let help = model
         .view(state.selected_row)
         .map_or_else(String::new, |view| match view.slider() {
             Some(spec) => format!(
-                "{}: {}..{}. {}",
-                view.label, spec.minimum, spec.maximum, view.help
+                "{}: {} ({}..{}). {}",
+                view.label, view.value, spec.minimum, spec.maximum, view.help
             ),
-            None => view.help.clone(),
+            None => format!("{}: {}. {}", view.label, view.value, view.help),
         });
     frame.render_widget(
         Paragraph::new(help).style(ink).wrap(Wrap { trim: true }),
@@ -457,8 +568,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         .style(ink.add_modifier(Modifier::DIM)),
         Rect::new(panel.x, footer_top + 3, panel.width, 1),
     );
-    render_inspired_by(frame, area, app, panel.width);
-    crate::animation_hover::render(frame, area, app, &model, state.scroll);
+    render_inspired_by(
+        frame,
+        area,
+        app,
+        if footer_height > FOOTER_ROWS {
+            0
+        } else {
+            panel.width
+        },
+    );
 }
 
 /// The one line shown over the field while the controls are hidden.
@@ -537,6 +656,28 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
+    #[test]
+    fn overhaul_scene_and_controls_use_separate_columns_with_wide_tracks() {
+        let settings = AnimationSettings::default();
+        let model = RowModel::new(&settings, &RowContext::default());
+        let area = Rect::new(0, 0, 120, 40);
+        let scene_y = row_y(area, &model, 0, 0).unwrap();
+        let control = model.first_control_index();
+        let control_y = row_y(area, &model, control, 0).unwrap();
+        assert!(control_y < scene_y + AnimationKind::ALL.len() as u16);
+        let slider = model
+            .rows()
+            .iter()
+            .position(|row| *row == AnimationRow::Common("speed"))
+            .unwrap();
+        let geometry = slider_geometry(area, &model, slider, 0).unwrap();
+        assert!(
+            geometry.track.width >= 32,
+            "track should double its old width: {geometry:?}"
+        );
+        assert!(geometry.label.x >= 24, "controls must be beside scenes");
+    }
+
     fn key(app: &mut App, code: KeyCode) {
         crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     }
@@ -608,12 +749,12 @@ mod tests {
 
     fn set_selected_row(app: &mut App, row: usize) {
         let content = content_area(app);
-        let count = app.animation_row_model().len();
+        let model = app.animation_row_model();
         let Mode::Settings(state) = &mut app.mode else {
             panic!("Settings stays open");
         };
         state.selected_row = row;
-        state.scroll = scroll_for_selection(content, count, row, state.scroll);
+        state.scroll = scroll_for_selection(content, &model, row, state.scroll);
     }
 
     /// Presses Up/Down until `target` is the selected row.
@@ -693,6 +834,8 @@ mod tests {
                 // style, fifteen more sliders after the four named ones.
                 let expected = if kind == AnimationKind::Shoreline {
                     4 + 1 + 15
+                } else if kind == AnimationKind::QuietPond {
+                    5
                 } else {
                     4
                 };
@@ -791,19 +934,21 @@ mod tests {
         for (width, height) in [(80, 24), (100, 30), (140, 40)] {
             let (mut app, _probe, _project) = settings_app(width, height);
             let area = content_area(&app);
-            let count = app.animation_row_model().len();
+            let model = app.animation_row_model();
+            let count = model.len();
             let panel = layout(area).panel;
             for row in 0..count {
-                let scroll = scroll_for_selection(area, count, row, 0);
+                let scroll = scroll_for_selection(area, &model, row, 0);
                 app.mode = Mode::Settings(SettingsState {
                     tab: SettingsTab::Animations,
                     selected_row: row,
                     scroll,
                     ..Default::default()
                 });
-                let y = row_y(area, count, row, scroll).expect("row visible after scrolling");
+                let y = row_y(area, &model, row, scroll).expect("row visible after scrolling");
                 let terminal = draw(&mut app, width, height);
-                assert!(terminal.backend().buffer()[(panel.x, y)]
+                let row_area = row_rect(area, &model, row, scroll).unwrap();
+                assert!(terminal.backend().buffer()[(row_area.x, y)]
                     .modifier
                     .contains(Modifier::REVERSED));
                 let model = app.animation_row_model();
@@ -888,9 +1033,10 @@ mod tests {
             assert_eq!(app.animation_settings.kind, AnimationKind::ALL[scene]);
             assert_eq!(selected_row(&app), scene);
         }
-        // The last scene (Dithr patterns) is a live-only hosted scene: no playback rows.
-        assert_eq!(app.animation_settings.kind, AnimationKind::DithrPatterns);
-        let count = app.animation_row_model().len();
+        // The last scene (Solar system) is a live-only hosted scene: no playback rows.
+        assert_eq!(app.animation_settings.kind, AnimationKind::SolarSystem);
+        let model = app.animation_row_model();
+        let count = model.len();
         for row in scene_count..count {
             key(&mut app, KeyCode::Down);
             let Mode::Settings(state) = &app.mode else {
@@ -898,7 +1044,7 @@ mod tests {
             };
             assert_eq!(state.selected_row, row);
             assert!(
-                row_y(area, count, row, state.scroll).is_some(),
+                row_y(area, &model, row, state.scroll).is_some(),
                 "row {row} remains visible"
             );
         }
@@ -927,12 +1073,12 @@ mod tests {
         key(&mut app, KeyCode::Down);
         assert_eq!(app.animation_settings.kind, AnimationKind::MoonlitWater);
         let area = content_area(&app);
-        let count = app.animation_row_model().len();
+        let model = app.animation_row_model();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
             area.x,
-            row_y(area, count, 5, 0).unwrap(),
+            row_y(area, &model, 5, 0).unwrap(),
         );
         assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
         assert_eq!(
@@ -960,8 +1106,7 @@ mod tests {
             assert!(slider_rows.len() >= 8, "four scene + four shared sliders");
             for row in slider_rows {
                 let model = app.animation_row_model();
-                let count = model.len();
-                let scroll = scroll_for_selection(area, count, row, 0);
+                let scroll = scroll_for_selection(area, &model, row, 0);
                 set_selected_row(&mut app, row);
                 let geometry = slider_geometry(area, &model, row, scroll).unwrap();
                 let spec = model.view(row).unwrap().slider().unwrap();
@@ -1018,8 +1163,8 @@ mod tests {
         let (mut app, _probe, _project) = settings_app(140, 40);
         let area = content_area(&app);
         let lightness = row_index(&app, &AnimationRow::Common("lightness"));
-        let count = app.animation_row_model().len();
-        let scroll = scroll_for_selection(area, count, lightness, 0);
+        let model = app.animation_row_model();
+        let scroll = scroll_for_selection(area, &model, lightness, 0);
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Animations,
             selected_row: lightness,
@@ -1179,13 +1324,13 @@ mod tests {
         key(&mut app, KeyCode::Left);
         assert!(!app.animation_settings.enabled);
         let dither = row_index(&app, &AnimationRow::Common("dither"));
-        let count = app.animation_row_model().len();
-        let y = row_y(area, count, dither, 0).unwrap();
+        let model = app.animation_row_model();
+        let row_area = row_rect(area, &model, dither, 0).unwrap();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
-            area.x + 2,
-            y,
+            row_area.x + 2,
+            row_area.y,
         );
         assert_eq!(
             app.animation_settings.dither,
@@ -1315,13 +1460,20 @@ mod tests {
         let credit = credit_row(&windowed, 120, 36).expect("credit is drawn in the demo");
         assert!(credit.contains("\u{ab}inspired by https://www.reddit.com/"));
         let panel = layout(content_area(&app)).panel;
+        let model = app.animation_row_model();
         assert!(
-            !credit
-                .chars()
-                .take(usize::from(panel.width))
-                .any(|c| c == '\u{ab}'),
-            "the credit stays clear of the controls panel"
+            footer_rows(content_area(&app), &model) > FOOTER_ROWS,
+            "compact credits get reserved footer rows below the controls"
         );
+        let credit_y = content_area(&app).bottom() - 2;
+        assert!(model.rows().iter().enumerate().all(|(row, _)| row_y(
+            content_area(&app),
+            &model,
+            row,
+            0
+        )
+        .is_none_or(|y| y < credit_y)));
+        assert!(panel.contains(Position::new(panel.x, credit_y)));
         key(&mut app, KeyCode::Char('f'));
         let full = draw(&mut app, 120, 36);
         assert!(
@@ -1388,15 +1540,15 @@ mod tests {
         // The clickable row enters it and a click returns.
         let full_row = row_index(&app, &AnimationRow::FullScreenPreview);
         let area = content_area(&app);
-        let count = app.animation_row_model().len();
-        let scroll = scroll_for_selection(area, count, full_row, 0);
+        let model = app.animation_row_model();
+        let scroll = scroll_for_selection(area, &model, full_row, 0);
         set_selected_row(&mut app, full_row);
-        let y = row_y(area, count, full_row, scroll).unwrap();
+        let row_area = row_rect(area, &model, full_row, scroll).unwrap();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
-            area.x + 3,
-            y,
+            row_area.x + 3,
+            row_area.y,
         );
         let Mode::Settings(state) = &app.mode else {
             panic!("Settings stays open");
@@ -1438,8 +1590,8 @@ mod tests {
         for (width, height) in [(100, 30), (60, 24), (20, 8), (5, 3), (0, 0)] {
             let area = Rect::new(3, 4, width, height);
             for row in 0..model.len() {
-                let scroll = scroll_for_selection(area, model.len(), row, 0);
-                if let Some(y) = row_y(area, model.len(), row, scroll) {
+                let scroll = scroll_for_selection(area, &model, row, 0);
+                if let Some(y) = row_y(area, &model, row, scroll) {
                     assert!(layout(area).panel.contains(Position::new(area.x, y)));
                     let expected = match model.view(row).unwrap().kind {
                         RowKind::Choice
@@ -1450,7 +1602,12 @@ mod tests {
                         _ => AnimationHit::Select(row),
                     };
                     assert_eq!(
-                        hit(area, &model, scroll, Position::new(area.x, y)),
+                        hit(
+                            area,
+                            &model,
+                            scroll,
+                            Position::new(row_rect(area, &model, row, scroll).unwrap().x, y)
+                        ),
                         Some(expected)
                     );
                 }
@@ -1461,11 +1618,15 @@ mod tests {
     #[test]
     fn scroll_and_scrollbar_derive_from_the_row_count() {
         let area = Rect::new(0, 0, 60, 20);
-        let visible = visible_rows(area);
-        assert_eq!(max_scroll(area, usize::from(visible)), 0);
-        assert_eq!(max_scroll(area, usize::from(visible) + 3), 3);
-        let far = scroll_for_selection(area, 40, 39, 0);
-        assert_eq!(far, max_scroll(area, 40));
-        assert_eq!(scroll_for_selection(area, 40, 0, far), 0);
+        let model = RowModel::new(&AnimationSettings::default(), &RowContext::default());
+        assert_eq!(
+            max_scroll(area, &model),
+            model
+                .visual_height()
+                .saturating_sub(visible_rows(area, &model))
+        );
+        let far = scroll_for_selection(area, &model, model.len() - 1, 0);
+        assert!(row_y(area, &model, model.len() - 1, far).is_some());
+        assert_eq!(scroll_for_selection(area, &model, 0, far), 0);
     }
 }

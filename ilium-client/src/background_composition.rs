@@ -16,7 +16,7 @@ use crate::config::MotionLevel;
 
 /// Cadence of the built-in scenes and of any hosted scene that has not
 /// declared its own (`Scene::frames_per_second`).
-pub const DEFAULT_FRAMES_PER_SECOND: u32 = 12;
+pub const DEFAULT_FRAMES_PER_SECOND: u32 = 30;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
 /// One absolute clock shared by the session compositor and Settings preview,
@@ -27,8 +27,8 @@ pub fn quantized_elapsed(elapsed: Duration) -> Duration {
 
 /// The start of the frame bucket containing `elapsed` at `frames_per_second`.
 /// Integer boundaries (`ceil(bucket * 1e9 / fps)` ns) do not accumulate the
-/// drift of a rounded interval: at 12 fps they alternate 83_333_333 and
-/// 83_333_334 ns. An input redraw inside a bucket reuses its exact engine
+/// drift of a rounded interval: at 12 fps they alternate 33_333_333 and
+/// 33_333_334 ns. An input redraw inside a bucket reuses its exact engine
 /// cache key rather than advancing motion.
 pub fn quantized_elapsed_at(elapsed: Duration, frames_per_second: u32) -> Duration {
     let bucket = elapsed_bucket(elapsed, frames_per_second);
@@ -108,6 +108,7 @@ fn render_field(
         cache.step(settings, area.width, area.height, 8);
         cache.status().is_ready && cache.copy_frame_into(elapsed, &mut app.animation_frame)
     } else {
+        app.animation_cache.borrow_mut().pause();
         false
     };
     if !cache_ready {
@@ -128,6 +129,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     let is_preview = app.is_animation_preview_visible();
     if buffer.area.is_empty() || !(is_preview || ambient_is_visible(app)) {
         app.animation_frame.host_mut().release();
+        app.animation_cache.borrow_mut().pause();
         return;
     }
     let settings = app.animation_settings.normalized();
@@ -142,12 +144,29 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     let foreground = Color::Rgb(red, green, blue);
     if is_preview {
         let area = buffer.area;
+        let opaque_panel = match &app.mode {
+            Mode::Settings(state) if !state.animation_fullscreen => Some(
+                crate::animation_settings_ui::layout(
+                    crate::settings_ui::compute_layout(area).content_area,
+                )
+                .panel,
+            ),
+            _ => None,
+        };
         paint_region_with_colors(
             buffer,
             area,
             None,
             foreground,
-            |column, row| app.animation_frame.glyph(column, row),
+            |column, row| {
+                if opaque_panel.is_some_and(|panel| {
+                    panel.contains(Position::new(area.x + column, area.y + row))
+                }) {
+                    ' '
+                } else {
+                    app.animation_frame.glyph(column, row)
+                }
+            },
             |column, row| field_color(app, column, row),
         );
         return;
@@ -636,15 +655,15 @@ mod tests {
         app.ui_settings.motion_level = MotionLevel::Reduced;
         assert_eq!(
             animation_frame_delay(&app, Duration::ZERO),
-            Some(Duration::from_nanos(83_333_334))
+            Some(Duration::from_nanos(33_333_334))
         );
-        let before_boundary = Duration::from_nanos(83_333_333);
+        let before_boundary = Duration::from_nanos(33_333_333);
         assert_eq!(quantized_elapsed(before_boundary), Duration::ZERO);
         assert_eq!(
             animation_frame_delay(&app, before_boundary),
             Some(Duration::from_nanos(1))
         );
-        let boundary = Duration::from_nanos(83_333_334);
+        let boundary = Duration::from_nanos(33_333_334);
         assert_eq!(quantized_elapsed(boundary), boundary);
         assert_eq!(animation_frame_bucket(&app, boundary), Some(1));
         assert_eq!(
@@ -657,11 +676,41 @@ mod tests {
         );
         assert_eq!(
             animation_frame_bucket(&app, Duration::from_secs(1)),
-            Some(12)
+            Some(30)
         );
         assert!(animation_frame_delay(&app, Duration::MAX).unwrap() > Duration::ZERO);
         let maximum_sample = quantized_elapsed(Duration::MAX);
         assert_eq!(quantized_elapsed(maximum_sample), maximum_sample);
+    }
+
+    #[test]
+    fn completed_hillside_cache_keeps_composition_off_the_simulation_path() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("cached".to_owned(), project.path().to_path_buf());
+        let area = Rect::new(0, 0, 40, 12);
+        app.set_screen_area(area);
+        app.animation_settings.enabled = true;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::WindyHillside;
+        app.animation_settings.loop_seconds = 1;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !app
+            .animation_cache
+            .borrow_mut()
+            .step(&app.animation_settings, 40, 12, 8)
+        {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        for index in 0..120 {
+            let mut buffer = Buffer::empty(area);
+            compose(&mut buffer, &mut app, Duration::from_millis(index * 33));
+        }
+        assert_eq!(app.animation_frame.geometry_render_count, 0);
+        assert_eq!(
+            (app.animation_frame.width(), app.animation_frame.height()),
+            (40, 12)
+        );
+        assert!(app.animation_cache.borrow().status().is_ready);
     }
 
     #[test]
@@ -770,9 +819,9 @@ mod tests {
             let maximum = quantized_elapsed_at(Duration::MAX, frames_per_second);
             assert_eq!(quantized_elapsed_at(maximum, frames_per_second), maximum);
         }
-        // The default helper is the 12 fps clock.
+        // The default helper is the 30 fps clock.
         let sample = Duration::from_millis(1234);
-        assert_eq!(quantized_elapsed(sample), quantized_elapsed_at(sample, 12));
+        assert_eq!(quantized_elapsed(sample), quantized_elapsed_at(sample, 30));
     }
 
     #[test]
@@ -821,15 +870,15 @@ mod tests {
     }
 
     #[test]
-    fn built_in_scenes_and_unhosted_kinds_keep_the_twelve_fps_clock() {
+    fn built_in_scenes_and_unhosted_kinds_keep_the_thirty_fps_clock() {
         let (mut app, probe, _project) = ambient_app();
         probe.fps.store(1, std::sync::atomic::Ordering::SeqCst);
         // No scene is hosted yet: the default cadence applies.
-        assert_eq!(app.animation_frames_per_second(), 12);
+        assert_eq!(app.animation_frames_per_second(), 30);
         compose_at(&mut app, 0);
         assert_eq!(app.animation_frames_per_second(), 1);
         app.animation_settings.kind = crate::background_animation::AnimationKind::Kelp;
-        assert_eq!(app.animation_frames_per_second(), 12);
+        assert_eq!(app.animation_frames_per_second(), 30);
     }
 
     #[test]

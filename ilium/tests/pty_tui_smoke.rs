@@ -60,6 +60,23 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use ilium_client::connection::Connection;
+
+fn settings_tab_keys(
+    from: ilium_client::app::SettingsTab,
+    to: ilium_client::app::SettingsTab,
+) -> Vec<u8> {
+    let tabs = ilium_client::app::SettingsTab::ALL;
+    let start = tabs
+        .iter()
+        .position(|tab| *tab == from)
+        .expect("registered starting tab");
+    let end = tabs
+        .iter()
+        .position(|tab| *tab == to)
+        .expect("registered destination tab");
+    vec![b'\t'; (end + tabs.len() - start) % tabs.len()]
+}
+
 use ilium_core::Tree;
 use ilium_core::{RestructureNode, RestructurePlan};
 use ilium_ipc::ClientRequest;
@@ -1358,11 +1375,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
 
-    // Settings opens on User Interface. Eleven real Tab key events reach the
+    // Settings opens on User Interface. Registry-derived Tab key events reach the
     // Voice control tab in the registry order, proving the feature is wired
     // into the same navigable settings surface as every established tab.
-    tui.write(b"\t\t\t\t\t\t\t\t\t\t\t")
-        .expect("navigating to Voice control settings");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::Appearance,
+        ilium_client::app::SettingsTab::VoiceControl,
+    ))
+    .expect("navigating to Voice control settings");
     let voice_settings_shown = wait_until(
         || {
             let screen = tui.screen_text();
@@ -1793,10 +1813,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the agent identifier choice to persist, config={:?}",
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
     );
-    // Animations now sits between Appearance and Icons. Exercise the live
+    // Exercise the live
     // Icons table, demo/real toolbar, and catalogue before Keyboard.
-    tui.write(b"\t\t")
-        .expect("switching to the Icons settings tab");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::Appearance,
+        ilium_client::app::SettingsTab::Icons,
+    ))
+    .expect("switching to the Icons settings tab");
     let icons_tab_shown = wait_until(
         || {
             let screen = tui.screen_text();
@@ -1866,8 +1889,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"j\r")
         .expect("selecting a catalogue icon for the group");
-    tui.write(b"\t\t")
-        .expect("switching to the Keyboard settings tab");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::Icons,
+        ilium_client::app::SettingsTab::Keyboard,
+    ))
+    .expect("switching to the Keyboard settings tab");
     let keyboard_tab_shown = wait_until(
         || {
             let screen = tui.screen_text();
@@ -1902,8 +1928,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // The Kanban Board tab owns card compactness and column sizing
     // independently from general appearance. Prove both defaults, live
     // adjustment, and isolated persistence before continuing to Sound.
-    tui.write(b"\t\t\t\t\t")
-        .expect("switching to the Kanban Board settings tab");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::Keyboard,
+        ilium_client::app::SettingsTab::KanbanBoard,
+    ))
+    .expect("switching to the Kanban Board settings tab");
     assert!(
         wait_until(
             || {
@@ -1942,11 +1971,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected minimum board column width to persist"
     );
 
-    // Sound follows Kanban Board. Exercise a real event checkbox without
+    // Navigate past Animations to Sound. Exercise a real event checkbox without
     // activating Preview, so this remains a silent automated test while
     // proving live request dispatch still occurs in the real TUI.
-    tui.write(b"\t")
-        .expect("switching to the Sound settings tab");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::KanbanBoard,
+        ilium_client::app::SettingsTab::Sound,
+    ))
+    .expect("switching to the Sound settings tab");
     let sound_tab_shown = wait_until(
         || {
             let screen = tui.screen_text();
@@ -1982,8 +2014,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 
     // Titles follows Voice control and Inference. Exercise both its keyboard
     // and mouse radio paths through the real rendered Settings screen.
-    tui.write(b"\t\t\t\t")
-        .expect("switching to the Titles settings tab");
+    tui.write(&settings_tab_keys(
+        ilium_client::app::SettingsTab::Sound,
+        ilium_client::app::SettingsTab::Titles,
+    ))
+    .expect("switching to the Titles settings tab");
     assert!(
         wait_until(
             || {

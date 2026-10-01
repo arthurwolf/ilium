@@ -56,14 +56,29 @@ pub struct SliderSpec {
     pub maximum: i32,
     pub step: i32,
     pub value: i32,
+    pub logarithmic: bool,
 }
 
 impl SliderSpec {
     pub fn thumb_offset(self, track_width: u16) -> u16 {
+        if self.logarithmic && self.minimum > 0 && self.maximum > self.minimum {
+            let fraction = (f64::from(self.value.clamp(self.minimum, self.maximum))
+                / f64::from(self.minimum))
+            .ln()
+                / (f64::from(self.maximum) / f64::from(self.minimum)).ln();
+            return (fraction * f64::from(track_width.saturating_sub(1))).round() as u16;
+        }
         slider_thumb_offset(self.minimum, self.maximum, self.value, track_width)
     }
 
     pub fn value_at(self, offset: u16, track_width: u16) -> i32 {
+        if self.logarithmic && self.minimum > 0 && self.maximum > self.minimum && track_width > 1 {
+            let fraction = f64::from(offset.min(track_width - 1)) / f64::from(track_width - 1);
+            return (f64::from(self.minimum)
+                * (f64::from(self.maximum) / f64::from(self.minimum)).powf(fraction))
+            .round()
+            .clamp(f64::from(self.minimum), f64::from(self.maximum)) as i32;
+        }
         crate::background_animation::slider_value_at(
             self.minimum,
             self.maximum,
@@ -207,6 +222,50 @@ impl RowModel {
         Self { rows, views }
     }
 
+    pub fn section(&self, row: usize) -> &'static str {
+        match self.row(row) {
+            Some(AnimationRow::Scene(_)) => "Scenes",
+            Some(
+                AnimationRow::SceneControl(_)
+                | AnimationRow::Location
+                | AnimationRow::Common("background"),
+            ) => "Scene settings",
+            Some(AnimationRow::Common("lightness" | "hue" | "saturation")) => "Color",
+            Some(AnimationRow::Common("playback" | "loop_seconds") | AnimationRow::CacheStatus) => {
+                "Playback and cache"
+            }
+            Some(AnimationRow::Common(_)) => "Motion and rendering",
+            _ => "Preview and status",
+        }
+    }
+    pub fn visual_row(&self, row: usize) -> Option<u16> {
+        self.row(row)?;
+        let scene_count = AnimationKind::ALL.len();
+        if row < scene_count {
+            return u16::try_from(row).ok();
+        }
+        let mut position = 0u16;
+        let mut previous = "";
+        for index in scene_count..=row {
+            let section = self.section(index);
+            if section != previous {
+                position = position.saturating_add(1);
+                previous = section;
+            }
+            if index == row {
+                return Some(position);
+            }
+            position = position.saturating_add(1);
+        }
+        None
+    }
+    pub fn visual_height(&self) -> u16 {
+        self.visual_row(self.len().saturating_sub(1))
+            .unwrap_or(0)
+            .saturating_add(1)
+            .max(AnimationKind::ALL.len() as u16)
+    }
+
     pub fn len(&self) -> usize {
         self.rows.len()
     }
@@ -296,6 +355,7 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
 fn control_view(control: &Control) -> RowView {
     let kind = match &control.kind {
         ControlKind::Slider { min, max, step, .. } => RowKind::Slider(SliderSpec {
+            logarithmic: control.id == "loop_seconds",
             minimum: *min,
             maximum: *max,
             step: *step,
@@ -358,13 +418,26 @@ fn cache_line(context: &RowContext) -> String {
     let eta = status.eta.map_or_else(|| "--".to_owned(), format_duration);
     let filled = percent / 10;
     format!(
-        "[{}{}] {:>3}% {} ETA {} RAM {}",
+        "RAM {} / {} [{}{}] {:>3}% {} ETA {}",
+        format_bytes(status.resident_bytes),
+        format_bytes(if status.estimated_bytes > 0 {
+            status.estimated_bytes
+        } else {
+            context.loop_bytes
+        }),
         "=".repeat(filled),
         ".".repeat(10usize.saturating_sub(filled)),
         percent,
-        if status.is_ready { "ready" } else { "building" },
-        eta,
-        format_bytes(context.loop_bytes)
+        if status.is_ready {
+            "ready"
+        } else if status.is_limited {
+            "limit; live"
+        } else if status.has_error {
+            "failed; live"
+        } else {
+            "building"
+        },
+        eta
     )
 }
 
@@ -414,7 +487,7 @@ impl AnimationRow {
                 label: "Cache".to_owned(),
                 value: cache_line(context),
                 kind: RowKind::Status,
-                help: "Progress of the loop cache: elapsed work, ETA and estimated RAM.".to_owned(),
+                help: "Packed-frame RAM now / projected, then progress and ETA. Generation runs in the background; oversized caches retain Live playback.".to_owned(),
                 disabled_options: Vec::new(),
             },
             Self::SceneStatus => RowView {
@@ -441,6 +514,7 @@ impl AnimationRow {
     /// numbered topics instead of needing their own catalog entry.
     pub fn help_id(&self, scene_controls: &[Control]) -> String {
         match self {
+            Self::Scene(AnimationKind::SolarSystem) => "AN-49".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()
@@ -460,19 +534,19 @@ impl AnimationRow {
                     "playback" => 7,
                     _ => 8,
                 };
-                format!("AN-{:02}", AnimationKind::ALL.len() + 1 + offset)
+                format!("AN-{:02}", 25 + 1 + offset)
             }
-            Self::CacheStatus => format!("AN-{:02}", AnimationKind::ALL.len() + 10),
-            Self::Location => format!("AN-{:02}", AnimationKind::ALL.len() + 11),
-            Self::SceneStatus => format!("AN-{:02}", AnimationKind::ALL.len() + 12),
-            Self::FullScreenPreview => format!("AN-{:02}", AnimationKind::ALL.len() + 13),
+            Self::CacheStatus => format!("AN-{:02}", 25 + 10),
+            Self::Location => format!("AN-{:02}", 25 + 11),
+            Self::SceneStatus => format!("AN-{:02}", 25 + 12),
+            Self::FullScreenPreview => format!("AN-{:02}", 25 + 13),
             Self::SceneControl(id) => {
                 let position = scene_controls
                     .iter()
                     .position(|control| control.id == *id)
                     .unwrap_or(0)
                     .min(SCENE_CONTROL_TOPICS - 1);
-                format!("AN-{:02}", AnimationKind::ALL.len() + 14 + position)
+                format!("AN-{:02}", 25 + 14 + position)
             }
         }
     }
@@ -485,8 +559,40 @@ pub const SCENE_CONTROL_TOPICS: usize = 10;
 /// Every help id the row model can produce: scene rows, common and special
 /// rows, then the numbered scene-control topics.
 pub fn help_ids() -> Vec<String> {
-    let count = AnimationKind::ALL.len() + 13 + SCENE_CONTROL_TOPICS;
+    let count = 25 + 13 + SCENE_CONTROL_TOPICS + 1;
     (1..=count)
         .map(|number| format!("AN-{number:02}"))
         .collect()
+}
+
+#[cfg(test)]
+mod overhaul_tests {
+    use super::*;
+    #[test]
+    fn overhaul_ram_usage_is_visible_before_progress_details() {
+        let context = RowContext {
+            loop_bytes: 1024 * 1024,
+            ..Default::default()
+        };
+        let text = cache_line(&context);
+        assert!(
+            text.starts_with("RAM "),
+            "RAM must survive short readout truncation: {text}"
+        );
+    }
+
+    #[test]
+    fn overhaul_loop_duration_uses_a_logarithmic_track() {
+        let settings = AnimationSettings::default();
+        let model = RowModel::new(&settings, &RowContext::default());
+        let index = model
+            .rows()
+            .iter()
+            .position(|row| *row == AnimationRow::Common("loop_seconds"))
+            .unwrap();
+        let slider = model.view(index).unwrap().slider().unwrap();
+        assert_eq!(slider.value_at(0, 101), 1);
+        assert_eq!(slider.value_at(100, 101), 120);
+        assert!((10..=12).contains(&slider.value_at(50, 101)));
+    }
 }

@@ -1930,7 +1930,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             .unwrap_or(0);
                         state.scroll = crate::animation_settings_ui::scroll_for_selection(
                             layout.content_area,
-                            app.animation_row_model().len(),
+                            &app.animation_row_model(),
                             state.selected_row,
                             0,
                         );

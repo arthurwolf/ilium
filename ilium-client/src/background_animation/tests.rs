@@ -33,7 +33,7 @@ fn loop_mode_defaults_to_sixty_seconds_and_reports_packed_ram() {
     let settings = AnimationSettings::default();
     assert_eq!(settings.playback_mode, AnimationPlaybackMode::Loop);
     assert_eq!(settings.loop_seconds, 60);
-    assert_eq!(settings.estimated_loop_bytes(80, 24), 80 * 24 * 12 * 60);
+    assert_eq!(settings.estimated_loop_bytes(80, 24), 80 * 24 * 30 * 60);
     assert_eq!(settings.normalized().loop_seconds, 60);
 }
 
@@ -45,12 +45,19 @@ fn loop_cache_builds_incrementally_and_wraps_completed_frames() {
     };
     let mut cache = AnimationLoopCache::default();
     cache.begin(&settings, 4, 2);
-    assert_eq!(cache.status().total_frames, 12);
+    assert_eq!(cache.status().total_frames, 30);
     assert!(cache.status().estimated_bytes > 0);
-    while !cache.step(&settings, 4, 2, 12) {}
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !cache.step(&settings, 4, 2, 12) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cache builder must complete"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(cache.status().is_ready);
     assert_eq!(cache.frame_index(Duration::from_secs(1)), 0);
-    assert_eq!(cache.frame_index(Duration::from_millis(999)), 11);
+    assert_eq!(cache.frame_index(Duration::from_millis(999)), 29);
 }
 
 fn snapshot_settings(settings: AnimationSettings, seconds: u64) -> Vec<char> {
@@ -194,6 +201,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "fbm_clouds",
         "dithered_waves",
         "dithr_patterns",
+        "solar_system",
     ];
     for (kind, id) in AnimationKind::ALL.into_iter().zip(expected) {
         assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{id}\""));
@@ -211,7 +219,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
             .map(AnimationKind::label)
             .collect::<HashSet<_>>()
             .len(),
-        25
+        26
     );
 }
 
@@ -1071,4 +1079,62 @@ fn clinging_foam_bits_appear_on_the_sand_after_the_wave_then_vanish() {
         lingering(60) > lingering(5),
         "longer linger, longer presence"
     );
+}
+
+#[test]
+fn overhaul_pond_accepts_sixty_four_pads() {
+    let mut settings = AnimationSettings {
+        kind: AnimationKind::QuietPond,
+        ..Default::default()
+    };
+    settings.quiet_pond.pad_count = 64;
+    assert_eq!(settings.normalized().quiet_pond.pad_count, 64);
+    let count = settings
+        .scene_control("scene_0")
+        .or_else(|| settings.scene_controls().into_iter().next())
+        .unwrap();
+    assert_eq!(slider_bounds(&count).1, 64);
+}
+
+#[test]
+fn overhaul_cache_has_at_least_thirty_frames_per_second() {
+    let settings = AnimationSettings {
+        loop_seconds: 1,
+        ..Default::default()
+    };
+    let mut cache = AnimationLoopCache::default();
+    cache.begin(&settings, 4, 2);
+    assert!(
+        cache.status().total_frames >= 30,
+        "12 fps cache visibly steps even when fully calculated"
+    );
+}
+
+#[test]
+fn cached_builtin_playback_releases_a_previous_hosted_scene() {
+    use super::test_support::{fake_host, FakeProbe};
+    use std::sync::atomic::Ordering;
+    let probe = FakeProbe::new();
+    probe.uses_colors.store(true, Ordering::SeqCst);
+    let mut frame = AnimationFrame {
+        host: fake_host(&probe),
+        ..Default::default()
+    };
+    frame.render(
+        &AnimationSettings {
+            kind: AnimationKind::Images,
+            ..Default::default()
+        },
+        4,
+        2,
+        Duration::ZERO,
+    );
+    assert_eq!(probe.alive(), 1);
+    frame.load_packed_cells(4, 2, &[255; 8]);
+    assert_eq!(
+        probe.alive(),
+        0,
+        "cached built-ins must release video/image workers and colored-scene metadata"
+    );
+    assert!(!frame.host().uses_cell_colors());
 }

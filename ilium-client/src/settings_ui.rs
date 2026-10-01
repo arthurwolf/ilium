@@ -414,6 +414,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
     }
     render_settings_help_anchors(frame, &layout, app, state);
+    if state.tab == SettingsTab::Animations {
+        crate::animation_hover::render(
+            frame,
+            layout.content_area,
+            app,
+            &app.animation_row_model(),
+            state.scroll,
+        );
+    }
 }
 
 fn push_help_anchor(
@@ -478,7 +487,7 @@ pub fn settings_help_anchors(
                 let (Some(y), Some(topic_id)) = (
                     crate::animation_settings_ui::row_y(
                         layout.content_area,
-                        model.len(),
+                        &model,
                         row,
                         state.scroll,
                     ),
@@ -486,14 +495,28 @@ pub fn settings_help_anchors(
                 ) else {
                     continue;
                 };
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &topic_id,
-                    y.saturating_sub(layout.content_area.y),
-                    0,
-                    state.selected_row == row,
-                );
+                if matches!(
+                    model.rows().get(row),
+                    Some(crate::animation_rows::AnimationRow::Scene(_))
+                ) {
+                    let column = crate::animation_settings_ui::layout(layout.content_area).scenes;
+                    if column.width > 0 {
+                        anchors.push(SettingsHelpAnchor {
+                            topic_id,
+                            hit_area: Rect::new(column.right().saturating_sub(1), y, 1, 1),
+                            selected: state.selected_row == row,
+                        });
+                    }
+                } else {
+                    push_help_anchor(
+                        &mut anchors,
+                        layout,
+                        &topic_id,
+                        y.saturating_sub(layout.content_area.y),
+                        0,
+                        state.selected_row == row,
+                    );
+                }
             }
         }
         SettingsTab::Terminal => {
@@ -1069,10 +1092,7 @@ pub(crate) fn render_scrollable(
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     if tab == SettingsTab::Animations {
-        return crate::animation_settings_ui::max_scroll(
-            content_area,
-            app.animation_row_model().len(),
-        );
+        return crate::animation_settings_ui::max_scroll(content_area, &app.animation_row_model());
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
@@ -4800,9 +4820,12 @@ mod tests {
                     "{} has no catalog entry on {tab:?}",
                     anchor.topic_id
                 );
-                assert!(layout
-                    .help_rail_area
-                    .contains(Position::new(anchor.hit_area.x, anchor.hit_area.y)));
+                let position = Position::new(anchor.hit_area.x, anchor.hit_area.y);
+                let scene_column = crate::animation_settings_ui::layout(layout.content_area).scenes;
+                let is_scene_rail = tab == SettingsTab::Animations
+                    && anchor.hit_area.x == scene_column.right().saturating_sub(1)
+                    && scene_column.contains(position);
+                assert!(layout.help_rail_area.contains(position) || is_scene_rail);
                 assert_eq!(
                     settings_help_at(
                         &layout,

@@ -197,9 +197,9 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
         panic!("slider keeps Settings open")
     };
     let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
-    let count = app.animation_row_model().len();
+    let model = app.animation_row_model();
     assert!(
-        crate::animation_settings_ui::row_y(area, count, lightness_row, state.scroll).is_some()
+        crate::animation_settings_ui::row_y(area, &model, lightness_row, state.scroll).is_some()
     );
 }
 

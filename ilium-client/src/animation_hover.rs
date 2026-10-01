@@ -146,7 +146,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, model: &RowModel, scroll
     if view.disabled_options.is_empty() {
         return;
     }
-    let Some(anchor_y) = row_y(area, model.len(), hover.row, scroll) else {
+    let Some(anchor_y) = row_y(area, model, hover.row, scroll) else {
         return;
     };
     let (title, body) = popover_text(&view.disabled_options);
@@ -301,13 +301,13 @@ mod tests {
     fn select_backend_row(app: &mut App) -> u16 {
         let row = backend_row(app);
         let content = content_area(app);
-        let count = app.animation_row_model().len();
+        let model = app.animation_row_model();
         let Mode::Settings(state) = &mut app.mode else {
             panic!("Settings stays open");
         };
         state.selected_row = row;
-        state.scroll = scroll_for_selection(content, count, row, state.scroll);
-        row_y(content, count, row, state.scroll).expect("row is visible")
+        state.scroll = scroll_for_selection(content, &model, row, state.scroll);
+        row_y(content, &model, row, state.scroll).expect("row is visible")
     }
 
     fn selected_row(app: &App) -> usize {
@@ -360,7 +360,12 @@ mod tests {
     /// Hovers the row label and lets the delay elapse.
     fn hover_until_shown(app: &mut App, y: u16) {
         let content = content_area(app);
-        pointer(app, MouseEventKind::Moved, content.x + 2, y);
+        pointer(
+            app,
+            MouseEventKind::Moved,
+            layout(content).controls.x + 2,
+            y,
+        );
         assert!(app.animation_hover.is_some(), "pointer rests on the row");
         assert!(
             !app.tick_animation_hover(Instant::now()),
@@ -389,11 +394,11 @@ mod tests {
             Mode::Settings(state) => state.scroll,
             _ => 0,
         };
-        let y = row_y(content, model.len(), backend_row(&app), scroll).unwrap();
+        let y = row_y(content, &model, backend_row(&app), scroll).unwrap();
         let rows = screen_rows(&terminal);
         let row_text = &rows[usize::from(y)];
         assert!(row_text.contains("Renderer"), "{row_text}");
-        assert!(row_text.contains("[ Software (slow-mo) ]"), "{row_text}");
+        assert!(row_text.contains("[ Software"), "{row_text}");
         let panel = layout(content).panel;
         let marker_column = row_text
             .chars()
@@ -407,7 +412,9 @@ mod tests {
             buffer[(marker_x, y)].modifier.contains(Modifier::DIM),
             "the marker is dim"
         );
-        assert!(!buffer[(panel.x + 2, y)].modifier.contains(Modifier::DIM));
+        assert!(!buffer[(layout(content).controls.x + 2, y)]
+            .modifier
+            .contains(Modifier::DIM));
     }
 
     #[test]
@@ -454,7 +461,12 @@ mod tests {
         let y = select_backend_row(&mut app);
         let content = content_area(&app);
         let before = draw(&mut app, 80, 24);
-        pointer(&mut app, MouseEventKind::Moved, content.x + 2, y);
+        pointer(
+            &mut app,
+            MouseEventKind::Moved,
+            layout(content).controls.x + 2,
+            y,
+        );
         let resting = draw(&mut app, 80, 24);
         assert_eq!(
             screen_rows(&before),
@@ -464,9 +476,19 @@ mod tests {
         assert!(app.tick_animation_hover(Instant::now() + HOVER_DELAY * 2));
         assert!(app.animation_hover.is_some_and(|hover| hover.is_shown));
         // Moving within the row keeps it; another row dismisses it.
-        pointer(&mut app, MouseEventKind::Moved, content.x + 5, y);
+        pointer(
+            &mut app,
+            MouseEventKind::Moved,
+            layout(content).controls.x + 5,
+            y,
+        );
         assert!(app.animation_hover.is_some_and(|hover| hover.is_shown));
-        pointer(&mut app, MouseEventKind::Moved, content.x + 5, y - 1);
+        pointer(
+            &mut app,
+            MouseEventKind::Moved,
+            layout(content).controls.x + 5,
+            y - 1,
+        );
         assert!(app.animation_hover.is_none(), "leaving the row dismisses");
         for dismissal in 0..3 {
             let y = select_backend_row(&mut app);
@@ -476,10 +498,15 @@ mod tests {
                 1 => pointer(
                     &mut app,
                     MouseEventKind::Down(MouseButton::Left),
-                    content.x + 2,
+                    layout(content).controls.x + 2,
                     y,
                 ),
-                _ => pointer(&mut app, MouseEventKind::ScrollDown, content.x + 2, y),
+                _ => pointer(
+                    &mut app,
+                    MouseEventKind::ScrollDown,
+                    layout(content).controls.x + 2,
+                    y,
+                ),
             }
             assert!(app.animation_hover.is_none(), "dismissal {dismissal}");
             let cleared = draw(&mut app, 80, 24);
@@ -504,7 +531,12 @@ mod tests {
         assert!(view.disabled_options.is_empty());
         assert!(view.help.contains("Test GPU"), "help names the adapter");
         let content = content_area(&app);
-        pointer(&mut app, MouseEventKind::Moved, content.x + 2, y);
+        pointer(
+            &mut app,
+            MouseEventKind::Moved,
+            layout(content).controls.x + 2,
+            y,
+        );
         assert!(app.animation_hover.is_none());
         assert!(!app.tick_animation_hover(Instant::now() + HOVER_DELAY * 2));
         let terminal = draw(&mut app, 80, 24);
@@ -588,7 +620,7 @@ mod tests {
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
-            content.x + 2,
+            layout(content).controls.x + 2,
             y,
         );
         assert_eq!(backend_choice(&app), software, "row click cannot pick GPU");

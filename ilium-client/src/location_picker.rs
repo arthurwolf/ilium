@@ -1021,15 +1021,15 @@ mod tests {
             .position(|row| *row == AnimationRow::Location)
             .unwrap();
         let area = crate::settings_ui::compute_layout(SCREEN).content_area;
-        let count = app.animation_row_model().len();
-        let scroll = crate::animation_settings_ui::scroll_for_selection(area, count, row, 0);
+        let model = app.animation_row_model();
+        let scroll = crate::animation_settings_ui::scroll_for_selection(area, &model, row, 0);
         let Mode::Settings(state) = &mut app.mode else {
             panic!("Settings is open");
         };
         state.selected_row = row;
         state.scroll = scroll;
-        let y = crate::animation_settings_ui::row_y(area, count, row, scroll).unwrap();
-        click(&mut app, Position::new(area.x + 2, y));
+        let row_area = crate::animation_settings_ui::row_rect(area, &model, row, scroll).unwrap();
+        click(&mut app, Position::new(row_area.x + 2, row_area.y));
         assert!(
             matches!(app.mode, Mode::LocationPicker(_)),
             "clicking Location opens it"

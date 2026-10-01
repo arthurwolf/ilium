@@ -71,6 +71,11 @@ impl AnimationSettings {
         if self.kind == AnimationKind::Shoreline {
             controls.extend(self.shoreline.extra_controls());
         }
+        if self.kind == AnimationKind::QuietPond {
+            controls.push(Control::toggle("natural_placement", "Rooted placement",
+                self.quiet_pond.natural_placement,
+                "Cluster leaves around underwater root groups, with bounded petiole reach and spacing."));
+        }
         controls
     }
 
@@ -95,7 +100,7 @@ impl AnimationSettings {
                 i32::from(self.speed_percent),
                 (25, 300, 5),
                 "%",
-                "How fast the scene moves, from 25% to 300%.",
+                "Multiplier on the scene rate, from 25% to 300%. Stars and Solar system also have simulation-speed choices in Scene settings, including hours or days per second.",
             ),
             "density" => Control::slider(
                 "density",
@@ -226,6 +231,14 @@ impl AnimationSettings {
         }
         if let Some(kind) = self.kind.ambient() {
             return self.ambient.set_control(kind, id, value);
+        }
+        if self.kind == AnimationKind::QuietPond && id == "natural_placement" {
+            let ControlValue::Bool(enabled) = value else {
+                return Ok(false);
+            };
+            let changed = self.quiet_pond.natural_placement != enabled;
+            self.quiet_pond.natural_placement = enabled;
+            return Ok(changed);
         }
         if self.kind == AnimationKind::Shoreline {
             let before = self.shoreline;
