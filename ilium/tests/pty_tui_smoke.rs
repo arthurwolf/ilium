@@ -87,7 +87,7 @@ use ilium_pty::{PtyCommand, PtySession};
 /// respond before giving up -- generous relative to `ilium-pty`'s own
 /// 5s convention since this test additionally waits on a real spawned
 /// `ilium-server` process starting up, not just a trivial child process.
-const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+const WAIT_TIMEOUT: Duration = Duration::from_secs(if cfg!(windows) { 30 } else { 10 });
 
 /// Mirrors `ilium_client::tree_ui::RECENTLY_CREATED_PULSE_MS` (crate-private
 /// there, so duplicated here rather than imported) -- the total window a
@@ -452,7 +452,11 @@ fn ilium_binary() -> String {
 /// unsigned fixture binary is scanned by the OS and can take tens of seconds
 /// on a shared runner before the agent process exists to be detected.
 const DETECTION_TIMEOUT: Duration =
-    Duration::from_secs(if cfg!(target_os = "macos") { 90 } else { 30 });
+    Duration::from_secs(if cfg!(any(target_os = "macos", windows)) {
+        90
+    } else {
+        30
+    });
 
 /// How long a one-shot `ilium` subcommand gets to finish.
 ///

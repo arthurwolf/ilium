@@ -248,7 +248,7 @@ def build(arguments):
     wix_source.write_text(render_wix(package_directory, files, version), encoding='utf-8')
     output.mkdir(parents=True)
     wix = find_tool('wix')
-    run([wix, 'build', '-arch', 'x64', '-o', str(output / MSI_NAME), str(wix_source)])
+    run([wix, 'build', '-arch', 'x64', '-pdbtype', 'none', '-o', str(output / MSI_NAME), str(wix_source)])
     inno_source = work / 'ilium.iss'
     inno_source.write_text(render_inno(package_directory, output, version), encoding='utf-8')
     iscc = find_tool('iscc', [os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Inno Setup 6', 'ISCC.exe'),
@@ -260,6 +260,7 @@ def build(arguments):
     receipt = {'schema': 1, 'tag': arguments.tag, 'version': version, 'source_archive': arguments.archive.name,
                'source_archive_sha256': sha(arguments.archive), 'package_files': files, 'installers': installers}
     (output / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='ascii')
+    require({path.name for path in output.iterdir()} == set(INSTALLER_NAMES) | {RECEIPT_NAME}, 'installer output inventory differs')
     emit('result', command='build', state='built', output=str(output), receipt=str(output / RECEIPT_NAME), installers=installers)
 
 
@@ -282,7 +283,9 @@ def user_path():
 
 
 def path_has(directory):
-    return directory.lower() in [item.strip().lower() for item in user_path().split(';')]
+    # MSI writes the directory with a trailing backslash; Inno Setup writes it without one.
+    wanted = directory.rstrip('\\').lower()
+    return wanted in [item.strip().rstrip('\\').lower() for item in user_path().split(';')]
 
 
 def wait_removed(directory, label):

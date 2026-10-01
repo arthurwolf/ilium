@@ -21,8 +21,9 @@ struct Workspace {
 impl Workspace {
     fn new() -> Self {
         let temporary = tempfile::tempdir().unwrap();
-        // Canonical so the slug and cwd comparisons match the converter's.
-        let root = std::fs::canonicalize(temporary.path()).unwrap();
+        // Canonical (same function as the converter, so no Windows `\\?\` prefix)
+        // so the slug and cwd comparisons match the converter's.
+        let root = ilium_platform::paths::canonicalize(temporary.path()).unwrap();
         let home = root.join("home");
         let project = root.join("work").join("my_proj.v2");
         std::fs::create_dir_all(&project).unwrap();

@@ -239,8 +239,9 @@ def native(arguments):
         # /var is a symlink to /private/var; tests compare resolved paths.
         environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
     if target['os'] == 'windows':
-        # Bound ConPTY/process concurrency; plain CI (no static CRT) is unaffected.
-        environment['RUST_TEST_THREADS'] = '2'
+        # Plain CI passes these PTY tests; the slower static-CRT release lane
+        # misses detection/render deadlines when they run concurrently.
+        environment['RUST_TEST_THREADS'] = '1'
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
         # The bundled libonnxruntime sits beside the executables; the installed
