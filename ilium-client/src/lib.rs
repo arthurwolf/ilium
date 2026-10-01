@@ -952,7 +952,10 @@ async fn run_inner(
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         if needs_redraw && can_draw {
             terminal
-                .draw(|frame| crate::ui::draw_at(frame, &mut app, animation_elapsed))
+                .draw(|frame| {
+                    crate::ui::draw_at(frame, &mut app, animation_elapsed);
+                    crate::terminal_guard::skip_bottom_right_cell(frame, cfg!(windows));
+                })
                 .map_err(ClientError::TerminalSetup)?;
             needs_redraw = false;
             needs_immediate_redraw = false;

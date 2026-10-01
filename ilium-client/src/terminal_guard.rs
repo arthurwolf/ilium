@@ -120,3 +120,42 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
     }
 }
+
+/// Keeps the frame's bottom-right cell out of the cell diff when `enabled`.
+///
+/// Windows ConPTY scrolls the whole screen when that cell is written, even
+/// with line wrap disabled, leaving every later differential write one row
+/// off. The footer's last cell is blank padding, so never writing it costs
+/// nothing visible and removes the scroll.
+pub(crate) fn skip_bottom_right_cell(frame: &mut ratatui::Frame, enabled: bool) {
+    let area = frame.area();
+    if !enabled || area.width == 0 || area.height == 0 {
+        return;
+    }
+    frame.buffer_mut()[(area.right() - 1, area.bottom() - 1)].set_skip(true);
+}
+
+#[cfg(test)]
+mod skip_tests {
+    use super::skip_bottom_right_cell;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn only_the_bottom_right_cell_is_skipped_and_only_when_enabled() {
+        let mut terminal = Terminal::new(TestBackend::new(6, 3)).unwrap();
+        for enabled in [false, true] {
+            terminal
+                .draw(|frame| {
+                    skip_bottom_right_cell(frame, enabled);
+                    let buffer = frame.buffer_mut();
+                    for y in 0..3u16 {
+                        for x in 0..6u16 {
+                            let expected = enabled && (x, y) == (5, 2);
+                            assert_eq!(buffer[(x, y)].skip, expected, "{x},{y} enabled={enabled}");
+                        }
+                    }
+                })
+                .unwrap();
+        }
+    }
+}
