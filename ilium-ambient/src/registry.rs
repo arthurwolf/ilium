@@ -17,6 +17,7 @@ use crate::scenes::{
     machine_screen::{MachineScreenScene, MachineScreenSettings},
     night_lights::{NightLightsScene, NightLightsSettings},
     pipes::{PipesScene, PipesSettings},
+    solar_system::{SolarSystemScene, SolarSystemSettings},
     spectrum::{SpectrumScene, SpectrumSettings},
     stars::{StarsScene, StarsSettings},
     video::{VideoScene, VideoSettings},
@@ -41,10 +42,11 @@ pub enum AmbientKind {
     FbmClouds,
     DitheredWaves,
     DithrPatterns,
+    SolarSystem,
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Pipes,
         Self::Stars,
         Self::NightLights,
@@ -60,12 +62,14 @@ impl AmbientKind {
         Self::FbmClouds,
         Self::DitheredWaves,
         Self::DithrPatterns,
+        Self::SolarSystem,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Pipes => "3D pipes",
             Self::Stars => "Stars overhead",
+            Self::SolarSystem => "Solar system",
             Self::NightLights => "Earth at night",
             Self::Clouds => "Satellite clouds",
             Self::Video => "Video",
@@ -85,6 +89,7 @@ impl AmbientKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::Pipes => "Dithered black-and-white pipes grow through 3D space, like the classic screensaver.",
+            Self::SolarSystem => "Eight planets orbit the Sun, with independent distance and size scales and simulated time.",
             Self::Stars => "The real night sky above your location, right now, as a perfect star map.",
             Self::NightLights => "City lights seen from orbit, on a borderless map of the dark Earth.",
             Self::Clouds => "Live weather-satellite clouds, global or over your location.",
@@ -143,6 +148,7 @@ pub struct AmbientSettings {
     pub location: GeoLocation,
     pub pipes: PipesSettings,
     pub stars: StarsSettings,
+    pub solar_system: SolarSystemSettings,
     pub night_lights: NightLightsSettings,
     pub clouds: CloudsSettings,
     pub video: VideoSettings,
@@ -164,6 +170,7 @@ impl AmbientSettings {
             location: self.location.normalized(),
             pipes: self.pipes.normalized(),
             stars: self.stars.normalized(),
+            solar_system: self.solar_system.normalized(),
             night_lights: self.night_lights.normalized(),
             clouds: self.clouds.normalized(),
             video: self.video.normalized(),
@@ -184,6 +191,7 @@ impl AmbientSettings {
         match kind {
             AmbientKind::Pipes => self.pipes.controls(),
             AmbientKind::Stars => self.stars.controls(),
+            AmbientKind::SolarSystem => self.solar_system.controls(),
             AmbientKind::NightLights => self.night_lights.controls(),
             AmbientKind::Clouds => self.clouds.controls(),
             AmbientKind::Video => self.video.controls(),
@@ -209,6 +217,7 @@ impl AmbientSettings {
         match kind {
             AmbientKind::Pipes => self.pipes.set_control(id, value),
             AmbientKind::Stars => self.stars.set_control(id, value),
+            AmbientKind::SolarSystem => self.solar_system.set_control(id, value),
             AmbientKind::NightLights => self.night_lights.set_control(id, value),
             AmbientKind::Clouds => self.clouds.set_control(id, value),
             AmbientKind::Video => self.video.set_control(id, value),
@@ -232,6 +241,7 @@ impl AmbientSettings {
         let settings = match kind {
             AmbientKind::Pipes => serde_json::to_string(&normalized.pipes),
             AmbientKind::Stars => serde_json::to_string(&normalized.stars),
+            AmbientKind::SolarSystem => serde_json::to_string(&normalized.solar_system),
             AmbientKind::NightLights => serde_json::to_string(&normalized.night_lights),
             AmbientKind::Clouds => serde_json::to_string(&normalized.clouds),
             AmbientKind::Video => serde_json::to_string(&normalized.video),
@@ -271,6 +281,9 @@ impl AmbientSettings {
         match kind {
             AmbientKind::Pipes => Box::new(PipesScene::new(&settings.pipes, env)),
             AmbientKind::Stars => Box::new(StarsScene::new(&settings.stars, env)),
+            AmbientKind::SolarSystem => {
+                Box::new(SolarSystemScene::new(&settings.solar_system, env))
+            }
             AmbientKind::NightLights => {
                 Box::new(NightLightsScene::new(&settings.night_lights, env))
             }

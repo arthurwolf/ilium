@@ -434,6 +434,71 @@ fn planet_elements(planet: Planet) -> Elements {
     }
 }
 
+/// Eight planets in conventional order, using the same JPL solver as the
+/// observer sky. Earth uses the Earth-Moon barycenter approximation.
+fn solar_elements(index: usize) -> Option<Elements> {
+    Some(match index {
+        0 => planet_elements(Planet::Mercury),
+        1 => planet_elements(Planet::Venus),
+        2 => EARTH_MOON_BARYCENTER,
+        3 => planet_elements(Planet::Mars),
+        4 => planet_elements(Planet::Jupiter),
+        5 => planet_elements(Planet::Saturn),
+        6 => Elements {
+            values: [
+                19.18916464,
+                0.04725744,
+                0.77263783,
+                313.23810451,
+                170.95427630,
+                74.01692503,
+            ],
+            rates: [
+                -0.00196176,
+                -0.00004397,
+                -0.00242939,
+                428.48202785,
+                0.40805281,
+                0.04240589,
+            ],
+        },
+        7 => Elements {
+            values: [
+                30.06992276,
+                0.00859048,
+                1.77004347,
+                -55.12002969,
+                44.96476227,
+                131.78422574,
+            ],
+            rates: [
+                0.00026291,
+                0.00005105,
+                0.00035372,
+                218.45945325,
+                -0.32241464,
+                -0.00508664,
+            ],
+        },
+        _ => return None,
+    })
+}
+
+pub(crate) fn solar_heliocentric(index: usize, jd: f64) -> Vec3 {
+    solar_elements(index).map_or([0.0; 3], |elements| heliocentric(&elements, jd))
+}
+
+/// Closed path at fixed J2000 orbital elements, rather than advancing centuries
+/// to sample Neptune and accidentally introducing secular element drift.
+pub(crate) fn solar_orbit_position(index: usize, fraction: f64) -> Vec3 {
+    let Some(mut elements) = solar_elements(index) else {
+        return [0.0; 3];
+    };
+    elements.values[3] = elements.values[4] + fraction * 360.0;
+    elements.rates = [0.0; 6];
+    heliocentric(&elements, 2451545.0)
+}
+
 /// Heliocentric ecliptic (J2000) rectangular position in au.
 fn heliocentric(elements: &Elements, jd: f64) -> Vec3 {
     let t = julian_centuries(jd);

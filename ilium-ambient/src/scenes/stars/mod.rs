@@ -8,7 +8,7 @@
 //! The scene is a pure function of `(settings, location, Frame)`: it owns no
 //! threads, does no I/O and reads the clock only through `Frame`.
 
-mod astro;
+pub(crate) mod astro;
 mod canvas;
 mod catalog;
 mod settings;
@@ -53,7 +53,7 @@ const MILKY_WAY_REBUILD_SECONDS: f64 = 20.0;
 
 #[derive(Default)]
 struct MilkyWayLayer {
-    key: Option<(usize, usize, i64)>,
+    key: Option<(usize, usize, i64, bool)>,
     /// Lit dots as (x, y, intensity).
     dots: Vec<(u32, u32, f32)>,
 }
@@ -160,13 +160,15 @@ impl StarsScene {
             canvas.width(),
             canvas.height(),
             (unix / MILKY_WAY_REBUILD_SECONDS).floor() as i64,
+            self.settings.horizon,
         );
         if self.milky_way.key != Some(key) {
             #[cfg(test)]
             {
                 self.milky_way_builds += 1;
             }
-            self.milky_way.dots = build_milky_way(view, to_horizon_j2000, key.0, key.1);
+            self.milky_way.dots =
+                build_milky_way(view, to_horizon_j2000, key.0, key.1, self.settings.horizon);
             self.milky_way.key = Some(key);
         }
         for (x, y, intensity) in &self.milky_way.dots {
@@ -233,7 +235,7 @@ impl StarsScene {
                 break;
             }
             let direction = mat_vec(to_horizon_j2000, &star.vector);
-            if direction[2] <= 0.0 {
+            if self.settings.horizon && direction[2] <= 0.0 {
                 continue;
             }
             let Some((x, y)) = view.project(&direction) else {
@@ -287,11 +289,49 @@ impl StarsScene {
         }
     }
 
+    fn draw_satellites(
+        &self,
+        canvas: &mut Canvas<'_>,
+        view: &View,
+        horizon: &Mat3,
+        unix: f64,
+        lst: f64,
+    ) {
+        // Synthetic 420 km circular orbits: remove the observer's geocentric
+        // position before projecting. Fixed phases are illustrative, not TLEs.
+        let observer = astro::equatorial_vector(lst, self.latitude);
+        for index in 0..6 {
+            let phase = (unix.rem_euclid(5400.0) / 5400.0 * std::f64::consts::TAU)
+                + index as f64 * std::f64::consts::FRAC_PI_3;
+            let node = index as f64 * 0.73;
+            let inclination = (51.6_f64 + index as f64 * 5.0).to_radians();
+            let (sin_phase, cos_phase) = phase.sin_cos();
+            let (sin_node, cos_node) = node.sin_cos();
+            let orbital = [
+                cos_node * cos_phase - sin_node * sin_phase * inclination.cos(),
+                sin_node * cos_phase + cos_node * sin_phase * inclination.cos(),
+                sin_phase * inclination.sin(),
+            ];
+            let direction = mat_vec(
+                horizon,
+                &normalize(std::array::from_fn(|axis| {
+                    6791.0 * orbital[axis] - 6371.0 * observer[axis]
+                })),
+            );
+            if self.settings.horizon && direction[2] <= 0.0 {
+                continue;
+            }
+            if let Some((x, y)) = view.project(&direction) {
+                canvas.cluster(x, y, PLUS, 1.0, [210, 235, 215]);
+            }
+        }
+    }
+
     fn draw_planets(&self, canvas: &mut Canvas<'_>, view: &View, to_horizon_j2000: &Mat3, jd: f64) {
         for planet in Planet::ALL {
             let sight = planet_sight(planet, jd);
             let direction = mat_vec(to_horizon_j2000, &sight.direction);
-            if direction[2] <= 0.0 {
+            if self.settings.horizon && direction[2] <= 0.0 {
                 continue;
             }
             let Some((x, y)) = view.project(&direction) else {
@@ -321,7 +361,7 @@ impl StarsScene {
         // Topocentric parallax lowers the Moon by up to a degree.
         let sin_parallax = moon.horizontal_parallax_deg.to_radians().sin();
         let direction = normalize([geocentric[0], geocentric[1], geocentric[2] - sin_parallax]);
-        if direction[2] <= 0.0 {
+        if self.settings.horizon && direction[2] <= 0.0 {
             return;
         }
         let Some((x, y)) = view.project(&direction) else {
@@ -380,6 +420,7 @@ fn build_milky_way(
     to_horizon_j2000: &Mat3,
     width: usize,
     height: usize,
+    clip_horizon: bool,
 ) -> Vec<(u32, u32, f32)> {
     let (pole, centre) = galactic_axes();
     let pole = mat_vec(to_horizon_j2000, &pole);
@@ -391,7 +432,7 @@ fn build_milky_way(
             let Some(direction) = view.unproject(x as f64 + 0.5, y as f64 + 0.5) else {
                 continue;
             };
-            if direction[2] <= 0.0 {
+            if clip_horizon && direction[2] <= 0.0 {
                 continue;
             }
             let intensity = milky_way_intensity(&direction, &pole, &centre, &third);
@@ -499,6 +540,9 @@ impl Scene for StarsScene {
             if self.settings.planets {
                 self.draw_planets(&mut canvas, &view, &to_horizon_j2000, jd);
             }
+            if self.settings.satellites {
+                self.draw_satellites(&mut canvas, &view, &horizon, unix, lst);
+            }
             if self.settings.moon {
                 self.draw_moon(&mut canvas, &view, &horizon, &to_horizon_j2000, jd);
             }
@@ -514,7 +558,7 @@ impl Scene for StarsScene {
     }
 
     fn frames_per_second(&self) -> u32 {
-        if self.settings.twinkle {
+        if self.settings.twinkle || self.settings.satellites {
             return 12;
         }
         match self.settings.time_speed {

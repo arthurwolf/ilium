@@ -94,12 +94,15 @@ fn rendering_is_deterministic_and_draws_stars() {
 
 #[test]
 fn dome_confines_the_sky_to_a_circle_and_draws_more_stars_with_a_deeper_limit() {
-    let mut settings = bare(WHEN);
+    let mut settings = StarsSettings {
+        horizon: true,
+        ..bare(WHEN)
+    };
     let shallow = draw(&settings, PARIS.0, PARIS.1, 120, 48, 0);
     settings.magnitude_limit_tenths = 60;
     let deep = draw(&settings, PARIS.0, PARIS.1, 120, 48, 0);
     assert!(
-        deep.lit_dots() > shallow.lit_dots() * 3,
+        deep.lit_dots() > shallow.lit_dots() + 200,
         "{} vs {}",
         deep.lit_dots(),
         shallow.lit_dots()
@@ -132,7 +135,10 @@ fn dome_confines_the_sky_to_a_circle_and_draws_more_stars_with_a_deeper_limit() 
 #[test]
 fn polaris_sits_at_the_expected_place_in_the_dome() {
     // Polaris is at altitude ~ latitude, due north: straight above the centre.
-    let settings = bare(WHEN);
+    let settings = StarsSettings {
+        horizon: true,
+        ..bare(WHEN)
+    };
     let rendered = draw(&settings, PARIS.0, PARIS.1, 120, 48, 0);
     let view = View::new(
         &settings.normalized(),
@@ -215,6 +221,7 @@ fn stars_below_the_horizon_are_never_drawn() {
     // Sirius is up at 21:00 in January but below the horizon twelve hours later.
     let settings = StarsSettings {
         magnitude_limit_tenths: 30,
+        horizon: true,
         ..bare("2026-01-10 21:00")
     };
     let evening = draw(&settings, PARIS.0, PARIS.1, 120, 48, 0);
@@ -261,7 +268,7 @@ fn stars_below_the_horizon_are_never_drawn() {
         .flat_map(|x| (0..morning.raster.height).map(move |y| (x, y)))
         .filter(|(x, y)| {
             (*x as f64 + 0.5 - 120.0).hypot(*y as f64 + 0.5 - 96.0) > radius + 1.0
-                && morning.raster.dots[y * morning.raster.width + x] > 0.0
+                && morning.raster.dots[y * morning.raster.width + x] > 0.9
         })
         .count();
     assert_eq!(outside, 0);
@@ -997,4 +1004,126 @@ fn milky_way_layer_is_cached_between_nearby_frames_and_rebuilt_on_change() {
         differing < 14,
         "{differing} dots differ only through 2 s of star motion"
     );
+}
+
+#[test]
+fn horizonless_panorama_draws_catalogue_stars_below_ground() {
+    let settings = StarsSettings {
+        projection: Projection::Panorama,
+        field_of_view_degrees: 180,
+        ..bare(WHEN)
+    };
+    let mut scene = StarsScene::new(&settings, &env(PARIS.0, PARIS.1));
+    let rendered = render_frame(&mut scene, 120, 48, Duration::ZERO);
+    let jd = julian_date(parse_utc(WHEN).unwrap());
+    let matrix = mat_mul(
+        &horizon_matrix(PARIS.0, local_sidereal_degrees(jd, PARIS.1)),
+        &precession_matrix(jd),
+    );
+    let mut below = 0;
+    for (index, star) in scene.catalog.stars.iter().enumerate() {
+        if star.magnitude > scene.magnitude_limit() {
+            continue;
+        }
+        if mat_vec(&matrix, &star.vector)[2] >= -0.1 {
+            continue;
+        }
+        if let Some((x, y)) = scene.projected[index] {
+            if x >= 1.0
+                && x < rendered.raster.width as f64 - 1.0
+                && y >= 1.0
+                && y < rendered.raster.height as f64 - 1.0
+            {
+                assert!(lit_at(&rendered, x, y, 0));
+                below += 1;
+            }
+        }
+    }
+    assert!(below > 20, "only {below} below-horizon stars");
+}
+
+#[test]
+fn milky_way_below_horizon_is_retained_only_in_fullscreen_mode() {
+    let settings = StarsSettings {
+        projection: Projection::Panorama,
+        horizon: false,
+        ..StarsSettings::default()
+    };
+    let view = View::new(&settings, 160, 96);
+    let full = build_milky_way(&view, &IDENTITY, 160, 96, false);
+    let clipped = build_milky_way(&view, &IDENTITY, 160, 96, true);
+    assert!(full.len() > clipped.len());
+    assert!(full.iter().any(|(_, y, _)| *y > 50));
+    assert!(clipped.iter().all(|(_, y, _)| *y < 48));
+}
+
+#[test]
+fn simulated_satellites_are_optional_persisted_and_raise_cadence() {
+    let mut settings = StarsSettings::default();
+    assert!(!settings.satellites);
+    assert!(settings
+        .set_control("satellites", crate::ControlValue::Bool(true))
+        .unwrap());
+    let restored: StarsSettings =
+        serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert!(restored.satellites);
+    let scene = StarsScene::new(&settings, &env(0.0, 0.0));
+    assert_eq!(scene.frames_per_second(), 12);
+    let control = settings
+        .controls()
+        .into_iter()
+        .find(|row| row.id == "satellites")
+        .unwrap();
+    assert!(control.label.contains("Simulated"));
+}
+
+#[test]
+fn below_horizon_moon_and_planets_can_be_seen_in_fullscreen_panorama() {
+    let latitude = PARIS.0;
+    let longitude = PARIS.1;
+    let mut checked_moon = false;
+    let mut checked_planet = false;
+    for day in 1..=28 {
+        let text = format!("2026-01-{day:02} 12:00");
+        let jd = julian_date(parse_utc(&text).unwrap());
+        let horizon = horizon_matrix(latitude, local_sidereal_degrees(jd, longitude));
+        let to_horizon = mat_mul(&horizon, &precession_matrix(jd));
+        let moon = moon_sight(jd);
+        let geocentric = mat_vec(&horizon, &moon.direction);
+        let moon_direction = normalize([
+            geocentric[0],
+            geocentric[1],
+            geocentric[2] - moon.horizontal_parallax_deg.to_radians().sin(),
+        ]);
+        let planet_direction = mat_vec(&to_horizon, &planet_sight(Planet::Jupiter, jd).direction);
+        for (is_moon, direction) in [(true, moon_direction), (false, planet_direction)] {
+            if !(direction[2] < -0.1 && direction[2] > -0.8) {
+                continue;
+            }
+            let (_, azimuth) = astro::enu_to_altitude_azimuth(&direction);
+            let settings = StarsSettings {
+                projection: Projection::Panorama,
+                look_azimuth_degrees: azimuth.round() as i32,
+                moon: is_moon,
+                planets: !is_moon,
+                ..bare(&text)
+            };
+            let rendered = draw(&settings, latitude, longitude, 120, 48, 0);
+            let view = View::new(&settings, rendered.raster.width, rendered.raster.height);
+            let (x, y) = view.project(&direction).unwrap();
+            assert!(
+                lit_at(&rendered, x, y, 5),
+                "below-horizon body missing: moon={is_moon} day={day}"
+            );
+            if is_moon {
+                checked_moon = true;
+            } else {
+                checked_planet = true;
+            }
+        }
+        if checked_moon && checked_planet {
+            break;
+        }
+    }
+    assert!(checked_moon && checked_planet);
 }

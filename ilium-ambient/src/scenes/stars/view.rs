@@ -21,6 +21,7 @@ pub struct View {
     center_y: f64,
     /// Dots per radian (dome/patch) or per degree (panorama).
     scale: f64,
+    scale_y: f64,
     forward: Vec3,
     right: Vec3,
     up: Vec3,
@@ -75,6 +76,17 @@ impl View {
             Projection::Patch => (width / 2.0) / lens_radius(settings.lens, half_field),
             Projection::Panorama => width / field_of_view,
         };
+        let (scale, scale_y) = if !settings.horizon {
+            match settings.projection {
+                Projection::Panorama => (scale, height / 180.0),
+                _ => (
+                    (width / 2.0) / lens_radius(settings.lens, half_field),
+                    (height / 2.0) / lens_radius(settings.lens, half_field),
+                ),
+            }
+        } else {
+            (scale, scale)
+        };
         Self {
             projection: settings.projection,
             lens: settings.lens,
@@ -83,11 +95,17 @@ impl View {
             center_x: width / 2.0,
             center_y: height / 2.0,
             scale,
+            scale_y,
             forward,
             right,
             up,
             panorama_azimuth: azimuth,
-            horizon_y: height * PANORAMA_HORIZON,
+            horizon_y: height
+                * if settings.horizon {
+                    PANORAMA_HORIZON
+                } else {
+                    0.5
+                },
         }
     }
 
@@ -109,7 +127,7 @@ impl View {
                 let delta = (azimuth - self.panorama_azimuth + 540.0).rem_euclid(360.0) - 180.0;
                 Some((
                     self.center_x + delta * self.scale,
-                    self.horizon_y - altitude * self.scale,
+                    self.horizon_y - altitude * self.scale_y,
                 ))
             }
             _ => {
@@ -127,7 +145,7 @@ impl View {
                 let radius = lens_radius(self.lens, theta) * self.scale;
                 Some((
                     self.center_x + radius * along_right / planar,
-                    self.center_y - radius * along_up / planar,
+                    self.center_y - radius * self.scale_y / self.scale * along_up / planar,
                 ))
             }
         }
@@ -138,7 +156,7 @@ impl View {
         match self.projection {
             Projection::Panorama => {
                 let azimuth = self.panorama_azimuth + (x - self.center_x) / self.scale;
-                let altitude = (self.horizon_y - y) / self.scale;
+                let altitude = (self.horizon_y - y) / self.scale_y;
                 if !(-90.0..=90.0).contains(&altitude) {
                     return None;
                 }
@@ -147,7 +165,7 @@ impl View {
             _ => {
                 let (dx, dy) = (
                     (x - self.center_x) / self.scale,
-                    (self.center_y - y) / self.scale,
+                    (self.center_y - y) / self.scale_y,
                 );
                 let radius = dx.hypot(dy);
                 let theta = lens_angle(self.lens, radius);
@@ -359,5 +377,44 @@ mod tests {
             dx.abs() < 1e-6 && dy < -0.9,
             "panorama ticks point up the panel"
         );
+    }
+}
+
+#[cfg(test)]
+mod overhaul_regression_tests {
+    use super::*;
+    #[test]
+    fn horizonless_panorama_spans_both_hemispheres() {
+        let view = View::new(
+            &StarsSettings {
+                horizon: false,
+                projection: Projection::Panorama,
+                ..StarsSettings::default()
+            },
+            160,
+            96,
+        );
+        let direction = view.unproject(80.0, 80.0).unwrap();
+        assert!(direction[2] < 0.0);
+        let back = view.project(&direction).unwrap();
+        assert!((back.1 - 80.0).abs() < 1e-6);
+    }
+    #[test]
+    fn horizonless_dome_corners_are_below_horizon_and_roundtrip() {
+        for lens in [Lens::Stereographic, Lens::Equidistant] {
+            let view = View::new(
+                &StarsSettings {
+                    horizon: false,
+                    lens,
+                    ..StarsSettings::default()
+                },
+                320,
+                96,
+            );
+            let direction = view.unproject(1.0, 1.0).unwrap();
+            assert!(direction[2] < 0.0);
+            let back = view.project(&direction).unwrap();
+            assert!((back.0 - 1.0).abs() < 1e-6 && (back.1 - 1.0).abs() < 1e-6);
+        }
     }
 }

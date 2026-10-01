@@ -10,6 +10,7 @@ pub mod images;
 pub mod machine_screen;
 pub mod night_lights;
 pub mod pipes;
+pub mod solar_system;
 pub mod spectrum;
 pub mod stars;
 pub mod video;

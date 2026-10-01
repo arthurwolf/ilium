@@ -130,12 +130,14 @@ pub struct StarsSettings {
     pub horizon: bool,
     /// Draw ticks at north, east, south and west, north longer. Default on.
     pub cardinal_marks: bool,
-    /// Draw traditional constellation stick figures. Default on.
+    /// Draw traditional constellation stick figures. Default off.
     pub constellation_lines: bool,
     /// Draw the Moon with its current phase. Default on.
     pub moon: bool,
     /// Draw Mercury, Venus, Mars, Jupiter and Saturn. Default on.
     pub planets: bool,
+    /// Illustrative low-Earth orbit satellites, not a live catalogue. Default off.
+    pub satellites: bool,
     /// Precess catalogue positions from J2000 to the date shown. Default on.
     pub precession: bool,
     /// Simulated time speed. Default x1 (real time).
@@ -165,9 +167,10 @@ impl Default for StarsSettings {
             milky_way: true,
             horizon: true,
             cardinal_marks: true,
-            constellation_lines: true,
+            constellation_lines: false,
             moon: true,
             planets: true,
+            satellites: false,
             precession: true,
             time_speed: TimeSpeed::X1,
             time_offset_hours: 0,
@@ -342,7 +345,7 @@ impl SceneSettings for StarsSettings {
             "horizon",
             "Horizon line",
             self.horizon,
-            "Draw the horizon: a ring in the dome, a line in the panorama.",
+            "On clips the sky at the ground and draws a horizon ring or line. Off includes objects below the horizon and expands the view to fill the panel.",
         ));
         rows.push(Control::toggle(
             "cardinal_marks",
@@ -367,6 +370,12 @@ impl SceneSettings for StarsSettings {
             "Planets",
             self.planets,
             "Show Mercury, Venus, Mars, Jupiter and Saturn where they really are.",
+        ));
+        rows.push(Control::toggle(
+            "satellites",
+            "Simulated satellites",
+            self.satellites,
+            "Illustrative low-Earth orbit satellites in inclined orbits. These are simulated, not real tracked satellite positions or predictions.",
         ));
         rows.push(Control::toggle(
             "precession",
@@ -434,6 +443,7 @@ impl SceneSettings for StarsSettings {
             "constellation_lines" => set_toggle(&mut self.constellation_lines, &value),
             "moon" => set_toggle(&mut self.moon, &value),
             "planets" => set_toggle(&mut self.planets, &value),
+            "satellites" => set_toggle(&mut self.satellites, &value),
             "precession" => set_toggle(&mut self.precession, &value),
             "time_speed" => set_choice(&mut self.time_speed, &value, TimeSpeed::from_index),
             "time_offset" => set_number(&mut self.time_offset_hours, &value, -168, 168),
@@ -669,5 +679,16 @@ mod tests {
             assert_eq!(TimeSpeed::from_index(index), Some(*item));
         }
         assert_eq!(Lens::from_index(5), None);
+    }
+}
+
+#[cfg(test)]
+mod overhaul_regression_tests {
+    use super::*;
+    #[test]
+    fn constellation_lines_start_off_but_saved_on_survives() {
+        assert!(!StarsSettings::default().constellation_lines);
+        let saved: StarsSettings = serde_json::from_str(r#"{"constellation_lines":true}"#).unwrap();
+        assert!(saved.constellation_lines);
     }
 }

@@ -27,6 +27,6 @@ pub use scenes::{
     cube_clock::CubeClockSettings, dither_water::DitherWaterSettings,
     dithered_waves::DitheredWavesSettings, dithr_patterns::DithrPatternsSettings,
     fbm_clouds::FbmCloudsSettings, images::ImagesSettings, machine_screen::MachineScreenSettings,
-    night_lights::NightLightsSettings, pipes::PipesSettings, spectrum::SpectrumSettings,
-    stars::StarsSettings, video::VideoSettings,
+    night_lights::NightLightsSettings, pipes::PipesSettings, solar_system::SolarSystemSettings,
+    spectrum::SpectrumSettings, stars::StarsSettings, video::VideoSettings,
 };
