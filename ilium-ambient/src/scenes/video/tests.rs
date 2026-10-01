@@ -19,6 +19,88 @@ use std::time::{Duration, Instant};
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
+/// A helper can stay inside a blocking operation after cancellation. Scene
+/// replacement must return promptly while cleanup retains ownership of it.
+#[test]
+fn switching_away_from_video_does_not_wait_for_a_blocked_worker() {
+    struct SlowSource {
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+        finished: std::sync::mpsc::Sender<()>,
+    }
+    impl FrameSource for SlowSource {
+        fn probe_duration(&mut self, _: &MediaInput) -> Option<f64> {
+            None
+        }
+        fn open(&mut self, _: &PlayRequest) -> Result<Box<dyn FrameStream>, OpenError> {
+            self.entered.send(()).unwrap();
+            let _ = self.release.recv();
+            self.finished.send(()).unwrap();
+            Err(OpenError::Failed(
+                "synthetic blocked helper released".into(),
+            ))
+        }
+    }
+    let (settings, _directory) = base_settings(&["a.mp4"]);
+    let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+    let (release_sender, release_receiver) = std::sync::mpsc::channel();
+    let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
+    let config = PlayerConfig::new(settings.clone(), stream_options(&settings), 1);
+    let mut scene = VideoScene::with_source(
+        &settings,
+        config,
+        Box::new(SlowSource {
+            entered: entered_sender,
+            release: release_receiver,
+            finished: finished_sender,
+        }),
+        ChildSlot::default(),
+    );
+    render_frame(&mut scene, 20, 5, Duration::ZERO);
+    entered_receiver.recv_timeout(PATIENCE).unwrap();
+    // Bound the synthetic stall even when the regression is present. Join
+    // this owned release thread before asserting, so red runs leak nothing.
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        release_sender.send(()).unwrap();
+    });
+    let started = Instant::now();
+    drop(scene);
+    let elapsed = started.elapsed();
+    release.join().unwrap();
+    finished_receiver.recv_timeout(PATIENCE).unwrap();
+    assert!(
+        elapsed < Duration::from_millis(100),
+        "scene drop blocked {elapsed:?}"
+    );
+}
+
+#[test]
+fn excessive_video_dimensions_are_rejected_before_starting_a_decoder() {
+    let (settings, _directory) = base_settings(&["a.mp4"]);
+    let runner = FakeRunner::new(FakeMode::Blocked);
+    let mut source = super::ffmpeg::FfmpegSource::new(
+        runner.clone(),
+        ChildSlot::default(),
+        stream_options(&settings),
+    );
+    let result = source.open(&PlayRequest {
+        input: MediaInput::File("synthetic.mp4".into()),
+        start_seconds: 0.0,
+        limit_seconds: None,
+        dots_width: u32::MAX,
+        dots_height: u32::MAX,
+    });
+    assert!(
+        result.is_err(),
+        "unbounded frame dimensions must be rejected"
+    );
+    assert!(
+        runner.children().is_empty(),
+        "invalid request spawned a child"
+    );
+}
+
 fn wait_until(mut check: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + PATIENCE;
     while Instant::now() < deadline {
@@ -533,6 +615,7 @@ impl Read for BlockedPipe {
 #[derive(Clone, Copy, PartialEq)]
 enum FakeMode {
     Blocked,
+    ProbeBlocked,
     MissingTools,
 }
 
@@ -579,11 +662,12 @@ impl CommandRunner for FakeRunner {
             .lock()
             .unwrap()
             .push((spec.clone(), Arc::clone(&child)));
-        let stdout: Box<dyn Read + Send> = if spec.program == "ffprobe" {
-            Box::new(std::io::Cursor::new(b"100.000000\n".to_vec()))
-        } else {
-            Box::new(BlockedPipe(Arc::clone(&child)))
-        };
+        let stdout: Box<dyn Read + Send> =
+            if spec.program == "ffprobe" && self.mode != FakeMode::ProbeBlocked {
+                Box::new(std::io::Cursor::new(b"100.000000\n".to_vec()))
+            } else {
+                Box::new(BlockedPipe(Arc::clone(&child)))
+            };
         Ok(SpawnedChild {
             stdout,
             control: child,
@@ -593,6 +677,47 @@ impl CommandRunner for FakeRunner {
 
 fn wait_for_ffmpeg(runner: &FakeRunner) -> bool {
     wait_until(|| !runner.specs("ffmpeg").is_empty())
+}
+
+#[test]
+fn stalled_local_duration_probe_is_cut_off_without_switching_scenes() {
+    let (settings, _directory) = base_settings(&["a.mp4"]);
+    let runner = FakeRunner::new(FakeMode::ProbeBlocked);
+    let mut scene = VideoScene::with_runner(&settings, runner.clone());
+    render_frame(&mut scene, 20, 5, Duration::ZERO);
+    let progressed = wait_for_ffmpeg(&runner);
+    drop(scene);
+    assert!(
+        progressed,
+        "local ffprobe stall prevented playback for {PATIENCE:?}"
+    );
+    for child in runner.children() {
+        assert!(child.kills.load(Ordering::SeqCst) > 0);
+        assert!(wait_until(|| child.reaps.load(Ordering::SeqCst) > 0));
+    }
+}
+
+#[test]
+fn stalled_local_frame_read_reports_a_recoverable_error() {
+    let (settings, _directory) = base_settings(&["a.mp4"]);
+    let runner = FakeRunner::new(FakeMode::Blocked);
+    let mut scene = VideoScene::with_runner(&settings, runner.clone());
+    assert!(draw_until(
+        &mut scene,
+        (20, 5),
+        Duration::ZERO,
+        |scene, _| {
+            scene
+                .status()
+                .is_some_and(|notice| notice.contains("video decoder stalled"))
+        }
+    ));
+    let started = Instant::now();
+    drop(scene);
+    assert!(started.elapsed() < Duration::from_millis(100));
+    for child in runner.children() {
+        assert!(wait_until(|| child.reaps.load(Ordering::SeqCst) > 0));
+    }
 }
 
 #[test]
@@ -617,7 +742,7 @@ fn dropping_the_scene_kills_and_reaps_a_blocked_child_promptly() {
             "every child killed"
         );
         assert!(
-            child.reaps.load(Ordering::SeqCst) >= 1,
+            wait_until(|| child.reaps.load(Ordering::SeqCst) >= 1),
             "every child reaped"
         );
     }
@@ -718,16 +843,6 @@ impl CommandRunner for SleepRunner {
 }
 
 #[cfg(target_os = "linux")]
-fn sleepers_running() -> usize {
-    std::fs::read_dir("/proc")
-        .unwrap()
-        .flatten()
-        .filter_map(|entry| std::fs::read(entry.path().join("cmdline")).ok())
-        .filter(|cmdline| cmdline.starts_with(b"sleep\x0031.415"))
-        .count()
-}
-
-#[cfg(target_os = "linux")]
 #[test]
 fn a_real_child_process_is_killed_and_reaped_on_drop() {
     let (settings, _directory) = base_settings(&["a.mp4"]);
@@ -736,17 +851,49 @@ fn a_real_child_process_is_killed_and_reaped_on_drop() {
     });
     let mut scene = VideoScene::with_runner(&settings, runner.clone());
     render_frame(&mut scene, 20, 5, secs(0.0));
-    assert!(wait_until(|| sleepers_running() >= 1));
+    assert!(wait_until(|| !runner.controls.lock().unwrap().is_empty()));
+    let controls = runner.controls.lock().unwrap().clone();
+    assert!(controls.iter().all(|control| !control.reap(Duration::ZERO)));
     let started = Instant::now();
     drop(scene);
     assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(sleepers_running(), 0, "no sleeper outlives the scene");
-    for control in runner.controls.lock().unwrap().iter() {
+    for control in controls {
         assert!(
-            control.reap(Duration::from_millis(200)),
+            wait_until(|| control.reap(Duration::ZERO)),
             "child was reaped, not a zombie"
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_real_stalled_decoder_is_timed_out_and_reaped() {
+    let (settings, _directory) = base_settings(&["a.mp4"]);
+    let runner = Arc::new(SleepRunner {
+        controls: Mutex::new(Vec::new()),
+    });
+    let mut scene = VideoScene::with_runner(&settings, runner.clone());
+    assert!(draw_until(
+        &mut scene,
+        (20, 5),
+        Duration::ZERO,
+        |scene, _| {
+            scene
+                .status()
+                .is_some_and(|notice| notice.contains("video decoder stalled"))
+        }
+    ));
+    let controls = runner.controls.lock().unwrap().clone();
+    assert!(!controls.is_empty());
+    for control in controls {
+        assert!(
+            wait_until(|| control.reap(Duration::ZERO)),
+            "owned stalled helper was not reaped"
+        );
+    }
+    let started = Instant::now();
+    drop(scene);
+    assert!(started.elapsed() < Duration::from_millis(100));
 }
 
 // --------------------------------------------------------------- appearance
@@ -906,7 +1053,7 @@ fn real_ffmpeg_test_pattern_plays_end_to_end() {
         (PlaybackMode::RandomScenes, RenderStyle::Colored),
     ] {
         let settings = VideoSettings {
-            source: clip.display().to_string(),
+            source: directory.path().display().to_string(),
             mode,
             style,
             scene_seconds: 3,

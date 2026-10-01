@@ -509,11 +509,11 @@ mod tests {
             ),
             Ok(true)
         );
-        let error = settings
-            .set_control("source", ControlValue::Text("/no/such/folder/x.mp4".into()))
-            .unwrap_err();
-        assert!(error.contains("not found"));
-        assert_eq!(settings.source, "https://a.example/v.mp4");
+        assert_eq!(
+            settings.set_control("source", ControlValue::Text("/no/such/folder/x.mp4".into())),
+            Ok(true)
+        );
+        assert_eq!(settings.source, "/no/such/folder/x.mp4");
         assert!(settings
             .set_control("source", ControlValue::Text("gopher://x".into()))
             .is_err());

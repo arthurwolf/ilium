@@ -10,7 +10,8 @@ use super::settings::FitMode;
 use std::ffi::OsString;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub const FFMPEG_PROGRAM: &str = "ffmpeg";
@@ -75,6 +76,19 @@ pub struct PlayRequest {
 }
 
 impl PlayRequest {
+    pub fn bounded_frame_bytes(&self, format: PixelFormat) -> Option<usize> {
+        if self.dots_width == 0
+            || self.dots_height == 0
+            || self.dots_width > 1024
+            || self.dots_height > 512
+        {
+            return None;
+        }
+        (self.dots_width as usize)
+            .checked_mul(self.dots_height as usize)?
+            .checked_mul(format.bytes_per_dot())
+    }
+    #[cfg(test)]
     pub fn frame_bytes(&self, format: PixelFormat) -> usize {
         self.dots_width as usize * self.dots_height as usize * format.bytes_per_dot()
     }
@@ -229,16 +243,106 @@ pub trait CommandRunner: Send + Sync {
 /// Runs real processes: stdin and stderr closed, stdout piped.
 pub struct SystemRunner;
 
-struct SystemChild(Mutex<Child>);
+const MAX_VIDEO_CHILDREN: usize = 4;
+static ACTIVE_VIDEO_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+struct ChildAdmission;
+impl ChildAdmission {
+    fn acquire() -> std::io::Result<Self> {
+        ACTIVE_VIDEO_CHILDREN
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_VIDEO_CHILDREN).then_some(count + 1)
+            })
+            .map(|_| Self)
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "previous video helpers are still stopping; retry shortly",
+                )
+            })
+    }
+}
+impl Drop for ChildAdmission {
+    fn drop(&mut self) {
+        ACTIVE_VIDEO_CHILDREN.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+struct RetiredChild {
+    child: Child,
+    _admission: ChildAdmission,
+}
+struct SystemChild {
+    child: Mutex<Option<Child>>,
+    admission: Option<ChildAdmission>,
+}
+
+impl Drop for SystemChild {
+    fn drop(&mut self) {
+        let Some(mut child) = self
+            .child
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        else {
+            return;
+        };
+        let _ = child.kill();
+        if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
+            return;
+        }
+        // Keep ownership when an OS-delayed child outlasts the ordinary reap
+        // deadline. One portable reaper handles every such child.
+        let Some(admission) = self.admission.take() else {
+            return;
+        };
+        let child = RetiredChild {
+            child,
+            _admission: admission,
+        };
+        static REAPER: OnceLock<std::sync::mpsc::Sender<RetiredChild>> = OnceLock::new();
+        let sender = REAPER.get_or_init(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<RetiredChild>();
+            let result = std::thread::Builder::new()
+                .name("ilium-video-child-reaper".into())
+                .spawn(move || {
+                    let mut pending: Vec<RetiredChild> = Vec::new();
+                    loop {
+                        match receiver.recv_timeout(Duration::from_millis(25)) {
+                            Ok(child) => pending.push(child),
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        }
+                        let mut index = 0;
+                        while index < pending.len() {
+                            if matches!(pending[index].child.try_wait(), Ok(Some(_)) | Err(_)) {
+                                let mut finished = pending.swap_remove(index);
+                                let _ = finished.child.wait();
+                            } else {
+                                index += 1;
+                            }
+                        }
+                    }
+                });
+            if let Err(error) = result {
+                tracing::warn!(%error, "video child reaper could not start");
+            }
+            sender
+        });
+        if sender.send(child).is_err() {
+            tracing::warn!("video child cleanup owner unavailable");
+        }
+    }
+}
 
 impl ChildControl for SystemChild {
     fn kill(&self) {
         let mut child = self
-            .0
+            .child
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Error means "already exited", which is what we want.
-        let _ = child.kill();
+        if let Some(child) = child.as_mut() {
+            let _ = child.kill();
+        }
     }
 
     fn reap(&self, timeout: Duration) -> bool {
@@ -246,9 +350,12 @@ impl ChildControl for SystemChild {
         loop {
             {
                 let mut child = self
-                    .0
+                    .child
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let Some(child) = child.as_mut() else {
+                    return true;
+                };
                 match child.try_wait() {
                     Ok(Some(_)) | Err(_) => return true,
                     Ok(None) => {}
@@ -264,6 +371,7 @@ impl ChildControl for SystemChild {
 
 impl CommandRunner for SystemRunner {
     fn spawn(&self, spec: &CommandSpec) -> std::io::Result<SpawnedChild> {
+        let admission = ChildAdmission::acquire()?;
         let mut child = Command::new(&spec.program)
             .args(&spec.args)
             .stdin(Stdio::null())
@@ -277,7 +385,10 @@ impl CommandRunner for SystemRunner {
         };
         Ok(SpawnedChild {
             stdout: Box::new(stdout),
-            control: Arc::new(SystemChild(Mutex::new(child))),
+            control: Arc::new(SystemChild {
+                child: Mutex::new(Some(child)),
+                admission: Some(admission),
+            }),
         })
     }
 }
@@ -293,6 +404,8 @@ pub struct ChildSlot {
 struct SlotState {
     closed: bool,
     current: Option<Arc<dyn ChildControl>>,
+    deadline: Option<Instant>,
+    timed_out: bool,
 }
 
 impl ChildSlot {
@@ -310,11 +423,48 @@ impl ChildSlot {
             return false;
         }
         state.current = Some(control);
+        state.timed_out = false;
+        state.deadline = Some(Instant::now() + Duration::from_secs(3));
         true
     }
 
     pub fn clear(&self) {
-        self.lock().current = None;
+        let mut state = self.lock();
+        state.current = None;
+        state.deadline = None;
+    }
+
+    pub fn arm(&self, duration: Option<Duration>) {
+        self.lock().deadline = duration.map(|duration| Instant::now() + duration);
+    }
+
+    pub fn timed_out(&self) -> bool {
+        self.lock().timed_out
+    }
+
+    pub fn watchdog(&self) -> std::io::Result<crate::source::Worker> {
+        let slot = self.clone();
+        crate::source::Worker::try_spawn("video-watchdog", move |stop| {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let expired = {
+                    let mut state = slot.lock();
+                    if state.closed {
+                        return;
+                    }
+                    if state.deadline.is_some_and(|at| Instant::now() >= at) {
+                        state.deadline = None;
+                        state.timed_out = true;
+                        state.current.clone()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(child) = expired {
+                    child.kill();
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        })
     }
 
     /// Refuse further children and kill the current one.

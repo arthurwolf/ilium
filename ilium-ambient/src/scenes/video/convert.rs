@@ -119,11 +119,11 @@ pub fn decode_frame(
     style: RenderStyle,
     tone: &Tone,
 ) -> Option<Decoded> {
-    let count = width * height;
+    let count = width.checked_mul(height)?;
     if count == 0
         || !width.is_multiple_of(2)
         || !height.is_multiple_of(4)
-        || data.len() != count * format.bytes_per_dot()
+        || data.len() != count.checked_mul(format.bytes_per_dot())?
     {
         return None;
     }

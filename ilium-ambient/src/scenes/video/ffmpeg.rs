@@ -24,6 +24,7 @@ pub struct FfmpegSource {
     runner: Arc<dyn CommandRunner>,
     slot: ChildSlot,
     options: StreamOptions,
+    watchdog: Option<crate::source::Worker>,
 }
 
 impl FfmpegSource {
@@ -32,12 +33,21 @@ impl FfmpegSource {
             runner,
             slot,
             options,
+            watchdog: None,
         }
+    }
+
+    fn start_watchdog(&mut self) -> io::Result<()> {
+        if self.watchdog.is_none() {
+            self.watchdog = Some(self.slot.watchdog()?);
+        }
+        Ok(())
     }
 }
 
 impl FrameSource for FfmpegSource {
     fn probe_duration(&mut self, input: &MediaInput) -> Option<f64> {
+        self.start_watchdog().ok()?;
         let mut child = self.runner.spawn(&ffprobe_spec(input)).ok()?;
         if !self.slot.register(Arc::clone(&child.control)) {
             child.control.kill();
@@ -55,6 +65,16 @@ impl FrameSource for FfmpegSource {
     }
 
     fn open(&mut self, request: &PlayRequest) -> Result<Box<dyn FrameStream>, OpenError> {
+        let frame_bytes = request
+            .bounded_frame_bytes(self.options.pixel_format)
+            .ok_or_else(|| {
+                OpenError::Failed(
+                    "Video output is too large (maximum 512 columns by 128 rows)".into(),
+                )
+            })?;
+        self.start_watchdog().map_err(|error| {
+            OpenError::Failed(format!("cannot start video timeout worker: {error}"))
+        })?;
         let spec = ffmpeg_spec(request, &self.options);
         let child = self.runner.spawn(&spec).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
@@ -72,7 +92,7 @@ impl FrameSource for FfmpegSource {
             stdout: child.stdout,
             control: child.control,
             slot: self.slot.clone(),
-            frame_bytes: request.frame_bytes(self.options.pixel_format),
+            frame_bytes,
         }))
     }
 }
@@ -87,7 +107,16 @@ pub struct FfmpegStream {
 impl FrameStream for FfmpegStream {
     fn read_frame(&mut self, buffer: &mut Vec<u8>) -> io::Result<bool> {
         buffer.resize(self.frame_bytes, 0);
-        match self.stdout.read_exact(buffer) {
+        self.slot.arm(Some(Duration::from_secs(5)));
+        let read = self.stdout.read_exact(buffer);
+        self.slot.arm(None);
+        if self.slot.timed_out() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "video decoder stalled for 5 seconds",
+            ));
+        }
+        match read {
             Ok(()) => Ok(true),
             // Clean end of clip, or the child was killed mid-frame.
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => Ok(false),

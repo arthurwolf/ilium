@@ -275,9 +275,14 @@ impl Player {
     fn rescan(&mut self) {
         self.scanned_at = Some(Instant::now());
         let settings = &self.config.settings;
-        let discovery = discover::discover(&settings.source, settings.recursive);
+        self.shared
+            .set_notice(Some("Scanning video sources...".into()));
+        let discovery =
+            discover::discover_cancellable(&settings.source, settings.recursive, &self.stop);
         if discovery.inputs.is_empty() {
-            let notice = if settings.source.trim().is_empty() {
+            let notice = if discovery.limited {
+                "Video scan limit reached: choose a narrower folder or disable recursion".to_owned()
+            } else if settings.source.trim().is_empty() {
                 "No video source set: choose a file, folder or URL".to_owned()
             } else {
                 format!("No videos found: {}", settings.source)

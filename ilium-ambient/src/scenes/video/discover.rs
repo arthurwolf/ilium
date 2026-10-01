@@ -2,12 +2,14 @@
 //!
 //! The source is one or several entries separated by semicolons. Each entry is
 //! an http(s) URL, a glob pattern, a folder, or a single file. Everything here
-//! touches the file system, so it runs on the worker thread (or in the
-//! settings editor's validation), never in `Scene::render`.
+//! touches the file system, so discovery runs on the worker thread, never in
+//! `Scene::render`. Settings validation only checks the source text.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// Extensions that count as video when scanning folders and globs. A file
 /// named explicitly is always accepted, whatever its extension.
@@ -67,6 +69,7 @@ pub struct Discovery {
     pub inputs: Vec<MediaInput>,
     /// Entries that matched nothing, for the status line.
     pub unmatched: Vec<String>,
+    pub limited: bool,
 }
 
 pub fn split_entries(source: &str) -> Vec<&str> {
@@ -132,14 +135,15 @@ fn split_glob(pattern: &Path) -> (PathBuf, Vec<String>) {
     (base, segments)
 }
 
-/// Check what the user typed in the settings editor. Missing files and
-/// folders, unsupported URL schemes and unreadable globs are rejected here so
-/// the mistake is visible immediately.
+/// Check source syntax without contacting a filesystem or network. Missing
+/// files and folders are reported by the cancellable discovery worker.
 pub fn validate_source(source: &str) -> Result<(), String> {
     validate_source_with_home(source, home_directory().as_deref())
 }
 
-fn validate_source_with_home(source: &str, home: Option<&Path>) -> Result<(), String> {
+fn validate_source_with_home(source: &str, _home: Option<&Path>) -> Result<(), String> {
+    // Validation runs in the settings input path: never stat a possibly
+    // disconnected filesystem here. Discovery owns availability checks.
     for entry in split_entries(source) {
         if is_http_url(entry) {
             let host = entry.split("://").nth(1).unwrap_or("");
@@ -150,38 +154,67 @@ fn validate_source_with_home(source: &str, home: Option<&Path>) -> Result<(), St
             return Err(format!(
                 "only http:// and https:// URLs are supported: {entry}"
             ));
-        } else if has_glob_characters(entry) {
-            let (base, _) = split_glob(&expand_home(entry, home));
-            if !base.is_dir() {
-                return Err(format!("folder not found: {}", base.display()));
-            }
-        } else if !expand_home(entry, home).exists() {
-            return Err(format!("file or folder not found: {entry}"));
         }
     }
     Ok(())
 }
 
-pub fn discover(source: &str, recursive: bool) -> Discovery {
-    discover_with_home(source, recursive, home_directory().as_deref())
+struct ScanBudget<'a> {
+    stop: &'a AtomicBool,
+    remaining: usize,
+    deadline: Instant,
+}
+impl ScanBudget<'_> {
+    fn exhausted(&self) -> bool {
+        self.remaining == 0 || self.stop.load(Ordering::Relaxed) || Instant::now() >= self.deadline
+    }
+    fn visit(&mut self) -> bool {
+        if self.exhausted() {
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
 }
 
+pub fn discover_cancellable(source: &str, recursive: bool, stop: &AtomicBool) -> Discovery {
+    discover_bounded(source, recursive, home_directory().as_deref(), stop)
+}
+
+#[cfg(test)]
 fn discover_with_home(source: &str, recursive: bool, home: Option<&Path>) -> Discovery {
+    discover_bounded(source, recursive, home, &AtomicBool::new(false))
+}
+
+fn discover_bounded(
+    source: &str,
+    recursive: bool,
+    home: Option<&Path>,
+    stop: &AtomicBool,
+) -> Discovery {
+    let mut budget = ScanBudget {
+        stop,
+        remaining: 20_000,
+        deadline: Instant::now() + Duration::from_secs(2),
+    };
     let mut discovery = Discovery::default();
     let mut seen: HashSet<MediaInput> = HashSet::new();
     for entry in split_entries(source) {
+        if budget.exhausted() {
+            break;
+        }
         let mut found: Vec<MediaInput> = Vec::new();
         if is_http_url(entry) {
             found.push(MediaInput::Url(entry.to_owned()));
         } else if has_glob_characters(entry) {
-            let mut matches = expand_glob(&expand_home(entry, home));
+            let mut matches = expand_glob(&expand_home(entry, home), &mut budget);
             matches.sort_by_key(|path| path.to_string_lossy().to_lowercase());
             for path in matches {
-                collect_path(&path, recursive, false, &mut found);
+                collect_path(&path, recursive, false, &mut found, &mut budget);
             }
         } else {
             let path = expand_home(entry, home);
-            collect_path(&path, recursive, true, &mut found);
+            collect_path(&path, recursive, true, &mut found, &mut budget);
         }
         let matched_nothing = found.is_empty();
         for input in found {
@@ -196,27 +229,48 @@ fn discover_with_home(source: &str, recursive: bool, home: Option<&Path>) -> Dis
             discovery.unmatched.push(entry.to_owned());
         }
     }
+    discovery.limited = budget.exhausted() && !stop.load(Ordering::Relaxed);
     discovery
 }
 
 /// Add the videos behind `path`: a file (any extension when `explicit`,
 /// otherwise only video extensions) or a folder scanned per `recursive`.
-fn collect_path(path: &Path, recursive: bool, explicit: bool, out: &mut Vec<MediaInput>) {
+fn collect_path(
+    path: &Path,
+    recursive: bool,
+    explicit: bool,
+    out: &mut Vec<MediaInput>,
+    budget: &mut ScanBudget<'_>,
+) {
+    if !budget.visit() {
+        return;
+    }
     if path.is_dir() {
-        scan_directory(path, recursive, out);
+        scan_directory(path, recursive, out, budget);
     } else if path.is_file() && (explicit || video_extension(path)) {
         out.push(MediaInput::File(path.to_path_buf()));
     }
 }
 
-fn scan_directory(root: &Path, recursive: bool, out: &mut Vec<MediaInput>) {
+fn scan_directory(
+    root: &Path,
+    recursive: bool,
+    out: &mut Vec<MediaInput>,
+    budget: &mut ScanBudget<'_>,
+) {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut pending: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
     while let Some((directory, depth)) = pending.pop() {
+        if budget.exhausted() || files.len() >= MAX_INPUTS {
+            break;
+        }
         let Ok(entries) = std::fs::read_dir(&directory) else {
             continue;
         };
         for entry in entries.flatten() {
+            if !budget.visit() {
+                break;
+            }
             let path = entry.path();
             let Ok(kind) = entry.file_type() else {
                 continue;
@@ -238,34 +292,43 @@ fn scan_directory(root: &Path, recursive: bool, out: &mut Vec<MediaInput>) {
     out.extend(files.into_iter().map(MediaInput::File));
 }
 
-fn expand_glob(pattern: &Path) -> Vec<PathBuf> {
+fn expand_glob(pattern: &Path, budget: &mut ScanBudget<'_>) -> Vec<PathBuf> {
     let (base, segments) = split_glob(pattern);
     let mut out = Vec::new();
-    walk_glob(&base, &segments, &mut out, 0);
+    walk_glob(&base, &segments, &mut out, 0, budget);
     out
 }
 
-fn sorted_children(directory: &Path) -> Vec<(String, PathBuf, bool)> {
+fn sorted_children(directory: &Path, budget: &mut ScanBudget<'_>) -> Vec<(String, PathBuf, bool)> {
+    if budget.exhausted() {
+        return Vec::new();
+    }
     let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new();
     };
-    let mut children: Vec<(String, PathBuf, bool)> = entries
-        .flatten()
-        .map(|entry| {
-            let is_real_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
-            (
-                entry.file_name().to_string_lossy().into_owned(),
-                entry.path(),
-                is_real_directory,
-            )
-        })
-        .collect();
+    let mut children = Vec::new();
+    for entry in entries.flatten() {
+        if !budget.visit() {
+            break;
+        }
+        children.push((
+            entry.file_name().to_string_lossy().into_owned(),
+            entry.path(),
+            entry.file_type().is_ok_and(|kind| kind.is_dir()),
+        ));
+    }
     children.sort();
     children
 }
 
-fn walk_glob(directory: &Path, segments: &[String], out: &mut Vec<PathBuf>, depth: usize) {
-    if out.len() >= MAX_INPUTS || depth > MAX_DEPTH {
+fn walk_glob(
+    directory: &Path,
+    segments: &[String],
+    out: &mut Vec<PathBuf>,
+    depth: usize,
+    budget: &mut ScanBudget<'_>,
+) {
+    if budget.exhausted() || out.len() >= MAX_INPUTS || depth > MAX_DEPTH {
         return;
     }
     let Some((segment, rest)) = segments.split_first() else {
@@ -275,18 +338,18 @@ fn walk_glob(directory: &Path, segments: &[String], out: &mut Vec<PathBuf>, dept
     if segment == "**" {
         // `**` matches zero or more directories; a trailing `**` means "every file".
         if rest.is_empty() {
-            walk_glob(directory, &["*".to_owned()], out, depth);
+            walk_glob(directory, &["*".to_owned()], out, depth, budget);
         } else {
-            walk_glob(directory, rest, out, depth);
+            walk_glob(directory, rest, out, depth, budget);
         }
-        for (name, path, is_real_directory) in sorted_children(directory) {
+        for (name, path, is_real_directory) in sorted_children(directory, budget) {
             if is_real_directory && !name.starts_with('.') {
-                walk_glob(&path, segments, out, depth + 1);
+                walk_glob(&path, segments, out, depth + 1, budget);
             }
         }
     } else if has_glob_characters(segment) {
         let pattern: Vec<char> = segment.chars().collect();
-        for (name, path, _) in sorted_children(directory) {
+        for (name, path, _) in sorted_children(directory, budget) {
             if name.starts_with('.') && !segment.starts_with('.') {
                 continue;
             }
@@ -297,7 +360,7 @@ fn walk_glob(directory: &Path, segments: &[String], out: &mut Vec<PathBuf>, dept
             if rest.is_empty() {
                 out.push(path);
             } else if path.is_dir() {
-                walk_glob(&path, rest, out, depth + 1);
+                walk_glob(&path, rest, out, depth + 1, budget);
             }
         }
     } else {
@@ -307,7 +370,7 @@ fn walk_glob(directory: &Path, segments: &[String], out: &mut Vec<PathBuf>, dept
                 out.push(next);
             }
         } else if next.is_dir() {
-            walk_glob(&next, rest, out, depth + 1);
+            walk_glob(&next, rest, out, depth + 1, budget);
         }
     }
 }
@@ -505,7 +568,7 @@ mod tests {
         let found = discover_with_home("~/Videos", false, Some(dir.path()));
         assert_eq!(found.inputs.len(), 1);
         assert!(validate_source_with_home("~/Videos", Some(dir.path())).is_ok());
-        assert!(validate_source_with_home("~/Nope", Some(dir.path())).is_err());
+        assert!(validate_source_with_home("~/Nope", Some(dir.path())).is_ok());
     }
 
     #[test]
@@ -520,10 +583,37 @@ mod tests {
         assert!(ok(&format!("{}/*.mp4", dir.path().display())));
         assert!(!ok("ftp://example.com/a.mp4"));
         assert!(!ok("https://"));
-        assert!(!ok("/definitely/not/here.mp4"));
-        assert!(!ok("/definitely/not/here/*.mp4"));
-        let error = validate_source_with_home("/definitely/not/here.mp4", None).unwrap_err();
-        assert!(error.contains("not found"), "{error}");
+        assert!(ok("/definitely/not/here.mp4"));
+        assert!(ok("/definitely/not/here/*.mp4"));
+    }
+
+    #[test]
+    fn editing_a_source_does_not_require_touching_its_filesystem() {
+        // Path availability belongs to the cancellable discovery worker. A
+        // disconnected mount or unavailable folder must still be editable.
+        assert!(validate_source_with_home("/synthetic-unavailable-mount/video", None).is_ok());
+        assert!(validate_source_with_home("/synthetic-unavailable-mount/**/*.mp4", None).is_ok());
+    }
+
+    #[test]
+    fn folder_discovery_obeys_entry_budget_and_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        for index in 0..256 {
+            touch(&directory.path().join(format!("clip-{index}.mp4")));
+        }
+        let stop = AtomicBool::new(false);
+        let mut budget = ScanBudget {
+            stop: &stop,
+            remaining: 32,
+            deadline: Instant::now() + Duration::from_secs(10),
+        };
+        let mut inputs = Vec::new();
+        scan_directory(directory.path(), true, &mut inputs, &mut budget);
+        assert_eq!(inputs.len(), 32);
+        assert!(budget.exhausted());
+        stop.store(true, Ordering::Relaxed);
+        let found = discover_cancellable(directory.path().to_str().unwrap(), true, &stop);
+        assert!(found.inputs.is_empty());
     }
 
     #[test]

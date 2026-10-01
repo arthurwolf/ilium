@@ -11,12 +11,27 @@ use super::settings::{PlaybackMode, RenderStyle, VideoSettings};
 use crate::raster::Raster;
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
 
 /// A changed terminal size must hold this long before ffmpeg is restarted.
 const RESIZE_SETTLE: Duration = Duration::from_millis(500);
+// Unit tests exercise independently owned scenes concurrently; the real
+// client has one backdrop and at most one settings preview.
+#[cfg(not(test))]
+const MAX_VIDEO_WORKERS: usize = 2;
+#[cfg(test)]
+const MAX_VIDEO_WORKERS: usize = 64;
+static ACTIVE_VIDEO_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+struct VideoAdmission;
+impl Drop for VideoAdmission {
+    fn drop(&mut self) {
+        ACTIVE_VIDEO_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 struct Current {
     decoded: Decoded,
@@ -38,8 +53,7 @@ pub struct VideoScene {
     requested: Option<(u16, u16)>,
     /// A different size seen since this wall time, not yet acted upon.
     settling: Option<((u16, u16), Duration)>,
-    /// Declared last so it is dropped (stopped and joined) after `Drop::drop`
-    /// has already killed the child the worker may be blocked on.
+    start: Option<Box<dyn FnOnce(Arc<std::sync::atomic::AtomicBool>) + Send>>,
     worker: Option<Worker>,
 }
 
@@ -80,10 +94,8 @@ impl VideoScene {
         let (sender, receiver) = sync_channel(QUEUE_FRAMES);
         let shared = Arc::new(SharedState::default());
         let worker_shared = Arc::clone(&shared);
-        let worker = Worker::spawn("video", move |stop| {
-            run_player(config, source, sender, worker_shared, stop);
-        });
-        Self {
+        let start = Box::new(move |stop| run_player(config, source, sender, worker_shared, stop));
+        let mut scene = Self {
             settings: settings.clone(),
             slot,
             shared,
@@ -95,7 +107,39 @@ impl VideoScene {
             origin: Duration::ZERO,
             requested: None,
             settling: None,
-            worker: Some(worker),
+            start: Some(start),
+            worker: None,
+        };
+        scene.try_start();
+        scene
+    }
+
+    fn try_start(&mut self) {
+        if self.start.is_none() {
+            return;
+        }
+        let admitted = ACTIVE_VIDEO_WORKERS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_VIDEO_WORKERS).then_some(count + 1)
+            })
+            .is_ok();
+        if !admitted {
+            self.shared.set_notice(Some(
+                "Waiting for previous video cleanup; other scenes remain available".into(),
+            ));
+            return;
+        }
+        if let Some(start) = self.start.take() {
+            let admission = VideoAdmission;
+            match Worker::try_spawn("video", move |stop| {
+                let _admission = admission;
+                start(stop);
+            }) {
+                Ok(worker) => self.worker = Some(worker),
+                Err(error) => self.shared.set_notice(Some(format!(
+                    "Could not start video worker: {error}; choose another scene and retry"
+                ))),
+            }
         }
     }
 
@@ -130,7 +174,7 @@ impl VideoScene {
         let expected = (usize::from(columns) * 2, usize::from(rows) * 4);
         // Only the newest due frame is worth decoding after a stall.
         let mut newest: Option<VideoFrame> = None;
-        loop {
+        for _ in 0..=QUEUE_FRAMES {
             let next = match self.pending.take() {
                 Some(frame) => frame,
                 None => match self.receiver.try_recv() {
@@ -193,6 +237,9 @@ impl Drop for VideoScene {
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.slot.close();
+        if let Some(worker) = self.worker.take() {
+            worker.stop_in_background();
+        }
     }
 }
 
@@ -201,16 +248,23 @@ impl Scene for VideoScene {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
-        self.track_size((frame.width, frame.height), frame.wall);
+        self.try_start();
+        self.track_size((frame.width.min(512), frame.height.min(128)), frame.wall);
         self.pump(frame.wall);
         let colored = self.uses_cell_colors();
         match &self.current {
             Some(current) => {
-                let dots = current
-                    .decoded
-                    .resampled_dots(frame.raster.width, frame.raster.height);
-                if dots.len() == frame.raster.dots.len() {
-                    frame.raster.dots.copy_from_slice(&dots);
+                if (current.decoded.width, current.decoded.height)
+                    == (frame.raster.width, frame.raster.height)
+                {
+                    frame.raster.dots.copy_from_slice(&current.decoded.dots);
+                } else {
+                    let dots = current
+                        .decoded
+                        .resampled_dots(frame.raster.width, frame.raster.height);
+                    if dots.len() == frame.raster.dots.len() {
+                        frame.raster.dots.copy_from_slice(&dots);
+                    }
                 }
                 if colored {
                     let columns = usize::from(frame.width);

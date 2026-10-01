@@ -34,14 +34,68 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// Transfer cleanup ownership away from the presentation thread. The
+    /// caller must bound admission of tasks that can block indefinitely.
+    pub fn stop_in_background(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        static REAPER: OnceLock<std::sync::mpsc::Sender<JoinHandle<()>>> = OnceLock::new();
+        let sender = REAPER.get_or_init(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<JoinHandle<()>>();
+            let result = std::thread::Builder::new()
+                .name("ilium-ambient-reaper".into())
+                .spawn(move || {
+                    let mut pending: Vec<JoinHandle<()>> = Vec::new();
+                    loop {
+                        match receiver.recv_timeout(Duration::from_millis(25)) {
+                            Ok(handle) => pending.push(handle),
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        }
+                        let mut index = 0;
+                        while index < pending.len() {
+                            if pending[index].is_finished() {
+                                let _ = pending.swap_remove(index).join();
+                            } else {
+                                index += 1;
+                            }
+                        }
+                    }
+                });
+            if let Err(error) = result {
+                tracing::warn!(%error, "ambient reaper could not start");
+            }
+            sender
+        });
+        if sender.send(handle).is_err() {
+            tracing::warn!("ambient cleanup owner unavailable");
+        }
+    }
+
     pub fn spawn(name: &str, task: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Self {
+        Self::try_spawn(name, task).unwrap_or_else(|_| Self {
+            stop: Arc::new(AtomicBool::new(false)),
+            handle: None,
+        })
+    }
+
+    /// Start an owned worker while preserving a spawn failure for callers
+    /// that expose readiness or recovery status.
+    pub fn try_spawn(
+        name: &str,
+        task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
+    ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let handle = std::thread::Builder::new()
             .name(format!("ilium-ambient-{name}"))
-            .spawn(move || task(thread_stop))
-            .ok();
-        Self { stop, handle }
+            .spawn(move || task(thread_stop))?;
+        Ok(Self {
+            stop,
+            handle: Some(handle),
+        })
     }
 
     pub fn is_stopping(&self) -> bool {
