@@ -238,8 +238,8 @@ def native(arguments):
         environment['RUST_TEST_THREADS'] = '1'
         # /var is a symlink to /private/var; tests compare resolved paths.
         environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
-    if target['os'] == 'linux' and target['arch'] == 'aarch64':
-        # The hosted arm64 runners miss PTY click/resize deadlines when UI tests run concurrently.
+    if target['os'] == 'linux':
+        # Hosted Linux runners miss PTY click/resize/expiry deadlines when UI tests run concurrently.
         environment['RUST_TEST_THREADS'] = '1'
     if target['os'] == 'windows':
         # Plain CI passes these PTY tests; the slower static-CRT release lane
