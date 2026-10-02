@@ -707,6 +707,7 @@ All animations share one look and one set of display controls (Settings -> Anima
 - **Live aircraft** plots airborne positions reported by OpenSky over a Braille world coastline. Anonymous global access is limited, so refresh is at least 15 minutes. Coverage is incomplete.
 - **Live boats** uses public Finnish AIS positions from Digitraffic, with a 30-second minimum refresh. It covers Finnish waters, not the global fleet. Aircraft and boats have separate map and marker colors and brightness.
 - **Live chess** follows Lichess TV with dithered pieces, board orientation and independent colors. Clocks show the latest feed values; connection failures retain the last board with its receipt age.
+- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, autonomous Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
 
 Live sources retain the last good data on request failures; they do not substitute simulated events. Quicknet values are displayed without BLS signature verification.
 
