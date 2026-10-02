@@ -1185,7 +1185,10 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
     let killed = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
     assert!(killed.status.success());
     cleanup_guard.already_cleaned_up = true;
-    assert!(wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await);
+    // The pane floods the client with output until the session dies, so on a
+    // loaded runner the client drains that backlog before it sees the server
+    // close; a slow exit is not a hang, a missing one is.
+    assert!(wait_until(|| tui.has_exited(), WAIT_TIMEOUT * 4).await);
 }
 
 #[tokio::test]
