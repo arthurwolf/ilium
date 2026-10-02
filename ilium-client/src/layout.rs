@@ -36,6 +36,29 @@ const MINIMUM_PANE_WIDTH: u16 = 3;
 /// use the exact same hit target.
 pub const VOICE_CONTROL_WIDTH: u16 = 22;
 
+/// ASCII keeps the attribution's measured width equal to its byte length.
+/// The source URL is in the OpenStreetMap Settings help topic (AN-55).
+pub const OSM_ATTRIBUTION: &str = "(c) OpenStreetMap contributors / ODbL";
+
+/// The caption owns complete rows above the existing status/voice footer.
+/// If three workspace rows cannot coexist with it, the compositor suppresses
+/// the map instead of displaying a map without its attribution.
+pub fn osm_attribution_area(screen_area: Rect) -> Rect {
+    if screen_area.width == 0 {
+        return Rect::default();
+    }
+    let rows = (OSM_ATTRIBUTION.len() as u16).div_ceil(screen_area.width);
+    if screen_area.height < rows.saturating_add(4) {
+        return Rect::default();
+    }
+    Rect::new(
+        screen_area.x,
+        screen_area.bottom() - 1 - rows,
+        screen_area.width,
+        rows,
+    )
+}
+
 /// Time-based presentation state for the tree panel's width. The state owns
 /// reversal as well as ordinary expansion/collapse, so input handlers only
 /// express the desired endpoint and never manipulate animation progress.
@@ -167,6 +190,7 @@ pub struct UiLayout {
     pub tree_area: Rect,
     pub pane_area: Rect,
     pub pane_content_area: Rect,
+    pub osm_attribution_area: Rect,
     pub status_area: Rect,
     pub voice_control_area: Rect,
 }
@@ -181,11 +205,37 @@ impl UiLayout {
     /// width. On narrow terminals the tree yields enough room for the pane's
     /// borders and one content cell rather than covering the pane entirely.
     pub fn from_screen_area_with_tree_width(screen_area: Rect, tree_width: u16) -> Self {
+        Self::from_screen_area_with_tree_width_and_attribution(screen_area, tree_width, false)
+    }
+
+    /// Reserve the OSM-only caption in the same geometry used for PTY resize,
+    /// workspace rendering and pointer hit-testing.
+    pub fn from_screen_area_with_tree_width_and_attribution(
+        screen_area: Rect,
+        tree_width: u16,
+        show_osm_attribution: bool,
+    ) -> Self {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(screen_area);
-        let main_area = rows[0];
+        let reserved = if show_osm_attribution {
+            osm_attribution_area(screen_area)
+        } else {
+            Rect::default()
+        };
+        let main_area = Rect::new(
+            rows[0].x,
+            rows[0].y,
+            rows[0].width,
+            rows[0].height.saturating_sub(reserved.height),
+        );
+        let osm_attribution_area = Rect::new(
+            main_area.x,
+            main_area.bottom(),
+            main_area.width,
+            reserved.height,
+        );
         let footer_area = rows[1];
         let voice_control_width = VOICE_CONTROL_WIDTH.min(footer_area.width);
         let status_area = Rect::new(
@@ -254,6 +304,7 @@ impl UiLayout {
             tree_area,
             pane_area,
             pane_content_area,
+            osm_attribution_area,
             status_area,
             voice_control_area,
         }
@@ -300,6 +351,26 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn osm_credit_reserves_complete_rows_without_moving_the_footer() {
+        for (screen, expected) in [
+            (Rect::new(0, 0, 80, 24), Rect::new(0, 22, 80, 1)),
+            (Rect::new(7, 11, 20, 10), Rect::new(7, 18, 20, 2)),
+        ] {
+            assert_eq!(osm_attribution_area(screen), expected);
+            let layout = UiLayout::from_screen_area_with_tree_width_and_attribution(
+                screen,
+                DEFAULT_UNFOCUSED_TREE_WIDTH,
+                true,
+            );
+            assert_eq!(layout.osm_attribution_area, expected);
+            assert_eq!(layout.pane_area.bottom(), expected.top());
+            assert_eq!(layout.status_area.y, screen.bottom() - 1);
+            assert_eq!(layout.voice_control_area.y, screen.bottom() - 1);
+        }
+        assert!(osm_attribution_area(Rect::new(0, 0, 10, 4)).is_empty());
+    }
 
     /// The animation and expanded-width assertions below use fixed 32/64
     /// widths (a 1:2 ratio) so their arithmetic does not move whenever the

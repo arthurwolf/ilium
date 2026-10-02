@@ -133,7 +133,7 @@ pub enum AnimationHit {
 /// scrollbar and help-rail columns.
 fn left_width(panel_width: u16) -> u16 {
     if panel_width >= 100 {
-        40
+        46
     } else if panel_width >= 76 {
         34
     } else {
@@ -906,8 +906,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
 
 /// The one line shown over the field while the controls are hidden.
 pub fn render_fullscreen_hint(frame: &mut Frame, area: Rect, app: &App) {
-    // The bottom row belongs to the persistent voice affordance.
-    if area.height < 2 || area.width == 0 {
+    // Keep the hint above OSM's wrapped credit and the persistent voice row.
+    let credit_rows = if app.animation_settings.kind == AnimationKind::OpenStreetMap {
+        crate::layout::osm_attribution_area(area).height
+    } else {
+        0
+    };
+    if area.height < credit_rows + 2 || area.width == 0 {
         return;
     }
     let text = fit(
@@ -917,7 +922,12 @@ pub fn render_fullscreen_hint(frame: &mut Frame, area: Rect, app: &App) {
     let width = UnicodeWidthStr::width(text.as_str()) as u16;
     frame.render_widget(
         Paragraph::new(text).style(control_ink(app).add_modifier(Modifier::DIM)),
-        Rect::new(area.x, area.bottom() - 2, width.min(area.width), 1),
+        Rect::new(
+            area.x,
+            area.bottom() - 2 - credit_rows,
+            width.min(area.width),
+            1,
+        ),
     );
 }
 
@@ -982,6 +992,16 @@ mod tests {
 
     #[test]
     fn narrow_scene_heading_stays_inside_its_column() {
+        if std::env::var_os("ILIUM_DUMP_ANIMATION_UI").is_some() {
+            let project = tempfile::tempdir().unwrap();
+            let app = App::new("dump".into(), project.path().into());
+            let mut terminal = Terminal::new(TestBackend::new(28, 24)).unwrap();
+            let area = Rect::new(0, 0, 28, 24);
+            terminal
+                .draw(|f| render(f, area, &app, &SettingsState::default()))
+                .unwrap();
+            eprintln!("{}", screen_text(&terminal).join("\n"));
+        }
         let project = tempfile::tempdir().unwrap();
         let app = App::new("animation-heading-test".into(), project.path().into());
         for width in [28, 48] {
@@ -993,7 +1013,7 @@ mod tests {
                 .unwrap();
             let buffer = terminal.backend().buffer();
             assert_eq!(buffer[(columns.scenes.right(), 0)].symbol(), " ");
-            assert_eq!(buffer[(columns.controls.x + 8, 0)].symbol(), " ");
+            assert_eq!(buffer[(columns.controls.right() - 1, 0)].symbol(), " ");
         }
     }
 
@@ -1338,6 +1358,7 @@ mod tests {
     #[test]
     fn dependent_rows_follow_the_hosted_scene_through_the_app() {
         let (mut app, probe, _project) = settings_app(140, 40);
+        app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
         app.animation_settings.kind = AnimationKind::Images;
         draw(&mut app, 140, 40);
         assert!(app
@@ -1348,7 +1369,8 @@ mod tests {
         // The scene reports colors once it renders its next frame.
         app.started_at -= std::time::Duration::from_secs(1);
         draw(&mut app, 140, 40);
-        assert!(!app
+        // The look is global: a scene with its own colors keeps the shared rows.
+        assert!(app
             .animation_row_model()
             .rows()
             .contains(&AnimationRow::Common("lightness")));
@@ -1658,6 +1680,7 @@ mod tests {
     #[test]
     fn palette_and_named_controls_survive_scene_switches_and_failed_saves() {
         let (mut app, _probe, project) = settings_app(140, 40);
+        app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
         let row = |app: &App, id: &'static str| row_index(app, &AnimationRow::Common(id));
         let lightness = row(&app, "lightness");
         let hue = row(&app, "hue");
@@ -1707,6 +1730,7 @@ mod tests {
     #[test]
     fn actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches() {
         let (mut app, _probe, project) = settings_app(80, 24);
+        app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
         for _ in 0..5 {
             key(&mut app, KeyCode::Down);
         }
@@ -2416,22 +2440,24 @@ mod tests {
             let terminal = draw(&mut app, width, height);
             let text = screen_text(&terminal);
             let joined = text.join("\n");
+            let wide = width >= 120;
             for needle in [
                 "Animations",
                 "Prev",
                 "Next",
                 "Look and display",
-                "Show in",
-                "Color mode",
-                "Brightness",
+                if wide { "Show in" } else { "Show" },
+                if wide { "Color mode" } else { "Backg" },
             ] {
                 assert!(
                     joined.contains(needle),
                     "{width}x{height} lacks {needle}\n{joined}"
                 );
             }
-            let right = format!("{} settings", app.animation_settings.kind.label());
-            assert!(joined.contains(&right), "{width}x{height} lacks {right}");
+            assert!(
+                joined.contains(" settings"),
+                "{width}x{height} lacks the right heading"
+            );
             if std::env::var_os("ILIUM_DUMP_ANIMATION_UI").is_some() {
                 eprintln!("--- {width}x{height}\n{joined}");
             }

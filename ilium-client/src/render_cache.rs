@@ -153,18 +153,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     }) {
                         app.pane_detection_evidence.remove(&pane_id);
                     }
-                    // The common path a pane first becomes a detected agent:
-                    // one incremental `PaneStatusChanged`, not a full
-                    // `TreeSnapshot`. Latching and resizing here (not only in
-                    // `apply_tree_snapshot`) is what makes the toolbar appear
-                    // -- and the PTY's row count shrink to match -- the same
-                    // tick detection actually fires, instead of waiting for
-                    // some unrelated later snapshot.
+                    // Detection reveals controls inside the slot allocated
+                    // before interaction; it never changes terminal geometry.
                     if became_agent {
                         app.agent_toolbar_latched_panes.insert(pane_id);
-                        app.resize_displayed_panes(
-                            ilium_ipc::PaneResizeCause::RightPanelPresentation,
-                        );
                     }
                     let is_plain_terminal = app.tree.get(pane_id).is_some_and(|node| {
                         matches!(
@@ -450,39 +442,22 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             pane_id,
             last_prompt,
         } => {
-            match app.tree.set_last_prompt(pane_id, last_prompt) {
-                Ok(()) => {
-                    // The banner's reserved height now tracks how many rows
-                    // the prompt actually wraps to (see
-                    // `last_prompt_banner::reserved_height`), so a changed
-                    // prompt can grow or shrink `content_area` the same way
-                    // an agent toolbar latching does above -- the PTY must
-                    // be told the new size, not just the render area.
-                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
-                }
-                Err(error) => {
-                    tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
-                }
+            if let Err(error) = app.tree.set_last_prompt(pane_id, last_prompt) {
+                tracing::warn!("dropping PaneLastPromptChanged for pane {pane_id:?}: {error}");
             }
             None
         }
         ServerEvent::PaneProgressChanged { pane_id, progress } => {
-            match app.tree.set_pane_progress(pane_id, progress) {
-                Ok(()) => {
-                    // The progress footer's reserved height tracks how many
-                    // rows the current message wraps to (see
-                    // `progress_bar::reserved_height`), same rationale as
-                    // `PaneLastPromptChanged` above.
-                    app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
-                }
-                Err(error) => {
-                    tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
-                }
+            if let Err(error) = app.tree.set_pane_progress(pane_id, progress) {
+                tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
             }
             None
         }
         ServerEvent::ProgressMonitorEnabledChanged { enabled } => {
-            app.ui_settings.progress_monitor_enabled = enabled;
+            if app.ui_settings.progress_monitor_enabled != enabled {
+                app.ui_settings.progress_monitor_enabled = enabled;
+                app.resize_displayed_panes(ilium_ipc::PaneResizeCause::UserInterfaceSettings);
+            }
             None
         }
         ServerEvent::ProgressMonitorCheckCompleted { .. }
@@ -1507,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn pane_status_changed_alone_latches_and_reserves_the_agent_toolbar_row() {
+    fn detection_and_prompt_updates_reveal_fixed_slots_without_resizing() {
         // Regression test: the toolbar must not depend on a full
         // `TreeSnapshot` following detection -- the server's actual
         // detection path broadcasts an incremental `PaneStatusChanged`
@@ -1529,7 +1504,7 @@ mod tests {
         app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let before = app.pane_viewport(pane_id).unwrap();
-        assert_eq!(before.toolbar_area, None);
+        assert!(before.toolbar_area.is_some());
         app.take_outbound_requests(); // drop the initial-size ResizePane
 
         apply(
@@ -1544,39 +1519,10 @@ mod tests {
         assert!(app.shows_agent_toolbar(pane_id));
         let after = app.pane_viewport(pane_id).unwrap();
         assert!(after.toolbar_area.is_some());
-        // No prompt recorded yet -- the last-prompt banner must not reserve
-        // any rows purely from agent detection/latching, or it would waste
-        // screen space showing nothing before the user has typed anything.
         assert!(!app.shows_last_prompt_banner(pane_id));
-        assert!(after.last_prompt_area.is_none());
-        // Toolbar row only reserved so far -- the last-prompt banner's
-        // dynamic row budget joins once a prompt actually exists, asserted
-        // below.
-        assert_eq!(after.content_area.height, before.content_area.height - 1);
-        // The PTY must be told the *reduced* size -- not just the render
-        // area -- or the agent's own bottom row (its input/prompt line)
-        // renders past what the real terminal was told it has.
-        let resize = app
-            .take_outbound_requests()
-            .into_iter()
-            .find_map(|request| match request {
-                ilium_ipc::ClientRequest::ResizePane {
-                    pane_id: resized_pane,
-                    rows,
-                    cols,
-                    ..
-                } if resized_pane == pane_id => Some((rows, cols)),
-                _ => None,
-            });
-        assert_eq!(
-            resize,
-            Some((after.content_area.height, after.content_area.width))
-        );
+        assert_eq!(after, before);
+        assert!(app.take_outbound_requests().is_empty());
 
-        // Once a prompt is recorded, the banner joins the toolbar in
-        // reserving rows -- but only as many as the prompt actually needs
-        // (one, for this short single-line prompt), not the full
-        // `DEFAULT_LAST_PROMPT_MAX_LINES` budget.
         apply(
             &mut app,
             ServerEvent::PaneLastPromptChanged {
@@ -1586,40 +1532,16 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
+        assert_eq!(with_prompt, before);
         assert_eq!(
-            with_prompt.last_prompt_area.map(|area| area.height),
-            Some(1)
+            with_prompt.last_prompt_area.unwrap().height,
+            u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert_eq!(
-            with_prompt.content_area.height,
-            after.content_area.height - 1
-        );
-        // The banner's appearance shrank `content_area` again -- the PTY
-        // must be resized a second time to match, exactly as it was for the
-        // toolbar row above.
-        let second_resize = app
-            .take_outbound_requests()
-            .into_iter()
-            .find_map(|request| match request {
-                ilium_ipc::ClientRequest::ResizePane {
-                    pane_id: resized_pane,
-                    rows,
-                    cols,
-                    ..
-                } if resized_pane == pane_id => Some((rows, cols)),
-                _ => None,
-            });
-        assert_eq!(
-            second_resize,
-            Some((
-                with_prompt.content_area.height,
-                with_prompt.content_area.width
-            ))
-        );
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[test]
-    fn a_long_single_line_prompt_reserves_only_as_many_wrapped_rows_as_it_needs() {
+    fn a_wrapped_prompt_uses_the_fixed_budget_without_resizing() {
         // Regression test for the banner growing past one row without ever
         // reserving its full `max_lines` ceiling: a prompt long enough to
         // wrap, but not long enough to hit the default four-line cap.
@@ -1676,31 +1598,12 @@ mod tests {
             },
         );
         let with_prompt = app.pane_viewport(pane_id).unwrap();
+        assert_eq!(with_prompt, after_toolbar);
         assert_eq!(
-            with_prompt.last_prompt_area.map(|area| area.height),
-            Some(expected_rows as u16),
-            "reserved height must match wrapped row count exactly -- neither 1 row \
-             (clipped, no wrap) nor the full max_lines ceiling (over-reserved)"
+            with_prompt.last_prompt_area.unwrap().height,
+            u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        let resize = app
-            .take_outbound_requests()
-            .into_iter()
-            .find_map(|request| match request {
-                ilium_ipc::ClientRequest::ResizePane {
-                    pane_id: resized_pane,
-                    rows,
-                    cols,
-                    ..
-                } if resized_pane == pane_id => Some((rows, cols)),
-                _ => None,
-            });
-        assert_eq!(
-            resize,
-            Some((
-                with_prompt.content_area.height,
-                with_prompt.content_area.width
-            ))
-        );
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[test]

@@ -3,18 +3,8 @@
 //! exactly-reconstructed line the user typed or pasted and submitted -- see
 //! `ilium_core::Tree::set_last_prompt`.
 //!
-//! The reservation is sized dynamically: a one-line prompt reserves one row,
-//! not `UiSettings::last_prompt_max_lines` -- see [`reserved_height`]. A
-//! prompt line wider than the banner's column width word-wraps onto
-//! additional rows (a single word wider than the column width hard-breaks at
-//! grapheme boundaries) rather than being silently clipped -- see
-//! [`wrap_lines`]. Only once the wrapped row count still exceeds
-//! `max_lines` does [`truncate_middle_rows`] drop the middle, keeping a
-//! head and tail. Because the reserved height now tracks content, every
-//! `PaneLastPromptChanged` that changes it must be followed by
-//! `App::resize_displayed_panes` -- see that call site in
-//! `render_cache::apply` -- so the PTY's own idea of its size never drifts
-//! from what's actually drawn above it.
+//! The enabled slot is reserved before interaction. Text wraps and is
+//! middle-truncated within that fixed budget, preserving terminal dimensions.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -134,25 +124,15 @@ pub fn truncate_middle_rows(rows: Vec<String>, max_lines: u16) -> Vec<(String, b
 }
 
 /// Wraps `text` to `width` columns, then middle-truncates to at most
-/// `max_lines` rows -- the exact rows the banner renders, and the same
-/// computation [`reserved_height`] uses to size the banner's reservation,
-/// so the two can never disagree within one frame.
+/// `max_lines` rows. Rendering uses the smaller of this budget and the
+/// physical slot; wrapping never changes the fixed reservation.
 pub fn layout(text: &str, width: u16, max_lines: u16) -> Vec<(String, bool)> {
     truncate_middle_rows(wrap_lines(text, width), max_lines)
 }
 
-/// The exact number of rows the banner needs for `text` at `width` columns,
-/// between 1 (a short prompt that fits on one row) and `max_lines` (a
-/// prompt long or numerous enough to need the full budget) -- never a fixed
-/// `max_lines` regardless of content. `text.is_empty()` returns 0: the
-/// banner itself is never shown for an empty prompt (see
-/// `App::shows_last_prompt_banner`), so nothing should be reserved for one
-/// either.
-pub fn reserved_height(text: &str, width: u16, max_lines: u16) -> u16 {
-    if text.is_empty() {
-        return 0;
-    }
-    layout(text, width, max_lines).len() as u16
+/// Fixed row budget, independent of prompt presence or wrapping.
+pub fn reserved_height(max_lines: u16) -> u16 {
+    max_lines.max(1)
 }
 
 /// Renders the last-prompt banner into `area`: a background fill spanning
@@ -172,7 +152,7 @@ pub fn render(
     }
     let lines: Vec<Line> = prompt
         .map(|prompt| {
-            layout(prompt, area.width, max_lines)
+            layout(prompt, area.width, max_lines.min(area.height))
                 .into_iter()
                 .map(|(line, is_seam)| {
                     if is_seam {
@@ -191,6 +171,34 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_prompt_slot_retains_the_end_of_the_prompt() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 2)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    Some("FIRST\nSECOND\nTHIRD\nLAST"),
+                    4,
+                    ColorScheme::Dark,
+                );
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("FIRST"));
+        assert!(text.contains("LAST"));
+        assert!(!text.contains("SECOND"));
+    }
 
     fn owned(lines: Vec<(&str, bool)>) -> Vec<(String, bool)> {
         lines
@@ -273,13 +281,13 @@ mod tests {
     }
 
     #[test]
-    fn a_short_prompt_reserves_only_the_one_row_it_needs() {
-        assert_eq!(reserved_height("fix the tests", 80, 4), 1);
+    fn the_prompt_slot_reserves_the_full_configured_budget() {
+        assert_eq!(reserved_height(4), 4);
     }
 
     #[test]
-    fn an_empty_prompt_reserves_nothing() {
-        assert_eq!(reserved_height("", 80, 4), 0);
+    fn a_zero_prompt_budget_still_reserves_one_row() {
+        assert_eq!(reserved_height(0), 1);
     }
 
     #[test]
@@ -295,9 +303,8 @@ mod tests {
             wrap_lines(text, 10),
             vec!["the quick", "brown fox", "jumps over", "the lazy", "dog"],
         );
-        // Reserving height for the same text at the same width must agree
-        // exactly with how many rows wrapping actually produced.
-        assert_eq!(reserved_height(text, 10, 20), 5);
+        // Wrapping does not change the configured reservation.
+        assert_eq!(reserved_height(20), 20);
     }
 
     #[test]
@@ -345,6 +352,6 @@ mod tests {
     #[test]
     fn a_narrow_width_of_zero_does_not_panic() {
         let _ = wrap_lines("some text", 0);
-        let _ = reserved_height("some text", 0, 4);
+        let _ = reserved_height(4);
     }
 }

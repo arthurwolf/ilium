@@ -176,6 +176,7 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
     let project = tempfile::tempdir().unwrap();
     let mut app = App::new("slider keyboard".into(), project.path().to_path_buf());
     app.set_screen_area(Rect::new(0, 0, 80, 24));
+    app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
     let lightness_row = lightness_row(&app);
     app.mode = Mode::Settings(SettingsState {
         tab: SettingsTab::Animations,
@@ -220,6 +221,7 @@ fn colour_slider_adjustment_failure_keeps_effective_ink_and_scene() {
     let project = tempfile::tempdir().unwrap();
     let mut app = App::new("failed colour save".into(), project.path().to_path_buf());
     std::fs::create_dir_all(project.path().join(".ilium/config.yaml")).unwrap();
+    app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
     let prior = app.animation_settings.clone();
     let lightness_row = lightness_row(&app);
     app.settings_adjust_animation_row(lightness_row, 1);

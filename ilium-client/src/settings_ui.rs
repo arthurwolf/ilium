@@ -184,10 +184,36 @@ pub struct SettingsHelpAnchor {
 /// border between the tab list and content -- [`GAP_WIDTH`] blank columns
 /// instead, per the module doc comment's "aerated, not boxy" brief.
 pub fn compute_layout(area: Rect) -> SettingsLayout {
+    compute_layout_with_attribution(area, false)
+}
+
+/// The Animations preview gives OSM credit its own rows above the voice row.
+/// Rendering, help anchors, keyboard scrolling and mouse hits use this same
+/// calculation; other Settings tabs retain their existing layout.
+pub fn compute_layout_for_mode(area: Rect, app: &App, state: &SettingsState) -> SettingsLayout {
+    let shows_osm = state.tab == SettingsTab::Animations
+        && state.icon_picker.is_none()
+        && state.keyboard_picker.is_none()
+        && app.modal_stack.is_empty()
+        && app.animation_settings.kind == crate::background_animation::AnimationKind::OpenStreetMap;
+    compute_layout_with_attribution(area, shows_osm)
+}
+
+fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayout {
     // `ui::draw` renders the persistent voice affordance after this full-screen
     // root. Reserve its bottom row here so scrollable settings content and
     // pointer geometry never disappear underneath that later overlay.
-    let settings_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+    let credit_rows = if shows_osm {
+        crate::layout::osm_attribution_area(area).height
+    } else {
+        0
+    };
+    let settings_area = Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        area.height.saturating_sub(1 + credit_rows),
+    );
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(HEADER_HEIGHT), Constraint::Min(1)])
@@ -261,7 +287,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         );
     }
 
-    let mut layout = compute_layout(area);
+    let mut layout = compute_layout_for_mode(area, app, state);
     let instructions_height =
         crate::instruction_settings::panel_height(state.tab, layout.content_area);
     if instructions_height > 0 {
@@ -538,8 +564,8 @@ pub fn settings_help_anchors(
                     continue;
                 };
                 // Rows of the left column (scenes and global settings) carry
-                // their help anchor in the gap column right of the column;
-                // the right column uses the shared help rail.
+                    // their help anchor in the gap column right of the column;
+                    // the right column uses the shared help rail.
                 if matches!(
                     model.region(row),
                     Some(
@@ -4988,17 +5014,35 @@ mod tests {
                             })
                             .collect(),
                     );
-                    for kind in crate::background_animation::AnimationKind::ALL {
-                        app.animation_settings.kind = kind;
-                        let state = SettingsState {
-                            tab,
-                            ..SettingsState::default()
-                        };
-                        reachable.extend(
-                            settings_help_anchors(&layout, &app, &state)
-                                .into_iter()
-                                .map(|anchor| anchor.topic_id),
-                        );
+                    // The scene list and the global rows are scrolled windows,
+                    // so walk every region's offsets; the ink rows exist only
+                    // in Monotone and the tint row only in Greyscale.
+                    use ilium_ambient::style::ColorMode;
+                    use crate::animation_rows::Region;
+                    for mode in [ColorMode::Color, ColorMode::Greyscale, ColorMode::Monotone] {
+                        app.animation_settings.appearance.mode = mode;
+                        for kind in crate::background_animation::AnimationKind::ALL {
+                            app.animation_settings.kind = kind;
+                            let model = app.animation_row_model();
+                            let area = layout.content_area;
+                            let limit = |region| {
+                                crate::animation_settings_ui::max_scroll(area, &model, region)
+                            };
+                            for step in 0..=limit(Region::Scenes).max(limit(Region::Global)) {
+                                let state = SettingsState {
+                                    tab,
+                                    scene_scroll: step.min(limit(Region::Scenes)),
+                                    global_scroll: step.min(limit(Region::Global)),
+                                    scroll: step.min(limit(Region::Controls)),
+                                    ..SettingsState::default()
+                                };
+                                reachable.extend(
+                                    settings_help_anchors(&layout, &app, &state)
+                                        .into_iter()
+                                        .map(|anchor| anchor.topic_id),
+                                );
+                            }
+                        }
                     }
                 }
                 SettingsTab::Cost => {

@@ -37,6 +37,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_at(frame, app, elapsed);
 }
 
+#[cfg(test)]
+#[path = "ui_openstreetmap_tests.rs"]
+mod osm_attribution_tests;
+
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     let area = frame.area();
@@ -45,6 +49,7 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
     draw_base_layer(frame, area, app);
     if app.onboarding.is_none() {
         crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
+        draw_osm_attribution(frame, app);
         draw_voice_control(frame, layout.voice_control_area, app);
     }
     if app.onboarding.is_none() && app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
@@ -68,6 +73,40 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
     }
     draw_mode_overlay(frame, area, app, &app.mode);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
+}
+
+/// Client chrome owns the credit. No terminal, animation cache or protected
+/// workspace cell is changed to make the scene's native text visible.
+fn draw_osm_attribution(frame: &mut Frame, app: &App) {
+    if app.animation_settings.kind != crate::background_animation::AnimationKind::OpenStreetMap {
+        return;
+    }
+    let area = if app.is_animation_preview_visible() {
+        crate::layout::osm_attribution_area(frame.area())
+    } else if crate::background_composition::ambient_is_visible(app) {
+        app.layout.osm_attribution_area
+    } else {
+        Rect::default()
+    };
+    if area.is_empty() {
+        return;
+    }
+
+    let style = theme::statusbar_style();
+    frame.render_widget(Clear, area);
+    frame.render_widget(ratatui::widgets::Block::default().style(style), area);
+    // The caption is ASCII, so each byte chunk is a complete terminal cell.
+    for (index, chunk) in crate::layout::OSM_ATTRIBUTION
+        .as_bytes()
+        .chunks(usize::from(area.width))
+        .enumerate()
+    {
+        let segment = std::str::from_utf8(chunk).expect("ASCII OSM credit");
+        frame.render_widget(
+            Paragraph::new(segment).style(style.add_modifier(Modifier::BOLD)),
+            Rect::new(area.x, area.y + index as u16, area.width, 1),
+        );
+    }
 }
 
 /// A VS16 glyph occupies two terminal cells. Ratatui's diff can emit its
@@ -1389,7 +1428,7 @@ fn draw_editor_line_context_menu(
     frame.render_widget(widget, menu.area);
 }
 
-/// Draws the Codex Sol/Terra/Luna reasoning-strength submenu -- one row per
+/// Draws the Codex Sol/Astra/Luna reasoning-strength submenu -- one row per
 /// `agent_toolbar::codex_reasoning_levels(tier_index)` entry, highlighting
 /// the row under keyboard/mouse selection. Each level gets a distinct
 /// growth-progression glyph (mirroring `agent_toolbar`'s
@@ -1803,37 +1842,41 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 }
                 return;
             }
-            let below_row = Rect::new(
-                viewport.content_area.x,
-                viewport.content_area.y,
-                viewport.content_area.width,
-                viewport.content_area.height.min(1),
-            );
-            let hovered = app
-                .hovered_agent_toolbar_action
-                .and_then(|(pane_id, action)| (pane_id == viewport.pane_id).then_some(action));
-            crate::agent_toolbar::render(
-                frame,
-                toolbar_area,
-                below_row,
-                crate::agent_toolbar::ToolbarContext {
-                    provider: app.agent_toolbar_provider(viewport.pane_id),
-                    icons: &app.ui_settings.icons,
-                    effort: app
-                        .agent_toolbar_effort
-                        .get(&viewport.pane_id)
-                        .copied()
-                        .unwrap_or_default(),
-                    show_labels: app.ui_settings.show_toolbar_labels,
-                    selection_enabled: app.ui_settings.terminal_text_selection_enabled,
-                },
-                hovered,
-            );
+            if app.shows_agent_toolbar(viewport.pane_id) {
+                let below_row = Rect::new(
+                    viewport.content_area.x,
+                    viewport.content_area.y,
+                    viewport.content_area.width,
+                    viewport.content_area.height.min(1),
+                );
+                let hovered = app
+                    .hovered_agent_toolbar_action
+                    .and_then(|(pane_id, action)| (pane_id == viewport.pane_id).then_some(action));
+                crate::agent_toolbar::render(
+                    frame,
+                    toolbar_area,
+                    below_row,
+                    crate::agent_toolbar::ToolbarContext {
+                        provider: app.agent_toolbar_provider(viewport.pane_id),
+                        icons: &app.ui_settings.icons,
+                        effort: app
+                            .agent_toolbar_effort
+                            .get(&viewport.pane_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        show_labels: app.ui_settings.show_toolbar_labels,
+                        selection_enabled: app.ui_settings.terminal_text_selection_enabled,
+                    },
+                    hovered,
+                );
+            }
         }
     }
 
     if let Some(last_prompt_area) = viewport.last_prompt_area {
-        if matches!(runtime, PaneRuntime::Terminal(_)) {
+        if matches!(runtime, PaneRuntime::Terminal(_))
+            && app.shows_last_prompt_banner(viewport.pane_id)
+        {
             crate::last_prompt_banner::render(
                 frame,
                 last_prompt_area,
@@ -1845,7 +1888,9 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
     }
 
     if let Some(progress_area) = viewport.progress_area {
-        if matches!(runtime, PaneRuntime::Terminal(_)) {
+        if matches!(runtime, PaneRuntime::Terminal(_))
+            && app.shows_progress_footer(viewport.pane_id)
+        {
             crate::progress_bar::render(
                 frame,
                 progress_area,

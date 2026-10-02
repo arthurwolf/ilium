@@ -286,7 +286,7 @@ pub enum Mode {
     ContextMenu(ContextMenu),
     /// A pane-scoped right-click menu for copying the visible terminal text.
     TerminalPaneContextMenu(TerminalPaneContextMenu),
-    /// The agent toolbar's Codex Sol/Terra/Luna reasoning-strength submenu.
+    /// The agent toolbar's Codex Sol/Astra/Luna reasoning-strength submenu.
     AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
     /// An immutable terminal snapshot is being semantically indexed for
     /// point-and-click clipboard extraction.
@@ -1306,7 +1306,7 @@ pub struct Submenu {
     pub selected_index: usize,
 }
 
-/// State for the Sol/Terra/Luna reasoning-strength submenu opened from the
+/// State for the Sol/Astra/Luna reasoning-strength submenu opened from the
 /// agent toolbar's `CodexModelTier` button. Modeled on `Submenu` and
 /// `EditorLineContextMenu` -- a mouse- and keyboard-driven popup that owns
 /// `App::mode` until a level is picked, Escape is pressed, or the pointer
@@ -2901,30 +2901,49 @@ impl App {
         viewports
             .into_iter()
             .map(|viewport| {
-                let viewport = if self.shows_agent_toolbar(viewport.pane_id) {
+                let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
+                    matches!(
+                        &node.kind,
+                        NodeKind::Pane {
+                            content: PaneContentKind::Terminal,
+                            ..
+                        }
+                    )
+                });
+                if !is_terminal {
+                    return viewport;
+                }
+                // Reserve before interaction: metadata changes only redraw these slots.
+                let viewport = if self.ui_settings.agent_toolbar_enabled {
                     viewport.with_agent_toolbar_reserved()
                 } else {
                     viewport
                 };
-                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
-                    let text = self.tree.last_prompt(viewport.pane_id).unwrap_or("");
-                    let rows = crate::last_prompt_banner::reserved_height(
-                        text,
-                        viewport.content_area.width,
+                let viewport = if self.ui_settings.last_prompt_enabled {
+                    // In a physically clipped pane, leave room for the progress
+                    // gauge and a detail row as well as the terminal itself.
+                    let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
+                        2.min(viewport.content_area.height.saturating_sub(2))
+                    } else {
+                        0
+                    };
+                    let prompt_rows = crate::last_prompt_banner::reserved_height(
                         self.ui_settings.last_prompt_max_lines.into(),
+                    )
+                    .min(
+                        viewport
+                            .content_area
+                            .height
+                            .saturating_sub(1 + minimum_progress_rows),
                     );
-                    viewport.with_last_prompt_reserved(rows)
+                    viewport.with_last_prompt_reserved(prompt_rows)
                 } else {
                     viewport
                 };
-                if self.shows_progress_footer(viewport.pane_id) {
-                    let progress = self.tree.pane_progress(viewport.pane_id);
-                    let rows = crate::progress_bar::reserved_height(
-                        progress,
-                        viewport.content_area.width,
+                if self.ui_settings.progress_monitor_enabled {
+                    viewport.with_progress_reserved(crate::progress_bar::reserved_height(
                         self.ui_settings.progress_max_lines.into(),
-                    );
-                    viewport.with_progress_reserved(rows)
+                    ))
                 } else {
                     viewport
                 }
@@ -2932,7 +2951,7 @@ impl App {
             .collect()
     }
 
-    /// Whether `pane_id` currently reserves a toolbar row: the user hasn't
+    /// Whether the already-reserved toolbar slot displays controls: the user hasn't
     /// turned the toolbar off globally, and the pane is either a detected
     /// agent right now or was latched as one earlier (see
     /// `agent_toolbar_latched_panes`'s doc comment). Checking live status
@@ -2961,10 +2980,8 @@ impl App {
                 || self.agent_toolbar_latched_panes.contains(&pane_id))
     }
 
-    /// Whether `pane_id` currently reserves the last-prompt banner: tracking
-    /// is active for it (see [`Self::last_prompt_tracking_enabled`]) and it
-    /// actually has a recorded prompt -- reserving rows for an empty banner
-    /// would waste screen space before the user has typed anything.
+    /// Whether the fixed prompt slot displays recorded text. Hiding its text
+    /// never changes terminal dimensions.
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
         self.last_prompt_tracking_enabled(pane_id)
             && self
@@ -2973,7 +2990,7 @@ impl App {
                 .is_some_and(|text| !text.is_empty())
     }
 
-    /// Whether `pane_id` currently reserves the progress footer: the user
+    /// Whether the already-reserved progress slot displays a report: the user
     /// hasn't turned the feature off and the server has an active report for
     /// this pane. Unlike the toolbar/last-prompt banner, this is not gated
     /// on "detected agent" -- a progress monitor can be running in any
@@ -2992,8 +3009,7 @@ impl App {
             )
     }
 
-    /// Reclaims footer rows once a retained result expires, even when no
-    /// server event or user input arrives. Never mutates monitor/result state.
+    /// Hides expired result text without resizing or mutating retained data.
     pub(crate) fn tick_completed_progress_display(&mut self, now_unix_millis: u64) -> bool {
         let previous = self
             .displayed_pane_ids()
@@ -3001,13 +3017,9 @@ impl App {
             .map(|pane_id| (pane_id, self.shows_progress_footer(pane_id)))
             .collect::<Vec<_>>();
         self.progress_display_now_unix_millis = now_unix_millis;
-        let changed = previous
+        previous
             .into_iter()
-            .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id));
-        if changed {
-            self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
-        }
-        changed
+            .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id))
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -3600,6 +3612,17 @@ impl App {
         }
     }
 
+    fn layout_for_animation(&self, screen_area: Rect, tree_width: u16) -> UiLayout {
+        let show_osm_attribution = self.animation_settings.enabled
+            && self.animation_settings.kind
+                == crate::background_animation::AnimationKind::OpenStreetMap;
+        UiLayout::from_screen_area_with_tree_width_and_attribution(
+            screen_area,
+            tree_width,
+            show_osm_attribution,
+        )
+    }
+
     /// Updates the geometry shared by rendering, hit-testing, and pane
     /// sizing, and queues a `ResizePane` request for every terminal pane
     /// whose size actually changed.
@@ -3631,10 +3654,8 @@ impl App {
     /// Recomputes geometry after the host terminal changes size while
     /// preserving the animation's current visible width.
     pub fn set_screen_area(&mut self, screen_area: Rect) {
-        let layout = UiLayout::from_screen_area_with_tree_width(
-            screen_area,
-            self.tree_width_animation.current_width(),
-        );
+        let layout =
+            self.layout_for_animation(screen_area, self.tree_width_animation.current_width());
         self.set_layout(layout, PaneResizeCause::HostTerminal);
         self.tick_layout_animation(Instant::now());
     }
@@ -3681,7 +3702,7 @@ impl App {
             .resolved_width(self.layout.screen_area.width, is_tree_active);
         self.tree_width_animation.snap_to(resolved_width, now);
         theme::set(Theme::for_scheme(ui.color_scheme));
-        let layout = UiLayout::from_screen_area_with_tree_width(
+        let layout = self.layout_for_animation(
             self.layout.screen_area,
             self.tree_width_animation.current_width(),
         );
@@ -6352,6 +6373,11 @@ impl App {
                 self.animation_settings = settings.normalized();
                 self.animation_cache = Default::default();
                 self.status_message = None;
+                let layout = self.layout_for_animation(
+                    self.layout.screen_area,
+                    self.tree_width_animation.current_width(),
+                );
+                self.set_layout(layout, PaneResizeCause::UserInterfaceSettings);
             }
             Err(error) => {
                 self.status_message = Some(format!("Could not save animation settings: {error}"))
@@ -6439,12 +6465,9 @@ impl App {
         self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
-    /// Adjusts the last-prompt banner's maximum row budget by one line,
-    /// clamped to the supported range -- the ceiling `last_prompt_banner`
-    /// wraps and middle-truncates against, not a height every banner
-    /// actually uses. Can change `content_area`'s height for any pane
-    /// currently showing a banner long/numerous enough to hit the old or new
-    /// ceiling, so this resizes displayed panes just like the toggle above.
+    /// Adjusts the fixed prompt slot by one row within the supported range.
+    /// This explicit setting changes terminal geometry even before a prompt
+    /// exists; subsequent text changes only wrap inside the reserved slot.
     pub fn settings_adjust_last_prompt_max_lines(&mut self, delta: i32) {
         let current = self.ui_settings.last_prompt_max_lines;
         let lines = (i32::from(current) + delta).clamp(
@@ -6787,7 +6810,7 @@ impl App {
         }
     }
 
-    /// Opens the Sol/Terra/Luna reasoning-strength submenu directly below
+    /// Opens the Sol/Astra/Luna reasoning-strength submenu directly below
     /// `anchor` (that tier button's own screen rect from
     /// `agent_toolbar::button_rect_for`), clamped to stay on screen exactly
     /// like `open_context_submenu`.
@@ -6975,6 +6998,22 @@ impl App {
 
     /// Records the pointer's last reported cell, driving the tree-panel
     /// hover-expand animation in `tick_layout_animation`.
+    /// Field-relative input for pointer-aware background scenes. This only
+    /// observes the ordinary input path and never consumes a terminal event.
+    pub fn animation_pointer(&self, area: Rect) -> Option<[f32; 2]> {
+        if !self.is_terminal_focused || area.is_empty() {
+            return None;
+        }
+        self.pointer_position
+            .filter(|position| area.contains(*position))
+            .map(|position| {
+                [
+                    (f32::from(position.x - area.x) + 0.5) / f32::from(area.width),
+                    (f32::from(position.y - area.y) + 0.5) / f32::from(area.height),
+                ]
+            })
+    }
+
     pub fn set_pointer_position(&mut self, position: Option<Position>) {
         self.pointer_position = position;
     }
@@ -7039,8 +7078,7 @@ impl App {
             .left_panel_sizing
             .resolved_width(self.layout.screen_area.width, self.is_tree_active());
         let tree_width = self.tree_width_animation.update(requested_width, now);
-        let layout =
-            UiLayout::from_screen_area_with_tree_width(self.layout.screen_area, tree_width);
+        let layout = self.layout_for_animation(self.layout.screen_area, tree_width);
         self.set_layout(layout, PaneResizeCause::TreePanelAnimation);
     }
 
@@ -11662,6 +11700,7 @@ impl App {
         // as the hamburger and completed-agent-close checks above.
         if let Some(toolbar_area) = viewport.toolbar_area {
             if toolbar_area.contains(position)
+                && self.shows_agent_toolbar(id)
                 && matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(_)))
             {
                 let provider = self.agent_toolbar_provider(id);
@@ -12546,6 +12585,10 @@ fn encode_bracketed_paste(pasted: &str) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[path = "metadata_geometry_tests.rs"]
+mod metadata_geometry_tests;
+
+#[cfg(test)]
 mod tests {
     use ilium_core::AgentClass;
 
@@ -12556,7 +12599,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_progress_expiry_reclaims_rows_and_preserves_retained_result() {
+    fn completed_progress_expiry_hides_text_without_resizing_or_losing_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
@@ -12605,12 +12648,9 @@ mod tests {
 
         assert!(app.tick_completed_progress_display(61_000));
         let after = app.pane_viewport(pane_id).unwrap();
-        assert!(after.progress_area.is_none());
-        assert!(after.content_area.height > before.content_area.height);
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(
-            request, ClientRequest::ResizePane { pane_id: resized, rows, .. }
-                if *resized == pane_id && *rows == after.content_area.height
-        )));
+        assert_eq!(after, before);
+        assert!(!app.shows_progress_footer(pane_id));
+        assert!(app.take_outbound_requests().is_empty());
         terminal
             .draw(|frame| crate::ui::draw(frame, &mut app))
             .unwrap();
@@ -12689,17 +12729,11 @@ mod tests {
             assert!(app.tick_completed_progress_display(61_000));
             let done_after = app.pane_viewport(done).unwrap();
             let busy_after = app.pane_viewport(busy).unwrap();
-            assert!(done_after.progress_area.is_none());
-            assert!(done_after.content_area.height > done_before.content_area.height);
+            assert_eq!(done_after, done_before);
+            assert!(!app.shows_progress_footer(done));
             assert_eq!(busy_after, busy_before);
             assert!(app.tree.pane_progress(done).is_some());
-            let requests = app.take_outbound_requests();
-            assert_eq!(requests.len(), 1);
-            assert!(matches!(
-                requests[0], ClientRequest::ResizePane { pane_id, rows, cols, .. }
-                    if pane_id == done && rows == done_after.content_area.height
-                        && cols == done_after.content_area.width
-            ));
+            assert!(app.take_outbound_requests().is_empty());
             app.ui_settings.completed_progress_hide_after_seconds = 0;
             app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
             assert!(app.pane_viewport(done).unwrap().progress_area.is_some());
@@ -15696,7 +15730,7 @@ mod tests {
         assert_eq!(resize_requests.len(), 2);
         assert!(resize_requests
             .iter()
-            .all(|(_, rows, cols, cause)| *rows == 37
+            .all(|(_, rows, cols, cause)| *rows == 27
                 && *cols == (120 - crate::layout::DEFAULT_UNFOCUSED_TREE_WIDTH - 4) / 2
                 && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
@@ -16334,7 +16368,7 @@ mod tests {
         let mut app = app();
         let pane_id = codex_pane(&mut app);
 
-        // Terra (index 1) at High (index 2): "/model", Enter, "2", "3".
+        // Astra (index 1) at High (index 2): "/model", Enter, "2", "3".
         app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CodexReasoningLevel(1, 2));
         assert_eq!(
             app.take_outbound_requests(),

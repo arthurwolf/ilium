@@ -47,36 +47,11 @@ pub struct PaneViewport {
     pub outer_area: Rect,
     pub content_area: Rect,
     pub slot_index: usize,
-    /// The reserved agent-toolbar row, one cell above `content_area`'s
-    /// current top edge -- `None` unless `App::pane_viewports` decided this
-    /// pane shows its toolbar. This crate stays tree/settings-agnostic (see
-    /// the module doc), so that decision and the resulting shrink of
-    /// `content_area` both happen in `App`, not here; this field only
-    /// carries the result so rendering, PTY sizing, and hit-testing agree.
+    /// Fixed toolbar slot; visibility is independent of its allocation.
     pub toolbar_area: Option<Rect>,
-    /// The reserved last-prompt banner rows, directly below `toolbar_area`
-    /// (or at the content top if no toolbar shows) -- `None` unless
-    /// `App::pane_viewports` decided this pane shows it. Sized dynamically
-    /// between 1 and `UiSettings::last_prompt_max_lines` rows by
-    /// `last_prompt_banner::reserved_height`, tracking how many rows the
-    /// current prompt actually wraps to -- never a fixed `max_lines`
-    /// regardless of content. Because this can now change on every prompt
-    /// submission (not only when the setting itself changes), every caller
-    /// that updates the tracked prompt must also call
-    /// `App::resize_displayed_panes` in the same tick -- see
-    /// `render_cache::apply`'s `PaneLastPromptChanged` arm -- so the PTY's
-    /// own idea of its size never drifts from what's actually drawn above
-    /// it.
+    /// Fixed prompt slot below the toolbar, clipped only by physical space.
     pub last_prompt_area: Option<Rect>,
-    /// The reserved progress-footer rows, at the *bottom* of `content_area`
-    /// -- the opposite end from `last_prompt_area`, which sits at the top
-    /// (see `crate::progress_bar`'s module doc for the placement rationale).
-    /// `None` unless `App::pane_viewports` decided this pane shows it. Sized
-    /// dynamically by `progress_bar::reserved_height`, same "only as many
-    /// rows as the content actually needs" discipline as `last_prompt_area`,
-    /// and the same `App::resize_displayed_panes` obligation applies to
-    /// every caller that changes it -- see `render_cache::apply`'s
-    /// `PaneProgressChanged` arm.
+    /// Fixed progress slot at the bottom, including hidden retained results.
     pub progress_area: Option<Rect>,
 }
 
@@ -103,7 +78,7 @@ impl PaneViewport {
     /// returning the adjusted viewport. A no-op on an already-empty content
     /// area so a sliver-sized split can't underflow into a huge `Rect`.
     pub fn with_agent_toolbar_reserved(self) -> Self {
-        if self.content_area.height == 0 {
+        if self.content_area.height <= 1 {
             return self;
         }
         let toolbar_area = Rect::new(
@@ -125,18 +100,12 @@ impl PaneViewport {
         }
     }
 
-    /// Reserves `rows` at the top of `content_area` for the last-prompt
-    /// banner, below any already-reserved toolbar row. `rows` is the
-    /// caller's already-computed dynamic height (see
-    /// `last_prompt_banner::reserved_height`), not necessarily
-    /// `UiSettings::last_prompt_max_lines`. A no-op on an already-empty
-    /// content area or a zero-row request, so a sliver-sized split or an
-    /// empty prompt can't underflow into a huge `Rect`.
+    /// Reserves the configured prompt budget while retaining one terminal row.
     pub fn with_last_prompt_reserved(self, rows: u16) -> Self {
-        if self.content_area.height == 0 || rows == 0 {
+        if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
-        let rows = rows.min(self.content_area.height);
+        let rows = rows.min(self.content_area.height - 1);
         let last_prompt_area = Rect::new(
             self.content_area.x,
             self.content_area.y,
@@ -162,10 +131,10 @@ impl PaneViewport {
     /// an already-empty content area or a zero-row request, for the same
     /// underflow-safety reason as that method.
     pub fn with_progress_reserved(self, rows: u16) -> Self {
-        if self.content_area.height == 0 || rows == 0 {
+        if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
-        let rows = rows.min(self.content_area.height);
+        let rows = rows.min(self.content_area.height - 1);
         let progress_area = Rect::new(
             self.content_area.x,
             self.content_area.y + self.content_area.height - rows,

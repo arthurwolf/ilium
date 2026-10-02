@@ -72,7 +72,7 @@ fn expected_sample(settings: &AnimationSettings, width: u16, height: u16, index:
         for (dot, target) in frame.raster.dots.iter_mut().zip(&head.raster.dots) {
             *dot = *dot * (1.0 - weight) + target * weight;
         }
-        frame.pack(crate::background_animation::PackKey::of(&settings));
+        frame.pack(crate::background_animation::PackKey::of(settings));
     }
     frame.packed_cells().to_vec()
 }

@@ -382,14 +382,14 @@ mod tests {
     #[test]
     fn disabled_gpu_option_shows_a_dim_marker_and_stays_within_the_panel() {
         let _gpu = unavailable(GpuUnavailable::NoDriver);
-        let (mut app, _project) = backend_app(80, 24);
+        let (mut app, _project) = backend_app(140, 40);
         select_backend_row(&mut app);
         let model = app.animation_row_model();
         let view = model.view(backend_row(&app)).unwrap();
         assert_eq!(view.value, "Software (slow-mo)");
         assert_eq!(view.disabled_options.len(), 1);
         assert_eq!(view.disabled_options[0].label, "GPU");
-        let terminal = draw(&mut app, 80, 24);
+        let terminal = draw(&mut app, 140, 40);
         let content = content_area(&app);
         let scroll = match &app.mode {
             Mode::Settings(state) => Scrolls::of(state),

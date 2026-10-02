@@ -199,6 +199,8 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-61".to_owned()
         } else if kind == AnimationKind::Chess {
             "AN-62".to_owned()
+        } else if kind == AnimationKind::Carpet {
+            "AN-63".to_owned()
         } else if kind == AnimationKind::SolarSystem {
             "AN-49".to_owned()
         } else if kind == AnimationKind::HexExpedition {

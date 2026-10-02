@@ -32,15 +32,9 @@ struct DetailRow {
     is_seam: bool,
 }
 
-/// The exact number of rows the footer needs for `progress` at `width`:
-/// one status/gauge row plus the bounded detail rows. Job/monitor identity is
-/// included only when the configured detail budget has room after task and
-/// monitor-health evidence.
-pub fn reserved_height(progress: Option<&PaneProgress>, width: u16, max_detail_lines: u16) -> u16 {
-    let Some(progress) = progress else {
-        return 0;
-    };
-    1 + detail_rows(progress, width, max_detail_lines).len() as u16
+/// Fixed status row plus configured detail budget, independent of content.
+pub fn reserved_height(max_detail_lines: u16) -> u16 {
+    1u16.saturating_add(max_detail_lines)
 }
 
 /// Renders task state, percent, task details, monitor-health warnings, and a
@@ -96,19 +90,23 @@ pub fn render(
         .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
     frame.render_widget(gauge, gauge_area);
 
-    let lines: Vec<Line> = detail_rows(progress, detail_area.width, max_detail_lines)
-        .into_iter()
-        .map(|row| {
-            let mut style = Style::new();
-            if let Some(color) = detail_tone_color(row.tone, scheme) {
-                style = style.fg(color);
-            }
-            if row.tone == DetailTone::Identity || row.is_seam {
-                style = style.add_modifier(Modifier::DIM);
-            }
-            Line::from(Span::styled(row.text, style))
-        })
-        .collect();
+    let lines: Vec<Line> = detail_rows(
+        progress,
+        detail_area.width,
+        max_detail_lines.min(detail_area.height),
+    )
+    .into_iter()
+    .map(|row| {
+        let mut style = Style::new();
+        if let Some(color) = detail_tone_color(row.tone, scheme) {
+            style = style.fg(color);
+        }
+        if row.tone == DetailTone::Identity || row.is_seam {
+            style = style.add_modifier(Modifier::DIM);
+        }
+        Line::from(Span::styled(row.text, style))
+    })
+    .collect();
     frame.render_widget(
         Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
         detail_area,
@@ -288,20 +286,46 @@ mod tests {
     }
 
     #[test]
-    fn no_progress_reserves_nothing() {
-        assert_eq!(reserved_height(None, 80, 4), 0);
+    fn small_progress_slot_retains_the_end_of_task_details() {
+        let progress = progress(
+            ProgressTaskStatus::Running,
+            50.0,
+            "FIRST SECOND THIRD LAST",
+            None,
+        )
+        .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(5, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, Some(&progress), 4, ColorScheme::Dark);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("FIRST"));
+        assert!(text.contains("LAST"));
+        assert!(!text.contains("SECOND"));
     }
 
     #[test]
-    fn running_task_reserves_status_message_and_identity_rows() {
-        let progress = progress(ProgressTaskStatus::Running, 50.0, "frame 10/100", None).unwrap();
-        assert_eq!(reserved_height(Some(&progress), 80, 4), 3);
+    fn progress_slot_exists_before_a_report() {
+        assert_eq!(reserved_height(4), 5);
+    }
+
+    #[test]
+    fn the_footer_reserves_status_plus_the_configured_detail_budget() {
+        assert_eq!(reserved_height(4), 5);
     }
 
     #[test]
     fn zero_detail_budget_reserves_only_the_status_row() {
-        let progress = progress(ProgressTaskStatus::Running, 50.0, "working", None).unwrap();
-        assert_eq!(reserved_height(Some(&progress), 80, 0), 1);
+        assert_eq!(reserved_height(0), 1);
     }
 
     #[test]

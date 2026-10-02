@@ -106,6 +106,8 @@ fn render_field(
     area: Rect,
     elapsed: Duration,
 ) {
+    let pointer = app.animation_pointer(area);
+    app.animation_frame.pointer(pointer);
     let cache_ready = if settings.uses_loop_cache() {
         let mut cache = app.animation_cache.borrow_mut();
         cache.step(settings, area.width, area.height, 8);
@@ -136,6 +138,14 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         return;
     }
     let mut settings = app.animation_settings.normalized();
+    if settings.kind == crate::background_animation::AnimationKind::OpenStreetMap
+        && crate::layout::osm_attribution_area(buffer.area).is_empty()
+    {
+        // A tiny terminal cannot show both a map and the complete credit.
+        app.animation_frame.release_hosts();
+        app.animation_cache.borrow_mut().pause();
+        return;
+    }
     let frozen_article = !is_preview
         && app.ui_settings.motion_level == MotionLevel::Off
         && settings.kind == crate::background_animation::AnimationKind::Wikipedia;
@@ -165,10 +175,18 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         // Article letters in label whitespace become part of the UI wording.
         // Keep the same page coordinates, but leave Settings chrome opaque.
         let preview_area =
-            if app.animation_frame.is_wikipedia() && settings.wikipedia.uses_native_text() {
+            if settings.kind == crate::background_animation::AnimationKind::OpenStreetMap {
+                let credit_rows = crate::layout::osm_attribution_area(area).height;
+                Rect::new(
+                    area.x,
+                    area.y,
+                    area.width,
+                    area.height.saturating_sub(1 + credit_rows),
+                )
+            } else if app.animation_frame.is_wikipedia() && settings.wikipedia.uses_native_text() {
                 match &app.mode {
                     Mode::Settings(state) if !state.animation_fullscreen => {
-                        crate::settings_ui::compute_layout(area).content_area
+                        crate::settings_ui::compute_layout_for_mode(area, app, state).content_area
                     }
                     _ => Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)),
                 }
@@ -178,7 +196,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         let opaque_panel = match &app.mode {
             Mode::Settings(state) if !state.animation_fullscreen => Some(
                 crate::animation_settings_ui::layout(
-                    crate::settings_ui::compute_layout(area).content_area,
+                    crate::settings_ui::compute_layout_for_mode(area, app, state).content_area,
                 )
                 .panel,
             ),
@@ -305,6 +323,10 @@ impl LookPaint<'_> {
 enum FieldCell {
     Empty,
     Continuation,
+    Native {
+        symbol: char,
+        color: Option<Color>,
+    },
     Ink {
         symbol: String,
         color: Option<Color>,
@@ -333,6 +355,12 @@ fn field_cell(app: &App, look: &LookPaint<'_>, column: u16, row: u16) -> FieldCe
             symbol: symbol.to_owned(),
             color: look.color(app, column, row, true),
             modifier,
+        };
+    }
+    if let Some(symbol) = frame.native_glyph(column, row) {
+        return FieldCell::Native {
+            symbol,
+            color: look.color(app, column, row, true),
         };
     }
     let symbol = frame.glyph(column, row);
@@ -478,7 +506,8 @@ fn safe_target(
 }
 
 /// A two-column article glyph is committed only with a typed continuation
-/// and two safe native destination cells. Ordinary scenes stay Braille-only.
+/// and two safe native destination cells. A scene's typed native glyph uses
+/// one safe cell; untyped ordinary scene ink remains Braille-only.
 fn paint_region_with_field(
     buffer: &mut Buffer,
     region: Rect,
@@ -493,6 +522,15 @@ fn paint_region_with_field(
     }
     let cursor = screen.and_then(|screen| visible_cursor(screen, region));
     for row in clipped.top()..clipped.bottom() {
+        // Article letters and image dots must preserve native word/table spacing.
+        // Wikipedia starts outside that span; ordinary scenes keep their texture.
+        let native_text_span = {
+            let occupied = |column: &u16| !is_inkless_symbol(buffer[(*column, row)].symbol());
+            (clipped.left()..clipped.right())
+                .find(occupied)
+                .zip((clipped.left()..clipped.right()).rfind(occupied))
+                .map(|(first, last)| first..=last)
+        };
         let mut remaining_continuations = 0;
         // Begin at the buffer's left edge: a wide leading glyph can lie
         // outside the allowed region while its continuation lies inside it.
@@ -508,14 +546,18 @@ fn paint_region_with_field(
             {
                 continue;
             }
-            let FieldCell::Ink {
-                symbol,
-                color,
-                modifier,
-            } = field(column - buffer.area.x, row - buffer.area.y)
-            else {
-                continue;
-            };
+            let (symbol, color, modifier, is_native) =
+                match field(column - buffer.area.x, row - buffer.area.y) {
+                    FieldCell::Ink {
+                        symbol,
+                        color,
+                        modifier,
+                    } => (symbol, color, modifier, false),
+                    FieldCell::Native { symbol, color } => {
+                        (symbol.to_string(), color, Modifier::empty(), true)
+                    }
+                    FieldCell::Empty | FieldCell::Continuation => continue,
+                };
             let symbol_width = crate::background_animation::wikipedia_symbol_width(&symbol);
             let is_braille = symbol_width == Some(1)
                 && symbol.chars().count() == 1
@@ -523,9 +565,30 @@ fn paint_region_with_field(
                     .chars()
                     .next()
                     .is_some_and(|character| ('\u{2801}'..='\u{28ff}').contains(&character));
-            let Some(symbol_width) = symbol_width.filter(|_| allow_text || is_braille) else {
+            let is_native_text = is_native
+                && symbol_width == Some(1)
+                && symbol.chars().count() == 1
+                && symbol
+                    .chars()
+                    .next()
+                    .is_some_and(|character| !character.is_control());
+            let Some(symbol_width) = symbol_width.filter(|_| {
+                if is_native {
+                    is_native_text
+                } else {
+                    allow_text || is_braille
+                }
+            }) else {
                 continue;
             };
+            if (allow_text || is_native_text)
+                && native_text_span.as_ref().is_some_and(|span| {
+                    span.contains(&column)
+                        || (symbol_width == 2 && span.contains(&column.saturating_add(1)))
+                })
+            {
+                continue;
+            }
             if symbol_width == 2 {
                 let next_column = column.saturating_add(1);
                 if next_column >= clipped.right()
@@ -569,6 +632,61 @@ mod tests {
     }
 
     #[test]
+    fn typed_native_scene_digits_paint_safe_blanks_without_replacing_terminal_text() {
+        let area = Rect::new(0, 0, 12, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(3, 0)].set_char('A').set_fg(Color::Yellow);
+        buffer[(5, 0)].set_char('B').set_fg(Color::Yellow);
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |column, _| FieldCell::Native {
+                symbol: if column == 1 { '.' } else { '3' },
+                color: Some(Color::Green),
+            },
+            false,
+        );
+        assert_eq!(buffer[(0, 0)].symbol(), "3");
+        assert_eq!(buffer[(1, 0)].symbol(), ".");
+        assert_eq!(buffer[(0, 0)].fg, Color::Green);
+        assert_eq!(buffer[(3, 0)].symbol(), "A");
+        assert_eq!(buffer[(4, 0)].symbol(), " ");
+        assert_eq!(buffer[(5, 0)].symbol(), "B");
+        assert_eq!(buffer[(6, 0)].symbol(), "3");
+    }
+
+    #[test]
+    fn typed_native_scene_glyphs_cannot_borrow_article_width_permission() {
+        let area = Rect::new(0, 0, 2, 1);
+        for allow_text in [false, true] {
+            for symbol in ['界', '\n', '\u{1b}'] {
+                let mut buffer = Buffer::empty(area);
+                paint_region_with_field(
+                    &mut buffer,
+                    area,
+                    None,
+                    Color::White,
+                    |column, _| {
+                        if column == 0 {
+                            FieldCell::Native {
+                                symbol,
+                                color: None,
+                            }
+                        } else {
+                            FieldCell::Continuation
+                        }
+                    },
+                    allow_text,
+                );
+                assert_eq!(buffer[(0, 0)].symbol(), " ");
+                assert_eq!(buffer[(1, 0)].symbol(), " ");
+            }
+        }
+    }
+
+    #[test]
     fn wikipedia_text_styles_only_safe_blanks() {
         let area = Rect::new(0, 0, 5, 1);
         let mut buffer = Buffer::empty(area);
@@ -591,6 +709,62 @@ mod tests {
         for column in 1..=3 {
             assert_eq!(buffer[(column, 0)], original[(column, 0)]);
         }
+    }
+
+    #[test]
+    fn article_letters_preserve_native_word_spacing_and_source_bytes() {
+        let area = Rect::new(0, 0, 22, 1);
+        let mut parser = vt100::Parser::new(1, 22, 0);
+        parser.process(b"\x1b[?25l\x1b[1;3H\x1b[3;32mNative two words\x1b[0m");
+        let source_before = parser.screen().contents_formatted();
+        let mut buffer = Buffer::empty(area);
+        buffer.set_string(
+            2,
+            0,
+            "Native two words",
+            ratatui::style::Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::ITALIC),
+        );
+        let native = buffer.clone();
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            Some(parser.screen()),
+            Color::White,
+            |_, _| FieldCell::Ink {
+                symbol: "A".into(),
+                color: None,
+                modifier: Modifier::empty(),
+            },
+            true,
+        );
+        for column in 2..18 {
+            assert_eq!(
+                buffer[(column, 0)],
+                native[(column, 0)],
+                "native text at {column}"
+            );
+        }
+        assert_eq!(buffer[(0, 0)].symbol(), "A");
+        assert_eq!(buffer[(21, 0)].symbol(), "A");
+        assert_eq!(parser.screen().contents_formatted(), source_before);
+
+        // Wikipedia image dots also preserve the native word separators.
+        let mut braille = native;
+        paint_region_with_field(
+            &mut braille,
+            area,
+            Some(parser.screen()),
+            Color::White,
+            |_, _| FieldCell::Ink {
+                symbol: "⣿".into(),
+                color: None,
+                modifier: Modifier::empty(),
+            },
+            true,
+        );
+        assert_eq!(braille[(8, 0)].symbol(), " ");
     }
 
     #[test]

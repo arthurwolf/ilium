@@ -1110,13 +1110,13 @@
   {
     "id": "AP-19",
     "title": "Last prompt banner lines",
-    "explanation": "“Limit wrapped prompt text to a maximum number of rows, keeping short prompts compact and preserving the beginning and end of longer ones.”",
-    "specimen": "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture.",
-    "states": "A short prompt using fewer rows than the ceiling; a long prompt middle-truncated at the ceiling; that same prompt with a higher ceiling.",
+    "explanation": "“Reserve this many prompt rows before interaction. Text wraps within that fixed space, preserving the beginning and end of longer prompts without resizing the terminal.”",
+    "specimen": "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n│                                          │\n│                                          │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture.",
+    "states": "A short prompt with blank unused rows inside the fixed slot; a long prompt middle-truncated within the same slot; that same prompt with a higher configured slot.",
     "motion": "None.",
     "caveat": "Wrap at the actual specimen width before calculating truncation. Do not assume a fixed source-text line count or invent behavior for unusually small limits not established by the source.",
     "frames": [
-      "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture."
+      "Keep the banner enabled and use a fixed pane width. Show:\n\nMaximum: 3 text rows — short prompt\n┌─ Last prompt ────────────────────────────┐\n│ Explain this test.                       │\n│                                          │\n│                                          │\n└──────────────────────────────────────────┘\n\nMaximum: 3 text rows — longer prompt\n┌─ Last prompt ────────────────────────────┐\n│ Diagnose the failing parser test.        │\n│ ... omitted middle ...                   │\n│ End with the smallest safe fix.          │\n└──────────────────────────────────────────┘\n\nThe omission text is schematic; use the actual truncation presentation. A further still raises the ceiling enough to show all five wrapped rows of the longer fixture."
     ]
   },
   {
@@ -2184,12 +2184,12 @@
     "id": "IC-45",
     "title": "Claude Fable choice",
     "explanation": "“Choose the icon beside Fable in Claude’s model choices.”",
-    "specimen": "menu `⬤ Fable` → `📖 Fable`.",
+    "specimen": "menu `🦖 Fable` → `📖 Fable`.",
     "states": "glyph only.",
     "motion": "static.",
     "caveat": "render only in a Claude context where this choice is available.",
     "frames": [
-      "menu `⬤ Fable` → `📖 Fable`."
+      "menu `🦖 Fable` → `📖 Fable`."
     ]
   },
   {
@@ -3445,7 +3445,7 @@
     "specimen": "Place · Selected / Ordered / Shuffled tour · Dwell · Fixed / Orbit / East-west camera · Camera speed · Map width · Map brightness · Line width · Independent road / building / water / green-space / railway / POI layers",
     "states": "The bundled catalogue works offline. Local Overpass JSON and an explicit HTTPS Overpass endpoint with coordinates are optional. Shared palette, hue, saturation, lightness, density and dithering style the dots.",
     "motion": "Hold one place or tour the catalogue; fixed maps remain still, while orbit and east-west cameras pan locally. Camera speed zero holds position.",
-    "caveat": "OpenStreetMap contributors / ODbL. Clipped or incomplete polygon boundaries remain outlines. Custom provider failures retain the last good map; requests are bounded and rate limited. Help never fetches data.",
+    "caveat": "OpenStreetMap contributors / ODbL: https://www.openstreetmap.org/copyright. Clipped or incomplete polygon boundaries remain outlines. Custom provider failures retain the last good map; requests are bounded and rate limited. Help never fetches data.",
     "frames": [
       "OpenStreetMap — Paris · water and roads",
       "OpenStreetMap — Tokyo · buildings and green space"
@@ -3521,6 +3521,18 @@
     "caveat": "Clocks show the latest feed values. Failed connections retain the last board with an error and receipt age. No synthetic game or invented move is substituted.",
     "frames": [
       "Live chess — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-63",
+    "title": "Carpet",
+    "explanation": "Parallel isometric Braille hatch lines bend over hidden spheres and tubes.",
+    "specimen": "Mode · Camera yaw · Camera pitch · Ground zoom · Hatch direction · Hatch spacing · Line width · Lift height · Object radius · Easing · Frame rate · Simulation speed",
+    "states": "Nine modes: mouse hunters, autonomous Snake, slow Conway Life, legal automated chess, Lichess TV chess, DVD ball, eight planetary orbits, digital civil clock and analog civil clock. Each mode exposes its relevant controls.",
+    "motion": "Hunters follow the pointer projected onto the ground. Board and clock objects ease between positions; analog hands move continuously. Civil clocks follow the chosen UTC offset independently of animation speed.",
+    "caveat": "Lichess mode follows real received positions and retains its last board on connection failure. The automated game uses a bounded legal-move search. Orbits are stylized; zoom may crop the plane. Shared appearance controls color and dither the hatch lines.",
+    "frames": [
+      "Carpet — illustrative hatch geometry; no live feed request"
     ]
   },
   {

@@ -1356,7 +1356,7 @@ fn handle_editor_line_context_menu_mouse(
     app.execute_editor_line_context_action(action, menu.source);
 }
 
-/// Handles a click inside (or outside) the Codex Sol/Terra/Luna
+/// Handles a click inside (or outside) the Codex Sol/Astra/Luna
 /// reasoning-strength submenu, mirroring
 /// `handle_editor_line_context_menu_mouse`'s outside-click/border/row
 /// structure exactly.
@@ -1792,8 +1792,10 @@ fn update_animation_hover(
 /// module doc comment for the shared layout/hit-test functions this
 /// reproduces no arithmetic of its own from.
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
+    let selected_before = state.selected_row;
     let position = Position::new(mouse.column, mouse.row);
-    let mut layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+    let mut layout =
+        crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
     {
@@ -2014,11 +2016,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     position,
                 ) {
                     Some(direction @ (AnimationHit::PreviousScene | AnimationHit::NextScene)) => {
-                        let delta = if direction == AnimationHit::PreviousScene {
-                            -1
-                        } else {
-                            1
-                        };
+                        let delta = if direction == AnimationHit::PreviousScene { -1 } else { 1 };
                         let kind = crate::animation_settings_ui::adjacent_scene(
                             app.animation_settings.kind,
                             delta,
@@ -2479,11 +2477,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             state.animation_slider_drag = None;
             let delta = i32::from(SETTINGS_WHEEL_SCROLL_LINES);
-            let delta = if mouse.kind == MouseEventKind::ScrollUp {
-                -delta
-            } else {
-                delta
-            };
+            let delta = if mouse.kind == MouseEventKind::ScrollUp { -delta } else { delta };
             // On the Animations tab the wheel scrolls the region under the
             // pointer (scene list, global settings or the right column); the
             // scene list scrolls its window without selecting a scene.
@@ -2519,7 +2513,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             .store(&mut state);
         // Keyboard-less selection changes (a click, Prev/Next) keep the
         // selected row visible in its own region.
-        if mouse.kind != MouseEventKind::ScrollUp && mouse.kind != MouseEventKind::ScrollDown {
+        if state.selected_row != selected_before {
             crate::animation_settings_ui::sync_scrolls(layout.content_area, &model, &mut state);
         }
     }

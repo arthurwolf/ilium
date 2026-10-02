@@ -157,6 +157,16 @@ impl AmbientHost {
         }
     }
 
+    /// Input for pointer-aware scenes; the scene owns coordinate interpretation.
+    pub fn pointer(&mut self, position: Option<[f32; 2]>) {
+        if let Some(hosted) = self.scene.as_mut() {
+            let outcome = catch_unwind(AssertUnwindSafe(|| hosted.scene.pointer(position)));
+            if let Err(payload) = outcome {
+                tracing::error!(message = %panic_message(payload.as_ref()), "ambient pointer handler panicked");
+            }
+        }
+    }
+
     pub fn uses_cell_colors(&self) -> bool {
         self.scene
             .as_ref()

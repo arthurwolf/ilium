@@ -62,7 +62,7 @@ pub enum AgentToolbarAction {
     /// of provider since it governs mouse behavior, not agent commands.
     ToggleTextSelection,
     /// Opens the reasoning-strength submenu for `CODEX_MODEL_TIERS[index]`
-    /// (Sol/Terra/Luna). Codex-only: unlike Claude's `/model <name>`, Codex's
+    /// (Sol/Astra/Luna). Codex-only: unlike Claude's `/model <name>`, Codex's
     /// `/model` command has no inline argument form -- typing one is read as
     /// a chat prompt, not a command (confirmed against a live `codex`
     /// session) -- so picking a model is an interactive picker requiring
@@ -74,18 +74,21 @@ pub enum AgentToolbarAction {
     CodexReasoningLevel(u8, u8),
 }
 
-/// One selectable Codex model tier: Sol, Terra, or Luna. `model_digit` is
-/// positional against Codex's `/model` root picker list (1=Sol, 2=Terra,
-/// 3=Luna) -- if OpenAI ever reorders that list, the wrong model gets
-/// selected silently, so keep this table in the exact order Codex renders.
+/// One selectable Codex model tier: Sol, Astra, or Luna, each the newest
+/// generation of its strength (GPT-6.1-Sol workhorse, GPT-6-Astra frontier,
+/// GPT-6-Luna fast). `model_digit` is positional against Codex's `/model`
+/// root picker list as of codex-cli 0.159 (1=GPT-6.1-Sol, 2=GPT-6-Astra,
+/// 4=GPT-6-Luna; 3 is the previous-generation GPT-6-Sol and 5-8 are older
+/// 5.x models) -- if OpenAI ever reorders that list, the wrong model gets
+/// selected silently, so re-verify against the live picker.
 pub struct CodexModelTier {
     pub glyph: &'static str,
     pub label: &'static str,
     model_digit: u8,
 }
 
-/// Sol/Terra/Luna in Codex's own `/model` picker order, each with the sun,
-/// earth, and moon glyphs the top-level menu is built around.
+/// Sol/Astra/Luna in Codex's own `/model` picker order, each with the sun,
+/// star, and moon glyphs the top-level menu is built around.
 pub const CODEX_MODEL_TIERS: [CodexModelTier; 3] = [
     CodexModelTier {
         glyph: "\u{2600}\u{fe0f}",
@@ -93,14 +96,14 @@ pub const CODEX_MODEL_TIERS: [CodexModelTier; 3] = [
         model_digit: b'1',
     },
     CodexModelTier {
-        glyph: "\u{1f30d}",
-        label: "Terra",
+        glyph: "\u{2b50}",
+        label: "Astra",
         model_digit: b'2',
     },
     CodexModelTier {
         glyph: "\u{1f319}",
         label: "Luna",
-        model_digit: b'3',
+        model_digit: b'4',
     },
 ];
 
@@ -164,7 +167,7 @@ pub fn codex_reasoning_levels(tier_index: usize) -> &'static [CodexReasoningLeve
 /// Confirmed against a live `codex` session: typing `/model` opens its
 /// slash-command autocomplete, and an Enter that arrives before that popup
 /// has settled is consumed as "accept completion" instead of "submit" --
-/// the whole `/model gpt-5.6-terra` line lands in the chat composer as text
+/// the whole `/model gpt-6-astra` line lands in the chat composer as text
 /// (and gets sent to the agent as a prompt) rather than opening the picker.
 /// Once the picker is actually open, digit-to-digit navigation between its
 /// nested screens (model -> reasoning level -> advanced reasoning) is
@@ -558,7 +561,7 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         show_labels,
     );
     if provider == BuiltinAgentProvider::Codex {
-        // Sol/Terra/Luna each open their own reasoning-strength submenu
+        // Sol/Astra/Luna each open their own reasoning-strength submenu
         // rather than sending a command directly -- see `CodexModelTier`'s
         // doc comment for why Codex's model buttons can't be flat like
         // Claude's or Antigravity's.
@@ -903,7 +906,10 @@ mod tests {
             .map(|(_, _, text)| text.as_str())
             .collect();
         assert_eq!(model_texts.len(), 4);
-        assert_eq!(model_texts, vec!["🐁Haiku", "🐈Sonnet", "🦁Opus", "⬤Fable"]);
+        assert_eq!(
+            model_texts,
+            vec!["🐁Haiku", "🐈Sonnet", "🦁Opus", "🦖Fable"]
+        );
 
         let mut configured_icons = icons.clone();
         configured_icons.set(IconTarget::AgentToolbarClaudeHaiku, "•".to_string());
@@ -941,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_toolbar_exposes_sol_terra_luna_tiers_not_flat_models() {
+    fn codex_toolbar_exposes_sol_astra_luna_tiers_not_flat_models() {
         let provider = BuiltinAgentProvider::Codex;
         assert!(models_for(provider).is_empty());
         let icons = IconSettings::default();
@@ -955,7 +961,7 @@ mod tests {
             .collect();
         assert_eq!(
             tier_labels,
-            vec!["\u{2600}\u{fe0f}Sol", "\u{1f30d}Terra", "\u{1f319}Luna"]
+            vec!["\u{2600}\u{fe0f}Sol", "\u{2b50}Astra", "\u{1f319}Luna"]
         );
         assert!(!rects
             .iter()
@@ -965,13 +971,13 @@ mod tests {
     #[test]
     fn luna_reasoning_levels_omit_ultra() {
         let sol_levels: Vec<&str> = codex_reasoning_levels(0).iter().map(|l| l.label).collect();
-        let terra_levels: Vec<&str> = codex_reasoning_levels(1).iter().map(|l| l.label).collect();
+        let astra_levels: Vec<&str> = codex_reasoning_levels(1).iter().map(|l| l.label).collect();
         let luna_levels: Vec<&str> = codex_reasoning_levels(2).iter().map(|l| l.label).collect();
         assert_eq!(
             sol_levels,
             vec!["Low", "Medium", "High", "Extra high", "Max", "Ultra"]
         );
-        assert_eq!(sol_levels, terra_levels);
+        assert_eq!(sol_levels, astra_levels);
         assert_eq!(
             luna_levels,
             vec!["Low", "Medium", "High", "Extra high", "Max"]
@@ -980,9 +986,9 @@ mod tests {
 
     #[test]
     fn codex_keystroke_stages_open_picker_then_pick_model_then_level() {
-        let terra = &CODEX_MODEL_TIERS[1];
+        let astra = &CODEX_MODEL_TIERS[1];
         let high = &codex_reasoning_levels(1)[2];
-        let stages = codex_model_keystroke_stages(terra, high);
+        let stages = codex_model_keystroke_stages(astra, high);
         assert_eq!(
             stages,
             vec![b"/model".to_vec(), b"\r".to_vec(), vec![b'2'], vec![b'3']]

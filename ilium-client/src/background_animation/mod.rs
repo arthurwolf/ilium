@@ -79,10 +79,11 @@ pub enum AnimationKind {
     Boats,
     Chess,
     OpenStreetMap,
+    Carpet,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -122,6 +123,7 @@ impl AnimationKind {
         Self::Boats,
         Self::Chess,
         Self::OpenStreetMap,
+        Self::Carpet,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
@@ -131,6 +133,7 @@ impl AnimationKind {
             Self::SolarSystem => Some(AmbientKind::SolarSystem),
             Self::TopographicMaps => Some(AmbientKind::TopographicMaps),
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
+            Self::Carpet => Some(AmbientKind::Carpet),
             Self::Graph => Some(AmbientKind::Graph),
             Self::Pi => Some(AmbientKind::Pi),
             Self::Earthquakes => Some(AmbientKind::Earthquakes),
@@ -507,6 +510,7 @@ pub struct AnimationFrame {
     has_cell_colors: bool,
     host: AmbientHost,
     last_ambient: Option<AmbientRenderKey>,
+    pointer: Option<[f32; 2]>,
     wikipedia: WikipediaPresentation,
     is_wikipedia: bool,
 }
@@ -522,6 +526,12 @@ impl AnimationFrame {
     /// The scene host shared by every surface that shows this field.
     pub fn host(&self) -> &AmbientHost {
         &self.host
+    }
+
+    /// Record normalized field position without consuming any UI mouse input.
+    pub fn pointer(&mut self, position: Option<[f32; 2]>) {
+        self.pointer = position.filter(|point| point.iter().all(|coordinate| coordinate.is_finite()))
+            .map(|point| point.map(|coordinate| coordinate.clamp(0.0, 1.0)));
     }
 
     pub fn host_mut(&mut self) -> &mut AmbientHost {
@@ -711,6 +721,7 @@ impl AnimationFrame {
                     wall,
                     now: SystemTime::now(),
                 };
+                self.host.pointer(self.pointer);
                 self.host.render(&mut frame);
             }
             self.last_ambient = Some(key);
@@ -738,6 +749,14 @@ impl AnimationFrame {
         } else {
             char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ')
         }
+    }
+
+    /// A scene-owned, single-cell glyph, distinct from packed Braille ink.
+    pub fn native_glyph(&self, x: u16, y: u16) -> Option<char> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        self.host.native_glyph(x, y)
     }
 
     /// True when the current field carries scene-supplied per-cell colors.

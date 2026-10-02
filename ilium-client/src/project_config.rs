@@ -628,11 +628,43 @@ animation:
                     .unwrap();
             }
         }
-        set_animation(project.path(), settings.clone()).unwrap();
-        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: open_street_map"), "{saved}");
-        assert!(saved.contains("openstreetmap:"), "{saved}");
-        assert_eq!(load(project.path()).unwrap().animation, settings);
+        // Source-specific text rows appear only after choosing their source.
+        // Reload each transition so persistence covers them as well as the
+        // catalogue, layer and camera controls above.
+        for source in 0..3 {
+            use ilium_ambient::ControlValue;
+            settings
+                .ambient
+                .openstreetmap
+                .set_control("source", ControlValue::Index(source))
+                .unwrap();
+            for control in settings.ambient.openstreetmap.controls() {
+                let text = match control.id {
+                    "local_path" => Some(
+                        project
+                            .path()
+                            .join("city extract.json")
+                            .display()
+                            .to_string(),
+                    ),
+                    "endpoint" => Some("https://example.com/api/interpreter".to_owned()),
+                    "coordinates" => Some("35.6762, 139.6503".to_owned()),
+                    _ => None,
+                };
+                if let Some(text) = text {
+                    settings
+                        .ambient
+                        .openstreetmap
+                        .set_control(control.id, ControlValue::Text(text))
+                        .unwrap();
+                }
+            }
+            set_animation(project.path(), settings.clone()).unwrap();
+            let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+            assert!(saved.contains("kind: open_street_map"), "{saved}");
+            assert!(saved.contains("openstreetmap:"), "{saved}");
+            assert_eq!(load(project.path()).unwrap().animation, settings);
+        }
         assert_ne!(
             load(tempfile::tempdir().unwrap().path()).unwrap().animation,
             settings

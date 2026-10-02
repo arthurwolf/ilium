@@ -1735,7 +1735,7 @@ fn handle_editor_line_context_menu_event(
     }
 }
 
-/// The Codex Sol/Terra/Luna reasoning-strength submenu uses the same
+/// The Codex Sol/Astra/Luna reasoning-strength submenu uses the same
 /// keyboard contract as the tree and source-line menus.
 fn handle_agent_toolbar_model_submenu_event(
     app: &mut App,
@@ -2372,7 +2372,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
 
     if key.code == KeyCode::Char('?') {
-        let layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
         if let Some(anchor) = crate::settings_ui::settings_help_anchors(&layout, app, &state)
             .into_iter()
             .find(|anchor| anchor.selected)
@@ -2476,8 +2477,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         // Previous / next scene from anywhere in the Animations list, wrapping.
         KeyCode::Char(character @ ('[' | ']')) if state.tab == SettingsTab::Animations => {
             let delta = if character == '[' { -1 } else { 1 };
-            let kind =
-                crate::animation_settings_ui::adjacent_scene(app.animation_settings.kind, delta);
+            let kind = crate::animation_settings_ui::adjacent_scene(app.animation_settings.kind, delta);
             if let Some(index) = crate::background_animation::AnimationKind::ALL
                 .iter()
                 .position(|candidate| *candidate == kind)
@@ -3146,7 +3146,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             .position(|kind| *kind == app.animation_settings.kind)
             .unwrap_or(0);
     }
-    let mut content_area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+    let mut content_area =
+        crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state)
+            .content_area;
     let instruction_height = crate::instruction_settings::panel_height(state.tab, content_area);
     content_area.y += instruction_height;
     content_area.height = content_area.height.saturating_sub(instruction_height);
