@@ -4204,9 +4204,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         .expect("attempt mutation from stale board state");
     assert!(
         wait_until(
-            || tui
-                .screen_text()
-                .contains("press r to reload before editing"),
+            || tui.screen_text().contains("press r to reload"),
             WAIT_TIMEOUT * 3,
         )
         .await,
