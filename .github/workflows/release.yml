@@ -92,6 +92,8 @@ jobs:
         python release/scripts/build_windows_ort.py --help
         python -m unittest release.tests.test_build_windows_ort
     - name: Full native build, tests, licence closure and candidate audit
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: python release/scripts/release_pipeline.py native --tag "${{ needs.source.outputs.tag }}" --target "${{
         matrix.rust_target }}" --runner-identity "${{ matrix.runner }}" --work "$RUNNER_TEMP/native-work" --output
         "$GITHUB_WORKSPACE/native-output"
