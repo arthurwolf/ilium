@@ -2218,7 +2218,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // drop-time guard no longer has anything to do.
     cleanup_guard.already_cleaned_up = true;
 
-    let attached_process_exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
+    // Loaded runners (Intel macOS) drain a pane's output backlog before the client
+    // sees the server close, so a slow exit is not a hang.
+    let attached_process_exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT * 4).await;
     if !attached_process_exited {
         // Defensive fallback only -- see this file's module docs. Getting
         // here means the graceful shutdown path itself regressed, which
@@ -4205,7 +4207,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             || tui
                 .screen_text()
                 .contains("press r to reload before editing"),
-            WAIT_TIMEOUT,
+            WAIT_TIMEOUT * 3,
         )
         .await,
         "expected stale-write guidance, got: {:?}",

@@ -3,3 +3,5 @@
 *.hbs text eol=lf
 ilium-prompts/tests/fixtures/** text eol=lf
 *.sh text eol=lf
+# Release registers and retained licence notices are hashed byte for byte.
+release/** text eol=lf
