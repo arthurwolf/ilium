@@ -419,6 +419,14 @@ Choose running indicators in **Settings → Agent Monitoring**. A live progress 
 
 The `/goal` badge reports observed activity; Ilium does not control the agent.
 
+#### Recover work after an agent stops
+
+When a detected Claude or Codex process exits or loses terminal ownership, its pane keeps its agent identity and shows an unavailable indicator. Hover for the reason; Ilium reports an exit cause only when it has a matching process receipt.
+
+Right-click the terminal to **Copy last submitted prompt**, copy a selection, line, visible screen or full terminal history, or copy the verified history-file path. Long prompts retain their line breaks and trailing spaces. If terminal-owned editing made the latest prompt uncertain, the menu says so and offers any **previous exact prompt** separately.
+
+The header stats dot remains available for the retained session: hover to preview or click to pin its recorded metrics. Scroll and selection stay local even if the stopped agent left mouse tracking enabled. You can still paste or type into a surviving shell; agent automation stops when the agent loses ownership.
+
 #### Notifications
 
 **Settings → Sound** also holds the desktop-notification switches, one per event: agent finished, agent needs approval, task succeeded, and task failed or lost. A master switch turns them all off. They live under `[notifications]` in `config.toml` and apply to running sessions within a couple of seconds.
@@ -638,7 +646,16 @@ New installs enable AI titles and tree organization through Kilo Gateway. Choose
 
 Kilo's default free model was marked as permitting prompt training when checked on 2026-09-27. Review its [data and usage guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free). You can also select OpenAI-compatible, Anthropic, or OpenRouter providers.
 
+For OpenAI, select **OpenAI-compatible** in **Settings → Inference**, enter your API key, then choose **Load available models**. Use left/right on the Model row to select a discovered ID, or Enter to type one manually. Refreshing the catalog preserves your saved model. The catalog includes every model exposed by your key; some IDs support other APIs rather than text chat, so use **Test provider** to verify your choice.
+
 File logging is off by default. Enabled logs can retain project prompts and request bodies, with credentials redacted. Treat logs as sensitive.
+
+Restructure prompt size is limited to **200,000 estimated input tokens** by default.
+Change **Settings → Inference → Restructure token budget** or set
+`restructure_prompt_token_limit = 200000` under `[inference]` in `config.toml`.
+The estimate rounds up one token per four Unicode characters; the selected
+provider’s actual context limit still applies. The budget includes instructions,
+scene catalog, protected layouts, and corrective retry feedback.
 
 #### Custom instructions
 
@@ -715,7 +732,7 @@ All animations share one look and one set of display controls (Settings -> Anima
 - **Live aircraft** plots airborne positions reported by OpenSky over a Braille world coastline. Anonymous global access is limited, so refresh is at least 15 minutes. Coverage is incomplete.
 - **Live boats** uses public Finnish AIS positions from Digitraffic, with a 30-second minimum refresh. It covers Finnish waters, not the global fleet. Aircraft and boats have separate map and marker colors and brightness.
 - **Live chess** follows Lichess TV with dithered pieces, board orientation and independent colors. Clocks show the latest feed values; connection failures retain the last board with its receipt age.
-- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, food-seeking Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Snake plans safe food routes with a tapered body, feeding pulses and gently breathing food. Carpet defaults to a 12×12 Snake board; saved project settings take precedence. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
+- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, food-seeking Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Snake plans safe food routes with a tapered body, feeding pulses and gently breathing food. Carpet defaults to a 12×12 Snake board; saved project settings take precedence. Infinite lines is enabled by default: hatches continue to the screen edges while the diamond remains the interactive work area. Turn it off to stop the lines at the diamond. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
 
 Live sources retain the last good data on request failures; they do not substitute simulated events. Quicknet values are displayed without BLS signature verification.
 

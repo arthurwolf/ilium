@@ -69,7 +69,7 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Prefer `thiserror` for typed error enums per crate; `ilium-server`'s top-level error boundary logs and continues (a single pane's detection failure or PTY hiccup must never take the whole server down — other panes keep running).
 - Every `async` task spawned (PTY reader, detection-loop tick, IPC connection handler) must have a clear owner that can cancel it. Use `tokio::task::JoinHandle` tracking, not fire-and-forget `tokio::spawn` with no handle kept anywhere — a pane that's closed must have its reader/detection tasks actually stop, not leak.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
-- Before compiling, if the project directory exceeds 10 GB in total, run `cargo clean` first.
+- After verified final binaries are installed and build/test consumers stop, enqueue disposable build targets/staging for 24-hour cleanup through `agent-artifact-cleanup.service` + `agent-artifact-cleanup.timer`: `/home/arthur/.local/bin/agent-artifact-cleanup enqueue --path /absolute/owned/target --verified-output /absolute/installed/binary --released --reason 'verified build; consumers stopped'`. Confirm the JSONL job ID/deadline. Cancel before reusing queued targets; coordinate shared target owners. Do not run pre-compilation `cargo clean` on queued or active artifacts. See `/home/arthur/.local/lib/agent-artifact-cleanup/README.md`.
 
 ## Testing
 
