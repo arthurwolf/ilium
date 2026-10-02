@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cost_model::{Calibration, ModelPrice, MAX_WINDOW_MINUTES};
+use crate::cost_model::{Calibration, CostMetric, ModelPrice, QuotaWindow, MAX_WINDOW_MINUTES};
 
 /// When a display option is drawn for a tree entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -75,7 +75,7 @@ impl CostDisplay {
     pub const fn label(self) -> &'static str {
         match self {
             Self::LevelGlyph => "Level glyph",
-            Self::LevelDollars => "Level glyph and dollars",
+            Self::LevelDollars => "Level glyph and amount",
             Self::Meter => "Five-cell meter",
             Self::Sparkline => "Burn sparkline",
             Self::GroupTotals => "Group and project totals",
@@ -91,22 +91,22 @@ impl CostDisplay {
                 "One height glyph per agent, coloured green to red. Quietest option; no numbers."
             }
             Self::LevelDollars => {
-                "The level glyph followed by the estimated dollars spent. Exact number next to the heat."
+                "The level glyph followed by the exact amount: estimated dollars, or percent of plan quota under the quota metric."
             }
             Self::Meter => {
                 "Five cells that fill as the agent gets more expensive. Easiest to read at a glance."
             }
             Self::Sparkline => {
-                "Spend over the configured window, one bar per time slice. Shows trend, not just total."
+                "Spend (or quota use) over the configured window, one bar per time slice. Shows trend, not just total."
             }
             Self::GroupTotals => {
-                "Project and group rows show the sum of everything beneath them, to find which project burns money."
+                "Project and group rows show the sum of everything beneath them, to find which project burns the most."
             }
             Self::DetailCard => {
-                "A card beside the tree with the agent's dollars, what it was rated against, burn rate, token classes, cost per model and quota. Hover shows it for the hovered agent; always keeps it on the selected one."
+                "A card beside the tree with the agent's amount, what it was rated against, burn rate, token classes, cost per model and quota. Hover shows it for the hovered agent; always keeps it on the selected one."
             }
             Self::HeaderTotal => {
-                "A single line above the tree with the total estimated spend of every agent."
+                "A single line above the tree with the total of every agent, in the chosen metric."
             }
             Self::BurnMarker => {
                 "An up arrow beside the indicator while spending runs at least twice the recent average."
@@ -169,6 +169,22 @@ pub const BURN_PRESETS: [[f64; 4]; 4] = [
     [1.0, 4.0, 10.0, 30.0],
     [2.0, 8.0, 20.0, 60.0],
 ];
+/// Fixed-band presets for the quota metric: percentage points of plan quota
+/// an agent used up.
+pub const QUOTA_FIXED_PRESETS: [[f64; 4]; 4] = [
+    [0.5, 2.0, 5.0, 12.0],
+    [1.0, 3.0, 8.0, 20.0],
+    [2.0, 6.0, 15.0, 35.0],
+    [5.0, 12.0, 30.0, 60.0],
+];
+/// Burn-rate presets for the quota metric: percentage points per hour.
+pub const QUOTA_BURN_PRESETS: [[f64; 4]; 3] = [
+    [0.5, 2.0, 5.0, 10.0],
+    [1.0, 4.0, 10.0, 20.0],
+    [2.0, 8.0, 20.0, 40.0],
+];
+/// Per-agent budget ladder for the quota metric, in percent of the window.
+pub const QUOTA_BUDGET_STEPS: [f64; 9] = [1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 50.0, 75.0, 100.0];
 pub const BUDGET_STEPS: [f64; 10] = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0];
 pub const HISTORY_DAY_STEPS: [u16; 8] = [7, 14, 30, 60, 90, 180, 365, 730];
 /// Sparkline windows in minutes, five minutes up to thirty days.
@@ -183,10 +199,18 @@ pub const MAX_HISTORY_DAYS: u16 = 3650;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CostSettings {
+    /// What is measured: API dollars, or plan quota (Codex only).
+    pub metric: CostMetric,
+    /// Which Codex rate-limit window the quota metric follows.
+    pub quota_window: QuotaWindow,
     pub calibration: Calibration,
     pub fixed_cuts: [f64; 4],
     pub burn_cuts: [f64; 4],
     pub budget_usd: f64,
+    /// The quota metric's counterparts of the three dollar values above.
+    pub quota_fixed_cuts: [f64; 4],
+    pub quota_burn_cuts: [f64; 4],
+    pub quota_budget_percent: f64,
     /// How far back the history calibration reads past sessions.
     pub history_days: u16,
     /// Time covered by the sparkline; six hours by default.
@@ -210,10 +234,15 @@ pub struct CostSettings {
 impl Default for CostSettings {
     fn default() -> Self {
         Self {
+            metric: CostMetric::Dollars,
+            quota_window: QuotaWindow::Primary,
             calibration: Calibration::OwnHistory,
             fixed_cuts: FIXED_PRESETS[2],
             burn_cuts: BURN_PRESETS[1],
             budget_usd: 10.0,
+            quota_fixed_cuts: QUOTA_FIXED_PRESETS[1],
+            quota_burn_cuts: QUOTA_BURN_PRESETS[1],
+            quota_budget_percent: 10.0,
             history_days: 90,
             sparkline_window_minutes: 360,
             sparkline_cells: 8,
@@ -261,6 +290,30 @@ impl CostSettings {
         }
     }
 
+    /// Fixed-band cut points in the active metric's unit.
+    pub fn active_fixed_cuts(&self) -> [f64; 4] {
+        match self.metric {
+            CostMetric::Dollars => self.fixed_cuts,
+            CostMetric::Quota => self.quota_fixed_cuts,
+        }
+    }
+
+    /// Burn-rate cut points in the active metric's unit per hour.
+    pub fn active_burn_cuts(&self) -> [f64; 4] {
+        match self.metric {
+            CostMetric::Dollars => self.burn_cuts,
+            CostMetric::Quota => self.quota_burn_cuts,
+        }
+    }
+
+    /// Per-agent budget in the active metric's unit.
+    pub fn active_budget(&self) -> f64 {
+        match self.metric {
+            CostMetric::Dollars => self.budget_usd,
+            CostMetric::Quota => self.quota_budget_percent,
+        }
+    }
+
     /// Whether any indicator is enabled, i.e. whether cost must be tracked.
     pub fn is_any_enabled(&self) -> bool {
         self.sort_by_cost || CostDisplay::ALL.iter().any(|d| self.option(*d).enabled)
@@ -277,6 +330,15 @@ impl CostSettings {
         }
         if !self.budget_usd.is_finite() || self.budget_usd < 0.01 {
             self.budget_usd = defaults.budget_usd;
+        }
+        if !is_ascending_positive(&self.quota_fixed_cuts) {
+            self.quota_fixed_cuts = defaults.quota_fixed_cuts;
+        }
+        if !is_ascending_positive(&self.quota_burn_cuts) {
+            self.quota_burn_cuts = defaults.quota_burn_cuts;
+        }
+        if !self.quota_budget_percent.is_finite() || self.quota_budget_percent < 0.1 {
+            self.quota_budget_percent = defaults.quota_budget_percent;
         }
         self.history_days = self.history_days.clamp(1, MAX_HISTORY_DAYS);
         self.sparkline_window_minutes = self.sparkline_window_minutes.clamp(1, MAX_WINDOW_MINUTES);
@@ -306,16 +368,41 @@ impl CostSettings {
     pub fn adjust(&mut self, row: CostRow, direction: i32) -> bool {
         let before = self.clone();
         match row {
+            CostRow::Metric(metric) => self.metric = metric,
+            CostRow::QuotaWindow => {
+                self.quota_window = match self.quota_window {
+                    QuotaWindow::Primary => QuotaWindow::Secondary,
+                    QuotaWindow::Secondary => QuotaWindow::Primary,
+                }
+            }
             CostRow::Calibration(calibration) => self.calibration = calibration,
-            CostRow::FixedPreset => {
-                self.fixed_cuts = step_preset(&FIXED_PRESETS, self.fixed_cuts, direction)
-            }
-            CostRow::BurnPreset => {
-                self.burn_cuts = step_preset(&BURN_PRESETS, self.burn_cuts, direction)
-            }
-            CostRow::Budget => {
-                self.budget_usd = step_ladder(&BUDGET_STEPS, self.budget_usd, direction)
-            }
+            CostRow::FixedPreset => match self.metric {
+                CostMetric::Dollars => {
+                    self.fixed_cuts = step_preset(&FIXED_PRESETS, self.fixed_cuts, direction)
+                }
+                CostMetric::Quota => {
+                    self.quota_fixed_cuts =
+                        step_preset(&QUOTA_FIXED_PRESETS, self.quota_fixed_cuts, direction)
+                }
+            },
+            CostRow::BurnPreset => match self.metric {
+                CostMetric::Dollars => {
+                    self.burn_cuts = step_preset(&BURN_PRESETS, self.burn_cuts, direction)
+                }
+                CostMetric::Quota => {
+                    self.quota_burn_cuts =
+                        step_preset(&QUOTA_BURN_PRESETS, self.quota_burn_cuts, direction)
+                }
+            },
+            CostRow::Budget => match self.metric {
+                CostMetric::Dollars => {
+                    self.budget_usd = step_ladder(&BUDGET_STEPS, self.budget_usd, direction)
+                }
+                CostMetric::Quota => {
+                    self.quota_budget_percent =
+                        step_ladder(&QUOTA_BUDGET_STEPS, self.quota_budget_percent, direction)
+                }
+            },
             CostRow::HistoryDays => {
                 self.history_days = step_ladder(&HISTORY_DAY_STEPS, self.history_days, direction)
             }
@@ -402,6 +489,10 @@ pub fn is_preset(presets: &[[f64; 4]], cuts: [f64; 4]) -> bool {
 /// One selectable row of the Cost settings tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CostRow {
+    /// Radio card choosing what is measured.
+    Metric(CostMetric),
+    /// Which Codex rate-limit window the quota metric follows.
+    QuotaWindow,
     /// Radio card choosing how "expensive" is decided.
     Calibration(Calibration),
     FixedPreset,
@@ -421,11 +512,11 @@ impl CostRow {
     /// Every row in display order. Parameter rows appear only for the active
     /// calibration, directly after the radio cards.
     pub fn rows(settings: &CostSettings) -> Vec<Self> {
-        let mut rows: Vec<Self> = Calibration::ALL
-            .iter()
-            .copied()
-            .map(Self::Calibration)
-            .collect();
+        let mut rows: Vec<Self> = CostMetric::ALL.iter().copied().map(Self::Metric).collect();
+        if settings.metric == CostMetric::Quota {
+            rows.push(Self::QuotaWindow);
+        }
+        rows.extend(Calibration::ALL.iter().copied().map(Self::Calibration));
         match settings.calibration {
             Calibration::FixedBands => rows.push(Self::FixedPreset),
             Calibration::PeerRelative => {}
@@ -445,6 +536,9 @@ impl CostRow {
 
     pub fn help_id(self) -> &'static str {
         match self {
+            Self::Metric(CostMetric::Dollars) => "COST-21",
+            Self::Metric(CostMetric::Quota) => "COST-22",
+            Self::QuotaWindow => "COST-23",
             Self::Calibration(Calibration::FixedBands) => "COST-01",
             Self::Calibration(Calibration::PeerRelative) => "COST-02",
             Self::Calibration(Calibration::OwnHistory) => "COST-03",
@@ -504,7 +598,11 @@ mod tests {
         assert!(CostRow::rows(&settings).contains(&CostRow::FixedPreset));
         settings.adjust(CostRow::Calibration(Calibration::PeerRelative), 0);
         let rows = CostRow::rows(&settings);
-        assert_eq!(rows.len(), 5 + 16 + 3);
+        assert_eq!(
+            rows.len(),
+            2 + 5 + 16 + 3,
+            "metric cards, calibration cards, options, tail"
+        );
     }
 
     #[test]
@@ -516,7 +614,7 @@ mod tests {
             for row in CostRow::rows(&settings) {
                 let id = row.help_id();
                 let number: u32 = id.strip_prefix("COST-").unwrap().parse().unwrap();
-                assert!((1..=20).contains(&number), "{id}");
+                assert!((1..=23).contains(&number), "{id}");
             }
         }
     }
@@ -611,5 +709,69 @@ mod tests {
         assert_eq!(partial.meter.visibility, CostVisibility::Always);
         assert!(!partial.meter.enabled);
         assert_eq!(partial.sparkline_window_minutes, 360);
+    }
+
+    #[test]
+    fn quota_metric_adds_its_window_row_and_keeps_dollar_values_apart() {
+        let mut settings = CostSettings::default();
+        assert_eq!(settings.metric, CostMetric::Dollars);
+        assert!(!CostRow::rows(&settings).contains(&CostRow::QuotaWindow));
+
+        assert!(settings.adjust(CostRow::Metric(CostMetric::Quota), 0));
+        let rows = CostRow::rows(&settings);
+        assert_eq!(rows[0], CostRow::Metric(CostMetric::Dollars));
+        assert_eq!(rows[1], CostRow::Metric(CostMetric::Quota));
+        assert_eq!(rows[2], CostRow::QuotaWindow);
+
+        // The parameter rows now edit the quota values, not the dollar ones.
+        let dollar_bands = settings.fixed_cuts;
+        assert!(settings.adjust(CostRow::FixedPreset, 1));
+        assert_eq!(settings.fixed_cuts, dollar_bands);
+        assert_eq!(settings.quota_fixed_cuts, QUOTA_FIXED_PRESETS[2]);
+        assert!(settings.adjust(CostRow::Budget, 1));
+        assert_eq!(settings.budget_usd, 10.0);
+        assert_eq!(settings.quota_budget_percent, 20.0);
+        assert!(settings.adjust(CostRow::BurnPreset, -1));
+        assert_eq!(settings.quota_burn_cuts, QUOTA_BURN_PRESETS[0]);
+        assert_eq!(settings.active_fixed_cuts(), QUOTA_FIXED_PRESETS[2]);
+        assert_eq!(settings.active_budget(), 20.0);
+
+        assert!(settings.adjust(CostRow::QuotaWindow, 0));
+        assert_eq!(settings.quota_window, QuotaWindow::Secondary);
+        assert!(settings.adjust(CostRow::QuotaWindow, 1));
+        assert_eq!(settings.quota_window, QuotaWindow::Primary);
+
+        assert!(settings.adjust(CostRow::Metric(CostMetric::Dollars), 0));
+        assert_eq!(settings.active_fixed_cuts(), dollar_bands);
+        assert!(!CostRow::rows(&settings).contains(&CostRow::QuotaWindow));
+    }
+
+    #[test]
+    fn every_row_has_a_distinct_catalogued_help_id() {
+        let mut settings = CostSettings::default();
+        let mut ids = std::collections::BTreeSet::new();
+        for metric in CostMetric::ALL {
+            settings.metric = metric;
+            for calibration in Calibration::ALL {
+                settings.calibration = calibration;
+                ids.extend(CostRow::rows(&settings).into_iter().map(CostRow::help_id));
+            }
+        }
+        assert_eq!(ids.len(), 23, "COST-01 through COST-23");
+    }
+
+    #[test]
+    fn bad_quota_values_are_repaired() {
+        let settings = CostSettings {
+            quota_fixed_cuts: [5.0, 1.0, 2.0, 3.0],
+            quota_burn_cuts: [0.0, 1.0, 2.0, 3.0],
+            quota_budget_percent: f64::NAN,
+            ..CostSettings::default()
+        }
+        .sanitized();
+        let defaults = CostSettings::default();
+        assert_eq!(settings.quota_fixed_cuts, defaults.quota_fixed_cuts);
+        assert_eq!(settings.quota_burn_cuts, defaults.quota_burn_cuts);
+        assert_eq!(settings.quota_budget_percent, 10.0);
     }
 }

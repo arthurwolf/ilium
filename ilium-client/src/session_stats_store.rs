@@ -120,6 +120,24 @@ impl SessionStatsStore {
         self.entries.get(&pane_id)
     }
 
+    /// Seeds a finished snapshot for a pane, for tests of consumers that must
+    /// not start a transcript worker.
+    #[cfg(test)]
+    pub(crate) fn insert_ready_for_test(&mut self, pane_id: NodeId, stats: Arc<SessionStats>) {
+        self.entries.insert(
+            pane_id,
+            StatsEntry {
+                stats: Some(stats),
+                state: LoadState::Ready,
+                accumulator: None,
+                transcript_path: None,
+                session_id: String::new(),
+                in_flight: false,
+                last_started: None,
+            },
+        );
+    }
+
     /// Drops one pane's cache, e.g. when the pane is gone or its agent
     /// session changed so the old totals no longer apply.
     pub fn forget(&mut self, pane_id: NodeId) {

@@ -1245,11 +1245,11 @@
   {
     "id": "COST-06",
     "title": "Fixed bands preset",
-    "explanation": "“Choose the dollar totals at which the fixed-band level steps up.”",
+    "explanation": "“Choose the totals at which the fixed-band level steps up: dollars, or percent of plan quota under the quota metric.”",
     "specimen": "`‹ $1 · $5 · $20 · $50 ›` stepping through five presets from `$0.25 · $1 · $4 · $10` to `$5 · $25 · $100 · $250`.",
     "states": "preset changes; a hand-edited set shows (custom).",
     "motion": "static.",
-    "caveat": "Only used while Fixed bands is the selected calibration, and as the fallback while history or peers are unavailable.",
+    "caveat": "Only used while Fixed bands is the selected calibration, and as the fallback while history or peers are unavailable. Custom cut points are set as fixed_cuts or quota_fixed_cuts in config.toml.",
     "frames": [
       "`‹ $1 · $5 · $20 · $50 ›` → `‹ $2 · $10 · $40 · $100 ›`\n"
     ]
@@ -1269,7 +1269,7 @@
   {
     "id": "COST-08",
     "title": "Budget per agent",
-    "explanation": "“Set the dollar budget one agent may spend before it counts as over budget.”",
+    "explanation": "“Set the budget one agent may use before it counts as over budget: dollars, or percent of the plan window under the quota metric.”",
     "specimen": "`‹ $10 ›` stepping 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000.",
     "states": "budget changes.",
     "motion": "static.",
@@ -1281,7 +1281,7 @@
   {
     "id": "COST-09",
     "title": "Burn-rate bands",
-    "explanation": "“Choose the dollars-per-hour rates at which the burn-rate level steps up.”",
+    "explanation": "“Choose the rates at which the burn-rate level steps up: dollars per hour, or percentage points per hour under the quota metric.”",
     "specimen": "`‹ $0.5/h · $2/h · $5/h · $15/h ›` stepping through four presets.",
     "states": "preset changes; a hand-edited set shows (custom).",
     "motion": "static.",
@@ -1304,12 +1304,12 @@
   },
   {
     "id": "COST-11",
-    "title": "Level glyph and dollars",
-    "explanation": "“Show the level glyph followed by the estimated dollars spent.”",
-    "specimen": "`▂ $1.30`, `▆ $9.80`, `█ ~$41.0` (a leading ~ marks a lower bound because a model had no known price).",
+    "title": "Level glyph and amount",
+    "explanation": "“Show the level glyph followed by the exact amount: estimated dollars, or percent of plan quota under the quota metric.”",
+    "specimen": "`▂ $1.30`, `▆ $9.80`, `█ ~$41.0` (a leading ~ marks a lower bound because a model had no known price). Under the quota metric: `▂ 1.3%`, `▆ 9.8%`.",
     "states": "Off or on; visible always or only while hovering the entry.",
     "motion": "static.",
-    "caveat": "Dollars are estimated from the transcript at API list prices (Claude Code's own recorded total wins when larger); subscription plans are not billed this amount.",
+    "caveat": "Dollars are estimated from the transcript at API list prices (Claude Code's own recorded total wins when larger); subscription plans are not billed this amount. Quota percent is account-wide use seen while the agent ran.",
     "frames": [
       "ROW  ● migrate-db              ▆ $9.80\n"
     ]
@@ -1421,6 +1421,42 @@
     "caveat": "Overrides the order chosen in the User Interface tab while on; the manual order is untouched and returns when this is off.",
     "frames": [
       "perf-hunt $41.0\nmigrate-db $9.8\nauth-refactor $1.3\n"
+    ]
+  },
+  {
+    "id": "COST-21",
+    "title": "Measure API dollars",
+    "explanation": "“Measure each agent in estimated dollars at API list prices.”",
+    "specimen": "The default. A card marked ◉ with its description; figures read `$4.30`, `~$41.0`.",
+    "states": "Selected and unselected radio card.",
+    "motion": "static.",
+    "caveat": "Works for Claude Code and Codex. Subscription plans are not billed this amount, so treat it as relative weight. Prices come from a built-in table that [cost.prices] in config.toml can override.",
+    "frames": [
+      "WHAT IS MEASURED?\n◉ API dollars  (default)\n○ Plan quota\n"
+    ]
+  },
+  {
+    "id": "COST-22",
+    "title": "Measure plan quota",
+    "explanation": "“Measure each agent in percentage points of the plan's rate-limit window that were used up while it ran.”",
+    "specimen": "Figures read `3.2%`, `12%`; rates read `4.0%/h`. Calibrations, thresholds, budget and history all switch to that unit.",
+    "states": "Selected and unselected radio card; choosing it adds a Quota window row below.",
+    "motion": "static.",
+    "caveat": "Only Codex transcripts record quota, and it is the whole account's use, so agents running at the same time are counted together. Claude Code agents show no indicator under this metric; their detail card says why and still shows the dollar estimate.",
+    "frames": [
+      "Figures read `3.2%`, `12%`; rates read `4.0%/h`. Calibrations, thresholds, budget and history all switch to that unit.\n"
+    ]
+  },
+  {
+    "id": "COST-23",
+    "title": "Quota window",
+    "explanation": "“Choose which Codex rate-limit window the quota figures follow.”",
+    "specimen": "`‹ Short window ›` and `‹ Long window ›`.",
+    "states": "Switches between the short rolling window and the longer weekly one; only shown under the quota metric.",
+    "motion": "static.",
+    "caveat": "Changing it recomputes every agent and re-reads history for the other window; sessions that never reported that window show nothing.",
+    "frames": [
+      "`‹ Short window ›` and `‹ Long window ›`.\n"
     ]
   },
   {

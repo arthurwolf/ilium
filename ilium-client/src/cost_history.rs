@@ -25,7 +25,7 @@ use serde_json::Value;
 use crate::cost_model::PriceTable;
 use crate::session_stats::TokenTotals;
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 /// Tail read first; covers almost every transcript's final records.
 const TAIL_BYTES: u64 = 4 * 1024 * 1024;
 /// Second, wider attempt for files whose tail holds only bulky records.
@@ -33,6 +33,8 @@ const WIDE_TAIL_BYTES: u64 = 48 * 1024 * 1024;
 const CODEX_HEAD_BYTES: u64 = 256 * 1024;
 /// Sessions below this are noise (opened and abandoned), not calibration data.
 const MINIMUM_SESSION_USD: f64 = 0.01;
+/// Sessions that used less quota than this many percentage points are noise.
+const MINIMUM_SESSION_QUOTA_POINTS: f64 = 0.05;
 /// A finished scan is refreshed at most this often.
 pub const RESCAN_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
@@ -53,6 +55,10 @@ pub struct HistoryEntry {
     pub size: u64,
     pub mtime_ms: i64,
     pub source: HistorySource,
+    /// Percentage points of each Codex quota window the session used up,
+    /// from its first to its last rate-limit reading. Empty for Claude Code.
+    #[serde(default)]
+    pub quota: Vec<(String, f64)>,
 }
 
 impl HistoryEntry {
@@ -68,6 +74,29 @@ impl HistoryEntry {
         };
         (usd >= MINIMUM_SESSION_USD).then_some(usd)
     }
+}
+
+impl HistoryEntry {
+    /// Quota points the session used in `window` (`primary` or `secondary`),
+    /// or `None` when the file has no reading or the use is negligible.
+    pub fn quota_points(&self, window: &str) -> Option<f64> {
+        self.quota
+            .iter()
+            .find(|(name, _)| name == window)
+            .map(|(_, points)| *points)
+            .filter(|points| *points >= MINIMUM_SESSION_QUOTA_POINTS)
+    }
+}
+
+/// Ascending per-session quota use of `window`, ready for percentile
+/// calibration under the quota metric.
+pub fn sorted_quota(entries: &[HistoryEntry], window: &str) -> Vec<f64> {
+    let mut points: Vec<f64> = entries
+        .iter()
+        .filter_map(|entry| entry.quota_points(window))
+        .collect();
+    points.sort_by(f64::total_cmp);
+    points
 }
 
 /// Ascending session totals, ready for percentile calibration.
@@ -215,6 +244,11 @@ pub fn scan(
                     } else {
                         read_claude(&path, size)
                     },
+                    quota: if is_codex {
+                        read_codex_quota(&path, size)
+                    } else {
+                        Vec::new()
+                    },
                 }
             }
         };
@@ -329,6 +363,70 @@ fn read_codex(path: &Path, size: u64) -> HistorySource {
         },
         None => HistorySource::Skipped,
     }
+}
+
+/// One Codex rate-limit reading: used percent and the reset instant that
+/// names the window period.
+type QuotaReading = (String, f64, Option<i64>);
+
+fn quota_readings(line: &[u8]) -> Vec<QuotaReading> {
+    let Some(limits) = serde_json::from_slice::<Value>(line)
+        .ok()
+        .and_then(|record| record.get("payload")?.get("rate_limits").cloned())
+    else {
+        return Vec::new();
+    };
+    ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|key| {
+            let window = limits.get(key).filter(|window| window.is_object())?;
+            Some((
+                key.to_owned(),
+                window.get("used_percent")?.as_f64()?,
+                window.get("resets_at").and_then(Value::as_i64),
+            ))
+        })
+        .collect()
+}
+
+/// The first complete line of `bytes` carrying an object-valued rate limit.
+fn first_quota_line(bytes: &[u8]) -> Option<&[u8]> {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .take(bytes.iter().filter(|byte| **byte == b'\n').count())
+        .find(|line| {
+            line.windows(RATE_LIMIT_NEEDLE.len())
+                .any(|window| window == RATE_LIMIT_NEEDLE)
+        })
+}
+
+const RATE_LIMIT_NEEDLE: &[u8] = br#""rate_limits":{"#;
+
+/// Quota points a Codex session used per window: the rise from its first to
+/// its last reading when both belong to the same window period, otherwise the
+/// last reading alone (the period began after the first one).
+fn read_codex_quota(path: &Path, size: u64) -> Vec<(String, f64)> {
+    let Some(tail) = read_range(path, size, TAIL_BYTES) else {
+        return Vec::new();
+    };
+    let Some(last_line) = last_line_containing(&tail, RATE_LIMIT_NEEDLE) else {
+        return Vec::new();
+    };
+    let last = quota_readings(last_line);
+    let first = read_head(path, CODEX_HEAD_BYTES)
+        .and_then(|head| first_quota_line(&head).map(quota_readings))
+        .unwrap_or_default();
+    last.into_iter()
+        .map(|(name, used, resets)| {
+            let used_before = first
+                .iter()
+                .find(|(first_name, _, first_resets)| {
+                    *first_name == name && *first_resets == resets
+                })
+                .map_or(0.0, |(_, first_used, _)| *first_used);
+            (name, (used - used_before).max(0.0))
+        })
+        .collect()
 }
 
 // ------------------------------------------------------------------ worker
@@ -520,6 +618,59 @@ mod tests {
         assert_eq!(entries.len(), 2);
         let totals = sorted_totals(&entries, &PriceTable::default());
         assert_eq!(totals, vec![12.5]);
+    }
+
+    fn quota_line(used: f64, resets_at: i64) -> String {
+        format!(
+            r#"{{"type":"event_msg","payload":{{"type":"token_count","info":null,"rate_limits":{{"primary":{{"used_percent":{used},"window_minutes":300,"resets_at":{resets_at}}},"secondary":{{"used_percent":40.0,"window_minutes":10080,"resets_at":9}}}}}}}}"#
+        )
+    }
+
+    fn codex_quota_file(home: &Path, id: &str, readings: &[(f64, i64)]) {
+        let lines: Vec<String> = readings
+            .iter()
+            .map(|(used, resets_at)| quota_line(*used, *resets_at))
+            .collect();
+        write(
+            &home
+                .join(".codex/sessions/2026/09/30")
+                .join(format!("rollout-{id}.jsonl")),
+            &lines,
+        );
+    }
+
+    #[test]
+    fn codex_quota_use_is_the_rise_inside_one_window_period() {
+        let home = tempfile::tempdir().unwrap();
+        codex_quota_file(
+            home.path(),
+            "rise",
+            &[(20.0, 100), (24.0, 100), (31.5, 100)],
+        );
+        // The window reset mid-session: only the new period's reading counts.
+        codex_quota_file(home.path(), "reset", &[(90.0, 100), (6.0, 200)]);
+        codex_quota_file(home.path(), "flat", &[(50.0, 100), (50.0, 100)]);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        assert_eq!(entries.len(), 3);
+        let mut primary = sorted_quota(&entries, "primary");
+        primary
+            .iter_mut()
+            .for_each(|value| *value = (*value * 10.0).round() / 10.0);
+        assert_eq!(primary, vec![6.0, 11.5], "flat session is negligible");
+        assert!(
+            sorted_quota(&entries, "secondary").is_empty(),
+            "a constant window consumed nothing"
+        );
+    }
+
+    #[test]
+    fn claude_sessions_carry_no_quota() {
+        let home = tempfile::tempdir().unwrap();
+        claude_file(home.path(), "-proj", "a", Some(3.0));
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        assert!(sorted_quota(&entries, "primary").is_empty());
     }
 
     #[test]

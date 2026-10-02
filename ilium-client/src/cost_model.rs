@@ -200,6 +200,59 @@ pub enum ScaleBasis {
     BurnUsdPerHour,
 }
 
+/// What is being measured per agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostMetric {
+    /// Estimated API-list-price dollars, for Claude Code and Codex alike.
+    #[default]
+    Dollars,
+    /// Percentage points of the plan's rate-limit window used up while the
+    /// agent ran. Only Codex transcripts record plan quota.
+    Quota,
+}
+
+impl CostMetric {
+    pub const ALL: [Self; 2] = [Self::Dollars, Self::Quota];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Dollars => "API dollars",
+            Self::Quota => "Plan quota",
+        }
+    }
+}
+
+/// Which Codex rate-limit window the quota metric follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaWindow {
+    /// The shorter, rolling window.
+    #[default]
+    Primary,
+    /// The longer, weekly window.
+    Secondary,
+}
+
+impl QuotaWindow {
+    pub const ALL: [Self; 2] = [Self::Primary, Self::Secondary];
+
+    /// The window name inside a Codex `rate_limits` record.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Primary => "Short window",
+            Self::Secondary => "Long window",
+        }
+    }
+}
+
 /// Which of the five ways of deciding "a lot" is in force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -242,7 +295,8 @@ impl Calibration {
 pub struct CalibrationInputs<'a> {
     pub fixed_cuts: [f64; LEVEL_COUNT - 1],
     pub burn_cuts: [f64; LEVEL_COUNT - 1],
-    pub budget_usd: f64,
+    /// Per-agent budget in the active metric's unit (dollars or quota percent).
+    pub budget: f64,
     /// Totals of every tracked agent right now.
     pub peer_totals: &'a [f64],
     /// Totals of past sessions, sorted ascending; `None` while unscanned.
@@ -317,7 +371,7 @@ pub fn calibrate(calibration: Calibration, inputs: &CalibrationInputs<'_>) -> Ca
         },
         Calibration::Budget => Calibrated {
             scale: LevelScale {
-                cuts: BUDGET_FRACTIONS.map(|fraction| inputs.budget_usd.max(0.01) * fraction),
+                cuts: BUDGET_FRACTIONS.map(|fraction| inputs.budget.max(0.01) * fraction),
             },
             basis: ScaleBasis::TotalUsd,
             note: CalibrationNote::Ready,
@@ -357,8 +411,8 @@ pub fn percent_rank(sorted: &[f64], value: f64) -> f64 {
 }
 
 /// Fill of a per-agent budget, `1.0` meaning the budget is fully spent.
-pub fn budget_fill(total_usd: f64, budget_usd: f64) -> f64 {
-    total_usd / budget_usd.max(0.01)
+pub fn budget_fill(total: f64, budget: f64) -> f64 {
+    total / budget.max(0.01)
 }
 
 // -------------------------------------------------------------- time series
@@ -423,15 +477,23 @@ pub fn burn_usd_per_hour(points: &[SpendPoint], now_ms: i64, window_ms: i64) -> 
 
 /// Window compared against the baseline when looking for a burn spike.
 pub const SPIKE_RECENT_MS: i64 = 10 * 60 * 1000;
-/// A spike must also exceed this absolute rate, so pennies never flag.
-const SPIKE_MIN_USD_PER_HOUR: f64 = 1.0;
+/// A dollar spike must also exceed this absolute rate, so pennies never flag.
+pub const SPIKE_MIN_USD_PER_HOUR: f64 = 1.0;
+/// The same floor for quota: under this many percentage points an hour the
+/// plan is not meaningfully being drained.
+pub const SPIKE_MIN_QUOTA_PER_HOUR: f64 = 2.0;
 const SPIKE_FACTOR: f64 = 2.0;
 
 /// Whether spending in the last ten minutes runs at least twice as fast as
 /// over the preceding part of `baseline_window_ms`.
-pub fn is_burn_spike(points: &[SpendPoint], now_ms: i64, baseline_window_ms: i64) -> bool {
+pub fn is_burn_spike(
+    points: &[SpendPoint],
+    now_ms: i64,
+    baseline_window_ms: i64,
+    minimum_per_hour: f64,
+) -> bool {
     let recent = burn_usd_per_hour(points, now_ms, SPIKE_RECENT_MS);
-    if recent < SPIKE_MIN_USD_PER_HOUR {
+    if recent < minimum_per_hour {
         return false;
     }
     let baseline_start = now_ms - baseline_window_ms.max(SPIKE_RECENT_MS * 2);
@@ -463,6 +525,31 @@ pub fn format_usd(usd: f64, is_lower_bound: bool) -> String {
         format!("~{body}")
     } else {
         body
+    }
+}
+
+/// Percentage points of plan quota: `0.4%`, `3.2%`, `12%`, `104%`.
+pub fn format_quota(points: f64) -> String {
+    if points < 10.0 {
+        format!("{points:.1}%")
+    } else {
+        format!("{points:.0}%")
+    }
+}
+
+/// An amount in the unit of `metric`; `~` marks a dollar lower bound.
+pub fn format_amount(metric: CostMetric, value: f64, is_lower_bound: bool) -> String {
+    match metric {
+        CostMetric::Dollars => format_usd(value, is_lower_bound),
+        CostMetric::Quota => format_quota(value),
+    }
+}
+
+/// A per-hour rate in the unit of `metric`.
+pub fn format_rate(metric: CostMetric, value: f64) -> String {
+    match metric {
+        CostMetric::Dollars => format_usd_per_hour(value),
+        CostMetric::Quota => format!("{}/h", format_quota(value)),
     }
 }
 
@@ -631,7 +718,7 @@ mod tests {
         CalibrationInputs {
             fixed_cuts: [1.0, 5.0, 20.0, 50.0],
             burn_cuts: [0.5, 2.0, 5.0, 15.0],
-            budget_usd: 10.0,
+            budget: 10.0,
             peer_totals: peers,
             history_sorted: history,
         }
@@ -738,7 +825,12 @@ mod tests {
             })
             .collect();
         assert!((burn_usd_per_hour(&hot, now, SPIKE_RECENT_MS) - 30.0).abs() < 1e-6);
-        assert!(is_burn_spike(&hot, now, 360 * minute));
+        assert!(is_burn_spike(
+            &hot,
+            now,
+            360 * minute,
+            SPIKE_MIN_USD_PER_HOUR
+        ));
 
         // The same rate sustained for hours is the baseline, not a spike.
         let steady: Vec<SpendPoint> = (0..360)
@@ -747,14 +839,36 @@ mod tests {
                 usd: 0.5,
             })
             .collect();
-        assert!(!is_burn_spike(&steady, now, 360 * minute));
+        assert!(!is_burn_spike(
+            &steady,
+            now,
+            360 * minute,
+            SPIKE_MIN_USD_PER_HOUR
+        ));
 
         // Pennies never flag however large the ratio.
         let tiny = [SpendPoint {
             at_ms: now,
             usd: 0.01,
         }];
-        assert!(!is_burn_spike(&tiny, now, 360 * minute));
+        assert!(!is_burn_spike(
+            &tiny,
+            now,
+            360 * minute,
+            SPIKE_MIN_USD_PER_HOUR
+        ));
+    }
+
+    #[test]
+    fn amounts_format_in_the_unit_of_their_metric() {
+        assert_eq!(format_amount(CostMetric::Dollars, 4.3, false), "$4.30");
+        assert_eq!(format_amount(CostMetric::Dollars, 4.3, true), "~$4.30");
+        assert_eq!(format_amount(CostMetric::Quota, 0.43, true), "0.4%");
+        assert_eq!(format_amount(CostMetric::Quota, 12.4, false), "12%");
+        assert_eq!(format_rate(CostMetric::Dollars, 3.0), "$3.00/h");
+        assert_eq!(format_rate(CostMetric::Quota, 1.5), "1.5%/h");
+        assert_eq!(QuotaWindow::Primary.key(), "primary");
+        assert_eq!(QuotaWindow::Secondary.key(), "secondary");
     }
 
     #[test]

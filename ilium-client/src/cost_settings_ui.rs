@@ -15,12 +15,13 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::cost_model::{
-    calibrate, format_usd, format_usd_per_hour, format_window, meter_string, sparkline_glyphs,
-    Calibration, CalibrationInputs, CalibrationNote, CostLevel, ScaleBasis,
+    calibrate, format_amount, format_rate, format_window, meter_string, sparkline_glyphs,
+    Calibration, CalibrationInputs, CalibrationNote, CostLevel, CostMetric, ScaleBasis,
 };
 use crate::cost_overlay::level_color;
 use crate::cost_settings::{
-    is_preset, CostDisplay, CostRow, CostSettings, BURN_PRESETS, FIXED_PRESETS,
+    is_preset, CostDisplay, CostRow, CostSettings, BURN_PRESETS, FIXED_PRESETS, QUOTA_BURN_PRESETS,
+    QUOTA_FIXED_PRESETS,
 };
 use crate::theme;
 
@@ -92,13 +93,13 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn format_cuts(cuts: &[f64; 4], per_hour: bool) -> String {
+fn format_cuts(metric: CostMetric, cuts: &[f64; 4], per_hour: bool) -> String {
     cuts.iter()
         .map(|cut| {
             if per_hour {
-                format_usd_per_hour(*cut)
+                format_rate(metric, *cut)
             } else {
-                format_usd(*cut, false)
+                format_amount(metric, *cut, false)
             }
             .replace(".00", "")
         })
@@ -107,15 +108,20 @@ fn format_cuts(cuts: &[f64; 4], per_hour: bool) -> String {
 }
 
 fn calibration_blurb(calibration: Calibration, settings: &CostSettings) -> String {
+    let is_quota = settings.metric == CostMetric::Quota;
     match calibration {
-        Calibration::FixedBands => {
+        Calibration::FixedBands => if is_quota {
+            "Fixed thresholds in percent of the plan window an agent used up: the same for \
+             every agent, every day. Predictable and easy to explain, but arbitrary: a heavy \
+             user sees everything red, a light one nothing."
+        } else {
             "Fixed dollar thresholds: the same for every agent, every day. Predictable and easy \
              to explain, but arbitrary: a heavy user sees everything red, a light one nothing."
-                .to_owned()
         }
+        .to_owned(),
         Calibration::PeerRelative => {
             "Each agent is rated against the median of the agents open right now. Good at \
-             spotting the outlier among your agents; says nothing about whether the spend is \
+             spotting the outlier among your agents; says nothing about whether the use is \
              large in absolute terms, and the scale moves as agents open and close."
                 .to_owned()
         }
@@ -125,17 +131,41 @@ fn calibration_blurb(calibration: Calibration, settings: &CostSettings) -> Strin
              work. Until enough history is scanned the fixed bands stand in.",
             settings.history_days
         ),
-        Calibration::Budget => {
+        Calibration::Budget => if is_quota {
+            "Indicators fill toward a per-agent share of the plan window, and a red ! appears \
+             once an agent passes it. Useful when one window is all you have; nothing is rated \
+             until you set a share."
+        } else {
             "Indicators fill toward a dollar budget per agent, and a red ! appears once an \
              agent passes it. The most meaningful choice when you have a limit to respect; \
              nothing is rated until you set one."
-                .to_owned()
         }
-        Calibration::BurnRate => {
+        .to_owned(),
+        Calibration::BurnRate => if is_quota {
+            "Rates how fast an agent is draining the plan window right now, in percentage \
+             points per hour, not its running total. Catches a runaway loop early; an old \
+             session that is now idle reads as cheap."
+        } else {
             "Rates how fast an agent is spending right now in dollars per hour, not its running \
              total. Catches a runaway loop early; an old expensive session that is now idle \
              reads as cheap."
-                .to_owned()
+        }
+        .to_owned(),
+    }
+}
+
+fn metric_blurb(metric: CostMetric) -> &'static str {
+    match metric {
+        CostMetric::Dollars => {
+            "Estimated dollars at API list prices, from the agent's own transcript. Works for \
+             Claude Code and Codex alike. Subscription plans are not billed this amount, so \
+             read it as relative weight."
+        }
+        CostMetric::Quota => {
+            "Percentage points of the plan's rate-limit window used up while the agent ran, as \
+             Codex records them. Codex reports the whole account's use, so agents running at \
+             the same time are counted together. Claude Code transcripts carry no quota, so \
+             those agents show nothing under this metric."
         }
     }
 }
@@ -144,10 +174,11 @@ fn calibration_blurb(calibration: Calibration, settings: &CostSettings) -> Strin
 fn ladder_line(app: &App, calibration: Calibration) -> Line<'static> {
     let overlay = app.cost_tracker.overlay();
     let settings = &app.cost_settings;
+    let metric = settings.metric;
     let inputs = CalibrationInputs {
-        fixed_cuts: settings.fixed_cuts,
-        burn_cuts: settings.burn_cuts,
-        budget_usd: settings.budget_usd,
+        fixed_cuts: settings.active_fixed_cuts(),
+        burn_cuts: settings.active_burn_cuts(),
+        budget: settings.active_budget(),
         peer_totals: &overlay.peer_totals,
         history_sorted: (overlay.history_sessions > 0 || !overlay.is_history_scanning)
             .then_some(overlay.history_sorted.as_slice()),
@@ -162,9 +193,9 @@ fn ladder_line(app: &App, calibration: Calibration) -> Line<'static> {
             format!(
                 "<{}",
                 if per_hour {
-                    format_usd_per_hour(first)
+                    format_rate(metric, first)
                 } else {
-                    format_usd(first, false)
+                    format_amount(metric, first, false)
                 }
             )
         } else {
@@ -172,9 +203,9 @@ fn ladder_line(app: &App, calibration: Calibration) -> Line<'static> {
             format!(
                 "≥{}",
                 if per_hour {
-                    format_usd_per_hour(cut)
+                    format_rate(metric, cut)
                 } else {
-                    format_usd(cut, false)
+                    format_amount(metric, cut, false)
                 }
             )
         };
@@ -209,9 +240,14 @@ fn ladder_line(app: &App, calibration: Calibration) -> Line<'static> {
 
 fn sample_for(display: CostDisplay, settings: &CostSettings) -> (String, CostLevel) {
     let level = CostLevel::new(2);
+    let is_quota = settings.metric == CostMetric::Quota;
     let text = match display {
         CostDisplay::LevelGlyph => level.glyph().to_string(),
-        CostDisplay::LevelDollars => format!("{} $6.20", level.glyph()),
+        CostDisplay::LevelDollars => format!(
+            "{} {}",
+            level.glyph(),
+            if is_quota { "6.2%" } else { "$6.20" }
+        ),
         CostDisplay::Meter => meter_string(Some(level)),
         CostDisplay::Sparkline => {
             let pattern = [0.0, 1.0, 2.0, 4.0, 7.0, 5.0, 3.0, 1.0];
@@ -219,9 +255,13 @@ fn sample_for(display: CostDisplay, settings: &CostSettings) -> (String, CostLev
             let values: Vec<f64> = (0..cells).map(|i| pattern[i % pattern.len()]).collect();
             sparkline_glyphs(&values)
         }
-        CostDisplay::GroupTotals => format!("{} $12.4", CostLevel::new(3).glyph()),
+        CostDisplay::GroupTotals => format!(
+            "{} {}",
+            CostLevel::new(3).glyph(),
+            if is_quota { "12%" } else { "$12.4" }
+        ),
         CostDisplay::DetailCard => "Card beside the row".to_owned(),
-        CostDisplay::HeaderTotal => "Σ $52.3".to_owned(),
+        CostDisplay::HeaderTotal => format!("Σ {}", if is_quota { "52%" } else { "$52.3" }),
         CostDisplay::BurnMarker => format!("{} ↑", meter_string(Some(level))),
     };
     (text, level)
@@ -229,6 +269,7 @@ fn sample_for(display: CostDisplay, settings: &CostSettings) -> (String, CostLev
 
 fn param_label(row: CostRow) -> &'static str {
     match row {
+        CostRow::QuotaWindow => "Quota window",
         CostRow::FixedPreset => "Fixed bands",
         CostRow::HistoryDays => "History window",
         CostRow::Budget => "Budget per agent",
@@ -250,21 +291,36 @@ fn param_value(row: CostRow, app: &App) -> String {
         }
     };
     match row {
-        CostRow::FixedPreset => custom(
-            is_preset(&FIXED_PRESETS, settings.fixed_cuts),
-            format_cuts(&settings.fixed_cuts, false),
-        ),
-        CostRow::BurnPreset => custom(
-            is_preset(&BURN_PRESETS, settings.burn_cuts),
-            format_cuts(&settings.burn_cuts, true),
-        ),
+        CostRow::QuotaWindow => settings.quota_window.label().to_owned(),
+        CostRow::FixedPreset => {
+            let (presets, cuts): (&[[f64; 4]], _) = match settings.metric {
+                CostMetric::Dollars => (&FIXED_PRESETS, settings.fixed_cuts),
+                CostMetric::Quota => (&QUOTA_FIXED_PRESETS, settings.quota_fixed_cuts),
+            };
+            custom(
+                is_preset(presets, cuts),
+                format_cuts(settings.metric, &cuts, false),
+            )
+        }
+        CostRow::BurnPreset => {
+            let (presets, cuts): (&[[f64; 4]], _) = match settings.metric {
+                CostMetric::Dollars => (&BURN_PRESETS, settings.burn_cuts),
+                CostMetric::Quota => (&QUOTA_BURN_PRESETS, settings.quota_burn_cuts),
+            };
+            custom(
+                is_preset(presets, cuts),
+                format_cuts(settings.metric, &cuts, true),
+            )
+        }
         CostRow::HistoryDays => format!("{} days", settings.history_days),
         CostRow::Budget => {
-            // Whole dollars stay whole; cents only when the budget has them.
-            if settings.budget_usd.fract() == 0.0 {
-                format!("${:.0}", settings.budget_usd)
-            } else {
-                format!("${:.2}", settings.budget_usd)
+            let budget = settings.active_budget();
+            // Whole numbers stay whole; decimals only when the budget has them.
+            match (settings.metric, budget.fract() == 0.0) {
+                (CostMetric::Dollars, true) => format!("${budget:.0}"),
+                (CostMetric::Dollars, false) => format!("${budget:.2}"),
+                (CostMetric::Quota, true) => format!("{budget:.0}%"),
+                (CostMetric::Quota, false) => format!("{budget:.1}%"),
             }
         }
         CostRow::SparklineWindow => format_window(settings.sparkline_window_minutes),
@@ -282,17 +338,29 @@ fn param_value(row: CostRow, app: &App) -> String {
 
 fn param_description(row: CostRow, app: &App) -> String {
     let overlay = app.cost_tracker.overlay();
+    let is_quota = app.cost_settings.metric == CostMetric::Quota;
     match row {
-        CostRow::FixedPreset => {
+        CostRow::QuotaWindow => {
+            "Which Codex rate-limit window the quota figures follow: the short rolling window \
+             or the longer weekly one. Press Enter or click to switch."
+                .to_owned()
+        }
+        CostRow::FixedPreset => if is_quota {
+            "Percent of the plan window at which the level steps up. Any four ascending values \
+             can be set as quota_fixed_cuts under [cost] in config.toml."
+        } else {
             "Dollar totals at which the level steps up. Any four ascending values can be \
              set as fixed_cuts under [cost] in config.toml."
-                .to_owned()
         }
-        CostRow::BurnPreset => {
+        .to_owned(),
+        CostRow::BurnPreset => if is_quota {
+            "Percentage points of the window per hour, measured over the last 15 minutes, at \
+             which the level steps up. Custom values: quota_burn_cuts under [cost]."
+        } else {
             "Dollars per hour, measured over the last 15 minutes, at which the level steps up. \
              Custom values: burn_cuts under [cost] in config.toml."
-                .to_owned()
         }
+        .to_owned(),
         CostRow::HistoryDays => {
             let state = if overlay.is_history_scanning {
                 "scanning…".to_owned()
@@ -304,11 +372,14 @@ fn param_description(row: CostRow, app: &App) -> String {
                  Only transcript tails are read and results are cached, so rescans are cheap."
             )
         }
-        CostRow::Budget => {
+        CostRow::Budget => if is_quota {
+            "Percent of the plan window one agent may use before it counts as over budget. \
+             Custom values: quota_budget_percent under [cost] in config.toml."
+        } else {
             "Dollars one agent may spend before it counts as over budget. Custom values: \
              budget_usd under [cost] in config.toml."
-                .to_owned()
         }
+        .to_owned(),
         CostRow::SparklineWindow => {
             "Time covered by the burn sparkline (six hours by default). Left/Right step through \
              common values from five minutes to thirty days; Enter types any exact window such \
@@ -349,14 +420,68 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
         Style::new().add_modifier(Modifier::BOLD),
     )));
     for text in wrap(
-        "See how much each agent has spent. Figures are estimated from the agent's own \
-         transcript at API list prices (a leading ~ means some model had no known price). \
+        "See how much each agent has used. Dollar figures are estimated from the agent's own \
+         transcript at API list prices (a leading ~ means some model had no known price); \
+         quota figures are percentage points of the plan window, where Codex records them. \
          Every change is saved immediately.",
         usize::from(width.saturating_sub(INSET + 2)),
     ) {
         lines.push(Line::from(Span::styled(format!("  {text}"), dim())));
     }
     lines.push(Line::from(""));
+
+    // ---- what is measured
+    lines.push(Line::from(Span::styled("  WHAT IS MEASURED?", accent)));
+    lines.push(Line::from(""));
+    for metric in CostMetric::ALL {
+        let row = CostRow::Metric(metric);
+        let first_line = lines.len() as u16;
+        let active = settings.metric == metric;
+        let marker = if active { "◉" } else { "○" };
+        let default_tag = if metric == CostMetric::Dollars {
+            "  (default)"
+        } else {
+            ""
+        };
+        let title_style = if is_selected(row) {
+            selected_style
+        } else if active {
+            accent
+        } else {
+            Style::new()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {marker} {}{default_tag}", metric.label()),
+            title_style,
+        )));
+        let body_style = if active { Style::new() } else { dim() };
+        for text in wrap(metric_blurb(metric), body_width) {
+            lines.push(Line::from(Span::styled(
+                format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
+                body_style,
+            )));
+        }
+        let last_line = lines.len() as u16 - 1;
+        spans_out.push(RowSpan {
+            row,
+            first_line,
+            last_line,
+            control_line: first_line,
+            control_x: 0,
+        });
+        lines.push(Line::from(""));
+    }
+    if all_rows.contains(&CostRow::QuotaWindow) {
+        push_control(
+            &mut lines,
+            &mut spans_out,
+            app,
+            CostRow::QuotaWindow,
+            is_selected(CostRow::QuotaWindow),
+            control_x,
+            width,
+        );
+    }
 
     // ---- how "expensive" is decided
     lines.push(Line::from(Span::styled(
@@ -841,5 +966,69 @@ mod tests {
         let up = scroll_for_selection(&app, area, 0, down);
         assert!(up < down);
         assert!(max_scroll(&app, 0, area) > 0);
+    }
+
+    #[test]
+    fn metric_cards_are_always_listed_and_quota_switches_every_unit() {
+        let mut app = app();
+        let page = text(&view(&app, 0, 110));
+        assert!(page.contains("WHAT IS MEASURED?"));
+        assert!(page.contains("◉ API dollars  (default)"));
+        assert!(page.contains("○ Plan quota"));
+        assert!(!page.contains("Quota window"));
+        assert!(page.contains("<$1.00"), "dollar ladders by default");
+
+        app.cost_settings.metric = CostMetric::Quota;
+        let view = view(&app, 0, 110);
+        let page = text(&view);
+        assert!(page.contains("◉ Plan quota"));
+        assert!(page.contains("‹ Short window ›"));
+        assert!(page.contains("<1.0%"), "fixed-band ladder is in percent");
+        assert!(!page.contains("<$1.00"));
+        assert!(page.contains("Claude Code transcripts carry no quota"));
+        let metric_rows = view
+            .rows
+            .iter()
+            .filter(|span| matches!(span.row, CostRow::Metric(_) | CostRow::QuotaWindow))
+            .count();
+        assert_eq!(metric_rows, 3);
+
+        app.cost_settings.calibration = Calibration::Budget;
+        let page = text(&super::view(&app, 0, 110));
+        assert!(page.contains("‹ 10% ›"), "budget is a share of the window");
+        assert!(page.contains("quota_budget_percent"));
+    }
+
+    #[test]
+    fn clicking_a_metric_card_or_the_window_row_activates_it() {
+        let app = app();
+        let area = Rect::new(0, 0, 110, 60);
+        let view = view(&app, 0, 110);
+        let quota_card = view
+            .rows
+            .iter()
+            .find(|span| span.row == CostRow::Metric(CostMetric::Quota))
+            .unwrap();
+        let click = hit(area, 0, Position::new(10, quota_card.first_line + 1), &app).unwrap();
+        assert_eq!(click.row, CostRow::Metric(CostMetric::Quota));
+        assert_eq!(click.direction, 0);
+
+        let mut quota_app = app;
+        quota_app.cost_settings.metric = CostMetric::Quota;
+        let view = super::view(&quota_app, 0, 110);
+        let window = view
+            .rows
+            .iter()
+            .find(|span| span.row == CostRow::QuotaWindow)
+            .unwrap();
+        let click = hit(
+            area,
+            0,
+            Position::new(window.control_x + 4, window.control_line),
+            &quota_app,
+        )
+        .unwrap();
+        assert_eq!(click.row, CostRow::QuotaWindow);
+        assert_eq!(click.direction, 0, "the window is a toggle, not a stepper");
     }
 }

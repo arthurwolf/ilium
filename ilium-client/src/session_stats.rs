@@ -162,6 +162,19 @@ pub struct SpendBucket {
     pub tokens: TokenTotals,
 }
 
+/// Percentage points of one plan-quota window that were used up during one
+/// minute while this session ran. Codex reports the account-wide `used_percent`
+/// of each window; the rise between two readings is what this session saw
+/// being consumed, so concurrent agents on the same account count together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuotaBucket {
+    /// Start of the minute, in Unix milliseconds.
+    pub minute_ms: i64,
+    /// Window name as Codex reports it (`primary` or `secondary`).
+    pub window: Arc<str>,
+    pub percent_points: f64,
+}
+
 const MINUTE_MS: i64 = 60_000;
 
 /// Everything the popover shows about one session.
@@ -210,6 +223,8 @@ pub struct SessionStats {
     /// Per-minute, per-model token spend including sub-agent calls; the
     /// source of the cost sparkline and burn rate.
     pub spend: Vec<SpendBucket>,
+    /// Per-minute rise of each plan-quota window (Codex only).
+    pub quota_spend: Vec<QuotaBucket>,
     pub activity_ms: Vec<i64>,
 
     pub bytes_read: u64,
@@ -317,6 +332,10 @@ pub struct StatsAccumulator {
     codex_rate_limits: Vec<(String, RateLimitWindow)>,
     codex_samples: Vec<TokenSample>,
     codex_spend: BTreeMap<(i64, String), TokenTotals>,
+    /// Last reading per quota window: used percent and the reset instant that
+    /// identifies which window period it belongs to.
+    codex_quota_last: HashMap<String, (f64, Option<i64>)>,
+    codex_quota_spend: BTreeMap<(i64, String), f64>,
 }
 
 impl StatsAccumulator {
@@ -346,6 +365,8 @@ impl StatsAccumulator {
             codex_rate_limits: Vec::new(),
             codex_samples: Vec::new(),
             codex_spend: BTreeMap::new(),
+            codex_quota_last: HashMap::new(),
+            codex_quota_spend: BTreeMap::new(),
         }
     }
 
@@ -762,6 +783,11 @@ impl StatsAccumulator {
                     },
                 ));
             }
+            if let Some(at_ms) = at_ms {
+                for (name, window) in &parsed {
+                    self.record_quota_reading(name, window, at_ms);
+                }
+            }
             if !parsed.is_empty() {
                 self.codex_rate_limits = parsed;
             }
@@ -821,6 +847,28 @@ impl StatsAccumulator {
                 },
             );
         }
+    }
+
+    /// Turns consecutive readings of one window into consumed percentage
+    /// points. A reading from a different window period (the reset instant
+    /// changed) or a lower one only re-baselines: how much of the new period
+    /// this session used is unknown, so nothing is invented.
+    fn record_quota_reading(&mut self, name: &str, window: &RateLimitWindow, at_ms: i64) {
+        let previous = self.codex_quota_last.insert(
+            name.to_owned(),
+            (window.used_percent, window.resets_at_unix),
+        );
+        let Some((last_percent, last_reset)) = previous else {
+            return;
+        };
+        let rise = window.used_percent - last_percent;
+        if last_reset != window.resets_at_unix || rise <= 0.0 {
+            return;
+        }
+        *self
+            .codex_quota_spend
+            .entry((at_ms - at_ms.rem_euclid(MINUTE_MS), name.to_owned()))
+            .or_default() += rise;
     }
 
     // ---------------------------------------------------------------- shared
@@ -950,6 +998,7 @@ impl StatsAccumulator {
                 .map(|(model, value)| (model.clone(), *value)),
         );
         stats.rate_limits = self.codex_rate_limits.clone();
+        stats.quota_spend = self.quota_buckets();
         stats.samples = decimate(self.codex_samples.clone());
         stats.spend = spend_buckets(
             self.codex_spend
@@ -967,6 +1016,24 @@ impl StatsAccumulator {
 }
 
 // --------------------------------------------------------------------- helpers
+
+impl StatsAccumulator {
+    fn quota_buckets(&self) -> Vec<QuotaBucket> {
+        let mut names: HashMap<&str, Arc<str>> = HashMap::new();
+        self.codex_quota_spend
+            .iter()
+            .map(|((minute_ms, window), percent_points)| QuotaBucket {
+                minute_ms: *minute_ms,
+                window: Arc::clone(
+                    names
+                        .entry(window.as_str())
+                        .or_insert_with(|| Arc::from(window.as_str())),
+                ),
+                percent_points: *percent_points,
+            })
+            .collect()
+    }
+}
 
 /// Collects per-minute spend, sharing one allocation per distinct model name.
 fn spend_buckets<'a>(
@@ -1383,6 +1450,41 @@ mod tests {
             r#"{{"timestamp":"{at}","ordinal":1,"type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"cache_write_input_tokens":0,"output_tokens":{},"reasoning_output_tokens":{}}},"last_token_usage":{{"input_tokens":{last_input},"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}},"model_context_window":258400}},"rate_limits":{{"plan_type":"pro","primary":{{"used_percent":74.0,"window_minutes":10080,"resets_at":1790054687}},"secondary":null}}}}}}"#,
             total.0, total.1, total.2, total.3
         )
+    }
+
+    fn codex_quota_event(used: f64, resets_at: i64, at: &str) -> String {
+        format!(
+            r#"{{"timestamp":"{at}","ordinal":1,"type":"event_msg","payload":{{"type":"token_count","info":null,"rate_limits":{{"plan_type":"pro","primary":{{"used_percent":{used},"window_minutes":300,"resets_at":{resets_at}}},"secondary":{{"used_percent":10.0,"window_minutes":10080,"resets_at":999}}}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn codex_quota_rises_become_per_minute_consumption_and_resets_only_rebaseline() {
+        let lines = [
+            codex_quota_event(20.0, 1000, "2026-09-20T02:57:20.000Z"),
+            codex_quota_event(23.5, 1000, "2026-09-20T02:57:50.000Z"),
+            codex_quota_event(23.5, 1000, "2026-09-20T02:58:10.000Z"),
+            codex_quota_event(25.0, 1000, "2026-09-20T02:58:40.000Z"),
+            // Window reset: a lower reading in a new period is a new baseline.
+            codex_quota_event(2.0, 2000, "2026-09-20T03:30:00.000Z"),
+            codex_quota_event(3.0, 2000, "2026-09-20T03:31:00.000Z"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let stats = feed(AgentClass::Codex, &refs);
+        let primary: Vec<f64> = stats
+            .quota_spend
+            .iter()
+            .filter(|bucket| &*bucket.window == "primary")
+            .map(|bucket| bucket.percent_points)
+            .collect();
+        assert_eq!(primary, vec![3.5, 1.5, 1.0]);
+        assert!(
+            stats
+                .quota_spend
+                .iter()
+                .all(|bucket| &*bucket.window != "secondary"),
+            "a flat window consumed nothing"
+        );
     }
 
     #[test]

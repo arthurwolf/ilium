@@ -15,8 +15,9 @@ use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::cost_model::{
-    budget_fill, format_tokens, format_usd, format_usd_per_hour, format_window, meter_string,
-    percent_rank, sparkline_glyphs, Calibration, CalibrationNote, CostLevel,
+    budget_fill, format_amount, format_quota, format_rate, format_tokens, format_usd,
+    format_window, meter_string, percent_rank, sparkline_glyphs, Calibration, CalibrationNote,
+    CostLevel, CostMetric,
 };
 use crate::cost_settings::{CostDisplay, CostSettings};
 use crate::cost_tracker::{CostOverlay, PaneCost, RowCost};
@@ -76,20 +77,25 @@ pub fn segments_for_row(
 ) -> Vec<Segment> {
     let shown = |display: CostDisplay| settings.option(display).is_shown(is_hovered);
     let level_color_of = |row: &RowCost| row.level.map_or(PENDING_COLOR, level_color);
-    let dollars = |row: &RowCost| {
+    let amount = |row: &RowCost| {
         if row.is_loading {
             "…".to_owned()
         } else {
-            format_usd(row.usd, row.is_lower_bound)
+            format_amount(settings.metric, row.amount, row.is_lower_bound)
         }
     };
     let glyph = |row: &RowCost| row.level.map_or('·', CostLevel::glyph).to_string();
 
     let mut segments = Vec::new();
+    if row.is_unavailable {
+        // The chosen metric has no figure for this agent; draw nothing rather
+        // than an empty track that would read as "free".
+        return segments;
+    }
     if is_group {
         if shown(CostDisplay::GroupTotals) {
             segments.push(Segment::new(glyph(row), level_color_of(row), true));
-            segments.push(Segment::new(dollars(row), level_color_of(row), false));
+            segments.push(Segment::new(amount(row), level_color_of(row), false));
         }
         return segments;
     }
@@ -108,7 +114,7 @@ pub fn segments_for_row(
     // both would show it twice.
     if shown(CostDisplay::LevelDollars) {
         segments.push(Segment::new(glyph(row), level_color_of(row), true));
-        segments.push(Segment::new(dollars(row), level_color_of(row), false));
+        segments.push(Segment::new(amount(row), level_color_of(row), false));
     } else if shown(CostDisplay::LevelGlyph) {
         segments.push(Segment::new(glyph(row), level_color_of(row), true));
     }
@@ -135,13 +141,18 @@ pub fn title_suffix(overlay: &CostOverlay, is_hovered: bool) -> Option<String> {
     }
     Some(format!(
         " · Σ {}",
-        format_usd(overlay.total_usd, overlay.total_is_lower_bound)
+        format_amount(
+            overlay.metric,
+            overlay.total_amount,
+            overlay.total_is_lower_bound
+        )
     ))
 }
 
 /// Words describing what the level was measured against.
 fn rating_basis(overlay: &CostOverlay, cost: &PaneCost) -> String {
     let settings = &overlay.settings;
+    let amount = cost.amount(overlay.metric);
     match (settings.calibration, overlay.calibrated.note) {
         (Calibration::FixedBands, _) => "fixed bands".to_owned(),
         (Calibration::PeerRelative, CalibrationNote::NoPeers) => {
@@ -153,13 +164,13 @@ fn rating_basis(overlay: &CostOverlay, cost: &PaneCost) -> String {
         }
         (Calibration::OwnHistory, _) => format!(
             "your history: p{:.0} of {} sessions",
-            percent_rank(&overlay.history_sorted, cost.usd),
+            percent_rank(&overlay.history_sorted, amount),
             overlay.history_sessions
         ),
         (Calibration::Budget, _) => format!(
             "budget: {:.0}% of {}",
-            budget_fill(cost.usd, settings.budget_usd) * 100.0,
-            format_usd(settings.budget_usd, false)
+            budget_fill(amount, settings.active_budget()) * 100.0,
+            format_amount(overlay.metric, settings.active_budget(), false)
         ),
         (Calibration::BurnRate, _) => "burn rate".to_owned(),
     }
@@ -182,10 +193,34 @@ pub fn detail_card_lines(
         .add_modifier(Modifier::BOLD);
     let mut lines = Vec::new();
 
+    let metric = overlay.metric;
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    if metric == CostMetric::Quota && !cost.is_available(metric) {
+        // Claude Code transcripts never record plan quota.
+        lines.push(Line::from(vec![
+            label("Quota"),
+            Span::styled("not recorded by this agent's CLI", dim),
+        ]));
+        lines.push(Line::from(vec![
+            label("Cost"),
+            Span::styled(
+                format!(
+                    "{} (API-equivalent estimate)",
+                    format_usd(cost.usd, cost.is_lower_bound)
+                ),
+                dim,
+            ),
+        ]));
+        return lines;
+    }
     let mut cost_line = vec![
-        label("Cost"),
+        label(if metric == CostMetric::Quota {
+            "Quota"
+        } else {
+            "Cost"
+        }),
         Span::styled(
-            format_usd(cost.usd, cost.is_lower_bound),
+            format_amount(metric, cost.amount(metric), cost.is_lower_bound),
             Style::new().add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
@@ -210,9 +245,21 @@ pub fn detail_card_lines(
         ),
     ]));
 
+    if metric == CostMetric::Quota {
+        lines.push(Line::from(vec![
+            label("Cost"),
+            Span::styled(
+                format!(
+                    "{} (API-equivalent estimate)",
+                    format_usd(cost.usd, cost.is_lower_bound)
+                ),
+                dim,
+            ),
+        ]));
+    }
     let mut burn = vec![
         label("Burn"),
-        Span::raw(format_usd_per_hour(cost.burn_usd_per_hour)),
+        Span::raw(format_rate(metric, cost.burn(metric))),
         Span::styled(" last 15 min", Style::new().add_modifier(Modifier::DIM)),
     ];
     if cost.is_spike {
@@ -263,8 +310,15 @@ pub fn detail_card_lines(
     }
     for (name, percent) in &cost.quota {
         lines.push(Line::from(vec![
-            label("Quota"),
-            Span::raw(format!("{name} window {percent:.0}% used")),
+            label(if metric == CostMetric::Quota {
+                ""
+            } else {
+                "Quota"
+            }),
+            Span::raw(format!(
+                "{name} window {} used account-wide",
+                format_quota(*percent)
+            )),
         ]));
     }
     if !cost.spark_cells.is_empty() {
@@ -383,13 +437,14 @@ mod tests {
     fn row(level: usize, usd: f64) -> RowCost {
         RowCost {
             level: Some(CostLevel::new(level)),
-            usd,
+            amount: usd,
             is_lower_bound: false,
-            burn_usd_per_hour: 0.0,
+            burn_per_hour: 0.0,
             spark: "▁▃█".to_owned(),
             is_spike: false,
             is_over_budget: false,
             is_loading: false,
+            is_unavailable: false,
         }
     }
 
@@ -452,13 +507,14 @@ mod tests {
         settings.adjust(CostRow::Display(CostDisplay::LevelDollars), 0);
         let loading = RowCost {
             level: None,
-            usd: 0.0,
+            amount: 0.0,
             is_lower_bound: false,
-            burn_usd_per_hour: 0.0,
+            burn_per_hour: 0.0,
             spark: String::new(),
             is_spike: false,
             is_over_budget: false,
             is_loading: true,
+            is_unavailable: false,
         };
         assert_eq!(
             text(&segments_for_row(&loading, &settings, true, false)),
@@ -539,7 +595,7 @@ mod tests {
     fn title_suffix_follows_its_visibility_and_needs_agents() {
         let mut overlay = CostOverlay {
             agent_count: 2,
-            total_usd: 52.34,
+            total_amount: 52.34,
             ..CostOverlay::default()
         };
         assert_eq!(
@@ -567,5 +623,81 @@ mod tests {
         let segments = vec![Segment::new("▰▰▱▱▱", Color::Red, false)];
         assert_eq!(draw_segments(&mut buffer, 0, 3, 6, &segments), None);
         assert_eq!(buffer_row(&buffer, 0).trim(), "");
+    }
+
+    #[test]
+    fn quota_rows_draw_percent_and_unavailable_rows_draw_nothing() {
+        let mut settings = CostSettings {
+            metric: CostMetric::Quota,
+            ..CostSettings::default()
+        };
+        settings.adjust(CostRow::Display(CostDisplay::LevelDollars), 0);
+        settings.adjust(CostRow::Visibility(CostDisplay::LevelDollars), 0);
+        let texts: Vec<String> = segments_for_row(&row(2, 6.2), &settings, false, false)
+            .into_iter()
+            .map(|segment| segment.text)
+            .collect();
+        assert!(texts.contains(&"6.2%".to_owned()), "{texts:?}");
+        assert!(!texts.iter().any(|text| text.contains('$')));
+
+        let unavailable = RowCost {
+            level: None,
+            is_unavailable: true,
+            ..row(0, 0.0)
+        };
+        assert!(segments_for_row(&unavailable, &settings, true, false).is_empty());
+    }
+
+    #[test]
+    fn detail_card_for_quota_shows_percent_and_explains_missing_data() {
+        let settings = CostSettings {
+            metric: CostMetric::Quota,
+            calibration: Calibration::FixedBands,
+            ..CostSettings::default()
+        };
+        let overlay = CostOverlay {
+            metric: CostMetric::Quota,
+            settings,
+            ..CostOverlay::default()
+        };
+        let text = |lines: Vec<Line<'static>>| {
+            lines
+                .iter()
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mut cost = PaneCost {
+            usd: 4.0,
+            is_lower_bound: false,
+            burn_usd_per_hour: 0.0,
+            is_spike: false,
+            spark_cells: Vec::new(),
+            quota_points: 7.5,
+            quota_burn_per_hour: 3.0,
+            has_quota: true,
+            tokens: Default::default(),
+            model_costs: Vec::new(),
+            reported_usd: None,
+            quota: vec![("primary".to_owned(), 41.0)],
+            spend_points: Vec::new(),
+        };
+        let page = text(detail_card_lines(&cost, &row(3, 7.5), &overlay));
+        assert!(page.contains("Quota  7.5%"), "{page}");
+        assert!(page.contains("3.0%/h"), "{page}");
+        assert!(page.contains("$4.00 (API-equivalent estimate)"), "{page}");
+        assert!(
+            page.contains("primary window 41% used account-wide"),
+            "{page}"
+        );
+
+        cost.has_quota = false;
+        let page = text(detail_card_lines(&cost, &row(0, 0.0), &overlay));
+        assert!(page.contains("not recorded by this agent's CLI"), "{page}");
     }
 }
