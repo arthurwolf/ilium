@@ -1368,6 +1368,10 @@ impl Drop for PtySession {
 }
 
 #[cfg(test)]
+#[path = "owner_regression_tests.rs"]
+mod owner_regression_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

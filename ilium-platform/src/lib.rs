@@ -49,6 +49,7 @@ pub mod file_lock;
 pub mod interruptible_reader;
 #[cfg(windows)]
 mod nofollow_windows;
+pub mod minecraft;
 pub mod open_external;
 pub mod paths;
 pub mod process_control;
