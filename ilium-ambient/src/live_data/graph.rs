@@ -22,8 +22,10 @@ pub enum GraphMode {
     Candles,
 }
 
-const WINDOW_MINUTES: [i32; 9] = [30, 60, 120, 360, 1440, 10080, 43200, 129600, 525600];
-const WINDOW_LABELS: [&str; 9] = [
+const WINDOW_MINUTES: [i32; 11] = [1, 5, 30, 60, 120, 360, 1440, 10080, 43200, 129600, 525600];
+const WINDOW_LABELS: [&str; 11] = [
+    "1 minute",
+    "5 minutes",
     "30 minutes",
     "1 hour",
     "2 hours",
@@ -82,7 +84,9 @@ impl SceneSettings for GraphSettings {
         if settings.mode == GraphMode::Candles && !settings.source().has_ohlc {
             settings.mode = GraphMode::Line;
         }
-        settings.window_minutes = settings.window_minutes.clamp(30, fetch::MAX_WINDOW_MINUTES);
+        settings.window_minutes = settings
+            .window_minutes
+            .clamp(fetch::MIN_WINDOW_MINUTES, fetch::MAX_WINDOW_MINUTES);
         settings.poll_seconds = settings.poll_seconds.clamp(5, 3600);
         settings.brightness_percent = settings.brightness_percent.clamp(0, 100);
         settings.hue = settings.hue.clamp(0, 360);
@@ -124,7 +128,7 @@ impl SceneSettings for GraphSettings {
         }
         let mut controls = vec![
             Control::choice("source", "Source", selection, &labels,
-                "Public observations; successful requests do not guarantee a new measurement.")
+                "Public observations; successful requests do not guarantee a new measurement. Selecting ISS, Wikipedia or drand from a nonfast source uses one minute only from the default two-hour window; authored windows are retained.")
                 .with_help_detail(format!("{}; {}. {}", source.attribution, source.units, source.documentation)),
             mode,
             window,
@@ -165,6 +169,19 @@ impl SceneSettings for GraphSettings {
                     .and_then(|index| catalog::SOURCES.get(index))
                     .ok_or_else(|| "Choose a listed graph source.".to_owned())?;
                 next.source_id = selected.id.into();
+                let is_fast = |provider: Provider| {
+                    matches!(
+                        provider,
+                        Provider::Iss(_) | Provider::Wikipedia(_) | Provider::DrandRandom
+                    )
+                };
+                if is_fast(selected.provider)
+                    && !is_fast(self.source().provider)
+                    && self.window_minutes == GraphSettings::default().window_minutes
+                {
+                    next.window_minutes = 1;
+                }
+
                 // A two-hour spot-price window cannot usefully display daily
                 // calendar reference rates, especially over a weekend.
                 if matches!(selected.provider, Provider::EcbReference(_))
@@ -582,6 +599,77 @@ mod tests {
     }
 
     #[test]
+    fn one_and_five_minute_presets_normalize_without_changing_the_persisted_field() {
+        let mut settings = GraphSettings {
+            window_minutes: 1,
+            ..Default::default()
+        };
+        assert_eq!(settings.normalized().window_minutes, 1);
+        let row = settings
+            .controls()
+            .into_iter()
+            .find(|row| row.id == "window")
+            .unwrap();
+        assert_eq!(row.display_value(), "1 minute");
+        settings
+            .set_control("window", ControlValue::Index(1))
+            .unwrap();
+        assert_eq!(settings.window_minutes, 5);
+        settings
+            .set_control("window", ControlValue::Number(0))
+            .unwrap();
+        assert_eq!(settings.window_minutes, 1);
+        let persisted = serde_json::to_value(settings).unwrap();
+        assert_eq!(persisted["window_minutes"], 1);
+    }
+    #[test]
+    fn default_nonfast_source_selection_uses_one_minute_for_each_fast_provider() {
+        for id in [
+            "iss_altitude",
+            "iss_velocity",
+            "iss_latitude",
+            "iss_longitude",
+            "wikipedia_edit_rate",
+            "wikipedia_bot_share",
+            "drand_randomness",
+        ] {
+            let mut settings = GraphSettings::default();
+            let selected = catalog::SOURCES
+                .iter()
+                .position(|source| source.id == id)
+                .unwrap();
+            settings
+                .set_control("source", ControlValue::Index(selected))
+                .unwrap();
+            assert_eq!(settings.window_minutes, 1, "{id}");
+            assert!(settings.controls()[0].help.contains("default two-hour"));
+        }
+    }
+    #[test]
+    fn nondefault_windows_and_fast_to_fast_selections_preserve_authored_spans() {
+        for (from, minutes, to) in [
+            ("btc_usd", 5, "iss_altitude"),
+            ("btc_usd", 121, "iss_altitude"),
+            ("eur_usd", 10080, "drand_randomness"),
+            ("iss_altitude", 120, "wikipedia_edit_rate"),
+            ("wikipedia_edit_rate", 5, "drand_randomness"),
+        ] {
+            let mut settings = GraphSettings {
+                source_id: from.into(),
+                window_minutes: minutes,
+                ..Default::default()
+            };
+            let selected = catalog::SOURCES
+                .iter()
+                .position(|source| source.id == to)
+                .unwrap();
+            settings
+                .set_control("source", ControlValue::Index(selected))
+                .unwrap();
+            assert_eq!(settings.window_minutes, minutes, "{from} to {to}");
+        }
+    }
+    #[test]
     fn selecting_daily_reference_starts_with_week_span_and_saved_custom_window_is_honest() {
         let mut settings = GraphSettings::default();
         let ecb = catalog::SOURCES
@@ -654,7 +742,7 @@ mod tests {
         assert_eq!(scene.settings.effective_poll_seconds(), 3600);
         let mut settings = scene.settings.clone();
         settings
-            .set_control("window", ControlValue::Index(8))
+            .set_control("window", ControlValue::Index(WINDOW_MINUTES.len() - 1))
             .unwrap();
         assert_eq!(settings.window_minutes, 525600);
         assert_eq!(settings.normalized().window_minutes, 525600);

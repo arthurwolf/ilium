@@ -91,6 +91,10 @@ impl Frame<'_> {
 /// * Time may only be read from `Frame`, never from the system clock, so
 ///   scenes are testable.
 pub trait Scene: Send {
+    /// Latest pointer position in normalized screen coordinates. Optional input
+    /// does not consume terminal/UI mouse events and must never block.
+    fn pointer(&mut self, _position: Option<[f32; 2]>) {}
+
     fn render(&mut self, frame: &mut Frame<'_>);
 
     /// Optional single-cell text above Braille ink (Pi text mode and live

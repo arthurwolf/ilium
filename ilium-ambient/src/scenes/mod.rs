@@ -1,5 +1,6 @@
 pub mod atlantic_dusk;
 pub mod box_machine;
+pub mod carpet;
 pub mod clouds;
 pub mod cube_clock;
 pub mod dither_water;

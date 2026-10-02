@@ -314,8 +314,7 @@ impl LiveMapScene {
                         intensity,
                     );
                     if self.settings.magnitude_labels {
-                        let text =
-                            magnitude.map_or_else(|| "?".into(), |number| format!("{number:.1}"));
+                        let text = magnitude.map_or_else(|| "?".into(), magnitude_label);
                         // A malformed direct fixture must not grow an unbounded
                         // native label. Parsers already bound real magnitudes.
                         let text = if text.len() <= 12 { text } else { "?".into() };
@@ -587,6 +586,20 @@ fn place_label(
     }
     false
 }
+fn magnitude_label(number: f64) -> String {
+    if number.fract() == 0.0 {
+        return format!("{number:.1}");
+    }
+    let text = number.to_string();
+    // Keep tiny reported magnitudes distinguishable from zero without
+    // allowing a long decimal expansion to consume the whole viewport.
+    if text.len() > 12 {
+        format!("{number:.2e}")
+    } else {
+        text
+    }
+}
+
 fn timestamp_age(time: Option<i64>, now: i64) -> String {
     let Some(time) = time else {
         return "unknown".into();
@@ -624,6 +637,20 @@ fn hue_rgb(hue: i32) -> [u8; 3] {
 mod tests {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
+    #[test]
+    fn reported_magnitude_labels_keep_tiny_nonzero_values() {
+        for (value, expected) in [
+            (0.0, "0.0"),
+            (-0.7, "-0.7"),
+            (0.01, "0.01"),
+            (-0.001, "-0.001"),
+            (1.25, "1.25"),
+            (0.00000000000001, "1.00e-14"),
+        ] {
+            assert_eq!(magnitude_label(value), expected);
+        }
+    }
+
     fn quake(id: &str, longitude: f64, magnitude: Option<f64>) -> Earthquake {
         Earthquake {
             position: Position::new(id.into(), longitude, 0.0, 1000).unwrap(),
@@ -740,14 +767,16 @@ mod tests {
                 quake("a", -120.0, Some(-0.7)),
                 quake("b", 0.0, Some(0.0)),
                 quake("c", 120.0, None),
+                quake("d", 60.0, Some(0.01)),
             ])),
             state: FeedState::default(),
         }));
         paint(&mut scene, 80, 24, 0);
-        assert_eq!(scene.marker_cells.len(), 3);
+        assert_eq!(scene.marker_cells.len(), 4);
         let text: String = scene.labels.iter().flatten().collect();
         assert!(text.contains("-0.7"));
         assert!(text.contains("0.0"));
+        assert!(text.contains("0.01"));
         assert!(text.contains('?'));
         assert!(scene
             .marker_cells

@@ -8,7 +8,9 @@ mod color;
 pub mod noise;
 pub mod placement;
 pub mod render;
+pub mod surface_biomes;
 pub mod terrain;
+pub mod terrain_fields;
 pub mod world;
 
 pub mod ecology;

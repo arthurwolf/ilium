@@ -276,7 +276,7 @@ pub fn threshold(x: usize, y: usize, mode: DitherMode) -> f32 {
         DitherMode::BlueNoise => blue_noise()[(y % BLUE_SIDE) * BLUE_SIDE + x % BLUE_SIDE],
         DitherMode::Gradient => {
             let inner = (0.067_110_56 * x as f32 + 0.005_837_15 * y as f32).fract();
-            (52.982_918_9 * inner).fract().clamp(0.005, 0.995)
+            (52.982_92 * inner).fract().clamp(0.005, 0.995)
         }
         DitherMode::Halftone => halftone()[(y % 8) * 8 + x % 8],
         DitherMode::Lines => ((y % 4) as f32 + 0.5) / 4.0,

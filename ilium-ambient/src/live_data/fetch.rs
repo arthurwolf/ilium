@@ -19,12 +19,13 @@ const ISS: &str = "https://api.wheretheiss.at/v1/satellites/25544";
 const BOATS: &str = "https://meri.digitraffic.fi/api/ais/v1/locations";
 const AIRCRAFT: &str = "https://opensky-network.org/api/states/all";
 
+pub const MIN_WINDOW_MINUTES: i32 = 1;
 pub const MAX_WINDOW_MINUTES: i32 = 525600;
 const CANDLE_INTERVALS: [u64; 6] = [60, 300, 900, 3600, 21600, 86400];
 /// Smallest supported interval needing at most 300 inclusive observations.
 /// A year exceeds even 300 daily candles; that case uses two bounded requests.
 pub fn candle_granularity(window_minutes: i32) -> u64 {
-    let seconds = window_minutes.clamp(30, MAX_WINDOW_MINUTES) as u64 * 60;
+    let seconds = window_minutes.clamp(MIN_WINDOW_MINUTES, MAX_WINDOW_MINUTES) as u64 * 60;
     CANDLE_INTERVALS
         .into_iter()
         .find(|interval| seconds <= interval * 299)
@@ -42,7 +43,7 @@ pub fn graph_urls(
     match source.provider {
         Provider::Coinbase(product)=>{
             let granularity=candle_granularity(window_minutes);
-            let mut start=now.checked_sub_signed(chrono::Duration::minutes(i64::from(window_minutes.clamp(30,MAX_WINDOW_MINUTES)))).unwrap_or(now);
+            let mut start=now.checked_sub_signed(chrono::Duration::minutes(i64::from(window_minutes.clamp(MIN_WINDOW_MINUTES,MAX_WINDOW_MINUTES)))).unwrap_or(now);
             let mut urls=Vec::new();
             while start<now {
                 let end=start.checked_add_signed(chrono::Duration::seconds((299*granularity) as i64)).unwrap_or(now).min(now);
@@ -110,7 +111,7 @@ pub fn graph(
             }
             if matches!(source.provider, Provider::Coinbase(_)) {
                 let start = now.timestamp_millis().saturating_sub(
-                    i64::from(window_minutes.clamp(30, MAX_WINDOW_MINUTES)) * 60000,
+                    i64::from(window_minutes.clamp(MIN_WINDOW_MINUTES, MAX_WINDOW_MINUTES)) * 60000,
                 );
                 merge_candles(&mut data, start, now.timestamp_millis());
                 data.detail = Some(format!(
@@ -210,6 +211,17 @@ mod tests {
             .with_timezone(&chrono::Utc)
     }
     #[test]
+    fn one_minute_plan_covers_exactly_one_minute_and_subminimum_input_clamps_coherently() {
+        let source = super::super::catalog::find("btc_usd").unwrap();
+        for minutes in [0, 1] {
+            let urls = graph_urls(source, minutes, now());
+            assert_eq!(urls.len(), 1);
+            assert!(urls[0]
+                .contains("granularity=60&start=2026-10-02T11:59:00Z&end=2026-10-02T12:00:00Z"));
+            assert_eq!(candle_granularity(minutes), 60);
+        }
+    }
+    #[test]
     fn plans_keep_current_schemas_and_all_sources_have_public_urls() {
         let wind = super::super::catalog::find("solar_wind_speed").unwrap();
         assert!(graph_urls(wind, 120, now())[0].ends_with("/json/rtsw/rtsw_wind_1m.json"));
@@ -228,7 +240,7 @@ mod tests {
     #[test]
     fn every_window_fits_supported_intervals_and_bounded_inclusive_requests() {
         let source = super::super::catalog::find("btc_usd").unwrap();
-        for window in [30, 120, 300, 1440, 10080, 43200, 129600, 525600] {
+        for window in [1, 5, 30, 120, 300, 1440, 10080, 43200, 129600, 525600] {
             let granularity = candle_granularity(window);
             assert!(CANDLE_INTERVALS.contains(&granularity));
             let urls = graph_urls(source, window, now());

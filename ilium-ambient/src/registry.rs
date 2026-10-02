@@ -13,6 +13,7 @@ use crate::scene::{Scene, SceneEnv};
 use crate::scenes::{
     atlantic_dusk::{AtlanticDuskScene, AtlanticDuskSettings},
     box_machine::{BoxMachineScene, BoxMachineSettings},
+    carpet::{CarpetScene, CarpetSettings},
     clouds::{CloudsScene, CloudsSettings},
     cube_clock::{CubeClockScene, CubeClockSettings},
     dither_water::{DitherWaterScene, DitherWaterSettings},
@@ -67,10 +68,11 @@ pub enum AmbientKind {
     Boats,
     Chess,
     OpenStreetMap,
+    Carpet,
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Pipes,
         Self::Stars,
         Self::NightLights,
@@ -99,11 +101,13 @@ impl AmbientKind {
         Self::Boats,
         Self::Chess,
         Self::OpenStreetMap,
+        Self::Carpet,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::OpenStreetMap => "OpenStreetMap",
+            Self::Carpet => "Carpet",
             Self::Pipes => "3D pipes",
             Self::Stars => "Stars overhead",
             Self::SolarSystem => "Solar system",
@@ -137,6 +141,9 @@ impl AmbientKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways around ten world places, drawn as Braille dots with fixed or panning cameras.",
+            Self::Carpet => {
+                "Isometric hatch lines lift over hidden moving spheres and tubes: mouse hunters, Snake, Life, legal chess, Lichess TV, a DVD ball, planets and civil clocks."
+            }
             Self::Graph => "Public observations as Braille lines, bars or genuine OHLC candles, with selectable sources and time scales.",
             Self::Pi => "Exact Pi digits as terminal text or real-font Braille, with scrolling and separate hues for each digit.",
             Self::Earthquakes => "USGS events of every reported magnitude on a coastline map, with pulsing markers and magnitude labels.",
@@ -250,6 +257,7 @@ pub struct AmbientSettings {
     pub solar_system: SolarSystemSettings,
     pub topographic_maps: TopographicMapsSettings,
     pub openstreetmap: OpenStreetMapSettings,
+    pub carpet: CarpetSettings,
     pub night_lights: NightLightsSettings,
     pub clouds: CloudsSettings,
     pub video: VideoSettings,
@@ -284,6 +292,7 @@ impl AmbientSettings {
             solar_system: self.solar_system.normalized(),
             topographic_maps: self.topographic_maps.normalized(),
             openstreetmap: self.openstreetmap.normalized(),
+            carpet: self.carpet.normalized(),
             night_lights: self.night_lights.normalized(),
             clouds: self.clouds.normalized(),
             video: self.video.normalized(),
@@ -317,6 +326,7 @@ impl AmbientSettings {
             AmbientKind::SolarSystem => self.solar_system.controls(),
             AmbientKind::TopographicMaps => self.topographic_maps.controls(),
             AmbientKind::OpenStreetMap => self.openstreetmap.controls(),
+            AmbientKind::Carpet => self.carpet.controls(),
             AmbientKind::NightLights => self.night_lights.controls(),
             AmbientKind::Clouds => self.clouds.controls(),
             AmbientKind::Video => self.video.controls(),
@@ -355,6 +365,7 @@ impl AmbientSettings {
             AmbientKind::SolarSystem => self.solar_system.set_control(id, value),
             AmbientKind::TopographicMaps => self.topographic_maps.set_control(id, value),
             AmbientKind::OpenStreetMap => self.openstreetmap.set_control(id, value),
+            AmbientKind::Carpet => self.carpet.set_control(id, value),
             AmbientKind::NightLights => self.night_lights.set_control(id, value),
             AmbientKind::Clouds => self.clouds.set_control(id, value),
             AmbientKind::Video => self.video.set_control(id, value),
@@ -391,6 +402,7 @@ impl AmbientSettings {
             AmbientKind::SolarSystem => serde_json::to_string(&normalized.solar_system),
             AmbientKind::TopographicMaps => serde_json::to_string(&normalized.topographic_maps),
             AmbientKind::OpenStreetMap => serde_json::to_string(&normalized.openstreetmap),
+            AmbientKind::Carpet => serde_json::to_string(&normalized.carpet),
             AmbientKind::NightLights => serde_json::to_string(&normalized.night_lights),
             AmbientKind::Clouds => serde_json::to_string(&normalized.clouds),
             AmbientKind::Video => serde_json::to_string(&normalized.video),
@@ -445,6 +457,7 @@ impl AmbientSettings {
             )),
             AmbientKind::Boats => Box::new(LiveMapScene::new(MapKind::Boats, &settings.boats, env)),
             AmbientKind::Chess => Box::new(ChessScene::new(&settings.chess, env)),
+            AmbientKind::Carpet => Box::new(CarpetScene::new(&settings.carpet, env)),
             AmbientKind::GalacticEmpires => {
                 Box::new(GalacticEmpiresScene::new(&settings.galactic_empires, env))
             }

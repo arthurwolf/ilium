@@ -45,4 +45,5 @@ pub use scenes::voxel_landscape::VoxelLandscapeSettings;
 pub use scenes::galactic_empires::GalacticEmpiresSettings;
 pub use scenes::topographic_maps::TopographicMapsSettings;
 
+pub use scenes::carpet::CarpetSettings;
 pub use scenes::openstreetmap::{GeometryMap, OpenStreetMapSettings, SourceElement};

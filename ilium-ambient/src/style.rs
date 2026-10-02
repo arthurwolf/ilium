@@ -1310,8 +1310,9 @@ mod tests {
             ),
             (300, 180, 50)
         );
+        // Extreme (clamped) settings still produce a colour, never a panic.
         let color = wild.shade([0; 3], None, &context());
-        assert!(color.iter().all(|channel| *channel <= 255));
+        assert_eq!(color.len(), 3);
     }
 
     #[test]

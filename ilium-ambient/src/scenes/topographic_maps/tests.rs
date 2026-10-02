@@ -405,11 +405,13 @@ fn reconfigure_keeps_the_loaded_world_unless_the_world_changes() {
     let mut scene = scene(&base);
     render_loaded(&mut scene, 0.0, 60, 20);
     let loaded = Arc::clone(&scene.current.as_ref().expect("loaded").field);
-    let mut ambient = AmbientSettings::default();
-    ambient.topographic_maps = TopographicMapsSettings {
-        interval_m: 2000,
-        zoom_percent: 300,
-        ..base.clone()
+    let mut ambient = AmbientSettings {
+        topographic_maps: TopographicMapsSettings {
+            interval_m: 2000,
+            zoom_percent: 300,
+            ..base.clone()
+        },
+        ..Default::default()
     };
     assert!(scene.reconfigure(&ambient));
     let current = scene.current.as_ref().expect("still loaded");
