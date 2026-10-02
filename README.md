@@ -26,13 +26,13 @@ or an [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/iliu
 Both install for your user without administrator rights, add Ilium to your `PATH`,
 and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
 
-Open a new terminal in your project and run `ilium`. Re-run the installer to upgrade.
+Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. Re-run the installer to upgrade.
 
 No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately.
 
 [Release packages](#install-from-release-packages) · [Build from source](#building-from-source)
 
-> **Network by default:** AI titles and tree organization send prompts to Kilo Gateway. Choose a local provider or disable these features before entering sensitive content. [Inference settings](#inference-and-privacy).
+> **AI privacy:** First-run setup lets you choose Kilo Gateway, paid APIs, local Ollama or Skip. Automatic AI requests remain paused until setup finishes. Existing configurations keep their provider; Kilo Gateway sends prompts to its service. [Inference settings](#inference-and-privacy).
 
 ## See it in action
 
@@ -183,11 +183,23 @@ No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and in
 </td>
 <td width="50%" valign="top"></td>
 </tr>
+<tr>
+<td colspan="2" width="100%" valign="top">
+<p>
+<strong>Choose an animation, then watch it play</strong>
+</p>
+<p>
+<a href="assets/demos/26-animations.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/26-animations.gif" alt="All 26 animations: open Settings, select a scene, close Settings, and watch it play" width="100%">
+</a>
+</p>
+</td>
+</tr>
 </tbody>
 </table>
 
 <details>
-<summary>Show the other 14 demos</summary>
+<summary>Show the other 15 demos</summary>
 
 <table width="100%">
 <tbody>
@@ -345,6 +357,19 @@ No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and in
 </p>
 </td>
 </tr>
+<tr>
+<td width="50%" valign="top">
+<p>
+<strong>Convert a session between Claude and Codex</strong>
+</p>
+<p>
+<a href="assets/demos/26-convert-session.gif?raw=true" target="_blank" rel="noopener noreferrer">
+<img src="assets/demos/26-convert-session.gif" alt="A Claude session converts to Codex, which still remembers the secret word, then converts back to Claude" width="100%">
+</a>
+</p>
+</td>
+<td width="50%" valign="top"></td>
+</tr>
 </tbody>
 </table>
 
@@ -396,7 +421,7 @@ The `/goal` badge reports observed activity; Ilium does not control the agent.
 
 ### Agent cost
 
-**Settings → Agent Cost** adds spend indicators, totals, and cost sorting to the tree. The default meter appears when you hover an agent.
+**Settings → Agent Cost** adds spend indicators, totals, and cost sorting to the tree. The default meter appears when you hover an agent. Measure estimated API dollars (default) or plan quota: percentage points of the Codex rate-limit window used while the agent ran (Codex only, account-wide). Thresholds, budget and history follow the chosen unit.
 
 Costs estimate API list prices from agent and sub-agent transcripts. They can lag live use and do not represent subscription charges. A leading `~` flags an unknown model price.
 
