@@ -1,0 +1,62 @@
+{
+  "source_file": "ilium-ambient/assets/openstreetmap/paris.json",
+  "source_sha256": "407238fb95ee6f0c4102eb863e4d6b1a20ca9dd225776fe721806194ecd0bece",
+  "fixture_sha256": "73b88a57a9c001eb46723b1e3fb89bbb9cc1b7278b6110564215ef7515648f79",
+  "license": "ODbL-1.0",
+  "attribution": "© OpenStreetMap contributors",
+  "copyright_url": "https://www.openstreetmap.org/copyright",
+  "elements": {
+    "roads": {
+      "type": "way",
+      "id": 600574637,
+      "tags": {
+        "highway": "steps"
+      }
+    },
+    "buildings": {
+      "type": "node",
+      "id": 3032793634,
+      "tags": {
+        "access": "private",
+        "amenity": "place_of_worship",
+        "building": "chapel",
+        "denomination": "catholic",
+        "name": "Chapelle Saint-Louis",
+        "religion": "christian",
+        "wikidata": "Q26203260"
+      }
+    },
+    "water": {
+      "type": "way",
+      "id": 79738438,
+      "tags": {
+        "natural": "water",
+        "source": "cadastre-dgi-fr source : Direction Générale des Impôts - Cadastre. Mise à jour : 2010"
+      }
+    },
+    "green_space": {
+      "type": "way",
+      "id": 627750410,
+      "tags": {
+        "landuse": "meadow"
+      }
+    },
+    "railways": {
+      "type": "way",
+      "id": 387178589,
+      "tags": {
+        "layer": "2",
+        "level": "1",
+        "railway": "platform"
+      }
+    },
+    "points_of_interest": {
+      "type": "node",
+      "id": 14130925800,
+      "tags": {
+        "amenity": "bench"
+      }
+    }
+  },
+  "transform": "Six whole unmodified OSM elements selected from retained Paris extract; no invented data"
+}

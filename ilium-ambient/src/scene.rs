@@ -3,6 +3,7 @@
 use crate::gpu::GpuRunner;
 use crate::location::GeoLocation;
 use crate::raster::Raster;
+use crate::registry::AmbientSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -92,6 +93,13 @@ impl Frame<'_> {
 pub trait Scene: Send {
     fn render(&mut self, frame: &mut Frame<'_>);
 
+    /// Optional single-cell text above Braille ink (Pi text mode and live
+    /// map labels). Hosts call this after rendering; it must be bounded,
+    /// nonblocking, and return only characters of one terminal cell width.
+    fn native_glyph(&self, _x: u16, _y: u16) -> Option<char> {
+        None
+    }
+
     /// True when the scene supplies `Frame::cell_colors`; otherwise the
     /// host paints every dot in the user's global palette.
     fn uses_cell_colors(&self) -> bool {
@@ -101,6 +109,14 @@ pub trait Scene: Send {
     /// Requested redraw cadence, 1..=30.
     fn frames_per_second(&self) -> u32 {
         12
+    }
+
+    /// Take changed settings without being rebuilt, keeping the scene's own
+    /// state: a running game keeps playing while its colours are adjusted.
+    /// Return `true` when the settings were applied; the default `false`
+    /// makes the host drop this scene and build a fresh one.
+    fn reconfigure(&mut self, _settings: &AmbientSettings) -> bool {
+        false
     }
 
     /// One short status line for the Settings panel ("Downloading tiles 40%",

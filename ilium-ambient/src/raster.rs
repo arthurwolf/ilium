@@ -6,6 +6,19 @@ pub enum DitherMode {
     #[default]
     Ordered,
     Stippled,
+    Bayer2,
+    Bayer4,
+    Bayer16,
+    BlueNoise,
+    Gradient,
+    Halftone,
+    Lines,
+    Diagonal,
+    Crosshatch,
+    WhiteNoise,
+    FloydSteinberg,
+    Atkinson,
+    SierraLite,
 }
 
 #[derive(Debug, Default)]
@@ -114,24 +127,7 @@ pub fn smoothstep(low: f32, high: f32, value: f32) -> f32 {
 }
 
 pub fn threshold(x: usize, y: usize, mode: DitherMode) -> f32 {
-    match mode {
-        DitherMode::Ordered => {
-            const BAYER: [[u8; 8]; 8] = [
-                [0, 48, 12, 60, 3, 51, 15, 63],
-                [32, 16, 44, 28, 35, 19, 47, 31],
-                [8, 56, 4, 52, 11, 59, 7, 55],
-                [40, 24, 36, 20, 43, 27, 39, 23],
-                [2, 50, 14, 62, 1, 49, 13, 61],
-                [34, 18, 46, 30, 33, 17, 45, 29],
-                [10, 58, 6, 54, 9, 57, 5, 53],
-                [42, 26, 38, 22, 41, 25, 37, 21],
-            ];
-            (f32::from(BAYER[y % 8][x % 8]) + 0.5) / 64.0
-        }
-        // A fixed irregular 64x64 threshold tile: spatial stipple, deliberately
-        // not advertised as a spectrally optimized blue-noise distribution.
-        DitherMode::Stippled => 0.005 + hash((x % 64) as i32, (y % 64) as i32) * 0.99,
-    }
+    crate::dither::threshold(x, y, mode)
 }
 
 #[cfg(test)]

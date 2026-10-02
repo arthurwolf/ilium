@@ -1,6 +1,6 @@
 //! Shared plumbing for scenes that fetch data or run helper processes.
 //!
-//! Every network fetch goes through `http_get`: a proper User-Agent, bounded
+//! Network reads use `http_get` or `http_stream_lines`: a proper User-Agent, bounded
 //! size and time, and a process-wide minimum spacing per host so a scene can
 //! never hammer a public service (keep the user's IP reputation clean).
 
@@ -126,7 +126,9 @@ pub fn sleep_unless_stopped(stop: &AtomicBool, duration: Duration) -> bool {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(100).min(deadline - Instant::now()));
+        std::thread::sleep(
+            Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
     !stop.load(Ordering::Relaxed)
 }
@@ -137,6 +139,10 @@ pub enum FetchError {
     NotHttps(String),
     #[error("request failed: {0}")]
     Request(String),
+    #[error("request cancelled")]
+    Cancelled,
+    #[error("request timeout, including host admission")]
+    Timeout,
     #[error("response larger than {0} bytes")]
     TooLarge(usize),
 }
@@ -152,31 +158,65 @@ fn host_of(url: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn wait_for_host_slot(url: &str) {
+fn wait_for_host_slot(
+    url: &str,
+    deadline: Instant,
+    stop: Option<&AtomicBool>,
+) -> Result<Duration, FetchError> {
     let table = LAST_REQUEST.get_or_init(Default::default);
     let host = host_of(url);
-    let wait = {
-        let mut table = table
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(FetchError::Cancelled);
+        }
         let now = Instant::now();
-        let ready_at = table
-            .get(&host)
-            .map_or(now, |last| (*last + MIN_HOST_SPACING).max(now));
-        table.insert(host, ready_at);
-        ready_at.saturating_duration_since(now)
-    };
-    if !wait.is_zero() {
-        std::thread::sleep(wait);
+        let remaining = deadline.saturating_duration_since(now);
+        if remaining.is_zero() {
+            return Err(FetchError::Timeout);
+        }
+        let wait = {
+            let mut table = table
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let ready_at = table
+                .get(&host)
+                .map_or(now, |last| *last + MIN_HOST_SPACING);
+            if ready_at <= now {
+                // Reserve only an admitted request; cancelled waiters never build a future queue.
+                table.insert(host.clone(), now);
+                return Ok(remaining);
+            }
+            ready_at.saturating_duration_since(now)
+        };
+        std::thread::sleep(wait.min(remaining).min(Duration::from_millis(20)));
     }
 }
 
 /// Blocking GET for use from worker threads only, never from `Scene::render`.
 pub fn http_get(url: &str, max_bytes: usize, timeout: Duration) -> Result<Vec<u8>, FetchError> {
+    http_get_inner(url, max_bytes, timeout, None)
+}
+
+/// GET that prevents a stopped live worker from starting a queued request.
+pub fn http_get_stoppable(
+    url: &str,
+    max_bytes: usize,
+    timeout: Duration,
+    stop: &AtomicBool,
+) -> Result<Vec<u8>, FetchError> {
+    http_get_inner(url, max_bytes, timeout, Some(stop))
+}
+
+fn http_get_inner(
+    url: &str,
+    max_bytes: usize,
+    timeout: Duration,
+    stop: Option<&AtomicBool>,
+) -> Result<Vec<u8>, FetchError> {
     if !url.starts_with("https://") {
         return Err(FetchError::NotHttps(url.to_owned()));
     }
-    wait_for_host_slot(url);
+    let timeout = wait_for_host_slot(url, Instant::now() + timeout, stop)?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
@@ -197,6 +237,55 @@ pub fn http_get(url: &str, max_bytes: usize, timeout: Duration) -> Result<Vec<u8
         return Err(FetchError::TooLarge(max_bytes));
     }
     Ok(bytes)
+}
+
+/// Read an HTTPS NDJSON connection on an owned worker. The callback receives
+/// complete bounded lines and returns false to stop. A finite connection
+/// lifetime bounds cancellation during a blocked read; callers back off
+/// before reconnecting and retain the last successfully decoded event.
+pub fn http_stream_lines(
+    url: &str,
+    max_line_bytes: usize,
+    timeout: Duration,
+    stop: &AtomicBool,
+    mut receive: impl FnMut(&[u8]) -> bool,
+) -> Result<(), FetchError> {
+    use std::io::BufRead;
+    if !url.starts_with("https://") {
+        return Err(FetchError::NotHttps(url.to_owned()));
+    }
+    let timeout = wait_for_host_slot(url, Instant::now() + timeout, Some(stop))?;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .user_agent(USER_AGENT)
+        .build()
+        .into();
+    let mut response = agent
+        .get(url)
+        .call()
+        .map_err(|error| FetchError::Request(error.to_string()))?;
+    let mut reader = std::io::BufReader::new(response.body_mut().as_reader());
+    let limit = max_line_bytes.clamp(1, 1_048_576);
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return Err(FetchError::Cancelled);
+        }
+        let mut line = Vec::new();
+        let read = reader
+            .by_ref()
+            .take(limit as u64 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|error| FetchError::Request(error.to_string()))?;
+        if read == 0 {
+            return Ok(());
+        }
+        if line.len() > limit {
+            return Err(FetchError::TooLarge(limit));
+        }
+        if !receive(&line) {
+            return Ok(());
+        }
+    }
 }
 
 /// Stable, filesystem-safe file name for a URL (FNV-1a hash + short suffix).
@@ -252,6 +341,44 @@ pub fn fetch_cached(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopped_worker_never_admits_a_request_or_reserves_a_future_slot() {
+        let stop = AtomicBool::new(true);
+        let url = "https://stopped-worker.invalid/data";
+        assert!(matches!(
+            http_get_stoppable(url, 10, Duration::from_secs(1), &stop),
+            Err(FetchError::Cancelled)
+        ));
+        assert!(!LAST_REQUEST
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .contains_key(&host_of(url)));
+    }
+
+    #[test]
+    fn host_admission_obeys_timeout_without_extending_the_queue() {
+        let url = "https://admission-budget.invalid/data";
+        let reserved = Instant::now() + Duration::from_secs(1);
+        LAST_REQUEST
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .insert(host_of(url), reserved);
+        assert!(matches!(
+            wait_for_host_slot(url, Instant::now() + Duration::from_millis(10), None),
+            Err(FetchError::Timeout)
+        ));
+        assert_eq!(
+            LAST_REQUEST
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .get(&host_of(url)),
+            Some(&reserved)
+        );
+    }
 
     #[test]
     fn worker_drop_stops_and_joins_the_thread() {

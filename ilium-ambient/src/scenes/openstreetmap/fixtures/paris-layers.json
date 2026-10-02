@@ -1,0 +1,195 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-02T04:33:03Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "way",
+      "id": 600574637,
+      "bounds": {
+        "minlat": 48.857697,
+        "minlon": 2.2909355,
+        "maxlat": 48.857708,
+        "maxlon": 2.2909528
+      },
+      "nodes": [
+        4547131005,
+        5710424204
+      ],
+      "geometry": [
+        {
+          "lat": 48.857708,
+          "lon": 2.2909355
+        },
+        {
+          "lat": 48.857697,
+          "lon": 2.2909528
+        }
+      ],
+      "tags": {
+        "highway": "steps"
+      }
+    },
+    {
+      "type": "node",
+      "id": 3032793634,
+      "lat": 48.8527313,
+      "lon": 2.3035652,
+      "tags": {
+        "access": "private",
+        "amenity": "place_of_worship",
+        "building": "chapel",
+        "denomination": "catholic",
+        "name": "Chapelle Saint-Louis",
+        "religion": "christian",
+        "wikidata": "Q26203260"
+      }
+    },
+    {
+      "type": "way",
+      "id": 79738438,
+      "bounds": {
+        "minlat": 48.8616268,
+        "minlon": 2.289421,
+        "maxlat": 48.8617364,
+        "maxlon": 2.2896258
+      },
+      "nodes": [
+        930613919,
+        2680395487,
+        930613407,
+        930613808,
+        930613755,
+        930614235,
+        930613919
+      ],
+      "geometry": [
+        {
+          "lat": 48.8616277,
+          "lon": 2.2895636
+        },
+        {
+          "lat": 48.8616527,
+          "lon": 2.2895251
+        },
+        {
+          "lat": 48.8616268,
+          "lon": 2.2894863
+        },
+        {
+          "lat": 48.861669,
+          "lon": 2.289421
+        },
+        {
+          "lat": 48.8617364,
+          "lon": 2.289521
+        },
+        {
+          "lat": 48.8616689,
+          "lon": 2.2896258
+        },
+        {
+          "lat": 48.8616277,
+          "lon": 2.2895636
+        }
+      ],
+      "tags": {
+        "natural": "water",
+        "source": "cadastre-dgi-fr source : Direction Générale des Impôts - Cadastre. Mise à jour : 2010"
+      }
+    },
+    {
+      "type": "way",
+      "id": 627750410,
+      "bounds": {
+        "minlat": 48.8626647,
+        "minlon": 2.3041331,
+        "maxlat": 48.862729,
+        "maxlon": 2.3042599
+      },
+      "nodes": [
+        5926230283,
+        5926230282,
+        5926230281,
+        5926230280,
+        5926230283
+      ],
+      "geometry": [
+        {
+          "lat": 48.862729,
+          "lon": 2.3042598
+        },
+        {
+          "lat": 48.8626676,
+          "lon": 2.3042599
+        },
+        {
+          "lat": 48.8626647,
+          "lon": 2.3041346
+        },
+        {
+          "lat": 48.8627258,
+          "lon": 2.3041331
+        },
+        {
+          "lat": 48.862729,
+          "lon": 2.3042598
+        }
+      ],
+      "tags": {
+        "landuse": "meadow"
+      }
+    },
+    {
+      "type": "way",
+      "id": 387178589,
+      "bounds": {
+        "minlat": 48.8535917,
+        "minlon": 2.2889804,
+        "maxlat": 48.8541974,
+        "maxlon": 2.289598
+      },
+      "nodes": [
+        6063948968,
+        3905020337,
+        3905020339,
+        2557090471
+      ],
+      "geometry": [
+        {
+          "lat": 48.8535917,
+          "lon": 2.289598
+        },
+        {
+          "lat": 48.8539082,
+          "lon": 2.289283
+        },
+        {
+          "lat": 48.8541793,
+          "lon": 2.289021
+        },
+        {
+          "lat": 48.8541974,
+          "lon": 2.2889804
+        }
+      ],
+      "tags": {
+        "layer": "2",
+        "level": "1",
+        "railway": "platform"
+      }
+    },
+    {
+      "type": "node",
+      "id": 14130925800,
+      "lat": 48.8554037,
+      "lon": 2.28315,
+      "tags": {
+        "amenity": "bench"
+      }
+    }
+  ]
+}
