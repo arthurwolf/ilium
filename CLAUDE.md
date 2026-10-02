@@ -113,6 +113,16 @@ Use the `directories` crate, never hardcode `~`:
 - Don't build the WASM plugin system, remote/SSH sharing, or agent-driving/SDK surface — see ARCHITECTURE.md "Non-goals." If a task seems to need one of those, stop and flag it rather than building toward it.
 - Milestones in ARCHITECTURE.md (M0–M5) are meant to be built in order. M0–M4 are done; M5 (config surface, snapshot-restore-on-boot, notifications) is partially done — read ARCHITECTURE.md "Implementation plan" for exactly what M5 covers (custom detection signatures, keybinding remap, a four-color theme override, snapshot respawn-on-boot, desktop notifications) and what it still deliberately leaves out (resuming an agent CLI's own session on restore; theming beyond the four colors listed) before assuming a piece of it already exists.
 
+## Background animations: the shared look is mandatory
+
+Every background animation (built-in, hosted `ilium-ambient` scene, Wikipedia, and every future one) must get the shared look and pattern controls for free, never by re-implementing them:
+
+- **Colour is global, not per scene.** `ilium_ambient::style::Appearance` (one value on `AnimationSettings`) owns colour mode (Color / Greyscale / Monotone), palette (38+ presets incl. pastel), colour source, reverse/shift/spread, brightness, contrast, gamma, colour intensity, hue shift, invert, edge fade, grey tint, style presets, and the pattern contrast/invert. The client applies it per cell after dithering (`background_composition::LookPaint`). A scene draws tone into the raster and, only if it has natural colours, per-cell colours; it must not add its own brightness/contrast/hue/palette/saturation controls. Scene-internal colour choices that are the scene's content (a map's land/sea colours, a game's team colours) are allowed; they are then recoloured through the shared look.
+- **Dithering is global.** Every `DitherMode` (matrix and error-diffusion) is available to every scene through the shared Dither row; add new algorithms in `ilium-ambient/src/dither.rs`, never inside a scene.
+- **Display is global.** Panel placement (both / left / right), frame-rate cap, speed, density and background on/off are shared rows, not scene settings.
+- **Scene settings are only what is specific to the scene.** If something can reasonably be configured and is not, add it as a scene control (`Control` rows, with range clamping in `normalized`, persistence, a help topic and a test).
+- **A new animation is not done until** it appears in the Settings list, the shared rows apply to it (the row-model tests cover every `AnimationKind`), its scene controls round-trip through `set_control`, its help topic exists, and `README.md`/`ARCHITECTURE.md` mention it. New shared controls get a help id in `animation_rows::STYLE_HELP_IDS` and a topic in `settings_help/catalog/topics.json`.
+
 ## Icon rendering
 
 - Never "fix" an icon rendering or width issue by replacing the normal UTF-8 icons with plain stable glyphs. Diagnose and correct the rendering, cell-width, or diff behavior while keeping normal icons as the default. A stable-glyph mode may exist only as an explicit, opt-in user preference.
