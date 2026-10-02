@@ -238,6 +238,9 @@ def native(arguments):
         environment['RUST_TEST_THREADS'] = '1'
         # /var is a symlink to /private/var; tests compare resolved paths.
         environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
+    if target['os'] == 'linux' and target['arch'] == 'aarch64':
+        # The hosted arm64 runners miss PTY click/resize deadlines when UI tests run concurrently.
+        environment['RUST_TEST_THREADS'] = '1'
     if target['os'] == 'windows':
         # Plain CI passes these PTY tests; the slower static-CRT release lane
         # misses detection/render deadlines when they run concurrently.
@@ -345,7 +348,7 @@ def native(arguments):
         command.extend(['--runtime-directory', runtime_root])
     if target['os'] == 'windows':
         vswhere = Path(os.environ['ProgramFiles(x86)']) / 'Microsoft Visual Studio/Installer/vswhere.exe'
-        tools = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-find', 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe'], text=True).splitlines()
+        tools = subprocess.check_output([str(vswhere), '-latest', '-version', '[17.0,18.0)', '-products', '*', '-find', 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe'], text=True).splitlines()
         require(len(tools) == 1, 'cannot resolve unique native dumpbin')
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
