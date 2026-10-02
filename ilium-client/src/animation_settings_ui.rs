@@ -170,7 +170,12 @@ pub fn layout_with_footer(area: Rect, footer: u16) -> AnimationLayout {
             left.saturating_sub(1),
             u16::from(available > 3),
         ),
-        global: Rect::new(area.x, global_heading_y + HEADER_ROWS, list_width, global_rows),
+        global: Rect::new(
+            area.x,
+            global_heading_y + HEADER_ROWS,
+            list_width,
+            global_rows,
+        ),
         controls_heading: Rect::new(
             controls_x,
             area.y,
@@ -237,7 +242,10 @@ impl Scrolls {
     /// Every offset limited to what its region can scroll.
     pub fn clamped(mut self, area: Rect, model: &RowModel) -> Self {
         for region in [Region::Scenes, Region::Global, Region::Controls] {
-            self.set(region, self.get(region).min(max_scroll(area, model, region)));
+            self.set(
+                region,
+                self.get(region).min(max_scroll(area, model, region)),
+            );
         }
         self
     }
@@ -287,7 +295,10 @@ pub fn region_at(area: Rect, model: &RowModel, position: Position) -> Option<Reg
             Region::Global
         });
     }
-    layout.controls.contains(position).then_some(Region::Controls)
+    layout
+        .controls
+        .contains(position)
+        .then_some(Region::Controls)
 }
 
 /// Mouse-wheel scrolling of the region under `position` by `delta` rows.
@@ -325,9 +336,7 @@ pub fn row_rect(area: Rect, model: &RowModel, row: usize, scrolls: Scrolls) -> O
     if rows.width <= 1 || rows.height == 0 {
         return None;
     }
-    let relative = model
-        .visual_row(row)?
-        .checked_sub(scrolls.get(region))?;
+    let relative = model.visual_row(row)?.checked_sub(scrolls.get(region))?;
     if relative >= rows.height {
         return None;
     }
@@ -415,7 +424,11 @@ pub fn hit(
         if position.x < nav.x + NAV_BUTTON_WIDTH.min(nav.width / 2) {
             return Some(AnimationHit::PreviousScene);
         }
-        if position.x >= nav.right().saturating_sub(NAV_BUTTON_WIDTH.min(nav.width / 2)) {
+        if position.x
+            >= nav
+                .right()
+                .saturating_sub(NAV_BUTTON_WIDTH.min(nav.width / 2))
+        {
             return Some(AnimationHit::NextScene);
         }
         return None;
@@ -709,8 +722,11 @@ fn draw_section_headings(
         };
         if relative < rows.height {
             frame.render_widget(
-                Paragraph::new(fit(&format!("\u{2500} {section} \u{2500}"), usize::from(rows.width)))
-                    .style(ink.add_modifier(Modifier::BOLD | Modifier::DIM)),
+                Paragraph::new(fit(
+                    &format!("\u{2500} {section} \u{2500}"),
+                    usize::from(rows.width),
+                ))
+                .style(ink.add_modifier(Modifier::BOLD | Modifier::DIM)),
                 Rect::new(rows.x, rows.y + relative, rows.width, 1),
             );
         }
@@ -728,7 +744,12 @@ fn draw_scene_nav(frame: &mut Frame, area: Rect, model: &RowModel, app: &App, in
         .position(|kind| *kind == app.animation_settings.kind)
         .unwrap_or(0);
     let count = format!("{}/{}", index + 1, AnimationKind::ALL.len());
-    let button = |text: &str| format!("{text:<width$}", width = usize::from(NAV_BUTTON_WIDTH.min(nav.width / 2)));
+    let button = |text: &str| {
+        format!(
+            "{text:<width$}",
+            width = usize::from(NAV_BUTTON_WIDTH.min(nav.width / 2))
+        )
+    };
     let width = usize::from(nav.width);
     let previous = button("\u{25c0} Prev");
     let next = format!(
@@ -763,8 +784,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     };
     if layout.scene_heading.height > 0 {
         frame.render_widget(
-            Paragraph::new(fit(scene_heading, usize::from(layout.scene_heading.width)))
-                .style(bold),
+            Paragraph::new(fit(scene_heading, usize::from(layout.scene_heading.width))).style(bold),
             layout.scene_heading,
         );
     }
@@ -985,11 +1005,22 @@ mod tests {
         let columns = layout(area);
         let none = Scrolls::default();
         let scene = row_rect(area, &model, 0, none).unwrap();
-        assert_eq!((scene.x, scene.y), (area.x, area.y + 1), "list under heading");
+        assert_eq!(
+            (scene.x, scene.y),
+            (area.x, area.y + 1),
+            "list under heading"
+        );
         let control = model.first_control_index();
         let control_rect = row_rect(area, &model, control, none).unwrap();
-        assert_eq!(control_rect.y, area.y + 2, "right column starts under its heading and section");
-        assert!(control_rect.x >= columns.scenes.right(), "controls sit right of the left column");
+        assert_eq!(
+            control_rect.y,
+            area.y + 2,
+            "right column starts under its heading and section"
+        );
+        assert!(
+            control_rect.x >= columns.scenes.right(),
+            "controls sit right of the left column"
+        );
         let global = model.region_rows(Region::Global).next().unwrap();
         let global_rect = row_rect(area, &model, global, none).unwrap();
         assert!(global_rect.x < columns.scenes.right() && global_rect.y > scene.y);
@@ -998,7 +1029,13 @@ mod tests {
             .region_rows(Region::Controls)
             .find(|row| model.view(*row).is_some_and(|view| view.slider().is_some()))
             .unwrap();
-        assert!(slider_geometry(area, &model, right_slider, none).unwrap().track.width >= 32);
+        assert!(
+            slider_geometry(area, &model, right_slider, none)
+                .unwrap()
+                .track
+                .width
+                >= 32
+        );
         let left_slider = model
             .region_rows(Region::Global)
             .find(|row| model.view(*row).is_some_and(|view| view.slider().is_some()))
@@ -1173,11 +1210,19 @@ mod tests {
             }
             // The single ink color belongs to Monotone mode only.
             for id in ["lightness", "hue", "saturation"] {
-                assert!(!list.contains(&AnimationRow::Common(id)), "{id} hides in Color mode");
+                assert!(
+                    !list.contains(&AnimationRow::Common(id)),
+                    "{id} hides in Color mode"
+                );
             }
             // Region order: scenes, then global, then the animation's own.
             let regions: Vec<Region> = list.iter().map(AnimationRow::region).collect();
-            assert!(regions.windows(2).all(|pair| (pair[0] as u8) <= (pair[1] as u8)), "{kind:?}");
+            assert!(
+                regions
+                    .windows(2)
+                    .all(|pair| (pair[0] as u8) <= (pair[1] as u8)),
+                "{kind:?}"
+            );
             if kind == AnimationKind::Wikipedia {
                 assert!(list.contains(&AnimationRow::SceneControl("wiki_scroll")));
                 assert!(list.contains(&AnimationRow::SceneControl("wiki_zoom")));
@@ -2091,7 +2136,9 @@ mod tests {
             let model = RowModel::new(&settings, &RowContext::default());
             let global: Vec<_> = model.region_rows(Region::Global).collect();
             let controls: Vec<_> = model.region_rows(Region::Controls).collect();
-            assert!(global.iter().any(|row| *model.row(*row).unwrap() == AnimationRow::Common("look_brightness")));
+            assert!(global
+                .iter()
+                .any(|row| *model.row(*row).unwrap() == AnimationRow::Common("look_brightness")));
             for row in &controls {
                 assert!(
                     !matches!(model.row(*row), Some(AnimationRow::Common(id)) if id.starts_with("look_") || matches!(*id, "panels" | "background" | "dither" | "density" | "speed")),
@@ -2124,32 +2171,81 @@ mod tests {
         let text = screen_text(&terminal);
         let nav = &text[usize::from(columns.scene_nav.y)];
         assert!(nav.contains("Prev") && nav.contains("Next"), "{nav}");
-        assert!(nav.contains(&format!("1/{}", AnimationKind::ALL.len())), "{nav}");
+        assert!(
+            nav.contains(&format!("1/{}", AnimationKind::ALL.len())),
+            "{nav}"
+        );
         // Mouse: Next / Prev select the adjacent scene, wrapping at the ends.
         let next = Position::new(columns.scene_nav.right() - 2, columns.scene_nav.y);
         let previous = Position::new(columns.scene_nav.x + 1, columns.scene_nav.y);
-        assert_eq!(hit(area, &model, Scrolls::default(), next), Some(AnimationHit::NextScene));
-        assert_eq!(hit(area, &model, Scrolls::default(), previous), Some(AnimationHit::PreviousScene));
-        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), next.x, next.y);
+        assert_eq!(
+            hit(area, &model, Scrolls::default(), next),
+            Some(AnimationHit::NextScene)
+        );
+        assert_eq!(
+            hit(area, &model, Scrolls::default(), previous),
+            Some(AnimationHit::PreviousScene)
+        );
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            next.x,
+            next.y,
+        );
         assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
-        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), previous.x, previous.y);
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            previous.x,
+            previous.y,
+        );
         assert_eq!(app.animation_settings.kind, AnimationKind::ALL[0]);
-        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), previous.x, previous.y);
-        assert_eq!(app.animation_settings.kind, *AnimationKind::ALL.last().unwrap(), "Prev wraps");
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            previous.x,
+            previous.y,
+        );
+        assert_eq!(
+            app.animation_settings.kind,
+            *AnimationKind::ALL.last().unwrap(),
+            "Prev wraps"
+        );
         // The window follows the selected scene.
         let state = state_of(&app);
         assert!(state.scene_scroll > 0);
-        assert!(row_y(area, &app.animation_row_model(), state.selected_row, state.scrolls()).is_some());
-        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), next.x, next.y);
-        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[0], "Next wraps");
+        assert!(row_y(
+            area,
+            &app.animation_row_model(),
+            state.selected_row,
+            state.scrolls()
+        )
+        .is_some());
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            next.x,
+            next.y,
+        );
+        assert_eq!(
+            app.animation_settings.kind,
+            AnimationKind::ALL[0],
+            "Next wraps"
+        );
         // Keyboard: ] and [ step through the scenes from any row.
         key(&mut app, KeyCode::Char(']'));
         assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
         key(&mut app, KeyCode::Char('['));
         key(&mut app, KeyCode::Char('['));
-        assert_eq!(app.animation_settings.kind, *AnimationKind::ALL.last().unwrap());
         assert_eq!(
-            crate::project_config::load(project.path()).unwrap().animation.kind,
+            app.animation_settings.kind,
+            *AnimationKind::ALL.last().unwrap()
+        );
+        assert_eq!(
+            crate::project_config::load(project.path())
+                .unwrap()
+                .animation
+                .kind,
             *AnimationKind::ALL.last().unwrap(),
             "navigation persists the scene"
         );
@@ -2167,10 +2263,18 @@ mod tests {
         let state = state_of(&app);
         assert!(state.scene_scroll > 0, "scene window scrolled");
         assert_eq!((state.global_scroll, state.scroll), (0, 0));
-        assert_eq!(app.animation_settings.kind, kind, "wheel never selects a scene");
+        assert_eq!(
+            app.animation_settings.kind, kind,
+            "wheel never selects a scene"
+        );
         // Wheel over the global settings scrolls only those.
         let on_global = Position::new(columns.global.x + 2, columns.global.y + 1);
-        pointer(&mut app, MouseEventKind::ScrollDown, on_global.x, on_global.y);
+        pointer(
+            &mut app,
+            MouseEventKind::ScrollDown,
+            on_global.x,
+            on_global.y,
+        );
         let after = state_of(&app);
         assert!(after.global_scroll > 0);
         assert_eq!(after.scene_scroll, state.scene_scroll);
@@ -2182,9 +2286,17 @@ mod tests {
         let model = app.animation_row_model();
         let on_controls = Position::new(columns.controls_rows.x + 2, columns.controls_rows.y + 1);
         let before = state_of(&app);
-        pointer(&mut app, MouseEventKind::ScrollDown, on_controls.x, on_controls.y);
+        pointer(
+            &mut app,
+            MouseEventKind::ScrollDown,
+            on_controls.x,
+            on_controls.y,
+        );
         let now = state_of(&app);
-        assert_eq!((now.scene_scroll, now.global_scroll), (before.scene_scroll, before.global_scroll));
+        assert_eq!(
+            (now.scene_scroll, now.global_scroll),
+            (before.scene_scroll, before.global_scroll)
+        );
         let overflow = max_scroll(area, &model, Region::Controls) > 0;
         assert_eq!(now.scroll > 0, overflow);
     }
@@ -2195,7 +2307,10 @@ mod tests {
         let area = content_area(&app);
         let model = app.animation_row_model();
         let columns = layout(area);
-        for (region, rows) in [(Region::Scenes, columns.scene_list), (Region::Global, columns.global)] {
+        for (region, rows) in [
+            (Region::Scenes, columns.scene_list),
+            (Region::Global, columns.global),
+        ] {
             let maximum = max_scroll(area, &model, region);
             assert!(maximum > 0, "{region:?} needs a scrollbar at 100x24");
             let x = rows.right();
@@ -2208,7 +2323,12 @@ mod tests {
                 hit(area, &model, Scrolls::default(), Position::new(x, rows.y)),
                 Some(AnimationHit::ScrollTo(region, 0))
             );
-            pointer(&mut app, MouseEventKind::Down(MouseButton::Left), bottom.x, bottom.y);
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                bottom.x,
+                bottom.y,
+            );
             let state = state_of(&app);
             assert_eq!(state.scrolls().get(region), maximum);
         }
@@ -2217,7 +2337,12 @@ mod tests {
         let text = screen_text(&terminal);
         let glyphs = |x: u16, rows: Rect| -> String {
             (rows.y..rows.bottom())
-                .map(|y| text[usize::from(y)].chars().nth(usize::from(x)).unwrap_or(' '))
+                .map(|y| {
+                    text[usize::from(y)]
+                        .chars()
+                        .nth(usize::from(x))
+                        .unwrap_or(' ')
+                })
                 .collect()
         };
         assert!(glyphs(columns.scene_list.right(), columns.scene_list).contains('\u{2503}'));
@@ -2234,11 +2359,26 @@ mod tests {
         let scrolls = state_of(&app).scrolls();
         let geometry = slider_geometry(area, &model, row, scrolls).unwrap();
         assert!(geometry.value.right() <= layout(area).scenes.right());
-        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), geometry.track.right() - 1, geometry.track.y);
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            geometry.track.right() - 1,
+            geometry.track.y,
+        );
         assert_eq!(app.animation_settings.appearance.brightness_percent, 200);
-        pointer(&mut app, MouseEventKind::Drag(MouseButton::Left), geometry.track.x, geometry.track.y);
+        pointer(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            geometry.track.x,
+            geometry.track.y,
+        );
         assert_eq!(app.animation_settings.appearance.brightness_percent, 1);
-        pointer(&mut app, MouseEventKind::Up(MouseButton::Left), geometry.track.x, geometry.track.y);
+        pointer(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            geometry.track.x,
+            geometry.track.y,
+        );
     }
 
     #[test]
@@ -2276,8 +2416,19 @@ mod tests {
             let terminal = draw(&mut app, width, height);
             let text = screen_text(&terminal);
             let joined = text.join("\n");
-            for needle in ["Animations", "Prev", "Next", "Look and display", "Show in", "Color mode", "Brightness"] {
-                assert!(joined.contains(needle), "{width}x{height} lacks {needle}\n{joined}");
+            for needle in [
+                "Animations",
+                "Prev",
+                "Next",
+                "Look and display",
+                "Show in",
+                "Color mode",
+                "Brightness",
+            ] {
+                assert!(
+                    joined.contains(needle),
+                    "{width}x{height} lacks {needle}\n{joined}"
+                );
             }
             let right = format!("{} settings", app.animation_settings.kind.label());
             assert!(joined.contains(&right), "{width}x{height} lacks {right}");

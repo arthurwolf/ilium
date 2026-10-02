@@ -257,7 +257,11 @@ impl RowModel {
             Some(AnimationRow::Scene(_)) => "Scenes",
             Some(AnimationRow::Common("background" | "panels")) => "Display",
             Some(AnimationRow::Common(
-                "speed" | "fps_limit" | "density" | "dither" | "look_pattern_contrast"
+                "speed"
+                | "fps_limit"
+                | "density"
+                | "dither"
+                | "look_pattern_contrast"
                 | "look_pattern_invert",
             )) => "Pattern and motion",
             Some(AnimationRow::Common(_)) => "Color",
@@ -275,8 +279,13 @@ impl RowModel {
     pub fn visual_row(&self, row: usize) -> Option<u16> {
         let region = self.region(row)?;
         if region == Region::Scenes {
-            return u16::try_from(self.rows[..row].iter().filter(|r| r.region() == region).count())
-                .ok();
+            return u16::try_from(
+                self.rows[..row]
+                    .iter()
+                    .filter(|r| r.region() == region)
+                    .count(),
+            )
+            .ok();
         }
         let mut position = 0u16;
         let mut previous = "";
@@ -296,7 +305,9 @@ impl RowModel {
 
     /// Rows (headings included) a region needs to show everything.
     pub fn visual_height(&self, region: Region) -> u16 {
-        let last = (0..self.len()).rev().find(|row| self.region(*row) == Some(region));
+        let last = (0..self.len())
+            .rev()
+            .find(|row| self.region(*row) == Some(region));
         last.and_then(|row| self.visual_row(row))
             .map_or(0, |position| position.saturating_add(1))
     }
@@ -351,12 +362,22 @@ pub fn rows(settings: &AnimationSettings, _context: &RowContext) -> Vec<Animatio
         .map(AnimationRow::Scene)
         .collect();
     // Global settings, shared by every animation: display, color, pattern.
-    rows.extend(["panels", "background"].into_iter().map(AnimationRow::Common));
+    rows.extend(
+        ["panels", "background"]
+            .into_iter()
+            .map(AnimationRow::Common),
+    );
     for control in settings.appearance.controls() {
         rows.push(AnimationRow::Common(control.id));
         // The single ink color of Monotone mode sits right under the mode.
-        if control.id == "look_mode" && settings.appearance.mode == ilium_ambient::style::ColorMode::Monotone {
-            rows.extend(["lightness", "hue", "saturation"].into_iter().map(AnimationRow::Common));
+        if control.id == "look_mode"
+            && settings.appearance.mode == ilium_ambient::style::ColorMode::Monotone
+        {
+            rows.extend(
+                ["lightness", "hue", "saturation"]
+                    .into_iter()
+                    .map(AnimationRow::Common),
+            );
         }
     }
     if kind != AnimationKind::Wikipedia {

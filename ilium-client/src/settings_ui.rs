@@ -538,8 +538,8 @@ pub fn settings_help_anchors(
                     continue;
                 };
                 // Rows of the left column (scenes and global settings) carry
-                    // their help anchor in the gap column right of the column;
-                    // the right column uses the shared help rail.
+                // their help anchor in the gap column right of the column;
+                // the right column uses the shared help rail.
                 if matches!(
                     model.region(row),
                     Some(

@@ -2014,7 +2014,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     position,
                 ) {
                     Some(direction @ (AnimationHit::PreviousScene | AnimationHit::NextScene)) => {
-                        let delta = if direction == AnimationHit::PreviousScene { -1 } else { 1 };
+                        let delta = if direction == AnimationHit::PreviousScene {
+                            -1
+                        } else {
+                            1
+                        };
                         let kind = crate::animation_settings_ui::adjacent_scene(
                             app.animation_settings.kind,
                             delta,
@@ -2475,7 +2479,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             state.animation_slider_drag = None;
             let delta = i32::from(SETTINGS_WHEEL_SCROLL_LINES);
-            let delta = if mouse.kind == MouseEventKind::ScrollUp { -delta } else { delta };
+            let delta = if mouse.kind == MouseEventKind::ScrollUp {
+                -delta
+            } else {
+                delta
+            };
             // On the Animations tab the wheel scrolls the region under the
             // pointer (scene list, global settings or the right column); the
             // scene list scrolls its window without selecting a scene.

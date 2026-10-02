@@ -1352,7 +1352,11 @@ fn every_dither_mode_packs_a_tone_to_about_that_many_dots() {
             // Atkinson drops a quarter of the error; the matrices round in steps.
             assert!((lit - tone).abs() < 0.2, "{mode:?} tone {tone} lit {lit}");
         }
-        assert_eq!(lit_bits(&packed_with(PackKey::plain(100, mode), 0.0)), 0, "{mode:?}");
+        assert_eq!(
+            lit_bits(&packed_with(PackKey::plain(100, mode), 0.0)),
+            0,
+            "{mode:?}"
+        );
     }
 }
 
@@ -1372,12 +1376,18 @@ fn dither_modes_make_different_patterns() {
 fn pattern_invert_and_contrast_change_which_dots_are_lit() {
     let normal = packed_with(PackKey::plain(100, DitherMode::Ordered), 0.3);
     let inverted = packed_with(
-        PackKey { invert: true, ..PackKey::plain(100, DitherMode::Ordered) },
+        PackKey {
+            invert: true,
+            ..PackKey::plain(100, DitherMode::Ordered)
+        },
         0.3,
     );
     assert!(lit_bits(&inverted) > lit_bits(&normal) * 2);
     let hard = packed_with(
-        PackKey { contrast_percent: 200, ..PackKey::plain(100, DitherMode::Ordered) },
+        PackKey {
+            contrast_percent: 200,
+            ..PackKey::plain(100, DitherMode::Ordered)
+        },
         0.3,
     );
     assert!(lit_bits(&hard) < lit_bits(&normal));
@@ -1387,10 +1397,22 @@ fn pattern_invert_and_contrast_change_which_dots_are_lit() {
 fn every_common_control_including_the_look_rows_round_trips() {
     for id in common_control_ids() {
         let mut settings = AnimationSettings::default();
-        let control = settings.common_control(id).unwrap_or_else(|| panic!("{id} resolves"));
-        let Some(stepped) = control.stepped(1) else { continue };
-        assert_eq!(settings.set_common_control(id, stepped.clone()), Ok(true), "{id}");
-        assert_eq!(settings.common_control(id).map(|row| row.value), Some(stepped), "{id}");
+        let control = settings
+            .common_control(id)
+            .unwrap_or_else(|| panic!("{id} resolves"));
+        let Some(stepped) = control.stepped(1) else {
+            continue;
+        };
+        assert_eq!(
+            settings.set_common_control(id, stepped.clone()),
+            Ok(true),
+            "{id}"
+        );
+        assert_eq!(
+            settings.common_control(id).map(|row| row.value),
+            Some(stepped),
+            "{id}"
+        );
     }
 }
 
@@ -1402,12 +1424,20 @@ fn choosing_a_preset_sets_the_look_and_may_set_dither_and_density() {
         settings.set_common_control("look_preset", ControlValue::Index(matrix)),
         Ok(true)
     );
-    assert_eq!(settings.appearance.preset, ilium_ambient::style::StylePreset::Matrix);
+    assert_eq!(
+        settings.appearance.preset,
+        ilium_ambient::style::StylePreset::Matrix
+    );
     assert_eq!(settings.dither, DitherMode::Lines);
     assert!(settings.appearance.brightness_percent < 100);
     // A hand edit afterwards leaves the preset.
-    settings.set_common_control("look_brightness", ControlValue::Number(90)).unwrap();
-    assert_eq!(settings.appearance.preset, ilium_ambient::style::StylePreset::Custom);
+    settings
+        .set_common_control("look_brightness", ControlValue::Number(90))
+        .unwrap();
+    assert_eq!(
+        settings.appearance.preset,
+        ilium_ambient::style::StylePreset::Custom
+    );
 }
 
 #[test]
@@ -1420,10 +1450,16 @@ fn look_and_panel_settings_are_global_normalized_and_persist_through_serde() {
     assert_eq!(normalized.appearance.brightness_percent, 1);
     assert_eq!(normalized.fps_limit, 30);
     let yaml = serde_json::to_string(&settings).unwrap();
-    assert_eq!(serde_json::from_str::<AnimationSettings>(&yaml).unwrap(), settings);
+    assert_eq!(
+        serde_json::from_str::<AnimationSettings>(&yaml).unwrap(),
+        settings
+    );
     // One look for every scene: the field is not per scene.
     for kind in AnimationKind::ALL {
-        let selected = AnimationSettings { kind, ..settings.clone() };
+        let selected = AnimationSettings {
+            kind,
+            ..settings.clone()
+        };
         assert_eq!(selected.appearance, settings.appearance);
     }
     // Missing keys fall back to the neutral defaults.
@@ -1436,7 +1472,10 @@ fn look_and_panel_settings_are_global_normalized_and_persist_through_serde() {
 #[test]
 fn look_changes_never_rebuild_the_loop_cache_but_pattern_changes_do() {
     let mut cache = AnimationLoopCache::default();
-    let mut settings = AnimationSettings { enabled: true, ..Default::default() };
+    let mut settings = AnimationSettings {
+        enabled: true,
+        ..Default::default()
+    };
     cache.begin(&settings, 20, 8);
     let first = cache.status().total_frames;
     assert!(first > 0);
