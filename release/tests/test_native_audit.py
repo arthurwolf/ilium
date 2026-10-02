@@ -181,6 +181,7 @@ class NativeAuditTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 audit.validate_embedding_proof(proof, root, model, [])
 
+    @unittest.skipIf(sys.platform == 'win32', 'macOS vmmap/Intel audit logic with POSIX fixture paths; it only runs on macOS targets')
     def test_held_embedding_process_must_be_installed_client_with_shipped_mapping(self):
         audit = self.module("audit_native")
         self.assertTrue(hasattr(audit, "validate_process_mapping"), "hardened-runtime process inspection gate is missing")
@@ -193,6 +194,7 @@ class NativeAuditTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     audit.validate_process_mapping(observed_client, mapping, client, runtime)
 
+    @unittest.skipIf(sys.platform == 'win32', 'macOS vmmap/Intel audit logic with POSIX fixture paths; it only runs on macOS targets')
     def test_process_mapping_accepts_real_vmmap_rows_with_a_protection_column(self):
         audit = self.module("audit_native")
         for directory in ("/Users/runner/work/ilium/native-output/candidate", "/candidate with spaces"):
@@ -422,6 +424,7 @@ class NativeAuditTests(unittest.TestCase):
             build.verify_tag_commit({"object": {"type": "commit", "sha": "0" * 40}})
         self.assertEqual(build.verify_tag_commit({"object": {"type": "commit", "sha": "058787ceead760166e3c50a0a4cba8a833a6f53f"}}), "058787ceead760166e3c50a0a4cba8a833a6f53f")
 
+    @unittest.skipIf(sys.platform == 'win32', 'macOS vmmap/Intel audit logic with POSIX fixture paths; it only runs on macOS targets')
     def test_intel_build_uses_shared_runtime_and_avoids_archive_git_mutation(self):
         build = self.module("build_intel_ort")
         self.assertTrue(hasattr(build, "build_command"), "pinned source archive build command is missing")

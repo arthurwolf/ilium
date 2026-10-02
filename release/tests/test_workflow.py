@@ -353,6 +353,7 @@ class PipelineTests(unittest.TestCase):
                 pipeline.install(install_arguments)
         logged.assert_not_called()
 
+    @unittest.skipIf(sys.platform == 'win32', 'aggregate/install POSIX-fixture flows; they only run on the Linux aggregate runner')
     def test_install_passes_aggregate_bound_embedding_inputs_to_native_harness(self):
         arguments = self.create_native_fixture()
         with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
@@ -456,6 +457,7 @@ class PipelineTests(unittest.TestCase):
             pipeline.install(install_arguments)
         logged.assert_not_called()
 
+    @unittest.skipIf(sys.platform == 'win32', 'aggregate/install POSIX-fixture flows; they only run on the Linux aggregate runner')
     def test_native_evidence_hash_and_nonempty_test_gate(self):
         path = self.root / 'receipt.json'; evidence = path.with_suffix('.evidence'); evidence.mkdir()
         def write(name, value):
@@ -520,6 +522,7 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError): pipeline.validate_install_evidence(proof, path, self.targets[0])
         missing.write_bytes(retained); rebind()
 
+    @unittest.skipIf(sys.platform == 'win32', 'aggregate/install POSIX-fixture flows; they only run on the Linux aggregate runner')
     def test_bound_qualification_rejects_missing_failed_and_changed_receipts(self):
         embedding_binding = {'wrapper_sha256': '5' * 64, 'command_sha256': '6' * 64, 'model_register_sha256': '7' * 64, 'model_files': {'model.onnx': '8' * 64}, 'runtime_files': {}}
         manifest = {'schema': 1, 'tag': 'v0.1.0', 'commit': 'a' * 40, 'archives': {row['archive']: 'b' * 64 for row in self.targets}, 'installers': {'install.sh': '2' * 64, 'install.ps1': '3' * 64}, 'target_receipts': {row['rust_target']: {'native_audit_sha256': 'c' * 64, 'candidate_receipt_sha256': 'd' * 64, 'client_sha256': 'e' * 64, 'server_sha256': 'f' * 64, 'harness_sha256': '1' * 64, 'installed_embedding': embedding_binding} for row in self.targets}}

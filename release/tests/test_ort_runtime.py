@@ -33,7 +33,7 @@ class OrtRuntimeTests(unittest.TestCase):
             if output.startswith('lib/libonnxruntime'): data = b'synthetic identical native alias fixture'
             items[name] = ('file', data, '')
             for parent in Path(name).parents:
-                if str(parent) != '.': items.setdefault(str(parent), ('directory', b'', ''))
+                if parent.as_posix() != '.': items.setdefault(parent.as_posix(), ('directory', b'', ''))
         if mutation:
             mutation(items, asset)
         archive = directory / asset['name']
