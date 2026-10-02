@@ -25,6 +25,8 @@ pub struct PackSourceSettings {
 pub struct VoxelLandscapeSettings {
     pub saved_maps: SavedMapsSettings,
     pub seed: u32,
+    /// Static generated-scene context: 0 day, 1 night, 2 thunderstorm.
+    pub atmosphere: usize,
     pub zoom_percent: i32,
     pub detail: usize,
     pub pan_speed_percent: i32,
@@ -60,6 +62,7 @@ impl Default for VoxelLandscapeSettings {
         Self {
             saved_maps: SavedMapsSettings::default(),
             seed: 71839,
+            atmosphere: 0,
             zoom_percent: 150,
             detail: 2,
             pan_speed_percent: 25,
@@ -143,6 +146,7 @@ impl SceneSettings for VoxelLandscapeSettings {
         Self {
             zoom_percent: self.zoom_percent.clamp(25, 400),
             detail: self.detail.min(3),
+            atmosphere: self.atmosphere.min(2),
             pan_speed_percent: self.pan_speed_percent.clamp(0, 200),
             pan_direction: self.pan_direction.min(3),
             color_mode: self.color_mode.min(1),
@@ -189,6 +193,7 @@ impl SceneSettings for VoxelLandscapeSettings {
             Control::text("pack_format", "Target pack format", &format!("{}.{}", value.pack_format_major, value.pack_format_minor),
                 "major.minor", "Target for authored overlays; outside declared range requires explicit compatibility evidence."),
             Control::text("seed", "World seed", &value.seed.to_string(), "0–4294967295", "The same seed recreates the same world, including structures. Camera and color changes preserve terrain."),
+            Control::choice("atmosphere", "Scene atmosphere", value.atmosphere, &["Day", "Night", "Thunderstorm"], "Choose a fixed atmosphere with matching light and surface creature scenes. Terrain and structures keep their positions."),
             Control::slider("zoom", "Tile zoom", value.zoom_percent, (25,400,5), "%", "Enlarge isometric tiles to inspect blocks, or zoom out to see more landscape."),
             Control::choice("detail", "Detail", value.detail, &["Terrain", "Landmarks", "Landscape", "All features"], "Choose the visible decoration density. Terrain and structure positions remain stable across detail levels."),
             Control::slider("pan_speed", "Camera speed", value.pan_speed_percent, (0,200,5), "%", "Slow continuous movement across the world. Zero freezes the camera; global animation speed also applies."),
@@ -209,6 +214,7 @@ impl SceneSettings for VoxelLandscapeSettings {
                 || !matches!(
                     row.id,
                     "seed"
+                        | "atmosphere"
                         | "detail"
                         | "pan_direction"
                         | "vegetation"
@@ -282,12 +288,13 @@ impl SceneSettings for VoxelLandscapeSettings {
                     _ => return Ok(false),
                 }
             }
-            "detail" | "pan_direction" | "color_mode" | "palette" | "pack_profile"
-            | "pack_mount" | "pack_edition" | "pack_addon_mount" => {
+            "atmosphere" | "detail" | "pan_direction" | "color_mode" | "palette"
+            | "pack_profile" | "pack_mount" | "pack_edition" | "pack_addon_mount" => {
                 let index = control::index(&value).ok_or("Expected a choice")?;
                 let limit = match id {
                     "color_mode" | "pack_mount" | "pack_edition" | "pack_addon_mount" => 2,
                     "pack_profile" => 11,
+                    "atmosphere" => 3,
                     _ => 4,
                 };
                 if index >= limit {
@@ -295,6 +302,7 @@ impl SceneSettings for VoxelLandscapeSettings {
                 }
                 match id {
                     "detail" => self.detail = index,
+                    "atmosphere" => self.atmosphere = index,
                     "pan_direction" => self.pan_direction = index,
                     "color_mode" => self.color_mode = index,
                     "palette" => self.palette = index,
@@ -464,5 +472,48 @@ mod pack_selection_tests {
             .set_control("pack_profile", ControlValue::Index(8))
             .unwrap();
         assert_eq!(settings.pack_path, "/private/faithful.zip");
+    }
+}
+
+#[cfg(test)]
+mod atmosphere_tests {
+    use super::*;
+    #[test]
+    fn generated_atmosphere_persists_defaults_and_rejects_unknown_choices() {
+        let mut settings = VoxelLandscapeSettings::default();
+        assert_eq!(
+            settings.set_control("atmosphere", ControlValue::Index(1)),
+            Ok(true)
+        );
+        let restored: VoxelLandscapeSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored
+                .controls()
+                .iter()
+                .find(|r| r.id == "atmosphere")
+                .unwrap()
+                .value,
+            ControlValue::Index(1)
+        );
+        let before = settings.clone();
+        assert!(settings
+            .set_control("atmosphere", ControlValue::Index(3))
+            .is_err());
+        assert_eq!(settings, before);
+        let missing: VoxelLandscapeSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            missing
+                .controls()
+                .iter()
+                .find(|r| r.id == "atmosphere")
+                .unwrap()
+                .value,
+            ControlValue::Index(0)
+        );
+        settings
+            .set_control("world_source", ControlValue::Index(1))
+            .unwrap();
+        assert!(!settings.controls().iter().any(|r| r.id == "atmosphere"));
     }
 }

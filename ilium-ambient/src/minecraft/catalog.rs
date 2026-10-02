@@ -71,6 +71,9 @@ pub struct Metadata {
     pub last_played: i64,
     /// Candidate anchor only. Saved chunk qualification still decides coverage.
     pub spawn_position: Option<[i32; 3]>,
+    /// Canonical WorldGenSettings.seed Long; missing/noncanonical values remain
+    /// unavailable to seeded rendering, without excluding catalog discovery.
+    pub world_seed: Option<i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -112,11 +115,22 @@ pub fn metadata(document: &nbt::Document) -> Result<Metadata, Error> {
         }
         _ => return Err(Error::Invalid("partial or non-Int spawn position")),
     };
+    // Canonical Java serialization writes a Long. Its native codec can coerce
+    // other numeric tags; this reader deliberately does not claim that parity.
+    // Supported modern versions do not use the historical RandomSeed fixer.
+    let world_seed = match nbt::get(data, "WorldGenSettings") {
+        Some(nbt::Tag::Compound(settings)) => match nbt::get(settings, "seed") {
+            Some(nbt::Tag::Long(seed)) => Some(*seed),
+            _ => None,
+        },
+        _ => None,
+    };
     Ok(Metadata {
         name: name.clone(),
         data_version: *data_version,
         last_played: *last_played,
         spawn_position,
+        world_seed,
     })
 }
 
@@ -187,6 +201,47 @@ mod tests {
         assert_eq!(value.name.0, [0x41, 0xd800]);
         assert!(value.name.to_utf8().is_err());
         assert!(metadata(&document(3218, 0)).is_ok());
+    }
+
+    #[test]
+    fn canonical_world_seed_preserves_all_signed_long_values() {
+        for seed in [i64::MIN, -1, 0, 1, i64::MAX] {
+            let mut document = document(3218, 0);
+            let Some(nbt::Tag::Compound(data)) = document.root.get_mut(&"Data".into()) else {
+                panic!("fixture Data");
+            };
+            data.insert(
+                "WorldGenSettings".into(),
+                nbt::Tag::Compound(BTreeMap::from([("seed".into(), nbt::Tag::Long(seed))])),
+            );
+            assert_eq!(metadata(&document).unwrap().world_seed, Some(seed));
+        }
+    }
+
+    #[test]
+    fn absent_or_noncanonical_seed_never_invents_a_render_seed() {
+        let mut document = document(3218, 0);
+        assert_eq!(metadata(&document).unwrap().world_seed, None);
+        let Some(nbt::Tag::Compound(data)) = document.root.get_mut(&"Data".into()) else {
+            panic!("fixture Data");
+        };
+        data.insert("RandomSeed".into(), nbt::Tag::Long(123));
+        assert_eq!(metadata(&document).unwrap().world_seed, None);
+        for settings in [
+            nbt::Tag::Long(7),
+            nbt::Tag::Compound(BTreeMap::new()),
+            nbt::Tag::Compound(BTreeMap::from([("seed".into(), nbt::Tag::Int(7))])),
+            nbt::Tag::Compound(BTreeMap::from([(
+                "seed".into(),
+                nbt::Tag::String("7".into()),
+            )])),
+        ] {
+            let Some(nbt::Tag::Compound(data)) = document.root.get_mut(&"Data".into()) else {
+                panic!("fixture Data");
+            };
+            data.insert("WorldGenSettings".into(), settings);
+            assert_eq!(metadata(&document).unwrap().world_seed, None);
+        }
     }
 
     #[test]
@@ -285,7 +340,12 @@ mod tests {
             bytes.extend(name.as_bytes());
             bytes.extend(payload);
         }
-        bytes.extend([0, 0]);
+        bytes.extend([10, 0, 16]);
+        bytes.extend(b"WorldGenSettings");
+        bytes.extend([4, 0, 4]);
+        bytes.extend(b"seed");
+        bytes.extend((-9_223_372_036_854_775_807_i64).to_be_bytes());
+        bytes.extend([0, 0, 0]);
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&bytes).unwrap();
         let compressed = encoder.finish().unwrap();
@@ -295,6 +355,12 @@ mod tests {
         assert_eq!(
             read_metadata(directory.path(), &|| false).unwrap().name,
             nbt::Text::from("A")
+        );
+        assert_eq!(
+            read_metadata(directory.path(), &|| false)
+                .unwrap()
+                .world_seed,
+            Some(-9_223_372_036_854_775_807)
         );
         assert_eq!(std::fs::read(&path).unwrap(), compressed);
         assert!(matches!(

@@ -37,6 +37,8 @@ impl Default for Limits {
 pub struct PreparedSave {
     pub directory: PathBuf,
     pub last_played: i64,
+    /// Retained for seeded saved-biome rendering; absence is never seed zero.
+    pub world_seed: Option<i64>,
     pub window: preparation::PreparedWindow,
 }
 
@@ -239,6 +241,7 @@ fn prepare_catalog_with(
             result.maps.push(PreparedSave {
                 directory: save.directory.clone(),
                 last_played: save.metadata.last_played,
+                world_seed: save.metadata.world_seed,
                 window,
             });
         }

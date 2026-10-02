@@ -153,6 +153,18 @@ pub fn definitions(id: &str) -> Option<StateGeometry> {
         }
         let id = model(&mut result, block, "inset", vec![element]);
         variants.insert(String::new(), json!({"model":id}));
+    } else if block == "sweet_berry_bush" {
+        // Each growth stage has its own pack image; there is no unstaged atlas.
+        for age in 0..=3 {
+            let texture = format!("sweet_berry_bush_stage{age}");
+            let id = model(
+                &mut result,
+                block,
+                &format!("age_{age}"),
+                cross(&texture, false),
+            );
+            variants.insert(format!("age={age}"), json!({"model":id}));
+        }
     } else if matches!(block, "leaf_litter" | "pink_petals" | "wildflowers") {
         let amount_property = if block == "leaf_litter" {
             "segment_amount"
@@ -279,9 +291,34 @@ pub fn definitions(id: &str) -> Option<StateGeometry> {
         parts.push(json!({"when":empty,"apply":apply}));
         result.blockstate = json!({"multipart":parts});
         return Some(result);
-    } else if matches!(block, "melon" | "pale_moss_block") {
+    } else if block == "mangrove_roots" {
+        // Original open lattice: crossed internal planes and cutout exterior,
+        // with source-grounded side/top materials. Both wet states share shape.
+        let mut exterior = cuboid([0, 0, 0], [16, 16, 16], "mangrove_roots_side");
+        for face in ["up", "down"] {
+            exterior["faces"][face]["texture"] = json!("minecraft:block/mangrove_roots_top");
+        }
+        let side = "minecraft:block/mangrove_roots_side";
+        let inner_x = json!({"from":[8,0,0],"to":[8,16,16],"faces":{"east":{"texture":side},"west":{"texture":side}}});
+        let inner_z = json!({"from":[0,0,8],"to":[16,16,8],"faces":{"north":{"texture":side},"south":{"texture":side}}});
+        let id = model(
+            &mut result,
+            block,
+            "lattice",
+            vec![exterior, inner_x, inner_z],
+        );
+        variants.insert(String::new(), json!({"model":id}));
+    } else if matches!(block, "mycelium" | "podzol") {
+        let mut element = cuboid([0, 0, 0], [16, 16, 16], &format!("{block}_side"));
+        element["faces"]["up"]["texture"] = json!(format!("minecraft:block/{block}_top"));
+        element["faces"]["down"]["texture"] = json!("minecraft:block/dirt");
+        let id = model(&mut result, block, "soil", vec![element]);
+        variants.insert(String::new(), json!({"model":id}));
+    } else if matches!(block, "melon" | "pale_moss_block" | "snow_block") {
         let texture = if block == "melon" {
             "melon_side"
+        } else if block == "snow_block" {
+            "snow"
         } else {
             block
         };
@@ -881,6 +918,29 @@ mod tests {
         assert!(definitions("minecraft:invented_bed").is_none());
     }
     #[test]
+    fn berry_growth_uses_each_real_stage_image_without_invented_texture() {
+        let geometry = definitions("minecraft:sweet_berry_bush").unwrap();
+        assert_eq!(
+            geometry.blockstate["variants"].as_object().unwrap().len(),
+            4
+        );
+        for age in 0..=3 {
+            let id = geometry.blockstate["variants"][format!("age={age}")]["model"]
+                .as_str()
+                .unwrap();
+            let elements = geometry.models[id]["elements"].as_array().unwrap();
+            assert_eq!(elements.len(), 2);
+            for element in elements {
+                for face in element["faces"].as_object().unwrap().values() {
+                    assert_eq!(
+                        face["texture"],
+                        format!("minecraft:block/sweet_berry_bush_stage{age}")
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn double_plants_bind_distinct_real_upper_and_lower_images() {
         let plant = definitions("minecraft:rose_bush").unwrap();
         let lower = plant.blockstate["variants"]["half=lower"]["model"]
@@ -1122,6 +1182,34 @@ mod tests {
         for value in shelf.models.values() {
             assert_eq!(value["elements"][0]["to"][2], 16);
             assert!(value["elements"][0]["to"][1].as_i64().unwrap() < 16);
+        }
+    }
+}
+
+#[cfg(test)]
+mod soil_face_tests {
+    use super::*;
+    #[test]
+    fn soil_caps_have_distinct_pack_top_sides_and_dirt_bottom() {
+        for block in ["mycelium", "podzol"] {
+            let geometry = definitions(&format!("minecraft:{block}"))
+                .expect("soil cap must have explicit geometry");
+            assert_eq!(geometry.models.len(), 1);
+            let model = geometry.models.values().next().unwrap();
+            let element = &model["elements"][0];
+            assert_eq!(element["from"], json!([0, 0, 0]));
+            assert_eq!(element["to"], json!([16, 16, 16]));
+            assert_eq!(
+                element["faces"]["up"]["texture"],
+                format!("minecraft:block/{block}_top")
+            );
+            assert_eq!(element["faces"]["down"]["texture"], "minecraft:block/dirt");
+            for face in ["north", "south", "east", "west"] {
+                assert_eq!(
+                    element["faces"][face]["texture"],
+                    format!("minecraft:block/{block}_side")
+                );
+            }
         }
     }
 }

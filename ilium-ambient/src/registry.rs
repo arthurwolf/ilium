@@ -217,6 +217,7 @@ impl AmbientKind {
             Self::DithrPatterns => crate::scenes::dithr_patterns::INSPIRED_BY,
             Self::HexExpedition => crate::scenes::hex_expedition::INSPIRED_BY,
             Self::VectorTd => crate::scenes::vector_td::INSPIRED_BY,
+            Self::VoxelLandscape => crate::scenes::voxel_landscape::INSPIRED_BY,
             _ => &[],
         }
     }

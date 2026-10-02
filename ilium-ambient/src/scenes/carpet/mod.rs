@@ -103,6 +103,7 @@ impl CarpetScene {
             pitch: s.pitch as f32,
             zoom: s.zoom as f32 / 100.0,
             hatch_direction: s.hatch_direction as f32,
+            infinite_lines: s.infinite_lines,
             spacing_in_dots: s.spacing as f32,
             line_width: s.line_width as f32 / 100.0,
             height_scale: MAX_BODY_HEIGHT * s.height as f32 / 100.0,
@@ -307,6 +308,10 @@ mod tests {
         assert!(scene.reconfigure(&settings));
         assert_eq!(scene.simulation_time, clock);
         assert_eq!(scene.settings.spacing, 9);
+        settings.carpet.infinite_lines = false;
+        assert!(scene.reconfigure(&settings));
+        assert_eq!(scene.simulation_time, clock);
+        assert!(!scene.render_options().infinite_lines);
         settings.carpet.seed += 1;
         assert!(!scene.reconfigure(&settings));
     }

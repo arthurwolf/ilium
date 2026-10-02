@@ -12,6 +12,7 @@ fn catalog() -> catalog::Catalog {
                     data_version: 3218,
                     last_played: number,
                     spawn_position: None,
+                    world_seed: Some(-number),
                 },
             })
             .into(),
@@ -100,6 +101,14 @@ fn recent_ranking_is_independent_of_catalog_order_and_failed_maps_fall_through()
         [3, 2, 1]
     );
     assert_eq!(output.reports.len(), 4);
+    assert_eq!(
+        output
+            .maps
+            .iter()
+            .map(|map| map.world_seed)
+            .collect::<Vec<_>>(),
+        [Some(-3), Some(-2), Some(-1)]
+    );
     assert!(output.catalog_complete);
 }
 

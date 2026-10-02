@@ -2,6 +2,10 @@
 mod settings;
 pub use settings::VoxelLandscapeSettings;
 
+/// The block world takes its look from Minecraft; no Minecraft assets ship
+/// with Ilium.
+pub const INSPIRED_BY: &[&str] = &["https://www.minecraft.net/"];
+
 pub mod assets;
 pub mod catalog;
 pub mod chunks;
@@ -17,13 +21,16 @@ pub mod surface_biome_selector;
 pub mod surface_biomes;
 pub mod surface_camp_assembly;
 pub mod surface_camps;
+pub mod surface_context;
 pub mod surface_entities;
 pub mod surface_entity_binding;
 pub mod surface_entity_raster;
+pub mod surface_events;
 pub mod surface_flora;
 pub mod surface_flora_vocabulary;
 pub mod surface_fluid;
 pub mod surface_generation;
+pub mod surface_geology;
 pub mod surface_landmark_assembly;
 pub mod surface_landmarks;
 pub mod surface_mesh;

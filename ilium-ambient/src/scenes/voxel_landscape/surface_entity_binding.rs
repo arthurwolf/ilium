@@ -63,6 +63,22 @@ impl PreparedEntityMesh {
     }
 }
 
+// Blob provenance retains the configured archive root. Classify complete path
+// components so nested Java packs receive the same atlas correction as flat packs.
+fn is_java_entity_member(path: &str) -> bool {
+    let components: Vec<_> = path.split('/').collect();
+    if components
+        .windows(4)
+        .any(|parts| parts == ["assets", "minecraft", "textures", "entity"])
+    {
+        return true;
+    }
+    !components.contains(&"assets")
+        && components
+            .windows(2)
+            .any(|parts| parts == ["textures", "entity"])
+}
+
 fn push_unique(paths: &mut Vec<String>, path: String) {
     if !paths.contains(&path) {
         paths.push(path);
@@ -388,7 +404,16 @@ pub fn bind(
         .entities
         .iter()
         .try_fold(0usize, |count, entity| {
-            count.checked_add(entity.model.parts.len().checked_mul(6)?)
+            // A Java cold-pig atlas can add one authored cutout fur shell.
+            let extra_shell = usize::from(entity.species == surface_entities::Species::Pig);
+            count.checked_add(
+                entity
+                    .model
+                    .parts
+                    .len()
+                    .checked_add(extra_shell)?
+                    .checked_mul(6)?,
+            )
         })
         .ok_or(AssetError::Allocation)?;
     if estimated_faces > MAX_ENTITY_FACES {
@@ -422,7 +447,13 @@ pub fn bind(
             .model
             .parts
             .len()
-            .checked_mul(size_of::<surface_entities::Part>())
+            .checked_add(usize::from(
+                entity.species == surface_entities::Species::Pig,
+            ))
+            .and_then(|n| n.checked_mul(size_of::<surface_entities::Part>()))
+            // Binding, Java compatibility and atomic anatomical reassignment
+            // can hold three temporary part vectors at the same time.
+            .and_then(|n| n.checked_mul(3))
             .and_then(|n| n.checked_add(4096))
             .ok_or(AssetError::Allocation)?;
         let _model_reservation = budget.reserve(transient as u64, cancel)?;
@@ -449,7 +480,16 @@ pub fn bind(
                 png_dimensions: atlas.dimensions,
                 encoded_sha256: atlas.source_sha256.to_string(),
             };
-            match surface_entities::apply_authored_compatibility(&mut model, &evidence) {
+            let compatibility = if is_java_entity_member(atlas.source.path.as_str()) {
+                surface_entities::apply_java_atlas_compatibility(
+                    &mut model,
+                    &evidence,
+                    atlas.source.path.as_str(),
+                )
+            } else {
+                surface_entities::apply_authored_compatibility(&mut model, &evidence)
+            };
+            match compatibility {
                 Ok(CompatibilityOutcome::Matched) => {}
                 Ok(CompatibilityOutcome::Unmatched) => {
                     all_bound = false;
@@ -639,5 +679,29 @@ mod tests {
             "{}",
             serde_json::json!({"type":"atlas_path_vocabulary","entries":vocabulary})
         );
+    }
+}
+
+#[cfg(test)]
+mod nested_origin_tests {
+    use super::is_java_entity_member;
+    #[test]
+    fn nested_reviewed_java_archive_members_keep_java_atlas_layout() {
+        for path in [
+            "assets/minecraft/textures/entity/zombie/husk.png",
+            "textures/entity/zombie/husk.png",
+            "PixelPerfectionCE/assets/minecraft/textures/entity/zombie/husk.png",
+            "VoxelAssets-hash/GoodVibes/minecraft/textures/entity/zombie/husk.png",
+        ] {
+            assert!(is_java_entity_member(path), "{path}");
+        }
+        for path in [
+            "textures/blocks/stone.png",
+            "assets/other/textures/entity/zombie.png",
+            "models/entity/zombie.json",
+            "mytextures/entity/zombie.png",
+        ] {
+            assert!(!is_java_entity_member(path), "{path}");
+        }
     }
 }

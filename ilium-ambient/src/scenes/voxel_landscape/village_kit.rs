@@ -162,6 +162,8 @@ pub struct Port {
 pub enum MarkerKind {
     Resident(Option<Profession>),
     Animal(&'static str),
+    /// Original static plaza guardian, not native golem spawning gameplay.
+    Guardian,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Marker {
@@ -745,6 +747,15 @@ fn center<S>(w: &mut Writer<S>, style: VillageStyle) -> Result<(), PlacementErro
             role: PortRole::Street,
         });
     }
+    // The broad original golem needs three blocks of carved headroom across
+    // its whole shoulder footprint. Keep the fountain, bell and street ports.
+    for x in 7..=9 {
+        w.air([x, 2, 3]);
+    }
+    w.markers.push(Marker {
+        position: [8, 2, 1],
+        kind: MarkerKind::Guardian,
+    });
     w.markers.push(Marker {
         position: [2, 2, 1],
         kind: if style == VillageStyle::Desert {
@@ -1095,6 +1106,88 @@ mod tests {
             let center = build(style, PieceKind::Center, 0, state).unwrap();
             assert!(!center.walkable.contains(&[4, 9, 0]));
             assert!(!center.walkable.contains(&[6, 9, 0]));
+        }
+    }
+}
+
+#[cfg(test)]
+mod guardian_tests {
+    use super::super::surface_entities::{self, AtlasLayout, ClimateSkin, Species};
+    use super::*;
+    type State = (String, BTreeMap<String, String>);
+    fn state(id: &str, props: &[(&str, &str)]) -> Result<State, PlacementError> {
+        Ok((
+            id.into(),
+            props
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ))
+    }
+    #[test]
+    fn each_village_style_has_one_guardian_with_whole_body_clearance_and_support() {
+        let model = surface_entities::model(
+            Species::IronGolem,
+            AtlasLayout::Bedrock,
+            ClimateSkin::Temperate,
+        );
+        let (minimum, maximum) = model.bounds().unwrap();
+        for style in VillageStyle::ALL {
+            let kit = build(style, PieceKind::Center, 97, state).unwrap();
+            let guardians: Vec<_> = kit
+                .markers
+                .iter()
+                .filter(|marker| marker.kind == MarkerKind::Guardian)
+                .collect();
+            assert_eq!(guardians.len(), 1, "{style:?} has no single plaza guardian");
+            let anchor = guardians[0].position;
+            let cells: BTreeMap<_, _> = kit
+                .template
+                .cells
+                .iter()
+                .map(|cell| (cell.position, &cell.state))
+                .collect();
+            let lower: [i32; 3] = std::array::from_fn(|axis| {
+                (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + minimum[axis]).floor()
+                    as i32
+            });
+            let upper: [i32; 3] = std::array::from_fn(|axis| {
+                (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + maximum[axis]).ceil()
+                    as i32
+            });
+            for y in lower[1]..upper[1] {
+                for x in lower[0]..upper[0] {
+                    assert!(
+                        cells.get(&[x, y, anchor[2] - 1]).unwrap().is_some(),
+                        "Missing guardian floor {style:?}"
+                    );
+                    for z in lower[2]..upper[2] {
+                        assert!(
+                            cells.get(&[x, y, z]).is_some_and(|state| state.is_none()),
+                            "Guardian intersects retained terrain or plaza {style:?} {:?}",
+                            [x, y, z]
+                        );
+                    }
+                }
+            }
+            assert!(
+                kit.markers
+                    .iter()
+                    .filter(|marker| marker.kind != MarkerKind::Guardian)
+                    .count()
+                    >= 1
+            );
+            for kind in [
+                PieceKind::Home(HomeForm::Cottage),
+                PieceKind::Pen,
+                PieceKind::Road(RoadShape::Cross),
+            ] {
+                assert!(!build(style, kind, 97, state)
+                    .unwrap()
+                    .markers
+                    .iter()
+                    .any(|marker| marker.kind == MarkerKind::Guardian));
+            }
         }
     }
 }

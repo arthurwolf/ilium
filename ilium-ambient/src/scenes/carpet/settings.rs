@@ -22,6 +22,7 @@ pub struct CarpetSettings {
     pub pitch: i32,
     pub zoom: i32,
     pub hatch_direction: i32,
+    pub infinite_lines: bool,
     pub spacing: i32,
     pub line_width: i32,
     pub height: i32,
@@ -70,6 +71,7 @@ impl Default for CarpetSettings {
             pitch: 30,
             zoom: 145,
             hatch_direction: 90,
+            infinite_lines: true,
             spacing: 2,
             line_width: 90,
             height: 25,
@@ -227,6 +229,12 @@ impl SceneSettings for CarpetSettings {
                 (0, 180, 5),
                 "°",
                 "All lines share this direction in the ground plane.",
+            ),
+            Control::toggle(
+                "carpet_infinite_lines",
+                "Infinite lines",
+                s.infinite_lines,
+                "Continue flat hatch lines to the viewport edges beyond the ground.",
             ),
             Control::slider(
                 "carpet_spacing",
@@ -585,6 +593,7 @@ impl SceneSettings for CarpetSettings {
             ("carpet_pitch", ControlValue::Number(value)) => self.pitch = value,
             ("carpet_zoom", ControlValue::Number(value)) => self.zoom = value,
             ("carpet_hatch_direction", ControlValue::Number(value)) => self.hatch_direction = value,
+            ("carpet_infinite_lines", ControlValue::Bool(value)) => self.infinite_lines = value,
             ("carpet_spacing", ControlValue::Number(value)) => self.spacing = value,
             ("carpet_line_width", ControlValue::Number(value)) => self.line_width = value,
             ("carpet_height", ControlValue::Number(value)) => self.height = value,
@@ -662,6 +671,36 @@ mod tests {
         partial_expected["spacing"] = serde_json::json!(7);
         let partial: CarpetSettings = serde_json::from_str("{\"spacing\":7}").unwrap();
         assert_eq!(serde_json::to_value(partial).unwrap(), partial_expected);
+    }
+    #[test]
+    fn infinite_lines_control_defaults_on_and_round_trips_off_in_every_mode() {
+        let mut settings: CarpetSettings = serde_json::from_str("{}").unwrap();
+        for mode in 0..9 {
+            settings.mode = mode;
+            let row = settings
+                .controls()
+                .into_iter()
+                .find(|row| row.id == "carpet_infinite_lines")
+                .expect("all modes expose infinite lines");
+            assert_eq!(row.value, ControlValue::Bool(true));
+        }
+        assert!(settings
+            .set_control("carpet_infinite_lines", ControlValue::Bool(false))
+            .unwrap());
+        let restored: CarpetSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored
+                .controls()
+                .into_iter()
+                .find(|row| row.id == "carpet_infinite_lines")
+                .unwrap()
+                .value,
+            ControlValue::Bool(false)
+        );
+        assert!(settings
+            .set_control("carpet_infinite_lines", ControlValue::Number(0))
+            .is_err());
     }
     #[test]
     fn every_mode_has_unique_valid_editable_controls() {

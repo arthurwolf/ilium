@@ -272,7 +272,7 @@ fn igloo<S>(w: &mut Writer<'_, S>) -> Result<Vec<[i32; 3]>, PlacementError> {
     }
     Ok(vec![[0, -6, 0]])
 }
-fn outpost<S>(w: &mut Writer<'_, S>) -> Result<Vec<[i32; 3]>, PlacementError> {
+fn outpost<S>(w: &mut Writer<'_, S>, seed: u64) -> Result<Vec<[i32; 3]>, PlacementError> {
     w.box_fill([0, 0, 0], [8, 8, 0], "minecraft:cobblestone")?;
     for z in 1..=14 {
         for [x, y] in [[1, 1], [7, 1], [1, 7], [7, 7]] {
@@ -383,6 +383,39 @@ fn outpost<S>(w: &mut Writer<'_, S>) -> Result<Vec<[i32; 3]>, PlacementError> {
     // A supported porch reaches the tower opening.
     w.box_fill([3, 0, 0], [5, 1, 0], "minecraft:cobblestone")?;
     w.clear([4, 0, 1], [4, 1, 2]);
+    // Optional original cage companion, not a copied native outpost template.
+    // Whole explicit air and floor preserve the occupant through terrain fit.
+    if seed.is_multiple_of(2) {
+        w.box_fill([12, 1, 0], [16, 5, 0], "minecraft:cobblestone")?;
+        let perimeter = |x, y| {
+            (12..=16).contains(&x)
+                && (1..=5).contains(&y)
+                && (x == 12 || x == 16 || y == 1 || y == 5)
+        };
+        for z in 1..=3 {
+            for y in 1..=5 {
+                for x in 12..=16 {
+                    if perimeter(x, y) {
+                        let value = |connected| if connected { "true" } else { "false" };
+                        w.block(
+                            [x, y, z],
+                            "minecraft:dark_oak_fence",
+                            &[
+                                ("north", value(perimeter(x, y - 1))),
+                                ("east", value(perimeter(x + 1, y))),
+                                ("south", value(perimeter(x, y + 1))),
+                                ("west", value(perimeter(x - 1, y))),
+                                ("waterlogged", "false"),
+                            ],
+                        )?;
+                    } else {
+                        w.air([x, y, z]);
+                    }
+                }
+            }
+        }
+        w.box_fill([12, 1, 4], [16, 5, 4], "minecraft:dark_oak_planks")?;
+    }
     Ok(vec![[4, 0, 0]])
 }
 fn mansion<S>(w: &mut Writer<'_, S>) -> Result<Vec<[i32; 3]>, PlacementError> {
@@ -505,20 +538,27 @@ pub fn build<S>(
         LandmarkKind::JunglePyramid => pyramid(&mut writer, true, seed)?,
         LandmarkKind::SwampHut => hut(&mut writer)?,
         LandmarkKind::IglooTop => igloo(&mut writer)?,
-        LandmarkKind::PillagerOutpost => outpost(&mut writer)?,
+        LandmarkKind::PillagerOutpost => outpost(&mut writer, seed)?,
         LandmarkKind::WoodlandMansion => mansion(&mut writer)?,
     };
     let occupants = match kind {
         LandmarkKind::SwampHut => {
             vec![("minecraft:witch", [3, 5, 5]), ("minecraft:cat", [4, 5, 5])]
         }
-        LandmarkKind::PillagerOutpost => vec![("minecraft:pillager", [5, 5, 11])],
+        LandmarkKind::PillagerOutpost => {
+            let mut occupants = vec![("minecraft:pillager", [5, 5, 11])];
+            if seed.is_multiple_of(2) {
+                occupants.push(("minecraft:allay", [14, 3, 1]));
+            }
+            occupants
+        }
         // Original static display positions, not native room-marker/spawn
-        // translation: porch guards and a mage beside an upper-storey window.
+        // translation: porch guards and a mage/vex scene beside an upper-storey window.
         LandmarkKind::WoodlandMansion => vec![
             ("minecraft:vindicator", [13, -2, 1]),
             ("minecraft:vindicator", [18, -2, 1]),
             ("minecraft:evoker", [3, 2, 15]),
+            ("minecraft:vex", [5, 2, 15]),
         ],
         _ => vec![],
     };
@@ -591,7 +631,14 @@ mod tests {
     #[test]
     fn mansion_occupants_have_supported_clear_aboveground_positions() {
         let kit = build(LandmarkKind::WoodlandMansion, 17, state).unwrap();
-        assert_eq!(kit.occupants.len(), 3);
+        assert_eq!(kit.occupants.len(), 4);
+        assert_eq!(
+            kit.occupants
+                .iter()
+                .filter(|(id, _)| *id == "minecraft:vex")
+                .count(),
+            1
+        );
         assert!(kit
             .occupants
             .iter()
@@ -734,6 +781,159 @@ mod tests {
                 .map(|c| (c.position, c.state))
                 .collect();
             assert_eq!(a, b);
+        }
+    }
+}
+
+#[cfg(test)]
+mod allay_cage_tests {
+    use super::super::surface_entities::{self, AtlasLayout, ClimateSkin, Species};
+    use super::*;
+    type State = (String, BTreeMap<String, String>);
+    fn state(id: &str, props: &[(&str, &str)]) -> Result<State, PlacementError> {
+        Ok((
+            id.into(),
+            props
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ))
+    }
+    #[test]
+    fn outpost_cage_has_a_supported_clear_allay_and_a_closed_perimeter() {
+        let kit = build(LandmarkKind::PillagerOutpost, 0, state).unwrap();
+        let allays: Vec<_> = kit
+            .occupants
+            .iter()
+            .filter(|(id, _)| *id == "minecraft:allay")
+            .collect();
+        assert_eq!(allays.len(), 1, "Outpost cage variant has no allay");
+        let anchor = allays[0].1;
+        assert!(kit.bounds[0][0] <= 12 && kit.bounds[1][0] > 16);
+        assert!(kit.bounds[0][1] <= 1 && kit.bounds[1][1] > 5);
+        assert!(kit.bounds[0][2] <= 0 && kit.bounds[1][2] > 4);
+        let cells: BTreeMap<_, _> = kit
+            .template
+            .cells
+            .iter()
+            .map(|cell| (cell.position, &cell.state))
+            .collect();
+        let model =
+            surface_entities::model(Species::Allay, AtlasLayout::Bedrock, ClimateSkin::Temperate);
+        let (minimum, maximum) = model.bounds().unwrap();
+        let lower: [i32; 3] = std::array::from_fn(|axis| {
+            (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + minimum[axis]).floor() as i32
+        });
+        let upper: [i32; 3] = std::array::from_fn(|axis| {
+            (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + maximum[axis]).ceil() as i32
+        });
+        for y in lower[1]..upper[1] {
+            for x in lower[0]..upper[0] {
+                assert!(cells.get(&[x, y, anchor[2] - 1]).unwrap().is_some());
+                for z in lower[2]..upper[2] {
+                    assert!(cells.get(&[x, y, z]).is_some_and(|state| state.is_none()));
+                }
+            }
+        }
+        for z in 1..=3 {
+            for y in 1..=5 {
+                for x in 12..=16 {
+                    if x == 12 || x == 16 || y == 1 || y == 5 {
+                        assert_eq!(
+                            cells[&[x, y, z]].as_ref().unwrap().0,
+                            "minecraft:dark_oak_fence"
+                        );
+                    }
+                }
+            }
+        }
+        for y in 1..=5 {
+            for x in 12..=16 {
+                assert!(cells[&[x, y, 4]].is_some());
+            }
+        }
+        assert!(kit
+            .occupants
+            .iter()
+            .any(|(id, _)| *id == "minecraft:pillager"));
+    }
+    #[test]
+    fn allays_only_belong_to_the_selected_outpost_cage_variant() {
+        for seed in 0..16 {
+            for kind in LandmarkKind::ALL {
+                let kit = build(kind, seed, state).unwrap();
+                let count = kit
+                    .occupants
+                    .iter()
+                    .filter(|(id, _)| *id == "minecraft:allay")
+                    .count();
+                assert_eq!(
+                    count,
+                    usize::from(kind == LandmarkKind::PillagerOutpost && seed.is_multiple_of(2))
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod vex_tests {
+    use super::super::surface_entities::{self, AtlasLayout, ClimateSkin, Species};
+    use super::*;
+    type State = (String, BTreeMap<String, String>);
+    fn state(id: &str, props: &[(&str, &str)]) -> Result<State, PlacementError> {
+        Ok((
+            id.into(),
+            props
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ))
+    }
+    #[test]
+    fn mansion_evoker_has_a_vex_with_clear_wings_and_supported_aboveground_space() {
+        let kit = build(LandmarkKind::WoodlandMansion, 47, state).unwrap();
+        let vexes: Vec<_> = kit
+            .occupants
+            .iter()
+            .filter(|(id, _)| *id == "minecraft:vex")
+            .collect();
+        assert_eq!(vexes.len(), 1, "Evoker scene is missing its vex");
+        let anchor = vexes[0].1;
+        assert!(kit.occupants.iter().any(|(id, p)| *id == "minecraft:evoker"
+            && p[2] == anchor[2]
+            && (p[0] - anchor[0]).abs() <= 4));
+        let cells: BTreeMap<_, _> = kit
+            .template
+            .cells
+            .iter()
+            .map(|cell| (cell.position, &cell.state))
+            .collect();
+        let model =
+            surface_entities::model(Species::Vex, AtlasLayout::Bedrock, ClimateSkin::Temperate);
+        let (minimum, maximum) = model.bounds().unwrap();
+        let lower: [i32; 3] = std::array::from_fn(|axis| {
+            (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + minimum[axis]).floor() as i32
+        });
+        let upper: [i32; 3] = std::array::from_fn(|axis| {
+            (anchor[axis] as f32 + if axis < 2 { 0.5 } else { 0.0 } + maximum[axis]).ceil() as i32
+        });
+        for y in lower[1]..upper[1] {
+            for x in lower[0]..upper[0] {
+                assert!(cells[&[x, y, anchor[2] - 1]].is_some());
+                for z in lower[2]..upper[2] {
+                    assert!(cells[&[x, y, z]].is_none());
+                }
+            }
+        }
+        for kind in LandmarkKind::ALL {
+            if kind != LandmarkKind::WoodlandMansion {
+                assert!(!build(kind, 47, state)
+                    .unwrap()
+                    .occupants
+                    .iter()
+                    .any(|(id, _)| *id == "minecraft:vex"));
+            }
         }
     }
 }

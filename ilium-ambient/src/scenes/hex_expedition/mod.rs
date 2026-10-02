@@ -35,8 +35,10 @@ use settings::{MapChoice, PanStyle};
 use sprites::{Smoke, TileView};
 use world::{hash_cell, unit, Atlas, MapKind, Terrain, Tile, World, SQRT3};
 
-/// The map is a game board, not a documented work; no page is credited.
-pub const INSPIRED_BY: &[&str] = &[];
+/// The expedition maps follow the look of Curious Expedition by
+/// Maschinen-Mensch; all art here is drawn by Ilium.
+pub const INSPIRED_BY: &[&str] =
+    &["https://store.steampowered.com/app/358130/The_Curious_Expedition/"];
 
 /// Tiles per second the camera travels at 100 % pan speed.
 const TILES_PER_SECOND: f64 = 0.32;

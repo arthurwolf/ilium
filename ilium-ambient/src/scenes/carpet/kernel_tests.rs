@@ -109,11 +109,12 @@ fn fitted_camera_round_trips_corners_and_narrow_viewports() {
 }
 
 #[test]
-fn actual_flat_raster_has_parallel_equally_spaced_full_plane_lines() {
+fn finite_flat_raster_has_parallel_equally_spaced_ground_lines() {
     let o = RenderOptions {
         yaw: 0.0,
         pitch: 30.0,
         spacing_in_dots: 8.0,
+        infinite_lines: false,
         ..Default::default()
     };
     let c = Camera::new(160, 96, &o).unwrap();
@@ -382,6 +383,7 @@ fn zero_narrow_extreme_nonfinite_and_malformed_inputs_are_safe() {
                 line_width: value,
                 height_scale: value,
                 softness: value,
+                infinite_lines: true,
             };
             let mut image = raster(w, h);
             let mut r = Renderer::default();
@@ -448,4 +450,131 @@ fn release_measurement() {
         start.elapsed().as_micros(),
         r.stats()
     );
+}
+
+#[test]
+fn default_flat_carpet_reaches_viewport_edges_outside_ground() {
+    let options = RenderOptions {
+        yaw: 0.0,
+        pitch: 30.0,
+        zoom: 0.5,
+        spacing_in_dots: 8.0,
+        ..Default::default()
+    };
+    let mut frame = raster(160, 96);
+    render(&mut frame, &[], &options);
+    let camera = Camera::new(160, 96, &options).unwrap();
+    assert!(camera.inverse_ground([0.0, 0.5]).is_none());
+    for x in [0, 159] {
+        assert!(
+            frame.dots.iter().skip(x).step_by(160).any(|v| *v > 0.5),
+            "flat hatches must reach viewport edge {x}"
+        );
+    }
+    assert!(
+        frame.dots[..160 * 8].iter().any(|v| *v > 0.5),
+        "lattice lines missing the ground square must also fill the viewport"
+    );
+}
+
+#[test]
+fn infinite_flat_lattice_matches_perpendicular_distance_oracle_across_cameras() {
+    for (width, height) in [(64, 40), (1, 90), (90, 1)] {
+        for yaw in [0.0, 45.0, 137.0] {
+            for hatch_direction in [0.0, 37.0, 90.0] {
+                for zoom in [0.3, 2.0] {
+                    let options = RenderOptions {
+                        yaw,
+                        pitch: 25.0,
+                        hatch_direction,
+                        zoom,
+                        spacing_in_dots: 6.0,
+                        ..Default::default()
+                    };
+                    let camera = Camera::new(width, height, &options).unwrap();
+                    let angle = hatch_direction.to_radians();
+                    let axis = camera.vector([angle.cos(), angle.sin()]);
+                    let length = axis[0].hypot(axis[1]);
+                    let normal = [-axis[1] / length, axis[0] / length];
+                    let mut image = raster(width, height);
+                    render(&mut image, &[], &options);
+                    for y in 0..height {
+                        for x in 0..width {
+                            let offset = (x as f32 + 0.5 - camera.origin[0]) * normal[0]
+                                + (y as f32 + 0.5 - camera.origin[1]) * normal[1];
+                            let distance = (offset - (offset / 6.0).round() * 6.0).abs();
+                            let expected = (1.1 - distance).clamp(0.0, 1.0);
+                            assert!((image.dots[y * width + x] - expected).abs() < 0.002,
+                                "missing/misaligned lattice at {width}x{height} yaw={yaw} hatch={hatch_direction} zoom={zoom} ({x},{y})");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn infinite_lines_toggle_invalidates_ink_cache_and_preserves_height_field() {
+    let mut renderer = Renderer::default();
+    let mut options = RenderOptions {
+        zoom: 0.5,
+        ..Default::default()
+    };
+    let mut image = raster(160, 96);
+    renderer.render(&mut image, &[sphere()], &options);
+    let infinite = image.dots.clone();
+    options.infinite_lines = false;
+    renderer.render(&mut image, &[sphere()], &options);
+    assert!(!renderer.stats().rebuilt);
+    assert!(!renderer.stats().frame_cache_hit);
+    assert_ne!(image.dots, infinite);
+    let finite = image.dots.clone();
+    image.dots.fill(0.0);
+    renderer.render(&mut image, &[sphere()], &options);
+    assert!(renderer.stats().frame_cache_hit);
+    assert_eq!(image.dots, finite);
+    options.infinite_lines = true;
+    renderer.render(&mut image, &[sphere()], &options);
+    assert!(!renderer.stats().rebuilt);
+    assert!(!renderer.stats().frame_cache_hit);
+    assert_eq!(image.dots, infinite);
+    let camera = Camera::new(160, 96, &options).unwrap();
+    assert!(camera.inverse_ground([0.0, 0.0]).is_none());
+}
+
+#[test]
+fn raised_ground_boundary_joins_flat_exterior_without_extruding_height() {
+    let options = RenderOptions {
+        yaw: 0.0,
+        pitch: 30.0,
+        zoom: 0.5,
+        height_scale: 1.0,
+        spacing_in_dots: 8.0,
+        ..Default::default()
+    };
+    let body = Body {
+        from: [0.0, 0.5],
+        to: [0.0, 0.5],
+        ..sphere()
+    };
+    let mut flat = raster(160, 96);
+    let mut raised = raster(160, 96);
+    render(&mut flat, &[], &options);
+    render(&mut raised, &[body], &options);
+    for y in 0..96 {
+        for x in (0..8).chain(152..160) {
+            near(flat.dots[y * 160 + x], raised.dots[y * 160 + x]);
+        }
+    }
+    let camera = Camera::new(160, 96, &options).unwrap();
+    let middle = camera.project(body.from, body.height * 0.5).unwrap();
+    assert!(
+        peak(&raised, middle) > 0.5,
+        "raised boundary must join the flat exterior without a gap"
+    );
+    assert!(Camera::new(160, 96, &options)
+        .unwrap()
+        .inverse_ground([0.0, 0.5])
+        .is_none());
 }

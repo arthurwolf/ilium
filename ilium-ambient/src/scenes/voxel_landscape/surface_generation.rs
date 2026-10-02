@@ -10,13 +10,15 @@ use super::{
     noise::hash2,
     settings::VoxelLandscapeSettings,
     surface_biome_selector,
-    surface_biomes::SurfaceBiome,
+    surface_biomes::{OrganismSource, SurfaceBiome, SURFACE_AZALEA_INDICATOR_CONFIGURATION_ID},
     surface_camp_assembly,
+    surface_context::{self, ContextEvent, SceneAtmosphere},
     surface_entities::{self, AtlasLayout, ClimateSkin, Model, Species},
+    surface_events,
     surface_flora::{FloraPlacement, FloraState, HabitatCell, PlantCandidate, Support},
     surface_flora_vocabulary::ENTRIES,
     surface_fluid::FluidCell,
-    surface_landmark_assembly, surface_ruin_assembly, surface_village_assembly,
+    surface_geology, surface_landmark_assembly, surface_ruin_assembly, surface_village_assembly,
     terrain_fields::{TerrainFields, TerrainSample},
     tree_decoration_profiles,
     tree_decorations::{DecorationOperation, DecorationPlanner, SurroundingCell},
@@ -60,6 +62,10 @@ pub enum SourceOwner {
     },
     Terrain {
         biome: SurfaceBiome,
+    },
+    Geology {
+        anchor: [i32; 3],
+        source: &'static str,
     },
     Tree {
         anchor: [i32; 3],
@@ -124,9 +130,9 @@ fn terrain_surface(biome: SurfaceBiome) -> (&'static str, &'static str) {
         }
         Desert | Beach => ("minecraft:sand", "minecraft:sandstone"),
         SnowyBeach => ("minecraft:snow_block", "minecraft:sand"),
-        StonyShore | StonyPeaks | JaggedPeaks | FrozenPeaks | WindsweptGravellyHills => {
-            ("minecraft:stone", "minecraft:stone")
-        }
+        StonyShore | StonyPeaks | WindsweptGravellyHills => ("minecraft:stone", "minecraft:stone"),
+        FrozenPeaks => ("minecraft:snow_block", "minecraft:packed_ice"),
+        JaggedPeaks => ("minecraft:snow_block", "minecraft:stone"),
         MushroomFields => ("minecraft:mycelium", "minecraft:dirt"),
         Swamp | MangroveSwamp => ("minecraft:mud", "minecraft:mud"),
         SnowyPlains | SnowySlopes | IceSpikes | SnowyTaiga | Grove => {
@@ -196,6 +202,73 @@ fn add_global(anchor: [i32; 3], offset: [i16; 3]) -> Result<[i32; 3]> {
             .checked_add(i32::from(offset[2]))
             .ok_or_else(|| AssetError::InvalidMetadata("feature coordinate overflow".into()))?,
     ])
+}
+
+// Authored bounded cover, informed by the differing pinned Java placement
+// prescriptions. These percentages are not native chunk-attempt counts.
+fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
+    use SurfaceBiome::*;
+    match biome {
+        BambooJungle | DarkForest | Jungle | PaleGarden => 85,
+        BirchForest | DappledForest | Forest | SnowyTaiga | Taiga => 80,
+        OldGrowthBirchForest | OldGrowthPineTaiga | OldGrowthSpruceTaiga => 75,
+        MangroveSwamp => 70,
+        CherryGrove | FlowerForest => 60,
+        Grove => 55,
+        WindsweptForest | MushroomFields => 45,
+        Swamp | WoodedBadlands => 35,
+        SparseJungle => 30,
+        Savanna | SavannaPlateau | WindsweptSavanna => 20,
+        WindsweptGravellyHills | WindsweptHills | IceSpikes => 12,
+        FrozenRiver | River => 8,
+        Meadow => 5,
+        Plains | SnowyPlains | SunflowerPlains => 2,
+        Badlands | Beach | Desert | ErodedBadlands | FrozenPeaks | JaggedPeaks | SnowyBeach
+        | SnowySlopes | StonyPeaks | StonyShore => 0,
+    }
+}
+
+fn tree_configuration(biome: SurfaceBiome, entropy: u64) -> Option<&'static str> {
+    // The supplemental surface tree is not an ordinary biome tree-table entry.
+    // Rare woodland indicators are authored; no underground cave is inferred.
+    let woodland = matches!(
+        biome,
+        SurfaceBiome::BambooJungle
+            | SurfaceBiome::BirchForest
+            | SurfaceBiome::DappledForest
+            | SurfaceBiome::DarkForest
+            | SurfaceBiome::FlowerForest
+            | SurfaceBiome::Forest
+            | SurfaceBiome::Jungle
+            | SurfaceBiome::OldGrowthBirchForest
+            | SurfaceBiome::SparseJungle
+    );
+    if woodland && entropy.rotate_left(7).is_multiple_of(128) {
+        return Some(SURFACE_AZALEA_INDICATOR_CONFIGURATION_ID);
+    }
+    let configs = biome.descriptor().natural_tree_configuration_ids;
+    if configs.is_empty() {
+        return None;
+    }
+    configs
+        .get((entropy.rotate_left(11) as usize) % configs.len())
+        .copied()
+}
+
+fn pumpkin_patch_contains(seed: u64, x: i32, y: i32) -> bool {
+    // Global ownership preserves patch membership across camera and region
+    // boundaries, including negative coordinates. Most 64-cell tiles have none.
+    let gx = x.div_euclid(64);
+    let gy = y.div_euclid(64);
+    let entropy = hash2(seed ^ 0x7075_6d70_6b69_6e73, i64::from(gx), i64::from(gy));
+    if !entropy.is_multiple_of(24) {
+        return false;
+    }
+    let center_x = 12 + (entropy.rotate_left(19) % 40) as i32;
+    let center_y = 12 + (entropy.rotate_left(37) % 40) as i32;
+    let dx = x.rem_euclid(64) - center_x;
+    let dy = y.rem_euclid(64) - center_y;
+    dx * dx + dy * dy <= 100
 }
 
 fn tree_growth(entropy: u64) -> Growth {
@@ -333,12 +406,7 @@ fn first_global_fauna_grid(minimum: i32) -> i64 {
 /// Authored daylight and solid-ground admission, evaluated after structures,
 /// trees and flora have written the final local surface snapshot. Exact native
 /// spawn light/noise/group rules remain unresolved.
-fn natural_entity_site(
-    world: &SurfaceWorld,
-    anchor: [i32; 3],
-    species: Species,
-    model: &Model,
-) -> bool {
+fn dry_surface_support(world: &SurfaceWorld, anchor: [i32; 3]) -> bool {
     let [x, y, feet] = anchor;
     let Some(biome) = world.biomes.get(&[x, y]).copied() else {
         return false;
@@ -359,6 +427,11 @@ fn natural_entity_site(
     {
         return false;
     }
+    true
+}
+
+fn entity_clearance(world: &SurfaceWorld, anchor: [i32; 3], model: &Model) -> bool {
+    let [x, y, feet] = anchor;
     let Some((minimum, maximum)) = model.bounds() else {
         return false;
     };
@@ -394,6 +467,26 @@ fn natural_entity_site(
             }
         }
     }
+    true
+}
+
+fn dry_surface_entity_site(world: &SurfaceWorld, anchor: [i32; 3], model: &Model) -> bool {
+    dry_surface_support(world, anchor) && entity_clearance(world, anchor, model)
+}
+fn natural_entity_site(
+    world: &SurfaceWorld,
+    anchor: [i32; 3],
+    species: Species,
+    model: &Model,
+) -> bool {
+    if !dry_surface_entity_site(world, anchor, model) {
+        return false;
+    }
+    let [x, y, feet] = anchor;
+    let Some((_, maximum)) = model.bounds() else {
+        return false;
+    };
+    let last_z = i64::from(feet) + f64::from(maximum[2]).ceil() as i64;
     // Under foliage/roof is a bounded shade proxy; no clock or native light
     // engine exists in this scene. Daylight-exposed hostile candidates are
     // excluded instead of implying a vanilla daytime spawn.
@@ -420,6 +513,325 @@ fn natural_entity_site(
     !hostile || covered
 }
 
+/// Display one bee beside each accepted natural nest after every block writer
+/// has finished. Nest occupancy, release timing and gameplay are not simulated.
+fn populate_nest_bees(world: &mut SurfaceWorld, cancelled: impl Fn() -> bool) -> Result<()> {
+    for (&position, block) in &world.blocks {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        if block.state.id().as_str() != "minecraft:bee_nest"
+            || !matches!(block.owner, SourceOwner::TreeDecoration { .. })
+        {
+            continue;
+        }
+        let Some(biome) = world.biomes.get(&[position[0], position[1]]) else {
+            continue;
+        };
+        if !biome
+            .descriptor()
+            .supplemental_organisms
+            .iter()
+            .any(|entry| {
+                entry.organism_id == "minecraft:bee" && entry.source == OrganismSource::BeeNest
+            })
+        {
+            continue;
+        }
+        let Some(facing) = block.state.properties().get("facing") else {
+            continue;
+        };
+        let Some((anchor, model)) = surface_entities::bee_nest_occupant(position, facing) else {
+            continue;
+        };
+        if world.entities.iter().any(|entity| entity.anchor == anchor)
+            || !surface_entities::bee_nest_clearance(anchor, &model, |cell| {
+                world.region.contains(cell)
+                    && !world.blocks.contains_key(&cell)
+                    && !world.fluids.contains_key(&cell)
+            })
+        {
+            continue;
+        }
+        world.entities.push(SurfaceEntity {
+            species: Species::Bee,
+            anchor,
+            model,
+            atlas_status: "Original hovering bee at accepted natural nest; native occupancy/release timing is not simulated; selected/fallback atlas checked during binding",
+        });
+    }
+    Ok(())
+}
+
+/// Admit a whole visitor party against the completed local surface. None of
+/// its members are published when a companion lacks ground or clear space.
+fn populate_trader_parties(world: &mut SurfaceWorld, cancelled: impl Fn() -> bool) -> Result<()> {
+    let first = world
+        .region
+        .minimum
+        .map(|value| value.div_euclid(surface_events::TRADER_GRID));
+    let last = world
+        .region
+        .maximum
+        .map(|value| (value - 1).div_euclid(surface_events::TRADER_GRID));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            let Some(xy) = surface_events::trader_candidate(world.seed, [gx, gy]) else {
+                continue;
+            };
+            let Some(sample) = world.columns.get(&xy) else {
+                continue;
+            };
+            let Some(biome) = world.biomes.get(&xy).copied() else {
+                continue;
+            };
+            let center = [xy[0], xy[1], i32::from(sample.height)];
+            let Some(party) =
+                surface_events::trader_party(center, fauna_climate(biome), |position| {
+                    let ground = world.columns.get(&position)?;
+                    ground
+                        .water_level
+                        .is_none_or(|water| water <= ground.height)
+                        .then_some(i32::from(ground.height))
+                })
+            else {
+                continue;
+            };
+            if !party.iter().all(|member| {
+                natural_entity_site(world, member.anchor, member.species, &member.model)
+                    && !world
+                        .entities
+                        .iter()
+                        .any(|entity| entity.anchor == member.anchor)
+            }) {
+                continue;
+            }
+            for member in party {
+                world.entities.push(SurfaceEntity {
+                    species: member.species,
+                    anchor: member.anchor,
+                    model: member.model,
+                    atlas_status: "Original static wandering trader and two companion llamas; no native trader timer/trading/lead gameplay; selected/fallback atlas checked during binding",
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A static raid party is owned by its real village anchor. Always use the
+/// first global approach; choosing by visible-region collisions would change
+/// the scene when the camera moves or the world is projected into fragments.
+fn populate_village_raids(world: &mut SurfaceWorld, cancelled: impl Fn() -> bool) -> Result<()> {
+    let villages: BTreeSet<_> = world
+        .structures
+        .iter()
+        .filter(|feature| {
+            matches!(
+                feature.source,
+                "minecraft:village_plains"
+                    | "minecraft:village_desert"
+                    | "minecraft:village_savanna"
+                    | "minecraft:village_taiga"
+                    | "minecraft:village_snowy"
+            )
+        })
+        .map(|feature| feature.anchor)
+        .collect();
+    for village in villages {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        let Some(candidates) = surface_events::raid_candidates(world.seed, village) else {
+            continue;
+        };
+        let xy = candidates[0];
+        let Some(sample) = world.columns.get(&xy) else {
+            continue;
+        };
+        let Some(biome) = world.biomes.get(&xy).copied() else {
+            continue;
+        };
+        let center = [xy[0], xy[1], i32::from(sample.height)];
+        let Some(party) = surface_events::raid_party(center, fauna_climate(biome), |position| {
+            let ground = world.columns.get(&position)?;
+            ground
+                .water_level
+                .is_none_or(|water| water <= ground.height)
+                .then_some(i32::from(ground.height))
+        }) else {
+            continue;
+        };
+        if !party.iter().all(|member| {
+            natural_entity_site(world, member.anchor, member.species, &member.model)
+                && !world
+                    .entities
+                    .iter()
+                    .any(|entity| entity.anchor == member.anchor)
+        }) {
+            continue;
+        }
+        for member in party {
+            world.entities.push(SurfaceEntity {
+                species:member.species,anchor:member.anchor,model:member.model,
+                atlas_status:"Original static ravager and two pillagers near an accepted village; no raid waves/combat simulation; selected/fallback atlas checked during binding",
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Phase-specific surface figures are generated only after every block writer.
+/// All display episodes are static and deterministic, never native gameplay.
+fn populate_contextual_fauna(
+    world: &mut SurfaceWorld,
+    atmosphere: SceneAtmosphere,
+    cancelled: impl Fn() -> bool,
+) -> Result<()> {
+    if atmosphere == SceneAtmosphere::Day {
+        return Ok(());
+    }
+    if atmosphere.is_night() {
+        let hearts: Vec<_> = world
+            .blocks
+            .iter()
+            .filter_map(|(&position, block)| {
+                (block.state.id().as_str() == "minecraft:creaking_heart"
+                    && matches!(block.owner, SourceOwner::TreeDecoration { .. })
+                    && world.biomes.get(&[position[0], position[1]])
+                        == Some(&SurfaceBiome::PaleGarden))
+                .then_some(position)
+            })
+            .collect();
+        for heart in hearts {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            if let Some(block) = world.blocks.get_mut(&heart) {
+                let mut properties = block.state.properties().clone();
+                properties.insert("creaking_heart_state".into(), "awake".into());
+                block.state = BlockState::new(block.state.id().clone(), properties)?;
+            }
+            let Some(xy) = surface_context::creaking_candidate(world.seed, heart) else {
+                continue;
+            };
+            if world.biomes.get(&xy) != Some(&SurfaceBiome::PaleGarden) {
+                continue;
+            }
+            let Some(sample) = world.columns.get(&xy) else {
+                continue;
+            };
+            let anchor = [xy[0], xy[1], i32::from(sample.height)];
+            let model = surface_entities::model(
+                Species::Creaking,
+                AtlasLayout::Bedrock,
+                ClimateSkin::Temperate,
+            );
+            if !dry_surface_entity_site(world, anchor, &model)
+                || world.entities.iter().any(|e| e.anchor == anchor)
+            {
+                continue;
+            }
+            world.entities.push(SurfaceEntity {species:Species::Creaking,anchor,model,
+                atlas_status:"Static night figure owned by accepted natural Pale Garden heart; native heart puppetry and combat are not simulated; selected/fallback atlas checked during binding"});
+        }
+    }
+    let first = world
+        .region
+        .minimum
+        .map(|v| v.div_euclid(surface_context::CONTEXT_GRID));
+    let last = world
+        .region
+        .maximum
+        .map(|v| (v - 1).div_euclid(surface_context::CONTEXT_GRID));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            let Some((xy, event)) = surface_context::candidate(world.seed, [gx, gy], atmosphere)
+            else {
+                continue;
+            };
+            let Some(sample) = world.columns.get(&xy) else {
+                continue;
+            };
+            let Some(biome) = world.biomes.get(&xy).copied() else {
+                continue;
+            };
+            let ground = [xy[0], xy[1], i32::from(sample.height)];
+            if !dry_surface_support(world, ground) {
+                continue;
+            }
+            if event != ContextEvent::Phantom && !surface_context::storm_eligible(biome) {
+                continue;
+            }
+            if event == ContextEvent::LightningPig
+                && !biome
+                    .descriptor()
+                    .biome_table_fauna_ids
+                    .contains(&"minecraft:pig")
+            {
+                continue;
+            }
+            let (anchor, models) = match event {
+                ContextEvent::Phantom => {
+                    let Some(height) = ground[2].checked_add(12) else {
+                        continue;
+                    };
+                    let anchor = [xy[0], xy[1], height];
+                    // Real open sky above the complete flight silhouette; no
+                    // player/insomnia counter or native mob-spawn claim.
+                    if (height..height.saturating_add(48)).any(|z| {
+                        world.blocks.contains_key(&[xy[0], xy[1], z])
+                            || world.fluids.contains_key(&[xy[0], xy[1], z])
+                    }) {
+                        continue;
+                    }
+                    (
+                        anchor,
+                        vec![surface_entities::model(
+                            Species::Phantom,
+                            AtlasLayout::Bedrock,
+                            fauna_climate(biome),
+                        )],
+                    )
+                }
+                ContextEvent::HorseTrap => (
+                    ground,
+                    surface_entities::event_models(
+                        surface_entities::SurfaceEvent::HorseJockey,
+                        AtlasLayout::Bedrock,
+                    ),
+                ),
+                ContextEvent::LightningPig => (
+                    ground,
+                    surface_entities::event_models(
+                        surface_entities::SurfaceEvent::LightningPig,
+                        AtlasLayout::Bedrock,
+                    ),
+                ),
+            };
+            if world.entities.iter().any(|e| e.anchor == anchor)
+                || !models
+                    .iter()
+                    .all(|model| entity_clearance(world, anchor, model))
+            {
+                continue;
+            }
+            // Commit mount/rider together only after every model is clear.
+            for model in models {
+                world.entities.push(SurfaceEntity {species:model.species,anchor,model,
+                    atlas_status:"Static globally owned night/precipitation episode; native insomnia/lightning/trap activation is not simulated; selected/fallback atlas checked during binding"});
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn prepare(
     region: Region,
     settings: &VoxelLandscapeSettings,
@@ -434,9 +846,16 @@ pub fn prepare(
         structures:Vec::new(),entities:Vec::new(), source_limitations:vec![
             "Terrain/biome selector is authored Ilium homage, not native multi-noise bands",
             "Flora attempts use authored sparse density; exact Java count/noise algorithms remain pending",
+            "Surface azalea indicators use rare authored woodland selection; no underground cave/root network is generated",
+            "Ice spire silhouettes and cold surface openings are authored; native feature processors are not reproduced",
             "Village graph uses authored kit and terrain fit; native jigsaw/templates/processors and other structure families remain pending",
             "Seven surface landmark exteriors, nine ruin kits and eighteen camp presets use original geometry and sparse placement; native salts, templates and processors remain unverified",
-            "Entity spawn light/habitat and selected-pack atlas compatibility remain pending",
+            "Desert wells use independent authored16-block rare-feature admission and whole dry-sand footprint checks; native RNG, buried support and exact placement parity remain unverified",
+            "Day/Night/Thunderstorm is fixed scene atmosphere; sparse phantom, skeleton-horse trap and transformed-pig episodes do not simulate sleep debt, lightning or combat",
+            "Night Creaking figures belong to accepted natural Pale Garden hearts; native heart puppetry and atlas parity remain unverified",
+            "Entity day shade uses authored clearance proxies; exact native spawn light and selected-pack atlas parity remain unverified",
+            "Wandering visitors use sparse globally owned original trader/two-llama groups with complete final-ground clearance; native trader timers, trading and leads are not simulated",
+            "Accepted natural bee nests display one original hovering bee when its complete silhouette fits; native nest occupancy and release timing are not simulated",
         ] };
     let mut terrain_states = BTreeMap::<&'static str, BlockState>::new();
     for y in region.minimum[1] - 1..=region.maximum[1] {
@@ -494,10 +913,20 @@ pub fn prepare(
             }
             if let Some(level) = sample.water_level {
                 if i32::from(level) > ground + 1 {
-                    world.fluids.insert(
-                        [x, y, i32::from(level) - 1],
-                        FluidCell::new(0, water_tint(biome))?,
-                    );
+                    let position = [x, y, i32::from(level) - 1];
+                    if surface_geology::freezes_surface(biome, seed, [x, y]) {
+                        world.blocks.insert(
+                            position,
+                            SurfaceBlock {
+                                state: plain("minecraft:ice")?,
+                                owner: SourceOwner::Terrain { biome },
+                            },
+                        );
+                    } else {
+                        world
+                            .fluids
+                            .insert(position, FluidCell::new(0, water_tint(biome))?);
+                    }
                 }
             }
         }
@@ -554,6 +983,7 @@ pub fn prepare(
                 }
                 let species = match marker.kind {
                     village_kit::MarkerKind::Resident(_) => Species::Villager,
+                    village_kit::MarkerKind::Guardian => Species::IronGolem,
                     village_kit::MarkerKind::Animal(id) => match Species::from_id(id) {
                         Some(species) => species,
                         None => continue,
@@ -586,77 +1016,100 @@ pub fn prepare(
     }
     let landmark_min = region.minimum.map(|value| (value - 224).div_euclid(256));
     let landmark_max = region.maximum.map(|value| (value + 224).div_euclid(256));
+    let mut landmark_candidates = Vec::new();
     for gy in landmark_min[1]..=landmark_max[1] {
         for gx in landmark_min[0]..=landmark_max[0] {
             if cancelled() {
                 return Err(AssetError::Cancelled);
             }
-            let Some(landmark) =
+            if let Some(landmark) =
                 surface_landmark_assembly::candidate([gx, gy], &fields, &settings, &cancelled)?
-            else {
+            {
+                landmark_candidates.push(landmark);
+            }
+        }
+    }
+    // Wells reserve their whole five-block exterior before region projection,
+    // using an independent16-block grid with enough halo for adjacent cells.
+    let well_min = region.minimum.map(|value| (value - 8).div_euclid(16));
+    let well_max = region.maximum.map(|value| (value + 8).div_euclid(16));
+    for gy in well_min[1]..=well_max[1] {
+        for gx in well_min[0]..=well_max[0] {
+            if let Some(well) = surface_landmark_assembly::desert_well_candidate(
+                [gx, gy],
+                &fields,
+                &settings,
+                &cancelled,
+            )? {
+                landmark_candidates.push(well);
+            }
+        }
+    }
+    for landmark in landmark_candidates {
+        // A full preprojected overlap rejects the candidate. Rejected
+        // fragments cannot reappear when a neighboring region is loaded.
+        if landmark
+            .writes
+            .keys()
+            .any(|position| structure_positions.contains(position))
+        {
+            continue;
+        }
+        for position in landmark.writes.keys() {
+            structure_positions.insert(*position);
+        }
+        let mut projected = 0;
+        for (position, block) in landmark.writes {
+            if !region.contains(position) {
+                continue;
+            }
+            projected += 1;
+            world.blocks.remove(&position);
+            world.fluids.remove(&position);
+            if let Some(block) = block {
+                if block.id().as_str() == "minecraft:water" {
+                    let biome = world.biomes[&[position[0], position[1]]];
+                    world
+                        .fluids
+                        .insert(position, FluidCell::new(0, water_tint(biome))?);
+                } else {
+                    world.blocks.insert(
+                        position,
+                        SurfaceBlock {
+                            state: block,
+                            owner: SourceOwner::Structure {
+                                anchor: landmark.anchor,
+                                source: landmark.source.clone(),
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        for (id, position) in landmark.occupants {
+            if !region.contains(position) {
+                continue;
+            }
+            let Some(species) = Species::from_id(id) else {
                 continue;
             };
-            // A full preprojected overlap rejects the candidate. Rejected
-            // fragments cannot reappear when a neighboring region is loaded.
-            if landmark
-                .writes
-                .keys()
-                .any(|position| structure_positions.contains(position))
-            {
-                continue;
-            }
-            for position in landmark.writes.keys() {
-                structure_positions.insert(*position);
-            }
-            let mut projected = 0;
-            for (position, block) in landmark.writes {
-                if !region.contains(position) {
-                    continue;
-                }
-                projected += 1;
-                world.blocks.remove(&position);
-                world.fluids.remove(&position);
-                if let Some(block) = block {
-                    if block.id().as_str() == "minecraft:water" {
-                        let biome = world.biomes[&[position[0], position[1]]];
-                        world
-                            .fluids
-                            .insert(position, FluidCell::new(0, water_tint(biome))?);
-                    } else {
-                        world.blocks.insert(
-                            position,
-                            SurfaceBlock {
-                                state: block,
-                                owner: SourceOwner::Structure {
-                                    anchor: landmark.anchor,
-                                    source: landmark.source.clone(),
-                                },
-                            },
-                        );
-                    }
-                }
-            }
-            for (id, position) in landmark.occupants {
-                if !region.contains(position) {
-                    continue;
-                }
-                let Some(species) = Species::from_id(id) else {
-                    continue;
-                };
-                let biome = world.biomes[&[position[0], position[1]]];
-                let climate = fauna_climate(biome);
-                world.entities.push(SurfaceEntity {species,anchor:position,
-                    model:surface_entities::model(species,AtlasLayout::Bedrock,climate),
-                    atlas_status:"Original landmark marker; selected-pack entity atlas compatibility unverified"});
-            }
-            if projected > 0 {
-                world.structures.push(FeatureRecord {
-                    anchor: landmark.anchor,
-                    source: surface_landmark_assembly::source(landmark.kind),
-                    projected_cells: projected,
-                    authored_placement: true,
-                });
-            }
+            let biome = world.biomes[&[position[0], position[1]]];
+            let climate = fauna_climate(biome);
+            world.entities.push(SurfaceEntity {
+                species,
+                anchor: position,
+                model: surface_entities::model(species, AtlasLayout::Bedrock, climate),
+                atlas_status:
+                    "Original landmark marker; selected-pack entity atlas compatibility unverified",
+            });
+        }
+        if projected > 0 {
+            world.structures.push(FeatureRecord {
+                anchor: landmark.anchor,
+                source: surface_landmark_assembly::source(landmark.kind),
+                projected_cells: projected,
+                authored_placement: true,
+            });
         }
     }
     // Ruins reserve their whole globally admitted footprint, including explicit
@@ -770,6 +1223,72 @@ pub fn prepare(
             }
         }
     }
+    // Ice spires have globally owned whole candidates, independently of flora
+    // density. Keep their exact feature/material provenance and aboveground scope.
+    let geology_min = region.minimum.map(|value| (value - 32).div_euclid(21));
+    let geology_max = region.maximum.map(|value| (value + 32).div_euclid(21));
+    for gy in geology_min[1]..=geology_max[1] {
+        for gx in geology_min[0]..=geology_max[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            let entropy = hash2(seed ^ 0x6963_655f_7370_696b, i64::from(gx), i64::from(gy));
+            if entropy % 100 >= 72 {
+                continue;
+            }
+            let x = gx * 21 + 10 + (entropy.rotate_left(17) % 9) as i32 - 4;
+            let y = gy * 21 + 10 + (entropy.rotate_left(41) % 9) as i32 - 4;
+            let (sample, biome) = sample_ground(&fields, &settings, x, y);
+            if biome != SurfaceBiome::IceSpikes
+                || sample
+                    .water_level
+                    .is_some_and(|level| level > sample.height)
+            {
+                continue;
+            }
+            let anchor = [x, y, i32::from(sample.height)];
+            let positions = surface_geology::ice_spike(entropy)
+                .into_iter()
+                .map(|cell| Ok((add_global(anchor, cell.position)?, cell.resource_id)))
+                .collect::<Result<Vec<_>>>()?;
+            if positions.iter().any(|(position, _)| {
+                if structure_positions.contains(position) {
+                    return true;
+                }
+                let (ground, cell_biome) =
+                    sample_ground(&fields, &settings, position[0], position[1]);
+                ground.water_level.is_some_and(|level| {
+                    level > ground.height && position[2] == i32::from(level) - 1
+                }) && !surface_geology::freezes_surface(
+                    cell_biome,
+                    seed,
+                    [position[0], position[1]],
+                )
+            }) {
+                continue;
+            }
+            for (position, resource) in positions {
+                let (ground, _) = sample_ground(&fields, &settings, position[0], position[1]);
+                if position[2] < i32::from(ground.height) {
+                    continue;
+                }
+                structure_positions.insert(position);
+                if !region.contains(position) {
+                    continue;
+                }
+                world.blocks.insert(
+                    position,
+                    SurfaceBlock {
+                        state: plain(resource)?,
+                        owner: SourceOwner::Geology {
+                            anchor,
+                            source: "minecraft:ice_spike",
+                        },
+                    },
+                );
+            }
+        }
+    }
     // Evaluate whole trees by global grid anchor, then project. This keeps the
     // same configuration and owner when a camera/region boundary moves.
     let anchor_min = region.minimum.map(|v| (v - 48).div_euclid(13));
@@ -779,14 +1298,16 @@ pub fn prepare(
             return Err(AssetError::Cancelled);
         }
         for gx in anchor_min[0]..=anchor_max[0] {
-            let x = gx * 13 + 6;
-            let y = gy * 13 + 6;
             let hash = hash2(seed ^ 0x7472_6565, i64::from(gx), i64::from(gy));
-            if hash % 100 >= (settings.vegetation_percent.min(100) as u64).saturating_mul(18) / 100
-            {
+            let x = gx * 13 + 6 + (hash.rotate_left(29) % 9) as i32 - 4;
+            let y = gy * 13 + 6 + (hash.rotate_left(43) % 9) as i32 - 4;
+            let (sample, biome) = sample_ground(&fields, &settings, x, y);
+            let cover = tree_cover_percent(biome)
+                * (settings.vegetation_percent.clamp(0, 100) as u64)
+                / 100;
+            if hash % 100 >= cover {
                 continue;
             }
-            let (sample, biome) = sample_ground(&fields, &settings, x, y);
             let configs = biome.descriptor().natural_tree_configuration_ids;
             if configs.is_empty()
                 || sample.water_level.is_some_and(|z| z > sample.height)
@@ -794,7 +1315,9 @@ pub fn prepare(
             {
                 continue;
             }
-            let source = configs[(hash.rotate_left(11) as usize) % configs.len()];
+            let Some(source) = tree_configuration(biome, hash) else {
+                continue;
+            };
             let Some(profile) = tree_profiles::profile(source) else {
                 continue;
             };
@@ -817,9 +1340,17 @@ pub fn prepare(
                 }
                 let block = state(
                     cell.resource_id,
-                    cell.properties
-                        .into_iter()
-                        .map(|(k, v)| (k.to_owned(), v.to_owned())),
+                    cell.properties.into_iter().map(|(k, v)| {
+                        let value = if cell.resource_id == "minecraft:mangrove_roots"
+                            && k == "waterlogged"
+                            && world.fluids.contains_key(&position)
+                        {
+                            "true"
+                        } else {
+                            v
+                        };
+                        (k.to_owned(), value.to_owned())
+                    }),
                 )?;
                 world.blocks.insert(
                     position,
@@ -926,7 +1457,11 @@ pub fn prepare(
             let (sample, biome) = sample_ground(&fields, &settings, x, y);
             let candidates: Vec<_> = ENTRIES
                 .iter()
-                .filter(|entry| !entry.attachment && entry.generation_biomes.contains(&biome.id()))
+                .filter(|entry| {
+                    !entry.attachment
+                        && entry.generation_biomes.contains(&biome.id())
+                        && (entry.id != "minecraft:pumpkin" || pumpkin_patch_contains(seed, x, y))
+                })
                 .collect();
             if candidates.is_empty() {
                 continue;
@@ -958,10 +1493,10 @@ pub fn prepare(
             };
             let admitted = flora.admit(candidate, |position| {
                 if structure_positions.contains(&position)
-                    || world
-                        .blocks
-                        .get(&position)
-                        .is_some_and(|b| !matches!(b.owner, SourceOwner::Terrain { .. }))
+                    || world.blocks.get(&position).is_some_and(|b| {
+                        b.state.id().as_str() == "minecraft:ice"
+                            || !matches!(b.owner, SourceOwner::Terrain { .. })
+                    })
                 {
                     HabitatCell::Solid
                 } else {
@@ -1044,7 +1579,12 @@ pub fn prepare(
             let model =
                 surface_entities::model(species, AtlasLayout::Bedrock, fauna_climate(*biome));
             let anchor = [gx, gy, i32::from(sample.height)];
-            if !natural_entity_site(&world, anchor, species, &model) {
+            let admitted = if SceneAtmosphere::from_index(settings.atmosphere).is_night() {
+                dry_surface_entity_site(&world, anchor, &model)
+            } else {
+                natural_entity_site(&world, anchor, species, &model)
+            };
+            if !admitted {
                 continue;
             }
             if world.entities.iter().any(|entity| entity.anchor == anchor) {
@@ -1054,12 +1594,340 @@ pub fn prepare(
                 atlas_status:"Authored habitat/daylight proxy; Bedrock-reference UV; selected/fallback atlas checked during binding"});
         }
     }
+    populate_nest_bees(&mut world, &cancelled)?;
+    populate_trader_parties(&mut world, &cancelled)?;
+    populate_village_raids(&mut world, &cancelled)?;
+    populate_contextual_fauna(
+        &mut world,
+        SceneAtmosphere::from_index(settings.atmosphere),
+        &cancelled,
+    )?;
     Ok(world)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn context_fixture(xy: [i32; 2], biome: SurfaceBiome) -> SurfaceWorld {
+        let mut world = nest_fixture_world(SourceOwner::Terrain { biome });
+        world.blocks.clear();
+        world.biomes.clear();
+        world.region = Region {
+            minimum: [xy[0] - 16, xy[1] - 16],
+            maximum: [xy[0] + 17, xy[1] + 17],
+        };
+        for y in world.region.minimum[1]..world.region.maximum[1] {
+            for x in world.region.minimum[0]..world.region.maximum[0] {
+                let mut sample = TerrainFields::new(world.seed).sample(x, y, false);
+                sample.height = 80;
+                sample.water_level = None;
+                world.columns.insert([x, y], sample);
+                world.biomes.insert([x, y], biome);
+                world.blocks.insert(
+                    [x, y, 79],
+                    SurfaceBlock {
+                        state: plain(terrain_surface(biome).0).unwrap(),
+                        owner: SourceOwner::Terrain { biome },
+                    },
+                );
+            }
+        }
+        world
+    }
+    fn context_candidate(event: ContextEvent, atmosphere: SceneAtmosphere) -> [i32; 2] {
+        (-64..64)
+            .flat_map(|y| (-64..64).map(move |x| [x, y]))
+            .find_map(|grid| {
+                surface_context::candidate(71839, grid, atmosphere)
+                    .filter(|(_, found)| *found == event)
+                    .map(|(xy, _)| xy)
+            })
+            .unwrap()
+    }
+    #[test]
+    fn contextual_phantom_requires_night_clear_air_and_is_not_duplicated() {
+        let xy = context_candidate(ContextEvent::Phantom, SceneAtmosphere::Night);
+        let mut world = context_fixture(xy, SurfaceBiome::Plains);
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Day, || false).unwrap();
+        assert!(world.entities.is_empty());
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Night, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].species, Species::Phantom);
+        assert_eq!(world.entities[0].anchor, [xy[0], xy[1], 92]);
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Night, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        let mut covered = context_fixture(xy, SurfaceBiome::Plains);
+        covered.blocks.insert(
+            [xy[0], xy[1], 100],
+            SurfaceBlock {
+                state: plain("minecraft:stone").unwrap(),
+                owner: SourceOwner::Terrain {
+                    biome: SurfaceBiome::Plains,
+                },
+            },
+        );
+        populate_contextual_fauna(&mut covered, SceneAtmosphere::Night, || false).unwrap();
+        assert!(covered.entities.is_empty());
+    }
+    #[test]
+    fn storm_mount_and_rider_commit_together_only_in_clear_rain_context() {
+        let xy = context_candidate(ContextEvent::HorseTrap, SceneAtmosphere::Thunderstorm);
+        let mut world = context_fixture(xy, SurfaceBiome::Plains);
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Thunderstorm, || false).unwrap();
+        assert_eq!(world.entities.len(), 2);
+        assert!(world
+            .entities
+            .iter()
+            .any(|e| e.species == Species::SkeletonHorse));
+        assert!(world
+            .entities
+            .iter()
+            .any(|e| e.species == Species::Skeleton));
+        assert!(world
+            .entities
+            .iter()
+            .all(|e| e.anchor == [xy[0], xy[1], 80]));
+        let mut blocked = context_fixture(xy, SurfaceBiome::Plains);
+        blocked.blocks.insert(
+            [xy[0], xy[1], 82],
+            SurfaceBlock {
+                state: plain("minecraft:stone").unwrap(),
+                owner: SourceOwner::Terrain {
+                    biome: SurfaceBiome::Plains,
+                },
+            },
+        );
+        populate_contextual_fauna(&mut blocked, SceneAtmosphere::Thunderstorm, || false).unwrap();
+        assert!(blocked.entities.is_empty());
+        let mut desert = context_fixture(xy, SurfaceBiome::Desert);
+        populate_contextual_fauna(&mut desert, SceneAtmosphere::Thunderstorm, || false).unwrap();
+        assert!(desert.entities.is_empty());
+        assert!(matches!(
+            populate_contextual_fauna(&mut desert, SceneAtmosphere::Thunderstorm, || true),
+            Err(AssetError::Cancelled)
+        ));
+    }
+    #[test]
+    fn lightning_pig_requires_pig_habitat_dry_floor_and_storm() {
+        let xy = context_candidate(ContextEvent::LightningPig, SceneAtmosphere::Thunderstorm);
+        let mut world = context_fixture(xy, SurfaceBiome::Plains);
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Day, || false).unwrap();
+        assert!(world.entities.is_empty());
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Thunderstorm, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].species, Species::ZombifiedPiglin);
+        let mut wet = context_fixture(xy, SurfaceBiome::Plains);
+        wet.columns.get_mut(&xy).unwrap().water_level = Some(81);
+        populate_contextual_fauna(&mut wet, SceneAtmosphere::Thunderstorm, || false).unwrap();
+        assert!(wet.entities.is_empty());
+        let mut unsuitable = context_fixture(xy, SurfaceBiome::River);
+        assert!(!SurfaceBiome::River
+            .descriptor()
+            .biome_table_fauna_ids
+            .contains(&"minecraft:pig"));
+        populate_contextual_fauna(&mut unsuitable, SceneAtmosphere::Thunderstorm, || false)
+            .unwrap();
+        assert!(unsuitable.entities.is_empty());
+    }
+    #[test]
+    fn night_creaking_belongs_to_natural_pale_heart_and_preserves_axis() {
+        let mut world = context_fixture([0, 0], SurfaceBiome::PaleGarden);
+        let heart = [0, 0, 84];
+        world.blocks.insert(
+            heart,
+            SurfaceBlock {
+                state: state(
+                    "minecraft:creaking_heart",
+                    [
+                        ("axis".into(), "y".into()),
+                        ("creaking_heart_state".into(), "dormant".into()),
+                    ],
+                )
+                .unwrap(),
+                owner: SourceOwner::TreeDecoration {
+                    anchor: [0, 0, 80],
+                    configuration: "minecraft:pale_oak",
+                },
+            },
+        );
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Day, || false).unwrap();
+        assert!(world.entities.is_empty());
+        assert_eq!(
+            world.blocks[&heart].state.properties()["creaking_heart_state"],
+            "dormant"
+        );
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Night, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].species, Species::Creaking);
+        assert_eq!(world.blocks[&heart].state.properties()["axis"], "y");
+        assert_eq!(
+            world.blocks[&heart].state.properties()["creaking_heart_state"],
+            "awake"
+        );
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Night, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        world.entities.clear();
+        world.blocks.get_mut(&heart).unwrap().owner = SourceOwner::Saved {
+            java_position: [0, 84, 0],
+        };
+        populate_contextual_fauna(&mut world, SceneAtmosphere::Night, || false).unwrap();
+        assert!(world.entities.is_empty());
+    }
+
+    fn nest_fixture_world(owner: SourceOwner) -> SurfaceWorld {
+        let position = [0, 0, 4];
+        SurfaceWorld {
+            region: Region {
+                minimum: [-4, -4],
+                maximum: [4, 4],
+            },
+            seed: 71839,
+            columns: BTreeMap::new(),
+            biomes: BTreeMap::from([([0, 0], SurfaceBiome::Forest)]),
+            blocks: BTreeMap::from([(
+                position,
+                SurfaceBlock {
+                    state: state(
+                        "minecraft:bee_nest",
+                        [
+                            ("facing".into(), "north".into()),
+                            ("honey_level".into(), "0".into()),
+                        ],
+                    )
+                    .unwrap(),
+                    owner,
+                },
+            )]),
+            fluids: BTreeMap::new(),
+            trees: vec![],
+            flora: vec![],
+            structures: vec![],
+            entities: vec![],
+            source_limitations: vec![],
+        }
+    }
+    fn natural_nest_fixture() -> SurfaceWorld {
+        nest_fixture_world(SourceOwner::TreeDecoration {
+            anchor: [0, 1, 0],
+            configuration: "minecraft:oak_bees_005",
+        })
+    }
+    #[test]
+    fn accepted_natural_nest_emits_one_bee_without_a_ground_requirement() {
+        let mut world = natural_nest_fixture();
+        populate_nest_bees(&mut world, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].species, Species::Bee);
+        assert_eq!(world.entities[0].anchor, [0, -1, 4]);
+        assert!(!world.blocks.contains_key(&[0, -1, 3]));
+        populate_nest_bees(&mut world, || false).unwrap();
+        assert_eq!(world.entities.len(), 1);
+    }
+    #[test]
+    fn saved_nests_and_ineligible_biomes_never_gain_generated_bees() {
+        let mut saved = nest_fixture_world(SourceOwner::Saved {
+            java_position: [0, 4, 0],
+        });
+        populate_nest_bees(&mut saved, || false).unwrap();
+        assert!(saved.entities.is_empty());
+        let mut desert = natural_nest_fixture();
+        desert.biomes.insert([0, 0], SurfaceBiome::Desert);
+        populate_nest_bees(&mut desert, || false).unwrap();
+        assert!(desert.entities.is_empty());
+    }
+    #[test]
+    fn final_blocks_fluids_and_snapshot_edges_block_nest_flight() {
+        let mut solid = natural_nest_fixture();
+        solid.blocks.insert(
+            [-1, -1, 4],
+            SurfaceBlock {
+                state: plain("minecraft:stone").unwrap(),
+                owner: SourceOwner::Terrain {
+                    biome: SurfaceBiome::Forest,
+                },
+            },
+        );
+        populate_nest_bees(&mut solid, || false).unwrap();
+        assert!(solid.entities.is_empty());
+        let mut wet = natural_nest_fixture();
+        wet.fluids.insert(
+            [1, -1, 4],
+            FluidCell::new(0, water_tint(SurfaceBiome::Forest)).unwrap(),
+        );
+        populate_nest_bees(&mut wet, || false).unwrap();
+        assert!(wet.entities.is_empty());
+        let mut clipped = natural_nest_fixture();
+        clipped.region.minimum[0] = 0;
+        populate_nest_bees(&mut clipped, || false).unwrap();
+        assert!(clipped.entities.is_empty());
+        let mut cancelled = natural_nest_fixture();
+        assert!(matches!(
+            populate_nest_bees(&mut cancelled, || true),
+            Err(AssetError::Cancelled)
+        ));
+        assert!(cancelled.entities.is_empty());
+    }
+
+    #[test]
+    fn natural_surface_visitors_keep_the_complete_trader_and_two_llamas() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            ..Default::default()
+        };
+        // Candidate/terrain positions found from actual default fields; final
+        // world occupancy and the ordinary group consumer are exercised here.
+        for center in [
+            [631, -8176, 75],
+            [651, -8142, 71],
+            [4395, -7952, 99],
+            [3858, -7701, 91],
+            [1334, -7662, 75],
+            [1384, -7640, 75],
+            [-3864, -7477, 109],
+            [1395, -7440, 66],
+            [1390, -7401, 78],
+        ] {
+            let world = prepare(
+                Region {
+                    minimum: [center[0] - 8, center[1] - 8],
+                    maximum: [center[0] + 8, center[1] + 8],
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            if !world
+                .entities
+                .iter()
+                .any(|entity| entity.species == Species::WanderingTrader && entity.anchor == center)
+            {
+                continue;
+            }
+            for (species, offset) in [
+                (Species::WanderingTrader, [0, 0]),
+                (Species::TraderLlama, [-2, 1]),
+                (Species::TraderLlama, [2, 1]),
+            ] {
+                let xy = [center[0] + offset[0], center[1] + offset[1]];
+                let anchor = [xy[0], xy[1], i32::from(world.columns[&xy].height)];
+                let members: Vec<_> = world
+                    .entities
+                    .iter()
+                    .filter(|entity| entity.species == species && entity.anchor == anchor)
+                    .collect();
+                assert_eq!(members.len(), 1, "Visitor party is partial or duplicated");
+                assert!(natural_entity_site(
+                    &world,
+                    anchor,
+                    species,
+                    &members[0].model
+                ));
+            }
+            return;
+        }
+        panic!("Default natural candidate windows never admitted a whole visitor party");
+    }
+
     #[test]
     fn fauna_climate_selects_real_model_skin_semantics() {
         for (biome, climate, expected_skin) in [
@@ -1143,6 +2011,277 @@ mod tests {
             .state
             .properties
             .contains(&("half", "upper")));
+    }
+    #[test]
+    fn surface_azalea_indicators_are_reachable_without_replacing_forest_prescriptions() {
+        let mut selected = BTreeSet::new();
+        let mut azaleas = 0;
+        for gx in -128..128 {
+            for gy in -128..128 {
+                let entropy = hash2(71839 ^ 0x7472_6565, gx, gy);
+                let source = tree_configuration(SurfaceBiome::Forest, entropy).unwrap();
+                selected.insert(source);
+                azaleas += usize::from(source == "minecraft:azalea_tree");
+            }
+        }
+        assert!(
+            azaleas > 0 && azaleas < 1024,
+            "Rare surface indicators selected {azaleas}/65536 times"
+        );
+        for source in SurfaceBiome::Forest
+            .descriptor()
+            .natural_tree_configuration_ids
+        {
+            assert!(
+                selected.contains(source),
+                "Ordinary prescription {source} lost"
+            );
+        }
+        assert_eq!(tree_configuration(SurfaceBiome::Desert, 0), None);
+    }
+
+    #[test]
+    fn natural_woodland_projects_a_surface_azalea_with_real_leaf_states() {
+        let mut witnessed = false;
+        for [x, y] in [[-3246, -17988], [-1758, -17949], [-3450, -17906]] {
+            let world = prepare(
+                Region {
+                    minimum: [x - 16, y - 16],
+                    maximum: [x + 16, y + 16],
+                },
+                &VoxelLandscapeSettings {
+                    seed: 71839,
+                    ..Default::default()
+                },
+                || false,
+            )
+            .unwrap();
+            let anchor = [x, y, i32::from(world.columns[&[x, y]].height)];
+            let record = world.trees.iter().any(|tree| {
+                tree.anchor == anchor
+                    && tree.source == "minecraft:azalea_tree"
+                    && tree.projected_cells > 0
+            });
+            let leaf = world.blocks.values().any(|block| {
+                matches!(&block.owner, SourceOwner::Tree {
+                    anchor: tree_anchor, configuration: "minecraft:azalea_tree"
+                } if *tree_anchor == anchor)
+                    && matches!(
+                        block.state.id().as_str(),
+                        "minecraft:azalea_leaves" | "minecraft:flowering_azalea_leaves"
+                    )
+            });
+            if record && leaf {
+                witnessed = true;
+                break;
+            }
+        }
+        assert!(
+            witnessed,
+            "Natural surface indicators lost configuration or leaf projection"
+        );
+    }
+
+    #[test]
+    fn natural_desert_well_has_water_and_identical_split_projection() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            ..Default::default()
+        };
+        // Actual chunk-admission/terrain witnesses; assembly and world projection
+        // are exercised here, not substituted by a forced flat fixture.
+        for anchor in [[-2374, -12665, 94], [-969, -12464, 77], [-13938, -8329, 96]] {
+            let region = Region {
+                minimum: [anchor[0] - 8, anchor[1] - 8],
+                maximum: [anchor[0] + 12, anchor[1] + 12],
+            };
+            let whole = prepare(region, &settings, || false).unwrap();
+            if !whole
+                .structures
+                .iter()
+                .any(|f| f.source == "minecraft:desert_well" && f.anchor == anchor)
+            {
+                continue;
+            }
+            let placement = surface_landmark_assembly::desert_well_candidate(
+                [anchor[0].div_euclid(16), anchor[1].div_euclid(16)],
+                &TerrainFields::new(u64::from(settings.seed)),
+                &settings,
+                || false,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(placement.anchor, anchor);
+            let expected_source = placement.source;
+            let owned = |world: &SurfaceWorld| -> BTreeMap<_, _> {
+                world.blocks.iter().filter(|(_, block)| matches!(&block.owner,
+                    SourceOwner::Structure { anchor:a, source } if *a == anchor && source == &expected_source))
+                    .map(|(position,block)| (*position,block.state.clone())).collect()
+            };
+            let expected = owned(&whole);
+            assert!(expected.len() >= 25);
+            for xy in [[2, 2], [1, 2], [3, 2], [2, 1], [2, 3]] {
+                assert!(whole.fluids.contains_key(&[
+                    anchor[0] + xy[0],
+                    anchor[1] + xy[1],
+                    anchor[2] + 1
+                ]));
+            }
+            let left = prepare(
+                Region {
+                    minimum: region.minimum,
+                    maximum: [anchor[0] + 2, region.maximum[1]],
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            let right = prepare(
+                Region {
+                    minimum: [anchor[0] + 2, region.minimum[1]],
+                    maximum: region.maximum,
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            let mut joined = owned(&left);
+            joined.extend(owned(&right));
+            assert_eq!(joined, expected);
+            return;
+        }
+        panic!("all natural desert-well witnesses rejected by actual assembly/projection");
+    }
+
+    #[test]
+    fn natural_frozen_river_keeps_ice_and_fluid_cells_disjoint() {
+        let world = prepare(
+            Region {
+                minimum: [8928, -15904],
+                maximum: [8992, -15840],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let ice = world
+            .blocks
+            .values()
+            .filter(|block| block.state.id().as_str() == "minecraft:ice")
+            .count();
+        assert!(ice > 2500, "Frozenriver has only {ice} ice surfaces");
+        assert!(world
+            .fluids
+            .keys()
+            .all(|position| !world.blocks.contains_key(position)));
+    }
+
+    #[test]
+    fn natural_ice_spikes_keep_packed_ice_feature_owners_above_ground() {
+        let world = prepare(
+            Region {
+                minimum: [-11808, -15648],
+                maximum: [-11744, -15584],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let mut packed = 0;
+        for (position, block) in &world.blocks {
+            if !matches!(
+                block.owner,
+                SourceOwner::Geology {
+                    source: "minecraft:ice_spike",
+                    ..
+                }
+            ) {
+                continue;
+            }
+            packed += 1;
+            assert_eq!(block.state.id().as_str(), "minecraft:packed_ice");
+            assert!(position[2] >= i32::from(world.columns[&[position[0], position[1]]].height));
+            assert!(!world.fluids.contains_key(position));
+        }
+        assert!(
+            packed > 100,
+            "Naturalice-spike witness has only {packed} icefeaturecells"
+        );
+    }
+
+    #[test]
+    fn natural_forest_has_standing_cover_without_scattered_pumpkins() {
+        let world = prepare(
+            Region {
+                minimum: [-2080, -16416],
+                maximum: [-2016, -16352],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let standing = world
+            .trees
+            .iter()
+            .filter(|tree| tree.projected_cells > 0 && !tree.source.contains("fallen"))
+            .count();
+        let pumpkins = world
+            .flora
+            .iter()
+            .filter(|flora| flora.projected_cells > 0 && flora.source == "minecraft:pumpkin")
+            .count();
+        assert!(
+            standing >= 10,
+            "Forest witness has only {standing} standing sources"
+        );
+        assert!(
+            pumpkins <= 8,
+            "Forest witness has {pumpkins} scattered pumpkins"
+        );
+    }
+
+    #[test]
+    fn natural_mangrove_roots_retain_water_and_mark_actual_wet_cells() {
+        let world = prepare(
+            Region {
+                minimum: [-13088, -15648],
+                maximum: [-13024, -15584],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let mut wet_roots = 0;
+        let mut dry_roots = 0;
+        for (position, block) in &world.blocks {
+            if block.state.id().as_str() != "minecraft:mangrove_roots" {
+                continue;
+            }
+            if world.fluids.contains_key(position) {
+                wet_roots += 1;
+                assert_eq!(block.state.property("waterlogged"), Some("true"));
+                assert!(matches!(block.owner, SourceOwner::Tree { .. }));
+            } else {
+                dry_roots += 1;
+                assert_eq!(block.state.property("waterlogged"), Some("false"));
+            }
+        }
+        assert!(
+            wet_roots > 0 && dry_roots > 0,
+            "Natural witness must exercise both root states"
+        );
     }
     #[test]
     fn naturally_generated_lily_pads_float_on_water_not_on_the_bed() {

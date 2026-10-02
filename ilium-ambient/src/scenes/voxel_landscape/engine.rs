@@ -10,9 +10,10 @@ use super::{
     render::{self, Canvas},
     settings::VoxelLandscapeSettings,
     surface_binding::{self, PreparedSurface},
+    surface_context::SceneAtmosphere,
     surface_entity_raster,
     surface_generation::Region,
-    surface_raster::{self, DirectionalLight, RasterFrame, RasterLimits},
+    surface_raster::{self, RasterFrame, RasterLimits},
     surface_retirement::Retirement,
     terrain_fields::TerrainFields,
 };
@@ -339,7 +340,7 @@ fn render_surface(
     let cancel = Cancel::new(&RASTER_STOP);
     let size = [frame.raster.width, frame.raster.height];
     let mut pixels = RasterFrame::new(size, RasterLimits::default(), &prepared.budget, cancel)?;
-    let light = DirectionalLight::default();
+    let light = SceneAtmosphere::from_index(settings.atmosphere).light();
     surface_raster::draw_mesh(
         &prepared.mesh,
         prepared.bank(),

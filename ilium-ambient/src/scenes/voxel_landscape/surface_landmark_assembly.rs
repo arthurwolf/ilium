@@ -206,11 +206,8 @@ pub fn assemble(
 }
 
 fn kind_for(biome: SurfaceBiome, hash: u64) -> Option<LandmarkKind> {
-    // Wells are a separate placed feature; all structure presets use the
-    // complete pinned biome eligibility rather than a representative list.
-    if biome == SurfaceBiome::Desert && hash.is_multiple_of(1000) {
-        return Some(LandmarkKind::DesertWell);
-    }
+    // Wells have their own chunk-scale placed-feature admission below;
+    // structure presets use complete pinned biome eligibility.
     let ids = biome.descriptor().surface_structure_variant_ids;
     let eligible: Vec<_> = LandmarkKind::ALL
         .into_iter()
@@ -220,6 +217,62 @@ fn kind_for(biome: SurfaceBiome, hash: u64) -> Option<LandmarkKind> {
         return None;
     }
     Some(eligible[(hash % eligible.len() as u64) as usize])
+}
+
+/// Separate authored chunk-scale admission for the pinned rare placed feature.
+pub fn desert_well_anchor(seed: u64, grid: [i32; 2], structures_percent: i32) -> Option<[i32; 2]> {
+    let density = structures_percent.clamp(0, 200) as u64;
+    let hash = hash2(
+        seed ^ 0x6465_7365_7274_7765,
+        i64::from(grid[0]),
+        i64::from(grid[1]),
+    );
+    // Default100 gives1/1000 admission per16-block cell, independently of
+    // sparse structures. This is an authored hash, not a native RNG/salt claim.
+    if hash % 100_000 >= density {
+        return None;
+    }
+    Some([
+        grid[0]
+            .checked_mul(16)?
+            .checked_add(((hash >> 20) & 15) as i32)?,
+        grid[1]
+            .checked_mul(16)?
+            .checked_add(((hash >> 28) & 15) as i32)?,
+    ])
+}
+
+pub fn desert_well_candidate(
+    grid: [i32; 2],
+    fields: &TerrainFields,
+    settings: &VoxelLandscapeSettings,
+    cancelled: impl Fn() -> bool,
+) -> Result<Option<LandmarkPlacement>> {
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    let seed = u64::from(settings.seed);
+    let Some([x, y]) = desert_well_anchor(seed, grid, settings.structures_percent) else {
+        return Ok(None);
+    };
+    let sample = fields.sample(x, y, settings.rivers);
+    if surface_biome_selector::select(seed, [x, y], sample) != SurfaceBiome::Desert
+        || !dry_ground(fields, settings, x, y)
+    {
+        return Ok(None);
+    }
+    assemble(
+        LandmarkKind::DesertWell,
+        [x, y, i32::from(sample.height)],
+        hash2(
+            seed ^ 0x6465_7365_7274_7765,
+            i64::from(grid[0]),
+            i64::from(grid[1]),
+        ),
+        fields,
+        settings,
+        cancelled,
+    )
 }
 
 /// One deterministic 256-block grid cell. The seed and complete footprint are
@@ -309,6 +362,38 @@ pub const fn source(kind: LandmarkKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desert_wells_have_chunk_scale_rarity_without_landmark_gate() {
+        let mut count = 0;
+        for y in -100..100 {
+            for x in -250..250 {
+                if let Some(position) = desert_well_anchor(71839, [x, y], 100) {
+                    assert_eq!(position.map(|v| v.div_euclid(16)), [x, y]);
+                    count += 1;
+                }
+            }
+        }
+        assert!(
+            (60..=140).contains(&count),
+            "100000 chunk attempts yielded {count} wells"
+        );
+    }
+    #[test]
+    fn well_admission_density_is_monotone_and_disabled_at_zero() {
+        let mut half = 0;
+        let mut full = 0;
+        for x in -50000..50000 {
+            let grid = [x, -1000];
+            assert!(desert_well_anchor(71839, grid, 0).is_none());
+            if desert_well_anchor(71839, grid, 50).is_some() {
+                half += 1;
+                assert!(desert_well_anchor(71839, grid, 100).is_some());
+            }
+            full += usize::from(desert_well_anchor(71839, grid, 100).is_some());
+        }
+        assert!(half > 20 && full > half);
+        assert!(desert_well_anchor(71839, [i32::MAX, i32::MIN], 200).is_none());
+    }
     #[test]
     fn all_43_biomes_use_exact_structure_eligibility_including_mountain_outposts() {
         for &biome in SurfaceBiome::all() {

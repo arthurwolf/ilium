@@ -23,6 +23,8 @@ pub struct RenderOptions {
     /// 1 fits the whole ground plus fixed height headroom; >1 intentionally crops.
     pub zoom: f32,
     pub hatch_direction: f32,
+    /// Continue the flat hatch lattice through the viewport outside the ground.
+    pub infinite_lines: bool,
     /// Perpendicular distance between projected, undeformed lines, in dots.
     pub spacing_in_dots: f32,
     /// Stroke diameter in dots, not Raster::line's radius. Zero disables ink.
@@ -38,6 +40,7 @@ impl Default for RenderOptions {
             pitch: 35.26439,
             zoom: 1.0,
             hatch_direction: 0.0,
+            infinite_lines: true,
             spacing_in_dots: 4.0,
             line_width: 1.0,
             height_scale: 0.25,
@@ -54,6 +57,7 @@ impl RenderOptions {
             pitch: finite(self.pitch, d.pitch).clamp(5.0, 85.0),
             zoom: finite(self.zoom, d.zoom).clamp(0.25, 4.0),
             hatch_direction: finite(self.hatch_direction, d.hatch_direction).rem_euclid(180.0),
+            infinite_lines: self.infinite_lines,
             spacing_in_dots: finite(self.spacing_in_dots, d.spacing_in_dots).clamp(2.0, 24.0),
             line_width: finite(self.line_width, d.line_width).clamp(0.0, 3.0),
             height_scale: finite(self.height_scale, d.height_scale).clamp(0.0, 2.5),
@@ -516,18 +520,95 @@ impl Renderer {
         let extent = (normal[0].abs() + normal[1].abs()) * 0.5;
         let first = (-extent / spacing).ceil() as i32;
         let last = (extent / spacing).floor() as i32;
+        let margin = o.line_width * 0.5 + 0.6;
+        let (first, last) = if o.infinite_lines {
+            let (visible_first, visible_last) =
+                viewport_lattice_range(&camera, projected, o.spacing_in_dots, margin);
+            (first.min(visible_first), last.max(visible_last))
+        } else {
+            (first, last)
+        };
         for k in first..=last {
+            if stopping(stop) {
+                return self.cancel_render();
+            }
             let base = [
                 0.5 + normal[0] * k as f32 * spacing,
                 0.5 + normal[1] * k as f32 * spacing,
             ];
-            let Some((start, end)) = interval(base, direction, &camera, o.line_width * 0.5 + 0.6)
-            else {
+            let point = |t: f32| [base[0] + t * direction[0], base[1] + t * direction[1]];
+            let mut has_exterior = false;
+            if o.infinite_lines {
+                let ground_span = ground_interval(base, direction);
+                if let Some((visible_start, visible_end)) =
+                    flat_interval(base, direction, &camera, margin)
+                {
+                    match ground_span {
+                        Some((ground_start, ground_end)) => {
+                            if visible_start < ground_start {
+                                stroke_flat(
+                                    raster,
+                                    &camera,
+                                    base,
+                                    direction,
+                                    (visible_start, visible_end.min(ground_start)),
+                                    o.line_width * 0.5,
+                                    &mut self.stats,
+                                );
+                                has_exterior = true;
+                            }
+                            if ground_end < visible_end {
+                                stroke_flat(
+                                    raster,
+                                    &camera,
+                                    base,
+                                    direction,
+                                    (visible_start.max(ground_end), visible_end),
+                                    o.line_width * 0.5,
+                                    &mut self.stats,
+                                );
+                                has_exterior = true;
+                            }
+                        }
+                        None => {
+                            stroke_flat(
+                                raster,
+                                &camera,
+                                base,
+                                direction,
+                                (visible_start, visible_end),
+                                o.line_width * 0.5,
+                                &mut self.stats,
+                            );
+                            has_exterior = true;
+                        }
+                    }
+                }
+                if let Some((ground_start, ground_end)) = ground_span {
+                    for t in [ground_start, ground_end] {
+                        let boundary = point(t);
+                        let height = self.height(boundary);
+                        self.stats.samples += 1;
+                        if height > 0.0 {
+                            stroke(
+                                raster,
+                                camera.dots(boundary, 0.0),
+                                camera.dots(boundary, height),
+                                o.line_width * 0.5,
+                                &mut self.stats,
+                            );
+                        }
+                    }
+                }
+            }
+            let Some((start, end)) = interval(base, direction, &camera, margin) else {
+                if has_exterior {
+                    self.stats.hatch_lines += 1;
+                }
                 continue;
             };
             self.stats.hatch_lines += 1;
             let steps = ((end - start) * (2 * GRID) as f32).ceil().max(1.0) as usize;
-            let point = |t: f32| [base[0] + t * direction[0], base[1] + t * direction[1]];
             let p = point(start);
             let mut previous = camera.dots(p, self.height(p));
             self.stats.samples += 1;
@@ -671,6 +752,84 @@ fn interval(
         return None;
     }
     Some(span)
+}
+
+/// The square's parametric intersection, without a screen or height lookup.
+fn ground_interval(base: [f32; 2], direction: [f32; 2]) -> Option<(f32, f32)> {
+    let mut span = (f32::NEG_INFINITY, f32::INFINITY);
+    for i in 0..2 {
+        if !slab(base[i], direction[i], 0.0, 1.0, &mut span) {
+            return None;
+        }
+    }
+    Some(span)
+}
+
+/// Flat projected line clipped to the padded dot viewport.
+fn flat_interval(
+    base: [f32; 2],
+    direction: [f32; 2],
+    camera: &Camera,
+    margin: f32,
+) -> Option<(f32, f32)> {
+    let mut span = (f32::NEG_INFINITY, f32::INFINITY);
+    let p = camera.dots(base, 0.0);
+    let d = camera.vector(direction);
+    for i in 0..2 {
+        if !slab(p[i], d[i], -margin, camera.size[i] + margin, &mut span) {
+            return None;
+        }
+    }
+    Some(span)
+}
+
+/// Each integer offset is exactly `spacing_in_dots` apart perpendicular to
+/// the projected direction. One extra index on each side absorbs f32 projection
+/// rounding; flat_interval still rejects lines outside the padded viewport.
+fn viewport_lattice_range(
+    camera: &Camera,
+    projected: [f32; 2],
+    spacing_in_dots: f32,
+    margin: f32,
+) -> (i32, i32) {
+    let direction = projected.map(f64::from);
+    let length = direction[0].hypot(direction[1]);
+    let normal = [-direction[1] / length, direction[0] / length];
+    let origin = camera.origin.map(f64::from);
+    let margin = f64::from(margin);
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for x in [-margin, f64::from(camera.size[0]) + margin] {
+        for y in [-margin, f64::from(camera.size[1]) + margin] {
+            let signed = (x - origin[0]) * normal[0] + (y - origin[1]) * normal[1];
+            low = low.min(signed);
+            high = high.max(signed);
+        }
+    }
+    let spacing = f64::from(spacing_in_dots);
+    (
+        ((low / spacing).ceil() as i32).saturating_sub(1),
+        ((high / spacing).floor() as i32).saturating_add(1),
+    )
+}
+
+fn stroke_flat(
+    raster: &mut Raster,
+    camera: &Camera,
+    base: [f32; 2],
+    direction: [f32; 2],
+    span: (f32, f32),
+    radius: f32,
+    stats: &mut RenderStats,
+) {
+    let point = |t: f32| [base[0] + t * direction[0], base[1] + t * direction[1]];
+    stroke(
+        raster,
+        camera.dots(point(span.0), 0.0),
+        camera.dots(point(span.1), 0.0),
+        radius,
+        stats,
+    );
 }
 
 fn stroke(raster: &mut Raster, a: [f32; 2], b: [f32; 2], radius: f32, stats: &mut RenderStats) {

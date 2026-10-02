@@ -42,5 +42,6 @@
   "life_wrap": true,
   "clock_seconds": true,
   "clock_24h": true,
-  "clock_tubes": false
+  "clock_tubes": false,
+  "infinite_lines": true
 }

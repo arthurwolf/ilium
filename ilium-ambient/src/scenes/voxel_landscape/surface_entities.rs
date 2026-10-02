@@ -1060,6 +1060,89 @@ pub fn model(species: Species, layout: AtlasLayout, climate: ClimateSkin) -> Mod
     }
     b.model
 }
+/// One original hovering bee at a generated nest's outward entrance.
+/// Eligibility and final-world clearance are owned by the caller.
+pub fn bee_nest_occupant(nest: [i32; 3], facing: &str) -> Option<([i32; 3], Model)> {
+    let (delta, yaw) = match facing {
+        "north" => ([0, -1], 0.0),
+        "south" => ([0, 1], std::f32::consts::PI),
+        "east" => ([1, 0], std::f32::consts::FRAC_PI_2),
+        "west" => ([-1, 0], -std::f32::consts::FRAC_PI_2),
+        _ => return None,
+    };
+    let anchor = [
+        nest[0].checked_add(delta[0])?,
+        nest[1].checked_add(delta[1])?,
+        nest[2],
+    ];
+    let mut bee = model(Species::Bee, AtlasLayout::Bedrock, ClimateSkin::Temperate);
+    let (sin, cos) = yaw.sin_cos();
+    for part in &mut bee.parts {
+        let pivot = part.pivot;
+        let rotated = [
+            pivot[0] * cos - pivot[1] * sin,
+            pivot[0] * sin + pivot[1] * cos,
+            pivot[2] + 0.2,
+        ];
+        for axis in 0..3 {
+            let translation = rotated[axis] - pivot[axis];
+            part.min[axis] += translation;
+            part.max[axis] += translation;
+        }
+        part.pivot = rotated;
+        part.rotation[2] += yaw;
+    }
+    Some((anchor, bee))
+}
+/// Conservative occupied-cell clearance for an original nest bee, including wings.
+/// The caller marks solid, fluid and unavailable snapshot cells as obstructed.
+pub fn bee_nest_clearance(
+    anchor: [i32; 3],
+    bee: &Model,
+    is_clear: impl Fn([i32; 3]) -> bool,
+) -> bool {
+    if bee.species != Species::Bee {
+        return false;
+    }
+    let Some((minimum, maximum)) = bee.bounds() else {
+        return false;
+    };
+    if (0..3).any(|axis| {
+        !minimum[axis].is_finite()
+            || !maximum[axis].is_finite()
+            || minimum[axis] < -2.0
+            || maximum[axis] > 2.0
+            || maximum[axis] < minimum[axis]
+    }) || minimum[2] < 0.0
+    {
+        return false;
+    }
+    let lower: [i64; 3] = std::array::from_fn(|axis| {
+        (f64::from(anchor[axis]) + if axis < 2 { 0.5 } else { 0.0 } + f64::from(minimum[axis]))
+            .floor() as i64
+    });
+    let upper: [i64; 3] = std::array::from_fn(|axis| {
+        (f64::from(anchor[axis]) + if axis < 2 { 0.5 } else { 0.0 } + f64::from(maximum[axis]))
+            .ceil() as i64
+    });
+    if (0..3).any(|axis| {
+        lower[axis] < i64::from(i32::MIN)
+            || upper[axis] > i64::from(i32::MAX) + 1
+            || lower[axis] >= upper[axis]
+    }) {
+        return false;
+    }
+    for z in lower[2]..upper[2] {
+        for y in lower[1]..upper[1] {
+            for x in lower[0]..upper[0] {
+                if !is_clear([x as i32, y as i32, z as i32]) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
 /// Surface event composition: caller decides habitat and event eligibility.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceEvent {
@@ -2143,6 +2226,205 @@ pub fn apply_authored_compatibility(
     })
 }
 
+/// Bind recorded anatomical regions to an explicitly Java-format atlas.
+/// This compatibility mapping keeps the original Bedrock references unchanged.
+pub fn apply_java_atlas_compatibility(
+    model: &mut Model,
+    atlas: &AtlasEvidence,
+    source_path: &str,
+) -> Result<CompatibilityOutcome, CompatibilityError> {
+    let mut candidate = model.clone();
+    let outcome = apply_authored_compatibility(&mut candidate, atlas)?;
+    if outcome == CompatibilityOutcome::Unmatched {
+        return Ok(outcome);
+    }
+    // Java base/warm pigs lack the Bedrock cold-fur cube in the lower half.
+    // A requested cold variant can also resolve to an older pack's base skin;
+    // use the actual selected member, rather than the requested climate.
+    let cold_pig = source_path.ends_with("/pig_cold.png") || source_path.ends_with("/cold_pig.png");
+    for part in candidate
+        .parts
+        .iter_mut()
+        .filter(|p| p.texture_semantic == atlas.semantic)
+    {
+        let mut uv = part.uv.ok_or(CompatibilityError::MissingSourcedRegion)?;
+        if candidate.species == Species::Pig && !cold_pig {
+            let region = UV_REFERENCES
+                .iter()
+                .find(|r| {
+                    r.source == "pig_v1.0" && r.bone == uv.source_bone && r.cube == uv.source_cube
+                })
+                .or_else(|| {
+                    UV_REFERENCES
+                        .iter()
+                        .find(|r| r.source == "pig_v1.0" && r.bone == uv.source_bone && r.cube == 0)
+                })
+                .ok_or(CompatibilityError::MissingSourcedRegion)?;
+            uv.nominal = region.nominal;
+            uv.faces = region.faces;
+            uv.source_file = region.source;
+            uv.source_bone = region.bone;
+            uv.source_cube = region.cube;
+        }
+        // These Java atlases keep the legacy pixel offsets on a square canvas.
+        // Preserve scale through the width; stretching a 32-row reference to
+        // the full square canvas would sample the transparent lower half.
+        if uv.nominal == [64, 32] && atlas.png_dimensions[0] == atlas.png_dimensions[1] {
+            uv.nominal = [64, 64];
+        }
+        uv.status = UvStatus::AuthoredCompatibility;
+        uv.mapping_note = "Authored Java atlas compatibility: recorded anatomical offsets, actual canvas aspect and pig member variant; not native Java model proof";
+        if uv
+            .faces
+            .iter()
+            .any(|face| face.pixels(uv.nominal, atlas.png_dimensions).is_none())
+        {
+            return Err(CompatibilityError::InvalidUv);
+        }
+        part.uv = Some(uv);
+    }
+    if candidate.species == Species::Pig && cold_pig {
+        let base_region = UV_REFERENCES
+            .iter()
+            .find(|r| r.source == "pig.v3" && r.bone == "body" && r.cube == 1)
+            .ok_or(CompatibilityError::MissingSourcedRegion)?;
+        let fur_region = UV_REFERENCES
+            .iter()
+            .find(|r| r.source == "pig.v3" && r.bone == "body" && r.cube == 0)
+            .ok_or(CompatibilityError::MissingSourcedRegion)?;
+        let body = candidate
+            .parts
+            .iter_mut()
+            .find(|p| p.name == "body")
+            .ok_or(CompatibilityError::MissingSourcedRegion)?;
+        let mut base_uv = body.uv.ok_or(CompatibilityError::MissingSourcedRegion)?;
+        base_uv.nominal = base_region.nominal;
+        base_uv.faces = base_region.faces;
+        base_uv.source_cube = 1;
+        body.uv = Some(base_uv);
+        let mut fur = body.clone();
+        fur.name = "body_cold_fur";
+        let mut fur_uv = base_uv;
+        fur_uv.faces = fur_region.faces;
+        fur_uv.source_cube = 0;
+        fur.uv = Some(fur_uv);
+        // The real cold skin has a cutout fur layer; keep its base behind the
+        // holes and offset the authored shell to avoid equal-depth contention.
+        for axis in 0..3 {
+            fur.min[axis] -= 0.0125;
+            fur.max[axis] += 0.0125;
+        }
+        if !candidate.parts.iter().any(|p| p.name == "body_cold_fur") {
+            candidate.parts.push(fur);
+        }
+    }
+    *model = candidate;
+    Ok(outcome)
+}
+
+#[cfg(test)]
+mod java_atlas_tests {
+    use super::*;
+    fn evidence(model: &Model, dimensions: [u32; 2]) -> AtlasEvidence {
+        AtlasEvidence {
+            semantic: model.texture_semantic.into(),
+            resource_id: format!("minecraft:entity/render/{}", model.species.id()),
+            png_dimensions: dimensions,
+            encoded_sha256: "4".repeat(64),
+        }
+    }
+    #[test]
+    fn square_java_legacy_anatomy_uses_upper_half_without_vertical_stretch() {
+        for species in [Species::Husk, Species::Zombie, Species::Mooshroom] {
+            for dimensions in [[64, 64], [32, 32], [128, 128]] {
+                let mut m = model(species, AtlasLayout::Bedrock, ClimateSkin::Temperate);
+                let atlas = evidence(&m, dimensions);
+                apply_java_atlas_compatibility(
+                    &mut m,
+                    &atlas,
+                    "assets/minecraft/textures/entity/base.png",
+                )
+                .unwrap();
+                let body = m
+                    .parts
+                    .iter()
+                    .find(|p| p.name == "body")
+                    .unwrap()
+                    .uv
+                    .unwrap();
+                assert_eq!(body.nominal, [64, 64], "{species:?}");
+                assert!(body
+                    .faces
+                    .iter()
+                    .all(|r| r.normalized(body.nominal).unwrap().max[1] <= 0.5));
+            }
+        }
+    }
+    #[test]
+    fn java_pig_base_and_variant_fallback_do_not_sample_cold_fur() {
+        for climate in [ClimateSkin::Temperate, ClimateSkin::Warm, ClimateSkin::Cold] {
+            let mut m = model(Species::Pig, AtlasLayout::Bedrock, climate);
+            let atlas = evidence(&m, [64, 64]);
+            apply_java_atlas_compatibility(
+                &mut m,
+                &atlas,
+                "assets/minecraft/textures/entity/pig/pig_temperate.png",
+            )
+            .unwrap();
+            let body = m
+                .parts
+                .iter()
+                .find(|p| p.name == "body")
+                .unwrap()
+                .uv
+                .unwrap();
+            assert_eq!(body.source_file, "pig_v1.0");
+            assert!(body
+                .faces
+                .iter()
+                .all(|r| r.normalized(body.nominal).unwrap().max[1] <= 0.5));
+        }
+    }
+    #[test]
+    fn java_cold_pig_keeps_its_actual_lower_half_fur_region() {
+        let mut m = model(Species::Pig, AtlasLayout::Bedrock, ClimateSkin::Cold);
+        let atlas = evidence(&m, [64, 64]);
+        apply_java_atlas_compatibility(
+            &mut m,
+            &atlas,
+            "assets/minecraft/textures/entity/pig/pig_cold.png",
+        )
+        .unwrap();
+        let body = m
+            .parts
+            .iter()
+            .find(|p| p.name == "body")
+            .unwrap()
+            .uv
+            .unwrap();
+        assert_eq!(body.source_file, "pig.v3");
+        assert_eq!(body.source_cube, 1);
+        assert!(body.faces[0].max[1] <= 32.0);
+        let fur = m
+            .parts
+            .iter()
+            .find(|p| p.name == "body_cold_fur")
+            .unwrap()
+            .uv
+            .unwrap();
+        assert_eq!(fur.source_cube, 0);
+        assert!(fur.faces[0].min[1] >= 32.0);
+        let before = format!("{m:?}");
+        apply_java_atlas_compatibility(
+            &mut m,
+            &atlas,
+            "assets/minecraft/textures/entity/pig/pig_cold.png",
+        )
+        .unwrap();
+        assert_eq!(format!("{m:?}"), before);
+    }
+}
+
 #[cfg(test)]
 mod compatibility_tests {
     use super::*;
@@ -2312,5 +2594,83 @@ mod compatibility_tests {
         assert_eq!(format!("{:?}", m), before);
         assert!(m.parts[unmapped].uv.is_none());
         assert!(m.atlas_evidence.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod bee_nest_tests {
+    use super::*;
+    #[test]
+    fn nest_bees_hover_outside_each_entrance_and_face_outward() {
+        for (facing, delta) in [
+            ("north", [0, -1]),
+            ("south", [0, 1]),
+            ("west", [-1, 0]),
+            ("east", [1, 0]),
+        ] {
+            let (anchor, bee) = bee_nest_occupant([-17, 9, 80], facing).unwrap();
+            assert_eq!(anchor, [-17 + delta[0], 9 + delta[1], 80]);
+            assert_eq!(bee.species, Species::Bee);
+            assert!(bee.bounds().unwrap().0[2] > 0.25);
+            let center = |name| {
+                let corners = bee.parts.iter().find(|p| p.name == name).unwrap().corners();
+                std::array::from_fn::<_, 3, _>(|axis| {
+                    corners.iter().map(|p| p[axis]).sum::<f32>() / 8.0
+                })
+            };
+            let head = center("head");
+            let body = center("body");
+            assert!(
+                (head[0] - body[0]) * delta[0] as f32 + (head[1] - body[1]) * delta[1] as f32 > 0.2
+            );
+            assert_eq!(
+                bee.parts.len(),
+                model(Species::Bee, AtlasLayout::Bedrock, ClimateSkin::Temperate)
+                    .parts
+                    .len()
+            );
+            assert_eq!(
+                bee.unsupported_parts(),
+                model(Species::Bee, AtlasLayout::Bedrock, ClimateSkin::Temperate)
+                    .unsupported_parts()
+            );
+        }
+    }
+    #[test]
+    fn malformed_nest_facing_and_overflow_never_emit_bees() {
+        for facing in ["", "up", "down", "North"] {
+            assert!(bee_nest_occupant([0, 0, 0], facing).is_none());
+        }
+        for (p, facing) in [
+            ([i32::MAX, 0, 0], "east"),
+            ([i32::MIN, 0, 0], "west"),
+            ([0, i32::MAX, 0], "south"),
+            ([0, i32::MIN, 0], "north"),
+        ] {
+            assert!(bee_nest_occupant(p, facing).is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod bee_clearance_tests {
+    use super::*;
+    #[test]
+    fn clear_nest_entrance_admits_the_complete_hovering_model() {
+        let (anchor, bee) = bee_nest_occupant([-17, 9, 80], "north").unwrap();
+        assert!(bee_nest_clearance(anchor, &bee, |_| true));
+        // Center is clear but a wing collides with the adjacent cell.
+        assert!(!bee_nest_clearance(anchor, &bee, |p| p != [-18, 8, 80]));
+        assert!(!bee_nest_clearance(anchor, &bee, |p| p != [-16, 8, 80]));
+        assert!(!bee_nest_clearance(anchor, &bee, |p| p != anchor));
+    }
+    #[test]
+    fn flight_clearance_rejects_unbounded_or_wrong_species_models() {
+        let (_, mut bee) = bee_nest_occupant([0, 0, 0], "north").unwrap();
+        assert!(!bee_nest_clearance([i32::MAX, 0, 0], &bee, |_| true));
+        bee.parts[0].max[0] = 10000.0;
+        assert!(!bee_nest_clearance([0, 0, 0], &bee, |_| true));
+        let cow = model(Species::Cow, AtlasLayout::Bedrock, ClimateSkin::Temperate);
+        assert!(!bee_nest_clearance([0, 0, 0], &cow, |_| true));
     }
 }

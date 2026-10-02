@@ -1578,3 +1578,12 @@ fn landmark_sprites_are_tall_enough_to_read_but_stay_near_their_tile() {
         assert!(lit_dots > 40, "{feature:?} lights only {lit_dots} dots");
     }
 }
+
+#[test]
+fn the_demo_credits_curious_expedition_with_its_steam_page() {
+    assert_eq!(
+        INSPIRED_BY,
+        ["https://store.steampowered.com/app/358130/The_Curious_Expedition/"]
+    );
+    assert_eq!(AmbientKind::HexExpedition.inspired_by(), INSPIRED_BY);
+}

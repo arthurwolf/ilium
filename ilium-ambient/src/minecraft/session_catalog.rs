@@ -39,6 +39,8 @@ pub struct SessionCatalog {
     pub snapshot: Snapshot,
     pub bindings: Vec<BoundMap>,
     pub maps: Vec<Arc<PreparedMap>>,
+    /// Canonical metadata seeds bound to prepared map identity; absence is not zero.
+    pub world_seeds: BTreeMap<MapId, Option<i64>>,
     pub metadata: catalog::Catalog,
     pub reports: Vec<pipeline::MapReport>,
     /// False only for a root initially absent. This is not terrain coverage.
@@ -128,6 +130,7 @@ pub fn prepare(
             snapshot,
             bindings: Vec::new(),
             maps: Vec::new(),
+            world_seeds: BTreeMap::new(),
             metadata: catalog::Catalog::default(),
             reports: Vec::new(),
             inventory_complete: false,
@@ -197,6 +200,7 @@ pub fn prepare(
         ));
     }
     let mut maps = Vec::with_capacity(prepared.maps.len());
+    let mut world_seeds = BTreeMap::new();
     for prepared_save in prepared.maps {
         checkpoint(cancelled)?;
         let window = prepared_save.window;
@@ -208,6 +212,7 @@ pub fn prepare(
             window.targets,
             &mut budget,
         )?;
+        world_seeds.insert(map.source().map, prepared_save.world_seed);
         maps.push(Arc::new(map));
     }
     // Do not start a new controller with an obsolete History if a different
@@ -236,6 +241,7 @@ pub fn prepare(
         snapshot: bound.snapshot,
         bindings: bound.maps,
         maps,
+        world_seeds,
         metadata,
         reports: prepared.reports,
         inventory_complete: true,

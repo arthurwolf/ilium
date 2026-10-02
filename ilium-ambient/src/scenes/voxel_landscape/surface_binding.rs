@@ -38,6 +38,17 @@ use std::{
 
 const SCENE_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
 
+fn texture_alpha(path: &str, alpha_min: u8) -> AlphaMode {
+    // Dense packed and blue ice must cull internal faces; only ordinary ice blends.
+    if path.contains("glass") || path == "block/ice" {
+        AlphaMode::Blend
+    } else if alpha_min < 255 {
+        AlphaMode::Cutout { threshold: 128 }
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ModelChoiceKey {
     application: Vec<u8>,
@@ -499,6 +510,15 @@ fn validate_supplied(
     cancel.check()
 }
 
+fn blocks_fluid_cell(block: &surface_generation::SurfaceBlock, generated: bool) -> bool {
+    // Generated open root lattices contain water; full solid cells still
+    // reject a fluid overlap. Supplied cells retain their adapter contract.
+    !(generated
+        && matches!(block.owner, surface_generation::SourceOwner::Tree { .. })
+        && block.state.id().as_str() == "minecraft:mangrove_roots"
+        && block.state.property("waterlogged") == Some("true"))
+}
+
 fn prepare_world(
     settings: &VoxelLandscapeSettings,
     reviewed_fallback: Option<&VoxelLandscapeSettings>,
@@ -707,13 +727,7 @@ fn prepare_world(
                 if let Some(handle) = imports.bank.resolve(&quad.texture) {
                     if let Some(texture) = imports.bank.texture(handle) {
                         let path = quad.texture.parts().1;
-                        let alpha = if path.contains("glass") || path.contains("ice") {
-                            AlphaMode::Blend
-                        } else if texture.image().info().alpha_min < 255 {
-                            AlphaMode::Cutout { threshold: 128 }
-                        } else {
-                            AlphaMode::Opaque
-                        };
+                        let alpha = texture_alpha(path, texture.image().info().alpha_min);
                         let layer = if path == "block/grass_block_side_overlay" {
                             1
                         } else {
@@ -778,7 +792,13 @@ fn prepare_world(
         .bank
         .resolve(&ResourceId::parse("minecraft:block/water_still")?)
     {
-        let solids = world.blocks.keys().copied().collect();
+        let solids = world
+            .blocks
+            .iter()
+            .filter_map(|(position, block)| {
+                blocks_fluid_cell(block, supplied_tints.is_none()).then_some(*position)
+            })
+            .collect();
         Some(FluidMesh::build(
             &world.fluids,
             &solids,
@@ -909,6 +929,43 @@ mod supplied_tests {
     };
     use super::*;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn only_generated_explicit_wet_root_lattices_admit_cooccupied_water() {
+        let mut block = SurfaceBlock {
+            state: BlockState::new(
+                ResourceId::parse("minecraft:mangrove_roots").unwrap(),
+                [("waterlogged".into(), "true".into())],
+            )
+            .unwrap(),
+            owner: SourceOwner::Tree {
+                anchor: [0, 0, 62],
+                configuration: "minecraft:mangrove",
+            },
+        };
+        assert!(!blocks_fluid_cell(&block, true));
+        assert!(blocks_fluid_cell(&block, false));
+        block.owner = SourceOwner::Saved {
+            java_position: [0, 62, 0],
+        };
+        assert!(blocks_fluid_cell(&block, true));
+        block.owner = SourceOwner::Tree {
+            anchor: [0, 0, 62],
+            configuration: "minecraft:mangrove",
+        };
+        block.state = BlockState::new(
+            ResourceId::parse("minecraft:mangrove_roots").unwrap(),
+            [("waterlogged".into(), "false".into())],
+        )
+        .unwrap();
+        assert!(blocks_fluid_cell(&block, true));
+        block.state = BlockState::new(
+            ResourceId::parse("minecraft:oak_log").unwrap(),
+            [("waterlogged".into(), "true".into())],
+        )
+        .unwrap();
+        assert!(blocks_fluid_cell(&block, true));
+    }
 
     fn world() -> SurfaceWorld {
         let mut blocks = BTreeMap::new();
@@ -1220,5 +1277,38 @@ mod supplied_tests {
         )
         .unwrap();
         assert!(normalized_key(&normalized).unwrap() != original);
+    }
+}
+
+#[cfg(test)]
+mod dense_ice_alpha_tests {
+    use super::*;
+    #[test]
+    fn dense_ice_is_opaque_without_changing_ordinary_ice_and_glass() {
+        for path in ["block/packed_ice", "block/blue_ice"] {
+            assert_eq!(
+                texture_alpha(path, 255),
+                AlphaMode::Opaque,
+                "{path} retains internal translucent faces"
+            );
+        }
+        for path in [
+            "block/ice",
+            "block/glass",
+            "block/tinted_glass",
+            "block/red_stained_glass",
+            "block/glass_pane_top",
+        ] {
+            assert_eq!(texture_alpha(path, 255), AlphaMode::Blend);
+        }
+        assert_eq!(
+            texture_alpha("block/packed_ice", 0),
+            AlphaMode::Cutout { threshold: 128 }
+        );
+        assert_eq!(
+            texture_alpha("block/oak_leaves", 0),
+            AlphaMode::Cutout { threshold: 128 }
+        );
+        assert_eq!(texture_alpha("block/stone", 255), AlphaMode::Opaque);
     }
 }

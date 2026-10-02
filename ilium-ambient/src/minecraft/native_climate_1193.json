@@ -1,0 +1,888 @@
+{
+  "profile": "java-1.19.3-stored-quart-r1",
+  "source_sha256": "b7228c23dbc8988129561af3918dd469577de842d2eb3c7dabe00316bf9a44d6",
+  "rows": [
+    {
+      "id": "minecraft:badlands",
+      "source": "data/minecraft/worldgen/biome/badlands.json",
+      "sha256": "991292fe5ea122c14697048c4f275f0f81fc39772e0b375daa7e65da60cabb0c",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": 10387789,
+        "grass_color": 9470285,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:bamboo_jungle",
+      "source": "data/minecraft/worldgen/biome/bamboo_jungle.json",
+      "sha256": "332dacbbbb647db561e47fb6ad6b339599908e8821e1be578c54f1d5d8973050",
+      "temperature": 0.95,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:basalt_deltas",
+      "source": "data/minecraft/worldgen/biome/basalt_deltas.json",
+      "sha256": "6a59169b5729f1bd1440bc9bea955785a9376e804bae70a809ed788fb288760e",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:beach",
+      "source": "data/minecraft/worldgen/biome/beach.json",
+      "sha256": "90ef40dcc2ae3ea97e07fdc2783a884e57d92520a23053b47282f452580ead36",
+      "temperature": 0.8,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:birch_forest",
+      "source": "data/minecraft/worldgen/biome/birch_forest.json",
+      "sha256": "2bf891ee36f148f7e231a0bd3b56cabdcf55eaf784c812bde16d4a098b68783d",
+      "temperature": 0.6,
+      "downfall": 0.6,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:cold_ocean",
+      "source": "data/minecraft/worldgen/biome/cold_ocean.json",
+      "sha256": "25cbed7689bb4ada6f1d8a1546d2417de51fd0fa7b24e8fe1657e0f241ae3845",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4020182,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:crimson_forest",
+      "source": "data/minecraft/worldgen/biome/crimson_forest.json",
+      "sha256": "95460d3989e839dfa052d711e3efaaa14235dfa0a3bb2adba4591e376df8b7dd",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:dark_forest",
+      "source": "data/minecraft/worldgen/biome/dark_forest.json",
+      "sha256": "c34b98bd7265cf8f23c2a08201443666d72c7f540d3648258d813175b107e730",
+      "temperature": 0.7,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": "dark_forest"
+      }
+    },
+    {
+      "id": "minecraft:deep_cold_ocean",
+      "source": "data/minecraft/worldgen/biome/deep_cold_ocean.json",
+      "sha256": "394ad987f99ce94eafee5b284f33754276cc3f0b9e4c038ae4bf1f86f41e0d57",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4020182,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:deep_dark",
+      "source": "data/minecraft/worldgen/biome/deep_dark.json",
+      "sha256": "ba48346257e6257fbc24ccf00c35948e5150737df3b85ef371e72c4b907304bd",
+      "temperature": 0.8,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:deep_frozen_ocean",
+      "source": "data/minecraft/worldgen/biome/deep_frozen_ocean.json",
+      "sha256": "895d63e86f92d3fe50599083991321951f1c82861510f56b66852a3fd12c9009",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": "frozen",
+      "effects": {
+        "water_color": 3750089,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:deep_lukewarm_ocean",
+      "source": "data/minecraft/worldgen/biome/deep_lukewarm_ocean.json",
+      "sha256": "662d840583d5ad7f688ce773bce618a329b19dac354378b6f5cec70a7037aff0",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4566514,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:deep_ocean",
+      "source": "data/minecraft/worldgen/biome/deep_ocean.json",
+      "sha256": "3c603c4e68a6fad69ca98d44f032fa8be26cf71e80b3700a34df5ef0526fb36b",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:desert",
+      "source": "data/minecraft/worldgen/biome/desert.json",
+      "sha256": "9581fb4d472b8f90e1db81a6d4b50dc93db8e36746a74a3ca782673a48dd0fa1",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:dripstone_caves",
+      "source": "data/minecraft/worldgen/biome/dripstone_caves.json",
+      "sha256": "74abd38f7eb647ae0ab0e9b58bd2069dec007df69b5edc3de71531c5c1bbaf7e",
+      "temperature": 0.8,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:end_barrens",
+      "source": "data/minecraft/worldgen/biome/end_barrens.json",
+      "sha256": "2a5eab1f04590592bcb6965a001d5d9f2cff1997d1f5f7896bd63592690761f2",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:end_highlands",
+      "source": "data/minecraft/worldgen/biome/end_highlands.json",
+      "sha256": "436f425c13f16786e8b2ab5f84812c9e0b49d1094461b6f6967cd14544023ed6",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:end_midlands",
+      "source": "data/minecraft/worldgen/biome/end_midlands.json",
+      "sha256": "2a5eab1f04590592bcb6965a001d5d9f2cff1997d1f5f7896bd63592690761f2",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:eroded_badlands",
+      "source": "data/minecraft/worldgen/biome/eroded_badlands.json",
+      "sha256": "991292fe5ea122c14697048c4f275f0f81fc39772e0b375daa7e65da60cabb0c",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": 10387789,
+        "grass_color": 9470285,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:flower_forest",
+      "source": "data/minecraft/worldgen/biome/flower_forest.json",
+      "sha256": "ed524359c10c8eb1252bfd6b8891754b085ca45a41ced09b045ec8bc91e5c3e1",
+      "temperature": 0.7,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:forest",
+      "source": "data/minecraft/worldgen/biome/forest.json",
+      "sha256": "0e0fef6d8505483a9a5301378289d1560cd29bd24dd7da8aba12a28a310d1e45",
+      "temperature": 0.7,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:frozen_ocean",
+      "source": "data/minecraft/worldgen/biome/frozen_ocean.json",
+      "sha256": "7ee36ca57d7e5ab5bca6acf090f27ed0f70afbd367215066032a81bb65657c5c",
+      "temperature": 0.0,
+      "downfall": 0.5,
+      "temperature_modifier": "frozen",
+      "effects": {
+        "water_color": 3750089,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:frozen_peaks",
+      "source": "data/minecraft/worldgen/biome/frozen_peaks.json",
+      "sha256": "2cd43f92ba0b38bbd8e6ef3964ef71bf3ffcf12fd6b755ac9f4d787f38ea1dfc",
+      "temperature": -0.7,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:frozen_river",
+      "source": "data/minecraft/worldgen/biome/frozen_river.json",
+      "sha256": "f42cb229ef83061b0902009ce64710d9ac6395779d15539248c079a15b74aa35",
+      "temperature": 0.0,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 3750089,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:grove",
+      "source": "data/minecraft/worldgen/biome/grove.json",
+      "sha256": "a47e7908b7eae1467ea210fda4e2f5a41c5ea10a325f5832379832564651c7f1",
+      "temperature": -0.2,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:ice_spikes",
+      "source": "data/minecraft/worldgen/biome/ice_spikes.json",
+      "sha256": "88d1a0d2481a41cb04b8e7d6d2655bd66579523b34f51408e9a7f54efec99a23",
+      "temperature": 0.0,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:jagged_peaks",
+      "source": "data/minecraft/worldgen/biome/jagged_peaks.json",
+      "sha256": "3a0fff2b121fb940e2d4b2ae4d8c6f4ba472124923356e09b68876f469b8f2ed",
+      "temperature": -0.7,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:jungle",
+      "source": "data/minecraft/worldgen/biome/jungle.json",
+      "sha256": "6a111994116c821020d0c610bc21a4391e6426300f335c4acf41da5f2cb15f3a",
+      "temperature": 0.95,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:lukewarm_ocean",
+      "source": "data/minecraft/worldgen/biome/lukewarm_ocean.json",
+      "sha256": "500dc32d11e40d8aa6297610a30352d094301492b1899582b11d18da7d3a0af1",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4566514,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:lush_caves",
+      "source": "data/minecraft/worldgen/biome/lush_caves.json",
+      "sha256": "3fbe1ebac46796281f5516d683d378596dbbd2ccd4587e0c64733c1110187cb5",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:mangrove_swamp",
+      "source": "data/minecraft/worldgen/biome/mangrove_swamp.json",
+      "sha256": "c5626c68edadf7640c10f4de15256dc9a66e5914194d91ba5ecde7b46eb161d3",
+      "temperature": 0.8,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 3832426,
+        "foliage_color": 9285927,
+        "grass_color": null,
+        "grass_color_modifier": "swamp"
+      }
+    },
+    {
+      "id": "minecraft:meadow",
+      "source": "data/minecraft/worldgen/biome/meadow.json",
+      "sha256": "4b0c8d9d589ef0ad259333251ba01cc47b20d59ab45e1be82faf4f6d4a6d9d90",
+      "temperature": 0.5,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 937679,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:mushroom_fields",
+      "source": "data/minecraft/worldgen/biome/mushroom_fields.json",
+      "sha256": "a8998350bd98450bbfe5c90dd35d8e682142b0c9e7a80b3c3f7ac2f1cabb4026",
+      "temperature": 0.9,
+      "downfall": 1.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:nether_wastes",
+      "source": "data/minecraft/worldgen/biome/nether_wastes.json",
+      "sha256": "bfcb0700d477c79e09816fd9a003bd1f7c1816073e6491337ac36280f9542426",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:ocean",
+      "source": "data/minecraft/worldgen/biome/ocean.json",
+      "sha256": "b9c08da3b5c1229535bbbcfeab84191d4a301a534368a4d34887d79fbf1c54a1",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:old_growth_birch_forest",
+      "source": "data/minecraft/worldgen/biome/old_growth_birch_forest.json",
+      "sha256": "b127d122b6da7db2c4c1f8fb79bb185c0bb54bb48729b9cf13de6b21cbde9543",
+      "temperature": 0.6,
+      "downfall": 0.6,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:old_growth_pine_taiga",
+      "source": "data/minecraft/worldgen/biome/old_growth_pine_taiga.json",
+      "sha256": "27f98ab60f75d62c1d7c57945c2a0c09b453f8771607eacfa69ed6c2bedda686",
+      "temperature": 0.3,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:old_growth_spruce_taiga",
+      "source": "data/minecraft/worldgen/biome/old_growth_spruce_taiga.json",
+      "sha256": "85bb801a763ffc131b364f12d225e2b5754c5419bf0d1afc4da16de51cc283e6",
+      "temperature": 0.25,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:plains",
+      "source": "data/minecraft/worldgen/biome/plains.json",
+      "sha256": "0d891c66eabf28b5991b98df7dc8f656ddb230c3f952ece3dce2286d56d92077",
+      "temperature": 0.8,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:river",
+      "source": "data/minecraft/worldgen/biome/river.json",
+      "sha256": "04ad520a9390c7a7fd305add359de9a6b681e22162d28952ac943421afa6b843",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:savanna",
+      "source": "data/minecraft/worldgen/biome/savanna.json",
+      "sha256": "b0904ad7ace5b7c9ad4472dc69b84f17415d9e6e55b0ab972acc275aaf1b1d36",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:savanna_plateau",
+      "source": "data/minecraft/worldgen/biome/savanna_plateau.json",
+      "sha256": "3133c7f7eef5f55c3c5fac73d7b780148d6e00eec5ecbccdb380d1bdf8bd519a",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:small_end_islands",
+      "source": "data/minecraft/worldgen/biome/small_end_islands.json",
+      "sha256": "6766c814b04d41811ce50cfc1554308c72a97c4b16b3cf7a1923df4204b0ac66",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:snowy_beach",
+      "source": "data/minecraft/worldgen/biome/snowy_beach.json",
+      "sha256": "e528f3862aa289295fdd35cef1fa0f5cafbc8904556d9540dd706b65d00917ea",
+      "temperature": 0.05,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4020182,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:snowy_plains",
+      "source": "data/minecraft/worldgen/biome/snowy_plains.json",
+      "sha256": "476160a6dd5f0730856b09389b6f9a77b02eb58da96c0b2ae613c681de72f8a7",
+      "temperature": 0.0,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:snowy_slopes",
+      "source": "data/minecraft/worldgen/biome/snowy_slopes.json",
+      "sha256": "6283f91c51f4e40827b65a546a62f656d8dcc613b39a24e9196c64115a0f3923",
+      "temperature": -0.3,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:snowy_taiga",
+      "source": "data/minecraft/worldgen/biome/snowy_taiga.json",
+      "sha256": "486b4c6ed66bd28ecf80dffe18f1196092e211d3f580c4113393b50a3143ee80",
+      "temperature": -0.5,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4020182,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:soul_sand_valley",
+      "source": "data/minecraft/worldgen/biome/soul_sand_valley.json",
+      "sha256": "9c69fb5a5306814e2f9dc417d633c2a53cae406cafe5798375ead64a346e31de",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:sparse_jungle",
+      "source": "data/minecraft/worldgen/biome/sparse_jungle.json",
+      "sha256": "ff651e7b92639885ef2170aaf29481155e0918c3a31cdafab408ab9579ae6f1c",
+      "temperature": 0.95,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:stony_peaks",
+      "source": "data/minecraft/worldgen/biome/stony_peaks.json",
+      "sha256": "fed324483e3d9c55211e73be8dda73cacec56e212930f1719d242b3c438298eb",
+      "temperature": 1.0,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:stony_shore",
+      "source": "data/minecraft/worldgen/biome/stony_shore.json",
+      "sha256": "a56b2ffe8db47f57684799c32fbccd654355360c4a3881f1e13ab818f47504cf",
+      "temperature": 0.2,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:sunflower_plains",
+      "source": "data/minecraft/worldgen/biome/sunflower_plains.json",
+      "sha256": "24c7026704502b7758bdb22c65db1bcf8b7095e0aa225d1c5f8c3575d37fcc6d",
+      "temperature": 0.8,
+      "downfall": 0.4,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:swamp",
+      "source": "data/minecraft/worldgen/biome/swamp.json",
+      "sha256": "3e9167e40bd4d4348a8911a5634efb77d20dc5c291349759b092b82ef20a36b4",
+      "temperature": 0.8,
+      "downfall": 0.9,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 6388580,
+        "foliage_color": 6975545,
+        "grass_color": null,
+        "grass_color_modifier": "swamp"
+      }
+    },
+    {
+      "id": "minecraft:taiga",
+      "source": "data/minecraft/worldgen/biome/taiga.json",
+      "sha256": "b9044d189037e89e3819d3aaeb0970129ddf118b459a961768f1a0fa45ca4656",
+      "temperature": 0.25,
+      "downfall": 0.8,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:the_end",
+      "source": "data/minecraft/worldgen/biome/the_end.json",
+      "sha256": "15cf7889a0d00b6ff1ebb88bbbc638a865f2286f444968776ca3fd597afa02c6",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:the_void",
+      "source": "data/minecraft/worldgen/biome/the_void.json",
+      "sha256": "c5b3e44ad87eea9b5aee34bbc8dd79799b2c3eacbbf8250714de0ee64736f69a",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:warm_ocean",
+      "source": "data/minecraft/worldgen/biome/warm_ocean.json",
+      "sha256": "cb024708ff47924de5169f0e80b830781f7e78ea3868644bf706f759736e183c",
+      "temperature": 0.5,
+      "downfall": 0.5,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4445678,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:warped_forest",
+      "source": "data/minecraft/worldgen/biome/warped_forest.json",
+      "sha256": "9bd13afd6a9d97994a4c95d2a9ff0c4b6ce9c927df910c6768de8cb8eb654105",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:windswept_forest",
+      "source": "data/minecraft/worldgen/biome/windswept_forest.json",
+      "sha256": "7c9f0fc2e1349b0e7342d3d817449788bca89886985202eeac3b40c975b5b7db",
+      "temperature": 0.2,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:windswept_gravelly_hills",
+      "source": "data/minecraft/worldgen/biome/windswept_gravelly_hills.json",
+      "sha256": "bdb0c7ed8dab4833483c0f2004f032eb7918690e2ccf020a95806cdaa2d67f60",
+      "temperature": 0.2,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:windswept_hills",
+      "source": "data/minecraft/worldgen/biome/windswept_hills.json",
+      "sha256": "bdb0c7ed8dab4833483c0f2004f032eb7918690e2ccf020a95806cdaa2d67f60",
+      "temperature": 0.2,
+      "downfall": 0.3,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:windswept_savanna",
+      "source": "data/minecraft/worldgen/biome/windswept_savanna.json",
+      "sha256": "52bb8a9eb94feb10cde4217c6dbc79256e9a897930875730b9a681ce9c5d94e0",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": null,
+        "grass_color": null,
+        "grass_color_modifier": null
+      }
+    },
+    {
+      "id": "minecraft:wooded_badlands",
+      "source": "data/minecraft/worldgen/biome/wooded_badlands.json",
+      "sha256": "880b74a9e35410402c59d01d04a942a83e3f0caf12f9d11a5d99f7c0d2b80575",
+      "temperature": 2.0,
+      "downfall": 0.0,
+      "temperature_modifier": null,
+      "effects": {
+        "water_color": 4159204,
+        "foliage_color": 10387789,
+        "grass_color": 9470285,
+        "grass_color_modifier": null
+      }
+    }
+  ]
+}

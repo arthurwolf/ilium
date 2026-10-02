@@ -233,6 +233,47 @@ fn overflowed_exclusive_region_unknown_saved_cell_and_mid_attempt_cancel_do_not_
     assert_eq!(input.positions.len(), 2);
 }
 
+#[test]
+fn admitted_121_chunk_default_band_has_separate_measured_state_copy_charge() {
+    let fixture = cells("minecraft:stone", &[]);
+    let template = fixture.map.loaded().chunks.values().next().unwrap();
+    let mut loaded = loader::LoadedWindow::default();
+    for x in -5..=5 {
+        for z in -5..=5 {
+            let mut decoded = (**template).clone();
+            decoded.identity.position = [x, z];
+            loaded.chunks.insert([x, z], Arc::new(decoded));
+            loaded.coverage.chunks.insert([x, z]);
+        }
+    }
+    let map = Arc::new(
+        PreparedMap::new(
+            fixture.map.source(),
+            0,
+            Arc::new(loaded),
+            Vec::new(),
+            &mut tours::Budget::new(u64::MAX, &|| false),
+        )
+        .unwrap(),
+    );
+    let input = crate::minecraft::render_cells::prepare(
+        map,
+        crate::minecraft::render_cells::Limits::default(),
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(input.positions.len(), 121 * 256 * 25);
+    let bound = prepare(&input, Limits::default(), &|| false).unwrap();
+    assert_eq!(bound.world.blocks.len(), input.positions.len());
+    assert!(bound.storage_charge > 16 << 20);
+    assert!(bound.storage_charge <= 256 << 20);
+    assert!(input.storage_charge <= 16 << 20);
+    println!(
+        "{}",
+        serde_json::json!({"type":"result","fixture":"synthetic uniform stone, actual decoded/admitted 121 chunk depth24 window","cells":input.positions.len(),"position_bytes":input.storage_charge,"state_copy_bytes":bound.storage_charge,"state_copy_work":bound.work_used})
+    );
+}
+
 use crate::voxel_landscape::{
     assets::{
         animation::{AnimationPlan, MissingAnimation},
@@ -257,7 +298,9 @@ use std::{
     sync::atomic::AtomicBool,
 };
 fn geometry_fixture() -> (PreparedMesh, FluidMesh, ByteBudget) {
-    let budget = ByteBudget::new(64 << 20).unwrap();
+    // The real model compiler reserves its configured 64 MiB working ceiling
+    // alongside the texture/definition receipts; budget both in this fixture.
+    let budget = ByteBudget::new(128 << 20).unwrap();
     let stop = AtomicBool::new(false);
     let cancel = Cancel::new(&stop);
     let asset_limits = crate::voxel_landscape::assets::Limits::default();

@@ -93,14 +93,21 @@ fn save(root: &Path, name: &str, played: i64, terrain: bool) -> PathBuf {
     paths::canonicalize(&path).unwrap()
 }
 fn metadata_file(path: &Path, played: i64) {
-    let bytes = encode(fields(vec![(
-        "Data",
-        Tag::Compound(fields(vec![
-            ("DataVersion", Tag::Int(3218)),
-            ("LastPlayed", Tag::Long(played)),
-            ("LevelName", Tag::String("Synthetic fixture".into())),
-        ])),
-    )]));
+    metadata_file_seed(path, played, None);
+}
+fn metadata_file_seed(path: &Path, played: i64, world_seed: Option<i64>) {
+    let mut data = fields(vec![
+        ("DataVersion", Tag::Int(3218)),
+        ("LastPlayed", Tag::Long(played)),
+        ("LevelName", Tag::String("Synthetic fixture".into())),
+    ]);
+    if let Some(seed) = world_seed {
+        data.insert(
+            "WorldGenSettings".into(),
+            Tag::Compound(fields(vec![("seed", Tag::Long(seed))])),
+        );
+    }
+    let bytes = encode(fields(vec![("Data", Tag::Compound(data))]));
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(&bytes).unwrap();
     std::fs::write(path.join("level.dat"), encoder.finish().unwrap()).unwrap();
@@ -598,4 +605,21 @@ fn existing_region_file_is_rejected_without_world_writes_or_history_credit() {
     let snapshot = Repository::new(storage).unwrap().load(&|| false).unwrap();
     assert_eq!(snapshot.bindings().len(), 2);
     assert_eq!(snapshot.history(), History::default());
+}
+
+#[test]
+fn canonical_seed_remains_bound_to_prepared_map_identity_without_world_writes() {
+    for seed in [Some(i64::MIN + 1), Some(0), None] {
+        let (_temporary, root, storage) = fixture();
+        let path = save(&root, "synthetic seeded world", 1, true);
+        metadata_file_seed(&path, 1, seed);
+        let before = std::fs::read(path.join("level.dat")).unwrap();
+        let prepared = prepare(&root, &storage, 7, limits(), &|| false).unwrap();
+        assert_eq!(prepared.maps.len(), 1);
+        let identity = prepared.maps[0].source().map;
+        assert_eq!(prepared.world_seeds.len(), 1);
+        assert_eq!(prepared.world_seeds.get(&identity), Some(&seed));
+        assert_eq!(prepared.metadata.maps[0].metadata.world_seed, seed);
+        assert_eq!(std::fs::read(path.join("level.dat")).unwrap(), before);
+    }
 }
