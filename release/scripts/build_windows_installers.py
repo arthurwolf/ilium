@@ -41,6 +41,11 @@ MAX_MEMBER_BYTES = 1_073_741_824
 MAX_TOTAL_BYTES = 2_000_000_000
 
 
+def inventory_matches(directory):
+    """True when the directory holds exactly the installers and their receipt."""
+    return {path.name for path in Path(directory).iterdir()} == set(INSTALLER_NAMES) | {RECEIPT_NAME}
+
+
 def require(condition, message):
     if not condition:
         raise release_tool.ReleaseError(message)
@@ -260,7 +265,7 @@ def build(arguments):
     receipt = {'schema': 1, 'tag': arguments.tag, 'version': version, 'source_archive': arguments.archive.name,
                'source_archive_sha256': sha(arguments.archive), 'package_files': files, 'installers': installers}
     (output / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='ascii')
-    require({path.name for path in output.iterdir()} == set(INSTALLER_NAMES) | {RECEIPT_NAME}, 'installer output inventory differs')
+    require(inventory_matches(output), 'installer output inventory differs')
     emit('result', command='build', state='built', output=str(output), receipt=str(output / RECEIPT_NAME), installers=installers)
 
 

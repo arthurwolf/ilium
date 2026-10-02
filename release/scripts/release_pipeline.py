@@ -495,7 +495,7 @@ def aggregate(arguments):
         shutil.copyfile(audit_path, output / 'audits' / (target['rust_target'] + '.json'))
     windows_row = next(row for row in targets if row['os'] == 'windows')
     installers_directory = arguments.windows_installers.resolve()
-    require(installers_directory.is_dir() and not installers_directory.is_symlink() and {path.name for path in installers_directory.iterdir()} == set(windows_installers.INSTALLER_NAMES) | {windows_installers.RECEIPT_NAME}, 'Windows installer artifact inventory differs')
+    require(installers_directory.is_dir() and not installers_directory.is_symlink() and windows_installers.inventory_matches(installers_directory), 'Windows installer artifact inventory differs')
     windows_audit = release_tool.audit_receipt(output / 'audits' / (windows_row['rust_target'] + '.json'), windows_row, release_tool.workspace_version(arguments.workspace, arguments.tag), arguments.tag)
     windows_installer_hashes = windows_installer_inventory(installers_directory, arguments.tag, archives[windows_row['archive']], windows_audit['files'])
     for name in sorted(windows_installer_hashes):
