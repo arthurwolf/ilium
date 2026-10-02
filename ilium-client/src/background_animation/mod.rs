@@ -571,19 +571,35 @@ impl AnimationFrame {
             }
             self.threshold_key = Some(threshold_key);
         }
+        let width = usize::from(self.width);
+        if width == 0 || self.height == 0 {
+            return;
+        }
         let density = f32::from(density_percent) / 100.0;
-        for y in 0..usize::from(self.height) {
-            for x in 0..usize::from(self.width) {
-                let mut cell = 0;
-                for (dy, row) in BITS.iter().enumerate() {
-                    for (dx, bit) in row.iter().enumerate() {
-                        let index = (y * 4 + dy) * self.raster.width + x * 2 + dx;
-                        if self.raster.dots[index] * density > self.thresholds[index] {
-                            cell |= bit;
-                        }
-                    }
+        let dot_row_width = width * 2;
+        // Each cell row consumes four contiguous dot rows. Two-dot chunks
+        // retain the Braille bit order without per-dot coordinate arithmetic.
+        for ((dots, thresholds), cells) in self
+            .raster
+            .dots
+            .chunks_exact(dot_row_width * 4)
+            .zip(self.thresholds.chunks_exact(dot_row_width * 4))
+            .zip(self.cells.chunks_exact_mut(width))
+        {
+            cells.fill(0);
+            for ((dot_row, threshold_row), bits) in dots
+                .chunks_exact(dot_row_width)
+                .zip(thresholds.chunks_exact(dot_row_width))
+                .zip(BITS)
+            {
+                for ((cell, pair), threshold_pair) in cells
+                    .iter_mut()
+                    .zip(dot_row.chunks_exact(2))
+                    .zip(threshold_row.chunks_exact(2))
+                {
+                    *cell |= (u8::from(pair[0] * density > threshold_pair[0]) * bits[0])
+                        | (u8::from(pair[1] * density > threshold_pair[1]) * bits[1]);
                 }
-                self.cells[y * usize::from(self.width) + x] = cell;
             }
         }
     }

@@ -204,8 +204,7 @@ const RICH_SPECS: [RichSpec; 15] = [
 ];
 
 const STYLE_CONTROL_ID: &str = "shoreline_style";
-const STYLE_HELP: &str =
-    "Classic is the original single wash. Rich adds wave sets, uneven foam, trailing lace and clinging foam.";
+const STYLE_HELP: &str = "Classic is the original single wash. Rich adds wave sets, uneven foam, trailing lace and clinging foam.";
 
 impl Default for ShorelineSettings {
     fn default() -> Self {
@@ -462,6 +461,15 @@ struct WashState {
     seed: i32,
 }
 
+/// Row-independent lace terms, prepared once per column and wash.
+#[derive(Debug, Clone, Copy, Default)]
+struct LaceLine {
+    active: bool,
+    level: f32,
+    dash: f32,
+    fade: f32,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct ColumnFrame {
     slope: f32,
@@ -470,6 +478,7 @@ struct ColumnFrame {
     trail: f32,
     retreat: f32,
     washes: [WashState; 2],
+    lace: [[LaceLine; LACE_LINES as usize]; 2],
     crest_phase: [f32; 4],
     crest_envelope: [f32; 4],
     chop_a: f32,
@@ -558,14 +567,18 @@ pub(super) fn shoreline_rich(
         .iter()
         .enumerate()
         .map(|(x, column)| {
-            column_frame(
+            let mut frame = column_frame(
                 &tuning,
                 column,
                 x as f32 + 0.5,
                 aspect,
                 time,
                 (phase_a, phase_b, phase_c),
-            )
+            );
+            frame.lace = frame
+                .washes
+                .map(|wash| prepare_lace(&tuning, &frame, &wash, x));
+            frame
         })
         .collect();
     for y in 0..raster.height {
@@ -671,6 +684,7 @@ fn column_frame(
         trail: half * 1.7,
         retreat,
         washes,
+        lace: [[LaceLine::default(); LACE_LINES as usize]; 2],
         crest_phase,
         crest_envelope,
         chop_a: px * 121.0 - time * 0.9,
@@ -776,11 +790,11 @@ fn beach(
     let mut intensity = grain * (1.0 - wet * tuning.darkness);
     let uncovered = smoothstep(frame.lead * 1.1, frame.lead * 2.6, distance);
     let dots_high = height as f32;
-    for wash in &frame.washes {
+    for (wash, lines) in frame.washes.iter().zip(&frame.lace) {
         if wash.age < 0.36 {
             continue;
         }
-        intensity += lace(tuning, frame, wash, v, x, dots_high) * uncovered;
+        intensity += prepared_lace(tuning, lines, v, dots_high) * uncovered;
         intensity +=
             clinging_bit(tuning, wash, (x, y, width, height), tuning.stick_life) * uncovered;
     }
@@ -801,21 +815,19 @@ fn beach(
 }
 
 /// Thin dashed foam threads left at fixed levels as the front passes them.
-fn lace(
+fn prepare_lace(
     tuning: &Tuning,
     frame: &ColumnFrame,
     wash: &WashState,
-    v: f32,
     x: usize,
-    dots_high: f32,
-) -> f32 {
-    if tuning.lace <= 0.0 {
-        return 0.0;
+) -> [LaceLine; LACE_LINES as usize] {
+    let mut lines = [LaceLine::default(); LACE_LINES as usize];
+    if tuning.lace <= 0.0 || wash.age < 0.36 {
+        return lines;
     }
-    let thickness = 1.1 / dots_high;
     let life = 0.34;
-    let mut total = 0.0;
-    for line in 0..LACE_LINES {
+    for (index, prepared) in lines.iter_mut().enumerate() {
+        let line = index as i32;
         let jitter = hash(wash.seed, 40 + line) - 0.5;
         let fraction = 0.14 + 0.78 * (line as f32 + 0.5 + jitter * 0.7) / LACE_LINES as f32;
         let alive = wash.age - retreat_phase(fraction);
@@ -824,10 +836,6 @@ fn lace(
         }
         let wiggle = 0.005 * (frame.slope * 40.0 + x as f32 * 0.09 + line as f32 * 1.7).sin();
         let level = FLOOR + fraction * wash.reach + frame.slope + wiggle;
-        let gap = (v - level).abs();
-        if gap >= thickness {
-            continue;
-        }
         let dash = smoothstep(
             0.85 - 0.5 * tuning.lace,
             0.97 - 0.5 * tuning.lace,
@@ -836,9 +844,36 @@ fn lace(
                 61,
             ),
         );
-        let thread = 1.0 - smoothstep(0.35 * thickness, thickness, gap);
         let fade = 1.0 - smoothstep(0.4, 1.0, alive / life);
-        total += thread * dash * fade * 0.85 * tuning.lace;
+        *prepared = LaceLine {
+            active: true,
+            level,
+            dash,
+            fade,
+        };
+    }
+    lines
+}
+
+fn prepared_lace(
+    tuning: &Tuning,
+    lines: &[LaceLine; LACE_LINES as usize],
+    v: f32,
+    dots_high: f32,
+) -> f32 {
+    let thickness = 1.1 / dots_high;
+    let mut total = 0.0;
+    for line in lines {
+        if !line.active {
+            continue;
+        }
+        let gap = (v - line.level).abs();
+        if gap >= thickness {
+            continue;
+        }
+        let thread = 1.0 - smoothstep(0.35 * thickness, thickness, gap);
+        // Keep the original multiplication and line accumulation order.
+        total += thread * line.dash * line.fade * 0.85 * tuning.lace;
     }
     total
 }
@@ -891,4 +926,99 @@ fn clinging_bit(
     let arrival = smoothstep(0.0, 0.05, alive);
     // The caller's `uncovered` factor hides any bit a later wave overruns.
     body * survives * arrival * 0.95
+}
+
+#[cfg(test)]
+mod lace_preparation_tests {
+    use super::*;
+
+    fn reference_lace(
+        tuning: &Tuning,
+        frame: &ColumnFrame,
+        wash: &WashState,
+        v: f32,
+        x: usize,
+        dots_high: f32,
+    ) -> f32 {
+        if tuning.lace <= 0.0 {
+            return 0.0;
+        }
+        let thickness = 1.1 / dots_high;
+        let life = 0.34;
+        let mut total = 0.0;
+        for line in 0..LACE_LINES {
+            let jitter = hash(wash.seed, 40 + line) - 0.5;
+            let fraction = 0.14 + 0.78 * (line as f32 + 0.5 + jitter * 0.7) / LACE_LINES as f32;
+            let alive = wash.age - retreat_phase(fraction);
+            if !(0.0..life).contains(&alive) {
+                continue;
+            }
+            let wiggle = 0.005 * (frame.slope * 40.0 + x as f32 * 0.09 + line as f32 * 1.7).sin();
+            let level = FLOOR + fraction * wash.reach + frame.slope + wiggle;
+            let gap = (v - level).abs();
+            if gap >= thickness {
+                continue;
+            }
+            let dash = smoothstep(
+                0.85 - 0.5 * tuning.lace,
+                0.97 - 0.5 * tuning.lace,
+                noise1(
+                    x as f32 * 0.085 + line as f32 * 13.7 + wash.seed as f32 * 5.3,
+                    61,
+                ),
+            );
+            let thread = 1.0 - smoothstep(0.35 * thickness, thickness, gap);
+            let fade = 1.0 - smoothstep(0.4, 1.0, alive / life);
+            total += thread * dash * fade * 0.85 * tuning.lace;
+        }
+        total
+    }
+
+    #[test]
+    fn prepared_lace_preserves_float_bits_at_all_thread_boundaries() {
+        for amount in [0, 1, 50, 100] {
+            let settings = ShorelineSettings {
+                lace_percent: amount,
+                ..ShorelineSettings::default()
+            };
+            let tuning = Tuning::new(&settings, 160);
+            for x in [0, 1, 79, 319, 479] {
+                for age in [0.36, 0.5, 0.7, 0.99, 1.2] {
+                    for seed in [-11, 0, 1, 17] {
+                        let frame = ColumnFrame {
+                            slope: 0.013,
+                            ..ColumnFrame::default()
+                        };
+                        let wash = WashState {
+                            age,
+                            reach: 0.27,
+                            seed,
+                            ..WashState::default()
+                        };
+                        let prepared = prepare_lace(&tuning, &frame, &wash, x);
+                        for height in [4.0, 96.0, 160.0, 240.0] {
+                            let thickness = 1.1 / height;
+                            let mut coordinates: Vec<f32> =
+                                (0..240).map(|y| (y as f32 + 0.5) / 240.0).collect();
+                            for line in prepared {
+                                coordinates.extend([
+                                    line.level,
+                                    line.level - thickness,
+                                    line.level + thickness,
+                                    line.level + 0.35 * thickness,
+                                ]);
+                            }
+                            for v in coordinates {
+                                assert_eq!(
+                                    prepared_lace(&tuning, &prepared, v, height).to_bits(),
+                                    reference_lace(&tuning, &frame, &wash, v, x, height).to_bits(),
+                                    "amount={amount}, x={x}, age={age}, seed={seed}, height={height}, v={v}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

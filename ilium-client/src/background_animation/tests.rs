@@ -1147,3 +1147,102 @@ fn cached_builtin_playback_releases_a_previous_hosted_scene() {
     );
     assert!(!frame.host().uses_cell_colors());
 }
+
+#[test]
+fn packing_matches_reference_for_every_braille_pattern_and_density_boundary() {
+    const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
+    for (width, height) in [(1, 1), (3, 5), (17, 7)] {
+        let mut frame = AnimationFrame::default();
+        frame.resize(width, height);
+        for dither in [DitherMode::Ordered, DitherMode::Stippled] {
+            for density in [0, 1, 50, 99, 100] {
+                for pattern in 0..=255_u8 {
+                    for y in 0..usize::from(height) {
+                        for x in 0..usize::from(width) {
+                            let mask = pattern.wrapping_add((y * usize::from(width) + x) as u8);
+                            for (dy, bits) in BITS.iter().enumerate() {
+                                for (dx, bit) in bits.iter().enumerate() {
+                                    frame.raster.dots
+                                        [(y * 4 + dy) * frame.raster.width + x * 2 + dx] =
+                                        if mask & bit != 0 { 1.0 } else { 0.0 };
+                                }
+                            }
+                        }
+                    }
+                    frame.pack(density, dither);
+                    for y in 0..usize::from(height) {
+                        for x in 0..usize::from(width) {
+                            let mut expected = 0;
+                            for (dy, bits) in BITS.iter().enumerate() {
+                                for (dx, bit) in bits.iter().enumerate() {
+                                    let rx = x * 2 + dx;
+                                    let ry = y * 4 + dy;
+                                    let value = frame.raster.dots[ry * frame.raster.width + rx];
+                                    if value * (f32::from(density) / 100.0)
+                                        > raster::threshold(rx, ry, dither)
+                                    {
+                                        expected |= bit;
+                                    }
+                                }
+                            }
+                            assert_eq!(frame.cells[y * usize::from(width) + x], expected, "size={width}x{height}, pattern={pattern}, density={density}, dither={dither:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn density_repacking_matches_original_comparisons_at_float_boundaries() {
+    const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
+    let mut frame = AnimationFrame::default();
+    frame.resize(7, 3);
+    for dither in [DitherMode::Ordered, DitherMode::Stippled] {
+        for offset in 0..8 {
+            for y in 0..frame.raster.height {
+                for x in 0..frame.raster.width {
+                    let threshold = raster::threshold(x, y, dither);
+                    let values = [
+                        f32::NAN,
+                        f32::INFINITY,
+                        f32::NEG_INFINITY,
+                        -0.0,
+                        threshold,
+                        f32::from_bits(threshold.to_bits().saturating_sub(1)),
+                        f32::from_bits(threshold.to_bits() + 1),
+                        1.0,
+                    ];
+                    frame.raster.dots[y * frame.raster.width + x] =
+                        values[(x + y + offset) % values.len()];
+                }
+            }
+            for density in [25, 60, 99, 100] {
+                frame.pack(density, dither);
+                for y in 0..3 {
+                    for x in 0..7 {
+                        let mut expected = 0;
+                        for (dy, row) in BITS.iter().enumerate() {
+                            for (dx, bit) in row.iter().enumerate() {
+                                let rx = x * 2 + dx;
+                                let ry = y * 4 + dy;
+                                if frame.raster.dots[ry * frame.raster.width + rx]
+                                    * (f32::from(density) / 100.0)
+                                    > raster::threshold(rx, ry, dither)
+                                {
+                                    expected |= bit;
+                                }
+                            }
+                        }
+                        assert_eq!(
+                            frame.cells[y * 7 + x],
+                            expected,
+                            "density={density},offset={offset},dither={dither:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

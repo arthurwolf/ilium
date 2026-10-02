@@ -419,3 +419,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod replacement_lifecycle_tests {
+    include!("replacement_lifecycle_tests.rs");
+}

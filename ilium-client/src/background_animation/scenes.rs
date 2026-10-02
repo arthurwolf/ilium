@@ -65,6 +65,10 @@ enum PreparedScene {
         surfaces: Vec<StoneSurface>,
         texture: Texture,
     },
+    Cloudlets {
+        // Per-frame x distances, not cached pixels. Refilled before every draw.
+        columns: Vec<[f32; 10]>,
+    },
     Ripples {
         phases: Vec<RipplePhase>,
     },
@@ -302,6 +306,9 @@ impl SceneCache {
                 let texture = Texture::new(raster.width, raster.height, caustic_texture);
                 PreparedScene::Stones { surfaces, texture }
             }
+            AnimationKind::Cloudlets => PreparedScene::Cloudlets {
+                columns: vec![[0.0; 10]; raster.width],
+            },
             AnimationKind::TwoRipples => PreparedScene::Ripples {
                 phases: ripple_phases(raster, settings.two_ripples),
             },
@@ -312,7 +319,7 @@ impl SceneCache {
                     water: water_columns(raster.width, 13.0, 35.0),
                 }
             }
-            // Cloudlets draw directly, and hosted kinds never reach this cache.
+            // Hosted kinds never reach this cache.
             _ => PreparedScene::Empty,
         };
         self.key = Some(key);
@@ -331,7 +338,7 @@ pub(super) fn render(
 ) {
     cache.prepare(raster, settings);
     let time = seconds as f32;
-    match &cache.prepared {
+    match &mut cache.prepared {
         PreparedScene::Shoreline { sand, columns } => {
             shoreline(raster, settings, time, sand, columns)
         }
@@ -363,6 +370,7 @@ pub(super) fn render(
         PreparedScene::Stones { surfaces, texture } => {
             stone_caustics(raster, settings.stone_caustics, time, surfaces, texture)
         }
+        PreparedScene::Cloudlets { columns } => cloudlets_prepared(raster, settings, time, columns),
         PreparedScene::Ripples { phases } => {
             two_ripples(raster, settings.two_ripples, time, phases)
         }
@@ -371,6 +379,12 @@ pub(super) fn render(
         }
         PreparedScene::Empty => cloudlets(raster, settings, time),
     }
+}
+
+#[derive(Clone, Copy)]
+struct ClassicColumnFrame {
+    shape: f32,
+    fragments: f32,
 }
 
 fn shoreline(
@@ -398,20 +412,27 @@ fn shoreline(
     let phase_a = (-time * 0.33).sin_cos();
     let phase_b = (time * 0.24).sin_cos();
     let foam_phase = (time * 0.65).sin_cos();
+    // Shape and foam fragmentation are independent of the raster row. Keep
+    // their original arithmetic so cached geometry and golden frames agree.
+    let frames: Vec<ClassicColumnFrame> = columns
+        .iter()
+        .map(|column| ClassicColumnFrame {
+            shape: column.slope
+                + traveling(column.shape_a, phase_a) * 0.014
+                + traveling(column.shape_b, phase_b) * 0.008,
+            fragments: 0.64 + 0.36 * smoothstep(-0.55, 0.55, traveling(column.foam, foam_phase)),
+        })
+        .collect();
     for y in 0..raster.height {
         let v = (y as f32 + 0.5) / raster.height as f32;
         let ripple_phase = (time * 0.90 - v * 54.0).sin_cos();
-        for (x, column) in columns.iter().enumerate() {
+        for (x, (column, frame)) in columns.iter().zip(&frames).enumerate() {
             let index = y * raster.width + x;
-            let shape = column.slope
-                + traveling(column.shape_a, phase_a) * 0.014
-                + traveling(column.shape_b, phase_b) * 0.008;
+            let shape = frame.shape;
             let distance = v - tide - shape;
             let intensity = if distance.abs() < foam_width {
                 let foam = 1.0 - smoothstep(foam_width * 0.15, foam_width, distance.abs());
-                let fragments =
-                    0.64 + 0.36 * smoothstep(-0.55, 0.55, traveling(column.foam, foam_phase));
-                foam * fragments
+                foam * frame.fragments
             } else if distance < 0.0 {
                 let crest = smoothstep(0.78, 0.99, traveling(column.ripple, ripple_phase));
                 0.012 + crest * 0.19 * (0.45 + 0.55 * (1.0 - smoothstep(0.0, 0.35, -distance)))
@@ -489,6 +510,13 @@ fn moonlit_water(
                 + wave_b * depth * strength * 0.035
                 + (depth * 47.0 + time * strength * 0.8).sin() * depth * strength * 0.012;
             let ribbon = 1.0 - smoothstep(half_width * 0.42, half_width, (u - local_center).abs());
+            if ribbon == 0.0 {
+                // The reflection product is exactly +0 here; only wavelets can
+                // contribute. Skip its crest and fragment work outside the ribbon.
+                raster.dots[y * raster.width + x] =
+                    smoothstep(0.86, 0.99, wave_a) * 0.10 * (0.3 + depth * 0.7) * strength.min(1.0);
+                continue;
+            }
             let crest = smoothstep(0.02, 0.72, (wave_a * 0.68 + wave_b * 0.32) * strength);
             let broken_surface = wave_b + (depth * 83.0 - time * strength * 1.7).sin() * 0.34;
             let fragments = 0.18 + 0.82 * smoothstep(-0.40, 0.48, broken_surface);
@@ -988,18 +1016,32 @@ fn stone_caustics(
 }
 
 fn cloudlets(raster: &mut Raster, settings: &AnimationSettings, time: f32) {
+    // Retain the direct renderer for the Empty fallback and existing oracles.
+    let mut columns = vec![[0.0; 10]; raster.width];
+    cloudlets_prepared(raster, settings, time, &mut columns);
+}
+
+fn cloudlets_prepared(
+    raster: &mut Raster,
+    settings: &AnimationSettings,
+    time: f32,
+    columns: &mut [[f32; 10]],
+) {
+    // Both callers allocate this private workspace for the current raster width;
+    // SceneKey includes dimensions, so a resized raster prepares a new workspace.
+    debug_assert_eq!(columns.len(), raster.width);
     // AnimationFrame normalizes this control to 2..=10. Specializing the small
     // source loop retains its addition order and exposes a fixed loop bound.
     match settings.cloudlets.form_count {
-        2 => cloudlets_with_sources::<2>(raster, settings, time),
-        3 => cloudlets_with_sources::<3>(raster, settings, time),
-        4 => cloudlets_with_sources::<4>(raster, settings, time),
-        5 => cloudlets_with_sources::<5>(raster, settings, time),
-        6 => cloudlets_with_sources::<6>(raster, settings, time),
-        7 => cloudlets_with_sources::<7>(raster, settings, time),
-        8 => cloudlets_with_sources::<8>(raster, settings, time),
-        9 => cloudlets_with_sources::<9>(raster, settings, time),
-        _ => cloudlets_with_sources::<10>(raster, settings, time),
+        2 => cloudlets_with_sources::<2>(raster, settings, time, columns),
+        3 => cloudlets_with_sources::<3>(raster, settings, time, columns),
+        4 => cloudlets_with_sources::<4>(raster, settings, time, columns),
+        5 => cloudlets_with_sources::<5>(raster, settings, time, columns),
+        6 => cloudlets_with_sources::<6>(raster, settings, time, columns),
+        7 => cloudlets_with_sources::<7>(raster, settings, time, columns),
+        8 => cloudlets_with_sources::<8>(raster, settings, time, columns),
+        9 => cloudlets_with_sources::<9>(raster, settings, time, columns),
+        _ => cloudlets_with_sources::<10>(raster, settings, time, columns),
     }
 }
 
@@ -1007,6 +1049,7 @@ fn cloudlets_with_sources<const SOURCE_COUNT: usize>(
     raster: &mut Raster,
     settings: &AnimationSettings,
     time: f32,
+    columns: &mut [[f32; 10]],
 ) {
     let controls = settings.cloudlets;
     let aspect = raster.aspect();
@@ -1029,14 +1072,32 @@ fn cloudlets_with_sources<const SOURCE_COUNT: usize>(
             squared_radius * (0.18 + cohesion * 0.08),
         );
     }
-    raster.field(|u, v| {
-        let mut field = 0.0;
-        for &(cx, cy, squared_radius, softened_radius) in &sources {
-            let distance_squared = ((u - cx) * aspect).powi(2) + (v - cy).powi(2);
-            field += squared_radius / (distance_squared + softened_radius);
+    // Preserve each f32 expression and source accumulation order. Only the
+    // lifetime of the squared terms changes: x uses W*S rather than
+    // W*H*S evaluations; y uses H*S. This is not a sampled/coarse field.
+    for (x, column) in columns.iter_mut().enumerate() {
+        let u = (x as f32 + 0.5) / raster.width as f32;
+        for (index, &(cx, _, _, _)) in sources.iter().enumerate() {
+            column[index] = ((u - cx) * aspect).powi(2);
         }
-        smoothstep(field_low, field_high, field) * 0.91
-    });
+    }
+    for y in 0..raster.height {
+        let v = (y as f32 + 0.5) / raster.height as f32;
+        let mut rows = [0.0; SOURCE_COUNT];
+        for (index, &(_, cy, _, _)) in sources.iter().enumerate() {
+            rows[index] = (v - cy).powi(2);
+        }
+        for (x, column) in columns.iter().enumerate() {
+            let mut field = 0.0;
+            for (index, &(_, _, squared_radius, softened_radius)) in sources.iter().enumerate() {
+                let distance_squared = column[index] + rows[index];
+                field += squared_radius / (distance_squared + softened_radius);
+            }
+            // Raster::field applies this outer clamp in the R04 renderer.
+            raster.dots[y * raster.width + x] =
+                (smoothstep(field_low, field_high, field) * 0.91).clamp(0.0, 1.0);
+        }
+    }
 }
 
 fn ripple_phases(raster: &Raster, settings: TwoRipplesSettings) -> Vec<RipplePhase> {
@@ -1085,7 +1146,37 @@ fn two_ripples(
 fn prepare_pond(raster: &mut Raster, settings: QuietPondSettings) {
     let aspect = raster.aspect();
     let pads = pond_pads(settings, aspect);
-    raster.field(|u, v| pond_light(&pads, aspect, u, v));
+    // One scratch allocation for the whole preparation, not one per row.
+    let mut row_pads = Vec::with_capacity(pads.len());
+    for y in 0..raster.height {
+        let v = (y as f32 + 0.5) / raster.height as f32;
+        pond_row_candidates(&pads, v, &mut row_pads);
+        for x in 0..raster.width {
+            let u = (x as f32 + 0.5) / raster.width as f32;
+            // Keep the exact leaf shader, sorted overlap order and field clamp.
+            raster.dots[y * raster.width + x] = pond_light(&row_pads, aspect, u, v).clamp(0.0, 1.0);
+        }
+    }
+}
+
+fn pond_row_candidates(
+    pads: &[(f32, f32, f32, f32)],
+    v: f32,
+    candidates: &mut Vec<(f32, f32, f32, f32)>,
+) {
+    candidates.clear();
+    for &pad in pads {
+        let (_, cy, radius, _) = pad;
+        let dy = (v - cy) * 1.13;
+        // Deliberately much wider than the shader's 1.08-radius support.
+        // Normalized pond radii are positive normal floats: outside two radii,
+        // hypot(dx, dy) / radius cannot approach the 1.08 boundary. Do not
+        // tighten this to the shading boundary or replace hypot in pond_light.
+        // Retain nonpositive/nonfinite radii or nonfinite vertical differences.
+        if !(radius > 0.0 && radius.is_finite() && dy.is_finite() && dy.abs() > radius * 2.0) {
+            candidates.push(pad);
+        }
+    }
 }
 
 /// Deterministic leaf positions. Rooted mode is a visual spacing heuristic:
@@ -1367,6 +1458,108 @@ mod optimization_fidelity_tests {
 }
 
 #[cfg(test)]
+mod moon_ribbon_fidelity_tests {
+    use super::*;
+
+    fn reference_moonlit_water(
+        raster: &mut Raster,
+        settings: MoonlitWaterSettings,
+        time: f32,
+        base: &[f32],
+        columns: &[WaterColumn],
+    ) {
+        raster.dots.copy_from_slice(base);
+        let strength = f32::from(settings.wave_strength_percent) / 100.0;
+        let scale = f32::from(settings.ripple_scale_percent) / 100.0;
+        let reflection = f32::from(settings.reflection_width_percent) / 100.0;
+        for y in 0..raster.height {
+            let v = (y as f32 + 0.5) / raster.height as f32;
+            if v < 0.43 {
+                continue;
+            }
+            let depth = (v - 0.43) / 0.57;
+            // Perspective increases band spacing toward the viewer. Both phases
+            // are transported, while columns supply cached crossing wave normals.
+            let perspective = 42.0 * (depth + 0.07).ln();
+            let broad = (time * strength * 1.10 - perspective / scale).sin_cos();
+            let fine = (-time * strength * 0.73 - depth * 107.0 / scale).sin_cos();
+            // The reflection spreads into a moving sheet as it approaches the
+            // viewer. Independent depth waves keep it from reading as a fixed
+            // vertical pillar, even when the water controls are set low.
+            let center = 0.54
+                + ((depth * 8.5 - time * strength * 0.62).sin() * 0.045
+                    + (depth * 19.0 + time * strength * 0.39).sin() * 0.022)
+                    * depth
+                    * strength;
+            let half_width = (0.018 + depth * depth * 0.22) * reflection;
+            for (x, column) in columns.iter().enumerate() {
+                let u = (x as f32 + 0.5) / raster.width as f32;
+                let wave_a = traveling(column.broad, broad);
+                let wave_b = traveling(column.fine, fine);
+                let local_center = center
+                    + wave_b * depth * strength * 0.035
+                    + (depth * 47.0 + time * strength * 0.8).sin() * depth * strength * 0.012;
+                let ribbon =
+                    1.0 - smoothstep(half_width * 0.42, half_width, (u - local_center).abs());
+                let crest = smoothstep(0.02, 0.72, (wave_a * 0.68 + wave_b * 0.32) * strength);
+                let broken_surface = wave_b + (depth * 83.0 - time * strength * 1.7).sin() * 0.34;
+                let fragments = 0.18 + 0.82 * smoothstep(-0.40, 0.48, broken_surface);
+                let reflection_light = ribbon * (0.12 + crest * 0.76) * fragments;
+                let outside_wavelets =
+                    smoothstep(0.86, 0.99, wave_a) * 0.10 * (0.3 + depth * 0.7) * strength.min(1.0);
+                raster.dots[y * raster.width + x] = reflection_light.max(outside_wavelets);
+            }
+        }
+    }
+
+    #[test]
+    fn zero_ribbon_shortcut_preserves_every_moon_dot() {
+        let settings = [
+            MoonlitWaterSettings::default(),
+            MoonlitWaterSettings {
+                wave_strength_percent: 0,
+                ripple_scale_percent: 50,
+                reflection_width_percent: 25,
+                moon_size_percent: 50,
+            },
+            MoonlitWaterSettings {
+                wave_strength_percent: 200,
+                ripple_scale_percent: 200,
+                reflection_width_percent: 200,
+                moon_size_percent: 150,
+            },
+        ];
+        for (width, height) in [(2, 4), (31, 17), (160, 96)] {
+            let columns = water_columns(width, 19.0, 47.0);
+            for controls in settings {
+                let mut prepared = Raster::default();
+                prepared.resize(width, height);
+                prepare_moon(&mut prepared, controls);
+                let base = prepared.dots;
+                for time in [0.0, 1.0 / 30.0, 7.0, 24.0] {
+                    let mut expected = Raster::default();
+                    expected.resize(width, height);
+                    expected.dots.fill(0.77);
+                    let mut actual = Raster::default();
+                    actual.resize(width, height);
+                    actual.dots.fill(0.77);
+                    reference_moonlit_water(&mut expected, controls, time, &base, &columns);
+                    moonlit_water(&mut actual, controls, time, &base, &columns);
+                    for (index, (left, right)) in expected.dots.iter().zip(&actual.dots).enumerate()
+                    {
+                        assert_eq!(
+                            left.to_bits(),
+                            right.to_bits(),
+                            "dot {index}, {width}x{height}, {controls:?}, t={time}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod pond_overhaul_tests {
     use super::*;
     #[test]
@@ -1407,4 +1600,14 @@ mod pond_overhaul_tests {
             "rear leaf edge must not show through the front leaf center"
         );
     }
+}
+
+#[cfg(test)]
+pub(super) mod r05_cloudlet_tests {
+    include!("r05_cloudlet_tests.rs");
+}
+
+#[cfg(test)]
+pub(super) mod r06_pond_tests {
+    include!("r06_pond_tests.rs");
 }
