@@ -34,6 +34,24 @@ impl ExclusiveFileLock {
     /// truncating one would momentarily disturb a concurrent holder's view of
     /// a file it is entitled to assume is stable.
     pub fn acquire(path: &Path) -> io::Result<Self> {
+        let file = Self::open(path)?;
+        file.lock()?;
+        Ok(Self { file })
+    }
+
+    /// Attempt ownership without waiting for another holder. Contention is
+    /// `Ok(None)`; filesystem failures remain errors. Worker callers can stop
+    /// or back off rather than making cancellation wait on a process lock.
+    pub fn try_acquire(path: &Path) -> io::Result<Option<Self>> {
+        let file = Self::open(path)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self { file })),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => Err(error),
+        }
+    }
+
+    fn open(path: &Path) -> io::Result<File> {
         // A bare relative path (`start.lock`) yields an empty parent, which is
         // the current directory and already exists: creating "" would fail on
         // the follow-up chmod rather than do anything useful.
@@ -55,8 +73,7 @@ impl ExclusiveFileLock {
         // reopen the name and so reintroduce exactly the swap-in race the
         // `O_NOFOLLOW` open above just refused.
         secure_fs::restrict_open_file_to_owner(&file)?;
-        file.lock()?;
-        Ok(Self { file })
+        Ok(file)
     }
 }
 
@@ -73,6 +90,20 @@ impl Drop for ExclusiveFileLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_acquire_reports_contention_and_recovers_after_release() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let path = root.path().join("contended.lock");
+        let first = ExclusiveFileLock::acquire(&path).expect("first acquire");
+        assert!(ExclusiveFileLock::try_acquire(&path)
+            .expect("try acquire")
+            .is_none());
+        drop(first);
+        assert!(ExclusiveFileLock::try_acquire(&path)
+            .expect("released acquire")
+            .is_some());
+    }
 
     #[test]
     fn acquire_creates_the_lock_file_and_its_parent_directory() {

@@ -81,6 +81,22 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
     let sibling_pane = order_before[1];
     let parent = tree.parent_of(converted_pane).expect("pane has a parent");
 
+    write_frame(
+        &mut client,
+        &ClientRequest::RenameNode {
+            node_id: converted_pane,
+            title: "Session conversion research".to_string(),
+            short_title: Some("Conversion research".to_string()),
+            inferred_icon: Some("book".to_string()),
+        },
+    )
+    .await
+    .expect("rename source pane");
+    expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree)
+            if tree.get(converted_pane).is_some_and(|node| node.name == "Session conversion research"))
+    }).await;
+
     // Stopping the process answers exactly once and leaves the node alone.
     write_frame(
         &mut client,
@@ -129,6 +145,18 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
     let replacement = order_after[0];
     assert_ne!(replacement, converted_pane);
     assert_eq!(tree.parent_of(replacement), Some(parent));
+    let node = tree.get(replacement).expect("replacement exists");
+    assert_eq!(node.name, "Session conversion research");
+    assert_eq!(node.short_name.as_deref(), Some("Conversion research"));
+    assert_eq!(node.inferred_icon.as_deref(), Some("book"));
+    assert!(node.is_name_fixed);
+    assert!(matches!(
+        node.kind,
+        ilium_core::NodeKind::Pane {
+            title_source: ilium_core::PaneTitleSource::UserSpecified,
+            ..
+        }
+    ));
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

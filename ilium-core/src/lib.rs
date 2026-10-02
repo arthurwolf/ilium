@@ -3167,6 +3167,40 @@ impl Tree {
         Ok(())
     }
 
+    /// Transfers the presentation and ownership of a conversation title to
+    /// its replacement pane without changing either pane's identity or activity.
+    pub fn inherit_pane_title(
+        &mut self,
+        source_id: NodeId,
+        replacement_id: NodeId,
+    ) -> Result<(), TreeError> {
+        let source = self
+            .get(source_id)
+            .ok_or(TreeError::NodeNotFound(source_id))?;
+        let NodeKind::Pane { title_source, .. } = &source.kind else {
+            return Err(TreeError::NotAPane(source_id));
+        };
+        let presentation = (
+            source.name.clone(),
+            source.short_name.clone(),
+            source.inferred_icon.clone(),
+            source.is_name_fixed,
+            source.structure_source,
+            *title_source,
+        );
+        let replacement = self.get_mut(replacement_id)?;
+        let NodeKind::Pane { title_source, .. } = &mut replacement.kind else {
+            return Err(TreeError::NotAPane(replacement_id));
+        };
+        replacement.name = presentation.0;
+        replacement.short_name = presentation.1;
+        replacement.inferred_icon = presentation.2;
+        replacement.is_name_fixed = presentation.3;
+        replacement.structure_source = presentation.4;
+        *title_source = presentation.5;
+        Ok(())
+    }
+
     /// Proposes a title (and its short-form alternative) for an automatic
     /// title source. No-ops once the pane has been genuinely user-renamed
     /// (`title_source == UserSpecified`), and returns `false` without
@@ -4077,6 +4111,50 @@ fn project_display_name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacement_inherits_automatic_and_manual_title_policy() {
+        for manual in [false, true] {
+            let mut tree = Tree::new();
+            let parent = tree.add_group(ROOT_ID, "Project").unwrap();
+            let source = tree
+                .add_pane(parent, "source", PaneContentKind::Terminal)
+                .unwrap();
+            let replacement = tree
+                .add_pane(parent, "codex resume session", PaneContentKind::Terminal)
+                .unwrap();
+            if manual {
+                tree.rename_node(
+                    source,
+                    "Research session",
+                    Some("Research".into()),
+                    Some("book".into()),
+                )
+                .unwrap();
+            } else {
+                tree.set_automatic_pane_title(
+                    source,
+                    "Research session",
+                    Some("Research".into()),
+                    Some("book".into()),
+                )
+                .unwrap();
+            }
+            tree.inherit_pane_title(source, replacement).unwrap();
+            let original = tree.get(source).unwrap();
+            let converted = tree.get(replacement).unwrap();
+            assert_eq!(converted.name, original.name);
+            assert_eq!(converted.short_name, original.short_name);
+            assert_eq!(converted.inferred_icon, original.inferred_icon);
+            assert_eq!(converted.is_name_fixed, manual);
+            assert_eq!(converted.structure_source, original.structure_source);
+            assert_eq!(
+                tree.set_automatic_pane_title(replacement, "Updated conversation", None, None)
+                    .unwrap(),
+                !manual
+            );
+        }
+    }
 
     #[test]
     fn worktree_branch_helpers_reject_git_ref_hazards() {

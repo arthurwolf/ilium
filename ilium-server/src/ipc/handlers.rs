@@ -3128,7 +3128,8 @@ async fn handle_replace_pane_with_command(
     };
     let placed = tree
         .move_node(new_pane_id, parent, position)
-        .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()));
+        .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()))
+        .and_then(|()| tree.inherit_pane_title(pane_id, new_pane_id));
     if let Err(error) = placed {
         let _ = tree.remove_node(new_pane_id);
         drop(tree);
