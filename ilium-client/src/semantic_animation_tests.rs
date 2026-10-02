@@ -183,7 +183,8 @@ fn conditional_inventory_is_not_default_only() {
         assert!(rows.values().all(exposable));
     }
     let rows = inventory(AnimationKind::Carpet).unwrap();
-    assert_eq!(rows.len(), 44);
+    assert_eq!(rows.len(), 45);
+    assert_eq!(rows["carpet_infinite_lines"].value, Bool(true));
     let ControlKind::Choice { options } = &rows["carpet_mode"].kind else {
         panic!("mode")
     };

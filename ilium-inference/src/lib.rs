@@ -34,9 +34,10 @@ pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const MAXIMUM_PROVIDER_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAXIMUM_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-/// Used only when the configured provider/model exposes no authoritative
-/// maximum-output capability. Requests should never silently fall back to a
-/// small convenience budget that truncates a valid structured response.
+/// Fallback budget for backends without an authoritative output capability.
+/// Official OpenAI does not transmit this fallback: it uses a documented model
+/// maximum where known and otherwise omits the explicit output-token limit.
+/// Never replace an unknown maximum with a small convenience budget.
 pub const UNKNOWN_MODEL_MAX_OUTPUT_TOKENS: u32 = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -91,6 +92,21 @@ pub struct PromptInstructions {
     pub ask_for_update: String,
 }
 
+/// Default safety budget for rendered restructure input, in estimated tokens.
+pub const DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT: u32 = 200_000;
+
+fn deserialize_positive_token_limit<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    let value = u32::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "restructure_prompt_token_limit must be greater than zero",
+        ));
+    }
+    Ok(value)
+}
+
 /// Complete durable settings. Switching providers preserves every other
 /// provider's endpoint, model, and credentials for a later switch back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +114,9 @@ pub struct PromptInstructions {
 pub struct InferenceSettings {
     pub selected_provider: InferenceProviderKind,
     pub title_style: TitleStyle,
+    /// Rough input-token budget (four Unicode characters per token).
+    #[serde(deserialize_with = "deserialize_positive_token_limit")]
+    pub restructure_prompt_token_limit: u32,
     pub instructions: PromptInstructions,
     pub kilo_gateway: KiloGatewaySettings,
     pub ollama: OllamaSettings,
@@ -111,6 +130,7 @@ impl Default for InferenceSettings {
         Self {
             selected_provider: InferenceProviderKind::KiloGateway,
             title_style: TitleStyle::default(),
+            restructure_prompt_token_limit: DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
             instructions: PromptInstructions::default(),
             kilo_gateway: KiloGatewaySettings::default(),
             ollama: OllamaSettings::default(),
@@ -692,6 +712,284 @@ impl InferenceProvider for OllamaProvider {
     }
 }
 
+/// Official OpenAI policy applies to the parsed HTTPS host, not to a provider
+/// name, model-name prefix, URL prefix, path, or user-info component.
+fn is_official_openai_base(base_url: &str) -> bool {
+    url::Url::parse(resolve_base_url(base_url, DEFAULT_OPENAI_URL))
+        .ok()
+        .is_some_and(|url| url.scheme() == "https" && url.host_str() == Some("api.openai.com"))
+}
+
+/// Exact identifiers with output maxima verified against OpenAI's model pages
+/// on 2026-10-02. This is not a capability catalog and does not infer anything
+/// about fine-tunes, arbitrary dated identifiers, or similarly named models.
+///
+/// Sources:
+/// https://developers.openai.com/api/docs/models/gpt-6-luna
+/// https://developers.openai.com/api/docs/models/gpt-6-astra
+/// https://developers.openai.com/api/docs/models/gpt-5
+/// https://developers.openai.com/api/docs/models/gpt-5-mini
+/// https://developers.openai.com/api/docs/models/gpt-5-nano
+/// https://developers.openai.com/api/docs/models/gpt-4.1
+/// https://developers.openai.com/api/docs/models/gpt-4o
+/// https://developers.openai.com/api/docs/models/o3
+fn official_openai_max_output_tokens(model: &str) -> Option<u32> {
+    match model {
+        "gpt-6-luna"
+        | "gpt-6-astra"
+        | "gpt-5"
+        | "gpt-5-2025-08-07"
+        | "gpt-5-mini"
+        | "gpt-5-mini-2025-08-07"
+        | "gpt-5-nano"
+        | "gpt-5-nano-2025-08-07" => Some(128_000),
+        "gpt-4.1" | "gpt-4.1-2025-04-14" => Some(32_768),
+        "gpt-4o" => Some(16_384),
+        "o3" | "o3-2025-04-16" => Some(100_000),
+        _ => None,
+    }
+}
+
+/// The only payload builder used by both OpenAI-compatible completion paths.
+///
+/// Official OpenAI:
+/// - never receives max_tokens;
+/// - never receives an explicit sampling temperature;
+/// - receives the documented model maximum when this registry knows it;
+/// - otherwise receives no explicit output-token budget.
+///
+/// The caller's max_tokens remains unchanged for custom compatible endpoints
+/// and OpenRouter. For official OpenAI, the user's maximum-output policy takes
+/// precedence over that provider-neutral fallback or any smaller caller hint.
+fn openai_chat_payload(
+    base_url: &str,
+    model: &str,
+    request: &InferenceRequest,
+    stream: bool,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_prompt}
+        ],
+        "stream": stream
+    });
+
+    if is_official_openai_base(base_url) {
+        if let Some(maximum) = official_openai_max_output_tokens(model) {
+            body["max_completion_tokens"] = serde_json::Value::from(maximum);
+        }
+    } else {
+        body["temperature"] = serde_json::json!(0.0);
+        body["max_tokens"] = serde_json::Value::from(request.max_tokens);
+    }
+
+    if stream {
+        body["stream_options"] = serde_json::json!({"include_usage": true});
+    }
+
+    body
+}
+
+/// Builds the new catalog request URL from the effective OpenAI-compatible
+/// base. Preserve a custom path prefix and query; fragments are not sent.
+///
+/// Completion URL construction is deliberately not changed here, preserving
+/// existing custom-compatible and OpenRouter completion behavior.
+fn openai_model_catalog_url(base_url: &str) -> Result<url::Url, InferenceError> {
+    let invalid_url = || {
+        InferenceError::Configuration(
+            "OpenAI-compatible API URL must be an absolute HTTP or HTTPS URL".to_string(),
+        )
+    };
+
+    let mut url = url::Url::parse(resolve_base_url(base_url, DEFAULT_OPENAI_URL))
+        .map_err(|_| invalid_url())?;
+
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(invalid_url());
+    }
+
+    let path = format!("{}/models", url.path().trim_end_matches('/'));
+    url.set_path(&path);
+    url.set_fragment(None);
+    Ok(url)
+}
+
+/// Credential-redacted catalog endpoint for progress metadata and rendering.
+///
+/// This is display metadata, NEVER a transport URL or cache identity. In
+/// particular, it cannot distinguish API keys and cannot detect an ABA edit.
+/// App must use its own monotonic discovery revision for that purpose.
+///
+/// Unsupported providers return None. An invalid OpenAI-compatible URL still
+/// identifies a supported discovery operation; list_models reports its safe
+/// configuration error without echoing the supplied URL.
+pub fn model_catalog_endpoint(settings: &InferenceSettings) -> Option<String> {
+    match settings.selected_provider {
+        InferenceProviderKind::KiloGateway => Some(kilo_gateway_model_catalog_url()),
+        InferenceProviderKind::Ollama => Some(ilium_logging::redacted_url(&format_url(
+            &settings.ollama.base_url,
+            "api/tags",
+        ))),
+        InferenceProviderKind::OpenAi => {
+            let mut url = match openai_model_catalog_url(&settings.openai.base_url) {
+                Ok(url) => url,
+                Err(_) => return Some("<invalid OpenAI-compatible API URL>".to_string()),
+            };
+
+            let had_query = url.query().is_some();
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            url.set_query(None);
+            url.set_fragment(None);
+
+            let mut display = url.to_string();
+            if had_query {
+                display.push_str("?<redacted>");
+            }
+
+            // Also suppress a literal configured key accidentally placed in a
+            // custom URL path. Never put the key itself into presentation state.
+            if !settings.openai.api_key.is_empty() {
+                display = display.replace(&settings.openai.api_key, "<redacted>");
+            }
+            Some(display)
+        }
+        InferenceProviderKind::Anthropic | InferenceProviderKind::OpenRouter => None,
+    }
+}
+
+/// Extract exact IDs, not guessed chat capabilities or output limits.
+///
+/// Additional metadata is allowed. Every record must have a usable ID; one
+/// malformed record fails the catalog rather than publishing a partial list.
+/// No response values are interpolated into validation errors.
+fn parse_openai_model_catalog(response: &serde_json::Value) -> Result<Vec<String>, InferenceError> {
+    if response.get("error").is_some_and(|error| !error.is_null()) {
+        return Err(InferenceError::InvalidResponse(
+            "Model catalog returned an error envelope".to_string(),
+        ));
+    }
+
+    if response
+        .get("object")
+        .is_some_and(|object| object.as_str() != Some("list"))
+    {
+        return Err(InferenceError::InvalidResponse(
+            "Model catalog object must be a list".to_string(),
+        ));
+    }
+
+    let records = response
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            InferenceError::InvalidResponse("Model catalog is missing its data array".to_string())
+        })?;
+
+    let mut models = Vec::with_capacity(records.len());
+    for record in records {
+        let id = record
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| {
+                !id.is_empty()
+                    && !id
+                        .chars()
+                        .any(|character| character.is_control() || character.is_whitespace())
+            })
+            .ok_or_else(|| {
+                InferenceError::InvalidResponse(
+                    "Model catalog contains a missing or invalid model ID".to_string(),
+                )
+            })?;
+        models.push(id.to_string());
+    }
+
+    models.sort_unstable();
+    models.dedup();
+    if models.is_empty() {
+        return Err(InferenceError::InvalidResponse(
+            "Model catalog contained no model IDs".to_string(),
+        ));
+    }
+    Ok(models)
+}
+
+/// Authenticated discovery has no selected-model prerequisite.
+///
+/// Do not route this through get_json/send: those existing general-purpose
+/// helpers log raw response bodies, including authentication-error bodies.
+/// This narrowly scoped path returns safe errors before DiagnosticProvider or
+/// the client worker can log them, without changing other providers' transport.
+fn list_openai_models(settings: &ApiKeyProviderSettings) -> Result<Vec<String>, InferenceError> {
+    require(
+        &settings.api_key,
+        "Enter an API key before loading OpenAI-compatible models",
+    )?;
+
+    let url = openai_model_catalog_url(&settings.base_url)?;
+    let authorization = format!("Bearer {}", settings.api_key);
+    let mut response = agent()
+        .get(url.as_str())
+        .header("Authorization", &authorization)
+        .call()
+        .map_err(|_| {
+            InferenceError::Transport(
+                "OpenAI-compatible model discovery request failed; check the endpoint and connection"
+                    .to_string(),
+            )
+        })?;
+
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        // Do not read, render, or log an authentication-error body: an endpoint
+        // can reflect the supplied credential in either text or JSON.
+        let message = match status {
+            401 => "Authentication failed; check the OpenAI-compatible API key",
+            403 => "Model discovery access denied; check the key and project permissions",
+            404 => "Model catalog endpoint not found; check the API base URL",
+            429 => "Model discovery was rate limited; retry later",
+            _ => "Model discovery request failed; response body withheld",
+        };
+        return Err(InferenceError::Http {
+            status,
+            message: message.to_string(),
+        });
+    }
+
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(MAXIMUM_PROVIDER_RESPONSE_BYTES)
+        .read_to_string()
+        .map_err(|_| {
+            InferenceError::Transport(
+                "Could not read the model catalog within the response-size limit".to_string(),
+            )
+        })?;
+
+    let response: serde_json::Value = serde_json::from_str(&body).map_err(|_| {
+        InferenceError::InvalidResponse("Model catalog was not valid JSON".to_string())
+    })?;
+    let models = parse_openai_model_catalog(&response)?;
+
+    // Successful bodies are untrusted too. DiagnosticProvider logs returned
+    // model IDs, so reject credential reflection before returning the list.
+    if models
+        .iter()
+        .any(|model| model.contains(settings.api_key.as_str()))
+    {
+        return Err(InferenceError::InvalidResponse(
+            "Model catalog reflected credential material; response withheld".to_string(),
+        ));
+    }
+
+    Ok(models)
+}
+
 /// Shared OpenAI-chat adapter logic working with borrowed settings.
 /// Used by OpenAI and OpenRouter to avoid cloning settings.
 fn complete_openai_compatible(
@@ -708,7 +1006,7 @@ fn complete_openai_compatible(
     let response = post_json(
         &format_url(base_url, "chat/completions"),
         &[("Authorization", format!("Bearer {}", api_key))],
-        serde_json::json!({"model":model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":false}),
+        openai_chat_payload(base_url, model, request, false),
     )?;
     openai_compatible_response_text(&response)
 }
@@ -725,7 +1023,7 @@ fn stream_openai_compatible(
     post_stream(
         &format_url(base_url, "chat/completions"),
         &[("Authorization", format!("Bearer {api_key}"))],
-        serde_json::json!({"model":model,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"temperature":0.0,"max_tokens":request.max_tokens,"stream":true,"stream_options":{"include_usage":true}}),
+        openai_chat_payload(base_url, model, request, true),
         StreamProtocol::OpenAiSse,
         on_event,
     )
@@ -736,9 +1034,11 @@ impl InferenceProvider for OpenAiProvider {
     fn kind(&self) -> InferenceProviderKind {
         InferenceProviderKind::OpenAi
     }
+
     fn selected_model(&self) -> Option<&str> {
         Some(&self.0.model)
     }
+
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         complete_openai_compatible(
             resolve_base_url(&self.0.base_url, DEFAULT_OPENAI_URL),
@@ -747,6 +1047,7 @@ impl InferenceProvider for OpenAiProvider {
             request,
         )
     }
+
     fn stream(
         &self,
         request: &InferenceRequest,
@@ -759,6 +1060,10 @@ impl InferenceProvider for OpenAiProvider {
             request,
             on_event,
         )
+    }
+
+    fn list_models(&self) -> Result<Vec<String>, InferenceError> {
+        list_openai_models(&self.0)
     }
 }
 struct OpenRouterProvider(Arc<OpenRouterSettings>);
@@ -1206,11 +1511,497 @@ fn anthropic_response_text(value: &serde_json::Value) -> Result<InferenceRespons
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restructure_budget_rejects_invalid_configuration() {
+        for value in ["0", "-1", "1.5", "4294967296", "\"200000\""] {
+            let source = format!(r#"{{"restructure_prompt_token_limit":{value}}}"#);
+            assert!(
+                serde_json::from_str::<InferenceSettings>(&source).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn restructure_budget_defaults_and_preserves_custom_tokens() {
+        let defaults: InferenceSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            serde_json::to_value(&defaults).unwrap()["restructure_prompt_token_limit"],
+            200_000
+        );
+        let custom: InferenceSettings =
+            serde_json::from_str(r#"{"restructure_prompt_token_limit":123456}"#).unwrap();
+        assert_eq!(
+            serde_json::to_value(&custom).unwrap()["restructure_prompt_token_limit"],
+            123456
+        );
+    }
+
     use ilium_kilo_gateway::DEFAULT_FREE_MODEL as DEFAULT_KILO_GATEWAY_MODEL;
 
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    const OPENAI_CATALOG_FIXTURE_KEY: &str = "sk-fixture-openai-catalog-secret";
+
+    fn openai_catalog_fixture_settings(response_url: &str) -> InferenceSettings {
+        let origin = response_url
+            .strip_suffix("/chat/completions")
+            .expect("existing HTTP fixture URL suffix");
+        InferenceSettings {
+            selected_provider: InferenceProviderKind::OpenAi,
+            openai: ApiKeyProviderSettings {
+                base_url: format!("{origin}/gateway/v1///"),
+                api_key: OPENAI_CATALOG_FIXTURE_KEY.to_string(),
+                model: String::new(),
+            },
+            ..InferenceSettings::default()
+        }
+    }
+
+    #[test]
+    fn openai_official_policy_requires_the_parsed_exact_https_host() {
+        for base in [
+            "",
+            "   ",
+            DEFAULT_OPENAI_URL,
+            "https://api.openai.com/v1/",
+            "HTTPS://API.OPENAI.COM/v1",
+            "https://api.openai.com:443/v1",
+            "https://api.openai.com:8443/custom-prefix",
+        ] {
+            assert!(is_official_openai_base(base), "official base: {base}");
+        }
+
+        for base in [
+            "http://api.openai.com/v1",
+            "https://api.openai.com.example.invalid/v1",
+            "https://api.openai.com@proxy.example/v1",
+            "https://proxy.example/api.openai.com/v1",
+            "https://proxy.example/v1?upstream=https://api.openai.com",
+            "https://api.openai.com./v1",
+            "http://127.0.0.1:8080/v1",
+            DEFAULT_OPENROUTER_URL,
+            "not a URL",
+        ] {
+            assert!(!is_official_openai_base(base), "non-official base: {base}");
+        }
+    }
+
+    #[test]
+    fn openai_official_complete_and_stream_payloads_omit_forbidden_parameters() {
+        let request = InferenceRequest {
+            system_prompt: "Return JSON only.".to_string(),
+            user_prompt: "A quoted \"value\" and a newline:\nnext".to_string(),
+            max_tokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+        };
+
+        for stream in [false, true] {
+            for model in ["gpt-6-astra", "gpt-5", "o3", "future-unregistered-model"] {
+                let body = openai_chat_payload(DEFAULT_OPENAI_URL, model, &request, stream);
+                assert!(body.get("max_tokens").is_none(), "{model}, stream={stream}");
+                assert!(
+                    body.get("temperature").is_none(),
+                    "{model}, stream={stream}"
+                );
+                assert!(body.get("top_p").is_none(), "{model}, stream={stream}");
+                assert_eq!(body["model"], model);
+                assert_eq!(body["stream"], stream);
+                assert_eq!(body["messages"][0]["role"], "system");
+                assert_eq!(body["messages"][0]["content"], request.system_prompt);
+                assert_eq!(body["messages"][1]["role"], "user");
+                assert_eq!(body["messages"][1]["content"], request.user_prompt);
+
+                if stream {
+                    assert_eq!(
+                        body["stream_options"],
+                        serde_json::json!({"include_usage": true})
+                    );
+                } else {
+                    assert!(body.get("stream_options").is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn openai_known_models_use_the_full_documented_maximum_not_a_caller_cap() {
+        let mut request = InferenceRequest::json_only("fixture");
+        request.max_tokens = 2;
+
+        let cases = [
+            ("gpt-6-luna", 128_000_u32),
+            ("gpt-6-astra", 128_000_u32),
+            ("gpt-5", 128_000),
+            ("gpt-5-2025-08-07", 128_000),
+            ("gpt-5-mini", 128_000),
+            ("gpt-5-mini-2025-08-07", 128_000),
+            ("gpt-5-nano", 128_000),
+            ("gpt-5-nano-2025-08-07", 128_000),
+            ("gpt-4.1", 32_768),
+            ("gpt-4.1-2025-04-14", 32_768),
+            ("gpt-4o", 16_384),
+            ("o3", 100_000),
+            ("o3-2025-04-16", 100_000),
+        ];
+
+        for (model, maximum) in cases {
+            assert_eq!(official_openai_max_output_tokens(model), Some(maximum));
+            for stream in [false, true] {
+                let body = openai_chat_payload(DEFAULT_OPENAI_URL, model, &request, stream);
+                assert_eq!(
+                    body["max_completion_tokens"],
+                    serde_json::Value::from(maximum),
+                    "{model}, stream={stream}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn openai_unknown_limits_are_omitted_without_family_or_fine_tune_guessing() {
+        let request = InferenceRequest::json_only("fixture");
+        for model in [
+            "future-unregistered-model",
+            "gpt-5-private",
+            "gpt-5-2099-01-01",
+            "gpt-6-astra-private",
+            "ft:gpt-4.1:organization:custom:identifier",
+            "gpt-4o-2024-05-13",
+            "GPT-5",
+        ] {
+            assert_eq!(official_openai_max_output_tokens(model), None);
+            for stream in [false, true] {
+                let body = openai_chat_payload(DEFAULT_OPENAI_URL, model, &request, stream);
+                assert!(body.get("max_completion_tokens").is_none());
+                assert!(body.get("max_tokens").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn openai_custom_and_openrouter_payloads_preserve_the_original_json_contract() {
+        let request = InferenceRequest {
+            system_prompt: "system fixture".to_string(),
+            user_prompt: "user fixture".to_string(),
+            max_tokens: 731,
+        };
+
+        for base in [
+            "http://127.0.0.1:8080/v1",
+            "https://custom.example/v1",
+            "https://api.openai.com.example.invalid/v1",
+            DEFAULT_OPENROUTER_URL,
+        ] {
+            for stream in [false, true] {
+                let mut expected = serde_json::json!({
+                    "model": "gpt-5",
+                    "messages": [
+                        {"role": "system", "content": "system fixture"},
+                        {"role": "user", "content": "user fixture"}
+                    ],
+                    "temperature": 0.0,
+                    "max_tokens": 731,
+                    "stream": stream
+                });
+                if stream {
+                    expected["stream_options"] = serde_json::json!({"include_usage": true});
+                }
+                assert_eq!(
+                    openai_chat_payload(base, "gpt-5", &request, stream),
+                    expected,
+                    "{base}, stream={stream}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn openai_catalog_parsing_sorts_deduplicates_and_does_not_guess_capabilities() {
+        let response = serde_json::json!({
+            "object": "list",
+            "error": null,
+            "data": [
+                {"id": "z-model", "created": 1, "owned_by": "fixture"},
+                {"id": "gpt-5", "shutdown_date": null},
+                {"id": "text-embedding-3-small"},
+                {"id": "gpt-5"},
+                {"id": "ft:gpt-4.1:org:custom:abc"}
+            ]
+        });
+
+        assert_eq!(
+            parse_openai_model_catalog(&response).unwrap(),
+            [
+                "ft:gpt-4.1:org:custom:abc",
+                "gpt-5",
+                "text-embedding-3-small",
+                "z-model",
+            ]
+        );
+
+        assert_eq!(
+            parse_openai_model_catalog(&serde_json::json!({
+                "data": [{"id": "custom-compatible-model"}]
+            }))
+            .unwrap(),
+            ["custom-compatible-model"]
+        );
+    }
+
+    #[test]
+    fn openai_catalog_parsing_rejects_empty_malformed_and_partial_catalogs() {
+        let invalid = [
+            serde_json::json!(null),
+            serde_json::json!([]),
+            serde_json::json!({}),
+            serde_json::json!({"data": null}),
+            serde_json::json!({"data": {}}),
+            serde_json::json!({"data": []}),
+            serde_json::json!({"object": "model", "data": [{"id": "ok"}]}),
+            serde_json::json!({"data": [{}]}),
+            serde_json::json!({"data": [null]}),
+            serde_json::json!({"data": [{"id": 123}]}),
+            serde_json::json!({"data": [{"id": ""}]}),
+            serde_json::json!({"data": [{"id": " gpt-5"}]}),
+            serde_json::json!({"data": [{"id": "gpt-5\n"}]}),
+            serde_json::json!({"data": [{"id": "gpt-\u{1b}[31m5"}]}),
+            serde_json::json!({"data": [{"id": "good"}, {"id": null}]}),
+            serde_json::json!({
+                "data": [{"id": "good"}],
+                "error": {"message": "upstream failed"}
+            }),
+        ];
+
+        for response in invalid {
+            assert!(matches!(
+                parse_openai_model_catalog(&response),
+                Err(InferenceError::InvalidResponse(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn openai_catalog_url_uses_the_effective_base_and_preserves_custom_prefixes() {
+        for base in [
+            "",
+            "   ",
+            DEFAULT_OPENAI_URL,
+            "https://api.openai.com/v1///",
+        ] {
+            assert_eq!(
+                openai_model_catalog_url(base).unwrap().as_str(),
+                "https://api.openai.com/v1/models"
+            );
+        }
+        assert_eq!(
+            openai_model_catalog_url(
+                "https://custom.example/gateway/v1/?api-version=fixture#not-sent"
+            )
+            .unwrap()
+            .as_str(),
+            "https://custom.example/gateway/v1/models?api-version=fixture"
+        );
+        for base in [
+            "not a URL",
+            "file:///tmp/catalog",
+            "mailto:fixture@example.com",
+        ] {
+            assert!(matches!(
+                openai_model_catalog_url(base),
+                Err(InferenceError::Configuration(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn openai_catalog_endpoint_metadata_is_redacted_and_model_independent() {
+        let mut settings = InferenceSettings {
+            selected_provider: InferenceProviderKind::OpenAi,
+            ..InferenceSettings::default()
+        };
+        assert_eq!(
+            model_catalog_endpoint(&settings).as_deref(),
+            Some("https://api.openai.com/v1/models")
+        );
+
+        settings.openai.base_url = format!(
+            "https://alice:password@custom.example/gateway/v1?api_key={}#ignored",
+            OPENAI_CATALOG_FIXTURE_KEY
+        );
+        settings.openai.api_key = OPENAI_CATALOG_FIXTURE_KEY.to_string();
+        settings.openai.model = "saved-choice".to_string();
+
+        let endpoint = model_catalog_endpoint(&settings).unwrap();
+        assert_eq!(
+            endpoint,
+            "https://custom.example/gateway/v1/models?<redacted>"
+        );
+        assert!(!endpoint.contains(OPENAI_CATALOG_FIXTURE_KEY));
+        assert!(!endpoint.contains("alice"));
+        assert!(!endpoint.contains("password"));
+        assert!(!endpoint.contains("saved-choice"));
+
+        settings.openai.base_url = "invalid supplied endpoint".to_string();
+        assert_eq!(
+            model_catalog_endpoint(&settings).as_deref(),
+            Some("<invalid OpenAI-compatible API URL>")
+        );
+
+        settings.selected_provider = InferenceProviderKind::OpenRouter;
+        assert_eq!(model_catalog_endpoint(&settings), None);
+    }
+
+    #[test]
+    fn openai_discovery_sends_authenticated_get_without_a_selected_model() {
+        let (url, request_receiver) = spawn_http_response(
+            "200 OK",
+            r#"{"object":"list","data":[{"id":"z"},{"id":"a"},{"id":"z"}]}"#,
+        );
+        let settings = openai_catalog_fixture_settings(&url);
+        assert!(settings.openai.model.is_empty());
+
+        let models = provider_from_settings(&settings).list_models().unwrap();
+        assert_eq!(models, ["a", "z"]);
+        assert!(settings.openai.model.is_empty());
+
+        let captured = request_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("catalog request was captured");
+        assert!(captured.starts_with("GET /gateway/v1/models HTTP/1.1\r\n"));
+        assert!(captured.to_ascii_lowercase().contains(&format!(
+            "authorization: bearer {}",
+            OPENAI_CATALOG_FIXTURE_KEY
+        )));
+        assert_eq!(
+            model_catalog_endpoint(&settings),
+            Some(format!(
+                "{}/gateway/v1/models",
+                url.strip_suffix("/chat/completions").unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn openai_discovery_requires_a_key_but_not_a_model() {
+        let settings = InferenceSettings {
+            selected_provider: InferenceProviderKind::OpenAi,
+            openai: ApiKeyProviderSettings {
+                base_url: "not a valid URL".to_string(),
+                api_key: "   ".to_string(),
+                model: String::new(),
+            },
+            ..InferenceSettings::default()
+        };
+        let error = provider_from_settings(&settings).list_models().unwrap_err();
+        assert!(matches!(
+            error,
+            InferenceError::Configuration(message) if message.contains("API key")
+        ));
+    }
+
+    #[test]
+    fn openai_discovery_reports_401_without_returning_a_reflected_key() {
+        let body = format!(
+            r#"{{"error":{{"message":"raw-body-marker {}"}}}}"#,
+            OPENAI_CATALOG_FIXTURE_KEY
+        );
+        let (url, request_receiver) = spawn_http_response("401 Unauthorized", &body);
+        let settings = openai_catalog_fixture_settings(&url);
+
+        let error = provider_from_settings(&settings).list_models().unwrap_err();
+        assert!(matches!(&error, InferenceError::Http { status: 401, .. }));
+        assert!(error.to_string().contains("Authentication failed"));
+        assert!(!format!("{error:?}").contains(OPENAI_CATALOG_FIXTURE_KEY));
+        assert!(!error.to_string().contains("raw-body-marker"));
+        request_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("authentication fixture received the request");
+    }
+
+    #[test]
+    fn openai_discovery_rejects_invalid_json_and_empty_or_malformed_envelopes() {
+        for body in [
+            "not JSON",
+            r#"{"data":[]}"#,
+            r#"{"data":[{"id":"good"},{"id":null}]}"#,
+            r#"{"error":{"message":"failed"},"data":[{"id":"good"}]}"#,
+        ] {
+            let (url, request_receiver) = spawn_http_response("200 OK", body);
+            let settings = openai_catalog_fixture_settings(&url);
+            assert!(matches!(
+                provider_from_settings(&settings).list_models(),
+                Err(InferenceError::InvalidResponse(_))
+            ));
+            request_receiver
+                .recv_timeout(Duration::from_secs(3))
+                .expect("catalog validation fixture received the request");
+        }
+    }
+
+    #[test]
+    fn openai_discovery_rejects_credentials_reflected_in_successful_model_ids() {
+        let body = format!(r#"{{"data":[{{"id":"{}"}}]}}"#, OPENAI_CATALOG_FIXTURE_KEY);
+        let (url, request_receiver) = spawn_http_response("200 OK", &body);
+        let settings = openai_catalog_fixture_settings(&url);
+
+        let error = provider_from_settings(&settings).list_models().unwrap_err();
+        assert!(matches!(&error, InferenceError::InvalidResponse(_)));
+        assert!(!format!("{error:?}").contains(OPENAI_CATALOG_FIXTURE_KEY));
+        request_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("credential-reflection fixture received the request");
+    }
+
+    #[test]
+    fn openai_custom_provider_complete_and_stream_keep_legacy_parameters_on_the_wire() {
+        for stream in [false, true] {
+            let response = if stream {
+                concat!(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                    "data: [DONE]\n\n"
+                )
+            } else {
+                r#"{"choices":[{"message":{"content":"ok"}}]}"#
+            };
+            let (url, request_receiver) = spawn_http_response("200 OK", response);
+            let mut settings = openai_catalog_fixture_settings(&url);
+            settings.openai.model = "gpt-5".to_string();
+
+            let mut request = InferenceRequest::json_only("fixture");
+            request.max_tokens = 731;
+            let provider = provider_from_settings(&settings);
+            if stream {
+                let mut text = String::new();
+                provider
+                    .stream(&request, &mut |event| {
+                        if let InferenceStreamEvent::TextDelta(delta) = event {
+                            text.push_str(&delta);
+                        }
+                        true
+                    })
+                    .unwrap();
+                assert_eq!(text, "ok");
+            } else {
+                assert_eq!(provider.complete(&request).unwrap().text, "ok");
+            }
+
+            let captured = request_receiver
+                .recv_timeout(Duration::from_secs(3))
+                .expect("custom completion request was captured");
+            assert!(captured.starts_with("POST /gateway/v1/chat/completions HTTP/1.1\r\n"));
+            let (_, body) = captured
+                .split_once("\r\n\r\n")
+                .expect("captured request has HTTP headers");
+            let body: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(body["max_tokens"], 731);
+            assert_eq!(body["temperature"], serde_json::json!(0.0));
+            assert_eq!(body["stream"], stream);
+            assert!(body.get("max_completion_tokens").is_none());
+        }
+    }
 
     #[test]
     fn prompt_instructions_default_and_persist_all_six_fields() {

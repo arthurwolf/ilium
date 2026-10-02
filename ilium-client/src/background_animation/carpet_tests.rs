@@ -44,8 +44,9 @@ fn all_nine_carpet_modes_and_every_conditional_control_survive_real_project_relo
             AnimationSettings::default()
         );
     }
+    assert!(seen.contains("carpet_infinite_lines"));
     assert!(
-        seen.len() == 44,
+        seen.len() == 45,
         "all advertised Carpet controls must be covered: {}",
         seen.len()
     );

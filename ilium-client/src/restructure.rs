@@ -46,12 +46,12 @@ mod semantic_contract_tests;
 /// arbitrary convenience cap.
 const RESTRUCTURE_MAX_TOKENS: u32 = UNKNOWN_MODEL_MAX_OUTPUT_TOKENS;
 
-/// The complete rendered request must remain small enough that an inference
-/// backend can spend its output allowance on the replacement tree rather than
-/// consuming it interpreting copied terminal/transcript noise. The observed
-/// failure recordings reached 180k characters with only ten items because a
-/// line-count cap alone does not constrain giant JSON/tool-output lines.
-const MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS: usize = 32_000;
+/// Rough input-token estimate, intentionally independent of provider tokenizer.
+/// Count Unicode scalar values rather than UTF-8 bytes, then round up at four
+/// characters per token. This is a safety budget, not a provider context guarantee.
+fn estimated_prompt_tokens(prompt: &str) -> usize {
+    prompt.chars().count().div_ceil(4)
+}
 
 /// Every leaf remains represented, but all leaf evidence together receives a
 /// fixed budget. This prevents one verbose agent transcript from crowding out
@@ -120,6 +120,10 @@ pub trait RestructureCompletionClient {
         ilium_inference::PromptInstructions::default()
     }
 
+    fn restructure_prompt_token_limit(&self) -> u32 {
+        ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT
+    }
+
     fn title_style(&self) -> TitleStyle {
         TitleStyle::Summarization
     }
@@ -128,6 +132,10 @@ pub trait RestructureCompletionClient {
 impl RestructureCompletionClient for InferenceSettings {
     fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
         self.instructions.clone()
+    }
+
+    fn restructure_prompt_token_limit(&self) -> u32 {
+        self.restructure_prompt_token_limit
     }
 
     fn title_style(&self) -> TitleStyle {
@@ -487,6 +495,11 @@ fn describe_pane_status(status: &PaneStatus) -> String {
             "naming/restructure/v0-agent",
             &serde_json::json!({"v0": (agent.class.label()).to_string(), "v1": (describe_activity(&agent.activity())).to_string()}),
         ),
+        PaneStatus::AgentUnavailable(recovery) => format!(
+            "{} agent unavailable ({})",
+            recovery.process.class.label(),
+            recovery.availability.label(),
+        ),
         PaneStatus::Editor { .. } => "Editor".to_string(),
         PaneStatus::Board => "Board".to_string(),
     }
@@ -733,6 +746,7 @@ fn render_restructure_prompt(
         protected_split_views,
         retry_feedback,
         &RecommendationContext::default(),
+        ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
     )
 }
 
@@ -744,10 +758,12 @@ fn render_restructure_prompt_with_instructions(
     protected_split_views: &[ProtectedSplitViewContext],
     retry_feedback: Option<&str>,
     recommendation_context: &RecommendationContext,
+    prompt_token_limit: u32,
 ) -> anyhow::Result<String> {
     let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
 
+    let mut prompt_tokens = 0;
     for _ in 0..12 {
         let mut prompt_context = RestructurePromptContext::new(
             title_style,
@@ -769,7 +785,8 @@ fn render_restructure_prompt_with_instructions(
         prompt_context.naming_and_organization =
             instructions.naming_and_organization.trim().to_owned();
         let prompt = ilium_prompts::render("naming/restructure", &prompt_context)?;
-        if prompt.chars().count() <= MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS {
+        prompt_tokens = estimated_prompt_tokens(&prompt);
+        if prompt_tokens <= prompt_token_limit as usize {
             return Ok(prompt);
         }
 
@@ -777,7 +794,7 @@ fn render_restructure_prompt_with_instructions(
         structure_evidence_budget = structure_evidence_budget.saturating_mul(3) / 4;
     }
 
-    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet", &serde_json::json!({"v0": (MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS).to_string()})))
+    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet", &serde_json::json!({"v0": prompt_token_limit.to_string(), "v1": prompt_tokens.to_string()})))
 }
 
 /// LLM-facing mirror of `ilium_core::RestructureNode`, tagged for a clean
@@ -912,11 +929,13 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             protected_split_views,
             retry_feedback.as_deref(),
             recommendation_context,
+            generator.restructure_prompt_token_limit(),
         )?;
         tracing::info!(
             operation_id,
             attempt,
-            prompt_characters = prompt.chars().count(),
+            prompt_estimated_tokens = estimated_prompt_tokens(&prompt),
+            prompt_token_limit = generator.restructure_prompt_token_limit(),
             item_count = contexts.len(),
             is_corrective_retry = retry_feedback.is_some(),
             "restructure inference started"
@@ -1582,6 +1601,46 @@ mod tests {
         )
         .map(|plan| plan.structure)
     }
+
+    #[test]
+    fn token_estimate_rounds_up_unicode_characters() {
+        assert_eq!(estimated_prompt_tokens(""), 0);
+        assert_eq!(estimated_prompt_tokens("abcd"), 1);
+        assert_eq!(estimated_prompt_tokens("abcde"), 2);
+        assert_eq!(estimated_prompt_tokens("🦀🦀🦀🦀"), 1);
+    }
+
+    #[test]
+    fn configured_budget_accepts_large_instructions_and_reports_tokens() {
+        let instructions = ilium_inference::PromptInstructions {
+            organization: "x".repeat(40_000),
+            ..Default::default()
+        };
+        let mut item = leaf(1, "");
+        item.kind_label.clear();
+        let render = |limit| {
+            render_restructure_prompt_with_instructions(
+                TitleStyle::Summarization,
+                &instructions,
+                std::slice::from_ref(&item),
+                "",
+                &[],
+                None,
+                &RecommendationContext::default(),
+                limit,
+            )
+        };
+        let prompt = render(200_000).unwrap();
+        assert!(prompt.chars().count() > 32_000);
+        let tokens = estimated_prompt_tokens(&prompt);
+        assert!(render(tokens as u32).is_ok());
+        assert!(render(tokens as u32 - 1).is_err());
+        let error = render(1).unwrap_err().to_string();
+        assert!(error.contains("estimated tokens"), "{error}");
+        assert!(error.contains("1-token"), "{error}");
+        assert!(error.contains("Inference"), "{error}");
+    }
+
     struct FakeGenerator {
         calls: Cell<u8>,
         last_prompt: RefCell<Option<String>>,
@@ -1620,6 +1679,54 @@ mod tests {
             }
             Ok(responses[0].clone())
         }
+    }
+
+    struct BudgetGenerator {
+        inner: FakeGenerator,
+        limit: u32,
+    }
+
+    impl RestructureCompletionClient for BudgetGenerator {
+        fn complete_restructure_prompt(&self, prompt: &str) -> anyhow::Result<String> {
+            self.inner.complete_restructure_prompt(prompt)
+        }
+        fn restructure_prompt_token_limit(&self) -> u32 {
+            self.limit
+        }
+        fn prompt_instructions(&self) -> ilium_inference::PromptInstructions {
+            ilium_inference::PromptInstructions {
+                organization: "x".repeat(40_000),
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn configured_token_budget_reaches_provider_and_corrective_retry() {
+        let generator = BudgetGenerator {
+            inner: FakeGenerator::sequence([
+                "invalid".into(),
+                r#"{"children":[{"kind":"pane","id":1,"title":"Shell Work","short_title":"Shell","icon":"📌"}]}"#.into(),
+            ]),
+            limit: 200_000,
+        };
+        let contexts = [leaf(1, "Shell")];
+        assert!(infer_restructure_plan(&generator, &contexts).is_ok());
+        assert_eq!(generator.inner.calls.get(), 2);
+        assert!(generator
+            .inner
+            .prompts
+            .borrow()
+            .iter()
+            .all(|prompt| prompt.chars().count() > 32_000
+                && estimated_prompt_tokens(prompt) <= 200_000));
+        let blocked = BudgetGenerator {
+            inner: FakeGenerator::new("invalid"),
+            limit: 1,
+        };
+        let error = infer_restructure_plan(&blocked, &contexts).unwrap_err();
+        assert!(error.to_string().contains("1-token"));
+        assert_eq!(blocked.inner.calls.get(), 0);
     }
 
     struct LabelGenerator(FakeGenerator);
@@ -2093,7 +2200,10 @@ mod tests {
             .borrow()
             .clone()
             .expect("rendered prompt");
-        assert!(prompt.chars().count() <= MAXIMUM_RESTRUCTURE_PROMPT_CHARACTERS);
+        assert!(
+            estimated_prompt_tokens(&prompt)
+                <= ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT as usize
+        );
         assert!(prompt.contains("structure-head"));
         assert!(prompt.contains("structure-tail"));
         assert!(prompt.contains(

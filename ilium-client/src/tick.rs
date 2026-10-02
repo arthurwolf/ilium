@@ -421,6 +421,16 @@ pub fn apply_naming_worker_event(
             }
             app.finish_project_restructure(project_id, &inference_activity_revisions, result);
         }
+        NamingWorkerEvent::AgentPromptTranscript(result) => {
+            if let Some(last_prompt) = result.last_prompt {
+                app.queue_request(ilium_ipc::ClientRequest::ReportAgentPromptFromTranscript {
+                    pane_id: result.pane_id,
+                    expected_session_id: result.session_id,
+                    prompt_epoch: result.prompt_epoch,
+                    last_prompt,
+                });
+            }
+        }
         NamingWorkerEvent::LastPromptTranscript(result) => {
             let crate::naming_workers::LastPromptTranscriptWorkerResult {
                 pane_id,
@@ -478,6 +488,63 @@ mod tests {
     use super::*;
     use crate::app::PendingRetitleRequest;
     use crate::naming::DualTitle;
+
+    #[test]
+    fn restructure_budget_autosaves_after_number_input_debounce() {
+        use crate::app::{InferenceSettingField, Mode};
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        use std::time::Duration;
+        let project = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
+        app.config_dir = Some(config.path().to_path_buf());
+        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
+        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
+            state.buf.clear();
+            state.cursor = 0;
+        }
+        for character in "234567".chars() {
+            crate::keys::handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE)),
+            );
+        }
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            200_000
+        );
+        let edited = Instant::now();
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = SearchWorkers::new(events_tx);
+        on_tick(
+            &mut app,
+            edited + Duration::from_millis(599),
+            false,
+            &mut workers,
+        );
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            200_000
+        );
+        on_tick(
+            &mut app,
+            edited + Duration::from_millis(700),
+            false,
+            &mut workers,
+        );
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            234567
+        );
+        assert_eq!(
+            crate::config::load(config.path())
+                .unwrap()
+                .inference
+                .restructure_prompt_token_limit,
+            234567
+        );
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+    }
 
     #[test]
     fn project_name_result_after_ai_opt_out_does_not_write_or_publish() {

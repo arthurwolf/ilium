@@ -122,6 +122,10 @@ pub fn identity_explanation(status: &PaneStatus) -> StatusExplanation {
                 body: "Ilium matched a configured custom agent signature in this terminal's process tree.",
             },
         },
+        PaneStatus::AgentUnavailable(recovery) => StatusExplanation {
+            title: "Former agent; recovery available",
+            body: recovery.availability.explanation(),
+        },
         PaneStatus::Editor { dirty: true } => StatusExplanation {
             title: "Editor with unsaved changes",
             body: "This tree entry is an editor pane whose current buffer has unsaved changes.",
@@ -152,6 +156,13 @@ pub(crate) fn identity_provenance_reason(
     status: &PaneStatus,
     detection: Option<&ilium_ipc::DetectionReason>,
 ) -> String {
+    if let PaneStatus::AgentUnavailable(recovery) = status {
+        return format!(
+            "Why: this pane previously belonged to a {} process; {}. Its live composer is not established.",
+            safe_tooltip_text(recovery.process.class.label()),
+            recovery.availability.label(),
+        );
+    }
     if let Some(detection) = detection {
         return detection_reason_text(detection);
     }
@@ -178,6 +189,7 @@ pub(crate) fn identity_provenance_reason(
                 safe_tooltip_text(class_name)
             )
         }
+        PaneStatus::AgentUnavailable(_) => unreachable!("handled before detection evidence"),
         PaneStatus::PlainShell => {
             missing_identity_evidence_reason(PaneContentKind::Terminal)
         }
@@ -415,6 +427,12 @@ pub fn now_span(
 ) -> Span<'static> {
     match signal {
         NowSignal::None => Span::raw(""),
+        NowSignal::AgentUnavailable(_) => Span::styled(
+            icons
+                .glyph_for_display(IconTarget::AgentUnavailable, use_stable_glyphs)
+                .to_string(),
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ),
         NowSignal::NeedsApproval => Span::styled(
             icons
                 .glyph_for_display(IconTarget::WaitingApproval, use_stable_glyphs)
@@ -562,6 +580,10 @@ pub fn objective_explanation(signal: ObjectiveSignal) -> Option<StatusExplanatio
 pub fn now_explanation(signal: NowSignal) -> Option<StatusExplanation> {
     Some(match signal {
         NowSignal::None => return None,
+        NowSignal::AgentUnavailable(availability) => StatusExplanation {
+            title: "Agent unavailable",
+            body: availability.explanation(),
+        },
         NowSignal::NeedsApproval => StatusExplanation {
             title: "Needs your approval",
             body: "The agent is blocked on a confirmation or a choice, such as a permission prompt or a selection menu. Nothing happens until you answer it.",
@@ -1050,6 +1072,7 @@ mod tests {
         assert!(objective_explanation(ObjectiveSignal::None).is_none());
 
         for signal in [
+            NowSignal::AgentUnavailable(ilium_core::AgentAvailability::Unverified),
             NowSignal::NeedsApproval,
             NowSignal::Working,
             NowSignal::WaitingSubagents,
@@ -1063,6 +1086,21 @@ mod tests {
             assert!(now_explanation(signal).is_some());
         }
         assert!(now_explanation(NowSignal::None).is_none());
+    }
+
+    #[test]
+    fn unavailable_agent_has_distinct_recovery_glyph_and_explicit_uncertainty() {
+        let icons = IconSettings::default();
+        let signal = NowSignal::AgentUnavailable(ilium_core::AgentAvailability::Unverified);
+        assert_eq!(now_span(signal, &icons, 0, false).content, "🛟");
+        assert_eq!(now_span(signal, &icons, 0, true).content, "R");
+        let explanation = now_explanation(signal).unwrap();
+        assert!(explanation
+            .body
+            .contains("no crash or clean exit is inferred"));
+        assert!(explanation
+            .body
+            .contains("did not establish a live agent composer"));
     }
 
     #[test]

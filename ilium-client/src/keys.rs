@@ -2694,6 +2694,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Field(
                     crate::app::InferenceSettingField::OllamaModel,
                 )) => app.settings_adjust_ollama_model(-1),
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::OpenAiModel,
+                )) => app.settings_adjust_openai_model(-1),
                 Some(crate::app::InferenceRow::KiloGatewayModel) => {
                     app.settings_adjust_kilo_gateway_model(-1)
                 }
@@ -2718,6 +2721,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     crate::app::InferenceSettingField::OllamaModel,
                 )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
                     app.settings_adjust_ollama_model(1)
+                }
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::OpenAiModel,
+                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
+                    app.settings_adjust_openai_model(1)
                 }
                 Some(crate::app::InferenceRow::Field(field)) => {
                     app.mode = Mode::Settings(state);

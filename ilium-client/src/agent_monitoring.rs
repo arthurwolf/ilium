@@ -100,7 +100,8 @@ pub fn is_running_quietly(status: &PaneStatus, attention: Option<IconTarget>) ->
             .is_some_and(|state| state.turn == AgentTurn::Working)
 }
 
-pub const STATUS_ICON_TARGETS: [IconTarget; 17] = [
+pub const STATUS_ICON_TARGETS: [IconTarget; 18] = [
+    IconTarget::AgentUnavailable,
     IconTarget::Working,
     IconTarget::WaitingBackground,
     IconTarget::BackgroundTaskStillRunning,
@@ -217,7 +218,9 @@ pub fn displayed_pane_signals(
     has_scheduled_input: bool,
     shell_output: Option<ShellOutputPhase>,
 ) -> PaneSignals {
-    if mode == AgentMonitoringMode::Normal {
+    // Historical agent identity has one explicit unavailable projection in
+    // every mode. Attention overrides apply only to live agent activity.
+    if mode == AgentMonitoringMode::Normal || status.agent_recovery().is_some() {
         return project_pane_signals(status, progress, has_scheduled_input, shell_output);
     }
 

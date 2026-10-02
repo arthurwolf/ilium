@@ -198,12 +198,22 @@ pub fn layout(area: Rect) -> AnimationLayout {
 }
 
 fn footer_rows(area: Rect, model: &RowModel) -> u16 {
-    if area.height < 12 || area.width.saturating_sub(layout(area).panel.width) >= 16 {
+    let urls = model
+        .effective_kind()
+        .map_or(&[] as &'static [&'static str], |kind| kind.inspired_by());
+    // The credit sits beside the panel only when its longest line fits whole
+    // there; otherwise it gets footer rows of its own under the controls.
+    let longest = urls
+        .iter()
+        .map(|url| UnicodeWidthStr::width(*url) + 14)
+        .max()
+        .unwrap_or(0);
+    if area.height < 12
+        || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
+    {
         return FOOTER_ROWS;
     }
-    let credits = model
-        .effective_kind()
-        .map_or(0, |kind| kind.inspired_by().len());
+    let credits = urls.len();
     FOOTER_ROWS + if credits > 0 { credits as u16 + 1 } else { 0 }
 }
 
@@ -1993,6 +2003,28 @@ mod tests {
         app.animation_settings.kind = AnimationKind::Shoreline;
         let plain = draw(&mut app, 120, 36);
         assert!(credit_row(&plain, 120, 36).is_none());
+    }
+
+    #[test]
+    fn game_inspired_scenes_credit_their_game_in_the_demo() {
+        let (mut app, _probe, _project) = settings_app(160, 36);
+        for (kind, url) in [
+            (
+                AnimationKind::HexExpedition,
+                "https://store.steampowered.com/app/358130/The_Curious_Expedition/",
+            ),
+            (AnimationKind::VoxelLandscape, "https://www.minecraft.net/"),
+        ] {
+            app.animation_settings.kind = kind;
+            let drawn = draw(&mut app, 160, 36);
+            let credit = credit_row(&drawn, 160, 36).unwrap_or_else(|| {
+                panic!("{kind:?}: no credit\n{}", screen_text(&drawn).join("\n"))
+            });
+            assert!(
+                credit.contains(&format!("\u{ab}inspired by {url}")),
+                "{kind:?}: {credit}"
+            );
+        }
     }
 
     #[test]

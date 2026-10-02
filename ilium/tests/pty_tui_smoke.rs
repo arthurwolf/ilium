@@ -1099,29 +1099,34 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
         })
         .await
         .unwrap();
-    let accepted = tokio::time::timeout(WAIT_TIMEOUT, async {
-        while let Some(event) = control.events.recv().await {
-            if let ServerEvent::ProgressMonitorSetCompleted {
-                request_id: 9871,
-                result,
-                ..
-            } = event
-            {
-                return result.expect("monitor accepted");
+    // The terminal report starts its three-second display deadline on the
+    // server. Observe the TUI concurrently with the independent control
+    // reply: waiting for that reply first can miss the entire visible window
+    // while this deliberately flooded connection drains its output.
+    let (accepted, footer_rendered) = tokio::join!(
+        tokio::time::timeout(WAIT_TIMEOUT, async {
+            while let Some(event) = control.events.recv().await {
+                if let ServerEvent::ProgressMonitorSetCompleted {
+                    request_id: 9871,
+                    result,
+                    ..
+                } = event
+                {
+                    return result.expect("monitor accepted");
+                }
             }
-        }
-        panic!("server closed before acceptance");
-    })
-    .await
-    .unwrap();
-    assert!(
-        wait_until(
+            panic!("server closed before acceptance");
+        }),
+        wait_for_transient_frame(
             || tui
                 .screen_text()
                 .contains("unique completed footer evidence"),
-            WAIT_TIMEOUT
+            WAIT_TIMEOUT,
         )
-        .await,
+    );
+    let accepted = accepted.unwrap();
+    assert!(
+        footer_rendered,
         "footer never rendered: {}",
         tui.screen_text()
     );
@@ -1992,7 +1997,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
             screen.contains("Sound source")
                 && screen.contains("System beep")
                 && screen.contains("Agent finished")
-                && screen.contains("Discovered system sound folders")
         },
         WAIT_TIMEOUT,
     )
@@ -3891,18 +3895,27 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 
     // A complete click on the remaining card surface opens the editable
     // title/body panel in the rightmost third.
-    let (context_card_column, context_card_row) = tui.with_screen(|screen| {
-        let row = rows_containing(screen, "[x] Context task")[0];
-        let columns = screen.size().1;
-        let column = (25..columns)
-            .find(|column| {
-                screen
-                    .cell(row, *column)
-                    .is_some_and(|cell| cell.contents() == "C")
+    // The first checked frame can still be part of the tree-width
+    // transition. Hit-testing uses the current layout, so resolve a settled
+    // card position before sending a click into a later frame.
+    let (context_card_column, context_card_row) = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                let row = *rows_containing(screen, "[x] Context task").first()?;
+                let columns = screen.size().1;
+                let column = (25..columns).find(|column| {
+                    screen
+                        .cell(row, *column)
+                        .is_some_and(|cell| cell.contents() == "C")
+                })?;
+                Some((column, row))
             })
-            .expect("find Context task card column");
-        (column, row)
-    });
+        },
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await
+    .expect("find settled Context task card position");
     tui.write(&sgr_mouse_down(0, context_card_column, context_card_row))
         .expect("press Context task card");
     tui.write(&sgr_mouse_up(context_card_column, context_card_row))

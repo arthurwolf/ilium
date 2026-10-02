@@ -278,7 +278,10 @@ fn semantic_contract_retries_with_catalog_and_original_prompt_limit() {
     let catalog = crate::semantic_animation::catalog().unwrap();
     for prompt in prompts.iter() {
         assert!(prompt.contains(catalog));
-        assert!(prompt.chars().count() <= 32_000);
+        assert!(
+            estimated_prompt_tokens(&prompt)
+                <= ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT as usize
+        );
     }
     assert!(prompts[1].contains("<retry-feedback>"));
 }
@@ -308,9 +311,13 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         &[],
         None,
         &recommendation_context,
+        ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
     )
     .unwrap();
-    assert!(prompt.chars().count() <= 32_000);
+    assert!(
+        estimated_prompt_tokens(&prompt)
+            <= ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT as usize
+    );
     assert!(prompt.contains("<fixed-group id=\"900\""));
     for item in contexts {
         assert!(prompt.contains(&format!("<item id=\"{}\"", item.id.0)));

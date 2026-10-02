@@ -3097,6 +3097,7 @@ mod tests {
         )
         .unwrap();
         let inference = InferenceSettings {
+            restructure_prompt_token_limit: 345_678,
             selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
             kilo_gateway: ilium_inference::KiloGatewaySettings {
                 model: "stepfun/step-3.7-flash:free".to_string(),

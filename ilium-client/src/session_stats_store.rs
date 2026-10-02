@@ -25,7 +25,7 @@ use crate::session_stats::{SessionStats, StatsAccumulator};
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Everything the worker needs to find and read one pane's transcript.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsRequest {
     pub class: AgentClass,
     pub session_id: String,
@@ -53,7 +53,8 @@ pub struct StatsEntry {
     pub state: LoadState,
     accumulator: Option<Box<StatsAccumulator>>,
     transcript_path: Option<PathBuf>,
-    session_id: String,
+    request: StatsRequest,
+    generation: u64,
     in_flight: bool,
     last_started: Option<Instant>,
 }
@@ -61,21 +62,24 @@ pub struct StatsEntry {
 enum StatsEvent {
     Progress {
         pane_id: NodeId,
-        session_id: String,
+        request: StatsRequest,
+        generation: u64,
         stats: SessionStats,
         done: u64,
         total: u64,
     },
     Finished {
         pane_id: NodeId,
-        session_id: String,
+        request: StatsRequest,
+        generation: u64,
         path: PathBuf,
         accumulator: Box<StatsAccumulator>,
         stats: SessionStats,
     },
     Failed {
         pane_id: NodeId,
-        session_id: String,
+        request: StatsRequest,
+        generation: u64,
         message: String,
     },
 }
@@ -85,6 +89,7 @@ pub struct SessionStatsStore {
     entries: HashMap<NodeId, StatsEntry>,
     events_tx: Sender<StatsEvent>,
     events_rx: Receiver<StatsEvent>,
+    next_generation: u64,
 }
 
 impl std::fmt::Debug for SessionStatsStore {
@@ -103,6 +108,7 @@ impl Default for SessionStatsStore {
             entries: HashMap::new(),
             events_tx,
             events_rx,
+            next_generation: 0,
         }
     }
 }
@@ -120,6 +126,21 @@ impl SessionStatsStore {
         self.entries.get(&pane_id)
     }
 
+    /// Hides a cache as soon as provider or transcript ownership changes.
+    pub fn matching_entry(&self, pane_id: NodeId, request: &StatsRequest) -> Option<&StatsEntry> {
+        self.entry(pane_id)
+            .filter(|entry| entry.request == *request)
+    }
+
+    /// Reconciles current live or historical transcript owners before results
+    /// are drained. In-flight work for removed owners cannot revive a cache.
+    pub fn reconcile_contexts(&mut self, contexts: &HashMap<NodeId, StatsRequest>) -> bool {
+        let previous = self.entries.len();
+        self.entries
+            .retain(|pane_id, entry| contexts.get(pane_id) == Some(&entry.request));
+        previous != self.entries.len()
+    }
+
     /// Seeds a finished snapshot for a pane, for tests of consumers that must
     /// not start a transcript worker.
     #[cfg(test)]
@@ -131,11 +152,31 @@ impl SessionStatsStore {
                 state: LoadState::Ready,
                 accumulator: None,
                 transcript_path: None,
-                session_id: String::new(),
+                request: StatsRequest {
+                    class: AgentClass::Codex,
+                    session_id: String::new(),
+                    project_path: PathBuf::new(),
+                    home: PathBuf::new(),
+                },
+                generation: 0,
                 in_flight: false,
                 last_started: None,
             },
         );
+    }
+
+    /// Seeds an explicitly attributed snapshot without starting filesystem I/O.
+    #[cfg(test)]
+    pub fn insert_ready_for_request_for_test(
+        &mut self,
+        pane_id: NodeId,
+        request: StatsRequest,
+        stats: Arc<SessionStats>,
+    ) {
+        self.insert_ready_for_test(pane_id, stats);
+        if let Some(entry) = self.entries.get_mut(&pane_id) {
+            entry.request = request;
+        }
     }
 
     /// Drops one pane's cache, e.g. when the pane is gone or its agent
@@ -165,19 +206,21 @@ impl SessionStatsStore {
             state: LoadState::Idle,
             accumulator: None,
             transcript_path: None,
-            session_id: request.session_id.clone(),
+            request: request.clone(),
+            generation: 0,
             in_flight: false,
             last_started: None,
         });
-        // A different session in the same pane (the agent was restarted or
-        // resumed) invalidates everything cached, including the accumulator.
-        if entry.session_id != request.session_id {
+        // Provider, session and transcript-store ownership all fence the cache,
+        // including the incremental accumulator and resolved path.
+        if entry.request != request {
             *entry = StatsEntry {
                 stats: None,
                 state: LoadState::Idle,
                 accumulator: None,
                 transcript_path: None,
-                session_id: request.session_id.clone(),
+                request: request.clone(),
+                generation: 0,
                 in_flight: false,
                 last_started: None,
             };
@@ -191,6 +234,11 @@ impl SessionStatsStore {
         {
             return false;
         }
+        let Some(generation) = self.next_generation.checked_add(1) else {
+            return false;
+        };
+        self.next_generation = generation;
+        entry.generation = generation;
         entry.in_flight = true;
         entry.last_started = Some(now);
         if entry.stats.is_none() {
@@ -200,7 +248,16 @@ impl SessionStatsStore {
         let accumulator = entry.accumulator.take();
         let known_path = entry.transcript_path.clone();
         let events_tx = self.events_tx.clone();
-        std::thread::spawn(move || run_pass(pane_id, request, known_path, accumulator, events_tx));
+        std::thread::spawn(move || {
+            run_pass(
+                pane_id,
+                request,
+                generation,
+                known_path,
+                accumulator,
+                events_tx,
+            )
+        });
         true
     }
 
@@ -218,12 +275,13 @@ impl SessionStatsStore {
         match event {
             StatsEvent::Progress {
                 pane_id,
-                session_id,
+                request,
+                generation,
                 stats,
                 done,
                 total,
             } => {
-                let Some(entry) = self.live_entry(pane_id, &session_id) else {
+                let Some(entry) = self.live_entry(pane_id, &request, generation) else {
                     return false;
                 };
                 entry.stats = Some(Arc::new(stats));
@@ -232,12 +290,13 @@ impl SessionStatsStore {
             }
             StatsEvent::Finished {
                 pane_id,
-                session_id,
+                request,
+                generation,
                 path,
                 accumulator,
                 stats,
             } => {
-                let Some(entry) = self.live_entry(pane_id, &session_id) else {
+                let Some(entry) = self.live_entry(pane_id, &request, generation) else {
                     return false;
                 };
                 entry.in_flight = false;
@@ -249,10 +308,11 @@ impl SessionStatsStore {
             }
             StatsEvent::Failed {
                 pane_id,
-                session_id,
+                request,
+                generation,
                 message,
             } => {
-                let Some(entry) = self.live_entry(pane_id, &session_id) else {
+                let Some(entry) = self.live_entry(pane_id, &request, generation) else {
                     return false;
                 };
                 entry.in_flight = false;
@@ -264,10 +324,15 @@ impl SessionStatsStore {
 
     /// The entry a worker result belongs to, provided it still describes the
     /// same session: a result for a superseded session is discarded.
-    fn live_entry(&mut self, pane_id: NodeId, session_id: &str) -> Option<&mut StatsEntry> {
+    fn live_entry(
+        &mut self,
+        pane_id: NodeId,
+        request: &StatsRequest,
+        generation: u64,
+    ) -> Option<&mut StatsEntry> {
         self.entries
             .get_mut(&pane_id)
-            .filter(|entry| entry.session_id == session_id)
+            .filter(|entry| entry.request == *request && entry.generation == generation)
     }
 }
 
@@ -306,11 +371,13 @@ fn claude_subagent_files(main_transcript: &std::path::Path) -> Vec<PathBuf> {
 fn run_pass(
     pane_id: NodeId,
     request: StatsRequest,
+    generation: u64,
     known_path: Option<PathBuf>,
     accumulator: Option<Box<StatsAccumulator>>,
     events_tx: Sender<StatsEvent>,
 ) {
     lower_current_thread(WorkerPriority::BelowNormal);
+    let event_request = request.clone();
     let StatsRequest {
         class,
         session_id,
@@ -320,7 +387,8 @@ fn run_pass(
     let fail = |message: String| {
         let _ = events_tx.send(StatsEvent::Failed {
             pane_id,
-            session_id: session_id.clone(),
+            request: event_request.clone(),
+            generation,
             message,
         });
     };
@@ -344,7 +412,8 @@ fn run_pass(
         }
         let _ = events_tx.send(StatsEvent::Progress {
             pane_id,
-            session_id: session_id.clone(),
+            request: event_request.clone(),
+            generation,
             stats: partial.snapshot(),
             done,
             total,
@@ -361,7 +430,8 @@ fn run_pass(
             let stats = accumulator.snapshot();
             let _ = events_tx.send(StatsEvent::Finished {
                 pane_id,
-                session_id: session_id.clone(),
+                request: event_request.clone(),
+                generation,
                 path,
                 accumulator,
                 stats,
@@ -554,6 +624,148 @@ mod tests {
         assert!(matches!(
             store.entry(pane_id).unwrap().state,
             LoadState::Unavailable(_)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod independent_identity_tests {
+    use super::*;
+    fn request() -> StatsRequest {
+        StatsRequest {
+            class: AgentClass::Claude,
+            session_id: "same-id".into(),
+            project_path: PathBuf::from("/fixture/old-project"),
+            home: PathBuf::from("/fixture/old-home"),
+        }
+    }
+    fn seed(
+        store: &mut SessionStatsStore,
+        pane_id: NodeId,
+        request: StatsRequest,
+        generation: u64,
+    ) -> Arc<SessionStats> {
+        let stats = Arc::new(SessionStats {
+            prompt_count: 991,
+            ..SessionStats::default()
+        });
+        store.insert_ready_for_test(pane_id, stats.clone());
+        let entry = store.entries.get_mut(&pane_id).unwrap();
+        entry.request = request;
+        entry.generation = generation;
+        entry.in_flight = true;
+        entry.transcript_path = Some(PathBuf::from("/fixture/old.jsonl"));
+        stats
+    }
+    #[test]
+    fn same_session_string_in_another_owner_must_not_reuse_prior_stats() {
+        for changed_field in 0..3 {
+            let mut store = SessionStatsStore::default();
+            let pane_id = NodeId(700);
+            let original = request();
+            seed(&mut store, pane_id, original.clone(), 0);
+            let mut replacement = original.clone();
+            match changed_field {
+                0 => replacement.class = AgentClass::Codex,
+                1 => replacement.project_path = PathBuf::from("/fixture/new-project"),
+                _ => replacement.home = PathBuf::from("/fixture/new-home"),
+            }
+            assert!(store.matching_entry(pane_id, &replacement).is_none());
+            assert!(store.request_refresh(pane_id, replacement, Instant::now()));
+            assert!(
+                store.entry(pane_id).unwrap().stats.is_none(),
+                "old owner snapshot must be hidden immediately"
+            );
+            assert!(store.entry(pane_id).unwrap().transcript_path.is_none());
+        }
+    }
+    #[test]
+    fn unresolved_replacement_drops_inflight_cache_and_all_late_result_kinds() {
+        let mut store = SessionStatsStore::default();
+        let pane_id = NodeId(701);
+        let original = request();
+        seed(&mut store, pane_id, original.clone(), 11);
+        assert!(store.reconcile_contexts(&HashMap::new()));
+        let events = [
+            StatsEvent::Progress {
+                pane_id,
+                request: original.clone(),
+                generation: 11,
+                stats: SessionStats::default(),
+                done: 1,
+                total: 2,
+            },
+            StatsEvent::Failed {
+                pane_id,
+                request: original.clone(),
+                generation: 11,
+                message: "old".into(),
+            },
+            StatsEvent::Finished {
+                pane_id,
+                request: original,
+                generation: 11,
+                path: PathBuf::from("old"),
+                accumulator: Box::new(StatsAccumulator::new(AgentClass::Claude)),
+                stats: SessionStats::default(),
+            },
+        ];
+        for event in events {
+            store.events_tx.send(event).unwrap();
+        }
+        assert!(!store.drain_events());
+        assert!(store.entry(pane_id).is_none());
+    }
+    #[test]
+    fn same_historical_transcript_keeps_exact_cached_snapshot() {
+        let mut store = SessionStatsStore::default();
+        let pane_id = NodeId(702);
+        let original = request();
+        let stats = seed(&mut store, pane_id, original.clone(), 12);
+        assert!(!store.reconcile_contexts(&HashMap::from([(pane_id, original.clone())])));
+        assert!(Arc::ptr_eq(
+            &stats,
+            store
+                .matching_entry(pane_id, &original)
+                .unwrap()
+                .stats
+                .as_ref()
+                .unwrap()
+        ));
+    }
+    #[test]
+    fn returning_to_same_identity_rejects_worker_from_earlier_generation() {
+        let mut store = SessionStatsStore::default();
+        let pane_id = NodeId(703);
+        let original = request();
+        seed(&mut store, pane_id, original.clone(), 31);
+        store.reconcile_contexts(&HashMap::new());
+        let stats = seed(&mut store, pane_id, original.clone(), 32);
+        assert!(!store.apply(StatsEvent::Progress {
+            pane_id,
+            request: original.clone(),
+            generation: 31,
+            stats: SessionStats::default(),
+            done: 1,
+            total: 2
+        }));
+        assert!(!store.apply(StatsEvent::Failed {
+            pane_id,
+            request: original.clone(),
+            generation: 31,
+            message: "old".into()
+        }));
+        assert!(!store.apply(StatsEvent::Finished {
+            pane_id,
+            request: original,
+            generation: 31,
+            path: PathBuf::from("old"),
+            accumulator: Box::new(StatsAccumulator::new(AgentClass::Claude)),
+            stats: SessionStats::default()
+        }));
+        assert!(Arc::ptr_eq(
+            &stats,
+            store.entry(pane_id).unwrap().stats.as_ref().unwrap()
         ));
     }
 }

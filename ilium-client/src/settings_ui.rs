@@ -328,6 +328,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 &app.model_discovery,
                 &app.ollama_models,
                 &app.kilo_gateway_models,
+                &app.openai_models,
                 state.selected_row,
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -829,7 +830,12 @@ pub fn settings_help_anchors(
             } else {
                 0
             };
-            let test_log_offset = inference_test_log_lines(&app.inference_test_state).len() as u16;
+            let test_log_offset = inference_operation_log_lines(
+                &app.inference_settings,
+                &app.inference_test_state,
+                &app.model_discovery,
+            )
+            .len() as u16;
             for (i, row) in inference_rows(&app.inference_settings).iter().enumerate() {
                 let id = match row {
                     InferenceRow::Provider => "INF-01",
@@ -837,6 +843,7 @@ pub fn settings_help_anchors(
                     InferenceRow::Test => "INF-14",
                     InferenceRow::KiloGatewayModel => "INF-12",
                     InferenceRow::Field(field) => match field {
+                        InferenceSettingField::RestructurePromptTokenLimit => "INF-15",
                         InferenceSettingField::OllamaUrl => "INF-02",
                         InferenceSettingField::OllamaModel => "INF-03",
                         InferenceSettingField::OpenAiUrl => "INF-04",
@@ -1210,6 +1217,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             &app.model_discovery,
             &app.ollama_models,
             &app.kilo_gateway_models,
+            &app.openai_models,
             selected_row,
         )
         .len() as u16,
@@ -1612,6 +1620,12 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 icons.glyph(IconTarget::TaskDone),
                 icons.glyph(IconTarget::Done),
                 "finished, task done",
+            ),
+            row(
+                IconTarget::Codex,
+                "",
+                icons.glyph(IconTarget::AgentUnavailable),
+                "agent unavailable; recovery retained",
             ),
             row(
                 IconTarget::Antigravity,
@@ -2345,6 +2359,7 @@ pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<Infe
         InferenceProviderKind::OpenAi => rows.extend([
             InferenceRow::Field(InferenceSettingField::OpenAiUrl),
             InferenceRow::Field(InferenceSettingField::OpenAiApiKey),
+            InferenceRow::RefreshModels,
             InferenceRow::Field(InferenceSettingField::OpenAiModel),
         ]),
         InferenceProviderKind::Anthropic => rows.extend([
@@ -2357,6 +2372,9 @@ pub fn inference_rows(settings: &ilium_inference::InferenceSettings) -> Vec<Infe
             InferenceRow::Field(InferenceSettingField::OpenRouterModel),
         ]),
     }
+    rows.push(InferenceRow::Field(
+        InferenceSettingField::RestructurePromptTokenLimit,
+    ));
     rows.push(InferenceRow::Test);
     rows
 }
@@ -2392,6 +2410,10 @@ fn inference_value(
         InferenceRow::KiloGatewayModel => format!("‹ {} ›", settings.kilo_gateway.model),
         InferenceRow::Test => "[ Test provider ]".to_string(),
         InferenceRow::Field(field) => match field {
+            InferenceSettingField::RestructurePromptTokenLimit => format!(
+                "{} estimated tokens",
+                settings.restructure_prompt_token_limit
+            ),
             InferenceSettingField::OllamaUrl => settings.ollama.base_url.clone(),
             InferenceSettingField::OllamaModel => settings.ollama.model.clone(),
             InferenceSettingField::OpenAiUrl => settings.openai.base_url.clone(),
@@ -2439,6 +2461,7 @@ fn inference_lines(
     model_discovery: &ModelDiscoveryState,
     ollama_models: &[String],
     kilo_gateway_models: &[String],
+    openai_models: &[String],
     selected_row: usize,
 ) -> Vec<Line<'static>> {
     let rows = inference_rows(settings);
@@ -2447,7 +2470,11 @@ fn inference_lines(
         lines.push(Line::from(Span::styled("  Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.", Style::new().fg(Color::Yellow))));
         lines.push(Line::from(""));
     }
-    lines.extend(inference_test_log_lines(test_state));
+    lines.extend(inference_operation_log_lines(
+        settings,
+        test_state,
+        model_discovery,
+    ));
     for (index, row) in rows.into_iter().enumerate() {
         let label = inference_label(row);
         let padding = usize::from(LABEL_COLUMN_WIDTH).saturating_sub(label.chars().count());
@@ -2468,11 +2495,12 @@ fn inference_lines(
             Span::styled(inference_value(row, settings, model_discovery), value_style),
         ]));
         let description = match row {
+            InferenceRow::Field(InferenceSettingField::RestructurePromptTokenLimit) => "Maximum restructure prompt size; roughly one token per four characters. Default: 200000. Enter to edit.",
             InferenceRow::Provider => {
                 "Choose the backend used by background title and organization inference."
             }
-            InferenceRow::Field(InferenceSettingField::OllamaModel) => {
-                "Use left/right to select a loaded local model, or Enter to type a model name."
+            InferenceRow::Field(InferenceSettingField::OllamaModel | InferenceSettingField::OpenAiModel) => {
+                "Use left/right to select a loaded model, or Enter to type a model name."
             }
             InferenceRow::KiloGatewayModel => {
                 "Use left/right to choose a free model from Kilo Gateway's live catalog."
@@ -2493,17 +2521,19 @@ fn inference_lines(
         )));
         lines.push(Line::from(""));
     }
-    if matches!(
-        settings.selected_provider,
-        ilium_inference::InferenceProviderKind::KiloGateway
-            | ilium_inference::InferenceProviderKind::Ollama
-    ) {
-        let models =
-            if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway {
-                kilo_gateway_models
-            } else {
-                ollama_models
-            };
+    if !has_active_model_discovery(settings, model_discovery)
+        && matches!(
+            settings.selected_provider,
+            ilium_inference::InferenceProviderKind::KiloGateway
+                | ilium_inference::InferenceProviderKind::Ollama
+                | ilium_inference::InferenceProviderKind::OpenAi
+        )
+    {
+        let models = match settings.selected_provider {
+            ilium_inference::InferenceProviderKind::KiloGateway => kilo_gateway_models,
+            ilium_inference::InferenceProviderKind::OpenAi => openai_models,
+            _ => ollama_models,
+        };
         lines.extend(model_discovery_lines(settings, model_discovery, models));
     }
     if let Some(result) = test_result {
@@ -2532,6 +2562,28 @@ fn inference_lines(
                 lines.push(Line::from(format!("     {branch} ▣ {pane}")));
             }
         }
+    }
+    lines
+}
+
+fn has_active_model_discovery(
+    settings: &ilium_inference::InferenceSettings,
+    discovery: &ModelDiscoveryState,
+) -> bool {
+    matches!(discovery, ModelDiscoveryState::Loading { provider, .. } if *provider == settings.selected_provider)
+}
+
+/// Active operations stay above the editable rows so adding a provider option
+/// cannot hide their progress. Rendering, help rails and mouse hits share this
+/// exact prefix; completed catalogs remain below the controls.
+fn inference_operation_log_lines(
+    settings: &ilium_inference::InferenceSettings,
+    test_state: &InferenceTestState,
+    discovery: &ModelDiscoveryState,
+) -> Vec<Line<'static>> {
+    let mut lines = inference_test_log_lines(test_state);
+    if has_active_model_discovery(settings, discovery) {
+        lines.extend(model_discovery_lines(settings, discovery, &[]));
     }
     lines
 }
@@ -2668,10 +2720,19 @@ fn model_discovery_lines(
             "{}/api/tags",
             settings.ollama.base_url.trim_end_matches('/')
         ),
+        ilium_inference::InferenceProviderKind::OpenAi => {
+            ilium_inference::model_catalog_endpoint(settings).unwrap_or_default()
+        }
         _ => String::new(),
     };
     let selected_model = settings.selected_model();
     let mut lines = vec![Line::from("")];
+    if provider == ilium_inference::InferenceProviderKind::OpenAi {
+        lines.push(Line::from(Span::styled(
+            "  Catalog IDs do not guarantee text-inference support. Use Test to confirm.",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
     match discovery {
         ModelDiscoveryState::Idle => {
             lines.push(Line::from(Span::styled(
@@ -2759,8 +2820,12 @@ fn model_discovery_lines(
                         Style::new().fg(Color::Red),
                     ),
                     (
-                        "The last known model list remains available; retry refresh when ready."
-                            .to_string(),
+                        if models.is_empty() {
+                            "No cached models are available; retry refresh when ready."
+                        } else {
+                            "The last known model list remains available; retry refresh when ready."
+                        }
+                        .to_string(),
                         Style::new().add_modifier(Modifier::DIM),
                     ),
                 ],
@@ -2817,6 +2882,7 @@ pub fn inference_content_hit_with_test(
     position: Position,
     settings: &ilium_inference::InferenceSettings,
     test_state: &InferenceTestState,
+    model_discovery: &ModelDiscoveryState,
 ) -> Option<(InferenceRow, i32)> {
     if !content_area.contains(position) {
         return None;
@@ -2825,7 +2891,7 @@ pub fn inference_content_hit_with_test(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let offset = inference_test_log_lines(test_state).len() as u16;
+    let offset = inference_operation_log_lines(settings, test_state, model_discovery).len() as u16;
     let adjusted = line.checked_sub(offset)?;
     inference_content_hit(
         content_area,
@@ -5535,6 +5601,22 @@ mod tests {
     }
 
     #[test]
+    fn restructure_token_budget_is_visible_for_every_provider() {
+        for provider in ilium_inference::InferenceProviderKind::ALL {
+            let settings = ilium_inference::InferenceSettings {
+                selected_provider: provider,
+                ..Default::default()
+            };
+            let row = InferenceRow::Field(InferenceSettingField::RestructurePromptTokenLimit);
+            assert!(inference_rows(&settings).contains(&row));
+            assert_eq!(
+                inference_value(row, &settings, &ModelDiscoveryState::Idle),
+                "200000 estimated tokens"
+            );
+        }
+    }
+
+    #[test]
     fn inference_rows_hide_impossible_fields_and_warn_for_kilo() {
         let settings = ilium_inference::InferenceSettings::default();
         assert_eq!(
@@ -5543,6 +5625,7 @@ mod tests {
                 InferenceRow::Provider,
                 InferenceRow::RefreshModels,
                 InferenceRow::KiloGatewayModel,
+                InferenceRow::Field(InferenceSettingField::RestructurePromptTokenLimit),
                 InferenceRow::Test
             ]
         );
@@ -5554,6 +5637,7 @@ mod tests {
             &ModelDiscoveryState::Idle,
             &[],
             &kilo_models,
+            &[],
             0,
         )
         .into_iter()
@@ -5578,6 +5662,7 @@ mod tests {
                 started_at: std::time::Instant::now(),
             },
             &discovered_models,
+            &[],
             &[],
             0,
         )
@@ -5624,6 +5709,7 @@ mod tests {
                 started_at: std::time::Instant::now(),
             },
             &ModelDiscoveryState::Idle,
+            &[],
             &[],
             &[],
             0,
@@ -5677,6 +5763,58 @@ mod tests {
         assert!(rendered.contains("Wait for and validate"));
         assert!(rendered.contains("┌"));
         assert!(rendered.contains("│"));
+    }
+
+    #[test]
+    fn active_discovery_prefix_keeps_inference_mouse_rows_aligned() {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.request_model_refresh();
+        let lines = inference_lines(
+            &app.inference_settings,
+            None,
+            &app.inference_test_state,
+            &app.model_discovery,
+            &[],
+            &[],
+            &[],
+            0,
+        );
+        let row_line = lines
+            .iter()
+            .position(|line| line.to_string().contains("Provider "))
+            .unwrap();
+        let area = Rect::new(0, 0, 120, 40);
+        let hit = inference_content_hit_with_test(
+            area,
+            0,
+            Position::new(10, row_line as u16),
+            &app.inference_settings,
+            &app.inference_test_state,
+            &app.model_discovery,
+        );
+        assert!(matches!(hit, Some((InferenceRow::Provider, _))));
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.to_string().contains("Request GET"))
+                .count(),
+            1
+        );
+        let request_line = lines
+            .iter()
+            .position(|line| line.to_string().contains("Request GET"))
+            .unwrap();
+        assert!(request_line < row_line);
+        assert!(inference_content_hit_with_test(
+            area,
+            0,
+            Position::new(10, request_line as u16),
+            &app.inference_settings,
+            &app.inference_test_state,
+            &app.model_discovery
+        )
+        .is_none());
     }
 
     #[test]
@@ -6591,5 +6729,32 @@ mod tests {
     fn close_button_hit_is_false_when_header_too_narrow_for_the_label() {
         let header_area = Rect::new(0, 0, 3, 2);
         assert!(!close_button_hit(header_area, Position::new(1, 0)));
+    }
+    #[test]
+    fn openai_model_catalog_is_visible_with_refresh_and_manual_entry_guidance() {
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::OpenAi,
+            ..Default::default()
+        };
+        assert!(inference_rows(&settings).contains(&InferenceRow::RefreshModels));
+        let models = vec!["gpt-6-luna".to_owned(), "gpt-6-sol".to_owned()];
+        let text = inference_lines(
+            &settings,
+            None,
+            &InferenceTestState::Idle,
+            &ModelDiscoveryState::Idle,
+            &[],
+            &[],
+            &models,
+            4,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
+        assert!(text.contains("Available models"));
+        assert!(text.contains("gpt-6-luna"));
+        assert!(text.contains("Use left/right"));
+        assert!(text.contains("Enter to type a model name"));
+        assert!(text.contains("https://api.openai.com/v1/models"));
     }
 }

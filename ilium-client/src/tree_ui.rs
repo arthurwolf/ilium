@@ -1285,6 +1285,19 @@ fn pane_label_with_icons(
             };
             (identity, text)
         }
+        PaneStatus::AgentUnavailable(recovery) => (
+            Span::styled(
+                agent_node_icon(&recovery.process.class, agent_identifiers, icons).to_string(),
+                Style::new().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(
+                    "{} [unavailable]",
+                    agent_title(&recovery.process.class, &title, agent_identifiers.mode)
+                ),
+                Style::new().fg(Color::Gray),
+            ),
+        ),
         PaneStatus::Editor { dirty: true } => (
             Span::styled(
                 icons.glyph(IconTarget::Editor).to_string(),

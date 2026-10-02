@@ -194,7 +194,7 @@ fn braille_ink(tui: &PtySession) -> String {
 }
 
 async fn verify_scene_motion(tui: &PtySession) {
-    let initial = tokio::time::timeout(TIMEOUT, async {
+    let initial_result = tokio::time::timeout(TIMEOUT, async {
         loop {
             let ink = braille_ink(tui);
             if ink.chars().count() >= 10 {
@@ -203,15 +203,35 @@ async fn verify_scene_motion(tui: &PtySession) {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
-    .await
-    .expect("concrete scene must paint actual nonempty Braille cells");
+    .await;
+    let initial = match initial_result {
+        Ok(ink) => ink,
+        Err(_) => {
+            retain_screen(tui, "failed-workspace-no-ink");
+            let workspace = tui.screen_text();
+            tui.resize(44, 240).unwrap();
+            open_animation_settings(tui).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            retain_screen(tui, "failed-settings-no-ink");
+            panic!(
+            "concrete scene must paint actual nonempty Braille cells; actual workspace:\n{workspace}\nsettings diagnostic:\n{}",
+            tui.screen_text()
+        );
+        }
+    };
     tokio::time::timeout(TIMEOUT, async {
         while braille_ink(tui) == initial {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("actual scene ink must advance while the normal workspace is visible");
+    .unwrap_or_else(|_| {
+        retain_screen(tui, "failed-workspace-no-motion");
+        panic!(
+            "actual scene ink must advance while the normal workspace is visible:\n{}",
+            tui.screen_text()
+        )
+    });
 }
 
 async fn initial_tree(connection: &mut Connection) -> Tree {
@@ -241,7 +261,7 @@ fn recommendation(kind: &str) -> AnimationRecommendation {
         "carpet" => &[("carpet_mode", 1, "Autonomous Snake")],
         _ => unreachable!("fixture uses only two offline scenes"),
     };
-    AnimationRecommendation {
+    let mut recommendation = AnimationRecommendation {
         version: ANIMATION_RECOMMENDATION_VERSION,
         kind: kind.into(),
         resources: ResourcePolicy::Catalog,
@@ -255,12 +275,20 @@ fn recommendation(kind: &str) -> AnimationRecommendation {
                 },
             })
             .collect(),
-    }
+    };
+    // Canonical admission orders OSM fields alphabetically (no dependency axes).
+    // Stored choice identities include this order as well as exact labels.
+    recommendation
+        .parameters
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    recommendation.validate_shape().unwrap();
+    recommendation
 }
 
 async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree {
     let project = tree.project_ids()[0];
     let pane = tree.pane_ids_in_tree_order()[0];
+    let expected_generation = tree.project_animation_generation(project).unwrap() + 1;
     let structure = RestructurePlan {
         children: vec![RestructureNode::Pane {
             id: pane,
@@ -288,14 +316,31 @@ async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree
         .unwrap();
     tokio::time::timeout(TIMEOUT, async {
         let mut updated = None;
+        let mut acknowledged = false;
         while let Some(event) = connection.events.recv().await {
             match event {
-                ServerEvent::TreeSnapshot(value) => updated = Some(value),
-                ServerEvent::ProjectRestructureApplied { .. } => return updated.unwrap(),
+                ServerEvent::TreeSnapshot(value)
+                    if value.project_animation_generation(project).unwrap()
+                        == expected_generation =>
+                {
+                    updated = Some(value);
+                }
+                ServerEvent::ProjectRestructureApplied { project_id, .. }
+                    if project_id == project =>
+                {
+                    acknowledged = true;
+                }
                 ServerEvent::ProjectRestructureRejected { message, .. } => {
                     panic!("apply rejected: {message}")
                 }
                 _ => {}
+            }
+            // Direct replies and mutation broadcasts are separate streams;
+            // both are required, but their relative arrival is not a contract.
+            if acknowledged {
+                if let Some(value) = updated.take() {
+                    return value;
+                }
             }
         }
         panic!("control disconnected before apply acknowledgement");
@@ -304,8 +349,9 @@ async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree
     .unwrap()
 }
 
-fn open_animation_settings(tui: &PtySession) {
+async fn open_animation_settings(tui: &PtySession) {
     tui.write(b"\x02:").unwrap();
+    screen_contains(tui, "⚙ Settings").await;
     let tabs = ilium_client::app::SettingsTab::ALL;
     let from = tabs
         .iter()
@@ -317,6 +363,7 @@ fn open_animation_settings(tui: &PtySession) {
         .unwrap();
     tui.write(&vec![b'\t'; (to + tabs.len() - from) % tabs.len()])
         .unwrap();
+    screen_contains(tui, "Animations — select to preview").await;
 }
 
 fn retain_screen(tui: &PtySession, name: &str) {
@@ -330,6 +377,12 @@ fn retain_screen(tui: &PtySession, name: &str) {
 async fn project_paris_and_entry_carpet_render_through_actual_recommendation_transport() {
     for (scope, expected) in [("project", "OpenStreetMap"), ("entry", "Carpet")] {
         let mut fixture = Fixture::new(scope, true);
+        let authored_before = serde_json::to_value(
+            ilium_client::project_config::load(&fixture.project)
+                .unwrap()
+                .animation,
+        )
+        .unwrap();
         let mut tui = fixture.start();
         screen_contains(&tui, "SemanticNative").await;
         // fork may return before exec replaces the child's test executable.
@@ -376,9 +429,38 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
             .unwrap();
         verify_scene_motion(&tui).await;
         retain_screen(&tui, &format!("{scope}-workspace"));
-        open_animation_settings(&tui);
-        screen_contains(&tui, &format!("Semantic {scope}")).await;
-        screen_contains(&tui, expected).await;
+        // Keep the ordinary 140-column motion proof above; the wider settings
+        // view must expose the complete owner-bound parameter status below.
+        tui.resize(44, 240).unwrap();
+        open_animation_settings(&tui).await;
+        let owner = if scope == "project" {
+            accepted.project_ids()[0]
+        } else {
+            accepted.pane_ids_in_tree_order()[0]
+        };
+        screen_contains(&tui, &format!("Semantic {scope} #{}: {expected}", owner.0)).await;
+        // The compact status row elides long recommendations. Selecting its
+        // read-only row exposes the unabridged value in the wrapped footer.
+        let recommendation_row = tui
+            .screen_text()
+            .lines()
+            .position(|line| line.contains("Recommendation ") && line.contains("Semantic "))
+            .unwrap()
+            + 1;
+        tui.write(
+            format!("\x1b[<0;100;{recommendation_row}M\x1b[<0;100;{recommendation_row}m")
+                .as_bytes(),
+        )
+        .unwrap();
+        screen_contains(
+            &tui,
+            if scope == "project" {
+                "place=Paris"
+            } else {
+                "carpet_mode=Autonomous Snake"
+            },
+        )
+        .await;
         if scope == "project" {
             screen_contains(&tui, "OpenStreetMap contributors").await;
         }
@@ -391,6 +473,7 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
             ilium_client::background_animation::AnimationKind::Semantic
         );
         assert!(authored.enabled);
+        assert_eq!(serde_json::to_value(authored).unwrap(), authored_before);
         fixture.kill();
         tokio::time::timeout(TIMEOUT, async {
             while !tui.has_exited()

@@ -2291,7 +2291,7 @@
   {
     "id": "INF-06",
     "title": "OpenAI-compatible model",
-    "explanation": "“Set the model name sent to the OpenAI-compatible provider.”",
+    "explanation": "“Select a loaded model with left/right, or press Enter to type its exact ID.”",
     "specimen": "`Model A → Model B` with fixed URL/key placeholders.",
     "states": "name changes.",
     "motion": "static.",
@@ -2376,12 +2376,12 @@
     "id": "INF-13",
     "title": "Available models",
     "explanation": "“Load or refresh selectable models where the selected provider exposes a catalog.”",
-    "specimen": "for Ollama or Kilo, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills.",
+    "specimen": "for Ollama, Kilo, or OpenAI-compatible, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills.",
     "states": "displayed catalog status changes.",
     "motion": "static.",
-    "caveat": "the supplied `inference_rows` exposes this control only for Ollama and Kilo Gateway; help performs no fetch.",
+    "caveat": "available for Ollama, Kilo Gateway, and OpenAI-compatible; OpenAI requires a key. Catalog IDs do not guarantee text-chat support; help performs no fetch.",
     "frames": [
-      "for Ollama or Kilo, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills."
+      "for Ollama, Kilo, or OpenAI-compatible, `[ Load available models ]` → inert `Loading / Loaded / Failed` operation-log stills."
     ]
   },
   {
@@ -3798,6 +3798,18 @@
     "frames": [
       "Scope ‹ Project ›\nOne recommendation across the project's entries",
       "Scope ‹ Entry ›\nRecommendation follows the selected tree entry"
+    ]
+  },
+  {
+    "id": "INF-15",
+    "title": "Restructure token budget",
+    "explanation": "Maximum estimated input tokens for initial and corrective restructure prompts. Default 200000.",
+    "specimen": "200000 estimated tokens",
+    "states": "A positive whole-number budget.",
+    "motion": "static.",
+    "caveat": "Estimate rounds up Unicode character count divided by four; provider context limits still apply.",
+    "frames": [
+      "200000 estimated tokens"
     ]
   }
 ]

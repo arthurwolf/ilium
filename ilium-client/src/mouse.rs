@@ -2117,6 +2117,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     position,
                     &app.inference_settings,
                     &app.inference_test_state,
+                    &app.model_discovery,
                 ) {
                     if let Some(index) = crate::settings_ui::inference_rows(&app.inference_settings)
                         .iter()
@@ -2135,6 +2136,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         crate::app::InferenceRow::Field(
                             crate::app::InferenceSettingField::OllamaModel,
                         ) => app.settings_adjust_ollama_model(direction),
+                        crate::app::InferenceRow::Field(
+                            crate::app::InferenceSettingField::OpenAiModel,
+                        ) => app.settings_adjust_openai_model(direction),
                         crate::app::InferenceRow::Field(field) => {
                             app.mode = Mode::Settings(state);
                             app.settings_open_inference_field(field);

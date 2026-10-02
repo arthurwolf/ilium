@@ -638,10 +638,11 @@ mod tests {
         assert_eq!(output.result["status"], "queued");
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::KeyInput {
+            vec![ilium_ipc::ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: b"/clear".to_vec(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
     }
@@ -669,10 +670,11 @@ mod tests {
             .contains("/clear"));
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::KeyInput {
+            vec![ilium_ipc::ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: b"/clear".to_vec(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
 
@@ -688,10 +690,11 @@ mod tests {
         assert_eq!(confirmation.result["status"], "queued");
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::KeyInput {
+            vec![ilium_ipc::ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: b"\r".to_vec(),
                 submission: Some(ilium_ipc::PromptSubmissionSource::VoiceControl),
+                prompt_epoch: None,
             }]
         );
     }
@@ -713,10 +716,11 @@ mod tests {
         let token = request.result["token"].as_str().unwrap();
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::KeyInput {
+            vec![ilium_ipc::ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: b"/clear".to_vec(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
 

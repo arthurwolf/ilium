@@ -607,7 +607,8 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         if matches!(
             &node.kind,
             ilium_core::NodeKind::Pane {
-                status: ilium_core::PaneStatus::Agent(_),
+                status: ilium_core::PaneStatus::Agent(_)
+                    | ilium_core::PaneStatus::AgentUnavailable(_),
                 ..
             }
         ) {

@@ -17,6 +17,7 @@ fn extracted_sources_match_frozen_original_bytes_and_format_skeletons() {
         if matches!(
             name,
             "naming/restructure"
+                | "naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet"
                 | "naming/restructure-label-example"
                 | "naming/restructure-summary-example"
         ) {

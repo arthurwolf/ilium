@@ -35,11 +35,11 @@ impl App {
     }
 
     /// The pane whose second header icon sits under `position`, when that
-    /// pane is a detected agent (the only kind with statistics to show).
+    /// pane has a current or historical agent identity.
     pub fn stats_icon_pane_at(&self, position: Position) -> Option<NodeId> {
         let viewport = self.pane_viewport_at(position)?;
         let is_icon = theme::chrome_stats_cell(viewport.outer_area) == position;
-        (is_icon && self.is_detected_agent_pane(viewport.pane_id)).then_some(viewport.pane_id)
+        (is_icon && self.is_known_agent_pane(viewport.pane_id)).then_some(viewport.pane_id)
     }
 
     /// Geometry of the open popover, `None` when none is open or its pane is
@@ -157,7 +157,7 @@ impl App {
                 return false;
             };
             status
-                .agent_state()
+                .known_agent_state()
                 .is_some_and(|agent| matches!(agent.class, AgentClass::Claude | AgentClass::Codex))
         })
     }
@@ -165,7 +165,7 @@ impl App {
     /// Everything the worker needs to read this pane's transcript, `None`
     /// until the agent's session id is known.
     pub(crate) fn session_stats_request(&self, pane_id: NodeId) -> Option<StatsRequest> {
-        let (class, session_id, project_path) = self.last_prompt_transcript_context(pane_id)?;
+        let (class, session_id, project_path) = self.known_agent_history_context(pane_id)?;
         if !self.stats_agent_is_supported(pane_id) {
             return None;
         }
@@ -178,18 +178,34 @@ impl App {
         })
     }
 
+    /// Filters snapshots immediately, including between an IPC identity
+    /// transition and the next maintenance tick.
+    pub(crate) fn current_stats_entry(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<&crate::session_stats_store::StatsEntry> {
+        let request = self.session_stats_request(pane_id)?;
+        self.session_stats.matching_entry(pane_id, &request)
+    }
+
     /// Periodic maintenance, called from every tick: applies finished worker
     /// results, keeps an open popover's data fresh, and reports whether a
     /// redraw is needed (new data, the live clock, or the load spinner).
     pub(crate) fn tick_session_stats(&mut self, now: Instant) -> bool {
-        let mut changed = self.session_stats.drain_events();
+        let contexts = self
+            .tree
+            .panes()
+            .filter_map(|node| {
+                self.session_stats_request(node.id)
+                    .map(|request| (node.id, request))
+            })
+            .collect();
+        let mut changed = self.session_stats.reconcile_contexts(&contexts);
+        changed |= self.session_stats.drain_events();
         let Some(pane_id) = self.stats_popover.as_ref().map(|popover| popover.pane_id) else {
-            let tree = &self.tree;
-            self.session_stats
-                .retain_panes(|pane_id| tree.get(pane_id).is_some());
             return changed;
         };
-        if !self.is_detected_agent_pane(pane_id) || self.pane_viewport(pane_id).is_none() {
+        if !self.is_known_agent_pane(pane_id) || self.pane_viewport(pane_id).is_none() {
             self.stats_popover = None;
             return true;
         }
@@ -199,7 +215,7 @@ impl App {
         if let Some(request) = self.session_stats_request(pane_id) {
             self.session_stats.request_refresh(pane_id, request, now);
         }
-        let is_loading = self.session_stats.entry(pane_id).is_some_and(|entry| {
+        let is_loading = self.current_stats_entry(pane_id).is_some_and(|entry| {
             matches!(
                 entry.state,
                 crate::session_stats_store::LoadState::Loading { .. }
@@ -469,5 +485,200 @@ mod tests {
             .unwrap();
         assert!(app.tick_session_stats(Instant::now()));
         assert!(app.stats_popover.is_none());
+    }
+}
+
+#[cfg(test)]
+mod retained_identity_tests {
+    use super::*;
+    use ilium_core::{
+        AgentActivity, AgentAvailability, AgentClass, AgentExitOutcome, AgentProcessKey,
+        AgentRecovery, PaneContentKind, PaneStatus, ROOT_ID,
+    };
+    use std::sync::Arc;
+    fn ready_app() -> (App, NodeId, Arc<crate::session_stats::SessionStats>) {
+        let mut app = App::new("synthetic-stats-recovery".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "synthetic").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "synthetic agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, "original-session".into());
+        let request = app.session_stats_request(pane_id).unwrap();
+        let snapshot = Arc::new(crate::session_stats::SessionStats {
+            prompt_count: 991,
+            ..Default::default()
+        });
+        app.session_stats
+            .insert_ready_for_request_for_test(pane_id, request, snapshot.clone());
+        (app, pane_id, snapshot)
+    }
+    #[test]
+    fn unresolved_replacement_hides_old_stats_before_tick_and_drops_cache_without_popover() {
+        let (mut app, pane_id, _) = ready_app();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        app.agent_session_ids.remove(&pane_id);
+        assert!(app.current_stats_entry(pane_id).is_none());
+        assert!(app.tick_session_stats(Instant::now()));
+        assert!(app.session_stats.entry(pane_id).is_none());
+    }
+    #[test]
+    fn crash_keeps_original_stats_after_live_session_map_is_cleared() {
+        let (mut app, pane_id, snapshot) = ready_app();
+        let ilium_core::NodeKind::Pane { status, .. } = &app.tree.get(pane_id).unwrap().kind else {
+            panic!("fixture pane expected")
+        };
+        let last_known_state = status.agent_state().unwrap().clone();
+        let recovery = AgentRecovery {
+            last_known_state,
+            process: AgentProcessKey {
+                class: AgentClass::Claude,
+                process_id: 99,
+                started_at_unix_seconds: 1,
+            },
+            availability: AgentAvailability::Exited(AgentExitOutcome::Unknown),
+            signal_name: None,
+            session_id: Some("original-session".into()),
+            last_prompt: None,
+            previous_exact_prompt: None,
+            latest_prompt_unavailable: false,
+        };
+        app.tree
+            .set_pane_status(pane_id, PaneStatus::AgentUnavailable(Box::new(recovery)))
+            .unwrap();
+        app.agent_session_ids.remove(&pane_id);
+        assert!(app.known_agent_history_context(pane_id).is_some());
+        assert!(Arc::ptr_eq(
+            &snapshot,
+            app.current_stats_entry(pane_id)
+                .unwrap()
+                .stats
+                .as_ref()
+                .unwrap()
+        ));
+        assert!(!app.tick_session_stats(Instant::now()));
+        assert!(Arc::ptr_eq(
+            &snapshot,
+            app.current_stats_entry(pane_id)
+                .unwrap()
+                .stats
+                .as_ref()
+                .unwrap()
+        ));
+    }
+    #[test]
+    fn different_verified_session_hides_old_snapshot_immediately() {
+        let (mut app, pane_id, _) = ready_app();
+        app.agent_session_ids
+            .insert(pane_id, "replacement-session".into());
+        assert!(app.current_stats_entry(pane_id).is_none());
+        app.tick_session_stats(Instant::now());
+        assert!(app.session_stats.entry(pane_id).is_none());
+    }
+
+    #[test]
+    fn stopped_agent_stats_dot_opens_pinned_retained_metrics_in_actual_renderer() {
+        use crate::app::{FocusTarget, PaneRuntime};
+        use crate::terminal_view::TerminalView;
+        use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+        let (mut app, pane_id, _) = ready_app();
+        let request = app.session_stats_request(pane_id).unwrap();
+        app.session_stats.insert_ready_for_request_for_test(
+            pane_id,
+            request,
+            Arc::new(crate::session_stats::SessionStats {
+                provider: Some("synthetic-retained-stats".into()),
+                prompt_count: 991,
+                ..Default::default()
+            }),
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Claude,
+                        AgentActivity::Idle,
+                        None,
+                    ),
+                    process: AgentProcessKey {
+                        class: AgentClass::Claude,
+                        process_id: 99,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: AgentAvailability::Exited(AgentExitOutcome::Unknown),
+                    signal_name: None,
+                    session_id: Some("original-session".into()),
+                    last_prompt: None,
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+        app.agent_session_ids.remove(&pane_id);
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(40, 100))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.onboarding = None;
+        app.set_screen_area(Rect::new(0, 0, 140, 44));
+        let mut terminal = Terminal::new(TestBackend::new(140, 44)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let icon = theme::chrome_stats_cell(app.pane_viewport(pane_id).unwrap().outer_area);
+        assert_eq!(terminal.backend().buffer()[(icon.x, icon.y)].symbol(), "●");
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: icon.x,
+            row: icon.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        assert!(app.handle_stats_popover_mouse(mouse, icon));
+        assert!(app.stats_popover.as_ref().unwrap().pinned);
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (0..44)
+            .flat_map(|row| (0..140).map(move |column| buffer[(column, row)].symbol()))
+            .collect();
+        assert!(rendered.contains("synthetic-retained-stats"));
+        assert!(rendered.contains("991"));
+        assert!(!rendered.contains("Waiting for the agent's session"));
+
+        // A replacement with unresolved identity must hide the old metrics
+        // even before the next maintenance tick reconciles the store.
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (0..44)
+            .flat_map(|row| (0..140).map(move |column| buffer[(column, row)].symbol()))
+            .collect();
+        assert!(!rendered.contains("synthetic-retained-stats"));
+        assert!(!rendered.contains("991"));
+        assert!(rendered.contains("Waiting for the agent's session"));
     }
 }

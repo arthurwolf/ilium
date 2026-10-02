@@ -35,6 +35,7 @@ pub mod agent_feature_setup;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
+pub mod agent_prompt_transcript;
 pub mod agent_toolbar;
 mod animation_hover;
 mod animation_rows;
@@ -1865,25 +1866,34 @@ fn dispatch_pending_app_work(
         }
     }
 
-    // Best-effort fallback/upgrade only -- live keystroke tracking already
-    // covers the immediate case, so a missing home directory or an
-    // unresolved session ID here just means this check is silently skipped
-    // rather than reported, unlike the retitle path above.
+    naming_workers.cancel_stale_exact_prompt_workers(|pane_id, session_id| {
+        app.known_agent_history_context(pane_id)
+            .is_some_and(|(_, known_id, _)| known_id == session_id)
+    });
+    for pane_id in app.take_pending_exact_prompt_worker_cancellations() {
+        naming_workers.cancel_exact_prompt_worker(pane_id);
+    }
+
+    // The keypress captured a verified path and its byte length before
+    // queuing Enter. Keep that immutable context even if the agent becomes
+    // historical before this dispatch turn runs.
     if let Some(home_dir) = home_dir {
         for check in app.take_pending_last_prompt_transcript_checks() {
-            if let Some((agent_class, session_id, project_path)) =
-                app.last_prompt_transcript_context(check.pane_id)
-            {
-                naming_workers.spawn_last_prompt_transcript_worker(
-                    crate::naming_workers::LastPromptTranscriptWorkerRequest {
-                        home: home_dir.to_path_buf(),
-                        pane_id: check.pane_id,
-                        project_path,
-                        agent_class,
-                        session_id,
-                        baseline_last_prompt: check.baseline_last_prompt,
-                    },
-                );
+            if let Err(error) = naming_workers.spawn_exact_agent_prompt_transcript_worker(
+                crate::naming_workers::ExactAgentPromptTranscriptRequest {
+                    home: home_dir.to_path_buf(),
+                    pane_id: check.pane_id,
+                    project_path: check.project_path,
+                    agent_class: check.agent_class,
+                    session_id: check.session_id,
+                    verified_path: check.verified_path,
+                    baseline_length: check.baseline_length,
+                    submitted_after: check.submitted_after,
+                    prompt_epoch: check.prompt_epoch,
+                },
+            ) {
+                tracing::warn!(pane_id = check.pane_id.0, %error,
+                    "exact agent prompt transcript worker unavailable");
             }
         }
     } else {

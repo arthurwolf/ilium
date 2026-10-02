@@ -492,6 +492,7 @@ pub enum AgentSetupTargetStatus {
 /// accidentally expose an impossible field (for example, Kilo has no key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferenceSettingField {
+    RestructurePromptTokenLimit,
     OllamaUrl,
     OllamaModel,
     OpenAiUrl,
@@ -507,6 +508,7 @@ pub enum InferenceSettingField {
 impl InferenceSettingField {
     pub const fn label(self) -> &'static str {
         match self {
+            Self::RestructurePromptTokenLimit => "Restructure token budget",
             Self::OllamaUrl => "Ollama API URL",
             Self::OllamaModel => "Ollama model",
             Self::OpenAiUrl => "OpenAI-compatible API URL",
@@ -1619,18 +1621,18 @@ pub enum PendingRetitleRequest {
     },
 }
 
-/// One agent pane's Enter keystroke queued for
-/// `crate::naming_workers::spawn_last_prompt_transcript_worker` -- see
-/// `App::pending_last_prompt_transcript_checks`. `baseline_last_prompt` is
-/// this pane's last-prompt value from *before* this submission (captured at
-/// keypress time, ahead of any server round trip), so the worker can tell a
-/// transcript read that landed before the agent CLI flushed this turn's
-/// message (still showing the previous turn's text) apart from a genuinely
-/// fresh one -- both look like `Some(text)` to a naive read, but only the
-/// second actually differs from the baseline.
+/// One Enter's verified transcript baseline, captured before IPC queues the
+/// physical key. A worker only accepts complete user records appended after
+/// this byte offset, including an identical repeat or trailing whitespace.
 pub struct PendingLastPromptTranscriptCheck {
     pub pane_id: NodeId,
-    pub baseline_last_prompt: Option<String>,
+    pub agent_class: ilium_core::AgentClass,
+    pub session_id: String,
+    pub project_path: PathBuf,
+    pub verified_path: PathBuf,
+    pub baseline_length: u64,
+    pub submitted_after: chrono::DateTime<chrono::Utc>,
+    pub prompt_epoch: String,
 }
 
 /// Complete compare-and-set payload for a session-derived LLM title. Keeping
@@ -1781,6 +1783,9 @@ pub struct App {
     /// walks this stack first so nested dialogs never erase their parents.
     pub(crate) modal_stack: Vec<Mode>,
     pub status_message: Option<String>,
+    /// Clipboard ownership must outlive the copy action on Linux, where the
+    /// clipboard content can disappear when its last owner is dropped.
+    terminal_clipboard: Option<arboard::Clipboard>,
     /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
     pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
     /// Set by input dispatch when the client should leave its event loop.
@@ -1898,6 +1903,10 @@ pub struct App {
     /// `crate::run`, which is the only layer that owns background workers.
     pending_icon_semantic_search: Option<IconSearchRequest>,
     pub ollama_models: Vec<String>,
+    /// Catalog owned by the current OpenAI endpoint and credential.
+    pub openai_models: Vec<String>,
+    openai_catalog_revision: u64,
+    openai_discovery_revision: Option<u64>,
     /// Free Kilo models begin with stable documented router fallbacks and are
     /// replaced by the latest compatible live catalog after a refresh.
     pub kilo_gateway_models: Vec<String>,
@@ -2007,6 +2016,7 @@ pub struct App {
     /// `crate::lib::dispatch_pending_app_work`, same pattern as every other
     /// pending-work outbox on this struct.
     pub pending_last_prompt_transcript_checks: Vec<PendingLastPromptTranscriptCheck>,
+    pub pending_exact_prompt_worker_cancellations: Vec<NodeId>,
     /// Files this client itself just asked the server to open as a new
     /// editor pane (via `request_new_editor`), keyed by file basename --
     /// consumed by `crate::render_cache::apply_tree_snapshot` to load the
@@ -2245,6 +2255,7 @@ impl App {
             onboarding_voice_suspended: false,
             modal_stack: Vec::new(),
             status_message: None,
+            terminal_clipboard: None,
             pending_terminal_link: None,
             exit_reason: None,
             started_at,
@@ -2314,6 +2325,9 @@ impl App {
             smart_copy_cancel_requested: false,
             pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
+            openai_models: Vec::new(),
+            openai_catalog_revision: 0,
+            openai_discovery_revision: None,
             kilo_gateway_models: ilium_inference::kilo_gateway_fallback_models(),
             model_discovery: ModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
@@ -2356,6 +2370,7 @@ impl App {
             titles_loading: HashSet::new(),
             pending_manual_retitles: HashSet::new(),
             pending_last_prompt_transcript_checks: Vec::new(),
+            pending_exact_prompt_worker_cancellations: Vec::new(),
             pending_editor_opens: Vec::new(),
             pending_pane_focuses: Vec::new(),
             // Deliberately the protocol-free fallback rather than a probed
@@ -2554,6 +2569,10 @@ impl App {
         std::mem::take(&mut self.pending_last_prompt_transcript_checks)
     }
 
+    pub fn take_pending_exact_prompt_worker_cancellations(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.pending_exact_prompt_worker_cancellations)
+    }
+
     /// Locates the agent CLI's own session transcript for `pane_id`, for the
     /// last-prompt-from-transcript fallback. Deliberately independent of
     /// `crate::title_inference::session_title_input`'s retitle-specific
@@ -2581,14 +2600,50 @@ impl App {
         Some((class, session_id, pane_cwd))
     }
 
+    /// Read-only history access can use a server-verified historical session.
+    /// This is deliberately separate from the live transcript fallback worker:
+    /// a stopped pane must never send a newly-read prompt back as live input.
+    pub(crate) fn known_agent_history_context(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<(ilium_core::AgentClass, String, std::path::PathBuf)> {
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        let (class, session_id) = match status {
+            PaneStatus::Agent(agent) => (
+                agent.class.clone(),
+                self.agent_session_ids.get(&pane_id)?.clone(),
+            ),
+            PaneStatus::AgentUnavailable(recovery) => {
+                let session_id = recovery.session_id.as_ref()?.clone();
+                if self
+                    .agent_session_ids
+                    .get(&pane_id)
+                    .is_some_and(|client_id| client_id != &session_id)
+                {
+                    return None;
+                }
+                (recovery.process.class.clone(), session_id)
+            }
+            _ => return None,
+        };
+        let pane_cwd = self
+            .tree
+            .pane_cwd(pane_id)
+            .unwrap_or(&self.session_cwd)
+            .to_path_buf();
+        Some((class, session_id, pane_cwd))
+    }
+
     /// Resolves the paste-ready JSONL history path for one detected pane.
     ///
     /// The server owns session identity and the client owns clipboard access.
     /// Verifying the file here ensures a copied path belongs to this pane's
     /// current agent session and project.
     fn history_file_path_for_pane(&self, pane_id: NodeId, home_dir: &Path) -> Option<PathBuf> {
-        let (agent_class, session_id, project_path) =
-            self.last_prompt_transcript_context(pane_id)?;
+        let (agent_class, session_id, project_path) = self.known_agent_history_context(pane_id)?;
         crate::agent_history_path::verified_jsonl_history_path(
             home_dir,
             &project_path,
@@ -2599,12 +2654,17 @@ impl App {
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) {
         let activity = match &request {
-            ClientRequest::KeyInput { pane_id, bytes, .. } if !bytes.is_empty() => Some((
-                *pane_id,
-                TerminalActivityCause::KeyInputQueued {
-                    byte_count: bytes.len(),
-                },
-            )),
+            ClientRequest::KeyInput { pane_id, bytes, .. }
+            | ClientRequest::UserKeyInput { pane_id, bytes, .. }
+                if !bytes.is_empty() =>
+            {
+                Some((
+                    *pane_id,
+                    TerminalActivityCause::KeyInputQueued {
+                        byte_count: bytes.len(),
+                    },
+                ))
+            }
             ClientRequest::SubmitTerminalText { pane_id, .. } => {
                 Some((*pane_id, TerminalActivityCause::TerminalTextQueued))
             }
@@ -2632,6 +2692,24 @@ impl App {
             pane_id,
             bytes,
             submission,
+        });
+    }
+
+    /// Direct user-origin bytes, including voice/control terminal actions.
+    pub(crate) fn send_user_terminal_bytes(
+        &mut self,
+        pane_id: NodeId,
+        bytes: Vec<u8>,
+        submission: Option<PromptSubmissionSource>,
+    ) {
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+            view.scroll_to_bottom();
+        }
+        self.queue_request(ClientRequest::UserKeyInput {
+            pane_id,
+            bytes,
+            submission,
+            prompt_epoch: None,
         });
     }
 
@@ -3016,32 +3094,36 @@ impl App {
     /// job of keeping the row reserved after that agent exits.
     pub fn shows_agent_toolbar(&self, pane_id: NodeId) -> bool {
         self.ui_settings.agent_toolbar_enabled
-            && (self.is_detected_agent_pane(pane_id)
+            && (self.is_known_agent_pane(pane_id)
                 || self.agent_toolbar_latched_panes.contains(&pane_id))
     }
 
-    /// Whether the last-prompt feature is active for `pane_id` at all: the
-    /// user hasn't turned it off, and the pane is detected-or-latched using
-    /// the same eligibility as [`Self::shows_agent_toolbar`] (a latched pane
-    /// keeps tracking its last prompt after its agent exits, same rationale
-    /// as that method's doc comment), gated by its own independent toggle
-    /// rather than the toolbar's. Split out from [`Self::shows_last_prompt_banner`]
-    /// so the Enter-keystroke trigger for a transcript-sourced fallback check
-    /// (`Self::pending_last_prompt_transcript_checks`) can ask "should this
-    /// pane track a last prompt" without also requiring one to already exist.
+    /// The transcript fallback worker only observes a confirmed live agent.
+    /// Historical prompt display is handled separately by recovery status.
     pub fn last_prompt_tracking_enabled(&self, pane_id: NodeId) -> bool {
-        self.ui_settings.last_prompt_enabled
-            && (self.is_detected_agent_pane(pane_id)
-                || self.agent_toolbar_latched_panes.contains(&pane_id))
+        self.ui_settings.last_prompt_enabled && self.is_detected_agent_pane(pane_id)
+    }
+
+    /// Stopped agent recovery has priority over the pane-wide prompt cache,
+    /// which might later describe shell input or an older exact submission.
+    pub(crate) fn display_last_agent_prompt(&self, pane_id: NodeId) -> Option<&str> {
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        match status {
+            PaneStatus::AgentUnavailable(recovery) => recovery.last_prompt.as_deref(),
+            PaneStatus::Agent(_) => self.tree.last_prompt(pane_id),
+            _ => None,
+        }
     }
 
     /// Whether the fixed prompt slot displays recorded text. Hiding its text
     /// never changes terminal dimensions.
     pub fn shows_last_prompt_banner(&self, pane_id: NodeId) -> bool {
-        self.last_prompt_tracking_enabled(pane_id)
+        self.ui_settings.last_prompt_enabled
             && self
-                .tree
-                .last_prompt(pane_id)
+                .display_last_agent_prompt(pane_id)
                 .is_some_and(|text| !text.is_empty())
     }
 
@@ -5422,6 +5504,13 @@ impl App {
     }
 
     pub fn apply_and_persist_inference_settings(&mut self, inference: InferenceSettings) {
+        if self.inference_settings.restructure_prompt_token_limit
+            != inference.restructure_prompt_token_limit
+        {
+            // A larger budget can resolve the failure immediately; do not keep
+            // the old prompt's automatic retry cooldown after an explicit edit.
+            self.automatic_restructure_retries.clear();
+        }
         if self.inference_settings != inference {
             self.onboarding_revision = self.onboarding_revision.wrapping_add(1);
             self.inference_test_result = None;
@@ -5434,6 +5523,24 @@ impl App {
         if self.inference_settings.ollama.base_url != inference.ollama.base_url {
             // Catalogs belong to one daemon; a URL edit must not reuse its models.
             self.ollama_models.clear();
+            if !self.model_discovery.is_loading() {
+                self.model_discovery = ModelDiscoveryState::Idle;
+            }
+        }
+        let openai_catalog_changed = self.inference_settings.openai.base_url
+            != inference.openai.base_url
+            || self.inference_settings.openai.api_key != inference.openai.api_key;
+        let openai_provider_changed = self.inference_settings.selected_provider
+            != inference.selected_provider
+            && (self.inference_settings.selected_provider
+                == ilium_inference::InferenceProviderKind::OpenAi
+                || inference.selected_provider == ilium_inference::InferenceProviderKind::OpenAi);
+        if openai_catalog_changed || openai_provider_changed {
+            // A revision, rather than endpoint equality, also rejects edit-away/back results.
+            self.openai_catalog_revision = self.openai_catalog_revision.wrapping_add(1);
+        }
+        if openai_catalog_changed {
+            self.openai_models.clear();
             if !self.model_discovery.is_loading() {
                 self.model_discovery = ModelDiscoveryState::Idle;
             }
@@ -5479,6 +5586,10 @@ impl App {
 
     pub fn settings_open_inference_field(&mut self, field: InferenceSettingField) {
         let value = match field {
+            InferenceSettingField::RestructurePromptTokenLimit => self
+                .inference_settings
+                .restructure_prompt_token_limit
+                .to_string(),
             InferenceSettingField::OllamaUrl => self.inference_settings.ollama.base_url.clone(),
             InferenceSettingField::OllamaModel => self.inference_settings.ollama.model.clone(),
             InferenceSettingField::OpenAiUrl => self.inference_settings.openai.base_url.clone(),
@@ -5510,6 +5621,18 @@ impl App {
         let mut settings = self.inference_settings.clone();
         let value = value.trim().to_string();
         match field {
+            InferenceSettingField::RestructurePromptTokenLimit => {
+                let Ok(limit) = value.parse::<u32>() else {
+                    self.status_message = Some("Restructure token budget must be a positive whole number (up to 4294967295)".into());
+                    return;
+                };
+                if limit == 0 {
+                    self.status_message =
+                        Some("Restructure token budget must be greater than zero".into());
+                    return;
+                }
+                settings.restructure_prompt_token_limit = limit;
+            }
             InferenceSettingField::OllamaUrl => settings.ollama.base_url = value,
             InferenceSettingField::OllamaModel => settings.ollama.model = value,
             InferenceSettingField::OpenAiUrl => settings.openai.base_url = value,
@@ -5593,6 +5716,10 @@ impl App {
                     .base_url
                     .trim_end_matches('/')
             ),
+            ilium_inference::InferenceProviderKind::OpenAi => {
+                ilium_inference::model_catalog_endpoint(&self.inference_settings)
+                    .unwrap_or_default()
+            }
             _ => {
                 self.status_message = Some(format!(
                     "{} does not expose model discovery",
@@ -5601,6 +5728,19 @@ impl App {
                 return;
             }
         };
+        if provider == ilium_inference::InferenceProviderKind::OpenAi {
+            if self.inference_settings.openai.api_key.trim().is_empty() {
+                self.model_discovery = ModelDiscoveryState::Failed {
+                    provider,
+                    endpoint,
+                    error: "Enter an API key before loading OpenAI models".into(),
+                    elapsed: Duration::ZERO,
+                };
+                self.status_message = Some("Enter an API key before loading OpenAI models".into());
+                return;
+            }
+            self.openai_discovery_revision = Some(self.openai_catalog_revision);
+        }
         self.pending_model_refresh = Some(provider);
         self.model_discovery = ModelDiscoveryState::Loading {
             provider,
@@ -5621,6 +5761,22 @@ impl App {
         elapsed: Duration,
         result: Result<Vec<String>, String>,
     ) {
+        if provider == ilium_inference::InferenceProviderKind::OpenAi
+            && (self.openai_discovery_revision.take() != Some(self.openai_catalog_revision)
+                || self.inference_settings.selected_provider != provider
+                || endpoint
+                    != ilium_inference::model_catalog_endpoint(&self.inference_settings)
+                        .unwrap_or_default())
+        {
+            self.model_discovery = ModelDiscoveryState::Failed {
+                provider,
+                endpoint,
+                error: "OpenAI settings changed during discovery; refresh again".into(),
+                elapsed,
+            };
+            self.status_message = Some("OpenAI settings changed; refresh models again".into());
+            return;
+        }
         if provider == ilium_inference::InferenceProviderKind::Ollama
             && endpoint
                 != format!(
@@ -5664,6 +5820,11 @@ impl App {
                         }
                         self.ollama_models.len()
                     }
+                    ilium_inference::InferenceProviderKind::OpenAi => {
+                        // Refresh must never silently change a saved model or trigger paid inference.
+                        self.openai_models = models;
+                        self.openai_models.len()
+                    }
                     _ => 0,
                 };
                 self.model_discovery = ModelDiscoveryState::Loaded {
@@ -5694,6 +5855,27 @@ impl App {
 
     pub fn take_pending_model_refresh(&mut self) -> Option<ilium_inference::InferenceProviderKind> {
         self.pending_model_refresh.take()
+    }
+
+    pub fn settings_adjust_openai_model(&mut self, direction: i32) {
+        if self.openai_models.is_empty() {
+            self.request_model_refresh();
+            return;
+        }
+        let selected = &self.inference_settings.openai.model;
+        let next = match self
+            .openai_models
+            .iter()
+            .position(|model| model == selected)
+        {
+            Some(index) => (index as i32 + direction.signum())
+                .rem_euclid(self.openai_models.len() as i32) as usize,
+            None if direction < 0 => self.openai_models.len() - 1,
+            None => 0,
+        };
+        let mut settings = self.inference_settings.clone();
+        settings.openai.model = self.openai_models[next].clone();
+        self.apply_and_persist_inference_settings(settings);
     }
 
     pub fn settings_adjust_ollama_model(&mut self, direction: i32) {
@@ -6009,7 +6191,7 @@ impl App {
 
             match (content, runtime) {
                 (PaneContentKind::Terminal, PaneRuntime::Terminal(view)) => {
-                    let kind = if matches!(status, PaneStatus::Agent(..)) {
+                    let kind = if status.known_agent_state().is_some() {
                         SearchObjectKind::Agent
                     } else {
                         SearchObjectKind::Shell
@@ -8575,6 +8757,10 @@ impl App {
                 ..
             }) => "agent",
             Some(NodeKind::Pane {
+                status: PaneStatus::AgentUnavailable(_),
+                ..
+            }) => "agent unavailable",
+            Some(NodeKind::Pane {
                 content: PaneContentKind::Terminal,
                 ..
             }) => "terminal",
@@ -9080,6 +9266,19 @@ impl App {
         })
     }
 
+    pub fn is_known_agent_pane(&self, pane_id: NodeId) -> bool {
+        self.tree.get(pane_id).is_some_and(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    status: PaneStatus::Agent(_) | PaneStatus::AgentUnavailable(_),
+                    ..
+                }
+            )
+        })
+    }
+
     /// Captures one terminal context menu at the exact right-click position.
     /// Copy actions deliberately use immutable text, while paste retains this
     /// exact pane identifier so incoming PTY output cannot retarget a later
@@ -9138,7 +9337,7 @@ impl App {
         // Preserve the existing agent-debug entry point and its first-row
         // activation contract when the user has explicitly enabled it. The
         // activation itself still verifies that this exact pane is an agent.
-        if self.ui_settings.agent_debug_menu_enabled {
+        if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
         }
         if self.is_detected_agent_pane(pane_id) {
@@ -9155,6 +9354,40 @@ impl App {
         }
         if selection_text.is_some() {
             actions.push(TerminalContextAction::CopySelectionToClipboard);
+        }
+        let recovery = self.tree.get(pane_id).and_then(|node| match &node.kind {
+            NodeKind::Pane { status, .. } => status.agent_recovery(),
+            _ => None,
+        });
+        if let Some(recovery) = recovery {
+            if let Some(prompt) = recovery
+                .last_prompt
+                .as_deref()
+                .filter(|prompt| !prompt.is_empty())
+            {
+                actions.push(TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                    prompt: prompt.to_string(),
+                });
+            } else if recovery.latest_prompt_unavailable {
+                actions.push(TerminalContextAction::LastSubmittedPromptUnavailable);
+                if let Some(prompt) = recovery
+                    .previous_exact_prompt
+                    .as_deref()
+                    .filter(|prompt| !prompt.is_empty())
+                {
+                    actions.push(TerminalContextAction::CopyPreviousExactPromptToClipboard {
+                        prompt: prompt.to_string(),
+                    });
+                }
+            }
+        } else if let Some(prompt) = self
+            .tree
+            .last_prompt(pane_id)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            actions.push(TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                prompt: prompt.to_string(),
+            });
         }
         actions.extend([
             TerminalContextAction::CopyLineToClipboard,
@@ -9203,6 +9436,20 @@ impl App {
         menu: TerminalPaneContextMenu,
     ) {
         match action {
+            TerminalContextAction::CopyLastSubmittedPromptToClipboard { prompt } => self
+                .copy_terminal_text_to_clipboard(
+                    prompt,
+                    "Last submitted prompt copied to clipboard",
+                ),
+            TerminalContextAction::CopyPreviousExactPromptToClipboard { prompt } => self
+                .copy_terminal_text_to_clipboard(
+                    prompt,
+                    "Previous exact prompt copied to clipboard; latest submission unavailable",
+                ),
+            TerminalContextAction::LastSubmittedPromptUnavailable => {
+                self.status_message =
+                    Some("The latest submitted prompt cannot be reconstructed exactly".to_string());
+            }
             TerminalContextAction::CopySelectionToClipboard => {
                 if let Some(text) = menu.selection_text {
                     self.copy_terminal_text_to_clipboard(text, "Selection copied to clipboard");
@@ -9305,6 +9552,11 @@ impl App {
                 status: PaneStatus::Agent(agent),
                 ..
             } => format!("{} agent", agent.class.label()),
+            NodeKind::Pane {
+                content: PaneContentKind::Terminal,
+                status: PaneStatus::AgentUnavailable(recovery),
+                ..
+            } => format!("former {} agent", recovery.process.class.label()),
             _ => "terminal".to_string(),
         }
     }
@@ -9338,7 +9590,15 @@ impl App {
     /// Uses the host clipboard for terminal text while keeping UI feedback at
     /// the terminal interaction boundary.
     fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
-        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text)) {
+        let result = match self.terminal_clipboard.as_mut() {
+            Some(clipboard) => clipboard.set_text(text),
+            None => arboard::Clipboard::new().and_then(|mut clipboard| {
+                clipboard.set_text(text)?;
+                self.terminal_clipboard = Some(clipboard);
+                Ok(())
+            }),
+        };
+        match result {
             Ok(()) => self.status_message = Some(success_message.to_string()),
             Err(error) => self.status_message = Some(format!("Could not copy text: {error}")),
         }
@@ -9378,10 +9638,10 @@ impl App {
     }
 
     pub fn open_agent_debug_log(&mut self, pane_id: NodeId) {
-        if !self.ui_settings.agent_debug_menu_enabled || !self.is_detected_agent_pane(pane_id) {
+        if !self.ui_settings.agent_debug_menu_enabled || !self.is_known_agent_pane(pane_id) {
             self.mode = Mode::Normal;
             self.status_message =
-                Some("Debug history is available only for detected agents".to_string());
+                Some("Debug history is available only for known agent panes".to_string());
             return;
         }
         let after_sequence = self
@@ -11003,27 +11263,41 @@ impl App {
             None => {}
         }
         if let Some(bytes) = pending_key_input {
-            self.queue_request(ClientRequest::KeyInput {
+            let prompt_epoch = is_enter_press.then(|| uuid::Uuid::new_v4().to_string());
+            let submitted_after = chrono::Utc::now();
+            // Resolve the provider-owned file before sending Enter. Comparing
+            // against the byte offset catches even a repeated identical
+            // prompt and keeps multiline/trailing text intact.
+            let transcript_check = prompt_epoch.as_ref().and_then(|epoch| {
+                let (agent_class, session_id, project_path) =
+                    self.last_prompt_transcript_context(id)?;
+                let home = directories::BaseDirs::new()?;
+                let verified_path = self.history_file_path_for_pane(id, home.home_dir())?;
+                let baseline_length = std::fs::metadata(&verified_path).ok()?.len();
+                Some(PendingLastPromptTranscriptCheck {
+                    pane_id: id,
+                    agent_class,
+                    session_id,
+                    project_path,
+                    verified_path,
+                    baseline_length,
+                    submitted_after,
+                    prompt_epoch: epoch.clone(),
+                })
+            });
+            self.queue_request(ClientRequest::UserKeyInput {
                 pane_id: id,
                 bytes,
                 submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
+                prompt_epoch,
             });
-            // Enter just submitted something (whether or not live keystroke
-            // tracking reconstructed it exactly) -- queue a check of the
-            // agent CLI's own session transcript in case it has a better
-            // answer, e.g. after shell-history recall or another
-            // unsupported edit marked the live reconstruction opaque.
-            if is_enter_press && self.last_prompt_tracking_enabled(id) {
-                // Captured now, before this submission's own server round
-                // trip can land -- see `PendingLastPromptTranscriptCheck`'s
-                // doc comment on why the worker needs this pre-submission
-                // value rather than whatever's in the tree once it runs.
-                let baseline_last_prompt = self.tree.last_prompt(id).map(str::to_string);
-                self.pending_last_prompt_transcript_checks
-                    .push(PendingLastPromptTranscriptCheck {
-                        pane_id: id,
-                        baseline_last_prompt,
-                    });
+            if let Some(check) = transcript_check {
+                self.pending_last_prompt_transcript_checks.push(check);
+            } else if is_enter_press && self.is_detected_agent_pane(id) {
+                // A newer Enter with no verified transcript file still
+                // revokes an older worker for this live composer. Shell
+                // input after a crash leaves historical recovery pending.
+                self.pending_exact_prompt_worker_cancellations.push(id);
             }
         }
         if did_change_client_content {
@@ -11060,10 +11334,11 @@ impl App {
             pasted.as_bytes().to_vec()
         };
 
-        self.queue_request(ClientRequest::KeyInput {
+        self.queue_request(ClientRequest::UserKeyInput {
             pane_id,
             bytes,
             submission: None,
+            prompt_epoch: None,
         });
         true
     }
@@ -11827,7 +12102,7 @@ impl App {
         if matches!(
             mouse.kind,
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-        ) && self.is_detected_agent_pane(id)
+        ) && self.is_known_agent_pane(id)
             && theme::chrome_hamburger_cell(viewport.outer_area) == position
         {
             self.settings_toggle_agent_toolbar();
@@ -12033,12 +12308,13 @@ impl App {
         // prompt and Codex negotiate nothing, which is the "no scrollback"
         // complaint this feature addresses.
         use crossterm::event::MouseEventKind;
+        let is_recovery_pane = self.tree.agent_recovery(id).is_some();
         if matches!(
             mouse.kind,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
         ) {
             if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&id) {
-                if !view.wants_mouse_protocol() {
+                if is_recovery_pane || !view.wants_mouse_protocol() {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => view.scroll_up(TERMINAL_WHEEL_SCROLL_LINES),
                         MouseEventKind::ScrollDown => view.scroll_down(TERMINAL_WHEEL_SCROLL_LINES),
@@ -12051,6 +12327,11 @@ impl App {
                     return;
                 }
             }
+        }
+
+        // Retained application modes describe history, not a live receiver.
+        if is_recovery_pane {
+            return;
         }
 
         let column = position.x.saturating_sub(viewport.content_area.x);
@@ -13719,12 +14000,196 @@ mod tests {
         assert!(!view.is_scrolled_back());
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: b"\x1b[1;5F".to_vec(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
+    }
+
+    #[test]
+    fn openai_refresh_starts_discovery_without_changing_the_saved_model() {
+        let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::OpenAi);
+        app.settings_commit_inference_field(
+            InferenceSettingField::OpenAiApiKey,
+            "fixture-key".into(),
+        );
+        app.settings_commit_inference_field(
+            InferenceSettingField::OpenAiModel,
+            "saved-model".into(),
+        );
+        app.request_model_refresh();
+        assert!(app.model_discovery.is_loading());
+        assert_eq!(
+            app.take_pending_model_refresh(),
+            Some(ilium_inference::InferenceProviderKind::OpenAi)
+        );
+        assert_eq!(app.inference_settings.openai.model, "saved-model");
+        assert!(!format!("{:?}", app.model_discovery).contains("fixture-key"));
+    }
+
+    fn configured_openai_app() -> App {
+        let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::OpenAi);
+        app.settings_commit_inference_field(
+            InferenceSettingField::OpenAiApiKey,
+            "fixture-key".into(),
+        );
+        app.settings_commit_inference_field(
+            InferenceSettingField::OpenAiModel,
+            "saved-model".into(),
+        );
+        app
+    }
+    fn finish_openai_catalog(app: &mut App, result: Result<Vec<String>, String>) {
+        app.finish_model_discovery(
+            ilium_inference::InferenceProviderKind::OpenAi,
+            ilium_inference::model_catalog_endpoint(&app.inference_settings).unwrap_or_default(),
+            Duration::from_millis(10),
+            result,
+        );
+    }
+    #[test]
+    fn openai_catalog_preserves_saved_selection_and_last_good_list_on_failure() {
+        let mut app = configured_openai_app();
+        app.request_model_refresh();
+        finish_openai_catalog(
+            &mut app,
+            Ok(vec!["first-model".into(), "second-model".into()]),
+        );
+        assert_eq!(app.inference_settings.openai.model, "saved-model");
+        assert_eq!(app.openai_models, ["first-model", "second-model"]);
+        app.request_model_refresh();
+        finish_openai_catalog(&mut app, Err("HTTP401".into()));
+        assert_eq!(app.openai_models, ["first-model", "second-model"]);
+        assert_eq!(app.inference_settings.openai.model, "saved-model");
+    }
+    #[test]
+    fn openai_discovery_rejects_credential_and_endpoint_aba_and_provider_switches() {
+        for field in [
+            InferenceSettingField::OpenAiApiKey,
+            InferenceSettingField::OpenAiUrl,
+        ] {
+            let mut app = configured_openai_app();
+            app.openai_models = vec!["old-model".into()];
+            app.request_model_refresh();
+            let original = match field {
+                InferenceSettingField::OpenAiApiKey => {
+                    app.inference_settings.openai.api_key.clone()
+                }
+                _ => app.inference_settings.openai.base_url.clone(),
+            };
+            app.settings_commit_inference_field(field, "changed".into());
+            app.settings_commit_inference_field(field, original);
+            finish_openai_catalog(&mut app, Ok(vec!["stale-model".into()]));
+            assert!(app.openai_models.is_empty());
+            assert!(matches!(
+                app.model_discovery,
+                ModelDiscoveryState::Failed { .. }
+            ));
+            assert_eq!(app.inference_settings.openai.model, "saved-model");
+        }
+        let mut app = configured_openai_app();
+        app.request_model_refresh();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::OpenAi);
+        finish_openai_catalog(&mut app, Ok(vec!["stale-model".into()]));
+        assert!(app.openai_models.is_empty());
+    }
+    #[test]
+    fn openai_keyboard_selection_persists_and_enter_keeps_manual_editing() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = configured_openai_app();
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.request_model_refresh();
+        finish_openai_catalog(
+            &mut app,
+            Ok(vec!["first-model".into(), "second-model".into()]),
+        );
+        let index = crate::settings_ui::inference_rows(&app.inference_settings)
+            .iter()
+            .position(|row| *row == InferenceRow::Field(InferenceSettingField::OpenAiModel))
+            .unwrap();
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row: index,
+            ..Default::default()
+        });
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Right,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+        assert_eq!(app.inference_settings.openai.model, "first-model");
+        let loaded = crate::config::load(directory.path()).unwrap();
+        assert_eq!(loaded.inference.openai.model, "first-model");
+        assert_eq!(
+            loaded.inference.kilo_gateway.model,
+            app.inference_settings.kilo_gateway.model
+        );
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+        assert!(matches!(
+            app.mode,
+            Mode::InferenceSettingPrompt(InferenceSettingField::OpenAiModel, _)
+        ));
+    }
+
+    #[test]
+    fn openai_mouse_model_selection_persists_without_opening_manual_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = configured_openai_app();
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.request_model_refresh();
+        finish_openai_catalog(
+            &mut app,
+            Ok(vec!["first-model".into(), "second-model".into()]),
+        );
+        let state = SettingsState {
+            tab: SettingsTab::Inference,
+            ..Default::default()
+        };
+        app.layout.screen_area = ratatui::layout::Rect::new(0, 0, 180, 60);
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
+        let column = layout.content_area.right() - 2;
+        let row = (layout.content_area.y..layout.content_area.bottom())
+            .find(|row| {
+                crate::settings_ui::inference_content_hit_with_test(
+                    layout.content_area,
+                    0,
+                    ratatui::layout::Position::new(column, *row),
+                    &app.inference_settings,
+                    &app.inference_test_state,
+                    &app.model_discovery,
+                ) == Some((InferenceRow::Field(InferenceSettingField::OpenAiModel), 1))
+            })
+            .expect("model row has a real mouse hit target");
+        app.mode = Mode::Settings(state);
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column,
+                row,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.inference_settings.openai.model, "first-model");
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let loaded = crate::config::load(directory.path()).unwrap();
+        assert_eq!(loaded.inference.openai.model, "first-model");
+        assert_eq!(loaded.inference.openai.api_key, "fixture-key");
     }
 
     #[test]
@@ -14677,6 +15142,7 @@ mod tests {
                 ilium_core::QueuedPrompt {
                     text: "pending".to_string(),
                     delivery: ilium_core::PromptQueueDelivery::Once,
+                    attempted_delivery: false,
                 },
             )
             .unwrap();
@@ -15222,14 +15688,15 @@ mod tests {
         let key_inputs = app
             .take_outbound_requests()
             .into_iter()
-            .filter(|request| matches!(request, ClientRequest::KeyInput { .. }))
+            .filter(|request| matches!(request, ClientRequest::UserKeyInput { .. }))
             .collect::<Vec<_>>();
         assert_eq!(
             key_inputs,
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: encode_bracketed_paste(&pasted),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
     }
@@ -15267,10 +15734,11 @@ mod tests {
 
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id: context_menu_pane_id,
                 bytes: encode_bracketed_paste(clipboard_text),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
     }
@@ -15297,14 +15765,15 @@ mod tests {
         let key_inputs = app
             .take_outbound_requests()
             .into_iter()
-            .filter(|request| matches!(request, ClientRequest::KeyInput { .. }))
+            .filter(|request| matches!(request, ClientRequest::UserKeyInput { .. }))
             .collect::<Vec<_>>();
         assert_eq!(
             key_inputs,
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: pasted.as_bytes().to_vec(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
     }
@@ -16367,7 +16836,10 @@ mod tests {
             PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
         );
         app.tree
-            .set_last_prompt(pane_id, Some("Recover this exact prompt\nwith its second line".into()))
+            .set_last_prompt(
+                pane_id,
+                Some("Recover this exact prompt\nwith its second line".into()),
+            )
             .unwrap();
         // The current detector loses agent status on exit. Recovery must not
         // depend on either a live process or a visible last-prompt banner.
@@ -16376,11 +16848,199 @@ mod tests {
         let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
             panic!("terminal recovery menu should open");
         };
-        assert!(menu.actions.iter().any(|action| action.label() == "Copy last submitted prompt"));
-        assert!(menu.actions.contains(&TerminalContextAction::CopyVisibleTerminalToClipboard));
-        assert!(menu.actions.contains(&TerminalContextAction::CopyFullTerminalHistoryToClipboard));
+        let prompt_action = menu
+            .actions
+            .iter()
+            .find(|action| action.label() == "Copy last submitted prompt")
+            .cloned()
+            .expect("recorded prompt must remain recoverable");
+        assert!(menu
+            .actions
+            .contains(&TerminalContextAction::CopyVisibleTerminalToClipboard));
+        assert!(menu
+            .actions
+            .contains(&TerminalContextAction::CopyFullTerminalHistoryToClipboard));
+        app.tree
+            .set_last_prompt(pane_id, Some("a later prompt".into()))
+            .unwrap();
+        assert_eq!(
+            prompt_action,
+            TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                prompt: "Recover this exact prompt\nwith its second line".into(),
+            }
+        );
     }
 
+    #[test]
+    fn stopped_agent_menu_prefers_its_exact_prompt_over_later_shell_input() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "stopped codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        let process = ilium_core::AgentProcessKey {
+            class: AgentClass::Codex,
+            process_id: 42,
+            started_at_unix_seconds: 1,
+        };
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Codex,
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process,
+                    availability: ilium_core::AgentAvailability::ShellForeground,
+                    signal_name: None,
+                    session_id: Some("verified-session".to_string()),
+                    last_prompt: Some("agent exact  ".to_string()),
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+        app.tree
+            .set_last_prompt(pane_id, Some("later shell command".to_string()))
+            .unwrap();
+
+        assert!(app.is_known_agent_pane(pane_id));
+        assert!(!app.is_detected_agent_pane(pane_id));
+        assert!(app.stats_agent_is_supported(pane_id));
+        assert_eq!(
+            app.known_agent_history_context(pane_id).unwrap().1,
+            "verified-session"
+        );
+        app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("menu did not open");
+        };
+        assert!(menu.actions.contains(
+            &TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                prompt: "agent exact  ".to_string(),
+            }
+        ));
+        assert!(!menu.actions.iter().any(|action| matches!(action,
+            TerminalContextAction::CopyLastSubmittedPromptToClipboard { prompt }
+                if prompt == "later shell command")));
+    }
+
+    #[test]
+    fn opaque_latest_submission_labels_previous_exact_prompt_as_historical() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "stopped codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Codex,
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process: ilium_core::AgentProcessKey {
+                        class: AgentClass::Codex,
+                        process_id: 42,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: ilium_core::AgentAvailability::Unverified,
+                    signal_name: None,
+                    session_id: None,
+                    last_prompt: None,
+                    previous_exact_prompt: Some("older exact".to_string()),
+                    latest_prompt_unavailable: true,
+                })),
+            )
+            .unwrap();
+        app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("menu did not open");
+        };
+        assert!(menu
+            .actions
+            .contains(&TerminalContextAction::LastSubmittedPromptUnavailable));
+        assert!(menu.actions.contains(
+            &TerminalContextAction::CopyPreviousExactPromptToClipboard {
+                prompt: "older exact".to_string(),
+            }
+        ));
+        assert!(!menu.actions.iter().any(|action| matches!(
+            action,
+            TerminalContextAction::CopyLastSubmittedPromptToClipboard { .. }
+        )));
+    }
+
+    #[test]
+    #[ignore = "requires an isolated host clipboard to avoid changing the user's clipboard"]
+    fn terminal_recovery_copy_keeps_exact_prompt_available_after_the_menu_closes() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "stopped agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        let prompt = format!(
+            "{}\nUnicode café 日本語 🦀\r\nlast line  ",
+            "authored work  ".repeat(600)
+        );
+        app.tree
+            .set_last_prompt(pane_id, Some(prompt.clone()))
+            .unwrap();
+        app.ui_settings.last_prompt_enabled = false;
+        app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("recovery menu did not open");
+        };
+        let action = menu
+            .actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action,
+                    TerminalContextAction::CopyLastSubmittedPromptToClipboard { .. }
+                )
+            })
+            .cloned()
+            .expect("last prompt action");
+        app.tree
+            .set_last_prompt(pane_id, Some("replacement".into()))
+            .unwrap();
+        let outbox_before = app.outbox.len();
+        app.execute_terminal_context_action(action, menu);
+        assert_eq!(
+            app.outbox.len(),
+            outbox_before,
+            "copy must write no terminal bytes"
+        );
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Last submitted prompt copied to clipboard")
+        );
+        // A fresh clipboard handle must see the copy after the action's local
+        // variables and the captured menu have been dropped.
+        let mut reader = arboard::Clipboard::new().expect("isolated host clipboard reader");
+        assert_eq!(reader.get_text().expect("clipboard readback"), prompt);
+    }
     #[test]
     fn left_drag_over_terminal_content_creates_a_local_selection_instead_of_forwarding() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -16453,6 +17113,93 @@ mod tests {
             elsewhere,
         );
         assert!(app.terminal_selection.is_none());
+    }
+
+    #[test]
+    fn stopped_claude_uses_local_scrollback_despite_retained_mouse_protocol() {
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "fixture claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+            )
+            .unwrap();
+        let mut view = TerminalView::new(24, 80);
+        view.feed(b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h");
+        for line in 0..100 {
+            view.feed(format!("recoverable error line {line}\r\n").as_bytes());
+        }
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let position = Position::new(viewport.content_area.x + 3, viewport.content_area.y + 2);
+        let event = |kind| MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.take_outbound_requests();
+        app.handle_pane_mouse(event(MouseEventKind::ScrollUp), position);
+        assert!(
+            app.take_outbound_requests()
+                .iter()
+                .any(|request| matches!(request, ClientRequest::MouseInput { .. })),
+            "live mouse-tracking agent retains its wheel"
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Claude,
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process: ilium_core::AgentProcessKey {
+                        class: AgentClass::Claude,
+                        process_id: 42,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: ilium_core::AgentAvailability::Unverified,
+                    signal_name: None,
+                    session_id: None,
+                    last_prompt: None,
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+        app.take_outbound_requests();
+        app.handle_pane_mouse(event(MouseEventKind::ScrollUp), position);
+        let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {
+            panic!("terminal missing")
+        };
+        assert!(
+            view.wants_mouse_protocol(),
+            "fixture retains stale mouse negotiation"
+        );
+        assert!(
+            view.scrollback_position() > 0,
+            "stopped agent wheel must recover local history"
+        );
+        app.handle_pane_mouse(event(MouseEventKind::Moved), position);
+        assert!(
+            app.take_outbound_requests()
+                .iter()
+                .all(|request| !matches!(request, ClientRequest::MouseInput { .. })),
+            "recovery pointer events must not reach the former application"
+        );
     }
 
     #[test]
@@ -17233,10 +17980,11 @@ mod tests {
 
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id: destination_pane_id,
                 bytes: encode_bracketed_paste(&expected_screen),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
     }
@@ -17305,10 +18053,11 @@ mod tests {
 
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::KeyInput {
+            vec![ClientRequest::UserKeyInput {
                 pane_id: destination_pane_id,
                 bytes: expected_screen.into_bytes(),
                 submission: None,
+                prompt_epoch: None,
             }]
         );
         assert_eq!(

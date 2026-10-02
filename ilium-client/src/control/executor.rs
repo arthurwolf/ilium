@@ -110,7 +110,7 @@ fn execute_terminal_typing(
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
     let bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
-    app.send_terminal_bytes(pane_id, bytes, None);
+    app.send_user_terminal_bytes(pane_id, bytes, None);
     Ok(ExecutionReceipt::queued(
         ilium_prompts::voice::VOICE_EXECUTOR_STAGED_TEXT_IN_THE_TERMINAL,
     ))
@@ -581,11 +581,12 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
             let key = command
                 .key
                 .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_KEY_IS_REQUIRED)?;
-            app.queue_request(ClientRequest::KeyInput {
+            app.queue_request(ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: terminal_key_bytes(key).to_vec(),
                 submission: matches!(key, TerminalKey::Enter)
                     .then_some(PromptSubmissionSource::VoiceControl),
+                prompt_epoch: None,
             });
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_SENT_THE_KEY_TO_THE_TERMINAL,

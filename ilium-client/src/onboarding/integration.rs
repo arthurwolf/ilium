@@ -60,6 +60,7 @@ enum Control {
     Field(InferenceSettingField),
     PaidProvider,
     Model,
+    OpenAiModel,
     Refresh,
     Test,
 }
@@ -136,6 +137,15 @@ fn provider_rows(app: &App) -> Vec<(String, Control)> {
             Control::Field(field),
         )
     }));
+    if settings.selected_provider == Provider::OpenAi {
+        rows.push((
+            format!(
+                "Choose discovered model  ·  {} model(s)",
+                app.openai_models.len()
+            ),
+            Control::OpenAiModel,
+        ));
+    }
     rows.push(("Refresh available models".into(), Control::Refresh));
     rows.push(("Test connection and organization".into(), Control::Test));
     rows
@@ -455,6 +465,7 @@ fn activate(app: &mut App, hit: Hit) {
                         );
                     }
                     Control::Model => app.settings_adjust_kilo_gateway_model(1),
+                    Control::OpenAiModel => app.settings_adjust_openai_model(1),
                     Control::Refresh => app.request_model_refresh(),
                     Control::Test => app.request_inference_test(),
                 }
@@ -1198,6 +1209,37 @@ mod tests {
         app.onboarding = Some(WizardUi::default());
         app.layout.screen_area = Rect::new(0, 0, 80, 24);
         app
+    }
+
+    #[test]
+    fn openai_catalog_choice_in_wizard_persists_explicit_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(Step::AiConfiguration);
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.inference_settings.selected_provider = Provider::OpenAi;
+        app.onboarding_progress.wizard.ai = Some(AiChoice::Paid);
+        app.inference_settings.openai.model = "model-a".into();
+        app.openai_models = vec!["model-a".into(), "model-b".into()];
+        let index = provider_rows(&app)
+            .iter()
+            .position(|(_, control)| matches!(control, Control::OpenAiModel))
+            .unwrap();
+        app.onboarding.as_mut().unwrap().focus = index;
+        handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.inference_settings.openai.model, "model-b");
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .inference
+                .openai
+                .model,
+            "model-b"
+        );
+        assert_eq!(app.onboarding_progress.wizard.step, Step::AiConfiguration);
+        assert!(app.onboarding.is_some());
     }
 
     #[test]

@@ -519,6 +519,16 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             let provider = parse_inference_provider(string(&value)?)?;
             app.settings_select_inference_provider(provider);
         }
+        "inference.restructure_prompt_token_limit" => {
+            let limit = u32::try_from(unsigned(&value)?)
+                .map_err(|_| "Restructure token budget exceeds 4294967295".to_string())?;
+            if limit == 0 {
+                return Err("Restructure token budget must be greater than zero".into());
+            }
+            let mut settings = app.inference_settings.clone();
+            settings.restructure_prompt_token_limit = limit;
+            app.apply_and_persist_inference_settings(settings);
+        }
         "inference.title_style" => {
             app.settings_select_title_style(parse_title_style(string(&value)?)?);
         }
@@ -778,6 +788,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "kanban_board.minimum_column_width" => app.settings_adjust_board_column_width(direction),
         "sound.file" => app.settings_adjust_sound_row(SoundRow::File, direction),
         "inference.kilo_gateway.model" => app.settings_adjust_kilo_gateway_model(direction),
+        "inference.openai.model" => app.settings_adjust_openai_model(direction),
         "voice.model" => {
             app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::Model, direction)
         }
@@ -1118,6 +1129,72 @@ mod tests {
         assert_eq!(app.inference_settings.title_style, TitleStyle::Labeling);
         assert!(set_setting(&mut app, "inference.title_style", json!("outline")).is_err());
         assert_eq!(app.inference_settings.title_style, TitleStyle::Labeling);
+    }
+
+    #[test]
+    fn restructure_token_setting_validates_and_updates_snapshot() {
+        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
+        let path = "inference.restructure_prompt_token_limit";
+        set_setting(&mut app, path, json!(345678)).unwrap();
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            345678
+        );
+        for invalid in [
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!("123"),
+            json!(4294967296_u64),
+        ] {
+            assert!(set_setting(&mut app, path, invalid).is_err());
+            assert_eq!(
+                app.inference_settings.restructure_prompt_token_limit,
+                345678
+            );
+        }
+        app.settings_commit_inference_field(
+            crate::app::InferenceSettingField::RestructurePromptTokenLimit,
+            "234567".into(),
+        );
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            234567
+        );
+        app.settings_commit_inference_field(
+            crate::app::InferenceSettingField::RestructurePromptTokenLimit,
+            "0".into(),
+        );
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            234567
+        );
+        for invalid in ["-1", "abc", "1.5", "4294967296", ""] {
+            app.settings_commit_inference_field(
+                crate::app::InferenceSettingField::RestructurePromptTokenLimit,
+                invalid.into(),
+            );
+            assert_eq!(
+                app.inference_settings.restructure_prompt_token_limit,
+                234567
+            );
+            assert!(app
+                .status_message
+                .as_ref()
+                .unwrap()
+                .contains("positive whole number"));
+        }
+        let snapshot =
+            super::super::snapshot::capture(&app, StateDetail::Compact, &Default::default())
+                .unwrap();
+        assert_eq!(
+            snapshot.settings["inference"]["restructure_prompt_token_limit"],
+            234567
+        );
+        assert!(snapshot.settings["writable_path_patterns"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(path)));
     }
 
     #[test]

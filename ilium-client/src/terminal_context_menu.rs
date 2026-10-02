@@ -16,6 +16,15 @@ pub enum TerminalContextAction {
     /// Present only when the pane has an active, non-empty text selection
     /// at the moment the menu opens (see `crate::terminal_selection`).
     CopySelectionToClipboard,
+    /// Exact authored text captured at menu opening, independent of live detection.
+    CopyLastSubmittedPromptToClipboard {
+        prompt: String,
+    },
+    /// Historical exact text, explicitly older than an opaque submission.
+    CopyPreviousExactPromptToClipboard {
+        prompt: String,
+    },
+    LastSubmittedPromptUnavailable,
     CopyLineToClipboard,
     CopyVisibleTerminalToClipboard,
     CopyFullTerminalHistoryToClipboard,
@@ -54,9 +63,12 @@ impl TerminalContextAction {
         use crate::icon_settings::IconTarget;
         match self {
             Self::CopySelectionToClipboard => IconTarget::AgentToolbarCopyScreen,
-            Self::CopyLineToClipboard
+            Self::CopyLastSubmittedPromptToClipboard { .. }
+            | Self::CopyPreviousExactPromptToClipboard { .. }
+            | Self::CopyLineToClipboard
             | Self::CopyFullTerminalHistoryToClipboard
             | Self::CopyHistoryFilePathToClipboard { .. } => IconTarget::Editor,
+            Self::LastSubmittedPromptUnavailable => IconTarget::AgentUnavailable,
             Self::CopyVisibleTerminalToClipboard => IconTarget::Terminal,
             Self::PasteClipboard => IconTarget::ScreenTransferDown,
             Self::PasteScreenInto { direction, .. } => match direction {
@@ -79,6 +91,13 @@ impl TerminalContextAction {
     pub fn label(&self) -> String {
         match self {
             Self::CopySelectionToClipboard => "Copy selection".to_string(),
+            Self::CopyLastSubmittedPromptToClipboard { .. } => {
+                "Copy last submitted prompt".to_string()
+            }
+            Self::CopyPreviousExactPromptToClipboard { .. } => {
+                "Copy previous exact prompt (latest unavailable)".to_string()
+            }
+            Self::LastSubmittedPromptUnavailable => "Last submitted prompt unavailable".to_string(),
             Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
             Self::CopyVisibleTerminalToClipboard => {
                 "Copy visible terminal to clipboard".to_string()

@@ -353,6 +353,10 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
                 ilium_core::ObjectiveSignal::None => None,
             },
             StatusSlot::Now => match signals.now {
+                ilium_core::NowSignal::AgentUnavailable(availability) => Some(format!(
+                    "Why: {}. Historical agent identity and recovery data remain available; the terminal has no confirmed live agent composer.",
+                    availability.label(),
+                )),
                 ilium_core::NowSignal::Parked => progress.as_deref().map(|progress| format!(
                     "Why: the agent is idle while live monitor #{} watches job «{}»; the monitor suppresses the finished alert.",
                     progress.monitor_id,
@@ -415,13 +419,13 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
         .pane_viewport(popover.pane_id)
         .map(|viewport| theme::chrome_stats_cell(viewport.outer_area));
     if let Some(anchor) = anchor {
-        let entry = app.session_stats.entry(popover.pane_id);
+        let entry = app.current_stats_entry(popover.pane_id);
         let idle = crate::session_stats_store::LoadState::Idle;
         let view = crate::session_stats_ui::StatsView {
             stats: entry.and_then(|entry| entry.stats.as_deref()),
             load: entry.map_or(&idle, |entry| &entry.state),
             supported: app.stats_agent_is_supported(popover.pane_id),
-            has_session: app.agent_session_ids.contains_key(&popover.pane_id),
+            has_session: app.known_agent_history_context(popover.pane_id).is_some(),
             now_ms: chrono::Utc::now().timestamp_millis(),
             animation_ms: app.started_at.elapsed().as_millis(),
             scheme: app.ui_settings.color_scheme,
@@ -434,7 +438,7 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
 /// Styles the second header icon of an agent pane as the popover's handle:
 /// accent-coloured when idle, filled while its popover is open.
 fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
-    if viewport.outer_area.width < 10 || !app.is_detected_agent_pane(viewport.pane_id) {
+    if viewport.outer_area.width < 10 || !app.is_known_agent_pane(viewport.pane_id) {
         return;
     }
     let is_open = app
@@ -1908,7 +1912,7 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
             crate::last_prompt_banner::render(
                 frame,
                 last_prompt_area,
-                app.tree.last_prompt(viewport.pane_id),
+                app.display_last_agent_prompt(viewport.pane_id),
                 app.ui_settings.last_prompt_max_lines.into(),
                 app.ui_settings.color_scheme,
             );
@@ -2260,6 +2264,11 @@ fn pane_title(app: &App, id: NodeId) -> String {
                 PaneStatus::Agent(agent) => {
                     format!("{} — {}", node.name, agent_class_title(&agent.class))
                 }
+                PaneStatus::AgentUnavailable(recovery) => format!(
+                    "{} — {} unavailable",
+                    node.name,
+                    agent_class_title(&recovery.process.class)
+                ),
                 _ => node.name.clone(),
             };
             crate::pane_title::decorate_pane_title(status, &logical_title)

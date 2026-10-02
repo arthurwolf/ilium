@@ -12,7 +12,7 @@
 //! immutable `SessionTitleInput` captured by the automatic trigger router or
 //! explicit row action before this background boundary.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentClass, NodeId};
 use ilium_inference::InferenceSettings;
+use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
 use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender;
 
@@ -85,6 +86,7 @@ pub enum NamingWorkerEvent {
     },
     Restructure(RestructureWorkerResult),
     LastPromptTranscript(LastPromptTranscriptWorkerResult),
+    AgentPromptTranscript(ExactAgentPromptTranscriptResult),
 }
 
 /// All immutable inputs captured when a session-title worker starts. Keeping
@@ -152,6 +154,26 @@ pub struct LastPromptTranscriptWorkerResult {
     pub last_prompt: Option<String>,
 }
 
+/// One recovery lookup fenced by the file position taken before Enter.
+pub struct ExactAgentPromptTranscriptRequest {
+    pub home: PathBuf,
+    pub pane_id: NodeId,
+    pub project_path: PathBuf,
+    pub agent_class: AgentClass,
+    pub session_id: String,
+    pub verified_path: PathBuf,
+    pub baseline_length: u64,
+    pub submitted_after: chrono::DateTime<chrono::Utc>,
+    pub prompt_epoch: String,
+}
+
+pub struct ExactAgentPromptTranscriptResult {
+    pub pane_id: NodeId,
+    pub session_id: String,
+    pub prompt_epoch: String,
+    pub last_prompt: Option<String>,
+}
+
 /// Initial wait before the first transcript read: the agent CLI needs a
 /// moment to flush this turn's submitted message to its own session log, and
 /// reading too early would just see the previous turn's already-applied
@@ -178,6 +200,125 @@ const LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL: Duration = Duration::from_millis(20
 /// fresh.
 const LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS: u32 = 25;
 
+struct ExactPromptWorkerState {
+    pending: Mutex<Option<ExactAgentPromptTranscriptRequest>>,
+    changed: Condvar,
+}
+
+struct ExactPromptWorker {
+    session_id: String,
+    state: Arc<ExactPromptWorkerState>,
+    _owner: OwnedWorker,
+}
+
+fn run_exact_prompt_worker(
+    state: Arc<ExactPromptWorkerState>,
+    stop: StopToken,
+    events_tx: Sender<NamingWorkerEvent>,
+) {
+    lower_current_thread(WorkerPriority::BelowNormal);
+    loop {
+        let request = {
+            let mut pending = state
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            while pending.is_none() && !stop.is_stopped() {
+                pending = state
+                    .changed
+                    .wait(pending)
+                    .unwrap_or_else(|error| error.into_inner());
+            }
+            if stop.is_stopped() {
+                return;
+            }
+            match pending.take() {
+                Some(request) => request,
+                None => continue,
+            }
+        };
+        if exact_prompt_worker_interrupted(&state, &stop, LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY) {
+            continue;
+        }
+        let mut last_prompt = None;
+        for attempt in 0..LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
+            if stop.is_stopped() {
+                return;
+            }
+            if state
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_some()
+            {
+                break;
+            }
+            let verified = TranscriptLocator::new(&request.home, &request.project_path)
+                .transcript_for_session(&request.agent_class, &request.session_id)
+                .filter(|transcript| transcript.path == request.verified_path);
+            if verified.is_some() {
+                last_prompt = crate::agent_prompt_transcript::exact_user_prompt_after(
+                    &request.agent_class,
+                    &request.verified_path,
+                    request.baseline_length,
+                    request.submitted_after,
+                )
+                .ok()
+                .flatten();
+            }
+            if last_prompt.is_some() || attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
+                break;
+            }
+            if exact_prompt_worker_interrupted(&state, &stop, LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL)
+            {
+                break;
+            }
+        }
+        if stop.is_stopped() {
+            return;
+        }
+        if state
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_some()
+        {
+            continue;
+        }
+        if let Some(last_prompt) = last_prompt {
+            // Backpressure never blocks cancellation or pane cleanup. A lost
+            // optional fallback leaves the direct PTY evidence unchanged.
+            let _ = events_tx.try_send(NamingWorkerEvent::AgentPromptTranscript(
+                ExactAgentPromptTranscriptResult {
+                    pane_id: request.pane_id,
+                    session_id: request.session_id,
+                    prompt_epoch: request.prompt_epoch,
+                    last_prompt: Some(last_prompt),
+                },
+            ));
+        }
+    }
+}
+
+fn exact_prompt_worker_interrupted(
+    state: &ExactPromptWorkerState,
+    stop: &StopToken,
+    duration: Duration,
+) -> bool {
+    let pending = state
+        .pending
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if pending.is_some() || stop.is_stopped() {
+        return true;
+    }
+    let (pending, _) = state
+        .changed
+        .wait_timeout(pending, duration)
+        .unwrap_or_else(|error| error.into_inner());
+    pending.is_some() || stop.is_stopped()
+}
+
 /// Tracks which naming workers are currently in flight, so a caller never
 /// accidentally spawns a second one for the same target while the first is
 /// still running.
@@ -190,6 +331,7 @@ pub struct NamingWorkers {
     inference_test_in_flight: bool,
     model_discovery_in_flight: bool,
     restructure_in_flight: HashSet<NodeId>,
+    exact_prompt_workers: HashMap<NodeId, ExactPromptWorker>,
     concurrency_limiter: Arc<InferenceConcurrencyLimiter>,
     automatic_ai_decision: Arc<AtomicU64>,
 }
@@ -294,6 +436,7 @@ impl NamingWorkers {
             inference_test_in_flight: false,
             model_discovery_in_flight: false,
             restructure_in_flight: HashSet::new(),
+            exact_prompt_workers: HashMap::new(),
             concurrency_limiter: Arc::new(InferenceConcurrencyLimiter::new(
                 MAX_CONCURRENT_INFERENCE_JOBS,
             )),
@@ -436,6 +579,78 @@ impl NamingWorkers {
     pub fn session_title_worker_finished(&mut self, pane_id: NodeId, session_id: &str) {
         self.session_title_in_flight
             .remove(&(pane_id, session_id.to_string()));
+    }
+
+    /// At most one owned worker per pane. A newer Enter replaces its pending
+    /// request and wakes it; closing/replacing a pane drops the owner.
+    pub fn spawn_exact_agent_prompt_transcript_worker(
+        &mut self,
+        request: ExactAgentPromptTranscriptRequest,
+    ) -> Result<(), String> {
+        if self
+            .exact_prompt_workers
+            .get(&request.pane_id)
+            .is_some_and(|worker| worker.session_id != request.session_id)
+        {
+            self.exact_prompt_workers.remove(&request.pane_id);
+        }
+        if let Some(worker) = self.exact_prompt_workers.get(&request.pane_id) {
+            let mut pending = worker
+                .state
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            *pending = Some(request);
+            worker.state.changed.notify_one();
+            return Ok(());
+        }
+        let pane_id = request.pane_id;
+        let session_id = request.session_id.clone();
+        let state = Arc::new(ExactPromptWorkerState {
+            pending: Mutex::new(Some(request)),
+            changed: Condvar::new(),
+        });
+        let wake_state = Arc::clone(&state);
+        let body_state = Arc::clone(&state);
+        let events_tx = self.events_tx.clone();
+        let owner = spawn_owned(
+            "ilium-agent-prompt-history",
+            WorkerKind::Cooperative,
+            StopToken::default(),
+            move || {
+                // Hold the predicate mutex while signalling: the worker's
+                // Condvar wait releases this same lock atomically, so owner
+                // cancellation cannot lose its wake between check and wait.
+                let _pending = wake_state
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                wake_state.changed.notify_all();
+            },
+            move |stop| run_exact_prompt_worker(body_state, stop, events_tx),
+        )
+        .map_err(|error| error.to_string())?;
+        self.exact_prompt_workers.insert(
+            pane_id,
+            ExactPromptWorker {
+                session_id,
+                state,
+                _owner: owner,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn cancel_exact_prompt_worker(&mut self, pane_id: NodeId) {
+        self.exact_prompt_workers.remove(&pane_id);
+    }
+
+    pub fn cancel_stale_exact_prompt_workers(
+        &mut self,
+        mut keep: impl FnMut(NodeId, &str) -> bool,
+    ) {
+        self.exact_prompt_workers
+            .retain(|pane_id, worker| keep(*pane_id, &worker.session_id));
     }
 
     /// Spawns a background check of the agent CLI's own session transcript
@@ -615,6 +830,9 @@ impl NamingWorkers {
                     "{}/api/tags",
                     settings.ollama.base_url.trim_end_matches('/')
                 ),
+                ilium_inference::InferenceProviderKind::OpenAi => {
+                    ilium_inference::model_catalog_endpoint(&settings).unwrap_or_default()
+                }
                 _ => provider.label().to_string(),
             };
             let started_at = std::time::Instant::now();

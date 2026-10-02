@@ -457,7 +457,13 @@ impl CostTracker {
 
         let alive: HashSet<NodeId> = input.agent_panes.iter().copied().collect();
         let before = self.panes.len();
-        self.panes.retain(|pane_id, _| alive.contains(pane_id));
+        self.panes.retain(|pane_id, _| {
+            alive.contains(pane_id)
+                && input
+                    .store
+                    .entry(*pane_id)
+                    .is_some_and(|entry| entry.stats.is_some())
+        });
         if self.panes.len() != before {
             panes_changed += 1;
         }
@@ -1153,5 +1159,43 @@ mod tests {
         settings.metric = CostMetric::Quota;
         assert!(tick(&mut tracker, &settings));
         assert_eq!(tracker.overlay().rows[&first].amount, 9.0);
+    }
+    #[test]
+    fn invalidated_transcript_cache_removes_previously_derived_costs() {
+        let (tree, _, first, _) = agent_tree();
+        let mut tracker = CostTracker::default();
+        let mut store = SessionStatsStore::default();
+        store.insert_ready_for_test(first, Arc::new(quota_stats(&[(0, 9.0)], "primary")));
+        let settings = CostSettings {
+            calibration: Calibration::FixedBands,
+            ..quota_settings()
+        };
+        let now = Instant::now();
+        assert!(tracker.tick(&TickInput {
+            settings: &settings,
+            tree: &tree,
+            tree_version: 1,
+            store: &store,
+            agent_panes: &[first],
+            now,
+            now_ms: 0,
+            home: None
+        }));
+        assert!(tracker.panes.contains_key(&first));
+        store.forget(first);
+        assert!(tracker.tick(&TickInput {
+            settings: &settings,
+            tree: &tree,
+            tree_version: 1,
+            store: &store,
+            agent_panes: &[first],
+            now,
+            now_ms: 0,
+            home: None
+        }));
+        assert!(
+            !tracker.panes.contains_key(&first),
+            "old session cost cannot remain after transcript ownership disappears"
+        );
     }
 }

@@ -135,6 +135,23 @@ fn pane_status_snapshot(status: &PaneStatus) -> Value {
                 "completion_unread": agent.completion_unread,
             }),
         },
+        PaneStatus::AgentUnavailable(recovery) => json!({
+            "kind": "agent_unavailable",
+            "agent_class": agent_class_key(&recovery.process.class),
+            "last_known_activity": agent_activity_key(&recovery.last_known_state.activity()),
+            "availability": match recovery.availability {
+                ilium_core::AgentAvailability::Unverified => "unverified",
+                ilium_core::AgentAvailability::ShellForeground => "shell_foreground",
+                ilium_core::AgentAvailability::Exited(_) => "exited",
+            },
+            "exit_outcome": match recovery.availability {
+                ilium_core::AgentAvailability::Exited(outcome) => Some(outcome.label()),
+                _ => None,
+            },
+            "exit_signal_name": recovery.signal_name.as_deref(),
+            "has_verified_session": recovery.session_id.is_some(),
+            "latest_prompt_unavailable": recovery.latest_prompt_unavailable,
+        }),
         PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
         PaneStatus::Board => json!({ "kind": "board" }),
     }
@@ -265,7 +282,7 @@ fn settings_snapshot(app: &App) -> Value {
             "notifications.task_failed", "notifications.suppress_redundant_task_outcomes",
             "notifications.task_coalesce_seconds",
             "triggers.<event_key>",
-            "inference.provider", "inference.title_style", "inference.kilo_gateway.model",
+            "inference.provider", "inference.title_style", "inference.restructure_prompt_token_limit", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
             "inference.openai.url", "inference.openai.api_key", "inference.openai.model",
             "inference.anthropic.url", "inference.anthropic.api_key", "inference.anthropic.model",
@@ -380,6 +397,7 @@ fn settings_snapshot(app: &App) -> Value {
                 ilium_inference::TitleStyle::Labeling => "labeling",
                 ilium_inference::TitleStyle::Summarization => "summarization",
             },
+            "restructure_prompt_token_limit": app.inference_settings.restructure_prompt_token_limit,
             "selected_model": app.inference_settings.selected_model(),
             "kilo_gateway": {
                 "model": app.inference_settings.kilo_gateway.model,

@@ -22,7 +22,10 @@ pub fn decorate_agent_title(activity: AgentActivity, title: &str) -> String {
 pub fn decorate_pane_title(status: &PaneStatus, title: &str) -> String {
     match status {
         PaneStatus::Agent(agent) => decorate_agent_title(agent.activity(), title),
-        PaneStatus::PlainShell | PaneStatus::Editor { .. } | PaneStatus::Board => title.to_string(),
+        PaneStatus::PlainShell
+        | PaneStatus::AgentUnavailable(_)
+        | PaneStatus::Editor { .. }
+        | PaneStatus::Board => title.to_string(),
     }
 }
 
