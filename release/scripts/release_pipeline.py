@@ -345,7 +345,7 @@ def native(arguments):
         command.extend(['--runtime-directory', runtime_root])
     if target['os'] == 'windows':
         vswhere = Path(os.environ['ProgramFiles(x86)']) / 'Microsoft Visual Studio/Installer/vswhere.exe'
-        tools = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-find', 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe'], text=True).splitlines()
+        tools = subprocess.check_output([str(vswhere), '-latest', '-version', '[17.0,18.0)', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-find', 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe'], text=True).splitlines()
         require(len(tools) == 1, 'cannot resolve unique native dumpbin')
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
