@@ -90,6 +90,7 @@ pub struct ClientConfig {
     pub reset_planning: ResetPlanningSettings,
     /// Agent-spend indicators and how "expensive" is decided.
     pub cost: CostSettings,
+    pub onboarding: crate::onboarding::progress::OnboardingProgress,
 }
 
 impl Default for ClientConfig {
@@ -114,6 +115,7 @@ impl Default for ClientConfig {
             api: ApiSettings::default(),
             reset_planning: ResetPlanningSettings::default(),
             cost: CostSettings::default(),
+            onboarding: crate::onboarding::progress::OnboardingProgress::default(),
         }
     }
 }
@@ -1087,6 +1089,8 @@ struct RawClientConfig {
     reset_planning: ResetPlanningSettings,
     #[serde(default)]
     cost: CostSettings,
+    #[serde(default)]
+    onboarding: crate::onboarding::progress::OnboardingProgress,
 }
 
 /// `[keyboard]`'s optional on-disk shape.
@@ -1406,6 +1410,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         api: raw.api,
         reset_planning: raw.reset_planning,
         cost: raw.cost.sanitized(),
+        onboarding: raw.onboarding,
     })
 }
 
@@ -2148,6 +2153,19 @@ pub fn save_session_settings(
     write_toml_document(&path, &document)?;
     Ok(saved)
 }
+/// Saves wizard progress alongside provider settings while retaining every
+/// unrelated table, including server-owned configuration.
+pub fn save_onboarding_progress(
+    config_dir: &Path,
+    progress: &crate::onboarding::progress::OnboardingProgress,
+) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(progress).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "onboarding", value)
+}
+
 fn save_table(config_dir: &Path, name: &str, value: toml::Value) -> Result<(), ClientError> {
     let path = config_dir.join("config.toml");
     let mut document = read_toml_document(&path)?;
@@ -2728,6 +2746,44 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn onboarding_progress_reload_preserves_unrelated_configuration() {
+        let directory = tempfile::tempdir().expect("isolated config directory");
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[future_settings]\nauthored_value = 'keep me'\n[debug]\nfile_logging_enabled = false\n",
+        )
+        .expect("write existing installation");
+        let existing = load(directory.path()).expect("load existing installation");
+        assert!(!existing.onboarding.should_open(false, true));
+        let mut progress = existing.onboarding;
+        progress.begin();
+        progress.choose_ai(crate::onboarding::state::AiChoice::Disabled);
+        save_onboarding_progress(directory.path(), &progress).expect("save partial wizard");
+        let resumed = load(directory.path()).expect("reload partial wizard");
+        assert_eq!(resumed.onboarding, progress);
+        assert!(resumed.onboarding.should_open(false, true));
+        assert!(!resumed.onboarding.automatic_ai_allowed());
+        let document: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).expect("read saved file"))
+                .expect("parse saved file");
+        assert_eq!(
+            document["future_settings"]["authored_value"].as_str(),
+            Some("keep me")
+        );
+        assert_eq!(
+            document["debug"]["file_logging_enabled"].as_bool(),
+            Some(false)
+        );
+        progress.finish();
+        save_onboarding_progress(directory.path(), &progress).expect("save completion");
+        let finished = load(directory.path()).expect("reload finished wizard");
+        assert!(!finished.onboarding.should_open(false, true));
+        assert!(finished.onboarding.should_open(true, true));
+        assert!(!finished.onboarding.automatic_ai_allowed());
+    }
 
     fn scratch_dir() -> std::path::PathBuf {
         let dir = std::env::temp_dir()
@@ -4169,6 +4225,7 @@ mod tests {
 
         let config = load(&dir).expect("valid sound config should load");
         assert_eq!(config.sound.source, ilium_sound::SoundSourceKind::SoundFile);
+        assert_eq!(config.sound.design, ilium_sound::SoundDesign::default());
         assert!(config.sound.events.agent_finished);
         assert!(config.sound.events.approval_required);
         assert!(!config.sound.events.agent_started);
@@ -4187,6 +4244,10 @@ mod tests {
             file: Some(std::path::PathBuf::from(
                 "/usr/share/sounds/freedesktop/stereo/complete.oga",
             )),
+            design: ilium_sound::SoundDesign {
+                pitch_hz: 915,
+                ..ilium_sound::SoundDesign::default()
+            },
             events: ilium_sound::SoundEventSettings {
                 approval_required: true,
                 ..ilium_sound::SoundEventSettings::default()

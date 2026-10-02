@@ -16,6 +16,15 @@ use std::time::{Duration, Instant};
 use ilium_core::{NowSignal, PaneSignals, PaneStatus};
 use serde::{Deserialize, Serialize};
 
+pub mod synthesis;
+pub use synthesis::{
+    render_pcm, render_wav, waveform_preview, SoundDesign, Waveform, WaveformColumn,
+};
+
+/// The attributed GNOME chirping sample is embedded so detached playback
+/// works without a source checkout or a system sound package.
+pub const BUNDLED_CHIRPING_WAV: &[u8] = include_bytes!("../assets/chirping.wav");
+
 /// Upper bound protecting startup from an unexpectedly enormous mounted
 /// sound tree while still comfortably covering normal desktop installations.
 const MAX_DISCOVERED_SOUNDS: usize = 4_096;
@@ -31,13 +40,28 @@ pub enum SoundSourceKind {
     #[default]
     SystemBeep,
     SoundFile,
+    BundledChirping,
+    Generated,
+    Muted,
 }
 
 impl SoundSourceKind {
+    /// Settings cycles every source while preserving the old first toggle.
+    pub const ALL: [Self; 5] = [
+        Self::SystemBeep,
+        Self::SoundFile,
+        Self::BundledChirping,
+        Self::Generated,
+        Self::Muted,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::SystemBeep => "System beep",
             Self::SoundFile => "Sound file",
+            Self::BundledChirping => "Bundled chirping",
+            Self::Generated => "Custom sound",
+            Self::Muted => "Muted",
         }
     }
 }
@@ -139,6 +163,9 @@ impl SoundEventSettings {
 pub struct SoundSettings {
     pub source: SoundSourceKind,
     pub file: Option<PathBuf>,
+    /// Kept when another source is selected so reopening the studio restores
+    /// the authored design. Generated playback normalizes it before rendering.
+    pub design: SoundDesign,
     pub events: SoundEventSettings,
 }
 
@@ -147,6 +174,7 @@ impl Default for SoundSettings {
         Self {
             source: SoundSourceKind::SystemBeep,
             file: None,
+            design: SoundDesign::default(),
             events: SoundEventSettings::default(),
         }
     }
@@ -197,6 +225,8 @@ pub enum SoundError {
     MissingFile(PathBuf),
     #[error("no supported sound player was found on this system")]
     NoPlaybackBackend,
+    #[error("could not prepare private temporary WAV for playback: {0}")]
+    TemporaryWav(std::io::Error),
     #[error("failed to launch {program}: {source}")]
     Launch {
         program: String,
@@ -327,7 +357,23 @@ pub fn play(settings: &SoundSettings) -> Result<(), SoundError> {
                 .ok_or(SoundError::MissingSelectedFile)?;
             play_file(path)
         }
+        SoundSourceKind::BundledChirping => play_wav_bytes(BUNDLED_CHIRPING_WAV),
+        SoundSourceKind::Generated => play_wav_bytes(&render_wav(&settings.design)),
+        SoundSourceKind::Muted => Ok(()),
     }
+}
+
+/// A private, short-lived WAV path is needed by the existing platform
+/// players, especially Windows SoundPlayer. The temp directory outlives the
+/// synchronous player process and is removed after that process exits.
+fn play_wav_bytes(bytes: &[u8]) -> Result<(), SoundError> {
+    let directory = tempfile::Builder::new()
+        .prefix("ilium-sound-")
+        .tempdir()
+        .map_err(SoundError::TemporaryWav)?;
+    let path = directory.path().join("sound.wav");
+    std::fs::write(&path, bytes).map_err(SoundError::TemporaryWav)?;
+    play_file(&path)
 }
 
 fn collect_sounds(
@@ -945,6 +991,33 @@ mod tests {
             absolute_directory(Some(absolute.clone())),
             Some(PathBuf::from(absolute))
         );
+    }
+
+    #[test]
+    fn bundled_sample_is_an_embedded_pcm_wave() {
+        assert_eq!(&BUNDLED_CHIRPING_WAV[..4], b"RIFF");
+        assert_eq!(&BUNDLED_CHIRPING_WAV[8..12], b"WAVE");
+        assert_eq!(
+            u16::from_le_bytes([BUNDLED_CHIRPING_WAV[20], BUNDLED_CHIRPING_WAV[21]]),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes([BUNDLED_CHIRPING_WAV[22], BUNDLED_CHIRPING_WAV[23]]),
+            2
+        );
+        assert_eq!(
+            u32::from_le_bytes(BUNDLED_CHIRPING_WAV[24..28].try_into().unwrap()),
+            44_100
+        );
+    }
+
+    #[test]
+    fn muted_source_has_no_playback_side_effect() {
+        let settings = SoundSettings {
+            source: SoundSourceKind::Muted,
+            ..SoundSettings::default()
+        };
+        assert!(play(&settings).is_ok());
     }
 
     #[test]

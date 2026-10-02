@@ -868,6 +868,11 @@ pub enum ClientRequest {
         pane_id: NodeId,
         command_line: String,
     },
+    /// Previews an unsaved sound-studio draft through the detached server.
+    /// Appended to preserve every earlier bincode request discriminant.
+    PreviewSoundSettings {
+        settings: SoundSettings,
+    },
 }
 
 impl ClientRequest {
@@ -898,6 +903,7 @@ impl ClientRequest {
             Self::CreateSplitView { .. } => "create_split_view",
             Self::UpdateSoundSettings { .. } => "update_sound_settings",
             Self::PreviewSound { .. } => "preview_sound",
+            Self::PreviewSoundSettings { .. } => "preview_sound_settings",
             Self::SchedulePaneInput { .. } => "schedule_pane_input",
             Self::EnqueuePrompt { .. } => "enqueue_prompt",
             Self::ClearPromptQueue { .. } => "clear_prompt_queue",

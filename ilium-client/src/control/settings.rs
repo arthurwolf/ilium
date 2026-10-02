@@ -415,13 +415,16 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 match normalized(string(&value)?).as_str() {
                     "system_beep" | "beep" => SoundSourceKind::SystemBeep,
                     "sound_file" | "file" => SoundSourceKind::SoundFile,
+                    "bundled_chirping" | "bundled" => SoundSourceKind::BundledChirping,
+                    "generated" | "custom" => SoundSourceKind::Generated,
+                    "muted" | "off" => SoundSourceKind::Muted,
                     _ => return Err(
                         ilium_prompts::voice::VOICE_SETTINGS_SOUND_SOURCE_MUST_BE_SYSTEM_BEEP_OR
                             .to_owned(),
                     ),
                 };
             if app.sound_settings.source != target {
-                app.settings_toggle_sound_source();
+                app.settings_select_sound_source(target);
             }
         }
         "sound.file" => {

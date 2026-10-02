@@ -287,6 +287,12 @@ mod tests {
                 source: SoundSourceKind::SoundFile,
                 file: Some(PathBuf::from("/usr/share/sounds/example.oga")),
             },
+            ClientRequest::PreviewSoundSettings {
+                settings: SoundSettings {
+                    source: SoundSourceKind::Generated,
+                    ..SoundSettings::default()
+                },
+            },
             ClientRequest::SchedulePaneInput {
                 pane_id: NodeId(2),
                 delay_seconds: 3661,

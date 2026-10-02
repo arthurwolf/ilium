@@ -1,9 +1,8 @@
-//! Builds a bounded project-context prompt and persists one LLM-suggested name.
+//! Builds a bounded project-context prompt and names a project.
 //!
-//! `bootstrap_project_name` is called once during session boot. It reads the
-//! project config first and therefore never contacts an inference provider when a name
-//! already exists; only the missing-name path collects context and calls the
-//! injected generator.
+//! Direct `bootstrap_project_name` callers retain the persisting workflow.
+//! Background workers use a proposal-only path so the event loop can reject
+//! stale or opted-out results before writing project configuration.
 
 use std::path::Path;
 
@@ -64,7 +63,19 @@ pub fn load_stored_project_icon(cwd: &Path) -> anyhow::Result<Option<String>> {
 }
 
 /// Loads a stored name, or calls the selected provider exactly once to infer and save it.
+/// Kept as the public, persisting workflow for existing direct callers.
 pub fn bootstrap_project_name<G: PromptCompletionClient>(
+    cwd: &Path,
+    generator: &G,
+) -> anyhow::Result<ProjectNameBootstrap> {
+    let proposal = infer_project_name_without_persisting(cwd, generator)?;
+    persist_inferred_project_name(cwd, proposal)
+}
+
+/// Computes one project-name proposal without writing project configuration.
+/// Background workers use this so a late result can be rejected by the
+/// client event loop before *any* inferred name reaches disk.
+pub(crate) fn infer_project_name_without_persisting<G: PromptCompletionClient>(
     cwd: &Path,
     generator: &G,
 ) -> anyhow::Result<ProjectNameBootstrap> {
@@ -91,15 +102,40 @@ pub fn bootstrap_project_name<G: PromptCompletionClient>(
         parse_project_name_response,
     )?;
 
-    project_config::update(cwd, |config| {
-        config.project_name = Some(project_name.clone());
-        config.project_icon = Some(icon.clone());
-    })?;
     Ok(ProjectNameBootstrap {
         project_name,
         icon: Some(icon),
         source: ProjectNameSource::Inferred,
     })
+}
+
+/// Commits an accepted inference after the event loop checks the current AI
+/// decision and the worker's generation. A valid name written by another
+/// client while inference was in flight wins under the project-config lock.
+pub(crate) fn persist_inferred_project_name(
+    cwd: &Path,
+    proposal: ProjectNameBootstrap,
+) -> anyhow::Result<ProjectNameBootstrap> {
+    if proposal.source == ProjectNameSource::Stored {
+        return Ok(proposal);
+    }
+    let mut accepted = proposal.clone();
+    project_config::update(cwd, |config| {
+        if let Some(project_name) = stored_project_name(config) {
+            accepted = ProjectNameBootstrap {
+                project_name,
+                icon: config
+                    .project_icon
+                    .as_deref()
+                    .and_then(naming::normalize_icon),
+                source: ProjectNameSource::Stored,
+            };
+        } else {
+            config.project_name = Some(proposal.project_name.clone());
+            config.project_icon = proposal.icon.clone();
+        }
+    })?;
+    Ok(accepted)
 }
 
 #[derive(Debug, Serialize)]
@@ -267,6 +303,47 @@ mod tests {
             project_config::load(&cwd).unwrap().project_name.as_deref(),
             Some("Stellar Tools")
         );
+    }
+
+    #[test]
+    fn inference_only_has_no_project_config_side_effect_until_commit() {
+        let cwd = scratch_dir();
+        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools","icon":"✨"}"#);
+
+        let proposal = infer_project_name_without_persisting(&cwd, &generator).unwrap();
+
+        assert_eq!(proposal.source, ProjectNameSource::Inferred);
+        assert_eq!(generator.calls.get(), 1);
+        assert!(!cwd.join(".ilium/config.yaml").exists());
+        assert_eq!(project_config::load(&cwd).unwrap().project_name, None);
+
+        let committed = persist_inferred_project_name(&cwd, proposal).unwrap();
+        assert_eq!(committed.source, ProjectNameSource::Inferred);
+        assert_eq!(
+            project_config::load(&cwd).unwrap().project_name.as_deref(),
+            Some("Stellar Tools")
+        );
+    }
+
+    #[test]
+    fn commit_preserves_a_valid_name_written_during_inference() {
+        let cwd = scratch_dir();
+        let generator = FakeGenerator::new(r#"{"project_name":"Stellar Tools","icon":"✨"}"#);
+        let proposal = infer_project_name_without_persisting(&cwd, &generator).unwrap();
+        project_config::update(&cwd, |config| {
+            config.project_name = Some("User Choice".to_string());
+            config.project_icon = Some("🧭".to_string());
+        })
+        .unwrap();
+
+        let accepted = persist_inferred_project_name(&cwd, proposal).unwrap();
+
+        assert_eq!(accepted.source, ProjectNameSource::Stored);
+        assert_eq!(accepted.project_name, "User Choice");
+        assert_eq!(accepted.icon.as_deref(), Some("🧭"));
+        let saved = project_config::load(&cwd).unwrap();
+        assert_eq!(saved.project_name.as_deref(), Some("User Choice"));
+        assert_eq!(saved.project_icon.as_deref(), Some("🧭"));
     }
 
     #[test]

@@ -946,7 +946,18 @@ fn render_header(frame: &mut Frame, area: Rect) {
             Style::new().add_modifier(Modifier::DIM),
         ));
         frame.render_widget(Paragraph::new(hint), hint_area);
+        frame.render_widget(
+            Paragraph::new("[ Guided setup ]").style(theme::selected_style()),
+            onboarding_button_area(area),
+        );
     }
+}
+
+pub fn onboarding_button_area(header: Rect) -> Rect {
+    if header.height < 2 || header.width < 20 {
+        return Rect::default();
+    }
+    Rect::new(header.right() - 16, header.y + 1, 16, 1)
 }
 
 /// The header row's `CLOSE_LABEL` button rect, right-aligned exactly as
@@ -2909,7 +2920,7 @@ fn sound_row_label(row: SoundRow) -> &'static str {
 
 fn sound_row_description(row: SoundRow) -> &'static str {
     match row {
-        SoundRow::Source => "Use the operating system beep or a discovered sound file.",
+        SoundRow::Source => "Choose a bundled, system or custom sound, or mute notifications.",
         SoundRow::File => "Left/Right cycles through files found in the folders listed below.",
         SoundRow::Preview => "Play the current choice once through the detached server.",
         SoundRow::AgentFinished => "A busy agent completed its turn and is waiting for you.",
@@ -4982,17 +4993,20 @@ mod tests {
                 }
                 SettingsTab::Cost => {
                     // A calibration's parameter row exists only while it is chosen.
-                    for calibration in crate::cost_model::Calibration::ALL {
-                        app.cost_settings.calibration = calibration;
-                        let state = SettingsState {
-                            tab,
-                            ..SettingsState::default()
-                        };
-                        reachable.extend(
-                            settings_help_anchors(&layout, &app, &state)
-                                .into_iter()
-                                .map(|anchor| anchor.topic_id),
-                        );
+                    for metric in crate::cost_model::CostMetric::ALL {
+                        app.cost_settings.metric = metric;
+                        for calibration in crate::cost_model::Calibration::ALL {
+                            app.cost_settings.calibration = calibration;
+                            let state = SettingsState {
+                                tab,
+                                ..SettingsState::default()
+                            };
+                            reachable.extend(
+                                settings_help_anchors(&layout, &app, &state)
+                                    .into_iter()
+                                    .map(|anchor| anchor.topic_id),
+                            );
+                        }
                     }
                 }
                 SettingsTab::Icons => {

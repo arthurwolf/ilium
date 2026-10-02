@@ -5452,13 +5452,14 @@ mod cost_indicator_tests {
     fn row_cost(level: usize, usd: f64) -> RowCost {
         RowCost {
             level: Some(CostLevel::new(level)),
-            usd,
+            amount: usd,
             is_lower_bound: false,
-            burn_usd_per_hour: 0.0,
+            burn_per_hour: 0.0,
             spark: "▁▃█".to_owned(),
             is_spike: false,
             is_over_budget: false,
             is_loading: false,
+            is_unavailable: false,
         }
     }
 
@@ -5748,7 +5749,7 @@ mod cost_indicator_tests {
         settings.adjust(CostRow::Visibility(CostDisplay::HeaderTotal), 0);
         let mut cost = overlay(settings, &[(fixture.shell, row_cost(1, 52.3))]);
         cost.agent_count = 1;
-        cost.total_usd = 52.3;
+        cost.total_amount = 52.3;
         let (buffer, _) = render_frame(
             &fixture.tree,
             TreeHoverState::default(),
@@ -5772,7 +5773,11 @@ mod cost_indicator_tests {
                 (fixture.second_shell, row_cost(3, 30.0)),
             ],
         );
-        cost.ranks = cost.rows.iter().map(|(id, row)| (*id, row.usd)).collect();
+        cost.ranks = cost
+            .rows
+            .iter()
+            .map(|(id, row)| (*id, row.amount))
+            .collect();
         let (_, manual) = render_frame(
             &fixture.tree,
             TreeHoverState::default(),

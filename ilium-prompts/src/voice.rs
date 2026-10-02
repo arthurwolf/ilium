@@ -1,5 +1,10 @@
 //! Authored model-facing voice control text, compiled from editable templates.
 
+pub const ONBOARDING_LIGHTBULB: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/voice/onboarding-lightbulb.hbs"
+));
+
 pub const VOICE_MOD_SYSTEM_INSTRUCTIONS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/mod/system-instructions.hbs"
@@ -780,6 +785,7 @@ pub const VOICE_SETTINGS_VAD_EAGERNESS_MUST_BE_AUTO_LOW_MEDIUM: &str = include_s
 ));
 
 pub const TEMPLATES: &[(&str, &str)] = &[
+    ("voice/onboarding-lightbulb", ONBOARDING_LIGHTBULB),
     (
         "voice/mod/system-instructions",
         VOICE_MOD_SYSTEM_INSTRUCTIONS,

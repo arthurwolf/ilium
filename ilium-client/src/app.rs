@@ -1725,6 +1725,12 @@ pub struct App {
     pub right_panel_target: RightPanelTarget,
     pub focus: FocusTarget,
     pub mode: Mode,
+    pub onboarding: Option<crate::onboarding::screen::WizardUi>,
+    pub onboarding_progress: crate::onboarding::progress::OnboardingProgress,
+    /// Invalidates results started under an earlier AI choice or provider.
+    pub onboarding_revision: u64,
+    pub(crate) project_name_attempt_revision: Option<u64>,
+    pub(crate) onboarding_voice_suspended: bool,
     /// Suspended parent layers, ordered from the oldest visible layer to the
     /// immediate parent of `mode`. Input always targets `mode`; rendering
     /// walks this stack first so nested dialogs never erase their parents.
@@ -1855,6 +1861,7 @@ pub struct App {
     /// status bar, this remains readable while Settings owns the full screen.
     pub inference_test_state: InferenceTestState,
     pub inference_test_result: Option<crate::inference_test::InferenceTestResult>,
+    inference_test_settings: Option<InferenceSettings>,
     /// Where to write `config.toml` when a setting changes -- `None` when
     /// `crate::paths::config_dir` couldn't be resolved at startup, in which
     /// case settings changes still apply live but can't be persisted (see
@@ -2184,6 +2191,11 @@ impl App {
             right_panel_target: RightPanelTarget::Empty,
             focus: FocusTarget::Pane,
             mode: Mode::Normal,
+            onboarding: None,
+            onboarding_progress: Default::default(),
+            onboarding_revision: 0,
+            project_name_attempt_revision: None,
+            onboarding_voice_suspended: false,
             modal_stack: Vec::new(),
             status_message: None,
             pending_terminal_link: None,
@@ -2255,6 +2267,7 @@ impl App {
             model_discovery: ModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
             inference_test_result: None,
+            inference_test_settings: None,
             config_dir: None,
             agent_setup_home_dir: None,
             pointer_position: None,
@@ -5074,7 +5087,8 @@ impl App {
 
     /// Opens the next queued offer only when no other interaction owns input.
     pub fn maybe_show_agent_setup_prompt(&mut self) {
-        if !self.is_initial_state_sync_complete
+        if self.onboarding.is_some()
+            || !self.is_initial_state_sync_complete
             || !self.is_agent_setup_policy_available
             || !matches!(self.mode, Mode::Normal)
         {
@@ -5281,6 +5295,22 @@ impl App {
     }
 
     pub fn apply_and_persist_inference_settings(&mut self, inference: InferenceSettings) {
+        if self.inference_settings != inference {
+            self.onboarding_revision = self.onboarding_revision.wrapping_add(1);
+            self.inference_test_result = None;
+            // Keep an in-flight test owned until its result arrives, but never
+            // display an earlier outcome as proof of the newly edited settings.
+            if !self.inference_test_state.is_loading() {
+                self.inference_test_state = InferenceTestState::Idle;
+            }
+        }
+        if self.inference_settings.ollama.base_url != inference.ollama.base_url {
+            // Catalogs belong to one daemon; a URL edit must not reuse its models.
+            self.ollama_models.clear();
+            if !self.model_discovery.is_loading() {
+                self.model_discovery = ModelDiscoveryState::Idle;
+            }
+        }
         self.inference_settings = inference;
         if let Some(config_dir) = self.config_dir.clone() {
             if let Err(error) =
@@ -5374,6 +5404,7 @@ impl App {
             return;
         }
         self.pending_inference_test = true;
+        self.inference_test_settings = Some(self.inference_settings.clone());
         self.inference_test_result = None;
         self.inference_test_state = InferenceTestState::Running {
             provider: self.inference_settings.selected_provider,
@@ -5390,6 +5421,16 @@ impl App {
         elapsed: Duration,
         result: anyhow::Result<crate::inference_test::InferenceTestResult>,
     ) {
+        if self.inference_test_settings.take().as_ref() != Some(&self.inference_settings) {
+            self.inference_test_result = None;
+            self.inference_test_state = InferenceTestState::Failed {
+                provider,
+                error: "Settings changed during the test; test again".to_string(),
+                elapsed,
+            };
+            self.status_message = Some("Inference settings changed; test again".to_string());
+            return;
+        }
         match result {
             Ok(result) => {
                 self.inference_test_result = Some(result);
@@ -5453,6 +5494,25 @@ impl App {
         elapsed: Duration,
         result: Result<Vec<String>, String>,
     ) {
+        if provider == ilium_inference::InferenceProviderKind::Ollama
+            && endpoint
+                != format!(
+                    "{}/api/tags",
+                    self.inference_settings
+                        .ollama
+                        .base_url
+                        .trim_end_matches('/')
+                )
+        {
+            self.model_discovery = ModelDiscoveryState::Failed {
+                provider,
+                endpoint,
+                error: "Ollama URL changed during discovery; refresh again".to_string(),
+                elapsed,
+            };
+            self.status_message = Some("Ollama URL changed; refresh models again".to_string());
+            return;
+        }
         match result {
             Ok(models) => {
                 let model_count = match provider {
@@ -5554,7 +5614,7 @@ impl App {
     /// Applies, persists, and sends one live update to the current detached
     /// server. Other project servers observe the atomic config-file change
     /// through their owned watchers.
-    fn apply_and_persist_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
+    pub(crate) fn apply_and_persist_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
         self.sound_settings = sound;
         if let Some(config_dir) = self.config_dir.clone() {
             if let Err(error) =
@@ -5568,22 +5628,28 @@ impl App {
         });
     }
 
-    /// Switches between the portable system beep and a discovered sound file.
+    /// Cycles every source; the first legacy toggle still selects a file.
     pub fn settings_toggle_sound_source(&mut self) {
         let mut sound = self.sound_settings.clone();
-        sound.source = match sound.source {
-            ilium_sound::SoundSourceKind::SystemBeep => {
-                if sound.file.is_none() {
-                    sound.file = self
-                        .sound_discovery
-                        .sounds
-                        .first()
-                        .map(|entry| entry.path.clone());
-                }
-                ilium_sound::SoundSourceKind::SoundFile
-            }
-            ilium_sound::SoundSourceKind::SoundFile => ilium_sound::SoundSourceKind::SystemBeep,
-        };
+        let sources = ilium_sound::SoundSourceKind::ALL;
+        let current_index = sources
+            .iter()
+            .position(|source| *source == sound.source)
+            .unwrap_or(0);
+        sound.source = sources[(current_index + 1) % sources.len()];
+        self.settings_select_sound_source(sound.source);
+    }
+
+    pub fn settings_select_sound_source(&mut self, source: ilium_sound::SoundSourceKind) {
+        let mut sound = self.sound_settings.clone();
+        sound.source = source;
+        if sound.source == ilium_sound::SoundSourceKind::SoundFile && sound.file.is_none() {
+            sound.file = self
+                .sound_discovery
+                .sounds
+                .first()
+                .map(|entry| entry.path.clone());
+        }
         self.apply_and_persist_sound_settings(sound);
     }
 
@@ -5641,9 +5707,12 @@ impl App {
                 Some("Cannot preview: select an available sound file first".to_string());
             return;
         }
-        self.queue_request(ClientRequest::PreviewSound {
-            source: self.sound_settings.source,
-            file: self.sound_settings.file.clone(),
+        if self.sound_settings.source == ilium_sound::SoundSourceKind::Muted {
+            self.status_message = Some("Sound is muted".to_string());
+            return;
+        }
+        self.queue_request(ClientRequest::PreviewSoundSettings {
+            settings: self.sound_settings.clone(),
         });
         self.status_message = Some("Playing sound preview".to_string());
     }
@@ -10793,6 +10862,9 @@ impl App {
     /// event stream owns detection, this method owns only action selection,
     /// and the existing pending-work outboxes retain async worker ownership.
     pub fn handle_trigger_occurrence(&mut self, occurrence: TriggerOccurrence) {
+        if self.onboarding.is_some() || !self.onboarding_progress.automatic_ai_allowed() {
+            return;
+        }
         let actions = self.trigger_settings.actions_for(occurrence.event).to_vec();
         if let Some(pane_id) = occurrence.pane_id {
             self.record_agent_debug_event(
@@ -11374,6 +11446,14 @@ impl App {
             job.state = ProjectRestructureState::Failed(message.clone());
         }
         self.status_message = Some(format!("Server error: {message}"));
+        self.refresh_structure_loading();
+    }
+
+    /// Drops an in-flight plan invalidated by an AI decision change.
+    /// Cancellation must not enter failure memory, so a later opt-in can
+    /// request a fresh plan with the same input.
+    pub fn cancel_project_restructure_after_ai_decision(&mut self, project_id: NodeId) {
+        self.project_restructure_jobs.remove(&project_id);
         self.refresh_structure_loading();
     }
 
@@ -13245,6 +13325,34 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_ollama_catalog_cannot_change_models_after_a_url_edit() {
+        let mut app = app();
+        app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
+        app.ollama_models = vec!["old-daemon-model".to_string()];
+        let old_endpoint = format!(
+            "{}/api/tags",
+            app.inference_settings.ollama.base_url.trim_end_matches('/')
+        );
+        app.request_model_refresh();
+        let mut settings = app.inference_settings.clone();
+        settings.ollama.base_url = "http://127.0.0.1:12345".to_string();
+        settings.ollama.model = "new-daemon-model".to_string();
+        app.apply_and_persist_inference_settings(settings);
+        app.finish_model_discovery(
+            ilium_inference::InferenceProviderKind::Ollama,
+            old_endpoint,
+            Duration::from_millis(10),
+            Ok(vec!["old-daemon-model".to_string()]),
+        );
+        assert!(app.ollama_models.is_empty());
+        assert_eq!(app.inference_settings.ollama.model, "new-daemon-model");
+        assert!(matches!(
+            app.model_discovery,
+            ModelDiscoveryState::Failed { .. }
+        ));
+    }
+
+    #[test]
     fn ollama_discovery_selects_a_returned_model_and_keeps_the_spinner_active() {
         let mut app = app();
         app.settings_select_inference_provider(ilium_inference::InferenceProviderKind::Ollama);
@@ -13314,6 +13422,47 @@ mod tests {
             .contains(&"stepfun/step-3.7-flash:free".to_string()));
         app.settings_adjust_kilo_gateway_model(1);
         assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
+    }
+
+    #[test]
+    fn onboarding_inference_test_never_accepts_results_for_changed_settings() {
+        let mut app = app();
+        let provider = app.inference_settings.selected_provider;
+        app.request_inference_test();
+        let mut edited = app.inference_settings.clone();
+        edited.ollama.model = "changed-model".to_string();
+        app.apply_and_persist_inference_settings(edited);
+        app.finish_inference_test(
+            provider,
+            Duration::from_millis(10),
+            Ok(crate::inference_test::InferenceTestResult {
+                groups: Vec::new(),
+                elapsed: Duration::ZERO,
+            }),
+        );
+        assert!(matches!(
+            app.inference_test_state,
+            InferenceTestState::Failed { .. }
+        ));
+        assert!(app.inference_test_result.is_none());
+        app.request_inference_test();
+        app.finish_inference_test(
+            provider,
+            Duration::from_millis(10),
+            Ok(crate::inference_test::InferenceTestResult {
+                groups: Vec::new(),
+                elapsed: Duration::ZERO,
+            }),
+        );
+        assert!(matches!(
+            app.inference_test_state,
+            InferenceTestState::Succeeded { .. }
+        ));
+        let mut edited = app.inference_settings.clone();
+        edited.ollama.model = "another-model".to_string();
+        app.apply_and_persist_inference_settings(edited);
+        assert!(matches!(app.inference_test_state, InferenceTestState::Idle));
+        assert!(app.inference_test_result.is_none());
     }
 
     #[test]
@@ -18082,6 +18231,23 @@ mod tests {
 
         assert!(matches!(app.mode, Mode::Normal));
         assert!(app.pending_agent_setup_prompts.is_empty());
+    }
+
+    #[test]
+    fn onboarding_defers_other_startup_offers_without_losing_them() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("setup-test".into(), project.path().to_path_buf());
+        app.is_initial_state_sync_complete = true;
+        app.is_agent_setup_policy_available = true;
+        app.onboarding = Some(Default::default());
+        app.pending_agent_setup_prompts
+            .push_back(crate::setup_prompt::SetupPromptScope::Project(
+                project.path().to_path_buf(),
+            ));
+        app.maybe_show_agent_setup_prompt();
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.pending_agent_setup_prompts.len(), 1);
+        assert!(!project.path().join("CLAUDE.md").exists());
     }
 
     #[test]

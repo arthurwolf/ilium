@@ -40,6 +40,9 @@ fn is_escape(event: &Event) -> bool {
 /// Top-level per-mode dispatch, called for every non-mouse `Event` (key
 /// presses, resizes are handled by the caller before reaching here).
 pub fn handle_event(app: &mut App, event: Event) {
+    if crate::onboarding::integration::handle_event(app, &event) {
+        return;
+    }
     if matches!(&event, Event::Key(key) if is_press(key) && key.code == KeyCode::Esc)
         && app
             .agent_popover
@@ -2184,6 +2187,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     };
     if !is_press(key) {
         app.mode = Mode::Settings(state);
+        return;
+    }
+    if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.mode = Mode::Settings(state);
+        crate::onboarding::integration::open(app, true);
         return;
     }
     state.animation_slider_drag = None;

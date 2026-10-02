@@ -43,9 +43,11 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
     let layout = app.layout;
 
     draw_base_layer(frame, area, app);
-    crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
-    draw_voice_control(frame, layout.voice_control_area, app);
-    if app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
+    if app.onboarding.is_none() {
+        crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
+        draw_voice_control(frame, layout.voice_control_area, app);
+    }
+    if app.onboarding.is_none() && app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
         draw_status_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
@@ -389,6 +391,10 @@ fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::
 /// Draws the one full-screen root behind every stacked overlay. Settings and
 /// Search replace the ordinary workspace only when they are the oldest layer.
 fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.onboarding.is_some() {
+        crate::onboarding::integration::render(frame, area, app);
+        return;
+    }
     let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
     if let Mode::Search(state) = root_mode {
         search_ui::render(frame, area, state, &app.ui_settings.icons);
@@ -601,7 +607,11 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             modal::render_text_prompt(frame, area, "Run command", state, "Run");
         }
         Mode::InferenceSettingPrompt(field, state) => {
-            modal::render_text_prompt(frame, area, field.label(), state, "Apply");
+            if matches!(field, crate::app::InferenceSettingField::OpenAiApiKey | crate::app::InferenceSettingField::AnthropicApiKey | crate::app::InferenceSettingField::OpenRouterApiKey) {
+                modal::render_masked_text_prompt(frame, area, field.label(), state, "Apply");
+            } else {
+                modal::render_text_prompt(frame, area, field.label(), state, "Apply");
+            }
         }
         Mode::VoiceSettingPrompt(field, state) => {
             modal::render_masked_text_prompt(frame, area, field.label(), state, "Replace");

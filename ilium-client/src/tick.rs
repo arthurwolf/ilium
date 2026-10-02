@@ -84,10 +84,21 @@ pub fn apply_naming_worker_event(
     event: NamingWorkerEvent,
 ) {
     match event {
-        NamingWorkerEvent::ProjectName(result) => {
+        NamingWorkerEvent::ProjectName { decision, result } => {
             workers.project_name_worker_finished();
             app.is_project_name_loading = false;
-            match result {
+            if app.onboarding.is_some()
+                || !app.onboarding_progress.automatic_ai_allowed()
+                || !workers.is_current_automatic_ai_decision(decision)
+            {
+                tracing::debug!("discarding project name after AI decision changed");
+                return;
+            }
+            // The worker only computed a proposal. This synchronous commit is
+            // serialized with the event loop's onboarding decision changes.
+            match result.and_then(|proposal| {
+                crate::project_naming::persist_inferred_project_name(&app.session_cwd, proposal)
+            }) {
                 Ok(bootstrap) => {
                     tracing::info!(
                         project_name = %bootstrap.project_name,
@@ -118,6 +129,7 @@ pub fn apply_naming_worker_event(
                 raw_response,
                 result,
                 trigger,
+                automatic_ai_decision,
             } = outcome;
             workers.session_title_worker_finished(pane_id, &session_id);
             if app.agent_session_ids.get(&pane_id) == Some(&session_id)
@@ -166,6 +178,12 @@ pub fn apply_naming_worker_event(
                 // clear would wait forever for a completion event that,
                 // for this pane_id, never lands again.
                 refire_pending_manual_retitle(app, pane_id);
+                return;
+            }
+            if app.onboarding.is_some()
+                || !app.onboarding_progress.automatic_ai_allowed()
+                || !workers.is_current_automatic_ai_decision(automatic_ai_decision)
+            {
                 return;
             }
             match result {
@@ -271,10 +289,16 @@ pub fn apply_naming_worker_event(
                 }
             }
         }
-        NamingWorkerEvent::TerminalTitle(pane_id, result, trigger) => {
+        NamingWorkerEvent::TerminalTitle(pane_id, result, trigger, automatic_ai_decision) => {
             workers.terminal_title_worker_finished(pane_id);
             app.titles_loading.remove(&pane_id);
             refire_pending_manual_retitle(app, pane_id);
+            if app.onboarding.is_some()
+                || !app.onboarding_progress.automatic_ai_allowed()
+                || !workers.is_current_automatic_ai_decision(automatic_ai_decision)
+            {
+                return;
+            }
             match result {
                 Ok(title) => {
                     tracing::info!(
@@ -373,9 +397,17 @@ pub fn apply_naming_worker_event(
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
                 inference_activity_revisions,
+                automatic_ai_decision,
                 result,
             } = outcome;
             workers.restructure_worker_finished(project_id);
+            if app.onboarding.is_some()
+                || !app.onboarding_progress.automatic_ai_allowed()
+                || !workers.is_current_automatic_ai_decision(automatic_ai_decision)
+            {
+                app.cancel_project_restructure_after_ai_decision(project_id);
+                return;
+            }
             match &result {
                 Ok(_) => tracing::info!(?project_id, "project restructure inference completed"),
                 Err(error) => tracing::error!(
@@ -448,6 +480,100 @@ mod tests {
     use crate::naming::DualTitle;
 
     #[test]
+    fn project_name_result_after_ai_opt_out_does_not_write_or_publish() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
+        app.is_project_name_loading = true;
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+        let old_decision = crate::naming_workers::AutomaticAiDecision::new(0, true);
+        app.onboarding_progress.begin();
+        app.onboarding_progress
+            .choose_ai(crate::onboarding::state::AiChoice::Disabled);
+        app.onboarding_progress.finish();
+        app.onboarding_revision = 1;
+        workers.set_automatic_ai_decision(1, false);
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::ProjectName {
+                decision: old_decision,
+                result: Ok(crate::project_naming::ProjectNameBootstrap {
+                    project_name: "Unwanted Name".to_string(),
+                    icon: Some("✦".to_string()),
+                    source: crate::project_naming::ProjectNameSource::Inferred,
+                }),
+            },
+        );
+
+        assert!(!app.is_project_name_loading);
+        assert_eq!(app.project_name, None);
+        assert_eq!(app.project_icon, None);
+        assert!(!cwd.path().join(".ilium/config.yaml").exists());
+    }
+
+    #[test]
+    fn reenabled_ai_still_rejects_an_old_project_name_result() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+        let old_decision = crate::naming_workers::AutomaticAiDecision::new(0, true);
+        workers.set_automatic_ai_decision(1, false);
+        workers.set_automatic_ai_decision(2, true);
+        app.onboarding_revision = 2;
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::ProjectName {
+                decision: old_decision,
+                result: Ok(crate::project_naming::ProjectNameBootstrap {
+                    project_name: "Old Provider Name".to_string(),
+                    icon: Some("✦".to_string()),
+                    source: crate::project_naming::ProjectNameSource::Inferred,
+                }),
+            },
+        );
+
+        assert_eq!(app.project_name, None);
+        assert!(!cwd.path().join(".ilium/config.yaml").exists());
+    }
+
+    #[test]
+    fn accepted_project_name_result_commits_before_publication() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
+        app.is_project_name_loading = true;
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::ProjectName {
+                decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
+                result: Ok(crate::project_naming::ProjectNameBootstrap {
+                    project_name: "Accepted Name".to_string(),
+                    icon: Some("✦".to_string()),
+                    source: crate::project_naming::ProjectNameSource::Inferred,
+                }),
+            },
+        );
+
+        assert!(!app.is_project_name_loading);
+        assert_eq!(app.project_name.as_deref(), Some("Accepted Name"));
+        assert_eq!(app.project_icon.as_deref(), Some("✦"));
+        let saved = crate::project_config::load(cwd.path()).unwrap();
+        assert_eq!(saved.project_name.as_deref(), Some("Accepted Name"));
+        assert_eq!(saved.project_icon.as_deref(), Some("✦"));
+    }
+
+    #[test]
     fn fresh_session_title_completion_refires_a_queued_manual_retitle() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -490,6 +616,7 @@ mod tests {
                     long: "The Now-Superseded Automatic Title".to_string(),
                 }),
                 trigger: TitleTrigger::Automatic,
+                automatic_ai_decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
             }),
         );
 
@@ -536,6 +663,7 @@ mod tests {
                     long: "Title From The Previous Agent Session".to_string(),
                 }),
                 trigger: TitleTrigger::Manual,
+                automatic_ai_decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
             }),
         );
 
@@ -576,6 +704,7 @@ mod tests {
                     long: "Build Persisted Agent Debug Timeline".to_string(),
                 }),
                 trigger: TitleTrigger::Automatic,
+                automatic_ai_decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
             }),
         );
 

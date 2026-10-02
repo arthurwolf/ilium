@@ -84,6 +84,7 @@ pub mod modal;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+pub mod onboarding;
 pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
@@ -176,6 +177,8 @@ pub const AGENT_SETUP_HOME_ENV: &str = "ILIUM_AGENT_SETUP_HOME";
 /// Everything [`run`] needs to attach to one already-running
 /// `ilium-server` session and start rendering it.
 pub struct RunOptions {
+    /// Explicit guided-setup request from `--onboarding`.
+    pub onboarding: bool,
     pub session_name: String,
     pub session_cwd: PathBuf,
     /// The CLI resolves the project-scoped session socket before handing
@@ -387,6 +390,10 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     // the settings screen (`crate::app::Mode::Settings`) needs it later to
     // persist a change (`crate::config::save_ui_settings`).
     let config_dir_result = crate::paths::config_dir();
+    let config_exists = config_dir_result
+        .as_ref()
+        .ok()
+        .is_some_and(|path| path.join("config.toml").exists());
     let file_logging_enabled_hint = config_dir_result
         .as_ref()
         .ok()
@@ -400,8 +407,17 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
     ilium_logging::install_panic_logging();
     let (mut config, config_dir, is_agent_setup_policy_available) =
         init_config(config_dir_result, file_logging_enabled_hint);
+    let should_open_onboarding = config
+        .onboarding
+        .should_open(options.onboarding, config_exists);
+    if should_open_onboarding {
+        config.onboarding.begin();
+    }
     ilium_logging::set_enabled(config.debug.file_logging_enabled)?;
-    if config.inference.kilo_gateway.paid_proxies_enabled {
+    if config.inference.kilo_gateway.paid_proxies_enabled
+        && !should_open_onboarding
+        && config.onboarding.automatic_ai_allowed()
+    {
         proxy_database::load_paid_proxies(&mut config.inference.kilo_gateway).await?;
     }
     tracing::info!(
@@ -435,10 +451,13 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         &options,
         config,
         config_dir,
+        should_open_onboarding,
         is_agent_setup_policy_available,
         sound_discovery,
-        voice_input_devices,
-        voice_output_devices,
+        VoiceDeviceCatalog {
+            input: voice_input_devices,
+            output: voice_output_devices,
+        },
     )
     .await;
     drop(guard);
@@ -497,15 +516,24 @@ fn init_config(
     (config, config_dir, is_agent_setup_policy_available)
 }
 
+struct VoiceDeviceCatalog {
+    input: Vec<String>,
+    output: Vec<String>,
+}
+
 async fn run_inner(
     options: &RunOptions,
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
+    should_open_onboarding: bool,
     is_agent_setup_policy_available: bool,
     sound_discovery: ilium_sound::SoundDiscovery,
-    voice_input_devices: Vec<String>,
-    voice_output_devices: Vec<String>,
+    voice_devices: VoiceDeviceCatalog,
 ) -> Result<ClientExitReason, ClientError> {
+    let VoiceDeviceCatalog {
+        input: voice_input_devices,
+        output: voice_output_devices,
+    } = voice_devices;
     // Buffered, not bare `stdout()`. `std::io::Stdout` is a `LineWriter`: it
     // flushes on every newline, and a rendered frame is full of them. A frame
     // therefore reached the terminal as dozens of partial writes, and under
@@ -578,6 +606,10 @@ async fn run_inner(
     app.voice_input_devices = voice_input_devices;
     app.voice_output_devices = voice_output_devices;
     app.config_dir = config_dir;
+    app.onboarding_progress = config.onboarding;
+    if should_open_onboarding {
+        crate::onboarding::integration::open(&mut app, options.onboarding);
+    }
     let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
     app.set_screen_area(Rect::new(0, 0, initial_size.width, initial_size.height));
 
@@ -591,6 +623,10 @@ async fn run_inner(
 
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
+    naming_workers.set_automatic_ai_decision(
+        app.onboarding_revision,
+        app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
+    );
     let (conversion_events_tx, mut conversion_events_rx) = mpsc::channel(256);
     let mut conversion_workers =
         crate::session_conversion::ConversionWorkers::new(conversion_events_tx);
@@ -606,7 +642,9 @@ async fn run_inner(
         tokio::sync::watch::channel(app.reset_planning_settings.clone());
     let reset_monitor = crate::reset_planning::spawn_monitor(reset_settings_rx, reset_events_tx);
     let mut control_plane = crate::control::ControlPlane::default();
-    let mut voice_service = if app.voice_settings.enabled {
+    let mut onboarding_voice = crate::onboarding::voice_runtime::VoiceDemoRuntime::default();
+    let mut onboarding_paused_players = Vec::new();
+    let mut voice_service = if app.voice_settings.enabled && app.onboarding.is_none() {
         start_voice_service(&mut app, &control_plane)
     } else {
         None
@@ -643,10 +681,12 @@ async fn run_inner(
                     None
                 });
         }
-        Ok(None) => {
+        Ok(None) if app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed() => {
             app.is_project_name_loading = true;
+            app.project_name_attempt_revision = Some(app.onboarding_revision);
             naming_workers.spawn_project_name_worker(app.session_cwd.clone());
         }
+        Ok(None) => {}
         Err(error) => {
             tracing::error!(
                 error = %error,
@@ -668,6 +708,7 @@ async fn run_inner(
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
     let mut last_animation_frame_bucket = None;
+    let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
     let mut last_recorded_surface = None;
     let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
@@ -677,6 +718,9 @@ async fn run_inner(
         let mut voice_tool_outputs = Vec::new();
         let maintenance_schedule = app.maintenance_schedule(now);
         let mut tick_delay = maintenance_schedule.delay;
+        if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
+            tick_delay = tick_delay.min(Duration::from_millis(33));
+        }
         if needs_redraw && !needs_immediate_redraw {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
         }
@@ -744,6 +788,10 @@ async fn run_inner(
                 }
             }
             Some(naming_event) = naming_events_rx.recv() => {
+                naming_workers.set_automatic_ai_decision(
+                    app.onboarding_revision,
+                    app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
+                );
                 crate::tick::apply_naming_worker_event(&mut app, &mut naming_workers, naming_event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
@@ -778,6 +826,13 @@ async fn run_inner(
                 app.reset_monitor_state.apply(reset_event, &app.reset_planning_settings);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
+            }
+            demo_event = onboarding_voice.next_event() => {
+                match demo_event {
+                    Some(event)=>onboarding_voice.handle_event(event).await,
+                    None=>onboarding_voice.channel_closed().await,
+                }
+                needs_redraw=true;needs_immediate_redraw=true;
             }
             voice_event = next_voice_event(&mut voice_service) => {
                 match voice_event {
@@ -853,6 +908,19 @@ async fn run_inner(
         reconcile_debug_logging(&mut app);
         reconcile_agent_debug_menu(&mut app);
         reconcile_progress_monitor_enabled(&mut app);
+        // Release the demonstration's devices/media ownership before the
+        // saved normal voice preference can acquire those resources again.
+        let is_voice_step = app.onboarding.is_some()
+            && app.onboarding_progress.wizard.step == crate::onboarding::state::Step::Voice;
+        onboarding_voice
+            .reconcile(&app.voice_settings, is_voice_step)
+            .await;
+        if (!onboarding_voice.state.is_running || !app.voice_settings.pause_media_while_active)
+            && !onboarding_paused_players.is_empty()
+        {
+            crate::media_control::resume_players(std::mem::take(&mut onboarding_paused_players))
+                .await;
+        }
         let is_voice_tool_shutdown = voice_tool_outputs_request_shutdown(&voice_tool_outputs);
         if is_voice_tool_shutdown {
             // A terminating result dominates any parallel tool call that may
@@ -933,6 +1001,50 @@ async fn run_inner(
             deliver_voice_text_offers(&mut app, voice_service.as_ref()).await;
         }
 
+        let demo_action = app
+            .onboarding
+            .as_mut()
+            .and_then(|ui| ui.voice_action.take());
+        if is_voice_step {
+            if let Some(action) = demo_action {
+                use crate::onboarding::voice_ui::VoiceAction;
+                let outcome = match action {
+                    VoiceAction::Test => {
+                        let result = onboarding_voice.start_test(&app.voice_settings).await;
+                        if result.is_ok()
+                            && app.voice_settings.pause_media_while_active
+                            && onboarding_paused_players.is_empty()
+                        {
+                            onboarding_paused_players =
+                                crate::media_control::pause_playing_players().await;
+                        }
+                        result
+                    }
+                    VoiceAction::Stop => {
+                        onboarding_voice.shutdown().await;
+                        Ok(())
+                    }
+                    VoiceAction::StartPushToTalk => onboarding_voice.push_to_talk(true).await,
+                    VoiceAction::StopPushToTalk => onboarding_voice.push_to_talk(false).await,
+                    VoiceAction::Configure(_) => Ok(()),
+                };
+                if let Err(error) = outcome {
+                    app.status_message = Some(error);
+                }
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
+            if let Some(ui) = &mut app.onboarding {
+                ui.voice_state = onboarding_voice.state.clone();
+            }
+        }
+        if (!onboarding_voice.state.is_running || !app.voice_settings.pause_media_while_active)
+            && !onboarding_paused_players.is_empty()
+        {
+            crate::media_control::resume_players(std::mem::take(&mut onboarding_paused_players))
+                .await;
+        }
+
         record_client_surface_change(&app, &mut last_recorded_surface);
         record_status_message_change(
             app.status_message.as_deref(),
@@ -946,6 +1058,13 @@ async fn run_inner(
         );
         let animation_frame_bucket =
             crate::background_composition::animation_frame_bucket(&app, animation_elapsed);
+        let onboarding_animation_active = crate::onboarding::integration::is_animating(&app);
+        // Draw the settled frame too, so a quiet workspace cannot retain the
+        // last green highlight after the finite onboarding animation ends.
+        if onboarding_animation_active || last_onboarding_animation_active {
+            needs_redraw = true;
+        }
+        last_onboarding_animation_active = onboarding_animation_active;
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
@@ -966,6 +1085,8 @@ async fn run_inner(
     reset_monitor.abort();
 
     smart_copy_workers.cancel();
+    onboarding_voice.shutdown().await;
+    crate::media_control::resume_players(onboarding_paused_players).await;
 
     if let Some(service) = voice_service {
         service.shutdown().await;
@@ -1216,6 +1337,26 @@ async fn reconcile_voice_runtime(
     voice_service: &mut Option<ilium_voice::VoiceService>,
     paused_media_players: &mut Vec<String>,
 ) {
+    if app.onboarding.is_some() {
+        app.onboarding_voice_suspended |= app.voice_settings.enabled;
+        app.take_voice_runtime_request();
+        if let Some(service) = voice_service.take() {
+            service.shutdown().await;
+        }
+        let players = std::mem::take(paused_media_players);
+        crate::media_control::resume_players(players).await;
+        return;
+    }
+    if std::mem::take(&mut app.onboarding_voice_suspended) {
+        app.take_voice_runtime_request();
+        if app.voice_settings.enabled {
+            *voice_service = start_voice_service(app, control_plane);
+            if voice_service.is_some() && app.voice_settings.pause_media_while_active {
+                *paused_media_players = crate::media_control::pause_playing_players().await;
+            }
+        }
+        return;
+    }
     let Some(request) = app.take_voice_runtime_request() else {
         return;
     };
@@ -1608,6 +1749,7 @@ fn dispatch_input_event(
 ) {
     if let Event::Resize(cols, rows) = &event {
         app.set_screen_area(Rect::new(0, 0, *cols, *rows));
+        crate::onboarding::integration::resize(app);
         return;
     }
     app.handle_event(event);
@@ -1627,7 +1769,24 @@ fn dispatch_pending_app_work(
     if let Some(request) = app.take_pending_icon_semantic_search() {
         icon_search_workers.request(request);
     }
+    naming_workers.set_automatic_ai_decision(
+        app.onboarding_revision,
+        app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
+    );
     naming_workers.set_inference_settings(app.inference_settings.clone());
+    // Setup may have suppressed the startup inference. Admit one fresh attempt
+    // for this decision after Finish; an error must not retry every frame.
+    if app.onboarding.is_none()
+        && app.onboarding_progress.automatic_ai_allowed()
+        && app.project_name.is_none()
+        && !app.is_project_name_loading
+        && app.project_name_attempt_revision != Some(app.onboarding_revision)
+    {
+        app.project_name_attempt_revision = Some(app.onboarding_revision);
+        app.is_project_name_loading = true;
+        naming_workers.spawn_project_name_worker(app.session_cwd.clone());
+    }
+
     if app.take_pending_inference_test() {
         naming_workers.spawn_inference_test_worker();
     }
@@ -1636,6 +1795,14 @@ fn dispatch_pending_app_work(
     }
 
     for request in app.take_pending_retitle_requests() {
+        if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
+            let pane_id = match &request {
+                crate::app::PendingRetitleRequest::Session { input, .. } => input.pane_id,
+                crate::app::PendingRetitleRequest::Terminal { input, .. } => input.pane_id,
+            };
+            app.titles_loading.remove(&pane_id);
+            continue;
+        }
         match request {
             crate::app::PendingRetitleRequest::Session {
                 input,
@@ -1702,6 +1869,10 @@ fn dispatch_pending_app_work(
     }
 
     for request in app.take_pending_restructure_requests() {
+        if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
+            app.cancel_project_restructure_after_ai_decision(request.project_id);
+            continue;
+        }
         match home_dir {
             Some(home_dir) => {
                 naming_workers.spawn_restructure_worker(request, home_dir.to_path_buf())

@@ -10,3 +10,7 @@ repository.workspace = true
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
+tempfile = "3.27.0"
+
+[dev-dependencies]
+serde_json = "1.0.149"

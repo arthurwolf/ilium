@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -42,11 +43,35 @@ pub enum TitleTrigger {
     Manual,
 }
 
+/// Revision and allow bit captured before an automatic inference worker starts.
+/// A single atomic word lets queued workers reject a revoked decision before
+/// their provider call; the event loop checks it again before side effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutomaticAiDecision(u64);
+
+impl AutomaticAiDecision {
+    pub fn new(revision: u64, allowed: bool) -> Self {
+        Self((revision << 1) | u64::from(allowed))
+    }
+
+    fn is_current(self, decision_word: &AtomicU64) -> bool {
+        self.0 & 1 != 0 && decision_word.load(Ordering::SeqCst) == self.0
+    }
+}
+
 /// A finished background naming result, forwarded into the main event loop.
 pub enum NamingWorkerEvent {
-    ProjectName(anyhow::Result<ProjectNameBootstrap>),
+    ProjectName {
+        decision: AutomaticAiDecision,
+        result: anyhow::Result<ProjectNameBootstrap>,
+    },
     SessionTitle(SessionTitleWorkerResult),
-    TerminalTitle(NodeId, anyhow::Result<DualTitle>, TitleTrigger),
+    TerminalTitle(
+        NodeId,
+        anyhow::Result<DualTitle>,
+        TitleTrigger,
+        AutomaticAiDecision,
+    ),
     InferenceTest {
         provider: ilium_inference::InferenceProviderKind,
         elapsed: Duration,
@@ -86,6 +111,7 @@ pub struct SessionTitleWorkerResult {
     pub raw_response: Option<String>,
     pub result: anyhow::Result<DualTitle>,
     pub trigger: TitleTrigger,
+    pub automatic_ai_decision: AutomaticAiDecision,
 }
 
 /// One restructure result plus the activity checkpoint visible to inference.
@@ -94,6 +120,7 @@ pub struct SessionTitleWorkerResult {
 pub struct RestructureWorkerResult {
     pub project_id: NodeId,
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
+    pub automatic_ai_decision: AutomaticAiDecision,
     pub result: anyhow::Result<ilium_core::RestructurePlan>,
 }
 
@@ -164,6 +191,7 @@ pub struct NamingWorkers {
     model_discovery_in_flight: bool,
     restructure_in_flight: HashSet<NodeId>,
     concurrency_limiter: Arc<InferenceConcurrencyLimiter>,
+    automatic_ai_decision: Arc<AtomicU64>,
 }
 
 const MAX_CONCURRENT_INFERENCE_JOBS: usize = 2;
@@ -269,7 +297,21 @@ impl NamingWorkers {
             concurrency_limiter: Arc::new(InferenceConcurrencyLimiter::new(
                 MAX_CONCURRENT_INFERENCE_JOBS,
             )),
+            automatic_ai_decision: Arc::new(AtomicU64::new(AutomaticAiDecision::new(0, true).0)),
         }
+    }
+
+    /// The event loop updates this after a wizard or provider decision and
+    /// before it accepts an automatic worker result or dispatches new work.
+    pub fn set_automatic_ai_decision(&self, revision: u64, allowed: bool) {
+        self.automatic_ai_decision.store(
+            AutomaticAiDecision::new(revision, allowed).0,
+            Ordering::SeqCst,
+        );
+    }
+
+    pub fn is_current_automatic_ai_decision(&self, decision: AutomaticAiDecision) -> bool {
+        decision.is_current(&self.automatic_ai_decision)
     }
 
     /// Spawns the one-shot project-name bootstrap worker, unless one is
@@ -283,20 +325,31 @@ impl NamingWorkers {
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
+        let decision_word = Arc::clone(&self.automatic_ai_decision);
+        let decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
         std::thread::spawn(move || {
             // Background inference must never compete with the render loop
             // for CPU -- same convention as `search_workers::start`.
             lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
-            let result = catch_worker_panic("project name", || {
-                crate::project_naming::bootstrap_project_name(&cwd, &inference_settings)
-            });
+            let result = if decision.is_current(&decision_word) {
+                catch_worker_panic("project name", || {
+                    crate::project_naming::infer_project_name_without_persisting(
+                        &cwd,
+                        &inference_settings,
+                    )
+                })
+            } else {
+                Err(anyhow::anyhow!(
+                    "automatic AI request cancelled before provider call"
+                ))
+            };
             // `blocking_send` (not the async `send`) since this closure
             // runs on a plain `std::thread`, not a tokio task -- exactly
             // the case that method exists for. It only ever actually
             // blocks if the main loop is unusually far behind, since this
             // channel carries at most one message per worker.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::ProjectName(result));
+            let _ = events_tx.blocking_send(NamingWorkerEvent::ProjectName { decision, result });
         });
     }
 
@@ -325,29 +378,41 @@ impl NamingWorkers {
         let inference_settings = self.inference_settings.clone();
         let provider = inference_settings.selected_provider;
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
+        let decision_word = Arc::clone(&self.automatic_ai_decision);
+        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
         std::thread::spawn(move || {
             // See `spawn_project_name_worker` on why every naming worker
             // thread lowers its own scheduling priority first.
             lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
             let started_at = Instant::now();
-            let trace = panic::catch_unwind(AssertUnwindSafe(|| {
-                crate::session_naming::infer_pane_title_with_trace(
-                    &inference_settings,
-                    &home,
-                    &input,
-                )
-            }))
-            .unwrap_or_else(|panic_payload| {
+            let trace = if !automatic_ai_decision.is_current(&decision_word) {
                 crate::session_naming::SessionTitleInferenceTrace {
                     rendered_prompt: None,
                     raw_response: None,
                     result: Err(anyhow::anyhow!(
-                        "session title worker panicked: {}",
-                        panic_payload_message(&panic_payload)
+                        "automatic AI request cancelled before provider call"
                     )),
                 }
-            });
+            } else {
+                panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::session_naming::infer_pane_title_with_trace(
+                        &inference_settings,
+                        &home,
+                        &input,
+                    )
+                }))
+                .unwrap_or_else(|panic_payload| {
+                    crate::session_naming::SessionTitleInferenceTrace {
+                        rendered_prompt: None,
+                        raw_response: None,
+                        result: Err(anyhow::anyhow!(
+                            "session title worker panicked: {}",
+                            panic_payload_message(&panic_payload)
+                        )),
+                    }
+                })
+            };
             let elapsed = started_at.elapsed();
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
@@ -362,6 +427,7 @@ impl NamingWorkers {
                     raw_response: trace.raw_response,
                     result: trace.result,
                     trigger,
+                    automatic_ai_decision,
                 },
             ));
         });
@@ -460,18 +526,30 @@ impl NamingWorkers {
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
+        let decision_word = Arc::clone(&self.automatic_ai_decision);
+        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
         std::thread::spawn(move || {
             // See `spawn_project_name_worker` on why every naming worker
             // thread lowers its own scheduling priority first.
             lower_current_thread(WorkerPriority::BelowNormal);
             let _permit = concurrency_limiter.acquire();
-            let result = catch_worker_panic("terminal title", || {
-                crate::terminal_naming::infer_terminal_title(&inference_settings, &input)
-            });
+            let result = if !automatic_ai_decision.is_current(&decision_word) {
+                Err(anyhow::anyhow!(
+                    "automatic AI request cancelled before provider call"
+                ))
+            } else {
+                catch_worker_panic("terminal title", || {
+                    crate::terminal_naming::infer_terminal_title(&inference_settings, &input)
+                })
+            };
             // See `spawn_project_name_worker`'s matching comment on why
             // `blocking_send` is correct here.
-            let _ =
-                events_tx.blocking_send(NamingWorkerEvent::TerminalTitle(pane_id, result, trigger));
+            let _ = events_tx.blocking_send(NamingWorkerEvent::TerminalTitle(
+                pane_id,
+                result,
+                trigger,
+                automatic_ai_decision,
+            ));
         });
     }
 
@@ -583,6 +661,8 @@ impl NamingWorkers {
         let events_tx = self.events_tx.clone();
         let inference_settings = self.inference_settings.clone();
         let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
+        let decision_word = Arc::clone(&self.automatic_ai_decision);
+        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
         std::thread::spawn(move || {
             // Lowered before `resolve_content_extracts`'s bulk transcript
             // reads, not just the LLM call -- see `spawn_project_name_worker`.
@@ -590,6 +670,9 @@ impl NamingWorkers {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 crate::restructure::resolve_content_extracts(&mut contexts, &home);
                 let _permit = concurrency_limiter.acquire();
+                if !automatic_ai_decision.is_current(&decision_word) {
+                    anyhow::bail!("automatic AI request cancelled before provider call");
+                }
                 crate::restructure::infer_restructure_plan_with_protected_splits(
                     &inference_settings,
                     &contexts,
@@ -609,6 +692,7 @@ impl NamingWorkers {
                 events_tx.blocking_send(NamingWorkerEvent::Restructure(RestructureWorkerResult {
                     project_id,
                     inference_activity_revisions,
+                    automatic_ai_decision,
                     result,
                 }));
         });
@@ -622,6 +706,38 @@ impl NamingWorkers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queued_project_worker_is_cancelled_before_provider_call() {
+        let cwd = tempfile::tempdir().unwrap();
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let held_permits = (0..MAX_CONCURRENT_INFERENCE_JOBS)
+            .map(|_| workers.concurrency_limiter.acquire())
+            .collect::<Vec<_>>();
+        workers.spawn_project_name_worker(cwd.path().to_path_buf());
+        workers.set_automatic_ai_decision(1, false);
+        drop(held_permits);
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let event = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), events_rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        });
+        let NamingWorkerEvent::ProjectName { result, .. } = event else {
+            panic!("expected project-name completion");
+        };
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "automatic AI request cancelled before provider call"
+        );
+        assert!(!cwd.path().join(".ilium/config.yaml").exists());
+    }
 
     /// End-to-end regression for the last-prompt banner's ".jsonl transcript"
     /// fallback: writes a synthetic Claude Code transcript to a temp home

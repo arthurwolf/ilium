@@ -634,6 +634,17 @@ pub async fn handle_request(
             );
             false
         }
+        ClientRequest::PreviewSoundSettings { settings } => {
+            crate::sounds::enqueue(
+                state,
+                crate::sounds::PlaybackRequest {
+                    settings,
+                    event: None,
+                    pane_name: None,
+                },
+            );
+            false
+        }
         ClientRequest::SchedulePaneInput {
             pane_id,
             delay_seconds,

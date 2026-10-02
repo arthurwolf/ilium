@@ -69,6 +69,10 @@ struct Cli {
     #[arg(long, global = true, conflicts_with = "restart_server")]
     reset_session: bool,
 
+    /// Open the guided setup even when this installation is already configured.
+    #[arg(long, global = true)]
+    onboarding: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -265,11 +269,19 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
                 &cli.cwd,
                 cli.restart_server,
                 cli.reset_session,
+                cli.onboarding,
             )
             .await
         }
         Some(Command::NewSession { name }) => {
-            attach_or_create(&name, &cli.cwd, cli.restart_server, cli.reset_session).await
+            attach_or_create(
+                &name,
+                &cli.cwd,
+                cli.restart_server,
+                cli.reset_session,
+                cli.onboarding,
+            )
+            .await
         }
         Some(Command::Ls) => list_sessions(&cli.cwd),
         Some(Command::KillSession { name }) => kill_session(&name, &cli.cwd).await,
@@ -792,6 +804,7 @@ async fn attach_or_create(
     cwd: &Path,
     should_restart_server: bool,
     should_reset_session: bool,
+    onboarding: bool,
 ) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
     // Capture this before the TUI starts. A later `make install` can replace
@@ -817,6 +830,7 @@ async fn attach_or_create(
         session_cwd: project_session.project_root.clone(),
         socket_path: project_session.socket_path.clone(),
         log_path,
+        onboarding,
     })
     .await?;
     match exit_reason {
@@ -1388,6 +1402,19 @@ mod tests {
         shell_join, workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
+
+    #[test]
+    fn onboarding_flag_is_available_for_bare_and_named_interactive_attach() {
+        assert!(
+            Cli::try_parse_from(["ilium", "--onboarding"])
+                .unwrap()
+                .onboarding
+        );
+        let named = Cli::try_parse_from(["ilium", "new-session", "demo", "--onboarding"]).unwrap();
+        assert!(named.onboarding);
+        assert!(matches!(named.command, Some(Command::NewSession { .. })));
+        assert!(!Cli::try_parse_from(["ilium"]).unwrap().onboarding);
+    }
 
     #[test]
     fn cmd_shell_keeps_backslash_and_short_name_paths_bare() {

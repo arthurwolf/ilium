@@ -25,6 +25,15 @@ fn extracted_sources_match_frozen_original_bytes_and_format_skeletons() {
 // Keep the immutable extraction hashes: only the explicitly authorized additive
 // instruction blocks may differ from the frozen baseline source.
 fn baseline_source(name: &str, source: &str) -> String {
+    // Onboarding deliberately expands the sound-source registry. Normalize
+    // only its exact authorized message, retaining the immutable extraction
+    // hash and still rejecting any other unexpected text change.
+    if name == "voice/settings/sound-source-must-be-system-beep-or"
+        && source
+            == "sound.source must be system_beep, sound_file, bundled_chirping, generated, or muted"
+    {
+        return "sound source must be system_beep or sound_file".to_owned();
+    }
     let fields: &[&str] = match name {
         "agent/ask-for-update" => &["custom_instructions"],
         "naming/project-name" => &["project_naming", "naming_and_organization"],

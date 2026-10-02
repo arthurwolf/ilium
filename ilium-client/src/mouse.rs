@@ -105,6 +105,9 @@ fn trace_mouse_event(app: &App, mouse: &MouseEvent) {
 
 /// Top-level mouse dispatch, called for every `Event::Mouse`.
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    if crate::onboarding::integration::handle_mouse(app, mouse) {
+        return;
+    }
     trace_mouse_event(app, &mouse);
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
@@ -1791,6 +1794,13 @@ fn update_animation_hover(
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     let mut layout = crate::settings_ui::compute_layout(app.layout.screen_area);
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
+    {
+        app.mode = Mode::Settings(state);
+        crate::onboarding::integration::open(app, true);
+        return;
+    }
     let instruction_height =
         crate::instruction_settings::panel_height(state.tab, layout.content_area);
     if instruction_height > 0 {
