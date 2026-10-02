@@ -4134,8 +4134,15 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     });
     tui.write(&sgr_mouse_down(0, second_task_column, second_task_row))
         .expect("press Second task for drag");
-    tui.write(&sgr_mouse_drag(second_task_column, dialog_task_row))
-        .expect("drag Second task above Dialog task");
+    // A press and its first drag arriving in one read can be coalesced before the
+    // board registers the press (slow runners, ConPTY); let the press settle and
+    // repeat the motion so a dropped first event cannot hide the insertion line.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for _ in 0..3 {
+        tui.write(&sgr_mouse_drag(second_task_column, dialog_task_row))
+            .expect("drag Second task above Dialog task");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     assert!(
         wait_until(|| tui.screen_text().contains('━'), WAIT_TIMEOUT).await,
         "active card drag should show a visible insertion line, got: {:?}",
