@@ -1,4 +1,4 @@
-//! Stable graph source identifiers and provider cadence constraints.
+//! Stable graph source identifiers and client/provider cadence policies.
 //! Cadence is a request floor, not a promise of a new observation each poll.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,9 @@ const fn crypto(id: &'static str, label: &'static str, product: &'static str) ->
         label,
         units: "USD",
         provider: Provider::Coinbase(product),
-        minimum_poll_seconds: 5,
+        // Coinbase discourages frequent historical-candle requests. This is
+        // our client polling policy, not a provider-enforced numeric quota.
+        minimum_poll_seconds: 60,
         has_ohlc: true,
         attribution: "Coinbase Exchange",
         documentation: COINBASE_DOCS,

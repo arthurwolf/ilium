@@ -133,8 +133,8 @@ impl SceneSettings for GraphSettings {
             mode,
             window,
             Control::slider("poll", "Requested refresh", settings.poll_seconds, (5,3600,5), " s",
-                "Provider request floors override faster requests. Errors retry with bounded backoff.")
-                .with_help_detail(format!("Effective request interval: {} s; provider floor: {} s.", settings.effective_poll_seconds(),source.minimum_poll_seconds)),
+                "Source request policies override faster requests. Historical crypto candle plans share a one-minute client floor per pair across local clients and reopened scenes; failed attempts consume the slot. ISS, Wikipedia and randomness support faster updates. Errors retry with bounded backoff.")
+                .with_help_detail(format!("Effective request interval: {} s; client/source floor: {} s.", settings.effective_poll_seconds(),source.minimum_poll_seconds)),
             Control::slider("brightness", "Brightness", settings.brightness_percent,(0,100,5),"%",
                 "Intensity of chart ink, including the dim axes."),
             Control::slider("hue", "Chart hue", settings.hue,(0,360,10),"°",
@@ -232,7 +232,57 @@ impl SceneSettings for GraphSettings {
     }
 }
 
+/// One recent successful window for each of the eight known Coinbase pairs.
+/// Scene recreation may reuse genuine data for the selected window, but never
+/// invent a new receipt or mix candle intervals. A wider selected window may
+/// initially contain only the prior known observations; it is not a complete
+/// fetched-window claim. Each entry is bounded to two 300-candle pages.
+struct RecentCoinbaseGraphs {
+    entries: [Option<(i32, Arc<Snapshot<DataSeries>>)>; 8],
+}
+impl Default for RecentCoinbaseGraphs {
+    fn default() -> Self {
+        Self {
+            entries: std::array::from_fn(|_| None),
+        }
+    }
+}
+impl RecentCoinbaseGraphs {
+    fn slot(settings: &GraphSettings) -> Option<usize> {
+        catalog::SOURCES
+            .iter()
+            .filter(|source| matches!(source.provider, Provider::Coinbase(_)))
+            .position(|source| source.id == settings.source_id)
+            .filter(|index| *index < 8)
+    }
+    fn get(&self, settings: &GraphSettings) -> Option<Arc<Snapshot<DataSeries>>> {
+        let (window, snapshot) = self.entries.get(Self::slot(settings)?)?.as_ref()?;
+        (*window == settings.window_minutes).then(|| Arc::clone(snapshot))
+    }
+    fn remember(&mut self, settings: &GraphSettings, snapshot: &Arc<Snapshot<DataSeries>>) {
+        let Some(slot) = Self::slot(settings) else {
+            return;
+        };
+        let Some(data) = snapshot.data.as_ref() else {
+            return;
+        };
+        if snapshot.state.received_ms.is_none()
+            || data.candles.len() > 600
+            || data.samples.len() > 600
+        {
+            return;
+        }
+        self.entries[slot] = Some((settings.window_minutes, Arc::clone(snapshot)));
+    }
+}
+fn recent_coinbase_graphs() -> &'static std::sync::Mutex<RecentCoinbaseGraphs> {
+    static RECENT: std::sync::OnceLock<std::sync::Mutex<RecentCoinbaseGraphs>> =
+        std::sync::OnceLock::new();
+    RECENT.get_or_init(|| std::sync::Mutex::new(RecentCoinbaseGraphs::default()))
+}
+
 pub struct GraphScene {
+    retain_on_drop: bool,
     settings: GraphSettings,
     poller: Option<Poller<DataSeries>>,
     stream: Option<WikiFeed>,
@@ -244,15 +294,36 @@ pub struct GraphScene {
     last_bounds: Option<chart::ChartBounds>,
 }
 
+impl Drop for GraphScene {
+    fn drop(&mut self) {
+        if self.retain_on_drop {
+            if let Ok(mut recent) = recent_coinbase_graphs().try_lock() {
+                recent.remember(&self.settings, &self.snapshot);
+            }
+        }
+    }
+}
+
 impl GraphScene {
     pub fn new(settings: &GraphSettings, _env: &SceneEnv) -> Self {
         let mut scene = Self::without_worker(settings.normalized());
+        // Only clone a bounded Arc under a nonblocking UI-path lock. Existing
+        // history then remains visible while normal admission/refill proceeds.
+        let retained = recent_coinbase_graphs()
+            .try_lock()
+            .ok()
+            .and_then(|recent| recent.get(&scene.settings));
+        if let Some(snapshot) = retained {
+            scene.accept_snapshot(snapshot);
+        }
+        scene.retain_on_drop = true;
         scene.start_worker();
         scene
     }
 
     fn without_worker(settings: GraphSettings) -> Self {
         Self {
+            retain_on_drop: false,
             settings,
             poller: None,
             stream: None,
@@ -407,7 +478,10 @@ impl GraphScene {
                 status.push_str(&format!("; {}", detail));
             }
             if data.rejected > 0 {
-                status.push_str(&format!("; {} invalid rows omitted", data.rejected));
+                status.push_str(&format!(
+                    "; {} unavailable or invalid rows omitted",
+                    data.rejected
+                ));
             }
         }
         if let Some(bounds) = self.last_bounds {
@@ -949,5 +1023,164 @@ mod tests {
             serde_json::from_str::<GraphSettings>("{}").unwrap(),
             GraphSettings::default()
         );
+    }
+}
+
+#[cfg(test)]
+mod request_policy_tests {
+    use super::*;
+
+    #[test]
+    fn historical_candle_policy_does_not_slow_the_fast_observation_sources() {
+        let mut crypto_count = 0;
+        for source in &catalog::SOURCES {
+            let settings = GraphSettings {
+                source_id: source.id.into(),
+                poll_seconds: 5,
+                ..Default::default()
+            };
+            if matches!(source.provider, Provider::Coinbase(_)) {
+                crypto_count += 1;
+                assert_eq!(settings.effective_poll_seconds(), 60, "{}", source.id);
+            } else if matches!(
+                source.provider,
+                Provider::Iss(_) | Provider::Wikipedia(_) | Provider::DrandRandom
+            ) {
+                assert_eq!(settings.effective_poll_seconds(), 5, "{}", source.id);
+            }
+        }
+        assert_eq!(crypto_count, 8);
+    }
+}
+
+#[cfg(test)]
+mod recent_coinbase_tests {
+    use super::super::model::FeedState;
+    use super::*;
+    fn genuine_snapshot(count: usize) -> Arc<Snapshot<DataSeries>> {
+        Arc::new(Snapshot {
+            data: Some(Arc::new(DataSeries {
+                samples: (0..count)
+                    .map(|index| Observation {
+                        observed_ms: index as i64 + 500,
+                        value: 42.0,
+                    })
+                    .collect(),
+                candles: (0..count)
+                    .map(|index| Candle {
+                        observed_ms: index as i64 + 500,
+                        open: 41.5,
+                        high: 43.0,
+                        low: 41.0,
+                        close: 42.0,
+                        volume: 1.0,
+                    })
+                    .collect(),
+                ..DataSeries::default()
+            })),
+            state: FeedState {
+                received_ms: Some(1000),
+                observed_ms: Some(500),
+                error: None,
+            },
+        })
+    }
+    #[test]
+    fn recreated_preview_retains_actual_data_and_original_receipt_without_fetch() {
+        let settings = GraphSettings::default();
+        let snapshot = genuine_snapshot(1);
+        let mut recent = RecentCoinbaseGraphs::default();
+        recent.remember(&settings, &snapshot);
+        let restored = recent.get(&settings).unwrap();
+        assert!(Arc::ptr_eq(&restored, &snapshot));
+        let mut recreated = GraphScene::without_worker(settings);
+        recreated.accept_snapshot(restored);
+        assert_eq!(recreated.history.samples().len(), 1);
+        assert_eq!(recreated.candles.len(), 1);
+        assert_eq!(recreated.candles.get(&500).unwrap().open, 41.5);
+        assert_eq!(recreated.snapshot.state.received_ms, Some(1000));
+        assert_eq!(recreated.snapshot.state.observed_ms, Some(500));
+        let failed_refill = Arc::new(Snapshot {
+            data: None,
+            state: FeedState {
+                error: Some("request floor".into()),
+                ..FeedState::default()
+            },
+        });
+        recreated.accept_snapshot(failed_refill);
+        assert_eq!(recreated.history.samples().len(), 1);
+        assert_eq!(recreated.candles.len(), 1);
+        assert_eq!(recreated.candles.get(&500).unwrap().open, 41.5);
+        assert_eq!(recreated.snapshot.state.received_ms, Some(1000));
+        assert_eq!(
+            recreated.snapshot.state.error.as_deref(),
+            Some("request floor")
+        );
+    }
+    #[test]
+    fn retained_window_never_crosses_source_window_or_noncoinbase_identity() {
+        let settings = GraphSettings::default();
+        let mut recent = RecentCoinbaseGraphs::default();
+        recent.remember(&settings, &genuine_snapshot(1));
+        for different in [
+            GraphSettings {
+                source_id: "eth_usd".into(),
+                ..settings.clone()
+            },
+            GraphSettings {
+                window_minutes: 1440,
+                ..settings.clone()
+            },
+            GraphSettings {
+                source_id: "wikipedia_edit_rate".into(),
+                ..settings.clone()
+            },
+        ] {
+            assert!(recent.get(&different).is_none());
+        }
+        let visual_change = GraphSettings {
+            mode: GraphMode::Bars,
+            brightness_percent: 20,
+            ..settings.clone()
+        };
+        assert!(recent.get(&visual_change).is_some());
+    }
+    #[test]
+    fn retention_is_eight_fixed_slots_and_rejects_unreceived_or_oversized_results() {
+        let settings = GraphSettings::default();
+        let mut recent = RecentCoinbaseGraphs::default();
+        let good = genuine_snapshot(600);
+        recent.remember(&settings, &good);
+        recent.remember(&settings, &genuine_snapshot(601));
+        recent.remember(&settings, &Arc::new(Snapshot::default()));
+        assert!(Arc::ptr_eq(&recent.get(&settings).unwrap(), &good));
+        assert_eq!(recent.entries.len(), 8);
+        assert_eq!(
+            catalog::SOURCES
+                .iter()
+                .filter(|source| matches!(source.provider, Provider::Coinbase(_)))
+                .count(),
+            8
+        );
+    }
+    #[test]
+    fn new_window_replaces_only_its_pair_and_keeps_true_times() {
+        let mut recent = RecentCoinbaseGraphs::default();
+        let first = GraphSettings::default();
+        let other = GraphSettings {
+            source_id: "eth_usd".into(),
+            ..first.clone()
+        };
+        let second = GraphSettings {
+            window_minutes: 1440,
+            ..first.clone()
+        };
+        recent.remember(&first, &genuine_snapshot(1));
+        recent.remember(&other, &genuine_snapshot(1));
+        let newer = genuine_snapshot(2);
+        recent.remember(&second, &newer);
+        assert!(recent.get(&first).is_none());
+        assert!(recent.get(&other).is_some());
+        assert!(Arc::ptr_eq(&recent.get(&second).unwrap(), &newer));
     }
 }

@@ -311,7 +311,12 @@ pub(crate) fn fetch_image(directory: &Path, url: &str) -> Result<(image::RgbaIma
     }
     // Source thumbnails remain intact when already smaller. Larger photographs
     // are sampled for terminal display; encoded source stays in the cache.
-    Ok((image.thumbnail(640, 640).to_rgba8(), cached.stale))
+    let image = if image.width() > 640 || image.height() > 640 {
+        image.thumbnail(640, 640)
+    } else {
+        image
+    };
+    Ok((image.to_rgba8(), cached.stale))
 }
 
 #[cfg(test)]
@@ -416,5 +421,46 @@ mod tests {
             b"cached"
         );
         assert!(read_bounded(&path, 2).is_err());
+    }
+
+    #[test]
+    fn cached_small_thumbnail_preserves_original_dimensions_and_pixels() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = "https://upload.wikimedia.org/wikipedia/commons/a/a0/small.png";
+        let mut original = image::RgbaImage::from_pixel(2, 3, image::Rgba([17, 34, 51, 255]));
+        original.put_pixel(1, 2, image::Rgba([99, 88, 77, 128]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(original.clone())
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(
+            directory.path().join(cache_file_name(url, "image")),
+            bytes.into_inner(),
+        )
+        .unwrap();
+        let (decoded, stale) = fetch_image(directory.path(), url).unwrap();
+        assert!(!stale);
+        assert_eq!(decoded.dimensions(), original.dimensions());
+        assert_eq!(decoded.as_raw(), original.as_raw());
+    }
+
+    #[test]
+    fn cached_large_image_is_downsampled_within_display_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = "https://upload.wikimedia.org/wikipedia/commons/a/a0/large.png";
+        let original = image::RgbaImage::from_pixel(1280, 320, image::Rgba([17, 34, 51, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(original)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(
+            directory.path().join(cache_file_name(url, "image")),
+            bytes.into_inner(),
+        )
+        .unwrap();
+        let (decoded, stale) = fetch_image(directory.path(), url).unwrap();
+        assert!(!stale);
+        assert_eq!(decoded.dimensions(), (640, 160));
+        assert_eq!(*decoded.get_pixel(320, 80), image::Rgba([17, 34, 51, 255]));
     }
 }

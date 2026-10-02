@@ -58,11 +58,20 @@ mod tests {
 
     #[test]
     fn positions_validate_geography_and_keep_unknown_values_unknown() {
-        assert!(Position::new("x".into(), 181.0, 10.0, 100).is_none());
-        assert!(Position::new("x".into(), 1.0, f64::INFINITY, 100).is_none());
-        let position = Position::new("x".into(), 180.0, -90.0, 100).unwrap();
+        assert!(Position::new("x".into(), 181.0, 10.0, Some(100)).is_none()); // Existing fixture supplies a known coordinate time.
+        assert!(Position::new("x".into(), 1.0, f64::INFINITY, Some(100)).is_none()); // Existing fixture supplies a known coordinate time.
+        let position = Position::new("x".into(), 180.0, -90.0, Some(100)).unwrap(); // Existing fixture supplies a known coordinate time.
         assert_eq!(position.heading_degrees, None);
         assert_eq!(position.speed_metres_per_second, None);
+        let unknown = Position::new("unknown".into(), 1.0, 2.0, None).unwrap(); // Usable coordinates need not have a known fix time.
+        assert_eq!(unknown.observed_ms, None); // Unknown is not epoch zero.
+        assert_eq!(
+            Position::new("epoch".into(), 1.0, 2.0, Some(0))
+                .unwrap()
+                .observed_ms,
+            Some(0)
+        ); // Explicit epoch remains distinguishable.
+        assert!(Position::new("bad".into(), 1.0, 2.0, Some(-1)).is_none()); // Reject negative known times.
     }
 }
 
@@ -190,17 +199,24 @@ pub struct Position {
     pub id: String,
     pub longitude: f64,
     pub latitude: f64,
-    pub observed_ms: i64,
+    pub observed_ms: Option<i64>, // Coordinate-fix time; None never means Unix epoch zero.
     pub heading_degrees: Option<f64>,
     pub speed_metres_per_second: Option<f64>,
     pub label: Option<String>,
 }
 
 impl Position {
-    pub fn new(id: String, longitude: f64, latitude: f64, observed_ms: i64) -> Option<Self> {
+    pub fn new(
+        // Validate coordinates independently of optional coordinate-fix time.
+        id: String,               // Preserve the provider identity.
+        longitude: f64,           // Longitude in degrees.
+        latitude: f64,            // Latitude in degrees.
+        observed_ms: Option<i64>, // Only an actual coordinate-fix time belongs here.
+    ) -> Option<Self> {
+        // Missing fix time does not invalidate usable coordinates.
         if id.is_empty()
             || id.len() > 256
-            || observed_ms < 0
+            || observed_ms.is_some_and(|time| time < 0) // Reject invalid known times, not unknown times.
             || !longitude.is_finite()
             || !latitude.is_finite()
             || !(-180.0..=180.0).contains(&longitude)

@@ -13,7 +13,14 @@ pub fn reserve(path: &Path, now_ms: i64, interval_ms: i64) -> Result<(), String>
         .map_err(|error| error.to_string())?
         .ok_or("source request reservation busy; retry later")?;
     let mut saved = String::new();
-    match secure_fs::private_open_options().read(true).open(path) {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().ok_or("invalid request reservation path")?;
+    let directory =
+        secure_fs::NoFollowDirectory::open_root(parent).map_err(|error| error.to_string())?;
+    match directory.open_regular(name) {
         Ok(mut file) => {
             secure_fs::restrict_open_file_to_owner(&file).map_err(|error| error.to_string())?;
             Read::by_ref(&mut file)

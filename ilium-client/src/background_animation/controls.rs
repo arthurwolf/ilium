@@ -9,7 +9,9 @@
 //! * hosted `ilium-ambient` scenes forward to `AmbientSettings::controls` and
 //!   `AmbientSettings::set_control`.
 
-use super::{AnimationKind, AnimationPlaybackMode, AnimationSettings, DitherMode, PanelTarget};
+use super::{
+    AnimationKind, AnimationPlaybackMode, AnimationSettings, DitherMode, PanelTarget, SemanticScope,
+};
 use ilium_ambient::control::{self, Control, ControlValue, SceneSettings};
 use ilium_ambient::style::ColorMode;
 
@@ -67,6 +69,14 @@ impl AnimationSettings {
         #[cfg(test)]
         if let Some(controls) = test_controls::current() {
             return controls;
+        }
+        if self.kind == AnimationKind::Semantic {
+            return vec![Control::choice(
+                "semantic_scope", "Recommendation scope",
+                usize::from(self.semantic_scope == SemanticScope::Entry),
+                &["Project", "Entry"],
+                "Use the selected project's recommendation or the focused entry's recommendation from the last tree reorganization.",
+            )];
         }
         if self.kind == AnimationKind::Wikipedia {
             return self.wikipedia.controls();
@@ -318,6 +328,19 @@ impl AnimationSettings {
         #[cfg(test)]
         if test_controls::current().is_some() {
             return test_controls::set(id, value);
+        }
+        if self.kind == AnimationKind::Semantic {
+            if id != "semantic_scope" {
+                return Err(format!("Unknown Semantic control: {id}"));
+            }
+            let scope = match value {
+                ControlValue::Index(0) => SemanticScope::Project,
+                ControlValue::Index(1) => SemanticScope::Entry,
+                _ => return Err("Semantic scope must be Project or Entry".into()),
+            };
+            let changed = self.semantic_scope != scope;
+            self.semantic_scope = scope;
+            return Ok(changed);
         }
         if self.kind == AnimationKind::Wikipedia {
             return self.wikipedia.set_control(id, value);

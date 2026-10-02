@@ -62,8 +62,11 @@ pub fn decode(source: &GraphSource, bytes: &[u8]) -> Result<DataSeries, String> 
                 // Count actual events by provider hour, including unknown magnitudes.
                 let mut hours = std::collections::BTreeMap::<i64, u32>::new();
                 for event in &decoded.items {
+                    let Some(observed_ms) = event.position.observed_ms else {
+                        continue;
+                    };
                     *hours
-                        .entry(event.position.observed_ms / 3_600_000 * 3_600_000)
+                        .entry(observed_ms / 3_600_000 * 3_600_000)
                         .or_default() += 1;
                 }
                 if let (Some(&first), Some(&last)) = (hours.keys().next(), hours.keys().next_back())
@@ -82,7 +85,7 @@ pub fn decode(source: &GraphSource, bytes: &[u8]) -> Result<DataSeries, String> 
                 }
             } else {
                 samples.extend(decoded.items.iter().filter_map(|event| {
-                    Observation::new(event.position.observed_ms, event.magnitude?)
+                    Observation::new(event.position.observed_ms?, event.magnitude?)
                 }));
             }
             samples.sort_by_key(|sample| sample.observed_ms);
@@ -190,22 +193,48 @@ fn noaa(bytes: &[u8], field: &str) -> Result<DataSeries, String> {
         .ok_or_else(|| "NOAA response is missing a bounded data array".to_owned())?;
     let mut result = DataSeries::default();
     let mut latest_timestamp = None;
+    let mut valid_rows = 0;
     for row in rows {
-        if row["active"].as_bool() != Some(true) {
+        let Some(active) = row["active"].as_bool() else {
+            result.rejected += 1;
             continue;
-        }
-        let sample = row["time_tag"]
+        };
+        let observed_ms = row["time_tag"]
             .as_str()
             .and_then(|text| {
                 chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f").ok()
             })
             .map(|time| time.and_utc().timestamp_millis())
-            .zip(row[field].as_f64().filter(|number| *number > -9999.0))
-            .and_then(|(time, number)| Observation::new(time, number));
-        let Some(sample) = sample else {
+            .filter(|time| *time >= 0);
+        let Some(observed_ms) = observed_ms else {
             result.rejected += 1;
             continue;
         };
+        if !active {
+            valid_rows += 1;
+            continue;
+        }
+        let Some(value) = row.get(field) else {
+            result.rejected += 1;
+            continue;
+        };
+        if value.is_null() {
+            valid_rows += 1;
+            result.rejected += 1;
+            continue;
+        }
+        let Some(value) = value.as_f64().filter(|number| number.is_finite()) else {
+            result.rejected += 1;
+            continue;
+        };
+        valid_rows += 1;
+        // A valid unavailable measurement is different from a malformed row.
+        // Preserve empty/inactive/null/sentinel feeds without hiding bad JSON.
+        if value <= -9999.0 {
+            result.rejected += 1;
+            continue;
+        }
+        let sample = Observation { observed_ms, value };
         if latest_timestamp.is_none_or(|previous| previous < sample.observed_ms) {
             latest_timestamp = Some(sample.observed_ms);
             result.detail = row["source"]
@@ -213,6 +242,9 @@ fn noaa(bytes: &[u8], field: &str) -> Result<DataSeries, String> {
                 .map(|text| text.chars().filter(|c| !c.is_control()).take(120).collect());
         }
         result.samples.push(sample);
+    }
+    if !rows.is_empty() && valid_rows == 0 {
+        return Err("NOAA response contains only malformed observations".into());
     }
     result.samples.sort_by_key(|sample| sample.observed_ms);
     result.samples.dedup_by_key(|sample| sample.observed_ms);
@@ -223,6 +255,44 @@ fn noaa(bytes: &[u8], field: &str) -> Result<DataSeries, String> {
 mod tests {
     use super::super::catalog::find;
     use super::*;
+    #[test]
+    fn noaa_distinguishes_malformed_data_from_unavailable_observations_for_every_field() {
+        for source in super::super::catalog::SOURCES.iter() {
+            let field = match source.provider {
+                Provider::SolarWind(field) | Provider::SolarMagnetometer(field) => field,
+                _ => continue,
+            };
+            assert!(decode(source, b"[null,{}]").is_err(), "{}", source.id);
+            let invalid_time = serde_json::json!([
+                {"active": true, "time_tag": "invalid", field: 1.0}
+            ]);
+            assert!(decode(source, &serde_json::to_vec(&invalid_time).unwrap()).is_err());
+            for valid_empty in [
+                serde_json::json!([]),
+                serde_json::json!([
+                    {"active": false, "time_tag": "2026-10-02T04:31:00", field: 999}
+                ]),
+                serde_json::json!([
+                    {"active": true, "time_tag": "2026-10-02T04:31:00", field: null}
+                ]),
+                serde_json::json!([
+                    {"active": true, "time_tag": "2026-10-02T04:31:00", field: -9999}
+                ]),
+            ] {
+                assert!(decode(source, &serde_json::to_vec(&valid_empty).unwrap())
+                    .unwrap()
+                    .samples
+                    .is_empty());
+            }
+            let partial = serde_json::json!([
+                null,
+                {"active": true, "time_tag": "2026-10-02T04:31:00", field: 1.0}
+            ]);
+            let data = decode(source, &serde_json::to_vec(&partial).unwrap()).unwrap();
+            assert_eq!(data.samples.len(), 1);
+            assert_eq!(data.rejected, 1);
+        }
+    }
     #[test]
     fn ecb_calendar_dates_are_sorted_positive_and_not_intraday_times() {
         let bytes=br#"[{"date":"2026-10-02","base":"EUR","quote":"USD","rate":1.15},{"date":"2026-09-30","base":"EUR","quote":"USD","rate":1.14},{"date":"2026-10-02","base":"EUR","quote":"USD","rate":1.16},{"date":"2026-02-30","base":"EUR","quote":"USD","rate":1.2},{"date":"2026-10-02","base":"USD","quote":"USD","rate":1.2},{"date":"2026-10-02","base":"EUR","quote":"USD","rate":0},{"date":"2026-10-02","base":"EUR","quote":"JPY","rate":150}]"#;

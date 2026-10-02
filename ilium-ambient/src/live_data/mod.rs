@@ -7,7 +7,12 @@ pub mod graph;
 pub mod map;
 pub mod maps;
 pub mod model;
+pub mod openseafeed;
 pub mod parse;
 pub mod poll;
 pub mod rate;
 pub mod series;
+
+mod fleet_cache;
+mod fleet_layer;
+mod map_markers;

@@ -4,6 +4,7 @@
 //! Coordinates do not depend on the terminal dimensions, so resize preserves state.
 
 use super::model::{Body, Mode};
+use std::collections::VecDeque;
 use std::f32::consts::TAU;
 
 /// Tunables are sanitized at the simulation boundary, including non-finite values.
@@ -141,6 +142,13 @@ impl Simulations {
             dvd_phase: [0.17, 0.31],
             orbit_phase: std::array::from_fn(|index| index as f64 * 0.73),
         }
+    }
+
+    /// Chess is updated outside this owner. Mark a scene mode change so a
+    /// return to the same non-chess mode cannot resume its stale state.
+    pub(super) fn deactivate(&mut self) {
+        self.active_mode = None;
+        self.last_time = None;
     }
 
     /// Caller clears `bodies`; output is appended, allowing composition with chess.
@@ -359,7 +367,20 @@ impl Simulations {
             return;
         };
         let interval = finite64(options.snake_step_seconds, 0.22, 0.04, 10.0);
-        state.accumulator = (state.accumulator + delta).min(interval * 8.0);
+        let easing = finite64(options.easing_seconds, 0.18, 0.0, 10.0).min(interval);
+        let elapsed = if state.timing == Some((interval, easing)) {
+            delta
+        } else {
+            // A live interval/easing edit settles the current pose and starts
+            // a fresh interval; old accumulated time belongs to the old rate.
+            state.timing = Some((interval, easing));
+            state.accumulator = 0.0;
+            state.previous_body.clear();
+            state.previous_body.extend(state.body.iter().copied());
+            0.0
+        };
+        state.meal_age = (state.meal_age + delta).min(1.0);
+        state.accumulator = (state.accumulator + elapsed).min(interval * 8.0);
         for _ in 0..8 {
             if state.accumulator + 1e-12 < interval {
                 break;
@@ -367,32 +388,43 @@ impl Simulations {
             state.accumulator -= interval;
             state.step();
         }
-        let easing = finite64(options.easing_seconds, 0.18, 0.0, 10.0).min(interval);
         let progress = if easing <= 0.0 {
             1.0
         } else {
             ease((state.accumulator / easing) as f32)
         };
         let cell_radius = radius.min(0.38 / side as f32);
-        for segment in 0..state.length {
+        let food_phase = self.last_time.unwrap_or(0.0).rem_euclid(1.4) as f32 / 1.4;
+        // The final capsule already covers the tail endpoint. Use the spare
+        // primitive for the head, keeping body + food within the grid budget.
+        for segment in 0..state.length - 1 {
             let position = state.segment_position(segment, progress);
-            if segment + 1 < state.length {
-                bodies.push(Body {
-                    from: position,
-                    to: state.segment_position(segment + 1, progress),
-                    radius: cell_radius,
-                    height,
-                });
-            } else {
-                point(bodies, position, cell_radius, height);
-            }
+            let taper = 1.0 - segment as f32 / (state.length - 1) as f32;
+            let wave = 1.0 + 0.04 * ((food_phase - segment as f32 * 0.09) * TAU).sin();
+            bodies.push(Body {
+                from: position,
+                to: state.segment_position(segment + 1, progress),
+                radius: cell_radius * (0.6 + 0.4 * taper),
+                height: height * (0.7 + 0.3 * taper) * wave,
+            });
         }
+        let feeding = (1.0 - state.meal_age as f32 / 0.32).max(0.0);
+        point(
+            bodies,
+            state.segment_position(0, progress),
+            (cell_radius * 1.16).min(0.44 / side as f32),
+            height * (1.2 + 0.25 * feeding * feeding),
+        );
+        // Food breathes between grid moves. Reduce the finite clock before
+        // converting to f32 so very large caller times cannot overflow it.
         for food in &state.food {
+            let phase = (food_phase + (*food % 16) as f32 / 16.0) * TAU;
+            let lift = 0.92 + 0.08 * phase.sin();
             point(
                 bodies,
                 state.coordinate(*food),
                 cell_radius * 1.25,
-                height * 0.65,
+                height * 0.65 * lift,
             );
         }
     }
@@ -509,33 +541,47 @@ fn hamiltonian_cycle(side: usize) -> Vec<[usize; 2]> {
 struct SnakeState {
     side: usize,
     cycle: Vec<[usize; 2]>,
+    ranks: Vec<usize>,
+    body: VecDeque<usize>,
+    previous_body: Vec<usize>,
+    route: VecDeque<usize>,
     head: usize,
-    previous_head: usize,
     length: usize,
-    previous_length: usize,
     initial_length: usize,
     food_count: usize,
     food: Vec<usize>,
     occupied: Vec<bool>,
     rng: Rng,
     accumulator: f64,
+    meal_age: f64,
+    timing: Option<(f64, f64)>,
 }
 
 impl SnakeState {
     fn new(side: usize, initial_length: usize, food_count: usize, seed: u64) -> Self {
+        let cycle = hamiltonian_cycle(side);
+        let mut ranks = vec![0; side * side];
+        for (rank, [x, y]) in cycle.iter().copied().enumerate() {
+            ranks[y * side + x] = rank;
+        }
+        let body: VecDeque<_> = (0..initial_length).rev().collect();
         let mut state = Self {
             side,
-            cycle: hamiltonian_cycle(side),
+            cycle,
+            ranks,
+            previous_body: body.iter().copied().collect(),
+            body,
+            route: VecDeque::new(),
             head: initial_length - 1,
-            previous_head: initial_length - 1,
             length: initial_length,
-            previous_length: initial_length,
             initial_length,
             food_count,
             food: Vec::with_capacity(food_count),
             occupied: vec![false; side * side],
             rng: Rng::new(seed ^ 0x534e_414b),
             accumulator: 0.0,
+            meal_age: 1.0,
+            timing: None,
         };
         state.replenish_food();
         state
@@ -548,9 +594,8 @@ impl SnakeState {
         ]
     }
     fn segment_position(&self, segment: usize, factor: f32) -> [f32; 2] {
-        let size = self.cycle.len();
-        let current = (self.head + size - segment) % size;
-        let previous = (self.previous_head + size - segment.min(self.previous_length - 1)) % size;
+        let current = self.body[segment];
+        let previous = self.previous_body[segment.min(self.previous_body.len() - 1)];
         lerp(self.coordinate(previous), self.coordinate(current), factor)
     }
     fn step(&mut self) {
@@ -559,26 +604,54 @@ impl SnakeState {
         if self.length == size {
             self.length = self.initial_length;
             self.head = self.initial_length - 1;
-            self.previous_head = self.head;
-            self.previous_length = self.length;
+            self.body.clear();
+            self.body.extend((0..self.initial_length).rev());
+            self.previous_body.clear();
+            self.previous_body.extend(self.body.iter().copied());
+            self.route.clear();
+            self.meal_age = 1.0;
             self.food.clear();
             self.replenish_food();
             return;
         }
-        self.previous_head = self.head;
-        self.previous_length = self.length;
-        self.head = (self.head + 1) % size;
+        self.previous_body.clear();
+        self.previous_body.extend(self.body.iter().copied());
+        if self
+            .route
+            .back()
+            .is_some_and(|target| !self.food.contains(target))
+        {
+            self.route.clear();
+        }
+        if self.route.is_empty() {
+            // Body construction and each legal move keep at least two cells.
+            let tail = self.body[self.length - 1];
+            self.route = super::snake_planner::food_route(
+                self.side,
+                &self.cycle,
+                &self.ranks,
+                self.head,
+                tail,
+                &self.food,
+            );
+        }
+        self.head = self.route.pop_front().unwrap_or((self.head + 1) % size);
         if let Some(index) = self.food.iter().position(|food| *food == self.head) {
             self.food.swap_remove(index);
             self.length += 1;
+            self.meal_age = self.accumulator.min(1.0);
+            self.route.clear();
+        } else {
+            self.body.pop_back();
         }
+        self.body.push_front(self.head);
         self.replenish_food();
     }
     fn replenish_food(&mut self) {
         self.occupied.fill(false);
         let size = self.cycle.len();
-        for offset in 0..self.length {
-            self.occupied[(self.head + size - offset) % size] = true;
+        for cell in &self.body {
+            self.occupied[*cell] = true;
         }
         for food in &self.food {
             self.occupied[*food] = true;
@@ -829,6 +902,231 @@ mod tests {
     }
 
     #[test]
+    fn snake_timing_edit_does_not_replay_elapsed_time_at_the_new_rate() {
+        let mut options = SimulationOptions {
+            snake_grid: 8,
+            snake_initial_length: 3,
+            snake_step_seconds: 0.2,
+            easing_seconds: 0.15,
+            ..SimulationOptions::default()
+        };
+        let mut simulation = Simulations::new(17);
+        simulation.update(Mode::Snake, &options, 0.0, 0.0, None, &mut Vec::new());
+        simulation.update(Mode::Snake, &options, 0.19, 0.19, None, &mut Vec::new());
+        let before = simulation.snake.as_ref().unwrap().body.clone();
+        assert!(simulation.snake.as_ref().unwrap().accumulator > 0.18);
+
+        options.snake_step_seconds = 0.04;
+        options.easing_seconds = 0.02;
+        simulation.update(Mode::Snake, &options, 0.19, 0.19, None, &mut Vec::new());
+        let snake = simulation.snake.as_ref().unwrap();
+        assert_eq!(snake.body, before, "a timing edit cannot move the snake");
+        assert_eq!(snake.accumulator, 0.0);
+        for segment in 0..snake.length {
+            assert_eq!(
+                snake.segment_position(segment, 0.0),
+                snake.segment_position(segment, 1.0)
+            );
+        }
+
+        simulation.update(Mode::Snake, &options, 0.23, 0.23, None, &mut Vec::new());
+        let snake = simulation.snake.as_ref().unwrap();
+        assert_eq!(snake.body[1], before[0], "one new interval advances once");
+
+        simulation.update(Mode::Snake, &options, 0.249, 0.249, None, &mut Vec::new());
+        let before_easing_edit = simulation.snake.as_ref().unwrap().body.clone();
+        options.easing_seconds = 0.01;
+        simulation.update(Mode::Snake, &options, 0.249, 0.249, None, &mut Vec::new());
+        let snake = simulation.snake.as_ref().unwrap();
+        assert_eq!(snake.body, before_easing_edit);
+        assert_eq!(snake.accumulator, 0.0);
+        for segment in 0..snake.length {
+            assert_eq!(
+                snake.segment_position(segment, 0.0),
+                snake.segment_position(segment, 1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn snake_eats_safe_adjacent_food_instead_of_scanning_eleven_cells() {
+        let mut snake = SnakeState::new(8, 3, 1, 17);
+        // Initial head (2,0), body (1,0),(0,0); food immediately below at (2,1).
+        // The old fixed cycle instead goes to (3,0), then takes eleven moves.
+        let food = snake.cycle.iter().position(|cell| *cell == [2, 1]).unwrap();
+        snake.food = vec![food];
+        snake.step();
+        assert_eq!(
+            snake.length, 4,
+            "adjacent safe food should be eaten immediately"
+        );
+        assert_eq!(snake.cycle[snake.head], [2, 1]);
+    }
+
+    #[test]
+    fn snake_food_breathes_between_game_steps() {
+        let options = SimulationOptions {
+            snake_food_count: 1,
+            ..SimulationOptions::default()
+        };
+        let mut simulation = Simulations::new(17);
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        simulation.update(Mode::Snake, &options, 0.0, 0.0, None, &mut before);
+        simulation.update(Mode::Snake, &options, 0.05, 0.05, None, &mut after);
+        assert_eq!(before.last().unwrap().from, after.last().unwrap().from);
+        assert_ne!(before.last().unwrap().height, after.last().unwrap().height);
+    }
+
+    #[test]
+    fn snake_turn_and_growth_interpolate_from_the_real_previous_body() {
+        let mut snake = SnakeState::new(8, 3, 1, 17);
+        let previous: Vec<_> = (0..3)
+            .map(|segment| snake.segment_position(segment, 1.0))
+            .collect();
+        let food = snake.cycle.iter().position(|cell| *cell == [2, 1]).unwrap();
+        snake.food = vec![food];
+        snake.step();
+        assert_eq!(snake.length, 4);
+
+        // A new tail starts on the old tail. Every other segment starts on
+        // its actual previous position, including when the head turns.
+        for segment in 0..4 {
+            assert_eq!(
+                snake.segment_position(segment, 0.0),
+                previous[segment.min(2)]
+            );
+        }
+        let head_start = previous[0];
+        let head_end = [2.5 / 8.0, 1.5 / 8.0];
+        assert_eq!(snake.segment_position(0, 1.0), head_end);
+        assert_eq!(
+            snake.segment_position(0, 0.5),
+            std::array::from_fn(|axis| (head_start[axis] + head_end[axis]) * 0.5)
+        );
+        assert_eq!(snake.segment_position(3, 1.0), previous[2]);
+    }
+
+    #[test]
+    fn snake_can_vacate_its_tail_without_growing_or_crossing_the_body() {
+        let mut snake = SnakeState::new(4, 6, 1, 17);
+        // This U-shaped, cycle-ordered body leaves the next cycle cell as
+        // its tail. It is legal to enter that cell only while the tail moves.
+        snake.body = VecDeque::from([2, 1, 6, 5, 4, 3]);
+        snake.head = 2;
+        snake.food = vec![8];
+        snake.step();
+        assert_eq!(snake.head, 3);
+        assert_eq!(snake.length, 6);
+        assert_eq!(snake.body, VecDeque::from([3, 2, 1, 6, 5, 4]));
+        assert_eq!(snake.food, vec![8]);
+    }
+
+    #[test]
+    fn snake_near_full_board_grows_then_restarts_with_coherent_interpolation() {
+        let mut snake = SnakeState::new(4, 15, 16, 17);
+        assert_eq!(snake.food.len(), 1);
+        snake.step();
+        assert_eq!(snake.length, 16);
+        assert!(snake.food.is_empty());
+        snake.step();
+        assert_eq!(snake.length, 15);
+        assert_eq!(snake.food.len(), 1);
+        for segment in 0..snake.length {
+            assert_eq!(
+                snake.segment_position(segment, 0.0),
+                snake.segment_position(segment, 1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn snake_has_a_tapered_body_and_a_feeding_pulse_that_decays_between_moves() {
+        let options = SimulationOptions {
+            snake_grid: 8,
+            snake_initial_length: 3,
+            snake_food_count: 1,
+            snake_step_seconds: 0.2,
+            ..SimulationOptions::default()
+        };
+        let mut simulation = Simulations::new(17);
+        let mut bodies = Vec::new();
+        simulation.update(Mode::Snake, &options, 0.0, 0.0, None, &mut bodies);
+        let snake = simulation.snake.as_mut().unwrap();
+        let food = snake.cycle.iter().position(|cell| *cell == [2, 1]).unwrap();
+        snake.food = vec![food];
+
+        bodies.clear();
+        simulation.update(Mode::Snake, &options, 0.2, 0.2, None, &mut bodies);
+        assert_eq!(simulation.snake.as_ref().unwrap().length, 4);
+        assert_eq!(bodies.len(), 5);
+        assert!(bodies[0].radius > bodies[2].radius);
+        assert!(bodies[3].radius > bodies[0].radius);
+        let eating_height = bodies[3].height;
+
+        bodies.clear();
+        simulation.update(Mode::Snake, &options, 0.25, 0.25, None, &mut bodies);
+        assert_eq!(simulation.snake.as_ref().unwrap().length, 4);
+        assert!(bodies[3].height < eating_height);
+    }
+
+    #[test]
+    fn snake_seed_matrix_preserves_actual_legality_growth_and_cyclic_escape_order() {
+        for side in (4..=32).step_by(2) {
+            for seed in [1, 7, 17, 33] {
+                for food_count in [1, 3, 16] {
+                    for initial in [2, 4, 32.min(side * side - 1)] {
+                        let mut snake = SnakeState::new(side, initial, food_count, seed);
+                        let mut meals = 0;
+                        for _ in 0..512 {
+                            let previous = snake.body.clone();
+                            let before = snake.length;
+                            snake.step();
+                            if before < side * side {
+                                let a = snake.cycle[previous[0]];
+                                let b = snake.cycle[snake.head];
+                                assert_eq!(a[0].abs_diff(b[0]) + a[1].abs_diff(b[1]), 1);
+                                let grew = snake.length > before;
+                                meals += usize::from(grew);
+                                let retained = previous.len() - usize::from(!grew);
+                                assert!(!previous
+                                    .iter()
+                                    .take(retained)
+                                    .any(|cell| *cell == snake.head));
+                            }
+                            assert_eq!(snake.body.len(), snake.length);
+                            let mut occupied = vec![false; side * side];
+                            let mut span = 0;
+                            for (segment, cell) in snake.body.iter().copied().enumerate() {
+                                assert!(!occupied[cell]);
+                                occupied[cell] = true;
+                                if segment > 0 {
+                                    let previous = snake.body[segment - 1];
+                                    let a = snake.cycle[previous];
+                                    let b = snake.cycle[cell];
+                                    assert_eq!(a[0].abs_diff(b[0]) + a[1].abs_diff(b[1]), 1);
+                                    span += (previous + side * side - cell) % (side * side);
+                                }
+                            }
+                            assert!(span < side * side);
+                            assert!(snake.food.iter().all(|cell| !occupied[*cell]));
+                            let mut food = snake.food.clone();
+                            food.sort_unstable();
+                            food.dedup();
+                            assert_eq!(food.len(), snake.food.len());
+                            assert_eq!(food.len(), food_count.min(side * side - snake.length));
+                        }
+                        assert!(
+                            meals > 0,
+                            "side{side}/seed{seed}/food{food_count}/initial{initial}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn life_blinker_uses_conway_rules() {
         let mut state = LifeState::new(5, 0.0, false, &mut Rng::new(1));
         state.cells.fill(false);
@@ -951,9 +1249,14 @@ mod tests {
             let size = snake.cycle.len();
             let mut cells = vec![false; size];
             for segment in 0..snake.length {
-                let index = (snake.head + size - segment) % size;
+                let index = snake.body[segment];
                 assert!(!cells[index]);
                 cells[index] = true;
+                if segment > 0 {
+                    let a = snake.cycle[snake.body[segment - 1]];
+                    let b = snake.cycle[index];
+                    assert_eq!(a[0].abs_diff(b[0]) + a[1].abs_diff(b[1]), 1);
+                }
             }
             assert!(snake.food.iter().all(|food| !cells[*food]));
             assert_eq!(snake.food.len(), 4.min(size - snake.length));
@@ -1110,5 +1413,37 @@ mod tests {
             simulation.snake.as_ref().unwrap().head,
             options.snake_initial_length as usize - 1
         );
+    }
+
+    #[test]
+    fn food_seeking_snake_finishes_seeded_games_including_dense_endgames() {
+        for side in [4, 8, 12, 32] {
+            for food_count in [1, 3, 16] {
+                for seed in [1, 17] {
+                    let mut snake = SnakeState::new(side, 4, food_count, seed);
+                    let size = side * side;
+                    // A conservative cycle controller needs at most one full
+                    // board traversal per meal. Shortcuts must still finish.
+                    let move_bound = size * (size - snake.initial_length);
+                    for _ in 0..move_bound {
+                        if snake.length == size {
+                            break;
+                        }
+                        snake.step();
+                    }
+                    assert_eq!(
+                        snake.length, size,
+                        "unfinished game: side{side}, food{food_count}, seed{seed}"
+                    );
+                    assert!(snake.food.is_empty());
+                    snake.step();
+                    assert_eq!(snake.length, snake.initial_length);
+                    assert_eq!(
+                        snake.previous_body,
+                        snake.body.iter().copied().collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
     }
 }

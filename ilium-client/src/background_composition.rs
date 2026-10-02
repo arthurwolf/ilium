@@ -18,6 +18,7 @@ use crate::config::MotionLevel;
 /// declared its own (`Scene::frames_per_second`).
 pub const DEFAULT_FRAMES_PER_SECOND: u32 = 30;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
+const MAX_RECEIPT_CELLS: usize = 262_144;
 
 /// One absolute clock shared by the session compositor and Settings preview,
 /// at the default 12 frames per second. See [`quantized_elapsed_at`].
@@ -66,13 +67,24 @@ pub fn ambient_is_visible(app: &App) -> bool {
         && !app.layout.screen_area.is_empty()
 }
 
+fn effective_field_is_available(app: &App) -> bool {
+    let Some(kind) = app.effective_animation_kind() else {
+        return false;
+    };
+    kind != crate::background_animation::AnimationKind::OpenStreetMap
+        || !crate::layout::osm_attribution_area(app.layout.screen_area).is_empty()
+}
+
 fn live_animation_is_visible(app: &App) -> bool {
+    if !effective_field_is_available(app) {
+        return false;
+    }
     !app.layout.screen_area.is_empty()
         && (app.is_animation_preview_visible()
             || (ambient_is_visible(app)
                 && (app.ui_settings.motion_level != MotionLevel::Off
-                    || app.animation_settings.kind
-                        == crate::background_animation::AnimationKind::Wikipedia)))
+                    || app.effective_animation_kind()
+                        == Some(crate::background_animation::AnimationKind::Wikipedia))))
 }
 
 /// `None` means animation contributes no recurring deadline. Preview remains
@@ -120,6 +132,7 @@ fn render_field(
         app.animation_frame
             .render(settings, area.width, area.height, elapsed);
     }
+    app.note_animation_field_settings();
 }
 
 /// Render one screen-wide field, then reveal it only through safe workspace
@@ -131,13 +144,19 @@ fn render_field(
 /// safe blank of the settings screen (its controls panel is opaque). The
 /// hosted scene and article worker are dropped whenever neither surface is visible.
 pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
+    app.reconcile_animation_presentation();
     let is_preview = app.is_animation_preview_visible();
     if buffer.area.is_empty() || !(is_preview || ambient_is_visible(app)) {
         app.animation_frame.release_hosts();
         app.animation_cache.borrow_mut().pause();
         return;
     }
-    let mut settings = app.animation_settings.normalized();
+    let Some(effective) = app.effective_animation_settings() else {
+        app.animation_frame.release_hosts();
+        app.animation_cache.borrow_mut().pause();
+        return;
+    };
+    let mut settings = effective.normalized();
     if settings.kind == crate::background_animation::AnimationKind::OpenStreetMap
         && crate::layout::osm_attribution_area(buffer.area).is_empty()
     {
@@ -161,6 +180,19 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             quantized_elapsed_at(elapsed, app.animation_frames_per_second())
         };
     render_field(app, &settings, buffer.area, elapsed);
+    let area = buffer.area;
+    let receipt_cells = usize::from(area.width) * usize::from(area.height);
+    let mut painted_bits = if !is_preview && receipt_cells <= MAX_RECEIPT_CELLS {
+        vec![0_u8; receipt_cells]
+    } else {
+        Vec::new()
+    };
+    let mut mark_painted = |column: u16, row: u16, bits: u8| {
+        let index = usize::from(row) * usize::from(area.width) + usize::from(column);
+        if let Some(cell) = painted_bits.get_mut(index) {
+            *cell |= bits;
+        }
+    };
     let (red, green, blue) = settings.foreground_rgb();
     let foreground = Color::Rgb(red, green, blue);
     let look = LookPaint {
@@ -202,7 +234,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             ),
             _ => None,
         };
-        paint_region_with_field(
+        paint_region_with_field_receipt(
             buffer,
             preview_area,
             None,
@@ -217,37 +249,45 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
                 }
             },
             app.animation_frame.is_wikipedia(),
+            &mut mark_painted,
         );
+        // A Settings preview is visible, but it is not ordinary workspace
+        // delivery and must not advance the tour's shown-history.
+        app.animation_frame.discard_composed_receipt();
         return;
     }
     if settings.panels.shows_left() {
-        paint_region_with_field(
+        paint_region_with_field_receipt(
             buffer,
             panel_inner(app.layout.tree_area),
             None,
             foreground,
             |column, row| field_cell(app, &look, column, row),
             app.animation_frame.is_wikipedia(),
+            &mut mark_painted,
         );
     }
 
     if !settings.panels.shows_right()
         || matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
     {
+        app.animation_frame.composed(painted_bits);
         return;
     }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         // This is draw_pane's known empty/loading placeholder, not an unknown
         // editor, board, search, settings, or chatroom surface.
-        paint_region_with_field(
+        paint_region_with_field_receipt(
             buffer,
             panel_inner(app.layout.pane_area),
             None,
             foreground,
             |column, row| field_cell(app, &look, column, row),
             app.animation_frame.is_wikipedia(),
+            &mut mark_painted,
         );
+        app.animation_frame.composed(painted_bits);
         return;
     }
     for viewport in viewports {
@@ -258,16 +298,18 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             .completed_agent_close_action(viewport)
             .map_or(viewport.content_area, |action| action.terminal_area);
         terminal.with_screen(|screen| {
-            paint_region_with_field(
+            paint_region_with_field_receipt(
                 buffer,
                 area,
                 Some(screen),
                 foreground,
                 |column, row| field_cell(app, &look, column, row),
                 app.animation_frame.is_wikipedia(),
+                &mut mark_painted,
             );
         });
     }
+    app.animation_frame.composed(painted_bits);
 }
 
 /// Everything needed to colour one ink cell through the shared look.
@@ -508,13 +550,36 @@ fn safe_target(
 /// A two-column article glyph is committed only with a typed continuation
 /// and two safe native destination cells. A scene's typed native glyph uses
 /// one safe cell; untyped ordinary scene ink remains Braille-only.
+#[cfg(test)]
 fn paint_region_with_field(
+    buffer: &mut Buffer,
+    region: Rect,
+    screen: Option<&vt100::Screen>,
+    foreground: Color,
+    field: impl FnMut(u16, u16) -> FieldCell,
+    allow_text: bool,
+) {
+    paint_region_with_field_receipt(
+        buffer,
+        region,
+        screen,
+        foreground,
+        field,
+        allow_text,
+        |_, _, _| {},
+    );
+}
+
+/// Reports only Braille cells actually committed through safe_target. This is
+/// provisional until the final buffer is checked after every later overlay.
+fn paint_region_with_field_receipt(
     buffer: &mut Buffer,
     region: Rect,
     screen: Option<&vt100::Screen>,
     foreground: Color,
     mut field: impl FnMut(u16, u16) -> FieldCell,
     allow_text: bool,
+    mut painted: impl FnMut(u16, u16, u8),
 ) {
     let clipped = region.intersection(buffer.area);
     if clipped.is_empty() {
@@ -613,7 +678,59 @@ fn paint_region_with_field(
                 next.modifier = Modifier::empty();
                 remaining_continuations = 1;
             }
+            if !is_native && is_braille {
+                if let Some(character) = symbol.chars().next() {
+                    painted(
+                        column - buffer.area.x,
+                        row - buffer.area.y,
+                        (u32::from(character) - 0x2800) as u8,
+                    );
+                }
+            }
         }
+    }
+}
+
+/// A caller must supply the terminal buffer from a successful draw after all
+/// overlays. If later drawing can write an identical glyph, it must also pass
+/// explicit touched-cell provenance or move composition to the last paint step.
+fn surviving_braille_bits(buffer: &Buffer, bits: &[u8]) -> Option<Vec<u8>> {
+    let area = buffer.area;
+    if area.is_empty() || bits.len() != usize::from(area.width) * usize::from(area.height) {
+        return None;
+    }
+    let mut surviving = vec![0_u8; bits.len()];
+    for (index, &painted) in bits.iter().enumerate() {
+        if painted == 0 {
+            continue;
+        }
+        let Some(column) = area.x.checked_add((index % usize::from(area.width)) as u16) else {
+            continue;
+        };
+        let Some(row) = area.y.checked_add((index / usize::from(area.width)) as u16) else {
+            continue;
+        };
+        let cell = &buffer[(column, row)];
+        let expected = char::from_u32(0x2800 + u32::from(painted));
+        if cell.diff_option == CellDiffOption::None
+            && expected.is_some_and(|symbol| {
+                let mut characters = cell.symbol().chars();
+                characters.next() == Some(symbol) && characters.next().is_none()
+            })
+        {
+            surviving[index] = painted;
+        }
+    }
+    Some(surviving)
+}
+
+/// Call only after successful final terminal draw of this exact buffer.
+pub(crate) fn acknowledge_final(buffer: &Buffer, area: Rect, app: &mut App) {
+    if buffer.area != area {
+        return;
+    }
+    if let Some(surviving) = surviving_braille_bits(buffer, app.animation_frame.composed_bits()) {
+        app.animation_frame.presented_final(&surviving);
     }
 }
 
@@ -1764,6 +1881,50 @@ mod tests {
             probe.rendered.load(Ordering::SeqCst),
             1,
             "no motion, no re-render"
+        );
+    }
+    #[test]
+    fn paint_receipt_counts_only_safe_committed_braille_and_later_survivors() {
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(1, 0)].set_symbol("X");
+        let mut bits = vec![0_u8; 2];
+        paint_region_with_field_receipt(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |_, _| FieldCell::Ink {
+                symbol: "\u{2801}".into(),
+                color: None,
+                modifier: Modifier::empty(),
+            },
+            false,
+            |column, row, painted| {
+                bits[usize::from(row) * 2 + usize::from(column)] |= painted;
+            },
+        );
+        assert_eq!(bits, vec![1, 0]);
+        assert_eq!(surviving_braille_bits(&buffer, &bits), Some(vec![1, 0]));
+        buffer[(0, 0)].set_symbol("Y");
+        assert_eq!(surviving_braille_bits(&buffer, &bits), Some(vec![0, 0]));
+    }
+    #[test]
+    fn completed_frame_excludes_skip_cells_even_if_they_contain_braille() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(2, 1)).unwrap();
+        let completed = terminal
+            .draw(|frame| {
+                frame.buffer_mut()[(0, 0)].set_symbol("\u{2801}");
+                frame.buffer_mut()[(1, 0)]
+                    .set_symbol("\u{2801}")
+                    .set_diff_option(CellDiffOption::Skip);
+            })
+            .unwrap();
+        assert_eq!(completed.area, completed.buffer.area);
+        assert_eq!(
+            surviving_braille_bits(completed.buffer, &[1, 1]),
+            Some(vec![1, 0])
         );
     }
 }

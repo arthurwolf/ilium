@@ -96,3 +96,28 @@ fn pi_native_digits_reach_client_glyphs_and_clear_on_scene_change() {
         .collect();
     assert!(!cleared.contains("3.14159"));
 }
+
+#[test] // Real project persistence, not only a serde round trip.
+fn boat_source_choices_survive_project_save_reload_without_serializing_notices() {
+    // No network or scene startup.
+    use ilium_ambient::live_data::maps::BoatSource; // Actual persisted enum.
+    let project = tempfile::tempdir().unwrap(); // Isolated project configuration.
+    for source in [BoatSource::OpenSeaFeed, BoatSource::Digitraffic] {
+        // Both explicit choices.
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::Boats,
+            enabled: true,
+            ..Default::default()
+        }; // Existing client settings pipeline.
+        settings.ambient.boats.boat_source = source; // Set the actual source field.
+        crate::project_config::set_animation(project.path(), settings).unwrap(); // Authoritative writer.
+        let loaded = crate::project_config::load(project.path())
+            .unwrap()
+            .animation; // Authoritative reader.
+        assert_eq!(loaded.ambient.boats.boat_source, source); // Provider survives a real project write/reload.
+        assert!(!loaded.uses_loop_cache()); // Source data is never precomputed into a fake animation loop.
+        let saved = serde_json::to_value(&loaded.ambient.boats).unwrap(); // Inspect only the public typed settings.
+        assert!(saved.get("boat_credit").is_none() && saved.get("boat_license").is_none());
+        // Notices are derived metadata, never editable provenance.
+    } // End block.
+} // End block.

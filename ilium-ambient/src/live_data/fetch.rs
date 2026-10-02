@@ -99,30 +99,70 @@ pub fn graph(
         Duration::from_secs(source.minimum_poll_seconds),
         move |stop| {
             let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
-            let mut data = DataSeries::default();
-            for url in graph_urls(source, window_minutes, now) {
-                let decoded = series::decode(source, &get(&url, stop)?)?;
-                data.samples.extend(decoded.samples);
-                data.candles.extend(decoded.candles);
-                data.rejected = data.rejected.saturating_add(decoded.rejected);
-                if decoded.detail.is_some() {
-                    data.detail = decoded.detail;
-                }
-            }
-            if matches!(source.provider, Provider::Coinbase(_)) {
-                let start = now.timestamp_millis().saturating_sub(
-                    i64::from(window_minutes.clamp(MIN_WINDOW_MINUTES, MAX_WINDOW_MINUTES)) * 60000,
-                );
-                merge_candles(&mut data, start, now.timestamp_millis());
-                data.detail = Some(format!(
-                    "Coinbase genuine {}s candle interval; provider-time window",
-                    candle_granularity(window_minutes)
-                ));
-            }
+            let data = fetch_graph_plan(
+                source,
+                window_minutes,
+                now,
+                &crate::source::default_cache_dir().join("live-data"),
+                stop,
+                get,
+            )?;
             let observed = data.samples.last().map(|sample| sample.observed_ms);
             Ok((data, observed))
         },
     )
+}
+
+/// Execute one bounded history plan on the poller worker. The transport seam
+/// permits admission tests without contacting public providers.
+fn fetch_graph_plan(
+    source: &GraphSource,
+    window_minutes: i32,
+    now: chrono::DateTime<chrono::Utc>,
+    reservation_root: &std::path::Path,
+    stop: &AtomicBool,
+    mut download: impl FnMut(&str, &AtomicBool) -> Result<Vec<u8>, String>,
+) -> Result<DataSeries, String> {
+    if stop.load(Ordering::Acquire) {
+        return Err("graph request cancelled".into());
+    }
+    // This is one client history-plan reservation (at most two HTTP pages),
+    // not a claim about Coinbase's provider-enforced numeric quota.
+    if let Provider::Coinbase(product) = source.provider {
+        if product.is_empty()
+            || !product
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err("invalid historical-candle product identity".into());
+        }
+        super::rate::reserve(
+            &reservation_root.join(format!("coinbase-{product}-request.time")),
+            now.timestamp_millis(),
+            60_000,
+        )?;
+    }
+    let mut data = DataSeries::default();
+    for url in graph_urls(source, window_minutes, now) {
+        let decoded = series::decode(source, &download(&url, stop)?)?;
+        data.samples.extend(decoded.samples);
+        data.candles.extend(decoded.candles);
+        data.rejected = data.rejected.saturating_add(decoded.rejected);
+        if decoded.detail.is_some() {
+            data.detail = decoded.detail;
+        }
+    }
+    if matches!(source.provider, Provider::Coinbase(_)) {
+        let start = now.timestamp_millis().saturating_sub(
+            i64::from(window_minutes.clamp(MIN_WINDOW_MINUTES, MAX_WINDOW_MINUTES)) * 60000,
+        );
+        merge_candles(&mut data, start, now.timestamp_millis());
+        data.detail = Some(format!(
+            "Coinbase genuine {}s candle interval; provider-time window",
+            candle_granularity(window_minutes)
+        ));
+    }
+    Ok(data)
 }
 
 fn merge_candles(data: &mut DataSeries, start_ms: i64, end_ms: i64) {
@@ -152,7 +192,10 @@ pub fn earthquakes(requested_seconds: u64) -> Result<Poller<Vec<Earthquake>>, St
         Duration::from_secs(60),
         |stop| {
             let data = parse::usgs(&get(USGS, stop)?)?.items;
-            let observed = data.iter().map(|event| event.position.observed_ms).max();
+            let observed = data
+                .iter()
+                .filter_map(|event| event.position.observed_ms)
+                .max();
             Ok((data, observed))
         },
     )
@@ -196,7 +239,10 @@ fn positions(
         Duration::from_secs(minimum),
         move |stop| {
             let data = decode(&get(url, stop)?)?.items;
-            let observed = data.iter().map(|position| position.observed_ms).max();
+            let observed = data
+                .iter()
+                .filter_map(|position| position.observed_ms)
+                .max();
             Ok((data, observed))
         },
     )
@@ -299,5 +345,113 @@ mod tests {
         assert!(get(AIRCRAFT, &AtomicBool::new(true))
             .unwrap_err()
             .contains("cancelled"));
+    }
+}
+
+#[cfg(test)]
+mod shared_history_admission_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    #[test]
+    fn reopen_and_second_client_share_history_floor_but_fast_inputs_are_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        let bitcoin = super::super::catalog::find("btc_usd").unwrap();
+        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(1_000_000, 0).unwrap();
+        let stop = AtomicBool::new(false);
+        let calls = AtomicUsize::new(0);
+        // Synthetic candle transport; no provider request or production cache.
+        let download = |_: &str, _: &AtomicBool| {
+            calls.fetch_add(1, Ordering::AcqRel);
+            Ok(br#"[[999960,1,3,2,2.5,1]]"#.to_vec())
+        };
+        fetch_graph_plan(bitcoin, 1, now, root.path(), &stop, download).unwrap();
+        let reopened = fetch_graph_plan(
+            bitcoin,
+            5,
+            now + chrono::Duration::milliseconds(1),
+            root.path(),
+            &stop,
+            download,
+        );
+        assert!(
+            reopened.is_err(),
+            "another client/window must not bypass the history floor"
+        );
+        assert_eq!(calls.load(Ordering::Acquire), 1);
+        fetch_graph_plan(
+            bitcoin,
+            1,
+            now + chrono::Duration::seconds(60),
+            root.path(),
+            &stop,
+            download,
+        )
+        .unwrap();
+        assert_eq!(calls.load(Ordering::Acquire), 2);
+        let ethereum = super::super::catalog::find("eth_usd").unwrap();
+        fetch_graph_plan(ethereum, 1, now, root.path(), &stop, download).unwrap();
+        assert_eq!(calls.load(Ordering::Acquire), 3);
+        let drand = super::super::catalog::find("drand_randomness").unwrap();
+        let random = |_: &str, _: &AtomicBool| {
+            Ok(br#"{"round":1,"randomness":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#.to_vec())
+        };
+        fetch_graph_plan(drand, 1, now, root.path(), &stop, random).unwrap();
+        fetch_graph_plan(
+            drand,
+            1,
+            now + chrono::Duration::seconds(5),
+            root.path(),
+            &stop,
+            random,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn failed_cancelled_and_corrupt_history_reservations_fail_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let bitcoin = super::super::catalog::find("btc_usd").unwrap();
+        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(1_000_000, 0).unwrap();
+        let stop = AtomicBool::new(true);
+        assert!(
+            fetch_graph_plan(bitcoin, 1, now, root.path(), &stop, |_, _| panic!(
+                "cancelled request contacted transport"
+            ))
+            .is_err()
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        stop.store(false, Ordering::Release);
+        let calls = AtomicUsize::new(0);
+        assert!(
+            fetch_graph_plan(bitcoin, 1, now, root.path(), &stop, |_, _| {
+                calls.fetch_add(1, Ordering::AcqRel);
+                Err("synthetic transport failure".into())
+            })
+            .is_err()
+        );
+        assert_eq!(calls.load(Ordering::Acquire), 1);
+        assert!(fetch_graph_plan(
+            bitcoin,
+            1,
+            now + chrono::Duration::seconds(1),
+            root.path(),
+            &stop,
+            |_, _| panic!("failed attempt reset budget")
+        )
+        .is_err());
+        let reservation = root.path().join("coinbase-BTC-USD-request.time");
+        std::fs::write(&reservation, b"invalid fixture ledger").unwrap();
+        assert!(fetch_graph_plan(
+            bitcoin,
+            1,
+            now + chrono::Duration::seconds(61),
+            root.path(),
+            &stop,
+            |_, _| panic!("corrupt ledger reset budget")
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read(reservation).unwrap(),
+            b"invalid fixture ledger"
+        );
     }
 }

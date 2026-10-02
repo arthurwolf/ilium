@@ -1,8 +1,11 @@
 //! Deterministic dot scenes. Decoration never enters PTY/source state.
 
+use ilium_ambient::raster::PaintedOwner;
 use ilium_ambient::style::Appearance;
 use ilium_ambient::{AmbientKind, AmbientSettings};
+use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
 
 mod cache;
@@ -80,10 +83,11 @@ pub enum AnimationKind {
     Chess,
     OpenStreetMap,
     Carpet,
+    Semantic,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -124,6 +128,7 @@ impl AnimationKind {
         Self::Chess,
         Self::OpenStreetMap,
         Self::Carpet,
+        Self::Semantic,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
@@ -175,7 +180,8 @@ impl AnimationKind {
     /// Live-only scenes are never precomputed into the loop cache: their
     /// output depends on data, processes or the wall clock, not just time.
     pub fn is_live_only(self) -> bool {
-        self == Self::Wikipedia || self.ambient().is_some_and(AmbientKind::is_live_only)
+        matches!(self, Self::Wikipedia | Self::Semantic)
+            || self.ambient().is_some_and(AmbientKind::is_live_only)
     }
 
     pub fn label(self) -> &'static str {
@@ -183,6 +189,7 @@ impl AnimationKind {
             return kind.label();
         }
         match self {
+            Self::Semantic => "Semantic",
             Self::Wikipedia => "Wikipedia",
             Self::Shoreline => "Wave washing up sand",
             Self::MoonlitWater => "Moon over moving water",
@@ -203,6 +210,7 @@ impl AnimationKind {
             return kind.description();
         }
         match self {
+            Self::Semantic => "Use the animation recommended during tree reorganization for the selected project or entry.",
             Self::Wikipedia => "Today's Wikipedia articles, slowly scrolling as readable text or font-rendered Braille, with images and infoboxes.",
             Self::Shoreline => "A diagonal wash with fine foam, wet sand and scattered grains.",
             Self::MoonlitWater => "Crossing wavelets fracture a widening moonlit reflection.",
@@ -225,6 +233,15 @@ impl AnimationKind {
             _ => unreachable!("ambient kinds return before this match"),
         }
     }
+}
+
+/// Which authoritative tree recommendation selects the shared background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticScope {
+    #[default]
+    Project,
+    Entry,
 }
 
 /// Which workspace panel shows the animation behind it.
@@ -276,6 +293,7 @@ pub enum AnimationPlaybackMode {
 pub struct AnimationSettings {
     pub enabled: bool,
     pub kind: AnimationKind,
+    pub semantic_scope: SemanticScope,
     pub playback_mode: AnimationPlaybackMode,
     pub loop_seconds: u16,
     pub speed_percent: u16,
@@ -314,6 +332,7 @@ impl Default for AnimationSettings {
         Self {
             enabled: false,
             kind: AnimationKind::default(),
+            semantic_scope: SemanticScope::default(),
             playback_mode: AnimationPlaybackMode::Loop,
             loop_seconds: 60,
             speed_percent: 100,
@@ -510,6 +529,9 @@ pub struct AnimationFrame {
     has_cell_colors: bool,
     host: AmbientHost,
     last_ambient: Option<AmbientRenderKey>,
+    /// Braille bits actually committed by safe_target during composition.
+    composed_bits: Vec<u8>,
+    composed_key: Option<AmbientRenderKey>,
     pointer: Option<[f32; 2]>,
     wikipedia: WikipediaPresentation,
     is_wikipedia: bool,
@@ -553,6 +575,9 @@ impl AnimationFrame {
         self.is_wikipedia = false;
         self.has_cell_colors = false;
         self.last_ambient = None;
+        self.composed_key = None;
+        self.composed_bits.fill(0);
+        self.raster.owner_ids.fill(0);
         self.last_geometry = None;
         self.cells.fill(0);
     }
@@ -620,11 +645,24 @@ impl AnimationFrame {
         elapsed: Duration,
     ) {
         let settings = settings.normalized();
+        // Semantic is a selection policy, never a concrete scene. Its caller
+        // must resolve a validated recommendation first. An unresolved policy
+        // drops the previous scene instead of showing stale artwork.
+        if settings.kind == AnimationKind::Semantic {
+            self.release_hosts();
+            if width != self.width || height != self.height {
+                self.resize(width, height);
+            }
+            self.cells.fill(0);
+            return;
+        }
         if settings.kind == AnimationKind::Wikipedia {
             self.host.release();
             self.is_wikipedia = true;
             self.last_geometry = None;
             self.last_ambient = None;
+            self.composed_key = None;
+            self.composed_bits.fill(0);
             if width != self.width || height != self.height {
                 self.resize(width, height);
             }
@@ -645,6 +683,8 @@ impl AnimationFrame {
         self.host.release();
         self.has_cell_colors = false;
         self.last_ambient = None;
+        self.composed_key = None;
+        self.composed_bits.fill(0);
         let key = FrameKey {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
@@ -665,6 +705,7 @@ impl AnimationFrame {
                 self.resize(width, height);
             } else {
                 self.raster.dots.fill(0.0);
+                self.raster.owner_ids.fill(0);
             }
             if width > 0 && height > 0 {
                 let seconds = elapsed.as_secs_f64() * f64::from(settings.speed_percent) / 100.0;
@@ -708,6 +749,7 @@ impl AnimationFrame {
                 self.resize(width, height);
             } else {
                 self.raster.dots.fill(0.0);
+                self.raster.owner_ids.fill(0);
             }
             self.colors.fill([0; 3]);
             if width > 0 && height > 0 {
@@ -788,6 +830,102 @@ impl AnimationFrame {
 
     pub(crate) fn packed_cells(&self) -> &[u8] {
         &self.cells
+    }
+
+    /// Store only cells the compositor actually wrote through safe_target.
+    /// A final-stage caller must filter this mask after all later overlays.
+    pub(crate) fn composed(&mut self, bits: Vec<u8>) {
+        if self.is_wikipedia || self.last_ambient.is_none() || bits.len() != self.cells.len() {
+            self.composed_key = None;
+            self.composed_bits.clear();
+            return;
+        }
+        self.composed_key = self.last_ambient;
+        self.composed_bits = bits;
+    }
+
+    pub(crate) fn composed_bits(&self) -> &[u8] {
+        &self.composed_bits
+    }
+
+    /// Remove possible saved-scene attribution under a later opaque UI write.
+    /// This is conservative for a region: unchanged or identical overpaint
+    /// cannot be mistaken for scene-owned ink.
+    pub(crate) fn occlude_composed(&mut self, screen: Rect, region: Rect) {
+        if self.composed_key.is_none()
+            || self.composed_bits.len() != usize::from(screen.width) * usize::from(screen.height)
+        {
+            return;
+        }
+        let clipped = screen.intersection(region);
+        for row in clipped.top()..clipped.bottom() {
+            let start = usize::from(row - screen.y) * usize::from(screen.width)
+                + usize::from(clipped.x - screen.x);
+            let end = start + usize::from(clipped.width);
+            self.composed_bits[start..end].fill(0);
+        }
+    }
+
+    /// Late overlays without a cheap exact paint rectangle withhold this
+    /// draw's receipt. The next draw can still credit the same cached raster.
+    pub(crate) fn discard_composed_receipt(&mut self) {
+        self.composed_key = None;
+        self.composed_bits.fill(0);
+    }
+
+    /// The sole acknowledgement handoff. `surviving` must be produced after
+    /// every overlay and a successful terminal flush for this exact frame.
+    pub(crate) fn presented_final(&mut self, surviving: &[u8]) {
+        const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
+        let Some(key) = self.composed_key else {
+            return;
+        };
+        if self.last_ambient != Some(key)
+            || self.width == 0
+            || self.height == 0
+            || surviving.len() != self.composed_bits.len()
+            || self.raster.owner_ids.len()
+                != usize::from(self.width) * 2 * usize::from(self.height) * 4
+        {
+            return;
+        }
+        let mut counts = BTreeMap::<u32, u32>::new();
+        let dot_width = usize::from(self.width) * 2;
+        for (cell_index, (&composed, &final_bits)) in
+            self.composed_bits.iter().zip(surviving).enumerate()
+        {
+            if final_bits & !composed != 0 {
+                return;
+            }
+            let row = cell_index / usize::from(self.width);
+            let column = cell_index % usize::from(self.width);
+            for (dy, bit_row) in BITS.iter().enumerate() {
+                for (dx, bit) in bit_row.iter().enumerate() {
+                    if final_bits & bit == 0 {
+                        continue;
+                    }
+                    let dot_index = (row * 4 + dy) * dot_width + column * 2 + dx;
+                    let owner = self.raster.owner_ids[dot_index];
+                    if owner == 0 {
+                        continue;
+                    }
+                    let count = counts.entry(owner).or_insert(0);
+                    let Some(next) = count.checked_add(1) else {
+                        return;
+                    };
+                    *count = next;
+                    if counts.len() > 8192 {
+                        return;
+                    }
+                }
+            }
+        }
+        let owners: Vec<PaintedOwner> = counts
+            .into_iter()
+            .map(|(id, dots)| PaintedOwner { id, dots })
+            .collect();
+        self.host.presented(key.generation, &owners);
+        self.composed_key = None;
     }
 
     pub(crate) fn load_packed_cells(&mut self, width: u16, height: u16, cells: &[u8]) {
@@ -893,3 +1031,36 @@ impl AnimationFrame {
 
 #[cfg(test)]
 mod galactic_empires_tests;
+
+#[cfg(test)]
+mod paint_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn same_cached_render_can_acknowledge_two_distinct_terminal_draws() {
+        let mut frame = AnimationFrame::default();
+        frame.resize(1, 1);
+        let key = AmbientRenderKey {
+            generation: 1,
+            speed_percent: 100,
+            width: 1,
+            height: 1,
+            elapsed: Duration::ZERO,
+        };
+        frame.last_ambient = Some(key);
+        assert!(frame.raster.owned_dot(0, 0, 1.0, 7));
+        frame.composed(vec![1]);
+        assert_eq!(frame.composed_key, Some(key));
+        frame.presented_final(&[1]);
+        assert_eq!(frame.composed_key, None);
+        frame.composed(vec![1]);
+        assert_eq!(frame.composed_key, Some(key));
+        frame.presented_final(&[0]);
+        assert_eq!(frame.composed_key, None);
+        frame.composed(vec![1]);
+        frame.occlude_composed(Rect::new(0, 0, 1, 1), Rect::new(0, 0, 1, 1));
+        assert_eq!(frame.composed_bits(), &[0]);
+        frame.discard_composed_receipt();
+        assert_eq!(frame.composed_key, None);
+    }
+}

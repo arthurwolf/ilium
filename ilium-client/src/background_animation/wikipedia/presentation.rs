@@ -139,14 +139,14 @@ impl WikipediaPresentation {
     pub fn status(&self) -> Option<String> {
         let source = self.runtime.status().unwrap_or("Loading Wikipedia");
         if let Some((_, error)) = &self.failure {
-            return Some(format!("{source} · {error}"));
+            return Some(format!("{error} · {source}"));
         }
         if let Some(error) = &self.frame_error {
-            return Some(format!("{source} · {error}"));
+            return Some(format!("{error} · {source}"));
         }
         if self.pending.is_some() || (self.runtime.document().is_some() && self.renderer.is_none())
         {
-            return Some(format!("{source} · Preparing page layout"));
+            return Some(format!("Preparing page layout · {source}"));
         }
         if let Some(stats) = self
             .renderer
@@ -282,5 +282,38 @@ impl WikipediaPresentation {
         self.renderer
             .as_ref()
             .map(|renderer| renderer.work_stats().layouts)
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn preparation_and_failures_precede_long_source_provenance() {
+        let settings = WikipediaSettings::default();
+        let document = Arc::new(
+            ilium_wikipedia::parse_article(
+                "A long source title that exceeds the visible Settings value",
+                "https://en.wikipedia.org/wiki/A_long_source_title",
+                "2026-10-02",
+                "<p>Semantic status fixture.</p>",
+            )
+            .unwrap(),
+        );
+        let mut host = WikipediaPresentation::default();
+        host.runtime.inject_document_for_test(document, &settings);
+        let pending = host.status().unwrap();
+        assert!(pending.starts_with("Preparing page layout"));
+        assert!(pending.contains("https://en.wikipedia.org/wiki/A_long_source_title"));
+        let key = PreparationKey::new(host.runtime.generation(), 80, &settings);
+        host.failure = Some((key, "Image memory limit".to_owned()));
+        assert!(host.status().unwrap().starts_with("Image memory limit"));
+        host.failure = None;
+        host.frame_error = Some("Viewport rendering failed".to_owned());
+        assert!(host
+            .status()
+            .unwrap()
+            .starts_with("Viewport rendering failed"));
     }
 }

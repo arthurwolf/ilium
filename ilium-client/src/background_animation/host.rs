@@ -6,6 +6,7 @@
 //! and child process it owns) whenever nothing shows it. A scene that panics
 //! is replaced by a message scene so the client keeps running.
 
+use ilium_ambient::raster::PaintedOwner;
 use ilium_ambient::{AmbientKind, AmbientSettings, Frame, MessageScene, Scene, SceneEnv};
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -153,7 +154,24 @@ impl AmbientHost {
             tracing::error!(scene = %hosted.key, %message, "ambient scene panicked; showing a message instead");
             hosted.scene = Box::new(MessageScene(format!("Scene failed: {message}")));
             frame.raster.dots.fill(0.0);
+            frame.raster.owner_ids.fill(0);
             frame.cell_colors.fill([0; 3]);
+        }
+    }
+
+    /// Only the matching hosted generation may receive a final paint receipt.
+    /// The scene checks its own frame/source tag before crediting history.
+    pub fn presented(&mut self, generation: u64, owners: &[PaintedOwner]) {
+        if self.generation != generation {
+            return;
+        }
+        let Some(hosted) = self.scene.as_mut() else {
+            return;
+        };
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| hosted.scene.presented(owners))) {
+            let message = panic_message(payload.as_ref());
+            tracing::error!(scene = %hosted.key, %message, "ambient presentation handler panicked");
+            hosted.scene = Box::new(MessageScene(format!("Scene failed: {message}")));
         }
     }
 

@@ -20,6 +20,39 @@ mod tests {
         assert_eq!(snapshot.state.observed_ms, Some(500));
         assert!(snapshot.state.error.is_none());
     }
+
+    #[test]
+    fn malformed_provider_refresh_preserves_last_good_but_valid_empty_replaces_it() {
+        use super::super::{model::Earthquake, parse};
+
+        let first = br#"{"type":"FeatureCollection","features":[{"id":"fixture","properties":{"time":500,"mag":null},"geometry":{"type":"Point","coordinates":[0,0]}}]}"#;
+        let mut snapshot = Snapshot::<Vec<Earthquake>>::default();
+        snapshot.apply(
+            1000,
+            parse::usgs(first).map(|decoded| (decoded.items, Some(500))),
+        );
+        let previous = Arc::clone(snapshot.data.as_ref().unwrap());
+
+        let malformed = br#"{"type":"FeatureCollection","features":[null,{}]}"#;
+        snapshot.apply(
+            2000,
+            parse::usgs(malformed).map(|decoded| (decoded.items, None)),
+        );
+        assert!(Arc::ptr_eq(snapshot.data.as_ref().unwrap(), &previous));
+        assert_eq!(snapshot.state.received_ms, Some(1000));
+        assert_eq!(snapshot.state.observed_ms, Some(500));
+        assert!(snapshot.state.error.is_some());
+
+        let empty = br#"{"type":"FeatureCollection","features":[]}"#;
+        snapshot.apply(
+            3000,
+            parse::usgs(empty).map(|decoded| (decoded.items, None)),
+        );
+        assert!(snapshot.data.as_ref().unwrap().is_empty());
+        assert_eq!(snapshot.state.received_ms, Some(3000));
+        assert_eq!(snapshot.state.observed_ms, None);
+        assert!(snapshot.state.error.is_none());
+    }
     #[test]
     fn retry_schedule_respects_source_floor_and_caps_exponential_backoff() {
         assert_eq!(

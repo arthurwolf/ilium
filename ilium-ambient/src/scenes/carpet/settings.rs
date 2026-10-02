@@ -65,24 +65,24 @@ pub struct CarpetSettings {
 impl Default for CarpetSettings {
     fn default() -> Self {
         Self {
-            mode: 0,
+            mode: 1,
             yaw: 45,
             pitch: 30,
-            zoom: 100,
-            hatch_direction: 0,
-            spacing: 5,
-            line_width: 65,
-            height: 100,
-            radius: 30,
+            zoom: 145,
+            hatch_direction: 90,
+            spacing: 2,
+            line_width: 90,
+            height: 25,
+            radius: 55,
             softness: 50,
-            easing_ms: 300,
+            easing_ms: 200,
             fps: 20,
             simulation_speed: 100,
             seed: 17,
             hunters_count: 6,
             hunters_speed: 20,
             hunters_separation: 50,
-            snake_grid: 16,
+            snake_grid: 12,
             snake_step_ms: 200,
             snake_initial_length: 4,
             snake_food_count: 3,
@@ -108,7 +108,7 @@ impl Default for CarpetSettings {
             life_wrap: true,
             clock_seconds: true,
             clock_24h: true,
-            clock_tubes: true,
+            clock_tubes: false,
         }
     }
 }
@@ -652,6 +652,17 @@ impl SceneSettings for CarpetSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_and_partial_settings_inherit_captured_session_defaults() {
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/session_defaults.json")).unwrap();
+        let empty: CarpetSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(serde_json::to_value(&empty).unwrap(), expected);
+        let mut partial_expected = expected;
+        partial_expected["spacing"] = serde_json::json!(7);
+        let partial: CarpetSettings = serde_json::from_str("{\"spacing\":7}").unwrap();
+        assert_eq!(serde_json::to_value(partial).unwrap(), partial_expected);
+    }
     #[test]
     fn every_mode_has_unique_valid_editable_controls() {
         for mode in 0..9 {

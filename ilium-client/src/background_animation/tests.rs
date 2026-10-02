@@ -91,7 +91,7 @@ fn hosted_kinds_map_to_the_crate_and_are_live_only() {
         assert_eq!(kind.is_ambient(), kind.ambient().is_some());
         assert_eq!(
             kind.is_live_only(),
-            kind.is_ambient() || kind == AnimationKind::Wikipedia
+            kind.is_ambient() || matches!(kind, AnimationKind::Wikipedia | AnimationKind::Semantic)
         );
         let settings = AnimationSettings {
             kind,
@@ -219,6 +219,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "chess",
         "open_street_map",
         "carpet",
+        "semantic",
     ];
     assert_eq!(expected.len(), AnimationKind::ALL.len());
     for (kind, id) in AnimationKind::ALL.into_iter().zip(expected) {

@@ -284,7 +284,7 @@ fn duplicates_reordering_camera_changes_and_softness_have_correct_cache_ownershi
         r.bodies.capacity(),
         r.next.capacity(),
         r.heights.capacity(),
-        r.minima.capacity(),
+        r.dirty.capacity(), // C1 replaces the old minima cache with a fixed dirty-tile mask.
     );
     r.render(
         &mut image,
@@ -301,7 +301,7 @@ fn duplicates_reordering_camera_changes_and_softness_have_correct_cache_ownershi
             r.bodies.capacity(),
             r.next.capacity(),
             r.heights.capacity(),
-            r.minima.capacity()
+            r.dirty.capacity() // C1 retains the same warm-capacity assertion for the replacement mask.
         )
     );
     r.render(&mut image, &[], &RenderOptions::default());
@@ -396,7 +396,7 @@ fn zero_narrow_extreme_nonfinite_and_malformed_inputs_are_safe() {
     let mut invalid = Raster {
         width: usize::MAX,
         height: 2,
-        dots: vec![],
+        ..Raster::default()
     };
     r.render(&mut invalid, &[], &RenderOptions::default());
     assert!(r.stats().rejected);

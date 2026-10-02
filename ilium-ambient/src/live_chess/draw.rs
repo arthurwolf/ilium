@@ -240,13 +240,16 @@ pub fn draw_board(
     colors.resize(width * height, [0; 3]);
     colors.fill([0; 3]);
     raster.dots.fill(0.0);
-    let square_rows = (width / 16).min(height / 8);
+    // Fullscreen chrome owns the hint row and persistent Voice footer. Size
+    // the complete board above both rows rather than clipping its last rank.
+    let usable_height = height.saturating_sub(2);
+    let square_rows = (width / 16).min(usable_height / 8);
     if square_rows == 0 || settings.brightness_percent <= 0 {
         return;
     }
     let side = square_rows * 4;
     let left = ((width - 16 * square_rows) / 2) * 2;
-    let top = ((height - 8 * square_rows) / 2) * 4;
+    let top = ((usable_height - 8 * square_rows) / 2) * 4;
     let brightness = settings.brightness_percent.clamp(0, 200) as f32 / 100.0;
     let mut piece_strength = vec![0.0f32; width * height];
     for y in top..top + side * 8 {
@@ -297,6 +300,90 @@ pub fn draw_board(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fullscreen_starting_board_preserves_eight_ranks_above_two_footer_rows() {
+        let position =
+            ChessPosition::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+                .unwrap();
+        // Hand-checked whole-cell rectangles, including the floor-size transitions.
+        for (width, height, left, top, right, bottom) in [
+            (120, 40, 28, 3, 92, 35),
+            (80, 24, 24, 3, 56, 19),
+            (80, 25, 24, 3, 56, 19),
+            (120, 42, 20, 0, 100, 40),
+        ] {
+            let mut raster = Raster::default();
+            raster.resize(width * 2, height * 4);
+            let mut colors = vec![];
+            draw_board(
+                &position,
+                &ChessSettings::default(),
+                &mut raster,
+                &mut colors,
+            );
+            assert!(
+                raster.dots[(height - 2) * 4 * raster.width..]
+                    .iter()
+                    .all(|v| *v == 0.0),
+                "footer contains board ink at {width}x{height}"
+            );
+            for rank in 0..8 {
+                let start = (top * 4 + rank * (bottom - top) / 8 * 4) * raster.width;
+                let end = start + (bottom - top) / 8 * 4 * raster.width;
+                assert!(
+                    raster.dots[start..end].iter().any(|v| *v > 0.0),
+                    "missing rank {rank} at {width}x{height}"
+                );
+            }
+            for y in 0..height {
+                for x in 0..width {
+                    let inside = (left..right).contains(&x) && (top..bottom).contains(&y);
+                    assert_eq!(
+                        colors[y * width + x] != [0; 3],
+                        inside,
+                        "board bounds at {width}x{height}, cell {x},{y}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn supersampled_dithered_pieces_remain_distinct_at_footer_reduced_sizes() {
+        for size in [8, 12, 16, 20] {
+            for mode in [
+                crate::raster::DitherMode::Ordered,
+                crate::raster::DitherMode::Stippled,
+            ] {
+                let mut shapes = std::collections::HashSet::new();
+                for piece in "PRNBQK".chars() {
+                    let shape: Vec<_> = (0..size * size)
+                        .map(|i| {
+                            let x = i % size;
+                            let y = i / size;
+                            let coverage: f32 = [0.25, 0.75]
+                                .into_iter()
+                                .flat_map(|dy| {
+                                    [0.25, 0.75].into_iter().map(move |dx| {
+                                        piece_coverage(
+                                            piece,
+                                            (x as f32 + dx) / size as f32,
+                                            (y as f32 + dy) / size as f32,
+                                        ) * 0.25
+                                    })
+                                })
+                                .sum();
+                            0.94 * coverage > crate::raster::threshold(x, y, mode)
+                        })
+                        .collect();
+                    assert!(
+                        shape.iter().any(|on| *on),
+                        "empty {piece} at {size} {mode:?}"
+                    );
+                    assert!(shapes.insert(shape), "duplicate {piece} at {size} {mode:?}");
+                }
+            }
+        }
+    }
     #[test]
     fn every_control_edits_and_settings_round_trip() {
         let mut settings = ChessSettings::default();
@@ -350,7 +437,7 @@ mod tests {
     }
     #[test]
     fn all_piece_silhouettes_are_nonempty_and_distinct_at_multiple_scales() {
-        for size in [12, 20, 32] {
+        for size in [8, 12, 16, 20, 32] {
             let mut shapes = std::collections::HashSet::new();
             for piece in "PNBRQKpnbrqk".chars() {
                 let samples: Vec<_> = (0..size * size)

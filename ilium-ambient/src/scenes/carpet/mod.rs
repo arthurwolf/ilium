@@ -5,6 +5,7 @@ pub mod model;
 pub mod render;
 mod settings;
 mod simulations;
+mod snake_planner;
 
 use crate::{Frame, Scene, SceneEnv, SceneSettings};
 use chess::{CarpetChess, ChessOptions};
@@ -122,6 +123,7 @@ impl Scene for CarpetScene {
         }
         if next.mode != self.settings.mode {
             self.chess = None;
+            self.simulation.deactivate();
         }
         self.settings = next;
         true
@@ -310,10 +312,33 @@ mod tests {
     }
 
     #[test]
+    fn returning_from_chess_starts_a_new_snake_game() {
+        let mut resumed = scene(1);
+        sample(&mut resumed, 0.0, 1.0, 0.0);
+        sample(&mut resumed, 0.4, 1.0, 0.4);
+        let advanced_head = resumed.bodies[0].from;
+
+        let mut settings = crate::AmbientSettings::default();
+        settings.carpet = resumed.settings.clone();
+        settings.carpet.mode = 3;
+        assert!(resumed.reconfigure(&settings));
+        settings.carpet.mode = 1;
+        assert!(resumed.reconfigure(&settings));
+        sample(&mut resumed, 0.4, 1.0, 0.4);
+
+        let mut fresh = scene(1);
+        sample(&mut fresh, 0.4, 1.0, 0.4);
+        assert_ne!(advanced_head, fresh.bodies[0].from);
+        assert_eq!(resumed.bodies[0].from, fresh.bodies[0].from);
+        assert_eq!(resumed.bodies[0].to, fresh.bodies[0].to);
+    }
+
+    #[test]
     fn hunters_follow_ground_targets_through_the_actual_screen_pointer_bridge() {
         let mut final_positions = Vec::new();
         for target in [[0.25, 0.25], [0.75, 0.75]] {
             let settings = CarpetSettings {
+                mode: 0, // Hunters remains explicit when the preferred default mode changes.
                 hunters_count: 1,
                 ..Default::default()
             };

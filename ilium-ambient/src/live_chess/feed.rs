@@ -12,7 +12,9 @@ pub struct Game {
 }
 
 /// Unknown event kinds and blank keepalives preserve the current game.
-/// Bad positions return an error before changing any prior state.
+/// Malformed FEN updates preserve the current game. A featured event starts
+/// a new identity epoch, so invalid replacements clear the decoder identity;
+/// the live owner retains its independently published last-good snapshot.
 pub fn apply_line(current: &mut Option<Game>, line: &[u8]) -> Result<bool, String> {
     if line.len() > 16_384 {
         return Err("chess event exceeds 16 KiB".into());
@@ -24,6 +26,9 @@ pub fn apply_line(current: &mut Option<Game>, line: &[u8]) -> Result<bool, Strin
     let data = &value["d"];
     match value["t"].as_str() {
         Some("featured") => {
+            // Subsequent FEN events carry no id. Even an invalid featured
+            // replacement must not let them update the previously featured game.
+            *current = None;
             let id = data["id"]
                 .as_str()
                 .filter(|id| {
@@ -78,6 +83,37 @@ fn position(data: &Value) -> Result<ChessPosition, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn invalid_featured_replacement_clears_identity_before_following_fen() {
+        for invalid_featured in [
+            br#"{"t":"featured","d":{"id":"newgame","fen":"invalid"}}"#.as_slice(),
+            br#"{"t":"featured","d":{"id":"","fen":"4k3/8/8/8/8/8/8/3K4 b - - 1 1"}}"#.as_slice(),
+        ] {
+            let mut game = None;
+            apply_line(
+                &mut game,
+                br#"{"t":"featured","d":{"id":"oldgame","fen":"4k3/8/8/8/8/8/8/4K3 w - - 0 1"}}"#,
+            )
+            .unwrap();
+            assert!(apply_line(&mut game, invalid_featured).is_err());
+            assert!(
+                game.is_none(),
+                "invalid featured replacement retained old identity"
+            );
+            assert!(apply_line(
+                &mut game,
+                br#"{"t":"fen","d":{"fen":"4k3/8/8/8/8/8/8/3K4 b - - 1 1"}}"#
+            )
+            .is_err());
+            assert!(game.is_none());
+            apply_line(
+                &mut game,
+                br#"{"t":"featured","d":{"id":"newgame","fen":"4k3/8/8/8/8/8/8/3K4 b - - 1 1"}}"#,
+            )
+            .unwrap();
+            assert_eq!(game.as_ref().unwrap().id, "newgame");
+        }
+    }
     #[test]
     fn authoritative_positions_replace_moves_and_invalid_events_preserve_game() {
         let mut game = None;
