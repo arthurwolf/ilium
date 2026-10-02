@@ -379,7 +379,8 @@ def package(arguments):
         staged = Path(stage) / output.name
         write_archive(staged, target, content)
         verify_content(read_archive(staged, target, receipt), receipt, version)
-        with staged.open("rb") as stream:
+        # Windows FlushFileBuffers needs write access: fsync on a read-only descriptor is EBADF.
+        with staged.open("r+b") as stream:
             os.fsync(stream.fileno())
         os.replace(staged, output)
     emit({"type": "artifact", "path": str(output), "sha256": digest(output.read_bytes()), "bytes": output.stat().st_size})
