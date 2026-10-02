@@ -419,6 +419,12 @@ Choose running indicators in **Settings → Agent Monitoring**. A live progress 
 
 The `/goal` badge reports observed activity; Ilium does not control the agent.
 
+#### Notifications
+
+**Settings → Sound** also holds the desktop-notification switches, one per event: agent finished, agent needs approval, task succeeded, and task failed or lost. A master switch turns them all off. They live under `[notifications]` in `config.toml` and apply to running sessions within a couple of seconds.
+
+A *task* is a background job an agent registered with `ilium progress`. Its outcome is a different event from the agent finishing its turn, so notifications say "background task finished (agent still working)" and lead with the pane title. By default you hear about the agent finishing, an approval prompt, and failed or lost tasks. Successful tasks stay silent and show only as ✅ in the sidebar. Task alerts are also skipped while the agent is idle or parked, because its own finished alert follows, and same-kind alerts on one pane within 30 seconds merge into the first. Both rules can be changed. Task sounds follow the same rules.
+
 ### Agent cost
 
 **Settings → Agent Cost** adds spend indicators, totals, and cost sorting to the tree. The default meter appears when you hover an agent. Measure estimated API dollars (default) or plan quota: percentage points of the Codex rate-limit window used while the agent ran (Codex only, account-wide). Thresholds, budget and history follow the chosen unit.
@@ -685,6 +691,8 @@ Outside Ilium, pass `--cwd` and `--session-name`. An attached client is required
 
 Backgrounds are off by default. Ilium saves your choice per project in `.ilium/config.yaml`. The settings put scenes beside grouped controls; Loop playback builds 30 fps frames in the background and shows packed-frame RAM usage.
 
+Choose **Semantic** and enable **Background** to use the animation recommended by AI tree reorganization. **Project** scope is the default; **Entry** follows the selected pane, group or split. Every reorganization records recommendations, including scene parameters: Paris work can use the offline Paris map, and pathfinding work can use Carpet's Snake. Changing selection makes no extra AI request. Missing recommendations show a status asking you to reorganize the project.
+
 - **Stars, Earth, and satellite clouds** share a location set by address, coordinates, or map. Earth and cloud imagery need network access.
 - **Voxel landscape** slowly pans over an isometric block world: 52 surface biomes, forests, deserts, villages, cave mouths and ravines, with 208 feature recipes. Choose zoom, detail and vegetation or structure density; use monochrome or pastel dithering with palette, hue, saturation and lightness controls. Its 64 pixel textures are original Ilium artwork.
 - **Solar system** offers all eight planets, orbit paths, distance and size realism, and speeds up to ten simulated years per second.
@@ -707,7 +715,7 @@ All animations share one look and one set of display controls (Settings -> Anima
 - **Live aircraft** plots airborne positions reported by OpenSky over a Braille world coastline. Anonymous global access is limited, so refresh is at least 15 minutes. Coverage is incomplete.
 - **Live boats** uses public Finnish AIS positions from Digitraffic, with a 30-second minimum refresh. It covers Finnish waters, not the global fleet. Aircraft and boats have separate map and marker colors and brightness.
 - **Live chess** follows Lichess TV with dithered pieces, board orientation and independent colors. Clocks show the latest feed values; connection failures retain the last board with its receipt age.
-- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, autonomous Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
+- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, food-seeking Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Snake plans safe food routes with a tapered body, feeding pulses and gently breathing food. Carpet defaults to a 12×12 Snake board; saved project settings take precedence. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
 
 Live sources retain the last good data on request failures; they do not substitute simulated events. Quicknet values are displayed without BLS signature verification.
 
