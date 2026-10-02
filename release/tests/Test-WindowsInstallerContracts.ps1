@@ -1,8 +1,10 @@
 # Portable helper-contract verification; does not claim Windows-native behavior.
 # All data belongs to a private temporary directory. JSONL is the CLI contract.
 [CmdletBinding()]
-param([string]$Installer = (Join-Path $PSScriptRoot '../install.ps1'), [switch]$TransactionRegressionsOnly)
+param([string]$Installer, [switch]$TransactionRegressionsOnly)
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty inside a param() default.
+if (-not $Installer) { $Installer = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '../install.ps1' }
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { @{type='error';stage='parse';errors=@($parseErrors | ForEach-Object {$_.Message})} | ConvertTo-Json -Compress; exit 1 }
