@@ -290,6 +290,12 @@ pub fn spawn_directory_generation(_path: &Path) -> io::Result<Option<(u64, u64)>
 
 #[cfg(unix)]
 impl NoFollowDirectory {
+    /// Clone this already admitted directory handle for a read-only capability
+    /// adapter. Both views retain the same root even if its pathname changes.
+    pub fn try_clone_file(&self) -> io::Result<std::fs::File> {
+        self.file.try_clone()
+    }
+
     pub fn sync_all(&self) -> io::Result<()> {
         self.file.sync_all()
     }
@@ -494,6 +500,13 @@ fn unix_child_name(name: &std::ffi::OsStr) -> io::Result<std::ffi::CString> {
 
 #[cfg(not(any(unix, windows)))]
 impl NoFollowDirectory {
+    pub fn try_clone_file(&self) -> io::Result<std::fs::File> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "safe directory-handle cloning is unavailable on this platform",
+        ))
+    }
+
     pub fn sync_all(&self) -> io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,

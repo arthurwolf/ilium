@@ -405,3 +405,358 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
         .expect("kill isolated test session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
+
+#[tokio::test]
+async fn a_second_attach_receives_accepted_text_triggers_without_replacing_them() {
+    let mut server = TestServer::start("text-trigger-attach-state").await;
+    let mut first = server.connect().await;
+    let settings = TextTriggerSettings {
+        triggers: vec![TextTrigger {
+            id: "retained-rule".to_owned(),
+            regexp: "fixture-ready".to_owned(),
+            message: "fixture-reply".to_owned(),
+            ..TextTrigger::default()
+        }],
+    };
+    write_frame(
+        &mut first,
+        &ClientRequest::UpdateTextTriggers {
+            settings: settings.clone(),
+        },
+    )
+    .await
+    .expect("apply isolated rule");
+    expect_event(&mut first, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TextTriggersChanged { settings: accepted, .. } if accepted == &settings)
+    }).await;
+    let mut second = server.connect().await;
+    write_frame(
+        &mut second,
+        &ClientRequest::AttachInteractive {
+            session: "text-trigger-attach-state".to_owned(),
+        },
+    )
+    .await
+    .expect("attach second client");
+    let (_, initial_events) = read_initial_state(&mut second, Duration::from_secs(5)).await;
+    assert!(initial_events.iter().any(|event| {
+        matches!(event, ServerEvent::TextTriggersChanged { settings: accepted, .. } if accepted == &settings)
+    }), "an attaching client must receive the retained rule list before initial sync completes");
+    write_frame(&mut first, &ClientRequest::KillSession)
+        .await
+        .expect("stop owned server");
+    tokio::time::timeout(Duration::from_secs(5), &mut server.server_task)
+        .await
+        .expect("server shutdown deadline")
+        .expect("server task join")
+        .expect("server shutdown");
+}
+
+#[tokio::test]
+async fn a_fresh_server_attaches_with_durable_rules_without_a_client_replacement() {
+    use ilium_server::{run, NoopSoundPlayer, ServerOptions};
+    use ilium_transport::SessionEndpoint;
+    use std::sync::Arc;
+
+    struct OwnedServer(
+        Option<tokio::task::JoinHandle<Result<(), ilium_server::error::ServerError>>>,
+    );
+    impl Drop for OwnedServer {
+        fn drop(&mut self) {
+            if let Some(task) = &self.0 {
+                task.abort();
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("config.toml");
+    let socket_path = directory.path().join("tt.sock");
+    let rules = TextTriggerSettings {
+        triggers: vec![TextTrigger {
+            id: "retained-durable-id".to_owned(),
+            regexp: "ready".to_owned(),
+            message: "reply".to_owned(),
+            ..TextTrigger::default()
+        }],
+    };
+    let mut document = toml::value::Table::new();
+    document.insert(
+        "text_triggers".to_owned(),
+        toml::Value::try_from(&rules).unwrap(),
+    );
+    let durable_bytes = toml::to_string(&document).unwrap();
+    std::fs::write(&config_path, &durable_bytes).unwrap();
+    let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        session_name: "durable-trigger".to_owned(),
+        socket_path: socket_path.clone(),
+        snapshot_path: directory.path().join("snapshot.json"),
+        ready_log_metadata: None,
+        session_cwd: ilium_platform::paths::canonicalize(directory.path()).unwrap(),
+        home_dir: directory.path().to_path_buf(),
+        detection_config: ilium_server::config::DetectionConfig::default(),
+        notifications_config: ilium_server::config::NotificationsConfig::default(),
+        sound_settings: ilium_sound::SoundSettings::default(),
+        sound_config_path: Some(config_path.clone()),
+        sound_player: Arc::new(NoopSoundPlayer),
+        custom_signatures: Vec::new(),
+        session_recovery: ilium_server::config::SessionRecoveryConfig::StartFresh,
+        session_backups_enabled: false,
+        agent_debug_menu_enabled: false,
+        http_api: ilium_server::config::HttpApiConfig { port: 0 },
+        progress_monitor_enabled: true,
+    }))));
+    let endpoint = SessionEndpoint::from_path(&socket_path);
+    let mut client = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(client) = endpoint.connect().await {
+                break client;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    write_frame(
+        &mut client,
+        &ClientRequest::AttachInteractive {
+            session: "durable-trigger".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    // Stop our isolated process even when the acceptance assertion fails.
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        assert!(server.0.take().unwrap().await.unwrap().is_ok());
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(config_path).unwrap(), durable_bytes);
+    assert!(events.iter().any(|event| matches!(event,
+        ServerEvent::TextTriggersChanged { settings, .. } if settings == &rules
+    )), "a fresh server must load durable rules before its first attach without a client replacement");
+}
+
+#[tokio::test]
+async fn a_running_server_reconciles_durable_trigger_edits_without_client_replacement() {
+    use ilium_server::{run, NoopSoundPlayer, ServerOptions};
+    use ilium_transport::SessionEndpoint;
+    use std::sync::Arc;
+
+    struct OwnedServer(
+        Option<tokio::task::JoinHandle<Result<(), ilium_server::error::ServerError>>>,
+    );
+    impl Drop for OwnedServer {
+        fn drop(&mut self) {
+            if let Some(task) = &self.0 {
+                task.abort();
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("config.toml");
+    let socket_path = directory.path().join("tt.sock");
+    let rules = TextTriggerSettings {
+        triggers: vec![TextTrigger {
+            id: "retained-durable-id".to_owned(),
+            regexp: "ready".to_owned(),
+            message: "reply".to_owned(),
+            ..TextTrigger::default()
+        }],
+    };
+    let mut document = toml::value::Table::new();
+    document.insert(
+        "text_triggers".to_owned(),
+        toml::Value::try_from(&rules).unwrap(),
+    );
+    let durable_bytes = toml::to_string(&document).unwrap();
+    std::fs::write(&config_path, &durable_bytes).unwrap();
+    let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        session_name: "durable-trigger".to_owned(),
+        socket_path: socket_path.clone(),
+        snapshot_path: directory.path().join("snapshot.json"),
+        ready_log_metadata: None,
+        session_cwd: ilium_platform::paths::canonicalize(directory.path()).unwrap(),
+        home_dir: directory.path().to_path_buf(),
+        detection_config: ilium_server::config::DetectionConfig::default(),
+        notifications_config: ilium_server::config::NotificationsConfig::default(),
+        sound_settings: ilium_sound::SoundSettings::default(),
+        sound_config_path: Some(config_path.clone()),
+        sound_player: Arc::new(NoopSoundPlayer),
+        custom_signatures: Vec::new(),
+        session_recovery: ilium_server::config::SessionRecoveryConfig::StartFresh,
+        session_backups_enabled: false,
+        agent_debug_menu_enabled: false,
+        http_api: ilium_server::config::HttpApiConfig { port: 0 },
+        progress_monitor_enabled: true,
+    }))));
+    let endpoint = SessionEndpoint::from_path(&socket_path);
+    let mut client = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(client) = endpoint.connect().await {
+                break client;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    write_frame(
+        &mut client,
+        &ClientRequest::AttachInteractive {
+            session: "durable-trigger".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    let mut updated = rules.clone();
+    updated.triggers[0].message = "changed durable reply".to_owned();
+    document.insert(
+        "text_triggers".to_owned(),
+        toml::Value::try_from(&updated).unwrap(),
+    );
+    let updated_bytes = toml::to_string(&document).unwrap();
+    std::fs::write(&config_path, &updated_bytes).unwrap();
+    let received_update = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client).await.unwrap();
+            if matches!(event, ServerEvent::TextTriggersChanged { settings, .. } if settings == updated) {
+                break;
+            }
+        }
+    }).await.is_ok();
+    // Stop our isolated process even when the acceptance assertion fails.
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        assert!(server.0.take().unwrap().await.unwrap().is_ok());
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(config_path).unwrap(), updated_bytes);
+    assert!(
+        received_update,
+        "running server must reconcile durable edits without a client replacement"
+    );
+    assert!(events.iter().any(|event| matches!(event,
+        ServerEvent::TextTriggersChanged { settings, .. } if settings == &rules
+    )), "a fresh server must load durable rules before its first attach without a client replacement");
+}
+
+#[tokio::test]
+async fn a_stale_client_default_payload_cannot_replace_durable_rules() {
+    use ilium_server::{run, NoopSoundPlayer, ServerOptions};
+    use ilium_transport::SessionEndpoint;
+    use std::sync::Arc;
+
+    struct OwnedServer(
+        Option<tokio::task::JoinHandle<Result<(), ilium_server::error::ServerError>>>,
+    );
+    impl Drop for OwnedServer {
+        fn drop(&mut self) {
+            if let Some(task) = &self.0 {
+                task.abort();
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let config_path = directory.path().join("config.toml");
+    let socket_path = directory.path().join("tt.sock");
+    let rules = TextTriggerSettings {
+        triggers: vec![TextTrigger {
+            id: "retained-durable-id".to_owned(),
+            regexp: "ready".to_owned(),
+            message: "reply".to_owned(),
+            ..TextTrigger::default()
+        }],
+    };
+    let mut document = toml::value::Table::new();
+    document.insert(
+        "text_triggers".to_owned(),
+        toml::Value::try_from(&rules).unwrap(),
+    );
+    let durable_bytes = toml::to_string(&document).unwrap();
+    std::fs::write(&config_path, &durable_bytes).unwrap();
+    let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        session_name: "durable-trigger".to_owned(),
+        socket_path: socket_path.clone(),
+        snapshot_path: directory.path().join("snapshot.json"),
+        ready_log_metadata: None,
+        session_cwd: ilium_platform::paths::canonicalize(directory.path()).unwrap(),
+        home_dir: directory.path().to_path_buf(),
+        detection_config: ilium_server::config::DetectionConfig::default(),
+        notifications_config: ilium_server::config::NotificationsConfig::default(),
+        sound_settings: ilium_sound::SoundSettings::default(),
+        sound_config_path: Some(config_path.clone()),
+        sound_player: Arc::new(NoopSoundPlayer),
+        custom_signatures: Vec::new(),
+        session_recovery: ilium_server::config::SessionRecoveryConfig::StartFresh,
+        session_backups_enabled: false,
+        agent_debug_menu_enabled: false,
+        http_api: ilium_server::config::HttpApiConfig { port: 0 },
+        progress_monitor_enabled: true,
+    }))));
+    let endpoint = SessionEndpoint::from_path(&socket_path);
+    let mut client = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(client) = endpoint.connect().await {
+                break client;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    write_frame(
+        &mut client,
+        &ClientRequest::AttachInteractive {
+            session: "durable-trigger".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::UpdateTextTriggers {
+            settings: TextTriggerSettings::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let after_stale_request = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event: ServerEvent = read_frame(&mut client).await.unwrap();
+            if let ServerEvent::TextTriggersChanged { settings, .. } = event {
+                break settings;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    // Stop our isolated process even when the acceptance assertion fails.
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        assert!(server.0.take().unwrap().await.unwrap().is_ok());
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(config_path).unwrap(), durable_bytes);
+    assert_eq!(
+        after_stale_request, rules,
+        "a stale default client payload must not replace the durable rules"
+    );
+    assert!(events.iter().any(|event| matches!(event,
+        ServerEvent::TextTriggersChanged { settings, .. } if settings == &rules
+    )), "a fresh server must load durable rules before its first attach without a client replacement");
+}

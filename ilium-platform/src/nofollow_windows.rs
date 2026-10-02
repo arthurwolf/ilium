@@ -83,6 +83,11 @@ struct FileIdentity {
 }
 
 impl NoFollowDirectory {
+    /// Clone the admitted directory handle without resolving its pathname again.
+    pub fn try_clone_file(&self) -> io::Result<File> {
+        self.file.try_clone()
+    }
+
     /// Opens `path` itself, refusing it when its final component is a link.
     pub fn open_root(path: &Path) -> io::Result<Self> {
         let before = std::fs::symlink_metadata(path)?;

@@ -1,6 +1,6 @@
 //! Length-prefixed bincode framing over any `AsyncRead`/`AsyncWrite`.
 //!
-//! Frame shape on the wire: a 4-byte little-endian `u32` payload length,
+//! Frame shape: a 4-byte little-endian schema-tagged `u32` payload length,
 //! followed by exactly that many bytes of bincode-encoded payload. Generic
 //! over the payload type so `ilium-server` and `ilium-client` reuse the
 //! same code for both the request stream (`ClientRequest`) and the event
@@ -38,6 +38,25 @@ fn frame_decode_options() -> impl bincode::Options {
 pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
+
+const FRAME_SCHEMA_TAG: u32 = 0xA800_0000;
+const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
+fn frame_length_word(length: u32) -> u32 {
+    FRAME_SCHEMA_TAG | length
+}
+fn frame_payload_length(word: u32) -> Result<u32, IpcError> {
+    if word & FRAME_SCHEMA_MASK != FRAME_SCHEMA_TAG {
+        return Err(IpcError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "incompatible Ilium IPC schema; client and server must use matching builds",
+        )));
+    }
+    let length = word & !FRAME_SCHEMA_MASK;
+    if length > MAX_FRAME_LEN {
+        return Err(IpcError::bad_length_prefix(length));
+    }
+    Ok(length)
+}
 
 /// A connection-owned encoder that retains its serialization allocation
 /// across frames, so long-lived connections don't pay a fresh `Vec`
@@ -87,7 +106,7 @@ where
             return Err(IpcError::frame_too_large(self.payload.len()));
         }
 
-        let length_header = length.to_le_bytes();
+        let length_header = frame_length_word(length).to_le_bytes();
         let buffers = [
             std::io::IoSlice::new(&length_header),
             std::io::IoSlice::new(&self.payload),
@@ -147,10 +166,7 @@ where
     {
         let mut length_bytes = [0u8; LENGTH_HEADER_BYTES];
         self.reader.read_exact(&mut length_bytes).await?;
-        let length = u32::from_le_bytes(length_bytes);
-        if length > MAX_FRAME_LEN {
-            return Err(IpcError::bad_length_prefix(length));
-        }
+        let length = frame_payload_length(u32::from_le_bytes(length_bytes))?;
 
         self.payload.resize(length as usize, 0);
         match self.reader.read_exact(&mut self.payload).await {
@@ -279,7 +295,7 @@ mod tests {
         let payload = bincode::serialize(&value).unwrap();
         let mut encoded = Vec::with_capacity((payload.len() + LENGTH_HEADER_BYTES) * ITERATIONS);
         for _iteration in 0..ITERATIONS {
-            encoded.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(&frame_length_word(payload.len() as u32).to_le_bytes());
             encoded.extend_from_slice(&payload);
         }
 
@@ -332,7 +348,7 @@ mod tests {
         // A full length header promising 100 bytes, but no payload at all
         // -- simulates a connection dying mid-frame.
         let mut buffer = Vec::new();
-        buffer.extend_from_slice(&100u32.to_le_bytes());
+        buffer.extend_from_slice(&frame_length_word(100).to_le_bytes());
 
         let mut cursor = Cursor::new(buffer);
         let result: Result<String, IpcError> = read_frame(&mut cursor).await;
@@ -347,7 +363,7 @@ mod tests {
         let payload = bincode::serialize(&"a longer payload than what arrives".to_string())
             .expect("serializable");
         let mut buffer = Vec::new();
-        buffer.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&frame_length_word(payload.len() as u32).to_le_bytes());
         // Only send half the promised payload bytes.
         buffer.extend_from_slice(&payload[..payload.len() / 2]);
 
@@ -359,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn read_frame_rejects_an_implausible_length_prefix() {
         let mut buffer = Vec::new();
-        buffer.extend_from_slice(&(MAX_FRAME_LEN + 1).to_le_bytes());
+        buffer.extend_from_slice(&frame_length_word(MAX_FRAME_LEN + 1).to_le_bytes());
 
         let mut cursor = Cursor::new(buffer);
         let result: Result<String, IpcError> = read_frame(&mut cursor).await;
@@ -378,7 +394,7 @@ mod tests {
         // as -- must error, not silently misparse.
         let mut buffer = Vec::new();
         let garbage = vec![0xFFu8; 8];
-        buffer.extend_from_slice(&(garbage.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&frame_length_word(garbage.len() as u32).to_le_bytes());
         buffer.extend_from_slice(&garbage);
 
         let mut cursor = Cursor::new(buffer);
@@ -398,11 +414,83 @@ mod tests {
         let mut payload = bincode::serialize(&"short".to_string()).expect("serializable");
         payload.extend_from_slice(&[0u8; 4]);
         let mut buffer = Vec::new();
-        buffer.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&frame_length_word(payload.len() as u32).to_le_bytes());
         buffer.extend_from_slice(&payload);
 
         let mut cursor = Cursor::new(buffer);
         let result: Result<String, IpcError> = read_frame(&mut cursor).await;
         assert!(matches!(result, Err(IpcError::Bincode(_))));
+    }
+    #[tokio::test]
+    async fn legacy_schema_is_rejected_before_allocation() {
+        let mut reader = FrameReader::new(Cursor::new(100u32.to_le_bytes().to_vec()));
+        let result: Result<String, IpcError> = reader.read().await;
+        assert!(
+            matches!(result, Err(IpcError::Io(ref error)) if error.kind() == std::io::ErrorKind::InvalidData)
+        );
+        assert!(reader.payload.is_empty());
+        assert_eq!(reader.reader.position(), 4);
+        assert!(frame_length_word(1) > MAX_FRAME_LEN);
+    }
+    #[tokio::test]
+    async fn recommended_plan_and_tree_snapshot_round_trip() {
+        use ilium_core::animation_recommendation::{
+            AnimationParameter, AnimationRecommendation, AnimationValue, PlanAnimationEntry,
+            RecommendedRestructurePlan, ResourcePolicy,
+        };
+        use ilium_core::{PaneContentKind, RestructureNode, RestructurePlan, Tree};
+        let mut tree = Tree::new();
+        let project_id = tree
+            .add_project(std::env::temp_dir().join("ilium-semantic-wire"))
+            .unwrap();
+        let group = tree.add_group(project_id, "work").unwrap();
+        let pane = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let recommendation = AnimationRecommendation {
+            version: 1,
+            kind: "carpet".into(),
+            resources: ResourcePolicy::Catalog,
+            parameters: vec![AnimationParameter {
+                id: "carpet_mode".into(),
+                value: AnimationValue::Choice {
+                    index: 1,
+                    label: "Autonomous Snake".into(),
+                },
+            }],
+        };
+        let plan = RecommendedRestructurePlan {
+            structure: RestructurePlan {
+                children: vec![RestructureNode::Pane {
+                    id: pane,
+                    title: "Work".into(),
+                    short_title: None,
+                    icon: None,
+                }],
+            },
+            expected_animation_generation: 0,
+            project: recommendation.clone(),
+            entries: vec![PlanAnimationEntry {
+                path: vec![0],
+                recommendation,
+            }],
+        };
+        let revisions = tree.project_activity_revisions(project_id).unwrap();
+        let request = crate::ClientRequest::ApplyRecommendedProjectRestructurePlan {
+            project_id,
+            plan: plan.clone(),
+            inference_activity_revisions: revisions.clone(),
+        };
+        let bytes = bincode::serialize(&request).unwrap();
+        let decoded: crate::ClientRequest = frame_decode_options().deserialize(&bytes).unwrap();
+        assert_eq!(decoded, request);
+        tree.apply_recommended_project_restructure(project_id, plan, &revisions)
+            .unwrap();
+        let event = crate::ServerEvent::TreeSnapshot(tree.clone());
+        let mut buffer = Vec::new();
+        write_frame(&mut buffer, &event).await.unwrap();
+        let decoded: crate::ServerEvent = read_frame(&mut Cursor::new(buffer)).await.unwrap();
+        assert_eq!(decoded, event);
+        assert_eq!(tree.project_animation_generation(project_id).unwrap(), 1);
     }
 }

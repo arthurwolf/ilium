@@ -38,6 +38,7 @@ mod snapshot_state;
 mod sounds;
 mod state;
 mod task_guard;
+mod text_trigger_config;
 mod text_triggers;
 mod voice_relay;
 mod workspace;
@@ -174,6 +175,16 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         agent_debug_menu_enabled: options.agent_debug_menu_enabled,
         progress_monitor_enabled: options.progress_monitor_enabled,
     }));
+    if let Some(path) = &options.sound_config_path {
+        // Invariant: this fresh ServerState has not been shared with consumers.
+        state
+            .text_trigger_config_path
+            .set(path.clone())
+            .expect("a fresh server has no Text Trigger source");
+        if let Err(error) = text_trigger_config::refresh(&state).await {
+            tracing::warn!(%error, "Text Triggers startup load failed; retaining accepted rules");
+        }
+    }
     state.set_session_backups_enabled(options.session_backups_enabled);
 
     // Capture before loading can normalize an older snapshot in place, and

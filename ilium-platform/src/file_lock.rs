@@ -51,6 +51,23 @@ impl ExclusiveFileLock {
         }
     }
 
+    /// Lock an already admitted no-follow regular-file handle without reopening
+    /// its path. Contention is `Ok(None)` and the guard owns the handle.
+    pub fn try_acquire_opened(file: File) -> io::Result<Option<Self>> {
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "exclusive lock requires an admitted regular file",
+            ));
+        }
+        secure_fs::restrict_open_file_to_owner(&file)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self { file })),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => Err(error),
+        }
+    }
+
     fn open(path: &Path) -> io::Result<File> {
         // A bare relative path (`start.lock`) yields an empty parent, which is
         // the current directory and already exists: creating "" would fail on
@@ -90,6 +107,32 @@ impl Drop for ExclusiveFileLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admitted_handle_locks_without_truncation_and_releases_on_drop() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let directory = secure_fs::NoFollowDirectory::open_root(root.path()).expect("root");
+        let name = std::ffi::OsStr::new("opened.lock");
+        let file = directory.create_regular(name).expect("create");
+        let first = ExclusiveFileLock::try_acquire_opened(file)
+            .expect("first admitted acquire")
+            .expect("uncontended lock");
+        let second = directory.open_regular(name).expect("reopen");
+        assert!(ExclusiveFileLock::try_acquire_opened(second)
+            .expect("contended")
+            .is_none());
+        drop(first);
+        let third = directory.open_regular(name).expect("reopen after release");
+        assert!(ExclusiveFileLock::try_acquire_opened(third)
+            .expect("released")
+            .is_some());
+        assert_eq!(
+            std::fs::metadata(root.path().join("opened.lock"))
+                .expect("metadata")
+                .len(),
+            0
+        );
+    }
 
     #[test]
     fn try_acquire_reports_contention_and_recovers_after_release() {

@@ -120,7 +120,9 @@ impl Default for SoundEventSettings {
             approval_required: false,
             agent_started: false,
             waiting_background: false,
-            task_succeeded: true,
+            // A monitored task finishing while its agent keeps working is
+            // routine progress, not something worth interrupting for.
+            task_succeeded: false,
             task_failed: true,
         }
     }
@@ -150,6 +152,112 @@ impl SoundEventSettings {
             }
             SoundEvent::TaskSucceeded => self.task_succeeded = !self.task_succeeded,
             SoundEvent::TaskFailed => self.task_failed = !self.task_failed,
+        }
+    }
+}
+
+/// User-selectable events that can independently raise a desktop
+/// notification. Names match [`SoundEvent`] so Sound and Notifications read as
+/// two outputs of one event vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationEvent {
+    AgentFinished,
+    ApprovalRequired,
+    TaskSucceeded,
+    TaskFailed,
+}
+
+impl NotificationEvent {
+    pub const ALL: [Self; 4] = [
+        Self::AgentFinished,
+        Self::ApprovalRequired,
+        Self::TaskSucceeded,
+        Self::TaskFailed,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AgentFinished => "Agent finished",
+            Self::ApprovalRequired => "Agent needs approval",
+            Self::TaskSucceeded => "Task succeeded",
+            Self::TaskFailed => "Task failed or monitor lost",
+        }
+    }
+}
+
+/// The `[notifications]` table. `enabled` is the master switch; every event
+/// is additionally gated by its own flag. Flat keys keep hand-written config
+/// simple (`task_succeeded = false`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationSettings {
+    pub enabled: bool,
+    pub agent_finished: bool,
+    pub approval_required: bool,
+    pub task_succeeded: bool,
+    pub task_failed: bool,
+    /// Suppress task-outcome notifications and sounds while the agent in the
+    /// pane is idle or parked: it is about to receive the result and will
+    /// raise its own "agent finished" alert, so the outcome is redundant.
+    pub suppress_redundant_task_outcomes: bool,
+    /// Task-outcome alerts of the same kind on the same pane closer together
+    /// than this are collapsed into the first. Zero disables coalescing.
+    pub task_coalesce_seconds: u32,
+}
+
+impl NotificationSettings {
+    pub const MAX_TASK_COALESCE_SECONDS: u32 = 600;
+    pub const TASK_COALESCE_STEP_SECONDS: u32 = 10;
+
+    pub const fn is_enabled(self, event: NotificationEvent) -> bool {
+        self.enabled
+            && match event {
+                NotificationEvent::AgentFinished => self.agent_finished,
+                NotificationEvent::ApprovalRequired => self.approval_required,
+                NotificationEvent::TaskSucceeded => self.task_succeeded,
+                NotificationEvent::TaskFailed => self.task_failed,
+            }
+    }
+
+    /// The event's own flag, ignoring the master switch (for Settings rows).
+    pub const fn event_flag(self, event: NotificationEvent) -> bool {
+        match event {
+            NotificationEvent::AgentFinished => self.agent_finished,
+            NotificationEvent::ApprovalRequired => self.approval_required,
+            NotificationEvent::TaskSucceeded => self.task_succeeded,
+            NotificationEvent::TaskFailed => self.task_failed,
+        }
+    }
+
+    pub fn toggle(&mut self, event: NotificationEvent) {
+        let flag = match event {
+            NotificationEvent::AgentFinished => &mut self.agent_finished,
+            NotificationEvent::ApprovalRequired => &mut self.approval_required,
+            NotificationEvent::TaskSucceeded => &mut self.task_succeeded,
+            NotificationEvent::TaskFailed => &mut self.task_failed,
+        };
+        *flag = !*flag;
+    }
+
+    /// Clamps hand-edited values into their supported range.
+    pub fn normalized(mut self) -> Self {
+        self.task_coalesce_seconds = self
+            .task_coalesce_seconds
+            .min(Self::MAX_TASK_COALESCE_SECONDS);
+        self
+    }
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            agent_finished: true,
+            approval_required: true,
+            task_succeeded: false,
+            task_failed: true,
+            suppress_redundant_task_outcomes: true,
+            task_coalesce_seconds: 30,
         }
     }
 }
@@ -1031,5 +1139,46 @@ mod tests {
             play(&settings),
             Err(SoundError::MissingSelectedFile)
         ));
+    }
+
+    #[test]
+    fn task_success_sound_and_notification_default_off_and_failure_on() {
+        assert!(!SoundEventSettings::default().task_succeeded);
+        assert!(SoundEventSettings::default().task_failed);
+        let notifications = NotificationSettings::default();
+        assert!(notifications.is_enabled(NotificationEvent::AgentFinished));
+        assert!(notifications.is_enabled(NotificationEvent::ApprovalRequired));
+        assert!(!notifications.is_enabled(NotificationEvent::TaskSucceeded));
+        assert!(notifications.is_enabled(NotificationEvent::TaskFailed));
+        assert!(notifications.suppress_redundant_task_outcomes);
+        assert_eq!(notifications.task_coalesce_seconds, 30);
+    }
+
+    #[test]
+    fn master_notification_switch_overrides_every_event() {
+        let mut notifications = NotificationSettings {
+            enabled: false,
+            ..NotificationSettings::default()
+        };
+        for event in NotificationEvent::ALL {
+            assert!(!notifications.is_enabled(event));
+        }
+        notifications.enabled = true;
+        notifications.toggle(NotificationEvent::TaskSucceeded);
+        assert!(notifications.is_enabled(NotificationEvent::TaskSucceeded));
+        assert!(notifications.event_flag(NotificationEvent::TaskSucceeded));
+    }
+
+    #[test]
+    fn notification_coalescing_is_clamped() {
+        let notifications = NotificationSettings {
+            task_coalesce_seconds: u32::MAX,
+            ..NotificationSettings::default()
+        }
+        .normalized();
+        assert_eq!(
+            notifications.task_coalesce_seconds,
+            NotificationSettings::MAX_TASK_COALESCE_SECONDS
+        );
     }
 }

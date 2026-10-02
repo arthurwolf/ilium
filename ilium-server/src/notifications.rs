@@ -10,6 +10,7 @@
 #[cfg(test)]
 use ilium_core::PaneStatus;
 use ilium_core::{NowSignal, PaneSignals};
+use ilium_sound::{NotificationEvent, NotificationSettings};
 
 /// True if going from `previous` to `new` is "an agent just finished a
 /// turn and this is the first classification to say so" -- i.e. `previous`
@@ -41,7 +42,7 @@ pub fn is_finished_signal_transition(previous: Option<&PaneSignals>, new: &PaneS
     ) && new.now == NowSignal::FinishedUnread
 }
 
-/// A notification-worthy transition, queued during a detection tick and
+/// A notification-worthy event, queued during a detection tick and
 /// sent once the tree/pane locks that produced it have been released (see
 /// `detection::run_due_panes`) -- a slow or unavailable notification daemon
 /// must never hold up an attached client's tree access.
@@ -49,21 +50,127 @@ pub struct PendingNotification {
     session_name: String,
     pane_name: String,
     agent_description: Option<String>,
-    /// A monitored task's outcome, when this notification reports that
-    /// rather than a finished agent turn.
-    task_outcome: Option<TaskOutcomeNotice>,
+    kind: PendingKind,
+}
+
+enum PendingKind {
+    /// An agent finished a turn and is waiting on the user.
+    AgentFinished,
+    /// An agent is blocked on an approval or confirmation prompt.
+    NeedsApproval,
+    /// A monitored task's outcome, reported separately from the agent turn.
+    Task(TaskOutcomeNotice),
 }
 
 /// Presentation of a progress monitor's terminal outcome.
 struct TaskOutcomeNotice {
     job_id: String,
     kind: TaskOutcomeKind,
+    agent_is_working: bool,
 }
 
-enum TaskOutcomeKind {
+/// What a monitored task's terminal report means for alerting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOutcomeKind {
     Done,
     Failed,
     Lost,
+}
+
+impl TaskOutcomeKind {
+    /// The notification event that governs this outcome.
+    pub const fn notification_event(self) -> NotificationEvent {
+        match self {
+            Self::Done => NotificationEvent::TaskSucceeded,
+            Self::Failed | Self::Lost => NotificationEvent::TaskFailed,
+        }
+    }
+
+    /// The sound event that governs this outcome.
+    pub const fn sound_event(self) -> ilium_sound::SoundEvent {
+        match self {
+            Self::Done => ilium_sound::SoundEvent::TaskSucceeded,
+            Self::Failed | Self::Lost => ilium_sound::SoundEvent::TaskFailed,
+        }
+    }
+
+    /// Classifies a monitor's latest progress, or `None` while it is live.
+    pub fn from_progress(progress: &ilium_core::PaneProgress) -> Option<Self> {
+        match progress.report.status {
+            ilium_core::ProgressTaskStatus::Done => Some(Self::Done),
+            ilium_core::ProgressTaskStatus::Error => Some(Self::Failed),
+            _ if progress.monitor_health.is_failed() => Some(Self::Lost),
+            _ => None,
+        }
+    }
+}
+
+/// True when a task outcome is redundant because the pane's agent is idle or
+/// parked: Ilium delivers the result to it, it resumes, and its own
+/// "agent finished" alert follows. Panes without an agent have no such alert,
+/// so their task outcomes are never redundant.
+pub fn is_task_outcome_redundant(
+    settings: &NotificationSettings,
+    status: &ilium_core::PaneStatus,
+    progress: &ilium_core::PaneProgress,
+) -> bool {
+    if !settings.suppress_redundant_task_outcomes
+        || !matches!(status, ilium_core::PaneStatus::Agent(_))
+    {
+        return false;
+    }
+    matches!(
+        ilium_core::project_pane_signals(status, Some(progress), false, None).now,
+        NowSignal::Idle | NowSignal::FinishedUnread | NowSignal::Parked
+    )
+}
+
+/// Whether the pane's agent is mid-turn, so a task outcome is not the end of
+/// the agent's work.
+pub fn is_agent_mid_turn(
+    status: &ilium_core::PaneStatus,
+    progress: &ilium_core::PaneProgress,
+) -> bool {
+    matches!(status, ilium_core::PaneStatus::Agent(_))
+        && matches!(
+            ilium_core::project_pane_signals(status, Some(progress), false, None).now,
+            NowSignal::Working
+                | NowSignal::WaitingSubagents
+                | NowSignal::Settling
+                | NowSignal::NeedsApproval
+        )
+}
+
+/// Collapses bursts of same-kind task outcomes on one pane. The first outcome
+/// in a window is admitted; later ones inside the window are dropped (the
+/// sidebar still shows each). Successes and failures are tracked separately
+/// so a failure is never swallowed by an earlier success.
+#[derive(Debug, Default)]
+pub struct TaskOutcomeCoalescer {
+    last_admitted: std::collections::HashMap<(ilium_core::NodeId, bool), std::time::Instant>,
+}
+
+impl TaskOutcomeCoalescer {
+    pub fn admit(
+        &mut self,
+        pane_id: ilium_core::NodeId,
+        kind: TaskOutcomeKind,
+        now: std::time::Instant,
+        window_seconds: u32,
+    ) -> bool {
+        if window_seconds == 0 {
+            return true;
+        }
+        let window = std::time::Duration::from_secs(u64::from(window_seconds));
+        let key = (pane_id, kind == TaskOutcomeKind::Done);
+        self.last_admitted
+            .retain(|_, admitted| now.saturating_duration_since(*admitted) < window);
+        if self.last_admitted.contains_key(&key) {
+            return false;
+        }
+        self.last_admitted.insert(key, now);
+        true
+    }
 }
 
 impl PendingNotification {
@@ -85,64 +192,97 @@ impl PendingNotification {
             session_name,
             pane_name,
             agent_description,
-            task_outcome: None,
+            kind: PendingKind::AgentFinished,
+        }
+    }
+
+    /// The same pane titling, reporting an approval prompt instead.
+    pub fn approval_from_pane_titles(
+        session_name: String,
+        long_pane_name: String,
+        short_pane_name: Option<String>,
+    ) -> Self {
+        Self {
+            kind: PendingKind::NeedsApproval,
+            ..Self::from_pane_titles(session_name, long_pane_name, short_pane_name)
         }
     }
 
     /// A monitored task reached `done`/`error`, or Ilium lost sight of it.
-    /// Returns `None` for a still-live monitor: there is no outcome yet.
+    /// `agent_is_working` selects the "agent still working" qualifier.
     pub fn for_task_outcome(
         session_name: String,
         pane_name: String,
-        progress: &ilium_core::PaneProgress,
-    ) -> Option<Self> {
-        let kind = match progress.report.status {
-            ilium_core::ProgressTaskStatus::Done => TaskOutcomeKind::Done,
-            ilium_core::ProgressTaskStatus::Error => TaskOutcomeKind::Failed,
-            _ if progress.monitor_health.is_failed() => TaskOutcomeKind::Lost,
-            _ => return None,
-        };
-        Some(Self {
+        kind: TaskOutcomeKind,
+        job_id: String,
+        agent_is_working: bool,
+    ) -> Self {
+        Self {
             session_name,
             pane_name,
             agent_description: None,
-            task_outcome: Some(TaskOutcomeNotice {
-                job_id: progress.report.job_id.clone(),
+            kind: PendingKind::Task(TaskOutcomeNotice {
+                job_id,
                 kind,
+                agent_is_working,
             }),
-        })
+        }
     }
 
-    /// Notification summary shown by the desktop shell.
+    /// Notification summary shown by the desktop shell. The pane title leads
+    /// so the alert names its agent before anything else.
     fn summary(&self) -> String {
-        match self.task_outcome.as_ref().map(|outcome| &outcome.kind) {
-            None => format!("{} finished", self.pane_name),
-            Some(TaskOutcomeKind::Done) => format!("{}: task done", self.pane_name),
-            Some(TaskOutcomeKind::Failed) => format!("{}: task failed", self.pane_name),
-            Some(TaskOutcomeKind::Lost) => format!("{}: task lost", self.pane_name),
+        match &self.kind {
+            PendingKind::AgentFinished => format!("{} finished", self.pane_name),
+            PendingKind::NeedsApproval => format!("{} needs approval", self.pane_name),
+            PendingKind::Task(outcome) => {
+                let (what, qualifier) = match outcome.kind {
+                    TaskOutcomeKind::Done => ("background task finished", "agent still working"),
+                    TaskOutcomeKind::Failed => {
+                        ("background task failed", "agent may be continuing")
+                    }
+                    TaskOutcomeKind::Lost => ("background task lost", "agent may be continuing"),
+                };
+                if outcome.agent_is_working {
+                    format!("{}: {what} ({qualifier})", self.pane_name)
+                } else {
+                    format!("{}: {what}", self.pane_name)
+                }
+            }
         }
     }
 
     /// Notification body, with a distinct long-form description appended as
     /// a second paragraph so the original completion text remains first.
     fn body(&self) -> String {
-        if let Some(outcome) = &self.task_outcome {
-            let what = match outcome.kind {
-                TaskOutcomeKind::Done => "completed successfully",
-                TaskOutcomeKind::Failed => "reported an error",
-                TaskOutcomeKind::Lost => {
-                    "can no longer be observed by Ilium; its outcome is unknown"
-                }
-            };
-            return format!(
-                "Session \"{}\": task {} in \"{}\" {what}.",
-                self.session_name, outcome.job_id, self.pane_name
-            );
-        }
-        let current_text = format!(
-            "Session \"{}\": the agent in \"{}\" is done and waiting on you.",
-            self.session_name, self.pane_name
-        );
+        let current_text = match &self.kind {
+            PendingKind::Task(outcome) => {
+                let what = match outcome.kind {
+                    TaskOutcomeKind::Done => "completed successfully",
+                    TaskOutcomeKind::Failed => "reported an error",
+                    TaskOutcomeKind::Lost => {
+                        "can no longer be observed by Ilium; its outcome is unknown"
+                    }
+                };
+                let tail = if outcome.agent_is_working {
+                    " The agent is still working; its own finished alert follows when it is done."
+                } else {
+                    ""
+                };
+                return format!(
+                    "Session \"{}\": background task {} in \"{}\" {what}.{tail}",
+                    self.session_name, outcome.job_id, self.pane_name
+                );
+            }
+            PendingKind::NeedsApproval => format!(
+                "Session \"{}\": the agent in \"{}\" is waiting for your approval.",
+                self.session_name, self.pane_name
+            ),
+            PendingKind::AgentFinished => format!(
+                "Session \"{}\": the agent in \"{}\" is done and waiting on you.",
+                self.session_name, self.pane_name
+            ),
+        };
         match &self.agent_description {
             Some(description) => format!("{current_text}\n\nAbout: {description}"),
             None => current_text,
@@ -454,6 +594,160 @@ mod tests {
         assert_eq!(
             pending.body(),
             "Session \"default\": the agent in \"Agent Work\" is done and waiting on you."
+        );
+    }
+
+    fn progress_with(status: ilium_core::ProgressTaskStatus) -> ilium_core::PaneProgress {
+        let error = (status == ilium_core::ProgressTaskStatus::Error).then(|| "boom".to_string());
+        ilium_core::PaneProgress::new(
+            1,
+            ilium_core::ProgressTaskReport::new(
+                "build".to_string(),
+                status,
+                50.0,
+                "message".to_string(),
+                error,
+            )
+            .expect("valid report"),
+            0,
+        )
+        .expect("valid progress")
+    }
+
+    #[test]
+    fn task_outcome_kind_follows_the_monitor_report() {
+        use ilium_core::ProgressTaskStatus as Status;
+        assert_eq!(
+            TaskOutcomeKind::from_progress(&progress_with(Status::Done)),
+            Some(TaskOutcomeKind::Done)
+        );
+        assert_eq!(
+            TaskOutcomeKind::from_progress(&progress_with(Status::Error)),
+            Some(TaskOutcomeKind::Failed)
+        );
+        assert_eq!(
+            TaskOutcomeKind::from_progress(&progress_with(Status::Running)),
+            None
+        );
+    }
+
+    #[test]
+    fn task_outcomes_map_to_their_own_events() {
+        assert_eq!(
+            TaskOutcomeKind::Done.notification_event(),
+            NotificationEvent::TaskSucceeded
+        );
+        assert_eq!(
+            TaskOutcomeKind::Lost.notification_event(),
+            NotificationEvent::TaskFailed
+        );
+        assert_eq!(
+            TaskOutcomeKind::Failed.sound_event(),
+            ilium_sound::SoundEvent::TaskFailed
+        );
+    }
+
+    #[test]
+    fn task_outcome_is_redundant_only_for_an_idle_or_finished_agent() {
+        let settings = NotificationSettings::default();
+        let outcome = progress_with(ilium_core::ProgressTaskStatus::Done);
+        assert!(is_task_outcome_redundant(&settings, &idle(), &outcome));
+        assert!(is_task_outcome_redundant(&settings, &done(), &outcome));
+        assert!(!is_task_outcome_redundant(&settings, &working(), &outcome));
+        assert!(!is_task_outcome_redundant(
+            &settings,
+            &plain_shell(),
+            &outcome
+        ));
+        let keep_all = NotificationSettings {
+            suppress_redundant_task_outcomes: false,
+            ..settings
+        };
+        assert!(!is_task_outcome_redundant(&keep_all, &idle(), &outcome));
+    }
+
+    #[test]
+    fn agent_mid_turn_is_true_only_while_the_agent_is_active() {
+        let outcome = progress_with(ilium_core::ProgressTaskStatus::Done);
+        assert!(is_agent_mid_turn(&working(), &outcome));
+        assert!(is_agent_mid_turn(&waiting_approval(), &outcome));
+        assert!(!is_agent_mid_turn(&idle(), &outcome));
+        assert!(!is_agent_mid_turn(&plain_shell(), &outcome));
+    }
+
+    #[test]
+    fn coalescer_merges_same_kind_outcomes_inside_the_window() {
+        let mut coalescer = TaskOutcomeCoalescer::default();
+        let pane = ilium_core::NodeId(7);
+        let start = std::time::Instant::now();
+        assert!(coalescer.admit(pane, TaskOutcomeKind::Done, start, 30));
+        let soon = start + std::time::Duration::from_secs(10);
+        assert!(!coalescer.admit(pane, TaskOutcomeKind::Done, soon, 30));
+        // A failure is never swallowed by an earlier success, nor another pane's.
+        assert!(coalescer.admit(pane, TaskOutcomeKind::Failed, soon, 30));
+        assert!(coalescer.admit(ilium_core::NodeId(8), TaskOutcomeKind::Done, soon, 30));
+        let later = start + std::time::Duration::from_secs(31);
+        assert!(coalescer.admit(pane, TaskOutcomeKind::Done, later, 30));
+    }
+
+    #[test]
+    fn coalescer_with_a_zero_window_admits_everything() {
+        let mut coalescer = TaskOutcomeCoalescer::default();
+        let pane = ilium_core::NodeId(7);
+        let now = std::time::Instant::now();
+        assert!(coalescer.admit(pane, TaskOutcomeKind::Done, now, 0));
+        assert!(coalescer.admit(pane, TaskOutcomeKind::Done, now, 0));
+    }
+
+    #[test]
+    fn task_outcome_text_leads_with_the_pane_and_names_the_agent_state() {
+        let working = PendingNotification::for_task_outcome(
+            "default".to_string(),
+            "Auth Bug".to_string(),
+            TaskOutcomeKind::Done,
+            "build".to_string(),
+            true,
+        );
+        assert_eq!(
+            working.summary(),
+            "Auth Bug: background task finished (agent still working)"
+        );
+        assert!(working.body().contains("The agent is still working"));
+
+        let failed = PendingNotification::for_task_outcome(
+            "default".to_string(),
+            "Auth Bug".to_string(),
+            TaskOutcomeKind::Failed,
+            "build".to_string(),
+            true,
+        );
+        assert_eq!(
+            failed.summary(),
+            "Auth Bug: background task failed (agent may be continuing)"
+        );
+
+        let shell = PendingNotification::for_task_outcome(
+            "default".to_string(),
+            "Shell".to_string(),
+            TaskOutcomeKind::Done,
+            "build".to_string(),
+            false,
+        );
+        assert_eq!(shell.summary(), "Shell: background task finished");
+        assert!(!shell.body().contains("still working"));
+    }
+
+    #[test]
+    fn approval_notification_names_the_pane_and_the_prompt() {
+        let pending = PendingNotification::approval_from_pane_titles(
+            "default".to_string(),
+            "Auth Bug".to_string(),
+            None,
+        );
+        assert_eq!(pending.summary(), "Auth Bug needs approval");
+        assert_eq!(
+            pending.body(),
+            "Session \"default\": the agent in \"Auth Bug\" is waiting for your approval."
         );
     }
 }

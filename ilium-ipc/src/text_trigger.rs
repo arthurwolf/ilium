@@ -71,6 +71,27 @@ pub struct TextTriggerSettings {
     pub triggers: Vec<TextTrigger>,
 }
 
+impl TextTriggerSettings {
+    /// Checks authored identities without normalizing them. Non-UUID IDs are
+    /// valid; absent, blank, control-bearing, and duplicate IDs are not.
+    /// Invalid documents stay on disk for their author to repair.
+    pub fn validate_identities(&self) -> Result<(), String> {
+        let mut ids = std::collections::HashSet::new();
+        for (index, trigger) in self.triggers.iter().enumerate() {
+            if trigger.id.trim().is_empty() || trigger.id.chars().any(char::is_control) {
+                return Err(format!(
+                    "Text Trigger {} has an invalid stable id",
+                    index + 1
+                ));
+            }
+            if !ids.insert(&trigger.id) {
+                return Err(format!("Text Trigger {} repeats an existing id", index + 1));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +112,39 @@ mod tests {
         let decoded: TextTriggerSettings =
             bincode::deserialize(&encoded).expect("deserialize settings");
         assert_eq!(decoded, settings);
+    }
+}
+
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    fn settings(id: &str) -> TextTriggerSettings {
+        TextTriggerSettings {
+            triggers: vec![TextTrigger {
+                id: id.to_owned(),
+                ..TextTrigger::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn identity_validation_preserves_authored_non_uuid_ids() {
+        let value = settings("authored-rule");
+        let before = value.clone();
+        assert_eq!(value.validate_identities(), Ok(()));
+        assert_eq!(value, before);
+        assert_eq!(TextTriggerSettings::default().validate_identities(), Ok(()));
+    }
+
+    #[test]
+    fn identity_validation_rejects_missing_blank_control_and_duplicate_ids() {
+        for id in ["", "   ", "rule\nname", "\t"] {
+            assert!(settings(id).validate_identities().is_err());
+        }
+        let mut value = settings("stable");
+        value.triggers.push(value.triggers[0].clone());
+        assert!(value.validate_identities().is_err());
     }
 }

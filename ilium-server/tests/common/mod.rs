@@ -377,7 +377,10 @@ impl TestServer {
             home_dir: ilium_platform::paths::canonicalize(dir.path())
                 .expect("canonical test home directory"),
             detection_config,
-            notifications_config: NotificationsConfig { enabled: false },
+            notifications_config: NotificationsConfig {
+                enabled: false,
+                ..NotificationsConfig::default()
+            },
             sound_settings,
             sound_config_path: None,
             sound_player,

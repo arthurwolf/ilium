@@ -400,6 +400,7 @@ async fn write_replies<W>(
                             &mut frame_writer,
                             &event,
                             &mut delivered_terminal_sequences,
+                            resynchronization_state.as_deref(),
                         )
                         .await
                         {
@@ -449,6 +450,7 @@ async fn write_replies<W>(
                         &mut frame_writer,
                         &terminal_stream_selection,
                         &mut delivered_terminal_sequences,
+                        resynchronization_state.as_deref(),
                     )
                     .await;
                     break;
@@ -472,6 +474,7 @@ async fn write_replies<W>(
                         &mut frame_writer,
                         &terminal_stream_selection,
                         &mut delivered_terminal_sequences,
+                        resynchronization_state.as_deref(),
                     )
                     .await;
                     break;
@@ -579,8 +582,13 @@ async fn write_replies<W>(
             }
         }
 
-        if let Err(error) =
-            write_server_event(&mut frame_writer, &event, &mut delivered_terminal_sequences).await
+        if let Err(error) = write_server_event(
+            &mut frame_writer,
+            &event,
+            &mut delivered_terminal_sequences,
+            resynchronization_state.as_deref(),
+        )
+        .await
         {
             tracing::warn!("connection write failed, closing: {error}");
             break;
@@ -605,8 +613,13 @@ where
         if !should_forward_terminal_event(&event, terminal_stream_selection) {
             continue;
         }
-        if let Err(error) =
-            write_server_event(frame_writer, &event, delivered_terminal_sequences).await
+        if let Err(error) = write_server_event(
+            frame_writer,
+            &event,
+            delivered_terminal_sequences,
+            Some(state),
+        )
+        .await
         {
             tracing::warn!(
                 "connection write failed during lag resynchronization, closing: {error}"
@@ -653,9 +666,13 @@ where
                 node_id: *pane_id,
                 activity_revision: *activity_revision,
             };
-            if let Err(error) =
-                write_server_event(frame_writer, &activity_event, delivered_terminal_sequences)
-                    .await
+            if let Err(error) = write_server_event(
+                frame_writer,
+                &activity_event,
+                delivered_terminal_sequences,
+                Some(state),
+            )
+            .await
             {
                 tracing::warn!("connection write failed during activity synchronization: {error}");
                 return false;
@@ -669,8 +686,13 @@ where
         else {
             continue;
         };
-        if let Err(error) =
-            write_server_event(frame_writer, &event, delivered_terminal_sequences).await
+        if let Err(error) = write_server_event(
+            frame_writer,
+            &event,
+            delivered_terminal_sequences,
+            Some(state),
+        )
+        .await
         {
             tracing::warn!("connection write failed during pane subscription: {error}");
             return false;
@@ -697,10 +719,23 @@ async fn write_server_event<W>(
     frame_writer: &mut FrameWriter<W>,
     event: &ServerEvent,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
 ) -> Result<(), ilium_ipc::IpcError>
 where
     W: AsyncWrite + Unpin,
 {
+    // Queued trigger snapshots are wakeups. Sample at this single writer so
+    // old broadcasts cannot undo a newer attach or recovery snapshot.
+    // Release the settings lock before awaiting a potentially blocked socket.
+    if matches!(event, ServerEvent::TextTriggersChanged { .. }) {
+        let state = state.ok_or_else(|| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(
+                "Text Trigger output requires server authority",
+            ))
+        })?;
+        let current = crate::text_trigger_config::snapshot(state).await;
+        return frame_writer.write(&current).await;
+    }
     frame_writer.write(event).await?;
     record_delivered_terminal_sequence(delivered_terminal_sequences, event);
     Ok(())
@@ -801,6 +836,7 @@ async fn drain_pending_broadcasts<W>(
     frame_writer: &mut FrameWriter<W>,
     terminal_stream_selection: &TerminalStreamSelection,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
 ) where
     W: AsyncWrite + Unpin,
 {
@@ -826,7 +862,7 @@ async fn drain_pending_broadcasts<W>(
             continue;
         }
         if let Err(error) =
-            write_server_event(frame_writer, &event, delivered_terminal_sequences).await
+            write_server_event(frame_writer, &event, delivered_terminal_sequences, state).await
         {
             tracing::warn!("connection write failed while draining final broadcasts: {error}");
             return;
@@ -1170,5 +1206,348 @@ mod tests {
             },
             &delivered,
         ));
+    }
+}
+
+
+#[cfg(test)]
+mod text_trigger_writer_tests {
+    use super::*;
+    use ilium_ipc::{TextTrigger, TextTriggerSettings};
+    use tokio::io::{duplex, AsyncReadExt};
+    use tokio::time::{timeout, Duration};
+    const WAIT: Duration = Duration::from_secs(5);
+    struct Task<T>(tokio::task::JoinHandle<T>);
+    impl<T> Drop for Task<T> {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    impl<T> Task<T> {
+        async fn joined(&mut self) -> T {
+            timeout(WAIT, &mut self.0)
+                .await
+                .expect("owned task timed out")
+                .expect("owned task panicked")
+        }
+    }
+    fn rules(message: &str) -> TextTriggerSettings {
+        TextTriggerSettings {
+            triggers: vec![TextTrigger {
+                id: "stable".to_owned(),
+                regexp: "ready$".to_owned(),
+                message: message.to_owned(),
+                ..TextTrigger::default()
+            }],
+        }
+    }
+    fn state_at(directory: &std::path::Path) -> (Arc<ServerState>, Task<()>) {
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "trigger-writer".to_owned(),
+            session_cwd: directory.to_path_buf(),
+            home_dir: directory.to_path_buf(),
+            snapshot_path: directory.join("snapshot.json"),
+            socket_path: directory.join("unused.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: false,
+        }));
+        (state, Task(sound_task))
+    }
+    async fn accept(state: &ServerState, message: &str, revision: u64) {
+        let mut current = state.text_trigger_settings.write().await;
+        current.settings = rules(message);
+        current.revision = revision;
+    }
+    fn event(message: &str) -> ServerEvent {
+        ServerEvent::TextTriggersChanged {
+            settings: rules(message),
+        }
+    }
+    async fn read<S: AsyncRead + Unpin>(stream: &mut S) -> ServerEvent {
+        timeout(WAIT, ilium_ipc::read_frame(stream))
+            .await
+            .expect("frame timed out")
+            .expect("frame decode failed")
+    }
+
+    #[tokio::test]
+    async fn text_trigger_attach_and_live_broadcast_use_current_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        accept(&state, "B", 2).await;
+        let (server, mut client) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (phase_tx, phase_rx) = watch::channel(AttachPhase::Replaying);
+        direct_tx.send(event("A")).await.unwrap();
+        broadcast_tx.send(event("A")).unwrap();
+        let mut writer = Task(tokio::spawn(write_replies(
+            server,
+            broadcast_rx,
+            direct_rx,
+            phase_rx,
+            mpsc::channel(1).1,
+            Some(Arc::clone(&state)),
+        )));
+        assert_eq!(read(&mut client).await, event("B"));
+        phase_tx.send_replace(AttachPhase::Ready);
+        assert_eq!(read(&mut client).await, event("B"));
+        drop(direct_tx);
+        writer.joined().await;
+    }
+
+    #[tokio::test]
+    async fn text_trigger_reader_exit_drain_cannot_restore_a_stale_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        accept(&state, "B", 2).await;
+        let (server, mut client) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (_phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
+        direct_tx.send(event("A")).await.unwrap();
+        broadcast_tx.send(event("A")).unwrap();
+        drop(direct_tx);
+        let mut writer = Task(tokio::spawn(write_replies(
+            server,
+            broadcast_rx,
+            direct_rx,
+            phase_rx,
+            mpsc::channel(1).1,
+            Some(Arc::clone(&state)),
+        )));
+        assert_eq!(read(&mut client).await, event("B"));
+        assert_eq!(read(&mut client).await, event("B"));
+        writer.joined().await;
+    }
+
+    #[tokio::test]
+    async fn text_trigger_stalled_socket_releases_settings_and_orders_later_frames() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        accept(&state, "A", 1).await;
+        let (server, mut client) = duplex(1);
+        let writer_state = Arc::clone(&state);
+        let mut writer = Task(tokio::spawn(async move {
+            let mut framed = FrameWriter::new(server);
+            let mut sequences = HashMap::new();
+            write_server_event(
+                &mut framed,
+                &event("stale"),
+                &mut sequences,
+                Some(&writer_state),
+            )
+            .await
+            .unwrap();
+            write_server_event(
+                &mut framed,
+                &event("A"),
+                &mut sequences,
+                Some(&writer_state),
+            )
+            .await
+            .unwrap();
+            assert!(sequences.is_empty());
+        }));
+        let mut prefix = [0_u8; 1];
+        timeout(WAIT, client.read_exact(&mut prefix))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut current = timeout(WAIT, state.text_trigger_settings.write())
+            .await
+            .expect("socket write retained the settings lock");
+        current.settings = rules("B");
+        current.revision = 2;
+        drop(current);
+        let mut reconstructed = (&prefix[..]).chain(&mut client);
+        assert_eq!(read(&mut reconstructed).await, event("A"));
+        assert_eq!(read(&mut reconstructed).await, event("B"));
+        writer.joined().await;
+    }
+
+    #[tokio::test]
+    async fn text_trigger_lag_repair_then_old_event_cannot_regress_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        accept(&state, "B", 2).await;
+        let (server, mut client) = duplex(64 * 1024);
+        let mut writer = FrameWriter::new(server);
+        let mut sequences = HashMap::new();
+        let expected_count = handlers::resynchronization_events(&state, &sequences)
+            .await
+            .len();
+        assert!(timeout(
+            WAIT,
+            write_resynchronization(
+                &mut writer,
+                &state,
+                &mut sequences,
+                &TerminalStreamSelection::None
+            )
+        )
+        .await
+        .unwrap());
+        write_server_event(&mut writer, &event("A"), &mut sequences, Some(&state))
+            .await
+            .unwrap();
+        let mut saw_rules = false;
+        for _ in 0..expected_count {
+            let received = read(&mut client).await;
+            assert!(!matches!(received, ServerEvent::InitialStateSyncComplete));
+            saw_rules |= received == event("B");
+        }
+        assert!(saw_rules);
+        assert_eq!(read(&mut client).await, event("B"));
+    }
+
+    #[tokio::test]
+    async fn text_trigger_writer_refuses_snapshots_without_authority() {
+        let mut writer = FrameWriter::new(tokio::io::sink());
+        let mut sequences = HashMap::new();
+        assert!(
+            write_server_event(&mut writer, &event("untrusted"), &mut sequences, None)
+                .await
+                .is_err()
+        );
+        assert!(sequences.is_empty());
+    }
+}
+
+
+#[cfg(test)]
+mod text_trigger_ordering_regressions {
+    use super::*;
+    use ilium_ipc::{read_frame, TextTrigger, TextTriggerSettings};
+    use tokio::io::duplex;
+    use tokio::time::{timeout, Duration};
+
+    async fn assert_newer_rules_survive_queued_old_event(lag: bool, drain: bool) {
+        let directory = tempfile::tempdir().expect("private directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "trigger-ordering".to_owned(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let newer = TextTriggerSettings {
+            triggers: vec![TextTrigger {
+                id: "retained-newer-rule".to_owned(),
+                regexp: "synthetic-ready".to_owned(),
+                message: "synthetic-reply".to_owned(),
+                ..TextTrigger::default()
+            }],
+        };
+        {
+            let mut accepted = state.text_trigger_settings.write().await;
+            accepted.settings = newer.clone();
+            accepted.revision = 2;
+        }
+        let (server_stream, mut client_stream) = duplex(16384);
+        let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(if lag { 2 } else { 8 });
+        let (direct_tx, direct_rx) = mpsc::channel(32);
+        let (phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
+        // Queue an older accepted broadcast before constructing the newer
+        // authoritative attach snapshot. In the lag case force exactly one
+        // dropped frame, retaining the older settings event after recovery.
+        if lag {
+            for _ in 0..2 {
+                broadcast_tx
+                    .send(ServerEvent::TreeSnapshot(ilium_core::Tree::new()))
+                    .unwrap();
+            }
+        }
+        broadcast_tx
+            .send(ServerEvent::TextTriggersChanged {
+                settings: TextTriggerSettings::default(),
+            })
+            .unwrap();
+        if !lag {
+            for event in handlers::initial_state_events(&state, true, false).await {
+                direct_tx.send(event).await.unwrap();
+            }
+        }
+        // Dropping the request side exercises the real final-broadcast drain;
+        // keeping it open exercises the normal single-writer broadcast path.
+        let keep_direct = if drain {
+            drop(direct_tx);
+            None
+        } else {
+            Some(direct_tx)
+        };
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            phase_rx,
+            mpsc::channel(1).1,
+            Some(Arc::clone(&state)),
+        ));
+        let mut delivered = Vec::new();
+        timeout(Duration::from_secs(2), async {
+            while delivered.len() < 2 {
+                let event = read_frame::<ServerEvent, _>(&mut client_stream)
+                    .await
+                    .unwrap();
+                if let ServerEvent::TextTriggersChanged { settings } = event {
+                    delivered.push(settings);
+                }
+            }
+        })
+        .await
+        .expect("two settings frames not delivered");
+        drop(keep_direct);
+        drop(phase_tx);
+        drop(broadcast_tx);
+        timeout(Duration::from_secs(2), writer)
+            .await
+            .expect("writer did not stop")
+            .unwrap();
+        sound_task.abort();
+        let _ = sound_task.await;
+        let authoritative = state.text_trigger_settings.read().await.settings.clone();
+        println!(
+            "{}",
+            serde_json::json!({
+                "type":"result", "lag":lag, "drain":drain,
+                "delivered_rule_counts":delivered.iter().map(|settings| settings.triggers.len()).collect::<Vec<_>>(),
+                "authoritative_rule_count":authoritative.triggers.len(),
+            })
+        );
+        assert_eq!(
+            delivered.first(),
+            Some(&newer),
+            "newer authority was not seeded first"
+        );
+        assert_eq!(delivered.last(), Some(&authoritative),
+            "queued older TextTriggersChanged rolled the client list back after authoritative synchronization");
+    }
+
+    #[tokio::test]
+    async fn newer_attach_snapshot_survives_queued_old_trigger_broadcast() {
+        assert_newer_rules_survive_queued_old_event(false, false).await;
+    }
+    #[tokio::test]
+    async fn newer_attach_snapshot_survives_final_old_trigger_drain() {
+        assert_newer_rules_survive_queued_old_event(false, true).await;
+    }
+    #[tokio::test]
+    async fn newer_lag_snapshot_survives_retained_old_trigger_broadcast() {
+        assert_newer_rules_survive_queued_old_event(true, false).await;
     }
 }

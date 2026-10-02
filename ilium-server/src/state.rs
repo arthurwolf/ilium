@@ -146,11 +146,20 @@ pub struct ServerState {
     pub socket_path: PathBuf,
     pub agent_detection_settings: tokio::sync::RwLock<AgentDetectionRuntimeSettings>,
     pub agent_detection_settings_transaction: Mutex<()>,
-    pub notifications_config: NotificationsConfig,
+    /// Live `[notifications]` settings; the config watcher refreshes them.
+    pub notifications_config: RwLock<NotificationsConfig>,
+    /// Bounds repeated task-outcome alerts per pane. Held only briefly and
+    /// never across an await.
+    pub task_outcome_coalescer: std::sync::Mutex<crate::notifications::TaskOutcomeCoalescer>,
     pub sound_settings: RwLock<ilium_sound::SoundSettings>,
     /// Last server-accepted Text Trigger configuration. Execution state is
     /// added separately so a rejected candidate never replaces this value.
     pub text_trigger_settings: RwLock<VersionedTextTriggerSettings>,
+    /// Set before restored panes or IPC consumers can execute.
+    pub(crate) text_trigger_config_path: std::sync::OnceLock<PathBuf>,
+    /// Serializes source read, validation, mutation, and publication.
+    /// Acquire before text_trigger_settings; never while holding tree/panes.
+    pub(crate) text_trigger_settings_transaction: Mutex<()>,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
     pub tree: RwLock<Tree>,
     pub panes: RwLock<PaneRegistry>,
@@ -163,6 +172,8 @@ pub struct ServerState {
     /// One pre-restructure snapshot per project. A project-scoped revert
     /// restores only that project's subtree, leaving concurrent work in
     /// every other project intact.
+    /// Apply and undo share one publication boundary; socket replies occur after release.
+    pub restructure_transaction: Mutex<()>,
     pub restructure_undo: Mutex<HashMap<NodeId, Tree>>,
     pub snapshot_write_lock: std::sync::Arc<Mutex<()>>,
     /// Serializes schedule replacement with the executor's final freshness
@@ -341,15 +352,19 @@ impl ServerState {
                 revision: 0,
             }),
             agent_detection_settings_transaction: Mutex::new(()),
-            notifications_config: options.notifications_config,
+            notifications_config: RwLock::new(options.notifications_config),
+            task_outcome_coalescer: std::sync::Mutex::default(),
             sound_settings: RwLock::new(options.sound_settings),
             text_trigger_settings: RwLock::new(VersionedTextTriggerSettings::default()),
+            text_trigger_config_path: std::sync::OnceLock::new(),
+            text_trigger_settings_transaction: Mutex::new(()),
             sound_requests: options.sound_requests,
             tree: RwLock::new(tree),
             panes: RwLock::new(HashMap::new()),
             agent_debug: AgentDebugRecorder::new(options.agent_debug_menu_enabled),
             last_terminal_working_directory: Mutex::new(None),
             pending_session_recovery: Mutex::new(None),
+            restructure_transaction: Mutex::new(()),
             restructure_undo: Mutex::new(HashMap::new()),
             snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
             scheduled_input_transaction: Mutex::new(()),
@@ -659,21 +674,8 @@ impl ServerState {
     /// `ilium_core::Tree`'s id allocator), so a stale key can never
     /// accidentally collide with a live project and get pruned by mistake.
     ///
-    /// Takes its own fresh `tree` read lock rather than a caller-supplied
-    /// snapshot: every `restructure_undo` insert happens strictly after the
-    /// tree write lock that committed the corresponding project is dropped
-    /// (see `handle_apply_project_restructure_plan`), so a project can never
-    /// appear in `restructure_undo` before it appears in the live tree.
-    /// Reading the live tree here, at whatever moment this call actually
-    /// runs, therefore can never observe an inserted entry's project as
-    /// missing -- reusing an already-cloned snapshot from moments earlier
-    /// could, if a concurrent restructure's tree commit and undo-insert
-    /// straddled that snapshot's read lock.
-    ///
-    /// Called from `broadcast_and_persist`, the shared tail of every
-    /// structural-mutation handler, so every path that can remove a project
-    /// -- present or future -- is covered without each handler needing to
-    /// remember this map exists.
+    /// Takes a fresh tree read before the undo lock, matching apply and revert.
+    /// Their undo-slot updates occur while the corresponding tree write is held.
     pub async fn prune_stale_restructure_undo(&self) {
         let tree = self.tree.read().await;
         let mut undo = self.restructure_undo.lock().await;

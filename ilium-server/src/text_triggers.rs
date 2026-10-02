@@ -21,7 +21,7 @@
 //! Newline and byte limits improve sampling of fast output; they do not guarantee
 //! observation of every transient screen state (for example cursor-only redraws).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use ilium_core::{NodeId, NodeKind, PaneStatus};
@@ -572,14 +572,10 @@ pub async fn resync_after_gap(
 /// Messages stay literal single lines so each rule has one text stage and one
 /// later Enter stage.
 pub fn validate_settings(settings: &ilium_ipc::TextTriggerSettings) -> Option<String> {
-    let mut ids = HashSet::new();
+    if let Err(message) = settings.validate_identities() {
+        return Some(message);
+    }
     for (index, trigger) in settings.triggers.iter().enumerate() {
-        if trigger.id.is_empty() {
-            return Some(format!("Text Trigger {} has no stable id", index + 1));
-        }
-        if !ids.insert(&trigger.id) {
-            return Some(format!("Text Trigger {} repeats an existing id", index + 1));
-        }
         if trigger.regexp.is_empty() {
             return Some(format!(
                 "Text Trigger {} regexp must not be empty",

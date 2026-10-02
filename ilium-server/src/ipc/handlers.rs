@@ -7,6 +7,7 @@
 //! (`ServerState::events` broadcast vs. this connection's own `direct_tx`)
 //! are wired together on the write side.
 
+use ilium_core::animation_recommendation::RecommendedRestructurePlan;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -101,6 +102,15 @@ pub async fn handle_request(
             false
         }
         ClientRequest::UpdateTextTriggers { settings } => {
+            if state.text_trigger_config_path.get().is_some() {
+                // Configured servers use the durable file as their authority.
+                // A delayed client's payload must not replace a newer save.
+                match crate::text_trigger_config::refresh(state).await {
+                    Ok(snapshot) => send_direct(direct_tx, snapshot).await,
+                    Err(message) => send_direct_error(direct_tx, message).await,
+                }
+                return false;
+            }
             if let Some(message) = crate::text_triggers::validate_settings(&settings) {
                 send_direct_error(direct_tx, message).await;
                 return false;
@@ -675,6 +685,21 @@ pub async fn handle_request(
             handle_revert_last_restructure(state, direct_tx).await;
             false
         }
+        ClientRequest::ApplyRecommendedProjectRestructurePlan {
+            project_id,
+            plan,
+            inference_activity_revisions,
+        } => {
+            handle_apply_recommended_project_restructure_plan(
+                state,
+                project_id,
+                plan,
+                &inference_activity_revisions,
+                direct_tx,
+            )
+            .await;
+            false
+        }
         ClientRequest::ApplyProjectRestructurePlan {
             project_id,
             plan,
@@ -1143,6 +1168,8 @@ async fn handle_attach(
             },
         )
         .await;
+        let settings = state.text_trigger_settings.read().await.settings.clone();
+        send_direct(direct_tx, ServerEvent::TextTriggersChanged { settings }).await;
         send_direct(
             direct_tx,
             ServerEvent::SessionRecoveryAvailable { pane_count },
@@ -1326,6 +1353,10 @@ async fn state_synchronization_events(
     };
     events.extend(status_replays);
     drop(statuses);
+    // Rules are server-owned live state, so an attachment or lag recovery
+    // needs them even when no client has changed the list during this stream.
+    let settings = state.text_trigger_settings.read().await.settings.clone();
+    events.push(ServerEvent::TextTriggersChanged { settings });
     if include_initial_sync_complete {
         let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
         events.push(ServerEvent::AgentDetectionSettingsChanged {
@@ -1456,39 +1487,74 @@ fn canonical_project_directory(path: std::path::PathBuf) -> Result<std::path::Pa
 /// `state.restructure_undo`'s one slot only when the plan actually applies
 /// cleanly -- a rejected plan leaves both the tree and any earlier undo
 /// buffer untouched.
+async fn commit_project_restructure(
+    state: &ServerState,
+    project_id: NodeId,
+    apply: impl FnOnce(&mut Tree) -> Result<Vec<ilium_core::NodeActivityRevision>, TreeError>,
+) -> Result<Vec<ilium_core::NodeActivityRevision>, TreeError> {
+    let mut tree = state.tree.write().await;
+    let mut undo = state.restructure_undo.lock().await;
+    let before = tree.clone();
+    let checkpoints = apply(&mut tree)?;
+    undo.insert(project_id, before);
+    state.request_snapshot_save();
+    Ok(checkpoints)
+}
+async fn project_restructure_event(
+    state: &ServerState,
+    project_id: NodeId,
+    result: Result<Vec<ilium_core::NodeActivityRevision>, TreeError>,
+) -> ServerEvent {
+    match result {
+        Ok(checkpoint_activity_revisions) => {
+            broadcast_and_persist(state).await;
+            ServerEvent::ProjectRestructureApplied {
+                project_id,
+                checkpoint_activity_revisions,
+            }
+        }
+        Err(error) => {
+            let message = format!("restructure failed: {error}");
+            tracing::error!(%message, "request failed");
+            ServerEvent::ProjectRestructureRejected {
+                project_id,
+                message,
+            }
+        }
+    }
+}
+
 async fn handle_apply_restructure_plan(
     state: &Arc<ServerState>,
     plan: RestructurePlan,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let mut tree = state.tree.write().await;
-    let Some(project_id) = tree.project_ids().into_iter().next() else {
-        drop(tree);
-        send_direct_error(direct_tx, "restructure failed: no project exists").await;
-        return;
-    };
-    if tree.project_ids().len() != 1 {
-        drop(tree);
+    let transaction = state.restructure_transaction.lock().await;
+    let projects = state.tree.read().await.project_ids();
+    if projects.len() != 1 {
+        drop(transaction);
         send_direct_error(
             direct_tx,
-            "restructure failed: select a project to restructure",
+            "restructure failed: select the single project to restructure",
         )
         .await;
         return;
     }
-    let before = tree.clone();
-    let result = tree.apply_project_restructure(project_id, plan);
-    drop(tree);
-    match result {
-        Ok(()) => {
-            state
-                .restructure_undo
-                .lock()
-                .await
-                .insert(project_id, before);
-            broadcast_and_persist(state).await;
+    let project_id = projects[0];
+    let result = commit_project_restructure(state, project_id, |tree| {
+        if tree.project_ids().len() != 1 {
+            return Err(TreeError::RootRequiresProject);
         }
-        Err(error) => send_direct_error(direct_tx, format!("restructure failed: {error}")).await,
+        tree.apply_project_restructure(project_id, plan)?;
+        Ok(Vec::new())
+    })
+    .await;
+    if result.is_ok() {
+        broadcast_and_persist(state).await;
+    }
+    drop(transaction);
+    if let Err(error) = result {
+        send_direct_error(direct_tx, format!("restructure failed: {error}")).await;
     }
 }
 
@@ -1526,44 +1592,35 @@ async fn handle_apply_project_restructure_plan(
     inference_activity_revisions: &[ilium_core::NodeActivityRevision],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let mut tree = state.tree.write().await;
-    let before = tree.clone();
-    let result = tree.apply_project_restructure_with_activity_checkpoint(
-        project_id,
-        plan,
-        inference_activity_revisions,
-    );
-    drop(tree);
-    match result {
-        Ok(checkpoint_activity_revisions) => {
-            state
-                .restructure_undo
-                .lock()
-                .await
-                .insert(project_id, before);
-            broadcast_and_persist(state).await;
-            send_direct(
-                direct_tx,
-                ServerEvent::ProjectRestructureApplied {
-                    project_id,
-                    checkpoint_activity_revisions,
-                },
-            )
-            .await;
-        }
-        Err(error) => {
-            let message = format!("restructure failed: {error}");
-            tracing::error!(%message, "request failed");
-            send_direct(
-                direct_tx,
-                ServerEvent::ProjectRestructureRejected {
-                    project_id,
-                    message,
-                },
-            )
-            .await;
-        }
-    }
+    let transaction = state.restructure_transaction.lock().await;
+    let result = commit_project_restructure(state, project_id, |tree| {
+        tree.apply_project_restructure_with_activity_checkpoint(
+            project_id,
+            plan,
+            inference_activity_revisions,
+        )
+    })
+    .await;
+    let event = project_restructure_event(state, project_id, result).await;
+    drop(transaction);
+    send_direct(direct_tx, event).await;
+}
+
+async fn handle_apply_recommended_project_restructure_plan(
+    state: &Arc<ServerState>,
+    project_id: NodeId,
+    plan: RecommendedRestructurePlan,
+    inference_activity_revisions: &[ilium_core::NodeActivityRevision],
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let transaction = state.restructure_transaction.lock().await;
+    let result = commit_project_restructure(state, project_id, |tree| {
+        tree.apply_recommended_project_restructure(project_id, plan, inference_activity_revisions)
+    })
+    .await;
+    let event = project_restructure_event(state, project_id, result).await;
+    drop(transaction);
+    send_direct(direct_tx, event).await;
 }
 
 async fn handle_revert_project_restructure(
@@ -1571,65 +1628,60 @@ async fn handle_revert_project_restructure(
     project_id: NodeId,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let previous = state.restructure_undo.lock().await.remove(&project_id);
-    match previous {
-        Some(previous_tree) => {
-            let publish_guard = state.workspace_spawn_lock.lock().await;
-            let mut tree = state.tree.write().await;
-            let orphaned_pane_ids: Vec<NodeId> = collect_pane_descendants(&tree, project_id)
-                .into_iter()
-                .filter(|pane_id| previous_tree.get(*pane_id).is_none())
-                .collect();
-            let result = tree.restore_project_from(project_id, &previous_tree);
-            if let Err(error) = result {
-                drop(tree);
-                drop(publish_guard);
-                state
-                    .restructure_undo
-                    .lock()
-                    .await
-                    .insert(project_id, previous_tree);
-                send_direct_error(direct_tx, format!("could not revert restructure: {error}"))
-                    .await;
-                return;
-            }
-            // Keep the write guard held across the pane-registry teardown
-            // below -- see `spawn_and_register_pane_in_directory`'s doc
-            // comment for why this tree-overwrite-then-sweep pair must stay
-            // atomic with respect to that function's own tree-check-then-
-            // panes-insert pair, under the "tree before panes" ordering
-            // `state.rs` documents. Only dropped afterward, still before
-            // `broadcast_and_persist`'s own read-locked clone -- see that
-            // function's docs.
-            if !orphaned_pane_ids.is_empty() {
-                let mut panes = state.panes.write().await;
-                for pane_id in &orphaned_pane_ids {
-                    if let Some(resource) = panes.remove(pane_id) {
-                        teardown_pane_resource(*pane_id, resource);
-                    }
-                }
-                drop(panes);
-            }
-            drop(tree);
-            drop(publish_guard);
-            // Mirrors `handle_close_pane`'s teardown ordering -- evict the
-            // orphaned panes' `AgentDebugRecorder` journals (and their
-            // change-only observation state) once the tree/panes locks are
-            // released, so a reverted restructure never leaves a dangling
-            // per-pane journal that keeps being re-persisted into every
-            // future session snapshot (see `AgentDebugRecorder` docs).
-            if !orphaned_pane_ids.is_empty() {
-                state.agent_debug.remove(&orphaned_pane_ids).await;
-                let mut preferences = state.workspace_close_preferences.write().await;
-                for pane_id in &orphaned_pane_ids {
-                    preferences.remove(pane_id);
-                }
-            }
-
-            broadcast_and_persist(state).await;
-        }
-        None => send_direct_error(direct_tx, "no restructure to revert for this project").await,
+    let transaction = state.restructure_transaction.lock().await;
+    let publish_guard = state.workspace_spawn_lock.lock().await;
+    let mut tree = state.tree.write().await;
+    let mut undo = state.restructure_undo.lock().await;
+    let Some(previous_tree) = undo.get(&project_id) else {
+        drop(undo);
+        drop(tree);
+        drop(publish_guard);
+        drop(transaction);
+        send_direct_error(direct_tx, "no restructure to revert for this project").await;
+        return;
+    };
+    let orphaned_pane_ids: Vec<NodeId> = collect_pane_descendants(&tree, project_id)
+        .into_iter()
+        .filter(|pane_id| previous_tree.get(*pane_id).is_none())
+        .collect();
+    // Acquire every resource guard before publishing the restore. A cancelled
+    // connection cannot remove tree nodes while their live resources remain.
+    let mut panes = if orphaned_pane_ids.is_empty() {
+        None
+    } else {
+        Some(state.panes.write().await)
+    };
+    if let Err(error) = tree.restore_project_from(project_id, previous_tree) {
+        drop(panes);
+        drop(undo);
+        drop(tree);
+        drop(publish_guard);
+        drop(transaction);
+        send_direct_error(direct_tx, format!("could not revert restructure: {error}")).await;
+        return;
     }
+    undo.remove(&project_id);
+    state.request_snapshot_save();
+    drop(undo);
+    if let Some(panes) = &mut panes {
+        for pane_id in &orphaned_pane_ids {
+            if let Some(resource) = panes.remove(pane_id) {
+                teardown_pane_resource(*pane_id, resource);
+            }
+        }
+    }
+    drop(panes);
+    drop(tree);
+    drop(publish_guard);
+    if !orphaned_pane_ids.is_empty() {
+        state.agent_debug.remove(&orphaned_pane_ids).await;
+        let mut preferences = state.workspace_close_preferences.write().await;
+        for pane_id in &orphaned_pane_ids {
+            preferences.remove(pane_id);
+        }
+    }
+    broadcast_and_persist(state).await;
+    drop(transaction);
 }
 
 /// Applies an automatic title only while the user has not explicitly named
@@ -2226,6 +2278,88 @@ async fn repair_rejected_staged_progress_monitor(
     rejection
 }
 
+/// Raises the sound and desktop notification for a monitored task's first
+/// terminal outcome. Both outputs obey the same policy: the per-event
+/// toggles, suppression when the pane's agent is idle or parked (its own
+/// "agent finished" alert follows), and per-pane coalescing of bursts. The
+/// sidebar signal is unaffected by any of this.
+async fn alert_task_outcome(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    progress: &ilium_core::PaneProgress,
+) {
+    let Some(kind) = crate::notifications::TaskOutcomeKind::from_progress(progress) else {
+        return;
+    };
+    let notification_settings = *state.notifications_config.read().await;
+    let sound_settings = state.sound_settings.read().await.clone();
+    let is_sound_enabled = sound_settings.events.is_enabled(kind.sound_event());
+    let is_notification_enabled = notification_settings.is_enabled(kind.notification_event());
+    if !is_sound_enabled && !is_notification_enabled {
+        return;
+    }
+    let (pane_name, session_status) = {
+        let tree = state.tree.read().await;
+        let Some(node) = tree.get(pane_id) else {
+            return;
+        };
+        let pane_name = node.short_name.clone().unwrap_or_else(|| node.name.clone());
+        let status = match &node.kind {
+            ilium_core::NodeKind::Pane { status, .. } => Some(status.clone()),
+            _ => None,
+        };
+        (pane_name, status)
+    };
+    let is_redundant = session_status.as_ref().is_some_and(|status| {
+        crate::notifications::is_task_outcome_redundant(&notification_settings, status, progress)
+    });
+    if is_redundant {
+        return;
+    }
+    let is_admitted = state
+        .task_outcome_coalescer
+        .lock()
+        .map(|mut coalescer| {
+            coalescer.admit(
+                pane_id,
+                kind,
+                std::time::Instant::now(),
+                notification_settings.task_coalesce_seconds,
+            )
+        })
+        // A poisoned lock only loses burst suppression; never drop the alert.
+        .unwrap_or(true);
+    if !is_admitted {
+        return;
+    }
+    if is_sound_enabled {
+        crate::sounds::enqueue(
+            state,
+            crate::sounds::PlaybackRequest {
+                settings: sound_settings,
+                event: Some(kind.sound_event()),
+                pane_name: Some(pane_name.clone()),
+            },
+        );
+    }
+    if is_notification_enabled {
+        let is_agent_working = session_status
+            .as_ref()
+            .is_some_and(|status| crate::notifications::is_agent_mid_turn(status, progress));
+        let pending = crate::notifications::PendingNotification::for_task_outcome(
+            state.session_name.clone(),
+            pane_name,
+            kind,
+            progress.report.job_id.clone(),
+            is_agent_working,
+        );
+        // `send` never fails and runs the blocking D-Bus call on its own
+        // blocking thread; result delivery waits for a ready composer anyway,
+        // so this short await does not delay it.
+        crate::notifications::send(pending).await;
+    }
+}
+
 async fn handle_progress_monitor_outcome(
     state: &Arc<ServerState>,
     pane_id: NodeId,
@@ -2250,49 +2384,8 @@ async fn handle_progress_monitor_outcome(
         let is_first_outcome_notification = runtime.claim_progress_outcome_notification(monitor_id);
         drop(panes);
         state.request_snapshot_save();
-        let sound_event = match progress.report.status {
-            ilium_core::ProgressTaskStatus::Done => Some(ilium_sound::SoundEvent::TaskSucceeded),
-            ilium_core::ProgressTaskStatus::Error => Some(ilium_sound::SoundEvent::TaskFailed),
-            _ if progress.monitor_health.is_failed() => Some(ilium_sound::SoundEvent::TaskFailed),
-            _ => None,
-        };
-        if let Some(event) = sound_event.filter(|_| is_first_outcome_notification) {
-            let settings = state.sound_settings.read().await.clone();
-            if settings.events.is_enabled(event) {
-                let pane_name = state
-                    .tree
-                    .read()
-                    .await
-                    .get(pane_id)
-                    .map(|node| node.name.clone());
-                crate::sounds::enqueue(
-                    state,
-                    crate::sounds::PlaybackRequest {
-                        settings,
-                        event: Some(event),
-                        pane_name,
-                    },
-                );
-            }
-        }
-        if is_first_outcome_notification && state.notifications_config.enabled {
-            let pane_name = state
-                .tree
-                .read()
-                .await
-                .get(pane_id)
-                .map(|node| node.name.clone())
-                .unwrap_or_default();
-            if let Some(pending) = crate::notifications::PendingNotification::for_task_outcome(
-                state.session_name.clone(),
-                pane_name,
-                &progress,
-            ) {
-                // `send` never fails and runs the blocking D-Bus call on its
-                // own blocking thread; delivery below waits for a ready
-                // composer anyway, so this short await does not delay it.
-                crate::notifications::send(pending).await;
-            }
+        if is_first_outcome_notification {
+            alert_task_outcome(state, pane_id, &progress).await;
         }
     }
     let message = match outcome {
@@ -7028,5 +7121,179 @@ mod tests {
         );
 
         sound_task.abort();
+    }
+    #[tokio::test]
+    async fn recommended_restructure_orders_undo_and_round_trips_persistence_and_attach() {
+        use ilium_core::animation_recommendation::{
+            AnimationRecommendation, PlanAnimationEntry, RecommendedRestructurePlan, ResourcePolicy,
+        };
+        use std::future::Future;
+        struct StopSound(tokio::task::JoinHandle<()>);
+        impl Drop for StopSound {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let _sound_guard = StopSound(sound_task);
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "semantic-transaction".into(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path()).unwrap(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("semantic.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: Default::default(),
+            notifications_config: Default::default(),
+            sound_settings: Default::default(),
+            sound_requests,
+            custom_signatures: vec![],
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let (project_id, pane_id) = {
+            let mut tree = state.tree.write().await;
+            let project = tree.project_ids()[0];
+            let group = tree.add_group(project, "work").unwrap();
+            let pane = tree
+                .add_pane(group, "shell", PaneContentKind::Terminal)
+                .unwrap();
+            (project, pane)
+        };
+        let before = state.tree.read().await.clone();
+        let revisions = before.project_activity_revisions(project_id).unwrap();
+        let recommendation = AnimationRecommendation {
+            version: 1,
+            kind: "shoreline".into(),
+            resources: ResourcePolicy::Catalog,
+            parameters: vec![],
+        };
+        let plan = RecommendedRestructurePlan {
+            structure: RestructurePlan {
+                children: vec![RestructureNode::Pane {
+                    id: pane_id,
+                    title: "Work".into(),
+                    short_title: None,
+                    icon: None,
+                }],
+            },
+            expected_animation_generation: 0,
+            project: recommendation.clone(),
+            entries: vec![PlanAnimationEntry {
+                path: vec![0],
+                recommendation,
+            }],
+        };
+        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let held_undo = state.restructure_undo.lock().await;
+        let apply = handle_apply_recommended_project_restructure_plan(
+            &state,
+            project_id,
+            plan.clone(),
+            &revisions,
+            &direct_tx,
+        );
+        tokio::pin!(apply);
+        std::future::poll_fn(|cx| {
+            assert!(apply.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(state.tree.try_read().is_err());
+        drop(held_undo);
+        tokio::time::timeout(Duration::from_secs(5), apply)
+            .await
+            .unwrap();
+        assert!(matches!(
+            direct_rx.try_recv(),
+            Ok(ServerEvent::ProjectRestructureApplied { .. })
+        ));
+        assert_eq!(
+            state.restructure_undo.lock().await.get(&project_id),
+            Some(&before)
+        );
+        let accepted = state.tree.read().await.clone();
+        assert!(accepted
+            .get(project_id)
+            .unwrap()
+            .inferred_animation
+            .is_some());
+        assert!(accepted.get(pane_id).unwrap().inferred_animation.is_some());
+        assert!(state.panes.read().await.is_empty());
+        let attach = initial_state_events(&state, false, false).await;
+        assert!(
+            matches!(&attach[0], ServerEvent::PaneStateSnapshot { tree, .. } if tree == &accepted)
+        );
+        crate::persistence::flush_pending_snapshot(&state).await;
+        let restored = crate::persistence::load_snapshot(&state.snapshot_path)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.tree, accepted);
+        handle_apply_recommended_project_restructure_plan(
+            &state, project_id, plan, &revisions, &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.try_recv(),
+            Ok(ServerEvent::ProjectRestructureRejected { .. })
+        ));
+        assert_eq!(*state.tree.read().await, accepted);
+        assert_eq!(
+            state.restructure_undo.lock().await.get(&project_id),
+            Some(&before)
+        );
+        let later_pane = state
+            .tree
+            .write()
+            .await
+            .add_pane(project_id, "created after apply", PaneContentKind::Terminal)
+            .unwrap();
+        let before_cancellation = state.tree.read().await.clone();
+        let held_panes = state.panes.write().await;
+        {
+            let mut revert = Box::pin(handle_revert_project_restructure(
+                &state, project_id, &direct_tx,
+            ));
+            std::future::poll_fn(|cx| {
+                assert!(revert.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            // Dropping a connection's blocked handler must precede its commit.
+        }
+        assert_eq!(*state.tree.read().await, before_cancellation);
+        assert!(state.tree.read().await.get(later_pane).is_some());
+        assert_eq!(
+            state.restructure_undo.lock().await.get(&project_id),
+            Some(&before)
+        );
+        drop(held_panes);
+        let held_tree = state.tree.write().await;
+        let revert = handle_revert_project_restructure(&state, project_id, &direct_tx);
+        tokio::pin!(revert);
+        std::future::poll_fn(|cx| {
+            assert!(revert.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(state
+            .restructure_undo
+            .try_lock()
+            .unwrap()
+            .contains_key(&project_id));
+        drop(held_tree);
+        tokio::time::timeout(Duration::from_secs(5), revert)
+            .await
+            .unwrap();
+        let undone = state.tree.read().await.clone();
+        assert!(undone.get(project_id).unwrap().inferred_animation.is_none());
+        assert!(undone.get(pane_id).unwrap().inferred_animation.is_none());
+        assert_eq!(undone.project_animation_generation(project_id).unwrap(), 2);
+        assert!(!state
+            .restructure_undo
+            .lock()
+            .await
+            .contains_key(&project_id));
     }
 }

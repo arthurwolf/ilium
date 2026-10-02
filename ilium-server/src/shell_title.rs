@@ -592,4 +592,14 @@ mod tests {
             .opaque_reason
             .is_some_and(|reason| reason.explanation().contains("completion")));
     }
+
+    #[test]
+    fn submitted_multiline_agent_prompt_survives_the_shell_title_limit() {
+        let mut tracker = ShellCommandTracker::default();
+        let prompt = format!("{}\nKeep the last line too: café", "authored text ".repeat(800));
+        let framed = format!("\x1b[200~{prompt}\x1b[201~");
+        assert!(tracker.observe_submission(framed.as_bytes()).is_none());
+        let submitted = tracker.observe_submission(b"\r").unwrap();
+        assert_eq!(submitted.exact_text(), Some(prompt.as_str()));
+    }
 }

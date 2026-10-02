@@ -873,6 +873,11 @@ pub enum ClientRequest {
     PreviewSoundSettings {
         settings: SoundSettings,
     },
+    ApplyRecommendedProjectRestructurePlan {
+        project_id: NodeId,
+        plan: ilium_core::animation_recommendation::RecommendedRestructurePlan,
+        inference_activity_revisions: Vec<NodeActivityRevision>,
+    },
 }
 
 impl ClientRequest {
@@ -903,6 +908,9 @@ impl ClientRequest {
             Self::CreateSplitView { .. } => "create_split_view",
             Self::UpdateSoundSettings { .. } => "update_sound_settings",
             Self::PreviewSound { .. } => "preview_sound",
+            Self::ApplyRecommendedProjectRestructurePlan { .. } => {
+                "apply_recommended_project_restructure_plan"
+            }
             Self::PreviewSoundSettings { .. } => "preview_sound_settings",
             Self::SchedulePaneInput { .. } => "schedule_pane_input",
             Self::EnqueuePrompt { .. } => "enqueue_prompt",

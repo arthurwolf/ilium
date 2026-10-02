@@ -31,6 +31,7 @@ use crate::notifications::{self, PendingNotification};
 use crate::pane::{ConfirmedGoalOwner, PaneResource};
 use crate::sounds::{self, PlaybackRequest};
 use crate::state::ServerState;
+use ilium_sound::NotificationEvent;
 
 /// Minimum time between two "force an immediate recheck" requests actually
 /// taking effect for the same pane. A focus transition (entering/exiting a
@@ -797,6 +798,7 @@ async fn run_due_panes(
         return Ok(());
     }
     let sound_settings = state.sound_settings.read().await.clone();
+    let notification_settings = *state.notifications_config.read().await;
     let mut pending_notifications = Vec::new();
     let mut pending_sounds = Vec::new();
     let mut completed_pane_ids = Vec::new();
@@ -1444,13 +1446,23 @@ async fn run_due_panes(
             // rejected `set_pane_status` above (a stale/inconsistent
             // registry entry) must never fire a notification for a
             // transition that didn't actually happen.
-            if state.notifications_config.enabled
+            if notification_settings.is_enabled(NotificationEvent::AgentFinished)
                 && notifications::is_finished_signal_transition(
                     previous_signals.as_ref(),
                     &new_signals,
                 )
             {
                 pending_notifications.push(PendingNotification::from_pane_titles(
+                    state.session_name.clone(),
+                    pane_name_before_update.clone().unwrap_or_default(),
+                    short_pane_name_before_update.clone(),
+                ));
+            }
+            if notification_settings.is_enabled(NotificationEvent::ApprovalRequired)
+                && ilium_sound::event_for_signals(previous_signals.as_ref(), &new_signals)
+                    == Some(ilium_sound::SoundEvent::ApprovalRequired)
+            {
+                pending_notifications.push(PendingNotification::approval_from_pane_titles(
                     state.session_name.clone(),
                     pane_name_before_update.clone().unwrap_or_default(),
                     short_pane_name_before_update,
@@ -1912,6 +1924,34 @@ fn is_agent_finished_transition(previous: Option<&PaneStatus>, next: &PaneStatus
                     .is_some_and(|next| next.turn == AgentTurn::Idle && next.completion_unread)
         })
     })
+}
+
+#[cfg(test)]
+mod stopped_agent_recovery_tests {
+    use super::*;
+    use ilium_core::AgentClass;
+
+    #[test]
+    fn agent_disappearance_preserves_recovery_identity_without_completion() {
+        let previous = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            None,
+        );
+        let mut pending = false;
+        let result = settle_agent_status(
+            PaneStatus::PlainShell,
+            Some(&previous),
+            false,
+            false,
+            &mut pending,
+        );
+        let recovered = result.agent_state().expect("stopped agent must retain recovery identity");
+        assert_eq!(recovered.class, AgentClass::Codex);
+        assert_ne!(recovered.turn, AgentTurn::Working);
+        assert!(!recovered.completion_unread);
+        assert!(!pending);
+    }
 }
 
 #[cfg(test)]

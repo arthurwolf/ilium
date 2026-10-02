@@ -62,15 +62,9 @@ impl Default for DetectionConfig {
     }
 }
 
-/// Whether a pane's `Working -> Done`/`Idle` transition fires a desktop
-/// notification (ARCHITECTURE.md M5). A separate table from `[detection]` -- polling
-/// cadence and "should this ever pop a notification" are independent
-/// concerns a user may want to tune separately (e.g. keep fast polling but
-/// disable notifications on a headless box with no notification daemon).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NotificationsConfig {
-    pub enabled: bool,
-}
+/// The `[notifications]` table: master switch, per-event toggles and
+/// task-outcome policy. The type is shared with the client Settings screen.
+pub use ilium_sound::NotificationSettings as NotificationsConfig;
 
 /// Whether this process writes its instrumented events to the session's
 /// timestamped `/tmp/.ilium/...` file. It is deliberately disabled unless the
@@ -90,12 +84,6 @@ pub struct HttpApiConfig {
 impl Default for HttpApiConfig {
     fn default() -> Self {
         Self { port: 8872 }
-    }
-}
-
-impl Default for NotificationsConfig {
-    fn default() -> Self {
-        Self { enabled: true }
     }
 }
 
@@ -179,7 +167,7 @@ struct RawConfig {
     #[serde(default)]
     detection: RawDetectionConfig,
     #[serde(default)]
-    notifications: RawNotificationsConfig,
+    notifications: NotificationsConfig,
     #[serde(default)]
     sound: SoundSettings,
     #[serde(default)]
@@ -222,11 +210,6 @@ struct RawDetectionConfig {
     /// process-name pattern plus the `AgentClass` it should resolve to.
     #[serde(default)]
     custom_signatures: Vec<RawCustomSignature>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawNotificationsConfig {
-    enabled: Option<bool>,
 }
 
 /// One `[[detection.custom_signatures]]` entry as read from TOML, before
@@ -516,15 +499,6 @@ impl DetectionConfig {
     }
 }
 
-impl NotificationsConfig {
-    fn from_raw(raw: RawNotificationsConfig) -> Self {
-        let defaults = Self::default();
-        Self {
-            enabled: raw.enabled.unwrap_or(defaults.enabled),
-        }
-    }
-}
-
 /// Parses `[session] recovery_policy` strictly -- an unrecognized value is a
 /// [`ConfigLoadError::InvalidSessionRecoveryPolicy`], not a silent fallback
 /// to the default, since this string controls a crash-recovery safety gate
@@ -607,7 +581,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
 
     Ok(ServerConfig {
         detection,
-        notifications: NotificationsConfig::from_raw(raw.notifications),
+        notifications: raw.notifications.normalized(),
         sound: raw.sound,
         custom_signatures,
         session_recovery,
@@ -764,6 +738,12 @@ mod tests {
         let dir = scratch_dir();
         let config = load(&dir).expect("missing file is not an error");
         assert!(config.notifications.enabled);
+        assert!(config.notifications.agent_finished);
+        assert!(config.notifications.approval_required);
+        assert!(!config.notifications.task_succeeded);
+        assert!(config.notifications.task_failed);
+        assert!(config.notifications.suppress_redundant_task_outcomes);
+        assert_eq!(config.notifications.task_coalesce_seconds, 30);
     }
 
     #[test]
@@ -780,6 +760,22 @@ mod tests {
         // The `[detection]` table was left unspecified entirely -- absence
         // of that whole table must not disturb its own defaults.
         assert_eq!(config.detection, DetectionConfig::default());
+    }
+
+    #[test]
+    fn notification_events_load_partially_and_clamp_coalescing() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[notifications]\ntask_succeeded = true\nagent_finished = false\ntask_coalesce_seconds = 99999\n",
+        )
+        .unwrap();
+        let config = load(&dir).expect("valid notifications config should load");
+        assert!(config.notifications.enabled);
+        assert!(config.notifications.task_succeeded);
+        assert!(!config.notifications.agent_finished);
+        assert!(config.notifications.task_failed);
+        assert_eq!(config.notifications.task_coalesce_seconds, 600);
     }
 
     #[test]

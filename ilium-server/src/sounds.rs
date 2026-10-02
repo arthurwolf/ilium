@@ -137,6 +137,14 @@ fn spawn_config_watcher_with_interval(
 
         loop {
             interval.tick().await;
+            // A sound-schema error or unchanged sound fingerprint must not
+            // prevent independently valid Text Trigger edits from loading.
+            // Retry rejected reads; refresh is a no-op for unchanged rules.
+            if state.text_trigger_config_path.get().is_some() {
+                if let Err(error) = crate::text_trigger_config::refresh(&state).await {
+                    tracing::warn!(%error, "Text Triggers reload failed; retaining accepted rules");
+                }
+            }
             let fingerprint = poll_config_blocking(&config_path).await;
             if fingerprint == observed_fingerprint {
                 continue;
@@ -154,6 +162,7 @@ fn spawn_config_watcher_with_interval(
             match load_config_blocking(config_dir.clone()).await {
                 Ok(config) => {
                     *state.sound_settings.write().await = config.sound;
+                    *state.notifications_config.write().await = config.notifications;
                     state.set_session_backups_enabled(config.session_backups_enabled);
                     observed_fingerprint = Some(current_fingerprint);
                 }
