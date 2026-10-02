@@ -139,6 +139,8 @@ pub enum FetchError {
     NotHttps(String),
     #[error("request failed: {0}")]
     Request(String),
+    #[error("HTTP status {0}")] // Preserve machine-readable status for provider retry policies.
+    HttpStatus(u16), // Do not infer HTTP status by parsing an arbitrary error message.
     #[error("request cancelled")]
     Cancelled,
     #[error("request timeout, including host admission")]
@@ -216,28 +218,71 @@ fn http_get_inner(
     if !url.starts_with("https://") {
         return Err(FetchError::NotHttps(url.to_owned()));
     }
-    let timeout = wait_for_host_slot(url, Instant::now() + timeout, stop)?;
+    let deadline = Instant::now() + timeout; // Admission and body collection share one deadline.
+    let timeout = wait_for_host_slot(url, deadline, stop)?; // Only the remaining budget reaches ureq.
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
         .build()
         .into();
-    let mut response = agent
-        .get(url)
-        .call()
-        .map_err(|error| FetchError::Request(error.to_string()))?;
-    let mut bytes = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .take(max_bytes as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| FetchError::Request(error.to_string()))?;
-    if bytes.len() > max_bytes {
-        return Err(FetchError::TooLarge(max_bytes));
-    }
-    Ok(bytes)
-}
+    let mut response = agent.get(url).call().map_err(request_error)?; // Keep structured HTTP status.
+    read_bounded_body(response.body_mut().as_reader(), max_bytes, deadline, stop)
+    // Count decoded bytes and check cancellation between chunks.
+} // End the worker-only HTTP request.
+
+fn request_error(error: ureq::Error) -> FetchError {
+    // Preserve typed status without changing successful HTTP behavior.
+    match error {
+        // ureq's documented error enum is non-exhaustive.
+        ureq::Error::StatusCode(status) => FetchError::HttpStatus(status), // Provider policy can recognize 429 and 5xx exactly.
+        ureq::Error::Timeout(_) => FetchError::Timeout, // Preserve timeout classification.
+        error => FetchError::Request(error.to_string()), // Preserve other transport diagnostics.
+    } // End transport-error conversion.
+} // End typed conversion.
+fn read_bounded_body(
+    // Worker-only collection; this does not make blocked socket reads instantly cancellable.
+    mut reader: impl Read,     // ureq supplies the decoded response reader.
+    max_bytes: usize,          // Provider-specific decoded-byte limit.
+    deadline: Instant,         // Includes the time spent waiting for host admission.
+    stop: Option<&AtomicBool>, // Non-live callers retain their existing non-stoppable API.
+) -> Result<Vec<u8>, FetchError> {
+    // Oversize/cancelled data is never returned as a truncated success.
+    let mut bytes = Vec::new(); // Do not preallocate an attacker-selected size.
+    let mut chunk = [0_u8; 8192]; // Fixed-size collection scratch space.
+    loop {
+        // The socket's ureq global timeout still bounds a blocked individual read.
+        if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(FetchError::Cancelled);
+        } // Check before reading.
+        if Instant::now() >= deadline {
+            return Err(FetchError::Timeout);
+        } // Include body processing in the deadline.
+        let remaining = max_bytes.saturating_sub(bytes.len()); // No subtraction underflow.
+        let wanted = chunk.len().min(remaining.saturating_add(1)); // Read at most one byte beyond the hard bound.
+        let read = match reader.read(&mut chunk[..wanted]) {
+            // Read decoded bytes without changing interrupted-read semantics.
+            Ok(read) => read, // Continue with the actual byte count.
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue, // Retry only after rechecking stop/deadline.
+            Err(error) => return Err(FetchError::Request(error.to_string())), // Other read failures retain last-good caller state.
+        }; // End the bounded read attempt.
+        if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(FetchError::Cancelled);
+        } // Do not publish a just-cancelled EOF.
+        if Instant::now() >= deadline {
+            return Err(FetchError::Timeout);
+        } // An over-deadline body is not a success.
+        if read > remaining {
+            return Err(FetchError::TooLarge(max_bytes));
+        } // Reject instead of keeping the first max_bytes.
+        if read == 0 {
+            return Ok(bytes);
+        } // Successful complete body receipt.
+        bytes
+            .try_reserve(read)
+            .map_err(|_| FetchError::Request("response allocation failed".into()))?; // Fallible growth.
+        bytes.extend_from_slice(&chunk[..read]); // Logical body length never exceeds max_bytes.
+    } // End finite collection.
+} // End bounded HTTP body reader.
 
 /// Read an HTTPS NDJSON connection on an owned worker. The callback receives
 /// complete bounded lines and returns false to stop. A finite connection
@@ -260,10 +305,7 @@ pub fn http_stream_lines(
         .user_agent(USER_AGENT)
         .build()
         .into();
-    let mut response = agent
-        .get(url)
-        .call()
-        .map_err(|error| FetchError::Request(error.to_string()))?;
+    let mut response = agent.get(url).call().map_err(request_error)?; // Preserve 429 for the stream owner's cooldown policy.
     let mut reader = std::io::BufReader::new(response.body_mut().as_reader());
     let limit = max_line_bytes.clamp(1, 1_048_576);
     loop {
@@ -438,3 +480,76 @@ mod tests {
         assert_eq!(bytes, b"cached");
     }
 }
+
+#[cfg(test)] // Pure I/O fixtures; no real HTTP requests.
+mod bounded_body_tests {
+    // Test the same collector used by http_get_stoppable.
+    use super::*; // Access typed errors and the internal bounded reader.
+    #[test] // Exactly-at-limit bodies succeed; one additional decoded byte fails.
+    fn body_bound_is_exact_and_not_a_truncation_rule() {
+        // Cursor models the decoded reader, not compressed Content-Length.
+        let deadline = Instant::now() + Duration::from_secs(5); // Finite fixture budget.
+        assert_eq!(
+            read_bounded_body(std::io::Cursor::new(b"abcd"), 4, deadline, None).unwrap(),
+            b"abcd"
+        ); // Complete exact-size body.
+        assert!(matches!(
+            read_bounded_body(std::io::Cursor::new(b"abcde"), 4, deadline, None),
+            Err(FetchError::TooLarge(4))
+        )); // No four-byte partial success.
+        assert!(
+            read_bounded_body(std::io::Cursor::new(b""), 0, deadline, None)
+                .unwrap()
+                .is_empty()
+        ); // Legitimate empty zero-limit body.
+        assert!(matches!(
+            read_bounded_body(std::io::Cursor::new(b"x"), 0, deadline, None),
+            Err(FetchError::TooLarge(0))
+        )); // Zero is still an exact bound.
+    } // End body-bound test.
+
+    struct CancellingReader<'a>(&'a AtomicBool); // Raises cancellation during a read operation.
+    impl Read for CancellingReader<'_> {
+        // No blocking operations or threads in this fixture.
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            // Return one byte while cancelling.
+            self.0.store(true, Ordering::Relaxed); // Simulate stop arriving during body receipt.
+            if output.is_empty() {
+                return Ok(0);
+            } // Respect the Read contract.
+            output[0] = b'x'; // A received byte must not cause cancelled publication.
+            Ok(1) // The collector observes the flag immediately after this read.
+        } // End synthetic read.
+    } // End synthetic reader implementation.
+    #[test] // Check cancellation both before and during collection, including expired budgets.
+    fn body_collection_rejects_cancelled_and_expired_results() {
+        // No latency or socket guarantees are inferred.
+        let stop = AtomicBool::new(true); // Stop before the first read.
+        let deadline = Instant::now() + Duration::from_secs(5); // Bounded fixture deadline.
+        assert!(matches!(
+            read_bounded_body(std::io::Cursor::new(b"ok"), 10, deadline, Some(&stop)),
+            Err(FetchError::Cancelled)
+        )); // Early stop.
+        stop.store(false, Ordering::Relaxed); // Permit the synthetic first read.
+        assert!(matches!(
+            read_bounded_body(CancellingReader(&stop), 10, deadline, Some(&stop)),
+            Err(FetchError::Cancelled)
+        )); // Stop during read.
+        assert!(matches!(
+            read_bounded_body(std::io::Cursor::new(b"ok"), 10, Instant::now(), None),
+            Err(FetchError::Timeout)
+        )); // Expired admission/body budget.
+    } // End cancellation test.
+    #[test] // HTTP retries must not depend on human-readable error strings.
+    fn preserves_http_status_codes() {
+        // Construct the documented ureq error variant directly.
+        assert!(matches!(
+            request_error(ureq::Error::StatusCode(429)),
+            FetchError::HttpStatus(429)
+        )); // Rate-limit classification.
+        assert!(matches!(
+            request_error(ureq::Error::StatusCode(503)),
+            FetchError::HttpStatus(503)
+        )); // Temporary server failure classification.
+    } // End typed-error test.
+} // End transport fixtures.

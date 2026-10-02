@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// One frame-local source owner and its final painted Braille-dot count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintedOwner {
+    pub id: u32,
+    pub dots: u32,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DitherMode {
@@ -26,6 +33,9 @@ pub struct Raster {
     pub width: usize,
     pub height: usize,
     pub dots: Vec<f32>,
+    /// Zero means no authenticated scene owner. A model renderer may set a
+    /// frame-local id only for a dot whose exact saved state supplied its ink.
+    pub owner_ids: Vec<u32>,
 }
 
 impl Raster {
@@ -34,6 +44,26 @@ impl Raster {
         self.height = height;
         self.dots.resize(width * height, 0.0);
         self.dots.fill(0.0);
+        self.owner_ids.resize(width * height, 0);
+        self.owner_ids.fill(0);
+    }
+
+    /// Conservative single-owner dot write. Ties erase provenance; unresolved
+    /// models use owner 0. Callers with multi-layer alpha must clear ownership
+    /// unless they can certify the final surviving contribution.
+    pub fn owned_dot(&mut self, x: usize, y: usize, intensity: f32, owner: u32) -> bool {
+        if x >= self.width || y >= self.height || !intensity.is_finite() {
+            return false;
+        }
+        let index = y * self.width + x;
+        let intensity = intensity.clamp(0.0, 1.0);
+        if intensity > self.dots[index] {
+            self.dots[index] = intensity;
+            self.owner_ids[index] = owner;
+        } else if intensity == self.dots[index] && owner != self.owner_ids[index] {
+            self.owner_ids[index] = 0;
+        }
+        true
     }
 
     pub fn aspect(&self) -> f32 {
@@ -49,7 +79,9 @@ impl Raster {
             let v = (y as f32 + 0.5) / height;
             for x in 0..self.width {
                 let u = (x as f32 + 0.5) / width;
-                self.dots[y * self.width + x] = sample(u, v).clamp(0.0, 1.0);
+                let index = y * self.width + x;
+                self.dots[index] = sample(u, v).clamp(0.0, 1.0);
+                self.owner_ids[index] = 0;
             }
         }
     }
@@ -89,7 +121,11 @@ impl Raster {
                 }
                 let coverage = (outer_radius - squared_distance.sqrt()).clamp(0.0, 1.0);
                 let index = y * self.width + x;
-                self.dots[index] = self.dots[index].max(coverage * intensity);
+                let next = coverage * intensity;
+                if next >= self.dots[index] {
+                    self.dots[index] = next;
+                    self.owner_ids[index] = 0;
+                }
             }
         }
     }
@@ -215,5 +251,30 @@ mod optimization_fidelity_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod painted_owner_tests {
+    use super::*;
+
+    #[test]
+    fn owner_tracks_only_single_stronger_saved_state_ink() {
+        let mut raster = Raster::default();
+        raster.resize(2, 4);
+        assert!(raster.owned_dot(0, 0, 0.8, 7));
+        assert_eq!(raster.owner_ids[0], 7);
+        assert!(raster.owned_dot(0, 0, 0.2, 9));
+        assert_eq!(raster.owner_ids[0], 7);
+        assert!(raster.owned_dot(0, 0, 0.8, 9));
+        assert_eq!(raster.owner_ids[0], 0);
+        assert!(raster.owned_dot(0, 0, 0.9, 9));
+        assert_eq!(raster.owner_ids[0], 9);
+        assert!(!raster.owned_dot(2, 0, 1.0, 9));
+        raster.field(|_, _| 0.2);
+        assert!(raster.owner_ids.iter().all(|owner| *owner == 0));
+        assert!(raster.owned_dot(0, 0, 0.9, 7));
+        raster.resize(2, 4);
+        assert!(raster.owner_ids.iter().all(|owner| *owner == 0));
     }
 }

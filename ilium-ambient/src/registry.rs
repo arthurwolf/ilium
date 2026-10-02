@@ -148,7 +148,7 @@ impl AmbientKind {
             Self::Pi => "Exact Pi digits as terminal text or real-font Braille, with scrolling and separate hues for each digit.",
             Self::Earthquakes => "USGS events of every reported magnitude on a coastline map, with pulsing markers and magnitude labels.",
             Self::Aircraft => "OpenSky's reported airborne positions worldwide, with independent map and aircraft styling; anonymous updates every fifteen minutes.",
-            Self::Boats => "Received AIS ship positions around Finnish waters from Digitraffic, on a world coastline map.",
+            Self::Boats => "Received AIS positions on a world coastline: broader OpenSeaFeed by default, with Finnish Digitraffic as an explicit alternative. Coverage is incomplete.",
             Self::Chess => "The featured Lichess TV game's actual positions with dithered piece silhouettes.",
             Self::TopographicMaps => "Contour maps of Earth, the Moon, Mars, Venus, Mercury, Ceres and fictional worlds from real elevation surveys, drawn as Braille dots on a slowly panning map or turning globe.",
             Self::VoxelLandscape => "A seeded isometric block world with forests, deserts, villages, caves and ravines, drifting past in monochrome or pastel dithering.",

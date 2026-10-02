@@ -12,6 +12,7 @@ pub mod gpu;
 pub mod live_chess;
 pub mod live_data;
 pub mod location;
+pub mod minecraft;
 pub mod pi_digits;
 pub mod raster;
 pub mod registry;

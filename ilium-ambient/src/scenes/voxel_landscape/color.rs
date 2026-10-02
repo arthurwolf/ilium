@@ -33,6 +33,27 @@ fn dot_coverage(value: f32) -> f32 {
 }
 
 pub fn composite(colors: &[[u8; 3]], frame: &mut Frame<'_>, settings: &VoxelLandscapeSettings) {
+    composite_pixels(colors, None, frame, settings, true);
+}
+
+/// Selected artwork retains its original RGB. Coverage comes from raster
+/// alpha rather than treating an opaque black texel as an uncovered pixel.
+pub fn composite_selected(
+    colors: &[[u8; 3]],
+    covered: &[bool],
+    frame: &mut Frame<'_>,
+    settings: &VoxelLandscapeSettings,
+) {
+    composite_pixels(colors, Some(covered), frame, settings, false);
+}
+
+fn composite_pixels(
+    colors: &[[u8; 3]],
+    covered: Option<&[bool]>,
+    frame: &mut Frame<'_>,
+    settings: &VoxelLandscapeSettings,
+    pastel: bool,
+) {
     let width = usize::from(frame.width);
     let height = usize::from(frame.height);
     frame.cell_colors.resize(width * height, [0; 3]);
@@ -47,7 +68,9 @@ pub fn composite(colors: &[[u8; 3]], frame: &mut Frame<'_>, settings: &VoxelLand
     let mut sums = vec![[0.0_f32; 4]; width * height];
     for (index, (&rgb, dot)) in colors.iter().zip(frame.raster.dots.iter_mut()).enumerate() {
         // Canvas::new uses black for uncovered pixels. Do not turn air into dots.
-        if rgb == [0; 3] {
+        if covered.map_or(rgb == [0; 3], |mask| {
+            !mask.get(index).copied().unwrap_or(false)
+        }) {
             continue;
         }
         let pixel_y = index / dot_width;
@@ -60,10 +83,14 @@ pub fn composite(colors: &[[u8; 3]], frame: &mut Frame<'_>, settings: &VoxelLand
         let intensity = dot_coverage(luminance(raw));
         *dot = intensity;
         let cell_index = cell_y * width + cell_x;
-        let pastel = adjust(raw, settings);
+        let adjusted = if pastel {
+            adjust(raw, settings)
+        } else {
+            adjust_channels(raw, settings, false)
+        };
         // Keep expected-coverage weighting within the existing 2x4 cell.
         // Darker surfaces now contribute in proportion to their new coverage.
-        for (channel, value) in pastel.into_iter().enumerate() {
+        for (channel, value) in adjusted.into_iter().enumerate() {
             sums[cell_index][channel] += value * intensity;
         }
         sums[cell_index][3] += intensity;
@@ -80,6 +107,19 @@ pub fn composite(colors: &[[u8; 3]], frame: &mut Frame<'_>, settings: &VoxelLand
 
 // Preserve the supplied palette, hue, saturation and lightness semantics.
 fn adjust(raw: [f32; 3], settings: &VoxelLandscapeSettings) -> [f32; 3] {
+    adjust_channels(raw, settings, true)
+}
+
+fn adjust_channels(raw: [f32; 3], settings: &VoxelLandscapeSettings, pastel: bool) -> [f32; 3] {
+    if !pastel
+        && settings.color_mode == 1
+        && settings.palette == 0
+        && settings.hue_degrees == 180
+        && settings.saturation_percent == 100
+        && settings.lightness_percent == 100
+    {
+        return raw.map(|channel| channel.clamp(0.0, 1.0));
+    }
     let tint = match settings.palette {
         1 => [0.12, -0.025, 0.06],
         2 => [-0.035, 0.035, 0.12],
@@ -102,7 +142,8 @@ fn adjust(raw: [f32; 3], settings: &VoxelLandscapeSettings) -> [f32; 3] {
         };
         // Tint is desaturated too: saturation=0 is genuinely achromatic.
         let color = gray + (raw[channel] - gray + tint[channel] + hue_offset) * saturation;
-        ((color * 0.7 + 0.3) * lightness).clamp(0.0, 1.0)
+        let color = if pastel { color * 0.7 + 0.3 } else { color };
+        (color * lightness).clamp(0.0, 1.0)
     })
 }
 
@@ -112,6 +153,54 @@ mod tests {
     use super::*;
     use crate::raster::{threshold, DitherMode, Raster};
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn selected_texture_colors_are_not_lifted_or_desaturated_by_default() {
+        let settings = VoxelLandscapeSettings::default();
+        let raw = [0.12, 0.63, 0.29];
+        assert_eq!(adjust_channels(raw, &settings, false), raw);
+        assert_ne!(adjust(raw, &settings), raw);
+        let mono = VoxelLandscapeSettings {
+            color_mode: 0,
+            ..settings
+        };
+        let output = adjust_channels(raw, &mono, false);
+        assert_eq!(output[0], output[1]);
+        assert_eq!(output[1], output[2]);
+    }
+
+    #[test]
+    fn selected_alpha_mask_prevents_stale_or_transparent_texel_colors() {
+        let mut raster = Raster::default();
+        raster.resize(2, 4);
+        let mut cell_colors = vec![[255; 3]];
+        let mut frame = Frame {
+            raster: &mut raster,
+            cell_colors: &mut cell_colors,
+            width: 1,
+            height: 1,
+            time: Duration::ZERO,
+            wall: Duration::ZERO,
+            now: SystemTime::UNIX_EPOCH,
+        };
+        composite_selected(
+            &[[200, 40, 20]; 8],
+            &[false; 8],
+            &mut frame,
+            &VoxelLandscapeSettings::default(),
+        );
+        assert_eq!(frame.cell_colors.as_slice(), &[[0; 3]]);
+        assert!(frame.raster.dots.iter().all(|&value| value == 0.));
+        composite_selected(
+            &[[200, 40, 20]; 8],
+            &[true; 8],
+            &mut frame,
+            &VoxelLandscapeSettings::default(),
+        );
+        assert!((199..=200).contains(&frame.cell_colors[0][0]));
+        assert!((39..=40).contains(&frame.cell_colors[0][1]));
+        assert!((19..=20).contains(&frame.cell_colors[0][2]));
+    }
 
     fn legacy_coverage(y: f32) -> f32 {
         ((y - 0.12) * 1.3).clamp(0.0, 0.92)

@@ -2,7 +2,7 @@
 
 use crate::gpu::GpuRunner;
 use crate::location::GeoLocation;
-use crate::raster::Raster;
+use crate::raster::{PaintedOwner, Raster};
 use crate::registry::AmbientSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,6 +96,12 @@ pub trait Scene: Send {
     fn pointer(&mut self, _position: Option<[f32; 2]>) {}
 
     fn render(&mut self, frame: &mut Frame<'_>);
+
+    /// The host calls this for each successful terminal draw of this scene,
+    /// including redraws that reused the cached raster. Scenes map frame-local
+    /// owner ids to retained source states and reject stale frame/source tags.
+    /// The default keeps ordinary scenes free of receipt bookkeeping.
+    fn presented(&mut self, _owners: &[PaintedOwner]) {}
 
     /// Optional single-cell text above Braille ink (Pi text mode and live
     /// map labels). Hosts call this after rendering; it must be bounded,

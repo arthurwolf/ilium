@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 directories = "6.0.0"
+getrandom = "=0.3.4"
 tracing = "0.1.44"
 
 [target.'cfg(unix)'.dependencies]

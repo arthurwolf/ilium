@@ -65,4 +65,5 @@ zbus = "5.18.0"
 uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]
+ilium-server = { version = "0.1.0", path = "../ilium-server" }
 tempfile = "3.27.0"

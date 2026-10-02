@@ -1,0 +1,746 @@
+{
+  "aliases": {
+    "goodvibes": {
+      "minecraft:block/acacia_log": [
+        "textures/block/acacia_log.png"
+      ],
+      "minecraft:block/acacia_log_top": [
+        "textures/block/acacia_log_top.png"
+      ],
+      "minecraft:block/beetroots_stage3": [
+        "textures/block/beetroots_stage3.png"
+      ],
+      "minecraft:block/birch_leaves": [
+        "textures/block/birch_leaves.png"
+      ],
+      "minecraft:block/birch_log": [
+        "textures/block/birch_log.png"
+      ],
+      "minecraft:block/birch_log_top": [
+        "textures/block/birch_log_top.png"
+      ],
+      "minecraft:block/bookshelf": [
+        "textures/block/bookshelf.png"
+      ],
+      "minecraft:block/bricks": [
+        "textures/block/bricks.png"
+      ],
+      "minecraft:block/cactus_bottom": [
+        "textures/block/cactus_bottom.png"
+      ],
+      "minecraft:block/cactus_side": [
+        "textures/block/cactus_side.png"
+      ],
+      "minecraft:block/cactus_top": [
+        "textures/block/cactus_top.png"
+      ],
+      "minecraft:block/carrots_stage3": [
+        "textures/block/carrots_stage3.png"
+      ],
+      "minecraft:block/clay": [
+        "textures/block/clay.png"
+      ],
+      "minecraft:block/coal_ore": [
+        "textures/block/coal_ore.png"
+      ],
+      "minecraft:block/cobblestone": [
+        "textures/block/cobblestone.png"
+      ],
+      "minecraft:block/dark_oak_planks": [
+        "textures/block/dark_oak_planks.png"
+      ],
+      "minecraft:block/dirt": [
+        "textures/block/dirt.png"
+      ],
+      "minecraft:block/dirt_path_side": [
+        "textures/block/grass_path_side.png"
+      ],
+      "minecraft:block/dirt_path_top": [
+        "textures/block/grass_path_top.png"
+      ],
+      "minecraft:block/farmland": [
+        "textures/block/farmland.png",
+        "textures/block/farmland_moist.png"
+      ],
+      "minecraft:block/glass": [
+        "textures/block/glass.png"
+      ],
+      "minecraft:block/granite": [
+        "textures/block/granite.png"
+      ],
+      "minecraft:block/grass_block_side": [
+        "textures/block/grass_block_side.png"
+      ],
+      "minecraft:block/grass_block_top": [
+        "textures/block/grass_block_top.png"
+      ],
+      "minecraft:block/gravel": [
+        "textures/block/gravel.png"
+      ],
+      "minecraft:block/hay_block_side": [
+        "textures/block/hay_block_side.png"
+      ],
+      "minecraft:block/hay_block_top": [
+        "textures/block/hay_block_top.png"
+      ],
+      "minecraft:block/ice": [
+        "textures/block/ice.png"
+      ],
+      "minecraft:block/iron_block": [
+        "textures/block/iron_block.png"
+      ],
+      "minecraft:block/iron_ore": [
+        "textures/block/iron_ore.png"
+      ],
+      "minecraft:block/jungle_leaves": [
+        "textures/block/jungle_leaves.png"
+      ],
+      "minecraft:block/jungle_log": [
+        "textures/block/jungle_log.png"
+      ],
+      "minecraft:block/jungle_log_top": [
+        "textures/block/jungle_log_top.png"
+      ],
+      "minecraft:block/lava_still": [
+        "textures/block/lava_still.png"
+      ],
+      "minecraft:block/melon_side": [
+        "textures/block/melon_side.png"
+      ],
+      "minecraft:block/melon_top": [
+        "textures/block/melon_top.png"
+      ],
+      "minecraft:block/mossy_cobblestone": [
+        "textures/block/mossy_cobblestone.png"
+      ],
+      "minecraft:block/oak_leaves": [
+        "textures/block/oak_leaves.png"
+      ],
+      "minecraft:block/oak_log": [
+        "textures/block/oak_log.png"
+      ],
+      "minecraft:block/oak_log_top": [
+        "textures/block/oak_log_top.png"
+      ],
+      "minecraft:block/oak_planks": [
+        "textures/block/oak_planks.png"
+      ],
+      "minecraft:block/obsidian": [
+        "textures/block/obsidian.png"
+      ],
+      "minecraft:block/podzol_side": [
+        "textures/block/podzol_side.png"
+      ],
+      "minecraft:block/podzol_top": [
+        "textures/block/podzol_top.png"
+      ],
+      "minecraft:block/poppy": [
+        "textures/block/poppy.png"
+      ],
+      "minecraft:block/potatoes_stage3": [
+        "textures/block/potatoes_stage3.png"
+      ],
+      "minecraft:block/pumpkin_side": [
+        "textures/block/pumpkin_side.png"
+      ],
+      "minecraft:block/pumpkin_top": [
+        "textures/block/pumpkin_top.png"
+      ],
+      "minecraft:block/red_mushroom_block": [
+        "textures/block/red_mushroom_block.png"
+      ],
+      "minecraft:block/red_sand": [
+        "textures/block/red_sand.png"
+      ],
+      "minecraft:block/red_sandstone": [
+        "textures/block/red_sandstone.png"
+      ],
+      "minecraft:block/red_sandstone_bottom": [
+        "textures/block/red_sandstone_bottom.png"
+      ],
+      "minecraft:block/red_sandstone_top": [
+        "textures/block/red_sandstone_top.png"
+      ],
+      "minecraft:block/sand": [
+        "textures/block/sand.png"
+      ],
+      "minecraft:block/sandstone": [
+        "textures/block/sandstone.png"
+      ],
+      "minecraft:block/sandstone_bottom": [
+        "textures/block/sandstone_bottom.png"
+      ],
+      "minecraft:block/sandstone_top": [
+        "textures/block/sandstone_top.png"
+      ],
+      "minecraft:block/seagrass": [
+        "textures/block/seagrass.png"
+      ],
+      "minecraft:block/snow": [
+        "textures/block/snow.png"
+      ],
+      "minecraft:block/spruce_leaves": [
+        "textures/block/spruce_leaves.png"
+      ],
+      "minecraft:block/spruce_log": [
+        "textures/block/spruce_log.png"
+      ],
+      "minecraft:block/spruce_log_top": [
+        "textures/block/spruce_log_top.png"
+      ],
+      "minecraft:block/stone": [
+        "textures/block/stone.png"
+      ],
+      "minecraft:block/sugar_cane": [
+        "textures/block/sugar_cane.png"
+      ],
+      "minecraft:block/terracotta": [
+        "textures/block/terracotta.png"
+      ],
+      "minecraft:block/tube_coral_block": [
+        "textures/block/tube_coral_block.png"
+      ],
+      "minecraft:block/water_still": [
+        "textures/block/water_still.png"
+      ],
+      "minecraft:block/wheat_stage7": [
+        "textures/block/wheat_stage7.png"
+      ],
+      "minecraft:block/white_wool": [
+        "textures/block/white_wool.png"
+      ]
+    },
+    "plasticator": {
+      "minecraft:block/acacia_log": [
+        "assets/minecraft/textures/block/acacia_log.png",
+        "Plasticator Texture Pack/textures/blocks/log_acacia.png"
+      ],
+      "minecraft:block/acacia_log_top": [
+        "assets/minecraft/textures/block/acacia_log_top.png",
+        "Plasticator Texture Pack/textures/blocks/log_acacia_top.png"
+      ],
+      "minecraft:block/basalt_side": [
+        "assets/minecraft/textures/block/basalt_side.png",
+        "Plasticator Texture Pack/textures/blocks/basalt_side.png"
+      ],
+      "minecraft:block/basalt_top": [
+        "assets/minecraft/textures/block/basalt_top.png",
+        "Plasticator Texture Pack/textures/blocks/basalt_top.png"
+      ],
+      "minecraft:block/beetroots_stage3": [
+        "assets/minecraft/textures/block/beetroots_stage3.png",
+        "Plasticator Texture Pack/textures/blocks/beetroots_stage_3.png"
+      ],
+      "minecraft:block/birch_leaves": [
+        "assets/minecraft/textures/block/birch_leaves.png",
+        "Plasticator Texture Pack/textures/blocks/leaves_birch.tga"
+      ],
+      "minecraft:block/birch_log": [
+        "assets/minecraft/textures/block/birch_log.png",
+        "Plasticator Texture Pack/textures/blocks/log_birch.png"
+      ],
+      "minecraft:block/birch_log_top": [
+        "assets/minecraft/textures/block/birch_log_top.png",
+        "Plasticator Texture Pack/textures/blocks/log_birch_top.png"
+      ],
+      "minecraft:block/bookshelf": [
+        "assets/minecraft/textures/block/bookshelf.png",
+        "Plasticator Texture Pack/textures/blocks/bookshelf.png"
+      ],
+      "minecraft:block/bricks": [
+        "assets/minecraft/textures/block/bricks.png",
+        "Plasticator Texture Pack/textures/blocks/brick.png"
+      ],
+      "minecraft:block/cactus_bottom": [
+        "assets/minecraft/textures/block/cactus_bottom.png",
+        "Plasticator Texture Pack/textures/blocks/cactus_bottom.tga"
+      ],
+      "minecraft:block/cactus_side": [
+        "assets/minecraft/textures/block/cactus_side.png",
+        "Plasticator Texture Pack/textures/blocks/cactus_side.tga"
+      ],
+      "minecraft:block/cactus_top": [
+        "assets/minecraft/textures/block/cactus_top.png",
+        "Plasticator Texture Pack/textures/blocks/cactus_top.tga"
+      ],
+      "minecraft:block/carrots_stage3": [
+        "assets/minecraft/textures/block/carrots_stage3.png",
+        "Plasticator Texture Pack/textures/blocks/carrots_stage_3.png"
+      ],
+      "minecraft:block/clay": [
+        "assets/minecraft/textures/block/clay.png",
+        "Plasticator Texture Pack/textures/blocks/clay.png"
+      ],
+      "minecraft:block/coal_ore": [
+        "assets/minecraft/textures/block/coal_ore.png",
+        "Plasticator Texture Pack/textures/blocks/coal_ore.png"
+      ],
+      "minecraft:block/cobblestone": [
+        "assets/minecraft/textures/block/cobblestone.png",
+        "Plasticator Texture Pack/textures/blocks/cobblestone.png"
+      ],
+      "minecraft:block/copper_block": [
+        "assets/minecraft/textures/block/copper_block.png",
+        "Plasticator Texture Pack/textures/blocks/copper_block.png"
+      ],
+      "minecraft:block/copper_ore": [
+        "assets/minecraft/textures/block/copper_ore.png",
+        "Plasticator Texture Pack/textures/blocks/copper_ore.png"
+      ],
+      "minecraft:block/dark_oak_planks": [
+        "assets/minecraft/textures/block/dark_oak_planks.png"
+      ],
+      "minecraft:block/dirt": [
+        "assets/minecraft/textures/block/dirt.png",
+        "Plasticator Texture Pack/textures/blocks/dirt.png"
+      ],
+      "minecraft:block/dirt_path_side": [
+        "assets/minecraft/textures/block/dirt_path_side.png",
+        "Plasticator Texture Pack/textures/blocks/grass_path_side.png"
+      ],
+      "minecraft:block/dirt_path_top": [
+        "assets/minecraft/textures/block/dirt_path_top.png",
+        "Plasticator Texture Pack/textures/blocks/grass_path_top.png"
+      ],
+      "minecraft:block/farmland": [
+        "assets/minecraft/textures/block/farmland.png",
+        "assets/minecraft/textures/block/farmland_moist.png"
+      ],
+      "minecraft:block/glass": [
+        "assets/minecraft/textures/block/glass.png",
+        "Plasticator Texture Pack/textures/blocks/glass.png"
+      ],
+      "minecraft:block/granite": [
+        "assets/minecraft/textures/block/granite.png",
+        "Plasticator Texture Pack/textures/blocks/stone_granite.png"
+      ],
+      "minecraft:block/grass_block_side": [
+        "assets/minecraft/textures/block/grass_block_side.png",
+        "Plasticator Texture Pack/textures/blocks/grass_side.png",
+        "Plasticator Texture Pack/textures/blocks/grass_side.tga"
+      ],
+      "minecraft:block/grass_block_top": [
+        "assets/minecraft/textures/block/grass_block_top.png",
+        "Plasticator Texture Pack/textures/blocks/grass_top.png"
+      ],
+      "minecraft:block/gravel": [
+        "assets/minecraft/textures/block/gravel.png",
+        "Plasticator Texture Pack/textures/blocks/gravel.png"
+      ],
+      "minecraft:block/hay_block_side": [
+        "assets/minecraft/textures/block/hay_block_side.png",
+        "Plasticator Texture Pack/textures/blocks/hay_block_side.png"
+      ],
+      "minecraft:block/hay_block_top": [
+        "assets/minecraft/textures/block/hay_block_top.png",
+        "Plasticator Texture Pack/textures/blocks/hay_block_top.png"
+      ],
+      "minecraft:block/ice": [
+        "assets/minecraft/textures/block/ice.png",
+        "Plasticator Texture Pack/textures/blocks/ice.png"
+      ],
+      "minecraft:block/iron_block": [
+        "assets/minecraft/textures/block/iron_block.png",
+        "Plasticator Texture Pack/textures/blocks/iron_block.png"
+      ],
+      "minecraft:block/iron_ore": [
+        "assets/minecraft/textures/block/iron_ore.png",
+        "Plasticator Texture Pack/textures/blocks/iron_ore.png"
+      ],
+      "minecraft:block/jungle_leaves": [
+        "assets/minecraft/textures/block/jungle_leaves.png",
+        "Plasticator Texture Pack/textures/blocks/leaves_jungle.tga"
+      ],
+      "minecraft:block/jungle_log": [
+        "assets/minecraft/textures/block/jungle_log.png",
+        "Plasticator Texture Pack/textures/blocks/log_jungle.png"
+      ],
+      "minecraft:block/jungle_log_top": [
+        "assets/minecraft/textures/block/jungle_log_top.png",
+        "Plasticator Texture Pack/textures/blocks/log_jungle_top.png"
+      ],
+      "minecraft:block/lantern": [
+        "assets/minecraft/textures/block/lantern.png",
+        "Plasticator Texture Pack/textures/blocks/lantern.png"
+      ],
+      "minecraft:block/lava_still": [
+        "assets/minecraft/textures/block/lava_still.png",
+        "Plasticator Texture Pack/textures/blocks/lava_still.png"
+      ],
+      "minecraft:block/melon_side": [
+        "assets/minecraft/textures/block/melon_side.png",
+        "Plasticator Texture Pack/textures/blocks/melon_side.png"
+      ],
+      "minecraft:block/melon_top": [
+        "assets/minecraft/textures/block/melon_top.png",
+        "Plasticator Texture Pack/textures/blocks/melon_top.png"
+      ],
+      "minecraft:block/moss_block": [
+        "assets/minecraft/textures/block/moss_block.png",
+        "Plasticator Texture Pack/textures/blocks/moss_block.png"
+      ],
+      "minecraft:block/mossy_cobblestone": [
+        "assets/minecraft/textures/block/mossy_cobblestone.png",
+        "Plasticator Texture Pack/textures/blocks/cobblestone_mossy.png"
+      ],
+      "minecraft:block/oak_leaves": [
+        "assets/minecraft/textures/block/oak_leaves.png",
+        "Plasticator Texture Pack/textures/blocks/leaves_oak.tga"
+      ],
+      "minecraft:block/oak_log": [
+        "assets/minecraft/textures/block/oak_log.png",
+        "Plasticator Texture Pack/textures/blocks/log_oak.png"
+      ],
+      "minecraft:block/oak_log_top": [
+        "assets/minecraft/textures/block/oak_log_top.png",
+        "Plasticator Texture Pack/textures/blocks/log_oak_top.png"
+      ],
+      "minecraft:block/oak_planks": [
+        "assets/minecraft/textures/block/oak_planks.png",
+        "Plasticator Texture Pack/textures/blocks/planks_oak.png"
+      ],
+      "minecraft:block/obsidian": [
+        "assets/minecraft/textures/block/obsidian.png",
+        "Plasticator Texture Pack/textures/blocks/obsidian.png"
+      ],
+      "minecraft:block/podzol_side": [
+        "assets/minecraft/textures/block/podzol_side.png",
+        "Plasticator Texture Pack/textures/blocks/dirt_podzol_side.png"
+      ],
+      "minecraft:block/podzol_top": [
+        "assets/minecraft/textures/block/podzol_top.png",
+        "Plasticator Texture Pack/textures/blocks/dirt_podzol_top.png"
+      ],
+      "minecraft:block/poppy": [
+        "assets/minecraft/textures/block/poppy.png",
+        "Plasticator Texture Pack/textures/blocks/flower_rose.png"
+      ],
+      "minecraft:block/potatoes_stage3": [
+        "assets/minecraft/textures/block/potatoes_stage3.png",
+        "Plasticator Texture Pack/textures/blocks/potatoes_stage_3.png"
+      ],
+      "minecraft:block/pumpkin_side": [
+        "assets/minecraft/textures/block/pumpkin_side.png",
+        "Plasticator Texture Pack/textures/blocks/pumpkin_side.png"
+      ],
+      "minecraft:block/pumpkin_top": [
+        "assets/minecraft/textures/block/pumpkin_top.png",
+        "Plasticator Texture Pack/textures/blocks/pumpkin_top.png"
+      ],
+      "minecraft:block/red_mushroom_block": [
+        "assets/minecraft/textures/block/red_mushroom_block.png"
+      ],
+      "minecraft:block/red_sand": [
+        "assets/minecraft/textures/block/red_sand.png",
+        "Plasticator Texture Pack/textures/blocks/red_sand.png"
+      ],
+      "minecraft:block/red_sandstone": [
+        "assets/minecraft/textures/block/red_sandstone.png"
+      ],
+      "minecraft:block/red_sandstone_bottom": [
+        "assets/minecraft/textures/block/red_sandstone_bottom.png",
+        "Plasticator Texture Pack/textures/blocks/red_sandstone_bottom.png"
+      ],
+      "minecraft:block/red_sandstone_top": [
+        "assets/minecraft/textures/block/red_sandstone_top.png",
+        "Plasticator Texture Pack/textures/blocks/red_sandstone_top.png"
+      ],
+      "minecraft:block/sand": [
+        "assets/minecraft/textures/block/sand.png",
+        "Plasticator Texture Pack/textures/blocks/sand.png"
+      ],
+      "minecraft:block/sandstone": [
+        "assets/minecraft/textures/block/sandstone.png"
+      ],
+      "minecraft:block/sandstone_bottom": [
+        "assets/minecraft/textures/block/sandstone_bottom.png",
+        "Plasticator Texture Pack/textures/blocks/sandstone_bottom.png"
+      ],
+      "minecraft:block/sandstone_top": [
+        "assets/minecraft/textures/block/sandstone_top.png",
+        "Plasticator Texture Pack/textures/blocks/sandstone_top.png"
+      ],
+      "minecraft:block/seagrass": [
+        "Plasticator Texture Pack/textures/blocks/seagrass.png"
+      ],
+      "minecraft:block/snow": [
+        "assets/minecraft/textures/block/snow.png",
+        "Plasticator Texture Pack/textures/blocks/snow.png"
+      ],
+      "minecraft:block/spruce_leaves": [
+        "assets/minecraft/textures/block/spruce_leaves.png",
+        "Plasticator Texture Pack/textures/blocks/leaves_spruce.tga"
+      ],
+      "minecraft:block/spruce_log": [
+        "assets/minecraft/textures/block/spruce_log.png",
+        "Plasticator Texture Pack/textures/blocks/log_spruce.png"
+      ],
+      "minecraft:block/spruce_log_top": [
+        "assets/minecraft/textures/block/spruce_log_top.png",
+        "Plasticator Texture Pack/textures/blocks/log_spruce_top.png"
+      ],
+      "minecraft:block/stone": [
+        "assets/minecraft/textures/block/stone.png",
+        "Plasticator Texture Pack/textures/blocks/stone.png"
+      ],
+      "minecraft:block/sugar_cane": [
+        "assets/minecraft/textures/block/sugar_cane.png",
+        "Plasticator Texture Pack/textures/blocks/reeds.tga"
+      ],
+      "minecraft:block/terracotta": [
+        "assets/minecraft/textures/block/terracotta.png",
+        "Plasticator Texture Pack/textures/blocks/hardened_clay.png"
+      ],
+      "minecraft:block/tube_coral_block": [
+        "assets/minecraft/textures/block/tube_coral_block.png"
+      ],
+      "minecraft:block/water_still": [
+        "assets/minecraft/textures/block/water_still.png",
+        "Plasticator Texture Pack/textures/blocks/water_still.png"
+      ],
+      "minecraft:block/wheat_stage7": [
+        "assets/minecraft/textures/block/wheat_stage7.png",
+        "Plasticator Texture Pack/textures/blocks/wheat_stage_7.png"
+      ],
+      "minecraft:block/white_wool": [
+        "assets/minecraft/textures/block/white_wool.png",
+        "Plasticator Texture Pack/textures/blocks/wool_colored_white.png"
+      ]
+    },
+    "programmerart": {
+      "minecraft:block/acacia_log": [
+        "assets/minecraft/textures/blocks/log_acacia.png"
+      ],
+      "minecraft:block/acacia_log_top": [
+        "assets/minecraft/textures/blocks/log_acacia_top.png"
+      ],
+      "minecraft:block/beetroots_stage3": [
+        "assets/minecraft/textures/blocks/beetroots_stage_3.png"
+      ],
+      "minecraft:block/birch_leaves": [
+        "assets/minecraft/textures/blocks/leaves_birch.png"
+      ],
+      "minecraft:block/birch_log": [
+        "assets/minecraft/textures/blocks/log_birch.png"
+      ],
+      "minecraft:block/birch_log_top": [
+        "assets/minecraft/textures/blocks/log_birch_top.png"
+      ],
+      "minecraft:block/bookshelf": [
+        "assets/minecraft/textures/blocks/bookshelf.png"
+      ],
+      "minecraft:block/bricks": [
+        "assets/minecraft/textures/blocks/brick.png"
+      ],
+      "minecraft:block/cactus_bottom": [
+        "assets/minecraft/textures/blocks/cactus_bottom.png"
+      ],
+      "minecraft:block/cactus_side": [
+        "assets/minecraft/textures/blocks/cactus_side.png"
+      ],
+      "minecraft:block/cactus_top": [
+        "assets/minecraft/textures/blocks/cactus_top.png"
+      ],
+      "minecraft:block/carrots_stage3": [
+        "assets/minecraft/textures/blocks/carrots_stage_3.png"
+      ],
+      "minecraft:block/clay": [
+        "assets/minecraft/textures/blocks/clay.png"
+      ],
+      "minecraft:block/coal_ore": [
+        "assets/minecraft/textures/blocks/coal_ore.png"
+      ],
+      "minecraft:block/cobblestone": [
+        "assets/minecraft/textures/blocks/cobblestone.png"
+      ],
+      "minecraft:block/dirt": [
+        "assets/minecraft/textures/blocks/dirt.png"
+      ],
+      "minecraft:block/dirt_path_side": [
+        "assets/minecraft/textures/blocks/grass_path_side.png"
+      ],
+      "minecraft:block/dirt_path_top": [
+        "assets/minecraft/textures/blocks/grass_path_top.png"
+      ],
+      "minecraft:block/glass": [
+        "assets/minecraft/textures/blocks/glass.png"
+      ],
+      "minecraft:block/granite": [
+        "assets/minecraft/textures/blocks/stone_granite.png"
+      ],
+      "minecraft:block/grass_block_side": [
+        "assets/minecraft/textures/blocks/grass_side.png"
+      ],
+      "minecraft:block/grass_block_top": [
+        "assets/minecraft/textures/blocks/grass_top.png"
+      ],
+      "minecraft:block/gravel": [
+        "assets/minecraft/textures/blocks/gravel.png"
+      ],
+      "minecraft:block/hay_block_side": [
+        "assets/minecraft/textures/blocks/hay_block_side.png"
+      ],
+      "minecraft:block/hay_block_top": [
+        "assets/minecraft/textures/blocks/hay_block_top.png"
+      ],
+      "minecraft:block/ice": [
+        "assets/minecraft/textures/blocks/ice.png"
+      ],
+      "minecraft:block/iron_block": [
+        "assets/minecraft/textures/blocks/iron_block.png"
+      ],
+      "minecraft:block/iron_ore": [
+        "assets/minecraft/textures/blocks/iron_ore.png"
+      ],
+      "minecraft:block/jungle_leaves": [
+        "assets/minecraft/textures/blocks/leaves_jungle.png"
+      ],
+      "minecraft:block/jungle_log": [
+        "assets/minecraft/textures/blocks/log_jungle.png"
+      ],
+      "minecraft:block/jungle_log_top": [
+        "assets/minecraft/textures/blocks/log_jungle_top.png"
+      ],
+      "minecraft:block/lava_still": [
+        "assets/minecraft/textures/blocks/lava_still.png"
+      ],
+      "minecraft:block/melon_side": [
+        "assets/minecraft/textures/blocks/melon_side.png"
+      ],
+      "minecraft:block/melon_top": [
+        "assets/minecraft/textures/blocks/melon_top.png"
+      ],
+      "minecraft:block/mossy_cobblestone": [
+        "assets/minecraft/textures/blocks/cobblestone_mossy.png"
+      ],
+      "minecraft:block/oak_leaves": [
+        "assets/minecraft/textures/blocks/leaves_oak.png"
+      ],
+      "minecraft:block/oak_log": [
+        "assets/minecraft/textures/blocks/log_oak.png"
+      ],
+      "minecraft:block/oak_log_top": [
+        "assets/minecraft/textures/blocks/log_oak_top.png"
+      ],
+      "minecraft:block/oak_planks": [
+        "assets/minecraft/textures/blocks/planks_oak.png"
+      ],
+      "minecraft:block/obsidian": [
+        "assets/minecraft/textures/blocks/obsidian.png"
+      ],
+      "minecraft:block/podzol_side": [
+        "assets/minecraft/textures/blocks/dirt_podzol_side.png"
+      ],
+      "minecraft:block/podzol_top": [
+        "assets/minecraft/textures/blocks/dirt_podzol_top.png"
+      ],
+      "minecraft:block/poppy": [
+        "assets/minecraft/textures/blocks/flower_rose.png"
+      ],
+      "minecraft:block/potatoes_stage3": [
+        "assets/minecraft/textures/blocks/potatoes_stage_3.png"
+      ],
+      "minecraft:block/pumpkin_side": [
+        "assets/minecraft/textures/blocks/pumpkin_side.png"
+      ],
+      "minecraft:block/pumpkin_top": [
+        "assets/minecraft/textures/blocks/pumpkin_top.png"
+      ],
+      "minecraft:block/red_sand": [
+        "assets/minecraft/textures/blocks/red_sand.png"
+      ],
+      "minecraft:block/red_sandstone_bottom": [
+        "assets/minecraft/textures/blocks/red_sandstone_bottom.png"
+      ],
+      "minecraft:block/red_sandstone_top": [
+        "assets/minecraft/textures/blocks/red_sandstone_top.png"
+      ],
+      "minecraft:block/sand": [
+        "assets/minecraft/textures/blocks/sand.png"
+      ],
+      "minecraft:block/sandstone_bottom": [
+        "assets/minecraft/textures/blocks/sandstone_bottom.png"
+      ],
+      "minecraft:block/sandstone_top": [
+        "assets/minecraft/textures/blocks/sandstone_top.png"
+      ],
+      "minecraft:block/snow": [
+        "assets/minecraft/textures/blocks/snow.png"
+      ],
+      "minecraft:block/spruce_leaves": [
+        "assets/minecraft/textures/blocks/leaves_spruce.png"
+      ],
+      "minecraft:block/spruce_log": [
+        "assets/minecraft/textures/blocks/log_spruce.png"
+      ],
+      "minecraft:block/spruce_log_top": [
+        "assets/minecraft/textures/blocks/log_spruce_top.png"
+      ],
+      "minecraft:block/stone": [
+        "assets/minecraft/textures/blocks/stone.png"
+      ],
+      "minecraft:block/sugar_cane": [
+        "assets/minecraft/textures/blocks/reeds.png"
+      ],
+      "minecraft:block/terracotta": [
+        "assets/minecraft/textures/blocks/hardened_clay.png"
+      ],
+      "minecraft:block/water_still": [
+        "assets/minecraft/textures/blocks/water_still.png"
+      ],
+      "minecraft:block/wheat_stage7": [
+        "assets/minecraft/textures/blocks/wheat_stage_7.png"
+      ],
+      "minecraft:block/white_wool": [
+        "assets/minecraft/textures/blocks/wool_colored_white.png"
+      ],
+      "minecraft:block/dark_oak_log": [
+        "assets/minecraft/textures/blocks/log_big_oak.png"
+      ],
+      "minecraft:block/large_fern_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_fern_bottom.png"
+      ],
+      "minecraft:block/large_fern_top": [
+        "assets/minecraft/textures/blocks/double_plant_fern_top.png"
+      ],
+      "minecraft:block/lilac_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_syringa_bottom.png"
+      ],
+      "minecraft:block/lilac_top": [
+        "assets/minecraft/textures/blocks/double_plant_syringa_top.png"
+      ],
+      "minecraft:block/peony_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_paeonia_bottom.png"
+      ],
+      "minecraft:block/peony_top": [
+        "assets/minecraft/textures/blocks/double_plant_paeonia_top.png"
+      ],
+      "minecraft:block/rose_bush_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_rose_bottom.png"
+      ],
+      "minecraft:block/rose_bush_top": [
+        "assets/minecraft/textures/blocks/double_plant_rose_top.png"
+      ],
+      "minecraft:block/sunflower_back": [
+        "assets/minecraft/textures/blocks/double_plant_sunflower_back.png"
+      ],
+      "minecraft:block/sunflower_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_sunflower_bottom.png"
+      ],
+      "minecraft:block/sunflower_front": [
+        "assets/minecraft/textures/blocks/double_plant_sunflower_front.png"
+      ],
+      "minecraft:block/sunflower_top": [
+        "assets/minecraft/textures/blocks/double_plant_sunflower_top.png"
+      ],
+      "minecraft:block/tall_grass_bottom": [
+        "assets/minecraft/textures/blocks/double_plant_grass_bottom.png"
+      ],
+      "minecraft:block/tall_grass_top": [
+        "assets/minecraft/textures/blocks/double_plant_grass_top.png"
+      ]
+    }
+  },
+  "schema": 1,
+  "source": "supplied full-pack-profile-catalog.json material-face exact members; no inferred art"
+}

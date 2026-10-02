@@ -42,9 +42,78 @@ pub fn java_directory() -> Option<PathBuf> {
     )
 }
 
+/// Lossless, platform-tagged directory binding key; never use display text as identity.
+pub fn native_path_key(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut key = std::env::consts::OS.as_bytes().to_vec();
+    key.push(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        key.extend_from_slice(path.as_os_str().as_bytes());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        for unit in path.as_os_str().encode_wide() {
+            key.extend_from_slice(&unit.to_le_bytes());
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    return Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Lossless native path encoding is unavailable",
+    ));
+    #[cfg(any(unix, windows))]
+    Ok(key)
+}
+
+/// A fresh opaque map identifier from the operating system random source.
+pub fn random_map_identifier() -> std::io::Result<[u8; 16]> {
+    let mut identifier = [0; 16];
+    getrandom::fill(&mut identifier).map_err(|error| {
+        std::io::Error::other(format!(
+            "Could not allocate Minecraft map identity: {error}"
+        ))
+    })?;
+    Ok(identifier)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn path_binding_preserves_unicode_and_significant_whitespace() {
+        let first = Path::new("saved worlds 雪");
+        let trailing = Path::new("saved worlds 雪 ");
+        assert_eq!(
+            native_path_key(first).unwrap(),
+            native_path_key(first).unwrap()
+        );
+        assert_ne!(
+            native_path_key(first).unwrap(),
+            native_path_key(trailing).unwrap()
+        );
+    }
+
+    #[test]
+    fn opaque_identifiers_do_not_reuse_a_constant_or_mutable_metadata() {
+        let first = random_map_identifier().unwrap();
+        let second = random_map_identifier().unwrap();
+        assert_ne!(first, [0; 16]);
+        assert_ne!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_path_binding_does_not_collapse_non_utf8_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        let first = Path::new(std::ffi::OsStr::from_bytes(b"world\xff"));
+        let second = Path::new(std::ffi::OsStr::from_bytes(b"world\xfe"));
+        assert_ne!(
+            native_path_key(first).unwrap(),
+            native_path_key(second).unwrap()
+        );
+    }
     #[test]
     fn official_paths_cover_three_platforms_and_windows_requires_roaming() {
         let home = Path::new("users/player");
