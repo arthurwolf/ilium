@@ -42,6 +42,11 @@ impl TextTriggerFocus {
 #[derive(Debug, Clone)]
 pub struct TextTriggerDialogState {
     pub editing_index: Option<usize>,
+    /// Identity captured when the editor opens; list positions can change.
+    pub editing_id: Option<String>,
+    pub editing_base: Option<TextTrigger>,
+    draft_id: String,
+    pub save_error: Option<String>,
     pub regexp: TextPromptState,
     pub message: TextPromptState,
     pub target: TextTriggerTarget,
@@ -58,6 +63,10 @@ impl TextTriggerDialogState {
         };
         Self {
             editing_index,
+            editing_id: editing_index.map(|_| trigger.id.clone()),
+            editing_base: editing_index.map(|_| trigger.clone()),
+            draft_id: uuid::Uuid::new_v4().to_string(),
+            save_error: None,
             regexp: TextPromptState::new(trigger.regexp),
             message: TextPromptState::new(trigger.message),
             target: trigger.target,
@@ -78,9 +87,9 @@ impl TextTriggerDialogState {
     pub fn candidate(&self) -> TextTrigger {
         TextTrigger {
             id: self
-                .editing_index
-                .map(|_| String::new())
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                .editing_id
+                .clone()
+                .unwrap_or_else(|| self.draft_id.clone()),
             enabled: self.enabled,
             regexp: self.regexp.buf.clone(),
             message: self.message.buf.clone(),
@@ -139,4 +148,23 @@ pub fn layout(area: Rect) -> TextTriggerDialogLayout {
         save,
         hint: rows[8],
     }
+}
+
+/// Paints the draft-owned refusal after the ordinary UI, without changing normal dialog layout.
+pub(crate) fn draw_save_error(frame: &mut ratatui::Frame<'_>, app: &crate::app::App) {
+    let crate::app::Mode::TextTriggerDialog(state) = &app.mode else {
+        return;
+    };
+    let Some(error) = state.save_error.as_deref() else {
+        return;
+    };
+    let area = layout(frame.area()).preview;
+    frame.render_widget(ratatui::widgets::Clear, area);
+    let text = format!("Draft retained. Retry after fixing storage; Esc/reopen to review a conflicting rule.\n{error}");
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(text)
+            .block(ratatui::widgets::Block::bordered().title("Text Trigger not saved"))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        area,
+    );
 }

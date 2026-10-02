@@ -121,7 +121,7 @@ pub struct RestructureWorkerResult {
     pub project_id: NodeId,
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     pub automatic_ai_decision: AutomaticAiDecision,
-    pub result: anyhow::Result<ilium_core::RestructurePlan>,
+    pub result: anyhow::Result<ilium_core::animation_recommendation::RecommendedRestructurePlan>,
 }
 
 /// Immutable inputs for one last-prompt-from-transcript check -- see
@@ -648,6 +648,8 @@ impl NamingWorkers {
         home: PathBuf,
     ) {
         let crate::app::PendingRestructureRequest {
+            project_cwd,
+            recommendation_snapshot,
             project_id,
             mut contexts,
             protected_split_views,
@@ -673,11 +675,13 @@ impl NamingWorkers {
                 if !automatic_ai_decision.is_current(&decision_word) {
                     anyhow::bail!("automatic AI request cancelled before provider call");
                 }
-                crate::restructure::infer_restructure_plan_with_protected_splits(
+                crate::restructure::infer_project_restructure(
                     &inference_settings,
                     &contexts,
                     &current_structure,
                     &protected_split_views,
+                    &recommendation_snapshot,
+                    &project_cwd,
                 )
             }))
             .unwrap_or_else(|panic_payload| {

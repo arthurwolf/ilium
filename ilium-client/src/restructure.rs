@@ -29,6 +29,16 @@ use ilium_inference::{
 use serde::{Deserialize, Serialize};
 
 use crate::app::PaneRuntime;
+use ilium_core::animation_recommendation::RecommendedRestructurePlan;
+#[path = "restructure_recommendations.rs"]
+mod recommendations;
+pub use recommendations::{
+    infer_project_restructure, RecommendationContext, RecommendationSnapshot,
+};
+
+#[cfg(test)]
+#[path = "restructure_semantic_tests.rs"]
+mod semantic_contract_tests;
 
 /// Provider settings currently do not retain a selected model's advertised
 /// output limit, so the inference-wide unknown-model fallback applies. This
@@ -518,6 +528,9 @@ fn clip_lines(text: &str) -> String {
 
 #[derive(Serialize)]
 struct RestructurePromptContext {
+    animation_catalog: &'static str,
+    fixed_groups: String,
+    resource_capabilities: String,
     entry_naming: String,
     organization: String,
     naming_and_organization: String,
@@ -560,6 +573,9 @@ impl RestructurePromptContext {
     ) -> Self {
         let evidence_budget_per_item = item_evidence_budget / items.len().max(1);
         Self {
+            animation_catalog: "",
+            fixed_groups: String::new(),
+            resource_capabilities: String::new(),
             entry_naming: String::new(),
             organization: String::new(),
             naming_and_organization: String::new(),
@@ -618,15 +634,7 @@ impl PromptLeafContext {
         let kind_budget = (evidence_budget / 10).clamp(16, 96);
         let icon_budget = (evidence_budget / 20).clamp(8, 32);
         let filename_budget = (evidence_budget / 10).clamp(16, 128);
-        let metadata_budget = title_budget
-            .saturating_add(kind_budget)
-            .saturating_add(icon_budget)
-            .saturating_add(filename_budget);
-        let content_budget = evidence_budget
-            .saturating_sub(metadata_budget)
-            .min(MAXIMUM_CONTENT_CHARACTERS_PER_ITEM);
-
-        Self {
+        let mut context = Self {
             id: item.id,
             kind_label: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
                 &item.kind_label,
@@ -649,11 +657,28 @@ impl PromptLeafContext {
                     filename_budget,
                 ))
             }),
-            content_extract: crate::naming::encode_untrusted_context(&clip_restructure_evidence(
-                &item.content_extract,
-                content_budget,
-            )),
-        }
+            content_extract: String::new(),
+        };
+        // Charge the metadata actually retained, rather than every field's
+        // maximum allowance: short titles and absent filenames should leave
+        // room for both the opening context and the newest transcript tail.
+        let metadata_characters = context.current_title.chars().count()
+            + context.kind_label.chars().count()
+            + context
+                .current_icon
+                .as_deref()
+                .map_or(0, |text| text.chars().count())
+            + context
+                .filename
+                .as_deref()
+                .map_or(0, |text| text.chars().count());
+        let content_budget = evidence_budget
+            .saturating_sub(metadata_characters)
+            .min(MAXIMUM_CONTENT_CHARACTERS_PER_ITEM);
+        context.content_extract = crate::naming::encode_untrusted_context(
+            &clip_restructure_evidence(&item.content_extract, content_budget),
+        );
+        context
     }
 }
 
@@ -707,6 +732,7 @@ fn render_restructure_prompt(
         current_structure,
         protected_split_views,
         retry_feedback,
+        &RecommendationContext::default(),
     )
 }
 
@@ -717,6 +743,7 @@ fn render_restructure_prompt_with_instructions(
     current_structure: &str,
     protected_split_views: &[ProtectedSplitViewContext],
     retry_feedback: Option<&str>,
+    recommendation_context: &RecommendationContext,
 ) -> anyhow::Result<String> {
     let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
@@ -732,6 +759,12 @@ fn render_restructure_prompt_with_instructions(
             retry_feedback,
         );
         prompt_context.entry_naming = instructions.entry_naming.trim().to_owned();
+        prompt_context.animation_catalog =
+            crate::semantic_animation::catalog().map_err(anyhow::Error::msg)?;
+        prompt_context.fixed_groups = recommendation_context.snapshot.prompt_groups();
+        prompt_context.resource_capabilities =
+            crate::semantic_animation::authored_capabilities(&recommendation_context.authored)
+                .to_string();
         prompt_context.organization = instructions.organization.trim().to_owned();
         prompt_context.naming_and_organization =
             instructions.naming_and_organization.trim().to_owned();
@@ -795,8 +828,10 @@ enum LlmRestructureNode {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LlmRestructurePlan {
     children: Vec<LlmRestructureNode>,
+    animations: crate::semantic_animation::ProposedRecommendations,
 }
 
 /// A free-tier router (`openrouter/free`) occasionally lands on a backend
@@ -820,12 +855,14 @@ const RESTRUCTURE_MAX_ATTEMPTS: u32 = 3;
 pub fn infer_restructure_plan<G: RestructureCompletionClient>(
     generator: &G,
     contexts: &[LeafContext],
-) -> anyhow::Result<RestructurePlan> {
+    recommendation_context: &RecommendationContext,
+) -> anyhow::Result<RecommendedRestructurePlan> {
     infer_restructure_plan_with_protected_splits(
         generator,
         contexts,
         ilium_prompts::naming::NAMING_RESTRUCTURE_NO_PRIOR_STRUCTURE_AVAILABLE,
         &[],
+        recommendation_context,
     )
 }
 
@@ -836,8 +873,15 @@ pub fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
     generator: &G,
     contexts: &[LeafContext],
     current_structure: &str,
-) -> anyhow::Result<RestructurePlan> {
-    infer_restructure_plan_with_protected_splits(generator, contexts, current_structure, &[])
+    recommendation_context: &RecommendationContext,
+) -> anyhow::Result<RecommendedRestructurePlan> {
+    infer_restructure_plan_with_protected_splits(
+        generator,
+        contexts,
+        current_structure,
+        &[],
+        recommendation_context,
+    )
 }
 
 /// Infers one project plan while treating the typed split-view snapshot as a
@@ -849,7 +893,8 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     contexts: &[LeafContext],
     current_structure: &str,
     protected_split_views: &[ProtectedSplitViewContext],
-) -> anyhow::Result<RestructurePlan> {
+    recommendation_context: &RecommendationContext,
+) -> anyhow::Result<RecommendedRestructurePlan> {
     if contexts.is_empty() {
         anyhow::bail!(ilium_prompts::naming::NAMING_RESTRUCTURE_NO_PANES_OR_FOLDERS_TO_RESTRUCTURE);
     }
@@ -866,6 +911,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             current_structure,
             protected_split_views,
             retry_feedback.as_deref(),
+            recommendation_context,
         )?;
         tracing::info!(
             operation_id,
@@ -905,6 +951,7 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
             contexts,
             protected_split_views,
             generator.title_style(),
+            recommendation_context,
         ) {
             Ok(plan) => {
                 tracing::info!(
@@ -941,14 +988,16 @@ fn parse_restructure_response(
     contexts: &[LeafContext],
     protected_split_views: &[ProtectedSplitViewContext],
     title_style: TitleStyle,
-) -> anyhow::Result<RestructurePlan> {
+    recommendation_context: &RecommendationContext,
+) -> anyhow::Result<RecommendedRestructurePlan> {
     let candidate = crate::naming::parse_structured_json_object(response, "restructure")?;
-    let mut parsed: LlmRestructurePlan = serde_json::from_value(candidate).map_err(|error| {
-        anyhow::anyhow!(ilium_prompts::render_value(
-            "naming/restructure/restructure-response-had-the-wrong-json-shape-error",
-            &serde_json::json!({"v0": (error).to_string()})
-        ))
-    })?;
+    let mut parsed: LlmRestructurePlan =
+        serde_json::from_value(candidate.clone()).map_err(|error| {
+            anyhow::anyhow!(ilium_prompts::render_value(
+                "naming/restructure/restructure-response-had-the-wrong-json-shape-error",
+                &serde_json::json!({"v0": (error).to_string()})
+            ))
+        })?;
 
     let mut referenced = Vec::new();
     collect_referenced_ids(&parsed.children, &mut referenced);
@@ -1041,13 +1090,24 @@ fn parse_restructure_response(
         })
         .map(|context| context.id)
         .collect();
-    Ok(RestructurePlan {
-        children: parsed
-            .children
-            .into_iter()
-            .map(|node| convert_node(node, &terminal_pane_ids, &fixed_name_ids, title_style))
-            .collect(),
-    })
+    let (project, entries) =
+        recommendations::parse_pointers(&candidate, &parsed.animations, recommendation_context)?;
+    let plan = RecommendedRestructurePlan {
+        structure: RestructurePlan {
+            children: parsed
+                .children
+                .into_iter()
+                .map(|node| convert_node(node, &terminal_pane_ids, &fixed_name_ids, title_style))
+                .collect(),
+        },
+        expected_animation_generation: recommendation_context
+            .snapshot
+            .expected_animation_generation,
+        project,
+        entries,
+    };
+    plan.validate_assignments()?;
+    Ok(plan)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1446,6 +1506,82 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
 
+    fn with_animation_fixture(response: String) -> String {
+        let Some(start) = response.find('{') else {
+            return response;
+        };
+        let Some(end) = response.rfind('}') else {
+            return response;
+        };
+        if end < start {
+            return response;
+        }
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&response[start..=end])
+        else {
+            return response;
+        };
+        fn decorate(nodes: &mut [serde_json::Value]) {
+            for node in nodes {
+                if let Some(children) = node
+                    .get_mut("children")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    decorate(children);
+                }
+                if let Some(object) = node.as_object_mut() {
+                    object
+                        .entry("animation")
+                        .or_insert_with(|| serde_json::json!("calm"));
+                }
+            }
+        }
+        let Some(children) = value
+            .get_mut("children")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return response;
+        };
+        decorate(children);
+        if value.get("animations").is_none() {
+            value["animations"] = serde_json::json!({"definitions":[{"key":"calm","recommendation":{"kind":"shoreline","resources":"catalog","parameters":[]}}],"project":"calm"});
+        }
+        format!("{}{}{}", &response[..start], value, &response[end + 1..])
+    }
+    fn infer_restructure_plan<G: RestructureCompletionClient>(
+        generator: &G,
+        contexts: &[LeafContext],
+    ) -> anyhow::Result<RestructurePlan> {
+        super::infer_restructure_plan(generator, contexts, &RecommendationContext::default())
+            .map(|plan| plan.structure)
+    }
+    fn infer_restructure_plan_with_structure<G: RestructureCompletionClient>(
+        generator: &G,
+        contexts: &[LeafContext],
+        structure: &str,
+    ) -> anyhow::Result<RestructurePlan> {
+        super::infer_restructure_plan_with_structure(
+            generator,
+            contexts,
+            structure,
+            &RecommendationContext::default(),
+        )
+        .map(|plan| plan.structure)
+    }
+    fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClient>(
+        generator: &G,
+        contexts: &[LeafContext],
+        structure: &str,
+        splits: &[ProtectedSplitViewContext],
+    ) -> anyhow::Result<RestructurePlan> {
+        super::infer_restructure_plan_with_protected_splits(
+            generator,
+            contexts,
+            structure,
+            splits,
+            &RecommendationContext::default(),
+        )
+        .map(|plan| plan.structure)
+    }
     struct FakeGenerator {
         calls: Cell<u8>,
         last_prompt: RefCell<Option<String>>,
@@ -1466,7 +1602,9 @@ mod tests {
                 calls: Cell::new(0),
                 last_prompt: RefCell::new(None),
                 prompts: RefCell::new(Vec::new()),
-                responses: RefCell::new(responses.into_iter().collect()),
+                responses: RefCell::new(
+                    responses.into_iter().map(with_animation_fixture).collect(),
+                ),
             }
         }
     }
@@ -1628,7 +1766,7 @@ mod tests {
         ));
         assert!(prompt.contains("Never invent, omit, duplicate, dissolve, or nest a split view"));
         assert!(
-            prompt.contains(r#"{"kind":"split_view","id":<existing-split-id>,"children":[...]}"#)
+            prompt.contains("- split_view: kind, id, children; existing protected split, exact listed pane ids/order")
         );
         assert!(!prompt.contains(r#"{"kind":"split_view","orientation":"vertical"|"horizontal""#));
     }
@@ -2076,8 +2214,8 @@ mod tests {
         assert!(prompt.contains("scope the user intends to return to"));
         assert!(prompt.contains("Rewrite an automatic activity summary"));
         assert!(prompt.contains("\"title\":\"LOGIN BUG\""));
-        assert!(prompt.contains("Every name-fixed ordinary group must appear exactly once"));
-        assert!(prompt.contains("Split views are user-created presentation layouts"));
+        assert!(prompt.contains("Every fixed group appears once as existing_group"));
+        assert!(prompt.contains("Preserve membership/order"));
         assert!(!prompt.contains("Backend Agent Fixing Login Bug"));
     }
 
@@ -2205,7 +2343,7 @@ mod tests {
 
         let prompt = generator.last_prompt.borrow().clone().unwrap();
         assert!(prompt.contains("Use it as context and preserve useful continuity"));
-        assert!(prompt.contains("do not reproduce it mechanically"));
+        assert!(prompt.contains("Current work may justify clearer grouping"));
         assert!(prompt.contains("source=\\\"manual\\\""));
         assert!(prompt.contains("source=\\\"LLM restructure\\\""));
     }

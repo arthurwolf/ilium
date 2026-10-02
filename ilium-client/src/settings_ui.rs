@@ -409,6 +409,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::Sound => {
             let lines = sound_lines(
                 &app.sound_settings,
+                &app.notification_settings,
                 &app.sound_discovery,
                 state.selected_row,
             );
@@ -1097,12 +1098,26 @@ const fn tab_row_height(area: Rect) -> u16 {
     }
 }
 
-/// Renders `lines` scrolled by `scroll` rows, adding a vertical scrollbar
-/// only once the content is actually taller than `area` -- matches
-/// `crate::ui`'s own `draw_terminal_scrollbar`/`draw_rendered_scrollbar`.
-/// Compact list surface for server-executed regexp responses. The add/edit
-/// form is deliberately modal so this tab remains scannable even with many
-/// rules.
+/// Maps the same unwrapped list rows used by `text_trigger_lines` to an
+/// edit index; `rule_count` identifies the Add action. Header and spacer
+/// lines stay inert, including when the page is scrolled.
+pub(crate) fn text_trigger_content_hit(
+    area: Rect,
+    scroll: u16,
+    position: Position,
+    rule_count: usize,
+) -> Option<usize> {
+    if !area.contains(position) {
+        return None;
+    }
+    let line = usize::from(position.y - area.y) + usize::from(scroll);
+    if line >= 3 && line < 3 + rule_count {
+        return Some(line - 3);
+    }
+    (line == 4 + rule_count).then_some(rule_count)
+}
+
+/// Compact list surface for server-executed regexp responses.
 fn text_trigger_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled(
@@ -1151,6 +1166,7 @@ fn text_trigger_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {
     lines
 }
 
+/// Renders unwrapped rows with a vertical scrollbar when needed.
 pub(crate) fn render_scrollable(
     frame: &mut Frame,
     area: Rect,
@@ -1246,9 +1262,13 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::KanbanBoard => {
             kanban_board_lines(&app.kanban_board_settings, selected_row).len() as u16
         }
-        SettingsTab::Sound => {
-            sound_lines(&app.sound_settings, &app.sound_discovery, selected_row).len() as u16
-        }
+        SettingsTab::Sound => sound_lines(
+            &app.sound_settings,
+            &app.notification_settings,
+            &app.sound_discovery,
+            selected_row,
+        )
+        .len() as u16,
         SettingsTab::VoiceControl => voice_lines(app, selected_row).len() as u16,
         SettingsTab::ResetPlanning => reset_planning_lines(app, selected_row).len() as u16,
         SettingsTab::AgentMonitoring => {
@@ -2951,6 +2971,13 @@ fn sound_row_label(row: SoundRow) -> &'static str {
         SoundRow::WaitingBackground => "Agent waits for background work",
         SoundRow::TaskSucceeded => "Task succeeded",
         SoundRow::TaskFailed => "Task failed or monitor lost",
+        SoundRow::NotifyEnabled => "Desktop notifications",
+        SoundRow::NotifyAgentFinished => "Notify: agent finished",
+        SoundRow::NotifyApprovalRequired => "Notify: needs approval",
+        SoundRow::NotifyTaskSucceeded => "Notify: task succeeded",
+        SoundRow::NotifyTaskFailed => "Notify: task failed or lost",
+        SoundRow::NotifySuppressRedundant => "Hide redundant task alerts",
+        SoundRow::NotifyCoalesce => "Merge task alerts within",
     }
 }
 
@@ -2965,6 +2992,25 @@ fn sound_row_description(row: SoundRow) -> &'static str {
         SoundRow::WaitingBackground => "An agent is waiting for background workers it started.",
         SoundRow::TaskSucceeded => "A monitored task reported successful completion.",
         SoundRow::TaskFailed => "A monitored task failed or Ilium lost sight of it.",
+        SoundRow::NotifyEnabled => {
+            "Master switch for every desktop notification below; off silences them all."
+        }
+        SoundRow::NotifyAgentFinished => "A busy agent completed its turn and is waiting for you.",
+        SoundRow::NotifyApprovalRequired => {
+            "An agent is blocked on an approval or confirmation prompt."
+        }
+        SoundRow::NotifyTaskSucceeded => {
+            "A monitored background task finished while its agent may keep working. Off by default."
+        }
+        SoundRow::NotifyTaskFailed => {
+            "A monitored background task failed or was lost; the agent may be continuing."
+        }
+        SoundRow::NotifySuppressRedundant => {
+            "Skip task alerts and sounds while the agent is idle or parked: its own finished alert follows."
+        }
+        SoundRow::NotifyCoalesce => {
+            "Same-kind task alerts on one pane closer together than this are merged into the first. Left/Right adjusts by 10 s; 0 turns merging off."
+        }
     }
 }
 
@@ -2987,15 +3033,39 @@ fn selected_sound_label(
         .unwrap_or_else(|| format!("{} (unavailable)", path.display()))
 }
 
+fn checkbox_value(is_enabled: bool) -> String {
+    if is_enabled {
+        "[x] Enabled".to_string()
+    } else {
+        "[ ] Disabled".to_string()
+    }
+}
+
 fn sound_row_value(
     row: SoundRow,
     settings: &ilium_sound::SoundSettings,
+    notifications: &ilium_sound::NotificationSettings,
     discovery: &ilium_sound::SoundDiscovery,
 ) -> String {
     match row {
         SoundRow::Source => format!("‹ {} ›", settings.source.label()),
         SoundRow::File => format!("‹ {} ›", selected_sound_label(settings, discovery)),
         SoundRow::Preview => "[ Play ]".to_string(),
+        SoundRow::NotifyEnabled => checkbox_value(notifications.enabled),
+        SoundRow::NotifySuppressRedundant => {
+            checkbox_value(notifications.suppress_redundant_task_outcomes)
+        }
+        SoundRow::NotifyCoalesce => {
+            if notifications.task_coalesce_seconds == 0 {
+                "‹ Off ›".to_string()
+            } else {
+                format!("‹ {} s ›", notifications.task_coalesce_seconds)
+            }
+        }
+        notify_row if notify_row.notification_event().is_some() => notify_row
+            .notification_event()
+            .map(|event| checkbox_value(notifications.event_flag(event)))
+            .unwrap_or_default(),
         event_row => event_row
             .event()
             .map(|event| {
@@ -3014,6 +3084,7 @@ fn sound_row_value(
 /// where options came from and lets mouse users select a file directly.
 fn sound_lines(
     settings: &ilium_sound::SoundSettings,
+    notifications: &ilium_sound::NotificationSettings,
     discovery: &ilium_sound::SoundDiscovery,
     selected_row: usize,
 ) -> Vec<Line<'static>> {
@@ -3035,7 +3106,10 @@ fn sound_lines(
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled(label, label_style),
             Span::raw(" ".repeat(padding)),
-            Span::styled(sound_row_value(row, settings, discovery), value_style),
+            Span::styled(
+                sound_row_value(row, settings, notifications, discovery),
+                value_style,
+            ),
         ]));
         lines.push(Line::from(Span::styled(
             format!("    {}", sound_row_description(row)),
@@ -5000,20 +5074,17 @@ mod tests {
                     // (location, scene status, playback and cache lines).
                     const IDS: [&str; 10] =
                         ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"];
-                    crate::background_animation::test_controls::install(
-                        IDS.iter()
-                            .map(|id| {
-                                ilium_ambient::Control::slider(
-                                    id,
-                                    "Fake",
-                                    0,
-                                    (0, 10, 1),
-                                    "",
-                                    "help",
-                                )
-                            })
-                            .collect(),
-                    );
+                    let semantic_controls = crate::background_animation::AnimationSettings {
+                        kind: crate::background_animation::AnimationKind::Semantic,
+                        ..Default::default()
+                    }
+                    .scene_controls();
+                    let numbered_controls = IDS
+                        .iter()
+                        .map(|id| {
+                            ilium_ambient::Control::slider(id, "Fake", 0, (0, 10, 1), "", "help")
+                        })
+                        .collect::<Vec<_>>();
                     // The scene list and the global rows are scrolled windows,
                     // so walk every region's offsets; the ink rows exist only
                     // in Monotone and the tint row only in Greyscale.
@@ -5023,6 +5094,15 @@ mod tests {
                         app.animation_settings.appearance.mode = mode;
                         for kind in crate::background_animation::AnimationKind::ALL {
                             app.animation_settings.kind = kind;
+                            // Semantic has its own real scope control, rather
+                            // than numbered concrete-scene controls.
+                            crate::background_animation::test_controls::install(
+                                if kind == crate::background_animation::AnimationKind::Semantic {
+                                    semantic_controls.clone()
+                                } else {
+                                    numbered_controls.clone()
+                                },
+                            );
                             let model = app.animation_row_model();
                             let area = layout.content_area;
                             let limit = |region| {
@@ -6388,11 +6468,16 @@ mod tests {
     #[test]
     fn sound_lines_show_source_events_and_real_discovery_evidence() {
         let settings = ilium_sound::SoundSettings::default();
-        let rendered = sound_lines(&settings, &sound_discovery_fixture(), 0)
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let rendered = sound_lines(
+            &settings,
+            &ilium_sound::NotificationSettings::default(),
+            &sound_discovery_fixture(),
+            0,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
         assert!(rendered.contains("System beep"));
         assert!(rendered.contains("[x] Enabled"));
         assert!(rendered.contains("Agent needs approval"));
@@ -6453,7 +6538,8 @@ mod tests {
     #[test]
     fn sound_hit_testing_handles_controls_catalog_and_scroll() {
         let discovery = sound_discovery_fixture();
-        let area = Rect::new(0, 0, 100, 40);
+        // Tall enough for every Sound and Notification row plus the catalog.
+        let area = Rect::new(0, 0, 100, 90);
         let control_x = area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH;
         assert_eq!(
             sound_content_hit(area, 0, Position::new(control_x, 1), &discovery),

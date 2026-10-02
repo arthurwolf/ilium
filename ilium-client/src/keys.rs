@@ -1440,20 +1440,17 @@ fn handle_text_trigger_dialog_event(
             app.mode = Mode::TextTriggerDialog(state);
         }
         KeyCode::Enter if state.focus == TextTriggerFocus::Save => {
-            let index = state.editing_index;
             let trigger = state.candidate();
-            if trigger.regexp.is_empty()
-                || regex::Regex::new(&trigger.regexp).is_err()
-                || trigger.message.contains(['\r', '\n'])
-            {
-                app.status_message = Some(
-                    "Enter a valid regexp and use a one-line message before saving".to_string(),
-                );
+            if let Err(error) = app.commit_text_trigger(
+                state.editing_id.as_deref(),
+                state.editing_base.as_ref(),
+                trigger,
+            ) {
+                state.save_error = Some(error);
                 app.mode = Mode::TextTriggerDialog(state);
-            } else {
-                app.commit_text_trigger(index, trigger);
-                app.pop_modal();
+                return;
             }
+            app.pop_modal();
         }
         _ if state.focus == TextTriggerFocus::Regexp => {
             let _ = crate::text_prompt::handle_key(&mut state.regexp, key.code);
@@ -4209,5 +4206,361 @@ mod indent_outdent_tests {
         // `group` is already top-level, so outdenting `pane` out of it
         // would leave the pane parentless at the root -- rejected.
         assert_eq!(compute_outdent_target(&tree, pane), None);
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_draft_tests {
+    use super::*;
+    use crate::text_trigger_dialog::TextTriggerFocus;
+
+    #[test]
+    fn text_trigger_disk_save_failure_keeps_draft_and_durable_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let invalid_document = "[text_triggers\n";
+        std::fs::write(&path, invalid_document).unwrap();
+        let mut app = App::new("test".to_owned(), directory.path().to_path_buf());
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        });
+        app.open_text_trigger_dialog(None);
+        let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+            panic!("editor should open");
+        };
+        editor.regexp.buf = "unsaved-pattern".to_owned();
+        editor.message.buf = "unsaved-message".to_owned();
+        editor.focus = TextTriggerFocus::Save;
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        let Mode::TextTriggerDialog(editor) = &app.mode else {
+            panic!("disk failure must retain draft");
+        };
+        assert_eq!(editor.regexp.buf, "unsaved-pattern");
+        assert_eq!(editor.message.buf, "unsaved-message");
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("Could not save"));
+        assert!(app.text_trigger_settings.triggers.is_empty());
+        assert!(app.take_outbound_requests().is_empty());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), invalid_document);
+    }
+
+    #[test]
+    fn text_trigger_save_refusal_keeps_the_actual_draft_and_parent_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_owned(), directory.path().to_path_buf());
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            selected_row: 4,
+            scroll: 3,
+            ..SettingsState::default()
+        });
+        app.text_trigger_settings
+            .triggers
+            .push(ilium_ipc::TextTrigger {
+                id: "edited-rule".to_owned(),
+                regexp: "original".to_owned(),
+                ..ilium_ipc::TextTrigger::default()
+            });
+        let baseline = app.text_trigger_settings.clone();
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &ilium_ipc::TextTriggerSettings::default(),
+            &baseline,
+        )
+        .unwrap();
+        app.open_text_trigger_dialog(Some(0));
+        let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+            panic!("editor should open");
+        };
+        editor.regexp.buf = "unsaved-pattern".to_owned();
+        editor.message.buf = "unsaved-message".to_owned();
+        editor.sample = ratatui_textarea::TextArea::from(["unsaved sample"]);
+        editor.focus = TextTriggerFocus::Save;
+        app.text_trigger_settings.triggers.clear();
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &baseline,
+            &ilium_ipc::TextTriggerSettings::default(),
+        )
+        .unwrap();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        let Mode::TextTriggerDialog(editor) = &app.mode else {
+            panic!("a refused save must keep the actual unsaved editor open");
+        };
+        assert_eq!(editor.editing_id.as_deref(), Some("edited-rule"));
+        assert_eq!(editor.regexp.buf, "unsaved-pattern");
+        assert_eq!(editor.message.buf, "unsaved-message");
+        assert_eq!(editor.sample_text(), "unsaved sample");
+        assert!(app.status_message.as_deref().unwrap().contains("deleted"));
+        assert!(app.text_trigger_settings.triggers.is_empty());
+        assert!(app.take_outbound_requests().is_empty());
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        let Mode::Settings(settings) = app.mode else {
+            panic!("cancel should return to parent settings");
+        };
+        assert_eq!(settings.tab, SettingsTab::TextTriggers);
+        assert_eq!(settings.selected_row, 4);
+        assert_eq!(settings.scroll, 3);
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_same_rule_conflict_tests {
+    use super::*;
+    use crate::text_trigger_dialog::TextTriggerFocus;
+    use ilium_ipc::{TextTrigger, TextTriggerSettings};
+
+    fn persist(directory: &std::path::Path, settings: &TextTriggerSettings) {
+        let mut document = toml::value::Table::new();
+        document.insert(
+            "text_triggers".to_owned(),
+            toml::Value::try_from(settings).unwrap(),
+        );
+        std::fs::write(
+            directory.join("config.toml"),
+            toml::to_string_pretty(&document).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn rule(id: &str, message: &str) -> TextTrigger {
+        TextTrigger {
+            id: id.to_owned(),
+            regexp: "original".to_owned(),
+            message: message.to_owned(),
+            ..TextTrigger::default()
+        }
+    }
+
+    fn open(directory: &std::path::Path, settings: TextTriggerSettings) -> App {
+        let mut app = App::new("isolated".to_owned(), directory.to_path_buf());
+        app.config_dir = Some(directory.to_path_buf());
+        app.text_trigger_settings = settings;
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        });
+        app.open_text_trigger_dialog(Some(0));
+        let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+            panic!("editor did not open");
+        };
+        editor.regexp.buf = "unsaved-pattern".to_owned();
+        editor.message.buf = "unsaved-message".to_owned();
+        editor.focus = TextTriggerFocus::Save;
+        app
+    }
+
+    #[test]
+    fn same_id_concurrent_change_refuses_actual_save_and_preserves_both_versions() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = TextTriggerSettings {
+            triggers: vec![rule("edited", "original-message")],
+        };
+        persist(directory.path(), &original);
+        let mut app = open(directory.path(), original);
+        let changed = TextTriggerSettings {
+            triggers: vec![rule("edited", "other-client-message")],
+        };
+        persist(directory.path(), &changed);
+        app.apply_text_trigger_settings(changed);
+        let before = std::fs::read(directory.path().join("config.toml")).unwrap();
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        assert_eq!(
+            std::fs::read(directory.path().join("config.toml")).unwrap(),
+            before,
+            "stale same-ID editor overwrote another client's durable rule"
+        );
+        let Mode::TextTriggerDialog(editor) = &app.mode else {
+            panic!("conflict discarded unsaved draft");
+        };
+        assert_eq!(editor.message.buf, "unsaved-message");
+        assert_eq!(editor.regexp.buf, "unsaved-pattern");
+        assert_eq!(editor.editing_id.as_deref(), Some("edited"));
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn editing_one_rule_preserves_unrelated_concurrent_changes_and_additions() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = TextTriggerSettings {
+            triggers: vec![
+                rule("edited", "original-message"),
+                rule("other", "old-other-message"),
+            ],
+        };
+        persist(directory.path(), &original);
+        let mut app = open(directory.path(), original);
+        let current = TextTriggerSettings {
+            triggers: vec![
+                rule("other", "new-other-message"),
+                rule("added", "added-message"),
+                rule("edited", "original-message"),
+            ],
+        };
+        persist(directory.path(), &current);
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+
+        let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+        assert_eq!(
+            saved.triggers.len(),
+            3,
+            "editing one rule discarded a concurrent addition"
+        );
+        assert_eq!(
+            saved.triggers[0], current.triggers[0],
+            "editing one rule replaced another client's unrelated edit"
+        );
+        assert_eq!(saved.triggers[1], current.triggers[1]);
+        assert_eq!(saved.triggers[2].id, "edited");
+        assert_eq!(saved.triggers[2].message, "unsaved-message");
+        assert!(matches!(app.mode, Mode::Settings(_)));
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_retry_and_delete_tests {
+    use super::*;
+    use crate::text_trigger_dialog::TextTriggerFocus;
+    use ilium_ipc::{ClientRequest, TextTriggerSettings};
+
+    #[test]
+    fn text_trigger_failed_save_is_painted_and_retry_keeps_the_draft_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[text_triggers\n").unwrap();
+        let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        });
+        app.open_text_trigger_dialog(None);
+        let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+            panic!("editor did not open");
+        };
+        editor.regexp.buf = "synthetic-ready".to_owned();
+        editor.message.buf = "synthetic-continue".to_owned();
+        editor.focus = TextTriggerFocus::Save;
+        let expected_id = editor.candidate().id;
+        let original_box = std::ptr::from_ref(editor.as_ref());
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        let Mode::TextTriggerDialog(editor) = &app.mode else {
+            panic!("failed save closed draft");
+        };
+        assert_eq!(std::ptr::from_ref(editor.as_ref()), original_box);
+        assert_eq!(editor.candidate().id, expected_id);
+        assert!(app.take_outbound_requests().is_empty());
+
+        for (width, height) in [(80, 24), (120, 40)] {
+            let backend = ratatui::backend::TestBackend::new(width, height);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    crate::ui::draw_at(frame, &mut app, std::time::Duration::ZERO);
+                    crate::text_trigger_dialog::draw_save_error(frame, &app);
+                })
+                .unwrap();
+            let painted: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                painted.contains("Text Trigger not saved"),
+                "save refusal hidden at {width}x{height}"
+            );
+            assert!(
+                painted.contains("Draft retained."),
+                "draft recovery guidance hidden at {width}x{height}"
+            );
+        }
+
+        // Repair only this synthetic isolated source, then retry the same Box.
+        std::fs::write(&path, "").unwrap();
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
+        assert_eq!(persisted.triggers.len(), 1);
+        assert_eq!(persisted.triggers[0].id, expected_id);
+        assert!(matches!(app.take_outbound_requests().as_slice(),
+            [ClientRequest::UpdateTextTriggers { settings }] if settings == &persisted));
+    }
+
+    #[test]
+    fn text_trigger_actual_delete_key_persists_an_explicit_empty_list() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = TextTriggerSettings {
+            triggers: vec![ilium_ipc::TextTrigger {
+                id: "synthetic-last-rule".to_owned(),
+                regexp: "synthetic-ready".to_owned(),
+                message: "synthetic-continue".to_owned(),
+                ..ilium_ipc::TextTrigger::default()
+            }],
+        };
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &TextTriggerSettings::default(),
+            &settings,
+        )
+        .unwrap();
+        let mut app = App::new("isolated".to_owned(), directory.path().to_path_buf());
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.text_trigger_settings = settings;
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            selected_row: 0,
+            ..SettingsState::default()
+        });
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+        );
+        let document: toml::Value =
+            toml::from_str(&std::fs::read_to_string(directory.path().join("config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            document["text_triggers"]["triggers"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(matches!(app.take_outbound_requests().as_slice(),
+            [ClientRequest::UpdateTextTriggers { settings }] if settings.triggers.is_empty()));
+        assert!(matches!(app.mode, Mode::Settings(_)));
     }
 }

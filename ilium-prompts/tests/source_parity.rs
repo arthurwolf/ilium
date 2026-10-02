@@ -11,6 +11,17 @@ fn extracted_sources_match_frozen_original_bytes_and_format_skeletons() {
             .find(|&&(catalog_name, _)| catalog_name == name)
             .unwrap()
             .1;
+        // Semantic intentionally extends the restructure contract. Retain the
+        // original extraction hashes as history; its current behavior is
+        // checked by semantic_restructure_contract and the client parser tests.
+        if matches!(
+            name,
+            "naming/restructure"
+                | "naming/restructure-label-example"
+                | "naming/restructure-summary-example"
+        ) {
+            continue;
+        }
         assert_eq!(
             format!(
                 "{:x}",
@@ -19,6 +30,46 @@ fn extracted_sources_match_frozen_original_bytes_and_format_skeletons() {
             case["sha256"].as_str().unwrap(),
             "{name}"
         );
+    }
+}
+
+#[test]
+fn semantic_restructure_contract_keeps_catalog_and_required_pointers() {
+    let context = serde_json::json!({
+        "animation_catalog": "COMPLETE_CATALOG_SENTINEL",
+        "fixed_groups": "FIXED_GROUP_SENTINEL",
+        "resource_capabilities": "AUTHORED_CAPABILITY_SENTINEL",
+    });
+    let prompt = ilium_prompts::render("naming/restructure", &context).unwrap();
+    for value in [
+        "COMPLETE_CATALOG_SENTINEL",
+        "FIXED_GROUP_SENTINEL",
+        "AUTHORED_CAPABILITY_SENTINEL",
+        "<animation-catalog>",
+        "\"animations\"",
+        "\"project\"",
+        "name-fixed",
+        "Protected splits",
+    ] {
+        assert!(prompt.contains(value), "missing {value}");
+    }
+    for name in [
+        "naming/restructure-label-example",
+        "naming/restructure-summary-example",
+    ] {
+        let example = ilium_prompts::render(name, &serde_json::json!({})).unwrap();
+        let value: Value = serde_json::from_str(&example).unwrap();
+        assert!(value["animations"]["definitions"].is_array());
+        assert!(value["animations"]["project"].is_string());
+        fn check_nodes(nodes: &[Value]) {
+            for node in nodes {
+                assert!(node["animation"].is_string());
+                if let Some(children) = node["children"].as_array() {
+                    check_nodes(children);
+                }
+            }
+        }
+        check_nodes(value["children"].as_array().unwrap());
     }
 }
 

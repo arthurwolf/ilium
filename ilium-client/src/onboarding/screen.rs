@@ -344,7 +344,7 @@ pub fn render_choices(frame: &mut Frame, geometry: &Geometry, step: Step, ui: &W
 fn choice_text(step: Step) -> [(&'static str, &'static str, &'static str); 3] {
     match step {
         Step::AiChoice => [
-            ("Kilo Gateway", "Cloud · no-cost models", "Free AI naming and organization.\n\nData is sent to a hosted provider and may be used for training.\n\nChoose this if convenience matters most."),
+            ("Kilo Gateway", "Cloud · no-cost models", "Free AI naming and organization. It sometimes just fails.\n\nData is sent to a hosted provider and may be used for training.\n\nChoose this if convenience matters most."),
             ("Paid APIs", "Cloud · your account", "Choose your provider and model.\n\nFast, capable models; usage costs money. Your provider's data policy applies.\n\nBring an API key."),
             ("Local Ollama", "Your machine · your data", "Run naming and organization locally.\n\nNo API usage charge; speed and model quality depend on your hardware.\n\nRequires a running Ollama instance."),
         ],

@@ -202,16 +202,8 @@ fn footer_rows(area: Rect, model: &RowModel) -> u16 {
         return FOOTER_ROWS;
     }
     let credits = model
-        .rows()
-        .iter()
-        .zip(model.views())
-        .find_map(|(row, view)| match (row, &view.kind) {
-            (AnimationRow::Scene(kind), RowKind::Scene { is_active: true }) => {
-                Some(kind.inspired_by().len())
-            }
-            _ => None,
-        })
-        .unwrap_or(0);
+        .effective_kind()
+        .map_or(0, |kind| kind.inspired_by().len());
     FOOTER_ROWS + if credits > 0 { credits as u16 + 1 } else { 0 }
 }
 
@@ -874,10 +866,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         Paragraph::new(help).style(ink).wrap(Wrap { trim: true }),
         Rect::new(panel.x, footer_top, panel.width, 2),
     );
+    let semantic_error = app.semantic_animation_error();
     frame.render_widget(
         Paragraph::new(fit(
             app.status_message
                 .as_deref()
+                .or(semantic_error.as_deref())
                 .unwrap_or("Saved automatically for this project."),
             usize::from(panel.width),
         ))
@@ -907,7 +901,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
 /// The one line shown over the field while the controls are hidden.
 pub fn render_fullscreen_hint(frame: &mut Frame, area: Rect, app: &App) {
     // Keep the hint above OSM's wrapped credit and the persistent voice row.
-    let credit_rows = if app.animation_settings.kind == AnimationKind::OpenStreetMap {
+    let credit_rows = if app.effective_animation_kind() == Some(AnimationKind::OpenStreetMap) {
         crate::layout::osm_attribution_area(area).height
     } else {
         0
@@ -915,10 +909,10 @@ pub fn render_fullscreen_hint(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < credit_rows + 2 || area.width == 0 {
         return;
     }
-    let text = fit(
-        " Full screen preview \u{b7} any key or click returns ",
-        usize::from(area.width),
-    );
+    let hint = app
+        .semantic_animation_error()
+        .unwrap_or_else(|| " Full screen preview \u{b7} any key or click returns ".to_owned());
+    let text = fit(&hint, usize::from(area.width));
     let width = UnicodeWidthStr::width(text.as_str()) as u16;
     frame.render_widget(
         Paragraph::new(text).style(control_ink(app).add_modifier(Modifier::DIM)),
@@ -935,7 +929,9 @@ pub fn render_fullscreen_hint(frame: &mut Frame, area: Rect, app: &App) {
 /// demo only: the Animations settings tab draws it, real use never does.
 /// `left_inset` keeps it clear of the controls panel.
 pub fn render_inspired_by(frame: &mut Frame, area: Rect, app: &App, left_inset: u16) {
-    let urls = app.animation_settings.kind.inspired_by();
+    let urls = app
+        .effective_animation_kind()
+        .map_or(&[] as &'static [&'static str], AnimationKind::inspired_by);
     // The bottom row belongs to the persistent voice affordance.
     if urls.is_empty() || area.height < 2 {
         return;
@@ -1108,6 +1104,43 @@ mod tests {
         (app, probe, project)
     }
 
+    #[test]
+    fn semantic_scope_row_persists_through_real_project_configuration() {
+        use crate::background_animation::SemanticScope;
+        let (mut app, _probe, project) = settings_app(80, 24);
+        let was_enabled = app.animation_settings.enabled;
+        let semantic_row = row_index(&app, &AnimationRow::Scene(AnimationKind::Semantic));
+        app.settings_adjust_animation_row(semantic_row, 1);
+        assert_eq!(
+            app.animation_settings.semantic_scope,
+            SemanticScope::Project
+        );
+        let scope_row = row_index(&app, &AnimationRow::SceneControl("semantic_scope"));
+        app.settings_adjust_animation_row(scope_row, 1);
+        let saved = crate::project_config::load(project.path())
+            .unwrap()
+            .animation;
+        assert_eq!(saved.kind, AnimationKind::Semantic);
+        assert_eq!(saved.semantic_scope, SemanticScope::Entry);
+        assert_eq!(saved.enabled, was_enabled);
+        let mut reloaded = App::new("reload".into(), project.path().to_path_buf());
+        // Production startup loads project settings after constructing App.
+        reloaded.animation_settings = crate::project_config::load(&reloaded.session_cwd)
+            .unwrap()
+            .animation
+            .normalized();
+        assert_eq!(reloaded.animation_settings, saved);
+        let terminal = draw(&mut app, 80, 24);
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Semantic"));
+    }
+
     fn draw(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| crate::ui::draw(frame, app)).unwrap();
@@ -1253,7 +1286,9 @@ mod tests {
                 .filter(|row| matches!(row, AnimationRow::SceneControl(_)))
                 .count();
             assert_eq!(control_rows, controls.len(), "{kind:?}");
-            if !kind.is_ambient() && kind != AnimationKind::Wikipedia {
+            if !kind.is_ambient()
+                && !matches!(kind, AnimationKind::Wikipedia | AnimationKind::Semantic)
+            {
                 // The shoreline lists its style choice and, in the default Rich
                 // style, fifteen more sliders after the four named ones.
                 let expected = if kind == AnimationKind::Shoreline {

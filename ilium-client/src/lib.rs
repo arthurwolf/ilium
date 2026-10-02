@@ -104,6 +104,7 @@ pub mod scheduled_input;
 pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
+mod semantic_animation;
 pub mod session_conversion;
 pub mod session_naming;
 pub mod session_stats;
@@ -571,26 +572,30 @@ async fn run_inner(
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
             app.ui_settings.show_project_separators = project_config.show_project_separators;
-            app.animation_settings = project_config.animation.normalized();
+            app.install_animation_project_settings(
+                app.session_cwd.clone(),
+                Ok(project_config.animation),
+            );
         }
         Err(error) => {
             tracing::warn!(%error, "failed to load project-scoped UI settings");
+            app.install_animation_project_settings(
+                app.session_cwd.clone(),
+                Err(format!(
+                    "Could not load project animation settings: {error}"
+                )),
+            );
         }
     }
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
     app.apply_sound_settings(config.sound);
+    app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);
     app.apply_trigger_settings(config.triggers);
     app.apply_text_trigger_settings(config.text_triggers);
     app.apply_agent_setup_settings(config.agent_setup);
-    // The detached server owns execution. Queue one prospective replacement
-    // on each attach so a server started before the client still receives the
-    // persisted global rules without needing a restart.
-    app.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers {
-        settings: app.text_trigger_settings.clone(),
-    });
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
@@ -714,6 +719,10 @@ async fn run_inner(
     let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
+        if app.synchronize_animation_project_settings() {
+            needs_redraw = true;
+            needs_immediate_redraw = true;
+        }
         let now = Instant::now();
         let mut voice_tool_outputs = Vec::new();
         let maintenance_schedule = app.maintenance_schedule(now);
@@ -1045,6 +1054,10 @@ async fn run_inner(
                 .await;
         }
 
+        if app.synchronize_animation_project_settings() {
+            needs_redraw = true;
+            needs_immediate_redraw = true;
+        }
         record_client_surface_change(&app, &mut last_recorded_surface);
         record_status_message_change(
             app.status_message.as_deref(),
@@ -1070,12 +1083,21 @@ async fn run_inner(
         }
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         if needs_redraw && can_draw {
-            terminal
+            let completed_frame = terminal
                 .draw(|frame| {
                     crate::ui::draw_at(frame, &mut app, animation_elapsed);
+                    crate::text_trigger_dialog::draw_save_error(frame, &app);
                     crate::terminal_guard::skip_bottom_right_cell(frame, cfg!(windows));
                 })
                 .map_err(ClientError::TerminalSetup)?;
+            // CompletedFrame exists only after Ratatui's backend flush succeeds.
+            // It contains the actual auto-resized buffer after overlays and
+            // platform Skip controls, not the earlier scene raster.
+            crate::background_composition::acknowledge_final(
+                completed_frame.buffer,
+                completed_frame.area,
+                &mut app,
+            );
             needs_redraw = false;
             needs_immediate_redraw = false;
             last_draw_at = Instant::now();

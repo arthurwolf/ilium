@@ -201,6 +201,8 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-62".to_owned()
         } else if kind == AnimationKind::Carpet {
             "AN-63".to_owned()
+        } else if kind == AnimationKind::Semantic {
+            "AN-64".to_owned()
         } else if kind == AnimationKind::SolarSystem {
             "AN-49".to_owned()
         } else if kind == AnimationKind::HexExpedition {
@@ -290,5 +292,90 @@ fn narrow_animation_settings_help_anchors_reach_every_lower_control() {
                 .any(|anchor| anchor.topic_id == expected_id && anchor.selected),
             "selected row {row}'s help anchor remains reachable when scrolled"
         );
+    }
+}
+
+#[test]
+fn scene_status_help_retains_complete_report_after_host_release_and_scrolls() {
+    use crate::app::{App, Mode, SettingsState, SettingsTab};
+    use crate::background_animation::AmbientHost;
+    use crate::config::MotionLevel;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use std::time::{Duration, Instant};
+    struct ReportScene(String);
+    impl ilium_ambient::Scene for ReportScene {
+        fn render(&mut self, _frame: &mut ilium_ambient::Frame<'_>) {}
+        fn status(&self) -> Option<String> {
+            Some(self.0.clone())
+        }
+    }
+    // Synthetic status text is confined to this fixture. Its final line must
+    // remain readable after the actual modal path drops the live scene.
+    let report = format!(
+        "Synthetic provider fixture: received1000; position age unknown
+{}
+STATUS_TAIL_64806_RECEIVED_NO_FIX",
+        "Known observations; failed refresh preserves original receipt
+"
+        .repeat(40)
+    );
+    for (width, height) in [(80, 24), (120, 40)] {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("status-help-fixture".into(), project.path().to_path_buf());
+        app.set_screen_area(Rect::new(0, 0, width, height));
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+        let supplied = report.clone();
+        *app.animation_frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
+            Box::new(ReportScene(supplied.clone()))
+        }));
+        app.animation_frame.host_mut().sync(
+            ilium_ambient::AmbientKind::Graph,
+            &app.animation_settings.ambient,
+            Duration::ZERO,
+        );
+        let before = app.animation_settings.clone();
+        app.push_modal_over(
+            Mode::Settings(SettingsState {
+                tab: SettingsTab::Animations,
+                ..Default::default()
+            }),
+            Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
+                "AN-37",
+                1,
+                MotionLevel::Off,
+            )),
+        );
+        app.animation_frame.release_hosts();
+        assert!(!app.animation_frame.host().is_hosted());
+        let Mode::SettingsHelp(state) = &mut app.mode else {
+            panic!("help must open")
+        };
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut visible = String::new();
+        for offset in (0..100).step_by(4) {
+            state.explanation_scroll = offset;
+            terminal
+                .draw(|frame| {
+                    super::dialog::render(
+                        frame,
+                        frame.area(),
+                        catalog::by_id("AN-37").unwrap(),
+                        state,
+                        MotionLevel::Off,
+                        Instant::now(),
+                    )
+                })
+                .unwrap();
+            for cell in &terminal.backend().buffer().content {
+                visible.push_str(cell.symbol());
+            }
+        }
+        assert!(
+            visible.contains("STATUS_TAIL_64806_RECEIVED_NO_FIX"),
+            "complete captured report must be scrollable at {width}x{height}"
+        );
+        app.pop_modal();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(app.animation_settings, before);
     }
 }

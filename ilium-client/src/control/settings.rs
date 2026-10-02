@@ -1,7 +1,7 @@
 //! Dotted-path adapter over ilium's existing validated settings methods.
 
 use ilium_inference::{InferenceProviderKind, TitleStyle};
-use ilium_sound::{SoundEvent, SoundSourceKind};
+use ilium_sound::{NotificationEvent, SoundEvent, SoundSourceKind};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use serde_json::Value;
 
@@ -457,6 +457,35 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "sound.events.task_failed" => {
             set_sound_event(app, SoundEvent::TaskFailed, boolean(&value)?)
         }
+        "notifications.enabled" => {
+            let mut notifications = app.notification_settings;
+            notifications.enabled = boolean(&value)?;
+            app.apply_and_persist_notification_settings(notifications);
+        }
+        "notifications.agent_finished" => {
+            set_notification_event(app, NotificationEvent::AgentFinished, boolean(&value)?)
+        }
+        "notifications.approval_required" => {
+            set_notification_event(app, NotificationEvent::ApprovalRequired, boolean(&value)?)
+        }
+        "notifications.task_succeeded" => {
+            set_notification_event(app, NotificationEvent::TaskSucceeded, boolean(&value)?)
+        }
+        "notifications.task_failed" => {
+            set_notification_event(app, NotificationEvent::TaskFailed, boolean(&value)?)
+        }
+        "notifications.suppress_redundant_task_outcomes" => {
+            let mut notifications = app.notification_settings;
+            notifications.suppress_redundant_task_outcomes = boolean(&value)?;
+            app.apply_and_persist_notification_settings(notifications);
+        }
+        "notifications.task_coalesce_seconds" => {
+            let seconds = u32::try_from(unsigned(&value)?)
+                .unwrap_or(ilium_sound::NotificationSettings::MAX_TASK_COALESCE_SECONDS);
+            let mut notifications = app.notification_settings;
+            notifications.task_coalesce_seconds = seconds;
+            app.apply_and_persist_notification_settings(notifications.normalized());
+        }
         path if path.starts_with("triggers.") => {
             // The guard above already proved the prefix is present, so this can never miss.
             let event_key = path
@@ -802,6 +831,14 @@ fn set_editor_toggle(app: &mut App, row: EditorRow, current: bool, target: bool)
 fn set_sound_event(app: &mut App, event: SoundEvent, target: bool) {
     if app.sound_settings.events.is_enabled(event) != target {
         app.settings_toggle_sound_event(event);
+    }
+}
+
+fn set_notification_event(app: &mut App, event: NotificationEvent, target: bool) {
+    if app.notification_settings.event_flag(event) != target {
+        let mut notifications = app.notification_settings;
+        notifications.toggle(event);
+        app.apply_and_persist_notification_settings(notifications);
     }
 }
 

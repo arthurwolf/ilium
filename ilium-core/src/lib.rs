@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub mod animation_recommendation;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
 
@@ -1455,6 +1457,12 @@ pub struct Node {
     #[serde(default)]
     pub structure_source: StructureSource,
     pub kind: NodeKind,
+    /// Inference-owned presentation metadata, separate from authored settings.
+    #[serde(default)]
+    pub inferred_animation: Option<animation_recommendation::AnimationRecommendation>,
+    /// Project transaction fence; apply and undo advance it monotonically.
+    #[serde(default)]
+    pub animation_generation: u64,
 }
 
 impl Node {
@@ -1763,6 +1771,8 @@ impl Tree {
                 name: "session".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2243,6 +2253,8 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2328,6 +2340,8 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2365,6 +2379,8 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2431,6 +2447,8 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2479,6 +2497,8 @@ impl Tree {
                 name,
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2543,6 +2563,8 @@ impl Tree {
                 name: name.into(),
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,
@@ -2661,6 +2683,8 @@ impl Tree {
             return Err(TreeError::NotAProject(project_id));
         }
 
+        let next_animation_generation = self.next_project_animation_generation(project_id)?;
+
         let mut referenced = RestructureReferences::default();
         self.validate_restructure_children(
             &plan.children,
@@ -2755,6 +2779,7 @@ impl Tree {
         Self::rebuild_restructure_children(&mut updated, project_id, &plan.children)?;
         let checkpoint_activity_revisions =
             updated.mark_project_restructured_at(project_id, inference_activity_revisions)?;
+        updated.get_mut(project_id)?.animation_generation = next_animation_generation;
         *self = updated;
         Ok(checkpoint_activity_revisions)
     }
@@ -2809,6 +2834,27 @@ impl Tree {
     /// before that project's restructure. Other projects and later edits to
     /// them remain untouched.
     pub fn restore_project_from(
+        &mut self,
+        project_id: NodeId,
+        previous: &Tree,
+    ) -> Result<(), TreeError> {
+        let next_generation = self.next_project_animation_generation(project_id)?;
+        let previous_project = previous
+            .get(project_id)
+            .filter(|node| node.is_project())
+            .ok_or(TreeError::NotAProject(project_id))?;
+        let recommendation = previous_project.inferred_animation.clone();
+        let mut updated = self.clone();
+        updated.restore_project_from_in_place(project_id, previous)?;
+        let project = updated.get_mut(project_id)?;
+        project.inferred_animation = recommendation;
+        project.animation_generation = next_generation;
+        updated.validate()?;
+        *self = updated;
+        Ok(())
+    }
+
+    fn restore_project_from_in_place(
         &mut self,
         project_id: NodeId,
         previous: &Tree,
@@ -3054,6 +3100,8 @@ impl Tree {
                             name: title.clone(),
                             short_name: short_title.clone(),
                             inferred_icon: icon.clone(),
+                            inferred_animation: None,
+                            animation_generation: 0,
                             is_name_fixed: false,
                             is_bookmarked: false,
                             activity_revision: 0,
@@ -6669,6 +6717,8 @@ mod tests {
                 name: "orphaned under a pane".to_string(),
                 short_name: None,
                 inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
                 is_name_fixed: false,
                 is_bookmarked: false,
                 activity_revision: 0,

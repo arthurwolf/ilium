@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use ilium_inference::InferenceSettings;
 use ilium_ipc::TextTriggerSettings;
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
-use ilium_sound::SoundSettings;
+use ilium_sound::{NotificationSettings, SoundSettings};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,9 @@ pub struct ClientConfig {
     /// User-global sound source and event checkboxes. The client persists
     /// changes; the detached server owns actual playback.
     pub sound: SoundSettings,
+    /// User-global desktop-notification switches. The client persists
+    /// changes; running servers pick them up through their config watcher.
+    pub notifications: NotificationSettings,
     /// Board presentation settings shown in the Kanban Board tab.
     pub kanban_board: KanbanBoardSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
@@ -101,6 +104,7 @@ impl Default for ClientConfig {
             theme: Theme::default(),
             ui: UiSettings::default(),
             sound: SoundSettings::default(),
+            notifications: NotificationSettings::default(),
             kanban_board: KanbanBoardSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
@@ -1062,6 +1066,8 @@ struct RawClientConfig {
     #[serde(default)]
     sound: SoundSettings,
     #[serde(default)]
+    notifications: NotificationSettings,
+    #[serde(default)]
     kanban_board: RawKanbanBoardConfig,
     #[serde(default)]
     inference: InferenceSettings,
@@ -1318,6 +1324,8 @@ pub enum ConfigSaveError {
     Write(std::io::Error),
     #[error("existing [session] config is not a TOML table")]
     InvalidSessionTable,
+    #[error("{0}")]
+    TextTrigger(String),
 }
 
 /// Loads `<config_dir>/config.toml`'s `[keybindings]`, `[keyboard]`, `[theme]`,
@@ -1396,10 +1404,11 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         theme,
         ui,
         sound: raw.sound,
+        notifications: raw.notifications.normalized(),
         kanban_board,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
-        text_triggers: normalize_text_trigger_settings(raw.text_triggers),
+        text_triggers: raw.text_triggers,
         agent_setup: raw.agent_setup,
         terminal,
         editor,
@@ -1412,18 +1421,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         cost: raw.cost.sanitized(),
         onboarding: raw.onboarding,
     })
-}
-
-/// Hand-authored TOML predates no Text Trigger IDs, so accept an omitted ID
-/// and assign one before the list reaches the server. The next settings save
-/// persists it, giving later edits and diagnostics a stable identity.
-fn normalize_text_trigger_settings(mut settings: TextTriggerSettings) -> TextTriggerSettings {
-    for trigger in &mut settings.triggers {
-        if trigger.id.is_empty() {
-            trigger.id = uuid::Uuid::new_v4().to_string();
-        }
-    }
-    settings
 }
 
 /// Resolves both configurable keyboard prefixes while keeping an absent
@@ -2103,12 +2100,6 @@ pub fn save_session_settings(
     desired: &SessionSettings,
 ) -> Result<SessionSettings, ClientError> {
     let path = config_dir.join("config.toml");
-    let lock_path = config_dir.join(".session-settings.lock");
-    let _lock =
-        ExclusiveFileLock::acquire(&lock_path).map_err(|source| ClientError::ConfigSave {
-            path: path.clone(),
-            source: Box::new(ConfigSaveError::Write(source)),
-        })?;
     let mut document = read_toml_document(&path)?;
     let session_value = document
         .as_table_mut()
@@ -2253,6 +2244,26 @@ pub fn save_sound_settings(config_dir: &Path, sound: &SoundSettings) -> Result<(
     write_toml_document(&path, &document)
 }
 
+/// Persists the complete `[notifications]` table without replacing settings
+/// owned by either the client or server. Running servers apply the change
+/// through their config watcher, so no IPC request is needed.
+pub fn save_notification_settings(
+    config_dir: &Path,
+    notifications: &NotificationSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(notifications).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("notifications".to_string(), value);
+    write_toml_document(&path, &document)
+}
+
 /// Persists only the client-owned `[inference]` table, preserving all server
 /// and unrelated client configuration. The settings UI deliberately avoids
 /// displaying API-key values after they are entered.
@@ -2292,23 +2303,155 @@ pub fn save_trigger_settings(
     write_toml_document(&path, &document)
 }
 
-/// Persists the complete `[text_triggers]` list while preserving every
-/// unrelated client and detached-server setting.
+/// Replaces an explicitly edited full list only when its durable baseline still matches.
 pub fn save_text_trigger_settings(
     config_dir: &Path,
+    expected: &TextTriggerSettings,
     settings: &TextTriggerSettings,
 ) -> Result<(), ClientError> {
     let path = config_dir.join("config.toml");
     let mut document = read_toml_document(&path)?;
-    let table = document
-        .as_table_mut()
-        .expect("a TOML document's root is always a table");
+    let current = text_trigger_settings_from_document(&path, &document)?;
+    if current != *expected {
+        return Err(text_trigger_save_error(
+            &path,
+            "Text Trigger list changed; cancel and reopen to review it",
+        ));
+    }
+    publish_text_trigger_settings(&path, &mut document, settings)
+}
+
+/// Applies one stable-ID edit against the latest durable list, preserving foreign rules and ordering.
+pub fn save_text_trigger_edit(
+    config_dir: &Path,
+    expected: Option<&ilium_ipc::TextTrigger>,
+    replacement: Option<&ilium_ipc::TextTrigger>,
+) -> Result<TextTriggerSettings, ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let mut current = text_trigger_settings_from_document(&path, &document)?;
+    if let Some(expected) = expected {
+        let Some(index) = current
+            .triggers
+            .iter()
+            .position(|rule| rule.id == expected.id)
+        else {
+            return Err(text_trigger_save_error(
+                &path,
+                "This Text Trigger was deleted; cancel and reopen to review the list",
+            ));
+        };
+        if current.triggers[index] != *expected {
+            return Err(text_trigger_save_error(
+                &path,
+                "This Text Trigger changed; cancel and reopen to review its new value",
+            ));
+        }
+        if let Some(replacement) = replacement {
+            if replacement.id != expected.id {
+                return Err(text_trigger_save_error(
+                    &path,
+                    "An edit cannot change a Text Trigger identity",
+                ));
+            }
+            current.triggers[index] = replacement.clone();
+        } else {
+            current.triggers.remove(index);
+        }
+    } else {
+        let Some(replacement) = replacement else {
+            return Err(text_trigger_save_error(
+                &path,
+                "No Text Trigger edit was supplied",
+            ));
+        };
+        if current
+            .triggers
+            .iter()
+            .any(|rule| rule.id == replacement.id)
+        {
+            return Err(text_trigger_save_error(
+                &path,
+                "The new Text Trigger identity already exists",
+            ));
+        }
+        current.triggers.push(replacement.clone());
+    }
+    publish_text_trigger_settings(&path, &mut document, &current)?;
+    Ok(current)
+}
+
+fn text_trigger_save_error(path: &Path, message: &str) -> ClientError {
+    ClientError::ConfigSave {
+        path: path.to_path_buf(),
+        source: Box::new(ConfigSaveError::TextTrigger(message.to_owned())),
+    }
+}
+
+fn text_trigger_settings_from_document(
+    path: &Path,
+    document: &ConfigDocument,
+) -> Result<TextTriggerSettings, ClientError> {
+    let Some(value) = document.get("text_triggers") else {
+        return Ok(TextTriggerSettings::default());
+    };
+    if value.get("triggers").is_none() {
+        return Err(text_trigger_save_error(
+            path,
+            "[text_triggers] must contain an explicit triggers list",
+        ));
+    }
+    let settings: TextTriggerSettings =
+        value
+            .clone()
+            .try_into()
+            .map_err(|source| ClientError::ConfigSave {
+                path: path.to_path_buf(),
+                source: Box::new(ConfigSaveError::Parse(source)),
+            })?;
+    validate_text_trigger_settings(path, &settings)?;
+    Ok(settings)
+}
+
+fn validate_text_trigger_settings(
+    path: &Path,
+    settings: &TextTriggerSettings,
+) -> Result<(), ClientError> {
+    settings
+        .validate_identities()
+        .map_err(|message| text_trigger_save_error(path, &message))?;
+    for rule in &settings.triggers {
+        if rule.regexp.is_empty() || rule.message.contains(['\r', '\n']) {
+            return Err(text_trigger_save_error(
+                path,
+                "Enter a nonempty regexp and a one-line message",
+            ));
+        }
+        if regex::Regex::new(&rule.regexp).is_err() {
+            return Err(text_trigger_save_error(
+                path,
+                "Enter a valid regexp before saving",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn publish_text_trigger_settings(
+    path: &Path,
+    document: &mut ConfigDocument,
+    settings: &TextTriggerSettings,
+) -> Result<(), ClientError> {
+    validate_text_trigger_settings(path, settings)?;
     let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
-    table.insert("text_triggers".to_owned(), value);
-    write_toml_document(&path, &document)
+    document
+        .as_table_mut()
+        .expect("TOML document root")
+        .insert("text_triggers".to_owned(), value);
+    write_toml_document(path, document)
 }
 
 /// Persists managed-instruction targets and prompt suppression while
@@ -2334,12 +2477,6 @@ pub fn update_agent_setup_settings(
     desired: &AgentSetupSettings,
 ) -> Result<AgentSetupSettings, ClientError> {
     let path = config_dir.join("config.toml");
-    let lock_path = config_dir.join(".agent-setup.lock");
-    let _lock =
-        ExclusiveFileLock::acquire(&lock_path).map_err(|source| ClientError::ConfigSave {
-            path: path.clone(),
-            source: Box::new(ConfigSaveError::Write(source)),
-        })?;
     let mut document = read_toml_document(&path)?;
     let mut current = document
         .get("agent_setup")
@@ -2413,18 +2550,52 @@ pub fn save_api_settings(config_dir: &Path, api: &ApiSettings) -> Result<(), Cli
 /// Reads and parses `path` as a generic TOML document for [`save_ui_settings`]
 /// to merge into -- an absent file starts from an empty table rather than an
 /// error, matching [`load`]'s own "no config file yet" handling.
-fn read_toml_document(path: &Path) -> Result<toml::Value, ClientError> {
-    if !path.exists() {
-        return Ok(toml::Value::Table(toml::value::Table::new()));
+/// The lock belongs to the parsed document until publication or refusal.
+struct ConfigDocument {
+    value: toml::Value,
+    _lock: ExclusiveFileLock,
+}
+
+impl std::ops::Deref for ConfigDocument {
+    type Target = toml::Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
     }
-    let contents = std::fs::read_to_string(path).map_err(|source| ClientError::ConfigSave {
-        path: path.to_path_buf(),
-        source: Box::new(ConfigSaveError::Read(source)),
-    })?;
-    toml::from_str(&contents).map_err(|source| ClientError::ConfigSave {
-        path: path.to_path_buf(),
-        source: Box::new(ConfigSaveError::Parse(source)),
-    })
+}
+
+impl std::ops::DerefMut for ConfigDocument {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+
+fn read_toml_document(path: &Path) -> Result<ConfigDocument, ClientError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    // The server detector saver already uses this lock. Every client table
+    // writer must hold it before reading the shared document.
+    let lock = ExclusiveFileLock::acquire(&parent.join(".agent-detection-settings.lock")).map_err(
+        |source| ClientError::ConfigSave {
+            path: path.to_path_buf(),
+            source: Box::new(ConfigSaveError::Write(source)),
+        },
+    )?;
+    let value = match std::fs::read_to_string(path) {
+        Ok(contents) => toml::from_str(&contents).map_err(|source| ClientError::ConfigSave {
+            path: path.to_path_buf(),
+            source: Box::new(ConfigSaveError::Parse(source)),
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            toml::Value::Table(toml::value::Table::new())
+        }
+        Err(source) => {
+            return Err(ClientError::ConfigSave {
+                path: path.to_path_buf(),
+                source: Box::new(ConfigSaveError::Read(source)),
+            });
+        }
+    };
+    Ok(ConfigDocument { value, _lock: lock })
 }
 
 /// Serializes and writes a merged config document.
@@ -2434,12 +2605,11 @@ fn read_toml_document(path: &Path) -> Result<toml::Value, ClientError> {
 /// `ilium_platform::secure_fs` -- the temp file is created owner-only with
 /// symlink refusal, exactly like `workspace_file::save`'s snapshot write,
 /// rather than `std::fs::write`'s umask-default (typically world-readable)
-/// mode. The rename preserves the temp file's `0o600` mode, and the final
-/// `restrict_file_to_owner` also tightens a pre-existing `config.toml` a
-/// user or older build may have left broader.
-fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), ClientError> {
+/// mode. Permissions are finalized on the temporary handle before rename.
+/// The rename replaces a previously broader destination with the private file.
+fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), ClientError> {
     let serialized =
-        toml::to_string_pretty(document).map_err(|source| ClientError::ConfigSave {
+        toml::to_string_pretty(&document.value).map_err(|source| ClientError::ConfigSave {
             path: path.to_path_buf(),
             source: Box::new(ConfigSaveError::Serialize(source)),
         })?;
@@ -2449,30 +2619,33 @@ fn write_toml_document(path: &Path, document: &toml::Value) -> Result<(), Client
             source: Box::new(ConfigSaveError::Write(source)),
         })?;
     }
-    let temporary_path = path.with_extension(format!("toml.tmp-{}", std::process::id()));
+    let temporary_path = path.with_extension(format!("toml.tmp-{}", uuid::Uuid::new_v4()));
+    let mut temporary_file_created = false;
 
     // Written as an inner closure so any failure after the temp file was
-    // created -- a failed write, sync, rename, or permission fix-up -- still
-    // cleans up the stray `*.toml.tmp-<pid>` file below rather than leaving
+    // created -- a failed write, sync, rename, or permission setup -- still
+    // cleans up this transaction's unique temporary file rather than leaving
     // it behind in the config directory forever.
     let result = (|| -> std::io::Result<()> {
-        // A recycled pid can leave a dead process's temp file at this exact
-        // path; clear it (best-effort) so `create_new` only refuses a
-        // genuine live collision instead of a corpse.
-        let _ = std::fs::remove_file(&temporary_path);
         let mut file = secure_fs::private_open_options()
             .write(true)
             .create_new(true)
             .open(&temporary_path)?;
+        temporary_file_created = true;
+        secure_fs::restrict_open_file_to_owner(&file)?;
         file.write_all(serialized.as_bytes())?;
         file.sync_all()?;
+        drop(file);
+        // No fallible operation follows this commit point: a reported refusal
+        // must mean the destination was not changed.
         std::fs::rename(&temporary_path, path)?;
-        secure_fs::restrict_file_to_owner(path)?;
         Ok(())
     })();
 
     result.map_err(|source| {
-        let _ = std::fs::remove_file(&temporary_path);
+        if temporary_file_created {
+            let _ = std::fs::remove_file(&temporary_path);
+        }
         ClientError::ConfigSave {
             path: path.to_path_buf(),
             source: Box::new(ConfigSaveError::Write(source)),
@@ -3032,7 +3205,7 @@ mod tests {
             }],
         };
 
-        save_text_trigger_settings(&dir, &settings).unwrap();
+        save_text_trigger_settings(&dir, &TextTriggerSettings::default(), &settings).unwrap();
 
         let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(saved.contains("[detection]"));
@@ -4380,5 +4553,124 @@ mod tests {
         assert!(raw.contains("[notifications]"));
         assert!(raw.contains("[debug]"));
         assert!(raw.contains("file_logging_enabled = true"));
+    }
+
+    #[test]
+    fn notification_settings_round_trip_and_preserve_other_tables() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[detection]\nworking_poll_seconds = 3\n",
+        )
+        .unwrap();
+        let notifications = NotificationSettings {
+            task_succeeded: true,
+            task_coalesce_seconds: 90,
+            ..NotificationSettings::default()
+        };
+
+        save_notification_settings(&dir, &notifications).expect("save should succeed");
+
+        let config = load(&dir).expect("saved notification config should load back");
+        assert_eq!(config.notifications, notifications);
+        let raw = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(raw.contains("working_poll_seconds = 3"));
+        assert!(raw.contains("task_succeeded = true"));
+    }
+
+    #[test]
+    fn notification_config_defaults_to_recommended_policy() {
+        let dir = scratch_dir();
+        let config = load(&dir).expect("missing file loads defaults");
+        assert!(config.notifications.enabled);
+        assert!(!config.notifications.task_succeeded);
+        assert!(config.notifications.task_failed);
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_config_exclusion_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn unrelated_settings_saves_wait_for_the_shared_document_transaction() {
+        let directory = tempfile::tempdir().expect("isolated configuration");
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[detection]\nworking_poll_seconds = 5\n")
+            .expect("initial synthetic configuration");
+        let held =
+            ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
+                .expect("hold existing server document transaction");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let mut workers = Vec::new();
+        for is_trigger in [true, false] {
+            let directory = directory.path().to_owned();
+            let started = started_tx.clone();
+            let finished = finished_tx.clone();
+            workers.push(std::thread::spawn(move || {
+                started.send(()).expect("report writer start");
+                let result = if is_trigger {
+                    save_text_trigger_settings(
+                        &directory,
+                        &TextTriggerSettings::default(),
+                        &TextTriggerSettings {
+                            triggers: vec![ilium_ipc::TextTrigger {
+                                id: "synthetic-concurrent-rule".to_owned(),
+                                enabled: true,
+                                regexp: "synthetic-ready".to_owned(),
+                                message: "synthetic-continue".to_owned(),
+                                target: ilium_ipc::TextTriggerTarget::Agents,
+                                sample_text: "synthetic-ready".to_owned(),
+                            }],
+                        },
+                    )
+                } else {
+                    save_ui_settings(
+                        &directory,
+                        &UiSettings {
+                            use_stable_glyphs: true,
+                            ..UiSettings::default()
+                        },
+                    )
+                };
+                finished
+                    .send(result.is_ok())
+                    .expect("report writer outcome");
+            }));
+        }
+        for _ in 0..2 {
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("writer reached save");
+        }
+        let premature = finished_rx.recv_timeout(Duration::from_millis(300)).ok();
+        drop(held);
+        for worker in workers {
+            worker.join().expect("writer completed");
+        }
+        let final_config = load(directory.path()).expect("authoritative readback");
+        assert!(
+            premature.is_none(),
+            "settings save published while server document transaction remained held"
+        );
+        assert_eq!(
+            final_config.text_triggers.triggers.len(),
+            1,
+            "unrelated UI save lost durable rule"
+        );
+        assert!(
+            final_config.ui.use_stable_glyphs,
+            "trigger save lost concurrent UI choice"
+        );
+        let document: toml::Value =
+            toml::from_str(&std::fs::read_to_string(path).expect("read authoritative bytes"))
+                .expect("parse final document");
+        assert_eq!(
+            document["detection"]["working_poll_seconds"].as_integer(),
+            Some(5)
+        );
     }
 }

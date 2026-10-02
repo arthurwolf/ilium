@@ -5408,10 +5408,8 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         tui.screen_text()
     );
 
-    // No prompt recorded yet -- the banner must reserve zero screen rows, so
-    // the fixture's own first content line ("model · workspace · ...")
-    // should paint directly below the toolbar rather than an empty banner
-    // background band sitting between them.
+    // Before any prompt is recorded, terminal content already starts after the
+    // four configured prompt rows. Recording a prompt must not move it.
     assert!(
         wait_until(
             || {
@@ -5422,7 +5420,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
                     let cols = screen.size().1;
                     screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 1) as usize)
+                        .nth((toolbar_row + 5) as usize)
                         .unwrap_or_default()
                         .contains("Pursuing goal")
                 })
@@ -5430,8 +5428,8 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
             WAIT_TIMEOUT,
         )
         .await,
-        "with no prompt recorded yet, the row directly below the toolbar should already be pane \
-         content, not a reserved empty banner row: {:?}",
+        "with no prompt recorded yet, pane content should start after the four reserved \
+         prompt rows: {:?}",
         tui.screen_text()
     );
 
@@ -5489,14 +5487,10 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     assert!(exited, "typed-prompt TUI did not exit after cleanup");
 }
 
-/// Regression test for the banner's dynamic height: a short, single-word
-/// prompt must reserve exactly one row, not the default four-line ceiling.
-/// Mirrors the "zero rows before any prompt" check above, one submission
-/// later -- the row directly below the toolbar must now be the banner
-/// (showing the short prompt), and the very next row must already be the
-/// fixture's own content, proving nothing beyond that one row was reserved.
+/// A short prompt uses the same four reserved rows as the empty prompt slot.
+/// Its text occupies the first row while terminal content keeps its position.
 #[tokio::test]
-async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
+async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("short-prompt-project");
@@ -5590,7 +5584,7 @@ async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
                         .unwrap_or_default();
                     let next_row = screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 2) as usize)
+                        .nth((toolbar_row + 5) as usize)
                         .unwrap_or_default();
                     banner_row.contains("hi") && next_row.contains("Pursuing goal")
                 })
@@ -5598,8 +5592,8 @@ async fn last_prompt_banner_reserves_exactly_one_row_for_a_short_prompt() {
             WAIT_TIMEOUT,
         )
         .await,
-        "expected the banner to reserve exactly one row (\"hi\" directly below the toolbar, \
-         the fixture's own content starting the very next row), got: {:?}",
+        "expected \"hi\" directly below the toolbar and terminal content after the same \
+         four reserved prompt rows, got: {:?}",
         tui.screen_text()
     );
 

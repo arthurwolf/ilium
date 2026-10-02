@@ -67,6 +67,7 @@ impl AnimationRow {
 /// Runtime facts the row list depends on besides the settings.
 #[derive(Debug, Clone, Default)]
 pub struct RowContext {
+    pub effective_kind: Option<AnimationKind>,
     /// The hosted scene paints its own per-cell colors.
     pub scene_uses_cell_colors: bool,
     pub scene_status: Option<String>,
@@ -234,6 +235,7 @@ pub enum AnimationRowOutcome {
 pub struct RowModel {
     rows: Vec<AnimationRow>,
     views: Vec<RowView>,
+    effective_kind: Option<AnimationKind>,
 }
 
 impl RowModel {
@@ -244,7 +246,14 @@ impl RowModel {
             .iter()
             .map(|row| row.view(settings, &scene_controls, context))
             .collect();
-        Self { rows, views }
+        let effective_kind = context
+            .effective_kind
+            .or_else(|| (settings.kind != AnimationKind::Semantic).then_some(settings.kind));
+        Self {
+            rows,
+            views,
+            effective_kind,
+        }
     }
 
     pub fn region(&self, row: usize) -> Option<Region> {
@@ -341,6 +350,10 @@ impl RowModel {
         &self.views
     }
 
+    pub fn effective_kind(&self) -> Option<AnimationKind> {
+        self.effective_kind
+    }
+
     /// Index of the first row of the selected scene's controls, or of the
     /// first row on the right when the scene has none: where Enter on a
     /// scene row lands.
@@ -354,8 +367,9 @@ impl RowModel {
 }
 
 /// The ordered row list for `settings`.
-pub fn rows(settings: &AnimationSettings, _context: &RowContext) -> Vec<AnimationRow> {
+pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<AnimationRow> {
     let kind = settings.kind;
+    let rendering_kind = context.effective_kind.unwrap_or(kind);
     let mut rows: Vec<AnimationRow> = AnimationKind::ALL
         .iter()
         .copied()
@@ -407,14 +421,14 @@ pub fn rows(settings: &AnimationSettings, _context: &RowContext) -> Vec<Animatio
     {
         rows.push(AnimationRow::Location);
     }
-    if !kind.is_live_only() {
+    if !rendering_kind.is_live_only() {
         rows.push(AnimationRow::Common("playback"));
         if settings.playback_mode == AnimationPlaybackMode::Loop {
             rows.push(AnimationRow::Common("loop_seconds"));
             rows.push(AnimationRow::CacheStatus);
         }
     }
-    if kind.is_ambient() || kind == AnimationKind::Wikipedia {
+    if kind.is_ambient() || matches!(kind, AnimationKind::Wikipedia | AnimationKind::Semantic) {
         rows.push(AnimationRow::SceneStatus);
     }
     rows.push(AnimationRow::FullScreenPreview);
@@ -560,10 +574,23 @@ impl AnimationRow {
                 disabled_options: Vec::new(),
             },
             Self::SceneStatus => RowView {
-                label: "Scene status".to_owned(),
-                value: context.scene_status.clone().unwrap_or_else(|| "OK".to_owned()),
+                label: if settings.kind == AnimationKind::Semantic {
+                    "Recommendation"
+                } else {
+                    "Scene status"
+                }.to_owned(),
+                value: context.scene_status.clone().unwrap_or_else(|| {
+                    if settings.kind == AnimationKind::Semantic {
+                        "Awaiting tree recommendation"
+                    } else {
+                        "OK"
+                    }.to_owned()
+                }),
                 kind: RowKind::Status,
-                help: if settings.kind == AnimationKind::Wikipedia {
+                help: if settings.kind == AnimationKind::Semantic {
+                    "The selected project or entry's validated recommendation from tree reorganization; selecting an entry does not make another model request."
+                        .to_owned()
+                } else if settings.kind == AnimationKind::Wikipedia {
                     "Article title, source URL, revision, offline state, missing images and font coverage."
                         .to_owned()
                 } else {
@@ -602,6 +629,8 @@ impl AnimationRow {
             Self::Scene(AnimationKind::Aircraft) => "AN-60".to_owned(),
             Self::Scene(AnimationKind::Boats) => "AN-61".to_owned(),
             Self::Scene(AnimationKind::Chess) => "AN-62".to_owned(),
+            Self::Scene(AnimationKind::Carpet) => "AN-63".to_owned(),
+            Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()
@@ -630,6 +659,7 @@ impl AnimationRow {
             Self::Location => format!("AN-{:02}", 25 + 11),
             Self::SceneStatus => format!("AN-{:02}", 25 + 12),
             Self::FullScreenPreview => format!("AN-{:02}", 25 + 13),
+            Self::SceneControl("semantic_scope") => "AN-65".to_owned(),
             Self::SceneControl(id) => {
                 let position = scene_controls
                     .iter()
@@ -698,7 +728,7 @@ pub fn help_ids() -> Vec<String> {
     if !ids.iter().any(|id| id == "AN-56") {
         ids.push("AN-56".to_owned());
     }
-    for number in 57..=62 {
+    for number in 57..=65 {
         ids.push(format!("AN-{number:02}"));
     }
     ids
@@ -735,3 +765,34 @@ mod overhaul_tests {
         assert!((10..=12).contains(&slider.value_at(50, 101)));
     }
 }
+
+#[cfg(test)] // Verify full source values reach the existing openable Text row path.
+mod boat_information_tests {
+    // No private UI state or network fixture.
+    use super::*; // Production row model and view conversion.
+    #[test] // Long source references must not exist only in truncated status/help text.
+    fn boat_information_is_exposed_as_full_text_prompt_values() {
+        // The normal Text action opens the shared input prompt.
+        let settings = AnimationSettings {
+            kind: AnimationKind::Boats,
+            ..Default::default()
+        }; // Broader default source.
+        let controls = settings.scene_controls(); // Actual client-to-ambient control bridge.
+        for (id, expected) in [
+            ("boat_credit", "OpenSeaFeed contributors"),
+            ("boat_provider", "https://openseafeed.com/"),
+            (
+                "boat_license",
+                "https://creativecommons.org/licenses/by/4.0/",
+            ),
+            ("boat_coverage", "position age unavailable"),
+            ("boat_changes", "projected"),
+        ] {
+            // Required provenance and limitations.
+            let view =
+                AnimationRow::SceneControl(id).view(&settings, &controls, &RowContext::default()); // Actual row conversion, without renderer truncation.
+            assert_eq!(view.kind, RowKind::Text);
+            assert!(view.value.contains(expected)); // Full value survives to the openable prompt path.
+        } // End block.
+    } // End block.
+} // End block.

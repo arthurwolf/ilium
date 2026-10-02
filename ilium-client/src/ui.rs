@@ -43,21 +43,46 @@ mod osm_attribution_tests;
 
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
+    app.reconcile_animation_presentation();
     let area = frame.area();
     let layout = app.layout;
 
+    // Onboarding bypasses composition; an earlier pending scene receipt must
+    // never be mistaken for pixels in its own completed terminal frame.
+    if app.onboarding.is_some() {
+        app.animation_frame.discard_composed_receipt();
+    }
     draw_base_layer(frame, area, app);
     if app.onboarding.is_none() {
         crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
-        draw_osm_attribution(frame, app);
+        let osm_credit_area = draw_osm_attribution(frame, app);
+        app.animation_frame
+            .occlude_composed(frame.area(), osm_credit_area);
         draw_voice_control(frame, layout.voice_control_area, app);
+        // This later chrome may repaint a Braille cell with an identical glyph.
+        // Remove its entire known rectangle from scene attribution.
+        app.animation_frame
+            .occlude_composed(frame.area(), layout.voice_control_area);
     }
     if app.onboarding.is_none() && app.modal_stack.is_empty() && matches!(app.mode, Mode::Normal) {
+        let popover_visible = app
+            .agent_popover
+            .as_ref()
+            .is_some_and(|popover| popover.is_visible(Instant::now()));
+        if app.hovered_status_slot.is_some()
+            || app.hovered_tree_node.is_some()
+            || app.stats_popover.is_some()
+            || popover_visible
+        {
+            // These late overlays own arbitrary blank pixels inside computed
+            // layouts. Withhold this draw instead of guessing identical writes.
+            app.animation_frame.discard_composed_receipt();
+        }
         draw_status_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
-        if let Some(popover) = &app.agent_popover {
-            if popover.is_visible(Instant::now()) {
+        if popover_visible {
+            if let Some(popover) = &app.agent_popover {
                 if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
                     crate::popover::render(frame, &geometry, popover, app.ui_settings.color_scheme);
                 }
@@ -77,9 +102,11 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
 
 /// Client chrome owns the credit. No terminal, animation cache or protected
 /// workspace cell is changed to make the scene's native text visible.
-fn draw_osm_attribution(frame: &mut Frame, app: &App) {
-    if app.animation_settings.kind != crate::background_animation::AnimationKind::OpenStreetMap {
-        return;
+fn draw_osm_attribution(frame: &mut Frame, app: &App) -> Rect {
+    if app.effective_animation_kind()
+        != Some(crate::background_animation::AnimationKind::OpenStreetMap)
+    {
+        return Rect::default();
     }
     let area = if app.is_animation_preview_visible() {
         crate::layout::osm_attribution_area(frame.area())
@@ -89,7 +116,7 @@ fn draw_osm_attribution(frame: &mut Frame, app: &App) {
         Rect::default()
     };
     if area.is_empty() {
-        return;
+        return area;
     }
 
     let style = theme::statusbar_style();
@@ -107,6 +134,7 @@ fn draw_osm_attribution(frame: &mut Frame, app: &App) {
             Rect::new(area.x, area.y + index as u16, area.width, 1),
         );
     }
+    area
 }
 
 /// A VS16 glyph occupies two terminal cells. Ratatui's diff can emit its
@@ -2008,13 +2036,16 @@ fn draw_smart_copy_highlights(
     session: &crate::smart_copy::SmartCopySession,
 ) {
     let now = Instant::now();
-    for candidate in &session.candidates {
+    for (candidate_index, candidate) in session.candidates.iter().enumerate() {
         let is_current = session
             .current_candidate()
             .is_some_and(|current| std::ptr::eq(current, candidate));
         let is_flashing =
             now.duration_since(candidate.arrived_at) < crate::smart_copy::ARRIVAL_FLASH_DURATION;
-        if !is_current && !is_flashing {
+        // Clicked regions stay inverted, exactly like the hover style, so the
+        // whole multi-selection reads as one highlighted set.
+        let is_selected = session.is_selected(candidate_index);
+        if !is_current && !is_flashing && !is_selected {
             continue;
         }
         for span in &candidate.spans {
@@ -2343,6 +2374,9 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         // function's local `spans`, so there is no need to allocate a new
         // `String` copy of the status message on every render frame.
         spans.push(Span::raw(message.as_str()));
+    } else if let Some(error) = app.semantic_animation_error() {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::raw(error));
     }
 
     let cap_style = theme::statusbar_cap_style();

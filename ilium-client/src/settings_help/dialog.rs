@@ -40,6 +40,8 @@ pub enum HelpPanel {
 #[derive(Debug, Clone)]
 pub struct SettingsHelpState {
     pub topic_id: String,
+    /// Complete source report captured before opening AN-37 releases the host.
+    pub captured_scene_status: Option<String>,
     selected_frame: usize,
     playback_started_at: Instant,
     pub is_playing: bool,
@@ -52,6 +54,7 @@ impl SettingsHelpState {
     pub fn new(topic_id: impl Into<String>, frame_count: usize, motion: MotionLevel) -> Self {
         Self {
             topic_id: topic_id.into(),
+            captured_scene_status: None,
             selected_frame: 0,
             playback_started_at: Instant::now(),
             is_playing: frame_count > 1 && motion != MotionLevel::Off,
@@ -199,10 +202,16 @@ pub fn render(
         layout.popup,
     );
 
-    let explanation = format!(
+    let mut explanation = format!(
         "{}\n\nStates and change\n{}\n\nMotion\n{}\n\nAccuracy note\n{}",
         topic.explanation, topic.states, topic.motion, topic.caveat
     );
+    if let Some(status) = &state.captured_scene_status {
+        explanation = format!(
+            "Scene status captured when help opened (not refreshed while open)\n{}\n\n{}",
+            status, explanation
+        );
+    }
     let explanation_block = panel_block(
         "What this setting does",
         state.focused_panel == HelpPanel::Explanation,

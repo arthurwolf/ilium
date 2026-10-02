@@ -260,6 +260,10 @@ fn settings_snapshot(app: &App) -> Value {
             "sound.events.agent_finished", "sound.events.approval_required",
             "sound.events.agent_started", "sound.events.waiting_background",
             "sound.events.task_succeeded", "sound.events.task_failed",
+            "notifications.enabled", "notifications.agent_finished",
+            "notifications.approval_required", "notifications.task_succeeded",
+            "notifications.task_failed", "notifications.suppress_redundant_task_outcomes",
+            "notifications.task_coalesce_seconds",
             "triggers.<event_key>",
             "inference.provider", "inference.title_style", "inference.kilo_gateway.model",
             "inference.ollama.url", "inference.ollama.model",
@@ -359,6 +363,16 @@ fn settings_snapshot(app: &App) -> Value {
                 "task_succeeded": app.sound_settings.events.task_succeeded,
                 "task_failed": app.sound_settings.events.task_failed,
             },
+        },
+        "notifications": {
+            "enabled": app.notification_settings.enabled,
+            "agent_finished": app.notification_settings.agent_finished,
+            "approval_required": app.notification_settings.approval_required,
+            "task_succeeded": app.notification_settings.task_succeeded,
+            "task_failed": app.notification_settings.task_failed,
+            "suppress_redundant_task_outcomes":
+                app.notification_settings.suppress_redundant_task_outcomes,
+            "task_coalesce_seconds": app.notification_settings.task_coalesce_seconds,
         },
         "inference": {
             "provider": app.inference_settings.selected_provider.label(),

@@ -2143,6 +2143,20 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         crate::app::InferenceRow::Test => app.request_inference_test(),
                     }
                 }
+            } else if state.tab == crate::app::SettingsTab::TextTriggers {
+                if let Some(index) = crate::settings_ui::text_trigger_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app.text_trigger_settings.triggers.len(),
+                ) {
+                    state.selected_row = index;
+                    let editing_index =
+                        (index < app.text_trigger_settings.triggers.len()).then_some(index);
+                    app.mode = Mode::Settings(state);
+                    app.open_text_trigger_dialog(editing_index);
+                    return;
+                }
             } else if state.tab == crate::app::SettingsTab::Triggers {
                 if let Some((event, action_hit)) = crate::trigger_settings_ui::hit_test(
                     app,
@@ -4080,5 +4094,123 @@ mod cost_settings_mouse_tests {
             panic!("settings stay open");
         };
         assert!(state.selected_row > 0, "a click moves the selection");
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_mouse_tests {
+    use super::*;
+    use crate::app::{App, SettingsState, SettingsTab};
+
+    fn click_trigger_line(app: &mut App, line: u16) {
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings expected")
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+            .content_area;
+        let click_row = area.y + line - state.scroll;
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x + 8,
+                row: click_row,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+    }
+
+    fn settings_app(scroll: u16) -> App {
+        let mut app = App::new("trigger-test".to_owned(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            scroll,
+            ..SettingsState::default()
+        });
+        app
+    }
+
+    #[test]
+    fn clicking_add_opens_editor_and_escape_returns_to_settings() {
+        let mut app = settings_app(0);
+        click_trigger_line(&mut app, 4);
+        assert!(
+            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index.is_none())
+        );
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::empty(),
+            )),
+        );
+        assert!(matches!(app.mode, Mode::Settings(_)));
+    }
+
+    #[test]
+    fn wheel_scrolling_a_long_list_then_clicking_edits_the_visible_rule() {
+        let mut app = settings_app(0);
+        app.set_screen_area(Rect::new(0, 0, 80, 24));
+        app.text_trigger_settings.triggers = (0..32)
+            .map(|index| ilium_ipc::TextTrigger {
+                id: format!("rule-{index}"),
+                regexp: format!("pattern-{index}"),
+                message: "reply".to_owned(),
+                ..ilium_ipc::TextTrigger::default()
+            })
+            .collect();
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings expected")
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+            .content_area;
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: area.x + 8,
+                row: area.y + 4,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings expected")
+        };
+        assert!(state.scroll > 0);
+        click_trigger_line(&mut app, 10);
+        assert!(
+            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(7) && state.regexp.buf == "pattern-7")
+        );
+    }
+
+    #[test]
+    fn clicking_headers_spacers_and_hint_does_not_open_an_editor() {
+        for line in [0, 1, 2, 3, 5] {
+            let mut app = settings_app(0);
+            click_trigger_line(&mut app, line);
+            assert!(
+                matches!(app.mode, Mode::Settings(_)),
+                "line {line} is inert"
+            );
+            assert!(app.take_outbound_requests().is_empty());
+        }
+    }
+
+    #[test]
+    fn clicking_existing_scrolled_rule_opens_edit_without_mutation() {
+        let mut app = settings_app(2);
+        let rule = ilium_ipc::TextTrigger {
+            id: "stable-rule".to_owned(),
+            regexp: "test".to_owned(),
+            message: "reply".to_owned(),
+            ..ilium_ipc::TextTrigger::default()
+        };
+        app.text_trigger_settings.triggers.push(rule.clone());
+        click_trigger_line(&mut app, 3);
+        assert!(
+            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(0) && state.regexp.buf == "test")
+        );
+        assert_eq!(app.text_trigger_settings.triggers, vec![rule]);
     }
 }

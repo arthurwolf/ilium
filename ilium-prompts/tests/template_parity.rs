@@ -36,12 +36,17 @@ fn full_prompt_templates_preserve_frozen_original_output() {
         )
         .unwrap();
         assert_eq!(legacy_rendered, rendered, "legacy label: {}", case["case"]);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(rendered.as_bytes())),
-            case["sha256"].as_str().unwrap(),
-            "{}",
-            case["case"]
-        );
+        // The new mandatory Semantic contract changes this prompt's output.
+        // Keep its old fixture/hash intact as provenance; source_parity's
+        // semantic contract and client regressions verify the current shape.
+        if name != "naming/restructure" {
+            assert_eq!(
+                format!("{:x}", Sha256::digest(rendered.as_bytes())),
+                case["sha256"].as_str().unwrap(),
+                "{}",
+                case["case"]
+            );
+        }
     }
 }
 

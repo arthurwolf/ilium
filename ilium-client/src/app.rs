@@ -71,6 +71,9 @@ use crate::voice_settings::{VoicePromptEditorState, VoiceRow, VoiceSettingField}
 use crate::worktree_dialog::{WorktreeDialogMode, WorktreeDialogState};
 use crate::worktree_manager::WorktreeManagerState;
 use ilium_inference::InferenceSettings;
+
+#[path = "app_semantic_animation.rs"]
+mod semantic_presentation;
 use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
@@ -906,10 +909,17 @@ pub enum SoundRow {
     WaitingBackground,
     TaskSucceeded,
     TaskFailed,
+    NotifyEnabled,
+    NotifyAgentFinished,
+    NotifyApprovalRequired,
+    NotifyTaskSucceeded,
+    NotifyTaskFailed,
+    NotifySuppressRedundant,
+    NotifyCoalesce,
 }
 
 impl SoundRow {
-    pub const ALL: [SoundRow; 9] = [
+    pub const ALL: [SoundRow; 16] = [
         Self::Source,
         Self::File,
         Self::Preview,
@@ -919,7 +929,25 @@ impl SoundRow {
         Self::WaitingBackground,
         Self::TaskSucceeded,
         Self::TaskFailed,
+        Self::NotifyEnabled,
+        Self::NotifyAgentFinished,
+        Self::NotifyApprovalRequired,
+        Self::NotifyTaskSucceeded,
+        Self::NotifyTaskFailed,
+        Self::NotifySuppressRedundant,
+        Self::NotifyCoalesce,
     ];
+
+    /// The per-event desktop-notification toggle this row edits, if any.
+    pub const fn notification_event(self) -> Option<ilium_sound::NotificationEvent> {
+        match self {
+            Self::NotifyAgentFinished => Some(ilium_sound::NotificationEvent::AgentFinished),
+            Self::NotifyApprovalRequired => Some(ilium_sound::NotificationEvent::ApprovalRequired),
+            Self::NotifyTaskSucceeded => Some(ilium_sound::NotificationEvent::TaskSucceeded),
+            Self::NotifyTaskFailed => Some(ilium_sound::NotificationEvent::TaskFailed),
+            _ => None,
+        }
+    }
 
     pub const fn event(self) -> Option<ilium_sound::SoundEvent> {
         match self {
@@ -929,7 +957,16 @@ impl SoundRow {
             Self::WaitingBackground => Some(ilium_sound::SoundEvent::WaitingBackground),
             Self::TaskSucceeded => Some(ilium_sound::SoundEvent::TaskSucceeded),
             Self::TaskFailed => Some(ilium_sound::SoundEvent::TaskFailed),
-            Self::Source | Self::File | Self::Preview => None,
+            Self::Source
+            | Self::File
+            | Self::Preview
+            | Self::NotifyEnabled
+            | Self::NotifyAgentFinished
+            | Self::NotifyApprovalRequired
+            | Self::NotifyTaskSucceeded
+            | Self::NotifyTaskFailed
+            | Self::NotifySuppressRedundant
+            | Self::NotifyCoalesce => None,
         }
     }
 }
@@ -1615,6 +1652,7 @@ pub struct SessionPaneTitleRequest {
 /// text (see `crate::restructure`'s module docs on why that step is left to
 /// the worker thread).
 pub struct PendingRestructureRequest {
+    pub recommendation_snapshot: crate::restructure::RecommendationSnapshot,
     pub project_id: NodeId,
     pub project_name: String,
     pub project_cwd: PathBuf,
@@ -1752,6 +1790,7 @@ pub struct App {
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
     pub animation_settings: crate::background_animation::AnimationSettings,
+    semantic_presentation: semantic_presentation::SemanticPresentation,
     /// The one screen-sized field (and hosted scene) shared by the ambient
     /// background and the Settings preview.
     pub animation_frame: crate::background_animation::AnimationFrame,
@@ -1790,6 +1829,7 @@ pub struct App {
     /// Live user-global sound choices and the system catalog discovered once
     /// before the terminal enters raw mode.
     pub sound_settings: ilium_sound::SoundSettings,
+    pub notification_settings: ilium_sound::NotificationSettings,
     pub sound_discovery: ilium_sound::SoundDiscovery,
     /// Persisted inference provider settings used by title and organization workers.
     pub inference_settings: InferenceSettings,
@@ -2211,6 +2251,9 @@ impl App {
             animation_settings: Default::default(),
             animation_frame: Default::default(),
             animation_cache: Default::default(),
+            semantic_presentation: semantic_presentation::SemanticPresentation::new(
+                session_cwd.clone(),
+            ),
             tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             requested_pane_sizes: HashMap::new(),
@@ -2225,6 +2268,7 @@ impl App {
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
+            notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             inference_settings: InferenceSettings::default(),
             trigger_settings: TriggerSettings::default(),
@@ -2350,7 +2394,18 @@ impl App {
     /// Suspends the visible mode and opens one input-blocking child above it.
     /// The stack owns the complete parent state, so closing the child restores
     /// the exact selection, scroll position, and in-progress form values.
-    pub(crate) fn push_modal(&mut self, modal: Mode) {
+    pub(crate) fn push_modal(&mut self, mut modal: Mode) {
+        if let Mode::SettingsHelp(state) = &mut modal {
+            if state.topic_id == "AN-37" {
+                // Help hides the preview and releases its host on the next draw.
+                // Preserve the complete last report before changing modes.
+                state.captured_scene_status = Some(
+                    self.animation_row_context()
+                        .scene_status
+                        .unwrap_or_else(|| "OK".to_owned()),
+                );
+            }
+        }
         let parent = std::mem::replace(&mut self.mode, modal);
         self.modal_stack.push(parent);
     }
@@ -3613,9 +3668,7 @@ impl App {
     }
 
     fn layout_for_animation(&self, screen_area: Rect, tree_width: u16) -> UiLayout {
-        let show_osm_attribution = self.animation_settings.enabled
-            && self.animation_settings.kind
-                == crate::background_animation::AnimationKind::OpenStreetMap;
+        let show_osm_attribution = self.animation_wants_attribution();
         UiLayout::from_screen_area_with_tree_width_and_attribution(
             screen_area,
             tree_width,
@@ -4591,6 +4644,15 @@ impl App {
         self.sound_settings = sound;
     }
 
+    /// Installs startup notification settings; the server loaded the same
+    /// global config before the client connected.
+    pub fn apply_notification_settings(
+        &mut self,
+        notifications: ilium_sound::NotificationSettings,
+    ) {
+        self.notification_settings = notifications;
+    }
+
     /// Installs startup inference settings. Active workers receive a cloned
     /// snapshot, so a settings change never mutates a request mid-flight.
     pub fn apply_inference_settings(&mut self, inference: InferenceSettings) {
@@ -5247,17 +5309,22 @@ impl App {
         true
     }
 
-    /// Persists the complete list first, then asks the currently attached
-    /// detached server to replace its prospective matching rules.
-    pub fn apply_and_persist_text_trigger_settings(&mut self, settings: TextTriggerSettings) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) = crate::config::save_text_trigger_settings(&config_dir, &settings) {
-                self.status_message = Some(format!("Could not save Text Triggers: {error}"));
-                return;
-            }
-        }
-        self.text_trigger_settings = settings.clone();
-        self.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers { settings });
+    /// Persists an explicit full-list replacement; attaching never calls this method.
+    pub fn apply_and_persist_text_trigger_settings(
+        &mut self,
+        settings: TextTriggerSettings,
+    ) -> Result<(), String> {
+        let result = match self.config_dir.as_deref() {
+            Some(directory) => crate::config::save_text_trigger_settings(
+                directory,
+                &self.text_trigger_settings,
+                &settings,
+            )
+            .map(|()| settings)
+            .map_err(|error| error.to_string()),
+            None => Err("No durable configuration directory is available".to_owned()),
+        };
+        self.finish_text_trigger_save(result)
     }
 
     pub fn open_text_trigger_dialog(&mut self, index: Option<usize>) {
@@ -5267,6 +5334,10 @@ impl App {
                 .get(index)
                 .map(|trigger| (index, trigger))
         });
+        if index.is_some() && existing.is_none() {
+            self.status_message = Some("The selected Text Trigger is no longer present".to_owned());
+            return;
+        }
         self.push_modal(Mode::TextTriggerDialog(Box::new(
             crate::text_trigger_dialog::TextTriggerDialogState::new(existing),
         )));
@@ -5274,29 +5345,57 @@ impl App {
 
     pub fn commit_text_trigger(
         &mut self,
-        index: Option<usize>,
+        editing_id: Option<&str>,
+        editing_base: Option<&ilium_ipc::TextTrigger>,
         mut trigger: ilium_ipc::TextTrigger,
-    ) {
-        let mut settings = self.text_trigger_settings.clone();
-        if let Some(index) = index {
-            if let Some(previous) = settings.triggers.get(index) {
-                trigger.id = previous.id.clone();
-            }
-            if let Some(slot) = settings.triggers.get_mut(index) {
-                *slot = trigger;
-            }
-        } else {
-            settings.triggers.push(trigger);
+    ) -> Result<(), String> {
+        if editing_id != editing_base.map(|rule| rule.id.as_str()) {
+            return self.finish_text_trigger_save(Err(
+                "Text Trigger edit identity does not match its original rule".to_owned(),
+            ));
         }
-        self.apply_and_persist_text_trigger_settings(settings);
+        if let Some(editing_id) = editing_id {
+            trigger.id = editing_id.to_owned();
+        }
+        let result = match self.config_dir.as_deref() {
+            Some(directory) => {
+                crate::config::save_text_trigger_edit(directory, editing_base, Some(&trigger))
+                    .map_err(|error| error.to_string())
+            }
+            None => Err("No durable configuration directory is available".to_owned()),
+        };
+        self.finish_text_trigger_save(result)
+    }
+
+    fn finish_text_trigger_save(
+        &mut self,
+        result: Result<TextTriggerSettings, String>,
+    ) -> Result<(), String> {
+        let settings = match result {
+            Ok(settings) => settings,
+            Err(error) => {
+                self.status_message = Some(format!("Could not save Text Triggers: {error}"));
+                return Err(error);
+            }
+        };
+        self.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers { settings });
+        self.status_message = Some("Text Triggers saved to disk".to_owned());
+        Ok(())
     }
 
     pub fn delete_text_trigger(&mut self, index: usize) {
-        let mut settings = self.text_trigger_settings.clone();
-        if index < settings.triggers.len() {
-            settings.triggers.remove(index);
-            self.apply_and_persist_text_trigger_settings(settings);
-        }
+        let Some(expected) = self.text_trigger_settings.triggers.get(index).cloned() else {
+            self.status_message = Some("The selected Text Trigger is no longer present".to_owned());
+            return;
+        };
+        let result = match self.config_dir.as_deref() {
+            Some(directory) => {
+                crate::config::save_text_trigger_edit(directory, Some(&expected), None)
+                    .map_err(|error| error.to_string())
+            }
+            None => Err("No durable configuration directory is available".to_owned()),
+        };
+        let _ = self.finish_text_trigger_save(result);
     }
 
     pub fn apply_and_persist_trigger_settings(&mut self, triggers: TriggerSettings) {
@@ -5750,10 +5849,52 @@ impl App {
             SoundRow::Source => self.settings_toggle_sound_source(),
             SoundRow::File => self.settings_adjust_sound_file(direction),
             SoundRow::Preview => self.settings_preview_sound(),
+            SoundRow::NotifyEnabled => {
+                let mut notifications = self.notification_settings;
+                notifications.enabled = !notifications.enabled;
+                self.apply_and_persist_notification_settings(notifications);
+            }
+            SoundRow::NotifySuppressRedundant => {
+                let mut notifications = self.notification_settings;
+                notifications.suppress_redundant_task_outcomes =
+                    !notifications.suppress_redundant_task_outcomes;
+                self.apply_and_persist_notification_settings(notifications);
+            }
+            SoundRow::NotifyCoalesce => {
+                let step = ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS;
+                let mut notifications = self.notification_settings;
+                notifications.task_coalesce_seconds = if direction < 0 {
+                    notifications.task_coalesce_seconds.saturating_sub(step)
+                } else {
+                    notifications.task_coalesce_seconds.saturating_add(step)
+                };
+                self.apply_and_persist_notification_settings(notifications.normalized());
+            }
             event_row => {
                 if let Some(event) = event_row.event() {
                     self.settings_toggle_sound_event(event);
+                } else if let Some(event) = event_row.notification_event() {
+                    let mut notifications = self.notification_settings;
+                    notifications.toggle(event);
+                    self.apply_and_persist_notification_settings(notifications);
                 }
+            }
+        }
+    }
+
+    /// Applies and persists the `[notifications]` table. Running servers pick
+    /// the change up from the config file through their watcher.
+    pub(crate) fn apply_and_persist_notification_settings(
+        &mut self,
+        notifications: ilium_sound::NotificationSettings,
+    ) {
+        self.notification_settings = notifications;
+        if let Some(config_dir) = self.config_dir.clone() {
+            if let Err(error) =
+                crate::config::save_notification_settings(&config_dir, &self.notification_settings)
+            {
+                self.status_message =
+                    Some(format!("Could not save notification settings: {error}"));
             }
         }
     }
@@ -6086,24 +6227,7 @@ impl App {
     /// Runtime facts (hosted scene colors and status, cache progress) that
     /// shape the Animations row list.
     pub fn animation_row_context(&self) -> crate::animation_rows::RowContext {
-        let screen = self.layout.screen_area;
-        crate::animation_rows::RowContext {
-            scene_uses_cell_colors: self.animation_settings.kind
-                == crate::background_animation::AnimationKind::Wikipedia
-                || self.animation_frame.host().uses_cell_colors(),
-            scene_status: if self.animation_settings.kind
-                == crate::background_animation::AnimationKind::Wikipedia
-                && !self.animation_frame.is_wikipedia()
-            {
-                Some("Loading Wikipedia".to_owned())
-            } else {
-                self.animation_frame.status()
-            },
-            cache: self.animation_cache.borrow().status(),
-            loop_bytes: self
-                .animation_settings
-                .estimated_loop_bytes(screen.width, screen.height),
-        }
+        self.effective_animation_row_context()
     }
 
     /// The row list every Animations surface (render, keys, mouse, scroll,
@@ -6118,26 +6242,7 @@ impl App {
     /// The redraw cadence of the field on screen: the hosted scene's request,
     /// or 30 frames per second for built-in scenes and before a scene exists.
     pub fn animation_frames_per_second(&self) -> u32 {
-        let scene = self.scene_frames_per_second();
-        match self.animation_settings.fps_limit {
-            0 => scene,
-            limit => scene.min(u32::from(limit)),
-        }
-    }
-
-    fn scene_frames_per_second(&self) -> u32 {
-        if self.animation_settings.kind == crate::background_animation::AnimationKind::Wikipedia {
-            // Smooth quarter-row Braille travel and prompt loader/status refreshes
-            // need no 30 Hz scene cadence.
-            4
-        } else if self.animation_settings.kind.is_ambient() {
-            self.animation_frame
-                .host()
-                .frames_per_second()
-                .unwrap_or(crate::background_composition::DEFAULT_FRAMES_PER_SECOND)
-        } else {
-            crate::background_composition::DEFAULT_FRAMES_PER_SECOND
-        }
+        self.effective_animation_frames_per_second()
     }
 
     /// Selects and persists a scene. Apply only after the project write
@@ -6146,6 +6251,9 @@ impl App {
         &mut self,
         kind: crate::background_animation::AnimationKind,
     ) {
+        if !self.prepare_animation_edit() {
+            return;
+        }
         if self.animation_settings.kind == kind {
             return;
         }
@@ -6161,6 +6269,9 @@ impl App {
         &mut self,
         edit: impl FnOnce(&mut crate::background_animation::AnimationSettings) -> Result<bool, String>,
     ) -> bool {
+        if !self.prepare_animation_edit() {
+            return false;
+        }
         let mut settings = self.animation_settings.clone();
         match edit(&mut settings) {
             Ok(true) => {
@@ -6253,6 +6364,9 @@ impl App {
         &mut self,
         row: usize,
     ) -> crate::animation_rows::AnimationRowOutcome {
+        if !self.prepare_animation_edit() {
+            return crate::animation_rows::AnimationRowOutcome::Done;
+        }
         use crate::animation_rows::{AnimationRow, AnimationRowOutcome};
         let model = self.animation_row_model();
         let Some(animation_row) = model.row(row).cloned() else {
@@ -6320,6 +6434,12 @@ impl App {
         control: &'static str,
         value: String,
     ) -> Result<(), String> {
+        if !self.prepare_animation_edit() {
+            return Err(self
+                .status_message
+                .clone()
+                .unwrap_or_else(|| "Animation edit target is unavailable".into()));
+        }
         let mut settings = self.animation_settings.clone();
         match settings.set_scene_control(control, ilium_ambient::ControlValue::Text(value)) {
             Ok(true) => {
@@ -6368,11 +6488,19 @@ impl App {
         &mut self,
         settings: crate::background_animation::AnimationSettings,
     ) {
-        match crate::project_config::set_animation(&self.session_cwd, settings.clone()) {
+        let path = match self.animation_write_path() {
+            Ok(path) => path,
+            Err(error) => {
+                self.status_message = Some(error);
+                return;
+            }
+        };
+        match crate::project_config::set_animation(&path, settings.clone()) {
             Ok(()) => {
                 self.animation_settings = settings.normalized();
                 self.animation_cache = Default::default();
                 self.status_message = None;
+                self.reconcile_animation_presentation();
                 let layout = self.layout_for_animation(
                     self.layout.screen_area,
                     self.tree_width_animation.current_width(),
@@ -6732,16 +6860,32 @@ impl App {
     }
 
     pub fn smart_copy_copy_current(&mut self) {
-        let selection = self.smart_copy_session.as_ref().and_then(|session| {
-            session
-                .current_candidate()
-                .map(|candidate| (candidate.text.clone(), candidate.label.clone()))
-        });
-        let Some((text, label)) = selection else {
+        // Each click toggles the hovered region in a persistent multi-selection
+        // and republishes the whole selection to the clipboard.
+        let toggled = self
+            .smart_copy_session
+            .as_mut()
+            .and_then(|session| session.toggle_current_selection());
+        let Some((label, is_selected)) = toggled else {
             self.status_message = Some("Move over a highlighted Smart Copy selection".to_string());
             return;
         };
-        self.copy_terminal_text_to_clipboard(text, &format!("Copied {label}"));
+        let Some((text, count)) = self
+            .smart_copy_session
+            .as_ref()
+            .map(|session| (session.selected_text(), session.selected_count()))
+        else {
+            return;
+        };
+        if count == 0 {
+            self.status_message = Some(format!("Deselected {label}; selection is empty"));
+            return;
+        }
+        let verb = if is_selected { "Added" } else { "Removed" };
+        self.copy_terminal_text_to_clipboard(
+            text,
+            &format!("{verb} {label}; copied {count} selection(s)"),
+        );
     }
 
     /// Writes a keystroke sequence to `pane_id`'s PTY, one stage at a time.
@@ -11294,7 +11438,11 @@ impl App {
                     return;
                 }
             };
-        if !has_unrestructured_activity {
+        let has_recommendations = self
+            .tree
+            .project_has_complete_animation_recommendations(project_id)
+            .unwrap_or(false);
+        if !has_unrestructured_activity && has_recommendations {
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
@@ -11337,10 +11485,20 @@ impl App {
                     return;
                 }
             };
-        let input_fingerprint = crate::restructure::project_restructure_input_fingerprint(
-            &contexts,
-            &current_structure,
-        );
+        let recommendation_snapshot =
+            match crate::restructure::RecommendationSnapshot::capture(&self.tree, project_id) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    if !request_origin.is_automatic() {
+                        self.status_message = Some(format!(
+                            "Could not capture project recommendations: {error}"
+                        ));
+                    }
+                    return;
+                }
+            };
+        let input_fingerprint =
+            recommendation_snapshot.input_fingerprint(&contexts, &current_structure);
         let inference_activity_revisions = match self.tree.project_activity_revisions(project_id) {
             Ok(inference_activity_revisions) => inference_activity_revisions,
             Err(error) => {
@@ -11389,6 +11547,7 @@ impl App {
                 contexts,
                 protected_split_views,
                 current_structure,
+                recommendation_snapshot,
                 inference_activity_revisions,
             });
         self.refresh_structure_loading();
@@ -11448,7 +11607,7 @@ impl App {
         &mut self,
         project_id: NodeId,
         inference_activity_revisions: &[ilium_core::NodeActivityRevision],
-        result: anyhow::Result<ilium_core::RestructurePlan>,
+        result: anyhow::Result<ilium_core::animation_recommendation::RecommendedRestructurePlan>,
     ) {
         let Some(job) = self.project_restructure_jobs.get(&project_id) else {
             return;
@@ -11485,8 +11644,8 @@ impl App {
         self.refresh_structure_loading();
     }
 
-    /// Finalizes a job only after the detached server confirms that it applied
-    /// the plan and persisted the exact inference checkpoint transactionally.
+    /// Finalizes a job after the server commits the authoritative tree and
+    /// checkpoint together and requests its ordinary debounced save.
     pub(crate) fn confirm_project_restructure_applied(
         &mut self,
         project_id: NodeId,
@@ -11601,10 +11760,10 @@ impl App {
     pub fn request_apply_project_restructure_plan(
         &mut self,
         project_id: NodeId,
-        plan: ilium_core::RestructurePlan,
+        plan: ilium_core::animation_recommendation::RecommendedRestructurePlan,
         inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     ) {
-        self.queue_request(ClientRequest::ApplyProjectRestructurePlan {
+        self.queue_request(ClientRequest::ApplyRecommendedProjectRestructurePlan {
             project_id,
             plan,
             inference_activity_revisions,
@@ -12599,6 +12758,138 @@ mod tests {
     }
 
     #[test]
+    fn scene_status_help_retains_complete_opening_report_after_host_release() {
+        use crate::background_animation::test_support::{fake_host, FakeProbe};
+        use crate::config::MotionLevel;
+        use crate::settings_help::dialog::SettingsHelpState;
+        use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+        use std::time::Duration;
+
+        for (width, height) in [(80, 24), (120, 40)] {
+            for use_parent_transition in [false, true] {
+                let project = tempfile::tempdir().unwrap();
+                let mut app = App::new("status-test".into(), project.path().to_path_buf());
+                app.set_screen_area(Rect::new(0, 0, width, height));
+                app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+                let settings_before = app.animation_settings.clone();
+                let probe = FakeProbe::new();
+                let report = format!(
+                    "{}\nTAIL_UNIQUE received=123 error=unknown fix age",
+                    (0..64)
+                        .map(|index| format!("provider report line {index}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                *probe.status.lock().unwrap() = Some(report.clone());
+                *app.animation_frame.host_mut() = fake_host(&probe);
+                app.animation_frame
+                    .render(&app.animation_settings, width, height, Duration::ZERO);
+                assert_eq!(
+                    app.animation_row_context().scene_status.as_deref(),
+                    Some(report.as_str())
+                );
+                let parent = Mode::Settings(SettingsState {
+                    tab: SettingsTab::Animations,
+                    ..Default::default()
+                });
+                let help = Mode::SettingsHelp(SettingsHelpState::new("AN-37", 1, MotionLevel::Off));
+                if use_parent_transition {
+                    app.mode = Mode::Normal;
+                    app.push_modal_over(parent, help);
+                } else {
+                    app.mode = parent;
+                    app.push_modal(help);
+                }
+                let Mode::SettingsHelp(state) = &app.mode else {
+                    panic!("status help opens")
+                };
+                assert_eq!(
+                    state.captured_scene_status.as_deref(),
+                    Some(report.as_str())
+                );
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut app))
+                    .unwrap();
+                assert_eq!(probe.alive(), 0, "help releases the source host");
+                assert_eq!(app.animation_frame.status(), None);
+                let mut tail_visible = false;
+                for _ in 0..80 {
+                    terminal
+                        .draw(|frame| crate::ui::draw(frame, &mut app))
+                        .unwrap();
+                    let text: String = terminal
+                        .backend()
+                        .buffer()
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect();
+                    tail_visible |= text.contains("TAIL_UNIQUE");
+                    let Mode::SettingsHelp(state) = &mut app.mode else {
+                        panic!("help remains open")
+                    };
+                    assert_eq!(
+                        state.captured_scene_status.as_deref(),
+                        Some(report.as_str())
+                    );
+                    state.scroll_focused_panel(1);
+                }
+                assert!(
+                    tail_visible,
+                    "complete captured report must be scrollable at {width}x{height}"
+                );
+                assert_eq!(app.animation_settings, settings_before);
+                app.pop_modal();
+                assert!(matches!(app.mode, Mode::Settings(_)));
+            }
+        }
+    }
+
+    #[test]
+    fn scene_status_help_capture_preserves_empty_unknown_and_errors_only_for_status_topic() {
+        use crate::background_animation::test_support::{fake_host, FakeProbe};
+        use crate::config::MotionLevel;
+        use crate::settings_help::dialog::SettingsHelpState;
+        use std::time::Duration;
+        for report in [
+            None,
+            Some(""),
+            Some("fix time unknown; received 123; error: offline"),
+        ] {
+            let mut app = app();
+            app.animation_settings.kind = crate::background_animation::AnimationKind::Graph;
+            let probe = FakeProbe::new();
+            *probe.status.lock().unwrap() = report.map(str::to_owned);
+            *app.animation_frame.host_mut() = fake_host(&probe);
+            app.animation_frame
+                .render(&app.animation_settings, 80, 24, Duration::ZERO);
+            app.push_modal(Mode::SettingsHelp(SettingsHelpState::new(
+                "AN-37",
+                1,
+                MotionLevel::Off,
+            )));
+            let Mode::SettingsHelp(state) = &app.mode else {
+                panic!("status help opens")
+            };
+            assert_eq!(
+                state.captured_scene_status.as_deref(),
+                Some(report.unwrap_or("OK"))
+            );
+            app.pop_modal();
+            app.push_modal(Mode::SettingsHelp(SettingsHelpState::new(
+                "AN-38",
+                1,
+                MotionLevel::Off,
+            )));
+            let Mode::SettingsHelp(state) = &app.mode else {
+                panic!("ordinary help opens")
+            };
+            assert_eq!(state.captured_scene_status, None);
+        }
+    }
+
+    #[test]
     fn completed_progress_expiry_hides_text_without_resizing_or_losing_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
@@ -12764,8 +13055,16 @@ mod tests {
             }],
         });
 
+        let baseline = app.text_trigger_settings.clone();
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &TextTriggerSettings::default(),
+            &baseline,
+        )
+        .unwrap();
         app.commit_text_trigger(
-            Some(0),
+            Some("stable-rule-id"),
+            Some(&baseline.triggers[0]),
             ilium_ipc::TextTrigger {
                 id: String::new(),
                 enabled: false,
@@ -12774,9 +13073,12 @@ mod tests {
                 target: ilium_ipc::TextTriggerTarget::Agents,
                 sample_text: "new sample".to_owned(),
             },
-        );
+        )
+        .expect("durable stable-ID edit");
 
         let persisted = crate::config::load(directory.path()).expect("read text trigger config");
+        assert_eq!(app.text_trigger_settings, baseline);
+        app.apply_text_trigger_settings(persisted.text_triggers.clone());
         assert_eq!(persisted.text_triggers, app.text_trigger_settings);
         assert_eq!(app.text_trigger_settings.triggers[0].id, "stable-rule-id");
         assert!(matches!(
@@ -12869,6 +13171,33 @@ mod tests {
         }));
     }
 
+    #[cfg(test)]
+    fn recommended_test_plan(
+        structure: ilium_core::RestructurePlan,
+    ) -> ilium_core::animation_recommendation::RecommendedRestructurePlan {
+        use ilium_core::animation_recommendation::*;
+        let project = AnimationRecommendation {
+            version: 1,
+            kind: "shoreline".into(),
+            resources: ResourcePolicy::Catalog,
+            parameters: vec![],
+        };
+        let entries = restructure_animation_paths(&structure.children)
+            .unwrap()
+            .into_iter()
+            .map(|path| PlanAnimationEntry {
+                path,
+                recommendation: project.clone(),
+            })
+            .collect();
+        RecommendedRestructurePlan {
+            structure,
+            expected_animation_generation: 0,
+            project,
+            entries,
+        }
+    }
+
     #[test]
     fn completed_restructure_applies_a_plan_when_the_project_changed_in_flight() {
         let mut app = app();
@@ -12891,14 +13220,14 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &pending.inference_activity_revisions,
-            Ok(ilium_core::RestructurePlan {
+            Ok(recommended_test_plan(ilium_core::RestructurePlan {
                 children: vec![ilium_core::RestructureNode::Pane {
                     id: pane_id,
                     title: "inferred shell".to_string(),
                     short_title: None,
                     icon: None,
                 }],
-            }),
+            })),
         );
 
         assert!(matches!(
@@ -12907,7 +13236,7 @@ mod tests {
         ));
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
-            [ClientRequest::ApplyProjectRestructurePlan {
+            [ClientRequest::ApplyRecommendedProjectRestructurePlan {
                 project_id: requested_project,
                 inference_activity_revisions,
                 ..
@@ -12939,26 +13268,38 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &pending.inference_activity_revisions,
-            Ok(ilium_core::RestructurePlan {
+            Ok(recommended_test_plan(ilium_core::RestructurePlan {
                 children: vec![ilium_core::RestructureNode::Pane {
                     id: pane_id,
                     title: "organized shell".to_string(),
                     short_title: None,
                     icon: None,
                 }],
-            }),
+            })),
         );
         assert!(matches!(
             app.project_restructure_jobs[&project_id].state,
             ProjectRestructureState::Applying
         ));
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::ApplyProjectRestructurePlan {
-                project_id: requested_project,
-                ..
-            }] if *requested_project == project_id
-        ));
+        let requests = app.take_outbound_requests();
+        let [ClientRequest::ApplyRecommendedProjectRestructurePlan {
+            project_id: requested_project,
+            plan,
+            inference_activity_revisions,
+        }] = requests.as_slice()
+        else {
+            panic!("expected the complete recommendation transaction");
+        };
+        assert_eq!(*requested_project, project_id);
+        // A production snapshot supplies the accepted metadata before a later
+        // unchanged check; a checkpoint ACK alone cannot invent it.
+        app.tree
+            .apply_recommended_project_restructure(
+                project_id,
+                plan.clone(),
+                inference_activity_revisions,
+            )
+            .unwrap();
 
         app.confirm_project_restructure_applied(project_id, &pending.inference_activity_revisions);
         app.action_request_project_restructure(project_id);
@@ -16012,6 +16353,35 @@ mod tests {
     }
 
     #[test]
+    fn terminal_recovery_menu_exposes_recorded_prompt_after_agent_disappears() {
+        use crate::terminal_context_menu::TerminalContextAction;
+
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "stopped codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree
+            .set_last_prompt(pane_id, Some("Recover this exact prompt\nwith its second line".into()))
+            .unwrap();
+        // The current detector loses agent status on exit. Recovery must not
+        // depend on either a live process or a visible last-prompt banner.
+        app.ui_settings.last_prompt_enabled = false;
+        app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
+            panic!("terminal recovery menu should open");
+        };
+        assert!(menu.actions.iter().any(|action| action.label() == "Copy last submitted prompt"));
+        assert!(menu.actions.contains(&TerminalContextAction::CopyVisibleTerminalToClipboard));
+        assert!(menu.actions.contains(&TerminalContextAction::CopyFullTerminalHistoryToClipboard));
+    }
+
+    #[test]
     fn left_drag_over_terminal_content_creates_a_local_selection_instead_of_forwarding() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
@@ -17869,6 +18239,45 @@ mod tests {
     }
 
     #[test]
+    fn notification_rows_persist_every_toggle_and_stepper_without_an_ipc_update() {
+        let config_dir = std::env::temp_dir()
+            .join("ilium-app-notification-settings-tests")
+            .join(format!("{:?}", std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut app = app();
+        app.config_dir = Some(config_dir.clone());
+        assert!(!app.notification_settings.task_succeeded);
+
+        app.settings_adjust_sound_row(SoundRow::NotifyTaskSucceeded, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyTaskFailed, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyAgentFinished, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyApprovalRequired, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifySuppressRedundant, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyEnabled, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, 1);
+        app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, -1);
+
+        let settings = app.notification_settings;
+        assert!(settings.task_succeeded);
+        assert!(!settings.task_failed);
+        assert!(!settings.agent_finished);
+        assert!(!settings.approval_required);
+        assert!(!settings.suppress_redundant_task_outcomes);
+        assert!(!settings.enabled);
+        assert_eq!(settings.task_coalesce_seconds, 40);
+        // Servers read `[notifications]` from the config file via their
+        // watcher, so no live IPC request is queued.
+        assert!(app.take_outbound_requests().is_empty());
+        let persisted = crate::config::load(&config_dir).unwrap();
+        assert_eq!(persisted.notifications, settings);
+
+        let _ = std::fs::remove_dir_all(config_dir);
+    }
+
+    #[test]
     fn workspace_search_finds_terminal_history_and_activates_its_exact_location() {
         let mut app = app();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
@@ -18350,5 +18759,107 @@ mod tests {
             .status_message
             .as_deref()
             .is_some_and(|message| message.contains("configuration directory is unavailable")));
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_concurrency_tests {
+    use super::App;
+    use ilium_ipc::{TextTrigger, TextTriggerSettings};
+
+    #[test]
+    fn saving_a_deleted_rule_does_not_overwrite_the_rule_at_its_old_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "trigger-concurrency".to_owned(),
+            directory.path().to_path_buf(),
+        );
+        app.config_dir = Some(directory.path().to_path_buf());
+        let edited = TextTrigger {
+            id: "edited-rule".to_owned(),
+            regexp: "edited-pattern".to_owned(),
+            message: "edited-message".to_owned(),
+            ..TextTrigger::default()
+        };
+        let retained = TextTrigger {
+            id: "retained-rule".to_owned(),
+            regexp: "retained-pattern".to_owned(),
+            message: "retained-message".to_owned(),
+            ..TextTrigger::default()
+        };
+        app.text_trigger_settings = TextTriggerSettings {
+            triggers: vec![edited.clone(), retained.clone()],
+        };
+        let mut editor =
+            crate::text_trigger_dialog::TextTriggerDialogState::new(Some((0, &edited)));
+        editor.message.buf = "new-edited-message".to_owned();
+        // A settings update from another client deletes the edited rule and
+        // shifts a different authored rule into the editor's original index.
+        app.text_trigger_settings = TextTriggerSettings {
+            triggers: vec![retained.clone()],
+        };
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &TextTriggerSettings::default(),
+            &app.text_trigger_settings,
+        )
+        .unwrap();
+        assert!(app
+            .commit_text_trigger(
+                editor.editing_id.as_deref(),
+                editor.editing_base.as_ref(),
+                editor.candidate()
+            )
+            .is_err());
+
+        assert_eq!(app.text_trigger_settings.triggers, vec![retained]);
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn saving_a_reordered_rule_updates_its_id_and_preserves_the_other_rule() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "trigger-concurrency".to_owned(),
+            directory.path().to_path_buf(),
+        );
+        app.config_dir = Some(directory.path().to_path_buf());
+        let edited = TextTrigger {
+            id: "edited-rule".to_owned(),
+            regexp: "edited-pattern".to_owned(),
+            message: "edited-message".to_owned(),
+            ..TextTrigger::default()
+        };
+        let retained = TextTrigger {
+            id: "retained-rule".to_owned(),
+            regexp: "retained-pattern".to_owned(),
+            message: "retained-message".to_owned(),
+            ..TextTrigger::default()
+        };
+        let mut editor =
+            crate::text_trigger_dialog::TextTriggerDialogState::new(Some((0, &edited)));
+        editor.message.buf = "new-edited-message".to_owned();
+        app.text_trigger_settings = TextTriggerSettings {
+            triggers: vec![retained.clone(), edited.clone()],
+        };
+        crate::config::save_text_trigger_settings(
+            directory.path(),
+            &TextTriggerSettings::default(),
+            &app.text_trigger_settings,
+        )
+        .unwrap();
+        app.commit_text_trigger(
+            editor.editing_id.as_deref(),
+            editor.editing_base.as_ref(),
+            editor.candidate(),
+        )
+        .expect("save by stable ID");
+        let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+        app.apply_text_trigger_settings(saved);
+
+        let mut expected = edited;
+        expected.message = "new-edited-message".to_owned();
+        assert_eq!(app.text_trigger_settings.triggers, vec![retained, expected]);
+        assert_eq!(app.take_outbound_requests().len(), 1);
     }
 }

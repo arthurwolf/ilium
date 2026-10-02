@@ -1376,6 +1376,9 @@ pub struct SmartCopySession {
     hovered_cell: Option<(u16, u16)>,
     overlap_index: usize,
     geometries: HashSet<Vec<CellSpan>>,
+    /// Indices into `candidates` the user clicked, in click order. Candidates
+    /// are only ever appended, so an index stays valid for the whole session.
+    selected: Vec<usize>,
 }
 
 impl SmartCopySession {
@@ -1403,6 +1406,7 @@ impl SmartCopySession {
             hovered_cell: None,
             overlap_index: 0,
             geometries,
+            selected: Vec::new(),
         }
     }
 
@@ -1465,6 +1469,41 @@ impl SmartCopySession {
         let matches = self.matching_indices();
         let index = matches.get(self.overlap_index % matches.len().max(1))?;
         self.candidates.get(*index)
+    }
+
+    /// Toggles the hovered candidate in the persistent selection. Returns the
+    /// toggled candidate's label and whether it is now selected, or `None`
+    /// when nothing is hovered.
+    pub fn toggle_current_selection(&mut self) -> Option<(String, bool)> {
+        let matches = self.matching_indices();
+        let index = *matches.get(self.overlap_index % matches.len().max(1))?;
+        let is_selected = if let Some(position) = self.selected.iter().position(|i| *i == index) {
+            self.selected.remove(position);
+            false
+        } else {
+            self.selected.push(index);
+            true
+        };
+        Some((self.candidates[index].label.clone(), is_selected))
+    }
+
+    pub fn is_selected(&self, candidate_index: usize) -> bool {
+        self.selected.contains(&candidate_index)
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.selected.len()
+    }
+
+    /// Clipboard text for the whole selection: each selected region's text in
+    /// click order, one blank line between regions.
+    pub fn selected_text(&self) -> String {
+        self.selected
+            .iter()
+            .filter_map(|index| self.candidates.get(*index))
+            .map(|candidate| candidate.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     pub fn overlap_position(&self) -> Option<(usize, usize)> {
@@ -1597,6 +1636,36 @@ mod tests {
         assert_eq!(session.current_candidate().unwrap().label, "word");
         session.cycle_overlap(1);
         assert_eq!(session.current_candidate().unwrap().kind, "paragraph");
+    }
+
+    #[test]
+    fn clicks_accumulate_a_persistent_selection_and_toggle_off() {
+        let mut session = SmartCopySession::new(1, NodeId(1), snapshot(&["alpha beta gamma"]));
+        session
+            .apply_json_line(
+                r#"{"label":"word","kind":"word","parts":[{"line":1,"from":"w2","through":"w2"}]}"#,
+            )
+            .unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 40, 1);
+        session.set_hover(area, Position::new(7, 0));
+        assert_eq!(
+            session.toggle_current_selection(),
+            Some(("word".to_string(), true))
+        );
+        session.set_hover(area, Position::new(0, 0));
+        let (_, is_selected) = session.toggle_current_selection().unwrap();
+        assert!(is_selected);
+        assert_eq!(session.selected_count(), 2);
+        assert!(session.selected_text().contains("beta"));
+        assert!(session.selected_text().contains("alpha beta gamma"));
+        session.set_hover(area, Position::new(7, 0));
+        assert_eq!(
+            session.toggle_current_selection(),
+            Some(("word".to_string(), false))
+        );
+        assert_eq!(session.selected_count(), 1);
+        session.set_hover(area, Position::new(50, 5));
+        assert_eq!(session.toggle_current_selection(), None);
     }
 
     #[test]
