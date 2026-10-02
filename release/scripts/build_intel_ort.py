@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
+import urllib.error
 import urllib.request
 
 from release_tool import JsonArgumentParser, ReleaseError, digest, emit, read_json
@@ -51,10 +53,22 @@ def verify_source_hash(archive, expected):
 
 
 def request_bytes(url):
-    request = urllib.request.Request(url, headers={"User-Agent": "ilium-native-release-provenance/1", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        require(response.url.startswith(("https://api.github.com/", "https://codeload.github.com/")), "source acquisition redirected outside pinned official hosts")
-        return response.read()
+    headers = {"User-Agent": "ilium-native-release-provenance/1", "Accept": "application/vnd.github+json"}
+    # Anonymous api.github.com calls from shared runner addresses are rate
+    # limited; the workflow token raises that limit and goes to that host only.
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = "Bearer " + token
+    for attempt in range(4):
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                require(response.url.startswith(("https://api.github.com/", "https://codeload.github.com/")), "source acquisition redirected outside pinned official hosts")
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code not in (403, 429, 500, 502, 503, 504) or attempt == 3:
+                raise
+            time.sleep(15 * (attempt + 1))
 
 
 def verify_tag_commit(reference, tag_object=None):

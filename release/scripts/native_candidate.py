@@ -139,6 +139,14 @@ def discovery(arguments, target, candidate, notices):
             continue
         values, identity = loader_dependencies(target, candidate / name, arguments.dumpbin)
         graph[name], evidence[name] = values, identity
+        # Name every unreviewed dependency at once: a CI audit cycle is far too
+        # slow to discover them one failure at a time.
+        unreviewed = sorted(
+            dependency for dependency in values
+            if not system_dependency(target['os'], dependency)
+            and not canonical_ort_name(dependency, target['os'])
+            and external.get(Path(dependency).name.casefold()) is None)
+        require(not unreviewed, 'Unreviewed non-system native dependency: ' + ', '.join(unreviewed))
         for dependency in values:
             if target['os'] == 'windows':
                 reject_windows_dynamic_crt(dependency)

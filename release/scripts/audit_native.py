@@ -280,7 +280,7 @@ def system_dependency(operating_system, name):
         return (name.startswith("/System/Library/Frameworks/") or name.startswith("/usr/lib/")) and "onnx" not in name.casefold() and ".." not in name
     if operating_system == "windows":
         # Vendor CRT/UCRT redistributables are intentionally not exempted.
-        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
+        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll", "combase.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
     return bool(re.fullmatch(r"(?:lib(?:c|m|pthread|dl|rt|resolv|util|ssl|crypto)\.so\.[0-9]+|ld-linux[^/]*\.so\.[0-9]+|lib(?:asound|udev|gcc_s)\.so\.[0-9]+|libstdc\+\+\.so\.6)", name))
 
 
