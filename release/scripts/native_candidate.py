@@ -133,6 +133,7 @@ def discovery(arguments, target, candidate, notices):
             external[key] = item
     pending = list(target['executables'])
     graph, evidence, runtimes, systems = {}, {}, {}, {}
+    unreviewed_by_binary = {}
     while pending:
         name = pending.pop()
         if name in graph:
@@ -146,8 +147,12 @@ def discovery(arguments, target, candidate, notices):
             if not system_dependency(target['os'], dependency)
             and not canonical_ort_name(dependency, target['os'])
             and external.get(Path(dependency).name.casefold()) is None)
-        require(not unreviewed, 'Unreviewed non-system native dependency: ' + ', '.join(unreviewed))
+        if unreviewed:
+            # Keep walking the rest of the graph so one failure names them all.
+            unreviewed_by_binary[name] = unreviewed
         for dependency in values:
+            if dependency in unreviewed:
+                continue
             if target['os'] == 'windows':
                 reject_windows_dynamic_crt(dependency)
             if system_dependency(target['os'], dependency):
@@ -189,6 +194,8 @@ def discovery(arguments, target, candidate, notices):
                 item['source_path'] = str(source)
                 runtimes[runtime_name] = item
                 pending.append(runtime_name)
+    require(not unreviewed_by_binary, 'Unreviewed non-system native dependency: ' + '; '.join(
+        binary + ' imports ' + ', '.join(names) for binary, names in sorted(unreviewed_by_binary.items())))
     if target['os'] in ('linux', 'macos', 'windows'):
         require(any('onnxruntime' in name.casefold() for name in runtimes), 'Native client must link a bundled shared ONNX Runtime')
     inventory = {'schema': 1, 'state': 'reviewed', 'publication_allowed': True, 'target': arguments.target, 'files': list(runtimes.values()), 'system_libraries': list(systems.values())}
