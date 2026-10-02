@@ -9,8 +9,9 @@
 //! * hosted `ilium-ambient` scenes forward to `AmbientSettings::controls` and
 //!   `AmbientSettings::set_control`.
 
-use super::{AnimationKind, AnimationPlaybackMode, AnimationSettings, DitherMode};
-use ilium_ambient::control::{self, Control, ControlValue};
+use super::{AnimationKind, AnimationPlaybackMode, AnimationSettings, DitherMode, PanelTarget};
+use ilium_ambient::style::ColorMode;
+use ilium_ambient::control::{self, Control, ControlValue, SceneSettings};
 
 /// Stable ids of the four named sliders of a built-in scene.
 pub const LEGACY_CONTROL_IDS: [&str; 4] = [
@@ -23,19 +24,41 @@ pub const LEGACY_CONTROL_IDS: [&str; 4] = [
 const LEGACY_CONTROL_HELP: &str =
     "A named control of the selected scene. Each scene keeps its own saved values.";
 
-/// Common control ids in display order.
-pub fn common_control_ids() -> [&'static str; 9] {
-    [
+/// Ids of the appearance rows (`look_*`), in display order, for every mode.
+fn appearance_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = Vec::new();
+    for mode in [ColorMode::Color, ColorMode::Greyscale, ColorMode::Monotone] {
+        let look = ilium_ambient::style::Appearance {
+            mode,
+            ..Default::default()
+        };
+        for row in look.controls().into_iter().chain(look.pattern_controls()) {
+            if !ids.contains(&row.id) {
+                ids.push(row.id);
+            }
+        }
+    }
+    ids
+}
+
+/// Common control ids: every row that applies to all animations, whatever
+/// its visibility right now. The row list decides which are shown.
+pub fn common_control_ids() -> Vec<&'static str> {
+    let mut ids = vec![
         "background",
         "speed",
         "density",
         "dither",
+        "fps_limit",
+        "panels",
         "lightness",
         "hue",
         "saturation",
         "playback",
         "loop_seconds",
-    ]
+    ];
+    ids.extend(appearance_ids());
+    ids
 }
 
 impl AnimationSettings {
@@ -44,6 +67,9 @@ impl AnimationSettings {
         #[cfg(test)]
         if let Some(controls) = test_controls::current() {
             return controls;
+        }
+        if self.kind == AnimationKind::Wikipedia {
+            return self.wikipedia.controls();
         }
         if let Some(kind) = self.kind.ambient() {
             return self.ambient.controls(kind);
@@ -113,33 +139,48 @@ impl AnimationSettings {
             "dither" => Control::choice(
                 "dither",
                 "Dither",
-                usize::from(self.dither == DitherMode::Stippled),
-                &["Ordered", "Stippled"],
-                "Repeating ordered pattern or stable irregular stippling.",
+                self.dither.index(),
+                &DitherMode::LABELS,
+                "How dot tones become on/off Braille dots: ordered or irregular patterns, blue noise, halftone dots, line screens, or error diffusion (Floyd-Steinberg, Atkinson, Sierra Lite), which can shimmer on moving scenes.",
+            ),
+            "fps_limit" => Control::slider(
+                "fps_limit",
+                "Frame rate cap",
+                i32::from(self.fps_limit),
+                (0, 30, 1),
+                " fps",
+                "Highest redraw rate in frames per second; 0 lets each scene choose its own. Lower it to save CPU.",
+            ),
+            "panels" => Control::choice(
+                "panels",
+                "Show in",
+                self.panels.index(),
+                &PanelTarget::LABELS,
+                "Which workspace panel shows the animation: both, only the tree on the left, or only the terminal panes on the right. Shared by all animations.",
             ),
             "lightness" => Control::slider(
                 "lightness",
-                "Lightness",
+                "Ink lightness",
                 i32::from(self.lightness_percent),
                 (0, 100, 1),
                 "%",
-                "Shared HSL lightness of the dots.",
+                "HSL lightness of the single ink color used in Monotone mode.",
             ),
             "hue" => Control::slider(
                 "hue",
-                "Hue",
+                "Ink hue",
                 i32::from(self.hue_degrees),
                 (0, 359, 1),
                 "\u{b0}",
-                "Shared HSL hue; visible when saturation is above zero.",
+                "HSL hue of the Monotone ink; visible when its saturation is above zero.",
             ),
             "saturation" => Control::slider(
                 "saturation",
-                "Saturation",
+                "Ink saturation",
                 i32::from(self.saturation_percent),
                 (0, 100, 1),
                 "%",
-                "Shared HSL saturation; zero keeps the dots neutral grey.",
+                "HSL saturation of the Monotone ink; zero keeps the dots neutral grey.",
             ),
             "playback" => Control::choice(
                 "playback",
@@ -156,8 +197,25 @@ impl AnimationSettings {
                 "s",
                 "Length of the cached loop, from 1 to 120 seconds.",
             ),
+            _ if id.starts_with("look_") => return self.appearance_control(id),
             _ => return None,
         })
+    }
+
+    /// An appearance row by id, even when the current color mode hides it.
+    fn appearance_control(&self, id: &str) -> Option<Control> {
+        [self.appearance.mode, ColorMode::Color, ColorMode::Greyscale, ColorMode::Monotone]
+            .into_iter()
+            .find_map(|mode| {
+                let look = ilium_ambient::style::Appearance {
+                    mode,
+                    ..self.appearance.clone()
+                };
+                look.controls()
+                    .into_iter()
+                    .chain(look.pattern_controls())
+                    .find(|control| control.id == id)
+            })
     }
 
     /// Applies one edit to a common control. `Ok(false)` for an unknown id, a
@@ -196,16 +254,43 @@ impl AnimationSettings {
                 Some(number) => self.loop_seconds = number,
                 None => return Ok(false),
             },
-            "dither" => match control::index(&value) {
-                Some(index) => {
-                    self.dither = if index == 0 {
-                        DitherMode::Ordered
-                    } else {
-                        DitherMode::Stippled
-                    }
-                }
+            "dither" => match control::index(&value).and_then(DitherMode::from_index) {
+                Some(mode) => self.dither = mode,
                 None => return Ok(false),
             },
+            "fps_limit" => match clamped(&value, 0, 30) {
+                Some(number) => self.fps_limit = number,
+                None => return Ok(false),
+            },
+            "panels" => match control::index(&value).and_then(PanelTarget::from_index) {
+                Some(target) => self.panels = target,
+                None => return Ok(false),
+            },
+            "look_preset" => {
+                let Some(preset) = control::index(&value)
+                    .and_then(ilium_ambient::style::StylePreset::from_index)
+                else {
+                    return Ok(false);
+                };
+                if preset == ilium_ambient::style::StylePreset::Custom {
+                    self.appearance.preset = preset;
+                } else if let Some((dither, density)) = self.appearance.apply_preset(preset) {
+                    // A preset may also pick a dither and a density.
+                    if let Some(dither) = dither {
+                        self.dither = dither;
+                    }
+                    if let Some(density) = density {
+                        self.density_percent = density.clamp(25, 100);
+                    }
+                }
+            }
+            _ if id.starts_with("look_") => {
+                // Returns Ok(false) for a wrong-typed value, like the rest.
+                return match self.appearance.set_control(id, value) {
+                    Ok(changed) => Ok(changed),
+                    Err(_) => Ok(false),
+                };
+            }
             "playback" => match control::index(&value) {
                 Some(index) => {
                     self.playback_mode = if index == 0 {
@@ -228,6 +313,9 @@ impl AnimationSettings {
         #[cfg(test)]
         if test_controls::current().is_some() {
             return test_controls::set(id, value);
+        }
+        if self.kind == AnimationKind::Wikipedia {
+            return self.wikipedia.set_control(id, value);
         }
         if let Some(kind) = self.kind.ambient() {
             return self.ambient.set_control(kind, id, value);

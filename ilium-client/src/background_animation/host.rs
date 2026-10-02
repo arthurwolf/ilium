@@ -17,6 +17,7 @@ pub type SceneFactory =
     Box<dyn Fn(AmbientKind, &AmbientSettings, &SceneEnv) -> Box<dyn Scene> + Send>;
 
 struct HostedScene {
+    kind: AmbientKind,
     key: String,
     scene: Box<dyn Scene>,
     /// Session-clock value at construction: scene time starts at zero.
@@ -72,8 +73,24 @@ impl AmbientHost {
         elapsed: Duration,
     ) -> u64 {
         let key = settings.scene_key(kind);
-        if self.scene.as_ref().is_some_and(|hosted| hosted.key == key) {
-            return self.generation;
+        if let Some(hosted) = self.scene.as_mut() {
+            if hosted.key == key {
+                return self.generation;
+            }
+            // A scene may take changed settings in place (a running game
+            // keeps playing while its colours change). The generation still
+            // moves on so the render of the old settings is not reused.
+            if hosted.kind == kind {
+                let normalized = settings.normalized();
+                let applied =
+                    catch_unwind(AssertUnwindSafe(|| hosted.scene.reconfigure(&normalized)))
+                        .unwrap_or(false);
+                if applied {
+                    hosted.key = key;
+                    self.generation += 1;
+                    return self.generation;
+                }
+            }
         }
         // Drop the old scene first so its workers stop before the new ones start.
         self.scene = None;
@@ -93,6 +110,7 @@ impl AmbientHost {
         self.generation += 1;
         self.last_wall = Duration::ZERO;
         self.scene = Some(HostedScene {
+            kind,
             key,
             scene,
             built_at: elapsed,
@@ -150,6 +168,13 @@ impl AmbientHost {
         self.scene
             .as_ref()
             .map(|hosted| hosted.scene.frames_per_second().clamp(1, 30))
+    }
+
+    /// Single-cell labels supplied by the current hosted scene.
+    pub fn native_glyph(&self, x: u16, y: u16) -> Option<char> {
+        self.scene
+            .as_ref()
+            .and_then(|hosted| hosted.scene.native_glyph(x, y))
     }
 
     pub fn status(&self) -> Option<String> {

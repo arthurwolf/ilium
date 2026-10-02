@@ -10,7 +10,7 @@
 
 use crate::{
     animation_rows::{DisabledOption, RowModel},
-    animation_settings_ui::{control_ink, layout, row_y},
+    animation_settings_ui::{control_ink, layout, row_y, Scrolls},
     app::{App, Mode, SettingsTab},
     last_prompt_banner::wrap_lines,
 };
@@ -136,7 +136,7 @@ pub fn popover_geometry(
 }
 
 /// Draws the popover of the hovered row, if it is shown and still valid.
-pub fn render(frame: &mut Frame, area: Rect, app: &App, model: &RowModel, scroll: u16) {
+pub fn render(frame: &mut Frame, area: Rect, app: &App, model: &RowModel, scroll: Scrolls) {
     let Some(hover) = app.animation_hover.filter(|hover| hover.is_shown) else {
         return;
     };
@@ -218,7 +218,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::animation_rows::AnimationRow;
-    use crate::animation_settings_ui::{row_y, scroll_for_selection, AnimationHit};
+    use crate::animation_settings_ui::{follow_selection, row_y, AnimationHit, Scrolls};
     use crate::app::SettingsState;
     use crate::background_animation::AnimationKind;
     use crossterm::event::{
@@ -306,8 +306,9 @@ mod tests {
             panic!("Settings stays open");
         };
         state.selected_row = row;
-        state.scroll = scroll_for_selection(content, &model, row, state.scroll);
-        row_y(content, &model, row, state.scroll).expect("row is visible")
+        let scrolls = follow_selection(content, &model, row, Scrolls::of(state));
+        scrolls.store(state);
+        row_y(content, &model, row, scrolls).expect("row is visible")
     }
 
     fn selected_row(app: &App) -> usize {
@@ -391,8 +392,8 @@ mod tests {
         let terminal = draw(&mut app, 80, 24);
         let content = content_area(&app);
         let scroll = match &app.mode {
-            Mode::Settings(state) => state.scroll,
-            _ => 0,
+            Mode::Settings(state) => Scrolls::of(state),
+            _ => Scrolls::default(),
         };
         let y = row_y(content, &model, backend_row(&app), scroll).unwrap();
         let rows = screen_rows(&terminal);
@@ -590,8 +591,8 @@ mod tests {
                     content,
                     &model,
                     match &app.mode {
-                        Mode::Settings(state) => state.scroll,
-                        _ => 0,
+                        Mode::Settings(state) => Scrolls::of(state),
+                        _ => Scrolls::default(),
                     },
                     ratatui::layout::Position::new(*column, y),
                 ),

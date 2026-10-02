@@ -616,11 +616,11 @@
   {
     "id": "AN-29",
     "title": "Animation dithering",
-    "explanation": "Choose a repeating ordered pattern or stable irregular stippling. Changes save immediately to this project.",
-    "specimen": "Animation dithering\n\nDither ‹ Ordered / Stippled ›",
-    "states": "The live demo remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "explanation": "Choose how dot tones become on/off Braille dots: ordered Bayer patterns (2x2 to 16x16), stable stippling, blue noise, gradient noise, halftone dots, scan lines, diagonal lines, crosshatch, white noise, or error diffusion (Floyd-Steinberg, Atkinson, Sierra Lite). Changes save immediately to this project.",
+    "specimen": "Animation dithering\n\nDither ‹ Ordered (Bayer 8x8) / Stippled / Blue noise / Halftone dots / Scan lines / Floyd-Steinberg … ›",
+    "states": "Matrix modes are a pure function of position, so a still scene never flickers. The error-diffusion modes spread each dot's rounding error onto its neighbours, which gives smoother tones but can shimmer on moving scenes. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Animation dithering\n\nDither ‹ Ordered / Stippled ›"
+      "Animation dithering\n\nDither ‹ Ordered (Bayer 8x8) / Stippled / Blue noise / Halftone dots / Scan lines / Floyd-Steinberg … ›"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille."
@@ -635,7 +635,7 @@
     ],
     "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
     "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
-    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast. These three rows set the single ink color of Monotone mode."
   },
   {
     "id": "AN-31",
@@ -647,7 +647,7 @@
     ],
     "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
     "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
-    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast. These three rows set the single ink color of Monotone mode."
   },
   {
     "id": "AN-32",
@@ -659,7 +659,7 @@
     ],
     "states": "Left/Right adjusts the selected slider. Only a click on its track changes the value; its label focuses the row. Dragging retains that slider until release, even beyond its endpoints. Each successful change saves immediately to this project; a failed save retains the previous effective setting and displays an error.",
     "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. Ambient scenes freeze with Motion Off.",
-    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast."
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Shared color applies equally to ambient dots and the live preview; controls retain normal UI contrast. These three rows set the single ink color of Monotone mode."
   },
   {
     "id": "AN-33",
@@ -861,6 +861,30 @@
     "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
       "Solar system\n\nEight independently visible planets orbit the Sun."
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
+  },
+  {
+    "id": "AN-50",
+    "title": "Hex expedition",
+    "explanation": "An endless sea of explorer's islands generated as you watch, each with its own shore, biomes, one moored ship, one distant goal and scattered villages, camps, ruins, caves, mines and shrines. Choose one map type (jungle, savanna, desert, arctic or volcanic) or let each be revealed in the next, hex by hex. Hex size, pan speed and route, tile animation, landmarks, weather and cloud shadows are adjustable. Changes save immediately to this project.",
+    "specimen": "Hex expedition\n\nMap type        All in turn → Jungle … Volcanic\nHex size        10 → 40 dots\nPan speed       0% → 300%",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Hex expedition\n\nA procedurally generated hex map pans slowly past animated water, trees, smoke and fires."
+    ],
+    "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The tile art is generated by Ilium itself; no game artwork is used."
+  },
+  {
+    "id": "AN-51",
+    "title": "Vector TD",
+    "explanation": "A tower defense that plays itself, full screen. An AI places, upgrades and unlocks vector towers against waves of monsters, sends waves early when the defence is strong, and moves from wave to wave, map to map and level to level while the towers and monsters grow stronger. Choose the map or play them all in turn, the start level, waves per level, difficulty and game speed. Colours are black and white or a colour scheme with brightness, contrast, hue and saturation sliders. Changes save immediately to this project.",
+    "specimen": "Vector TD\n\nMap             All in turn → Serpent\nGame speed      25% → 400%\nColours         Black and white / Colour\nHue             0 → 360 deg",
+    "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
+    "frames": [
+      "Vector TD\n\nTowers fire at a stream of monsters walking a glowing path while the status line counts waves, money and lives."
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."
@@ -3360,6 +3384,383 @@
     "caveat": "help must not activate the button.",
     "frames": [
       "`[ Reconnect now ]` beside an inert `current settings → new connection` diagram."
+    ]
+  },
+  {
+    "id": "AN-54",
+    "title": "Wikipedia",
+    "explanation": "Today’s English Wikipedia Main Page articles, slowly scrolling with their headings, references, infoboxes and images.",
+    "specimen": "Page rendering: Braille / Text · Greyscale · Wikipedia / Pastel / Sepia / Night · Page zoom · Page scroll · Page dwell · Palette hue shift / saturation · Page lightness",
+    "states": "Braille is the default. Text keeps readable characters, bold and italic; color and greyscale apply to images and text. Zero scroll pauses the page.",
+    "motion": "Configurable slow scrolling through the entire article, followed by another daily Main Page article.",
+    "caveat": "Requires Wikipedia access on first use; previously downloaded pages and images can be reused offline. This help specimen is illustrative and does not fetch a page.",
+    "frames": [
+      "Wikipedia — Main Page articles\nBraille · Greyscale · Page scroll: 0.2 row/s",
+      "Wikipedia — Main Page articles\nText · Pastel · Page scroll: paused"
+    ]
+  },
+  {
+    "id": "AN-53",
+    "title": "Galactic empires",
+    "explanation": "A procedural galaxy overview: connected stars, colored dithered territories and moving fleets. Empires expand, change between peace and war, and eventually unify under one winner.",
+    "specimen": "Simulation speed · Camera speed · Star systems · Starting empires · Galaxy seed · Territory shading · Show fleets",
+    "states": "Seed 0 chooses a fresh map; positive seeds reproduce the initial galaxy. A winner remains visible before another galaxy begins.",
+    "motion": "A slow clockwise camera orbit shows roughly one quarter of the galaxy at a time. Simulation and camera speed are independently adjustable.",
+    "caveat": "An atmospheric, deliberately basic strategy simulation; no external game assets or network access.",
+    "frames": [
+      "Galactic empires — expanding territories and travelling fleets",
+      "Galactic empires — one empire united the stars"
+    ]
+  },
+  {
+    "id": "AN-52",
+    "title": "Voxel landscape",
+    "explanation": "An original isometric surface world of textured blocks: seeded biomes, forests, cactuses, connected villages, cave mouths and ravines.",
+    "specimen": "World seed · Tile zoom · Detail · Camera speed / direction · Black and white / Pastel color · Landscape palette · Hue tint · Color saturation / lightness · Vegetation / Structure density · Rivers / Ravines / Cave mouths",
+    "states": "The same seed preserves world identity. Detail changes decoration coverage; zoom changes projected tile size. Camera speed zero freezes movement. Monochrome uses gray dots; pastel supplies material colors.",
+    "motion": "Continuous slow pan across an unbounded seeded landscape, using the shared animation speed.",
+    "caveat": "Surface scenery only. Textures are original procedural pixel artwork; no Minecraft or resource-pack assets are bundled. Decoration does not change terminal output, history, copied text or agent detection. Live playback.",
+    "frames": [
+      "Voxel landscape — forests and a village in pastel dithering",
+      "Voxel landscape — a ravine and an open cave in monochrome"
+    ]
+  },
+  {
+    "id": "AN-56",
+    "title": "Topographic maps",
+    "explanation": "Contour maps of Earth, the Moon, Mars, Venus, Mercury, Ceres and generated fictional worlds, drawn as Braille dots on a flat map or a turning globe. Each dot line is one elevation step.",
+    "specimen": "World · Seconds per world · Fictional seed · Projection · Zoom · Contour lines / spacing · Index line every · Line thickness · Lines below zero · Emphasise zero level · Map outline · Relief shading · Colours · Pan / speed · Start latitude / longitude · Zero level shift · Tide range / period",
+    "states": "Contour spacing 0 derives round steps from the number of lines; a fixed spacing in metres overrides it. Pan speed 0 holds the view. A zero level shift or tide floods and drains the world, moving the shore line.",
+    "motion": "The view slides or the globe turns slowly; several worlds follow one another with a dissolve.",
+    "caveat": "Elevation is embedded offline from NOAA ETOPO 2022 (Earth) and NASA LOLA, MOLA, Magellan, MESSENGER and Dawn surveys at about 0.2 degree resolution; the fictional worlds are generated from the seed. No network access.",
+    "frames": [
+      "Topographic maps — Earth, 500 m contours, dotted below sea level",
+      "Topographic maps — Mars globe, 2000 m contours with index lines"
+    ]
+  },
+  {
+    "id": "AN-55",
+    "title": "OpenStreetMap",
+    "explanation": "Real streets, buildings, water, green spaces and railways around Paris, London, Venice, New York, Tokyo, Cape Town, Sydney, Rio, Singapore and Reykjavik, drawn as Braille dots.",
+    "specimen": "Place · Selected / Ordered / Shuffled tour · Dwell · Fixed / Orbit / East-west camera · Camera speed · Map width · Map brightness · Line width · Independent road / building / water / green-space / railway / POI layers",
+    "states": "The bundled catalogue works offline. Local Overpass JSON and an explicit HTTPS Overpass endpoint with coordinates are optional. Shared palette, hue, saturation, lightness, density and dithering style the dots.",
+    "motion": "Hold one place or tour the catalogue; fixed maps remain still, while orbit and east-west cameras pan locally. Camera speed zero holds position.",
+    "caveat": "OpenStreetMap contributors / ODbL. Clipped or incomplete polygon boundaries remain outlines. Custom provider failures retain the last good map; requests are bounded and rate limited. Help never fetches data.",
+    "frames": [
+      "OpenStreetMap — Paris · water and roads",
+      "OpenStreetMap — Tokyo · buildings and green space"
+    ]
+  },
+  {
+    "id": "AN-57",
+    "title": "Live graphs",
+    "explanation": "Provider-time line graphs, bars and genuine OHLC candles from public keyless sources.",
+    "specimen": "Source · Chart · Time window · Requested refresh · Graph brightness · Graph hue · Rising hue · Falling hue",
+    "states": "OHLC is available only where the provider supplies it. Changing source clears the old series.",
+    "motion": "Shows received measurements over the selected time window; repeated polls do not invent observations.",
+    "caveat": "Provider minimum refresh intervals apply. Wikipedia is an aggregate of public edits; Quicknet values are not BLS-verified. Connection and observation timestamps are shown separately.",
+    "frames": [
+      "Graph — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-58",
+    "title": "Digits of Pi",
+    "explanation": "An exact prefix of Pi scrolling as native text or real-font Braille.",
+    "specimen": "Pi rendering · Font size · Exact digits · Scroll speed · Pi hue · Pi brightness · Colors by digit",
+    "states": "Font size applies in Font Braille mode. Digit colors expose ten independently configurable hues.",
+    "motion": "Scroll through the exact prefix; zero scroll holds its beginning.",
+    "caveat": "Digits are calculated locally. Native text follows the terminal font; Braille uses bundled Cascadia Code. The selected prefix repeats.",
+    "frames": [
+      "Pi — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-59",
+    "title": "Live earthquakes",
+    "explanation": "Reported earthquakes on a Braille world coastline, including tiny, zero, negative and unknown magnitudes.",
+    "specimen": "Map brightness · Map hue · Marker brightness · Marker hue · Requested refresh · Magnitude labels",
+    "states": "Unknown magnitudes are retained and marked with a question mark. Dense labels may be omitted to avoid collisions.",
+    "motion": "Recent reported events pulse at their actual coordinates.",
+    "caveat": "USGS all-day GeoJSON refreshes at most once per minute. A feed refresh does not imply a new earthquake.",
+    "frames": [
+      "Earthquakes — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-60",
+    "title": "Live aircraft",
+    "explanation": "All usable airborne positions reported by the selected public global feed, over a Braille coastline.",
+    "specimen": "Map brightness · Map hue · Marker brightness · Marker hue · Requested refresh",
+    "states": "Map and aircraft colors and brightness are independent. Grounded or coordinate-less records are excluded.",
+    "motion": "Positions change when the provider reports new observations; movement is not extrapolated.",
+    "caveat": "OpenSky anonymous credit limits impose a conservative 15-minute global polling floor shared through a local reservation. Coverage is incomplete; this is not a list of every aircraft worldwide.",
+    "frames": [
+      "Aircraft — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-61",
+    "title": "Live boats",
+    "explanation": "Public ship positions in Finnish waters over a Braille world coastline.",
+    "specimen": "Map brightness · Map hue · Marker brightness · Marker hue · Requested refresh",
+    "states": "Map and vessel colors and brightness are independent. Heading is drawn only when reported.",
+    "motion": "Positions change on successful provider updates; movement is not extrapolated.",
+    "caveat": "Digitraffic provides regional Finnish AIS coverage, not global ships. Refresh is limited to at least 30 seconds; old positions remain visible with freshness information on failure.",
+    "frames": [
+      "Boats — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-62",
+    "title": "Live chess",
+    "explanation": "A real featured Lichess game shown with original dithered chess-piece silhouettes.",
+    "specimen": "Board orientation · Chess brightness · White pieces · Black pieces · Board color",
+    "states": "Orientation swaps the players while keeping each piece upright. Small viewports may not fit the board.",
+    "motion": "The board follows authoritative positions from the public Lichess TV stream.",
+    "caveat": "Clocks show the latest feed values. Failed connections retain the last board with an error and receipt age. No synthetic game or invented move is substituted.",
+    "frames": [
+      "Live chess — illustrative settings specimen; no network request"
+    ]
+  },
+  {
+    "id": "AN-C01",
+    "title": "Style preset",
+    "explanation": "Apply a ready-made look in one step: color mode, palette, brightness, contrast, edge fade and sometimes a dither. Presets range from Whisper (barely visible) and Subtle to Neon night, Matrix, Amber terminal, Blueprint and Paper and ink.",
+    "specimen": "Style preset ‹ Custom / Original / Whisper / Subtle / Quiet grey / Soft pastel / Vivid / Neon night … ›",
+    "states": "Choosing a preset sets every look value it defines. Editing any look value afterwards switches the preset back to Custom, so the row always tells the truth. Presets that name a dither or density change those too.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Style preset ‹ Custom / Original / Whisper / Subtle / Quiet grey / Soft pastel / Vivid / Neon night … ›"
+    ]
+  },
+  {
+    "id": "AN-C02",
+    "title": "Color mode",
+    "explanation": "Choose how the animation is colored. Color uses a palette (or the scene's own colors), Greyscale uses shades of grey with an optional tint, and Monotone draws every dot in one ink color.",
+    "specimen": "Color mode ‹ Color / Greyscale / Monotone ›",
+    "states": "Color shows the palette rows, Greyscale shows the grey tint rows, Monotone shows the ink lightness, hue and saturation rows. Brightness, contrast and the other tone rows apply to all three.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Color mode ‹ Color / Greyscale / Monotone ›"
+    ]
+  },
+  {
+    "id": "AN-C03",
+    "title": "Palette",
+    "explanation": "Pick the gradient the colors come from: pastel, neon, sunset, ocean, forest, ember, viridis, solarized, nord, dracula and many more. Scene colors keeps the animation's own colors.",
+    "specimen": "Palette ‹ Scene colors / Rainbow / Pastel rainbow / Cotton candy / Neon / Sunset / Ocean / Viridis … ›",
+    "states": "With a palette other than Scene colors, scenes that paint their own colors are recolored by brightness, and scenes without colors take the palette by dot coverage, position or time (see Color from).",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Palette ‹ Scene colors / Rainbow / Pastel rainbow / Cotton candy / Neon / Sunset / Ocean / Viridis … ›"
+    ]
+  },
+  {
+    "id": "AN-C04",
+    "title": "Color from",
+    "explanation": "Choose what picks the position on the palette or grey ramp: the scene's own brightness or the dot coverage, a fixed middle position, a gradient from top to bottom, left to right, diagonal or from the centre, or a slow drift through time.",
+    "specimen": "Color from ‹ Scene or coverage / Flat / Dot coverage / Top to bottom / Left to right / Diagonal / Centre to edge / Drifting in time ›",
+    "states": "Flat shows one color; the gradient and drift sources work on scenes that paint no colors of their own.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Color from ‹ Scene or coverage / Flat / Dot coverage / Top to bottom / Left to right / Diagonal / Centre to edge / Drifting in time ›"
+    ]
+  },
+  {
+    "id": "AN-C05",
+    "title": "Reverse palette",
+    "explanation": "Run the palette or grey ramp from its other end, so dark and light swap places along the gradient.",
+    "specimen": "Reverse ‹ Off / On ›",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Reverse ‹ Off / On ›"
+    ]
+  },
+  {
+    "id": "AN-C06",
+    "title": "Palette shift",
+    "explanation": "Rotate the palette by a percentage of its length; the colors wrap around. Use it to move a palette's hot or cool part to where you like it.",
+    "specimen": "Palette shift   ●─────────────  0%\nRange 0%..100%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Palette shift   ●─────────────  0%\nRange 0%..100%"
+    ]
+  },
+  {
+    "id": "AN-C07",
+    "title": "Palette spread",
+    "explanation": "How much of the palette the full range of the source covers. Below 100% shows a narrow slice of it; above 100% crowds the gradient so the ends repeat sooner.",
+    "specimen": "Palette spread   ──────●──────  100%\nRange 25%..400%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Palette spread   ──────●──────  100%\nRange 25%..400%"
+    ]
+  },
+  {
+    "id": "AN-C08",
+    "title": "Grey tint hue",
+    "explanation": "Hue of the tint mixed into the greys in Greyscale mode, for warm paper or cool slate greys.",
+    "specimen": "Grey tint hue   ──●───────────  40°\nRange 0°..359°",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Grey tint hue   ──●───────────  40°\nRange 0°..359°"
+    ]
+  },
+  {
+    "id": "AN-C09",
+    "title": "Grey tint strength",
+    "explanation": "How strongly the greys lean toward the tint hue. Zero is pure grey; 100% is a fully tinted monochrome.",
+    "specimen": "Grey tint   ●─────────────  0%\nRange 0%..100%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Grey tint   ●─────────────  0%\nRange 0%..100%"
+    ]
+  },
+  {
+    "id": "AN-C10",
+    "title": "Brightness",
+    "explanation": "Overall brightness of the animation, from 1% to 200%. Lower it to make the background less noticeable; 100% leaves colors unchanged and values above 100% brighten.",
+    "specimen": "Brightness   ──────●──────  100%\nRange 1%..200%",
+    "states": "Low values dim every color toward black, in any color mode. Use the Whisper or Subtle presets for a quick quiet look.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Brightness   ──────●──────  100%\nRange 1%..200%"
+    ]
+  },
+  {
+    "id": "AN-C11",
+    "title": "Contrast",
+    "explanation": "Spread colors away from mid-grey (above 100%) or pull them toward it (below 100%). Zero makes everything flat mid-grey.",
+    "specimen": "Contrast   ──────●──────  100%\nRange 0%..200%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Contrast   ──────●──────  100%\nRange 0%..200%"
+    ]
+  },
+  {
+    "id": "AN-C12",
+    "title": "Gamma",
+    "explanation": "The mid-tone curve. Above 100% lifts the mid-tones, below 100% deepens them, without moving pure black or white.",
+    "specimen": "Gamma   ──────●──────  100%\nRange 30%..300%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Gamma   ──────●──────  100%\nRange 30%..300%"
+    ]
+  },
+  {
+    "id": "AN-C13",
+    "title": "Color intensity",
+    "explanation": "Multiplier on color saturation. Zero turns everything grey, 100% leaves the palette as designed and up to 200% pushes colors harder.",
+    "specimen": "Color intensity   ──────●──────  100%\nRange 0%..200%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Color intensity   ──────●──────  100%\nRange 0%..200%"
+    ]
+  },
+  {
+    "id": "AN-C14",
+    "title": "Hue shift",
+    "explanation": "Rotate every color around the color wheel by up to 180° either way. It recolors any palette or scene without changing its brightness.",
+    "specimen": "Hue shift   ──────●──────  0°\nRange -180°..180°",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Hue shift   ──────●──────  0°\nRange -180°..180°"
+    ]
+  },
+  {
+    "id": "AN-C15",
+    "title": "Invert colors",
+    "explanation": "Replace every color by its opposite tone. Combine with Brightness to keep an inverted look discreet.",
+    "specimen": "Invert colors ‹ Off / On ›",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Invert colors ‹ Off / On ›"
+    ]
+  },
+  {
+    "id": "AN-C16",
+    "title": "Edge fade",
+    "explanation": "Darken the animation toward the edges of the screen with a soft vignette, keeping the centre of attention clear.",
+    "specimen": "Edge fade   ●─────────────  0%\nRange 0%..100%",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Edge fade   ●─────────────  0%\nRange 0%..100%"
+    ]
+  },
+  {
+    "id": "AN-C17",
+    "title": "Pattern contrast",
+    "explanation": "Sharpen or soften the scene's dot tones before they are dithered. Above 100% keeps only the brighter dots and drops the shadows; below 100% fills the shadows in.",
+    "specimen": "Pattern contrast   ──────●──────  100%\nRange 50%..200%",
+    "states": "Unlike the color rows this changes which dots are drawn, so it applies the same way in every color mode.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Pattern contrast   ──────●──────  100%\nRange 50%..200%"
+    ]
+  },
+  {
+    "id": "AN-C18",
+    "title": "Invert pattern",
+    "explanation": "Swap lit and unlit dots, like a photographic negative of the scene's dot pattern.",
+    "specimen": "Invert pattern ‹ Off / On ›",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Invert pattern ‹ Off / On ›"
+    ]
+  },
+  {
+    "id": "AN-C19",
+    "title": "Frame rate cap",
+    "explanation": "Limit how often the animation redraws, from 1 to 30 frames per second. Zero lets each scene choose its own rate. A lower cap saves CPU on slow machines or batteries.",
+    "specimen": "Frame rate cap   ●─────────────  0 fps (scene's own)\nRange 0..30 fps",
+    "states": "Left/Right adjusts the selected row; a click on a slider track sets it. Each successful change saves immediately to this project and applies to every animation; a failed save retains the previous effective setting and displays an error.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Frame rate cap   ●─────────────  0 fps (scene's own)\nRange 0..30 fps"
+    ]
+  },
+  {
+    "id": "AN-C20",
+    "title": "Show in panel",
+    "explanation": "Choose where the animation appears: behind both workspace panels (the default), only behind the tree panel on the left, or only behind the terminal panes on the right. It applies to every animation.",
+    "specimen": "Show in ‹ Both panels / Left panel only / Right panel only ›",
+    "states": "The Settings preview always shows the whole screen so you can judge the look. The choice only affects the real workspace.",
+    "motion": "The explicitly opened demo stays live even with Background disabled or Motion Off. The change shows at once on the preview.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Show in ‹ Both panels / Left panel only / Right panel only ›"
     ]
   }
 ]

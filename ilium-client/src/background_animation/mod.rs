@@ -1,5 +1,6 @@
 //! Deterministic dot scenes. Decoration never enters PTY/source state.
 
+use ilium_ambient::style::Appearance;
 use ilium_ambient::{AmbientKind, AmbientSettings};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
@@ -15,6 +16,7 @@ mod shoreline;
 pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
+mod wikipedia;
 
 pub use cache::{AnimationCacheStatus, AnimationLoopCache};
 #[cfg(test)]
@@ -29,6 +31,9 @@ pub use parameters::{
     TwoRipplesSettings, WindyHillsideSettings,
 };
 pub use shoreline::{ShorelineSettings, ShorelineStyle};
+pub(crate) use wikipedia::render::safe_symbol_width as wikipedia_symbol_width;
+use wikipedia::WikipediaPresentation;
+pub use wikipedia::WikipediaSettings;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -60,11 +65,24 @@ pub enum AnimationKind {
     FbmClouds,
     DitheredWaves,
     DithrPatterns,
+    HexExpedition,
+    VectorTd,
+    Wikipedia,
+    GalacticEmpires,
+    VoxelLandscape,
     SolarSystem,
+    TopographicMaps,
+    Graph,
+    Pi,
+    Earthquakes,
+    Aircraft,
+    Boats,
+    Chess,
+    OpenStreetMap,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 39] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -90,7 +108,20 @@ impl AnimationKind {
         Self::FbmClouds,
         Self::DitheredWaves,
         Self::DithrPatterns,
+        Self::HexExpedition,
+        Self::VectorTd,
+        Self::Wikipedia,
+        Self::GalacticEmpires,
+        Self::VoxelLandscape,
         Self::SolarSystem,
+        Self::TopographicMaps,
+        Self::Graph,
+        Self::Pi,
+        Self::Earthquakes,
+        Self::Aircraft,
+        Self::Boats,
+        Self::Chess,
+        Self::OpenStreetMap,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
@@ -98,6 +129,15 @@ impl AnimationKind {
     pub const fn ambient(self) -> Option<AmbientKind> {
         match self {
             Self::SolarSystem => Some(AmbientKind::SolarSystem),
+            Self::TopographicMaps => Some(AmbientKind::TopographicMaps),
+            Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
+            Self::Graph => Some(AmbientKind::Graph),
+            Self::Pi => Some(AmbientKind::Pi),
+            Self::Earthquakes => Some(AmbientKind::Earthquakes),
+            Self::Aircraft => Some(AmbientKind::Aircraft),
+            Self::Boats => Some(AmbientKind::Boats),
+            Self::Chess => Some(AmbientKind::Chess),
+            Self::GalacticEmpires => Some(AmbientKind::GalacticEmpires),
             Self::Pipes => Some(AmbientKind::Pipes),
             Self::Stars => Some(AmbientKind::Stars),
             Self::NightLights => Some(AmbientKind::NightLights),
@@ -113,6 +153,9 @@ impl AnimationKind {
             Self::FbmClouds => Some(AmbientKind::FbmClouds),
             Self::DitheredWaves => Some(AmbientKind::DitheredWaves),
             Self::DithrPatterns => Some(AmbientKind::DithrPatterns),
+            Self::HexExpedition => Some(AmbientKind::HexExpedition),
+            Self::VectorTd => Some(AmbientKind::VectorTd),
+            Self::VoxelLandscape => Some(AmbientKind::VoxelLandscape),
             _ => None,
         }
     }
@@ -129,7 +172,7 @@ impl AnimationKind {
     /// Live-only scenes are never precomputed into the loop cache: their
     /// output depends on data, processes or the wall clock, not just time.
     pub fn is_live_only(self) -> bool {
-        self.ambient().is_some_and(AmbientKind::is_live_only)
+        self == Self::Wikipedia || self.ambient().is_some_and(AmbientKind::is_live_only)
     }
 
     pub fn label(self) -> &'static str {
@@ -137,6 +180,7 @@ impl AnimationKind {
             return kind.label();
         }
         match self {
+            Self::Wikipedia => "Wikipedia",
             Self::Shoreline => "Wave washing up sand",
             Self::MoonlitWater => "Moon over moving water",
             Self::SleepingRidge => "Clouds over a sleeping ridge",
@@ -156,6 +200,7 @@ impl AnimationKind {
             return kind.description();
         }
         match self {
+            Self::Wikipedia => "Today's Wikipedia articles, slowly scrolling as readable text or font-rendered Braille, with images and infoboxes.",
             Self::Shoreline => "A diagonal wash with fine foam, wet sand and scattered grains.",
             Self::MoonlitWater => "Crossing wavelets fracture a widening moonlit reflection.",
             Self::SleepingRidge => "Layered clouds and valley mist drift over quiet ridges.",
@@ -176,6 +221,42 @@ impl AnimationKind {
             }
             _ => unreachable!("ambient kinds return before this match"),
         }
+    }
+}
+
+/// Which workspace panel shows the animation behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelTarget {
+    #[default]
+    Both,
+    /// Only behind the tree panel on the left.
+    Left,
+    /// Only behind the terminal panes on the right.
+    Right,
+}
+
+impl PanelTarget {
+    pub const LABELS: [&'static str; 3] = ["Both panels", "Left panel only", "Right panel only"];
+
+    pub fn from_index(index: usize) -> Option<Self> {
+        [Self::Both, Self::Left, Self::Right].get(index).copied()
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Both => 0,
+            Self::Left => 1,
+            Self::Right => 2,
+        }
+    }
+
+    pub const fn shows_left(self) -> bool {
+        matches!(self, Self::Both | Self::Left)
+    }
+
+    pub const fn shows_right(self) -> bool {
+        matches!(self, Self::Both | Self::Right)
     }
 }
 
@@ -200,6 +281,14 @@ pub struct AnimationSettings {
     pub lightness_percent: u16,
     pub hue_degrees: u16,
     pub saturation_percent: u16,
+    /// The look shared by every animation: color mode, palette, brightness,
+    /// contrast and the other tone controls. One value for all scenes.
+    pub appearance: Appearance,
+    /// Which panel shows the animation. Shared by every animation.
+    pub panels: PanelTarget,
+    /// Upper limit on the redraw rate in frames per second; 0 keeps each
+    /// scene's own rate.
+    pub fps_limit: u16,
     pub shoreline: ShorelineSettings,
     pub moonlit_water: MoonlitWaterSettings,
     pub sleeping_ridge: SleepingRidgeSettings,
@@ -210,6 +299,7 @@ pub struct AnimationSettings {
     pub cloudlets: CloudletSettings,
     pub two_ripples: TwoRipplesSettings,
     pub quiet_pond: QuietPondSettings,
+    pub wikipedia: WikipediaSettings,
     /// Settings of the hosted `ilium-ambient` scenes and the shared observer
     /// location. Flattened so the project YAML stays one flat mapping.
     #[serde(flatten)]
@@ -229,6 +319,9 @@ impl Default for AnimationSettings {
             lightness_percent: 60,
             hue_degrees: 210,
             saturation_percent: 0,
+            appearance: Default::default(),
+            panels: PanelTarget::Both,
+            fps_limit: 0,
             shoreline: Default::default(),
             moonlit_water: Default::default(),
             sleeping_ridge: Default::default(),
@@ -239,6 +332,7 @@ impl Default for AnimationSettings {
             cloudlets: Default::default(),
             two_ripples: Default::default(),
             quiet_pond: Default::default(),
+            wikipedia: Default::default(),
             ambient: Default::default(),
         }
     }
@@ -253,6 +347,12 @@ impl AnimationSettings {
             lightness_percent: self.lightness_percent.min(100),
             hue_degrees: self.hue_degrees.min(359),
             saturation_percent: self.saturation_percent.min(100),
+            appearance: self.appearance.normalized(),
+            fps_limit: if self.fps_limit == 0 {
+                0
+            } else {
+                self.fps_limit.clamp(1, 30)
+            },
             shoreline: self.shoreline.normalized(),
             moonlit_water: self.moonlit_water.normalized(),
             sleeping_ridge: self.sleeping_ridge.normalized(),
@@ -263,6 +363,7 @@ impl AnimationSettings {
             cloudlets: self.cloudlets.normalized(),
             two_ripples: self.two_ripples.normalized(),
             quiet_pond: self.quiet_pond.normalized(),
+            wikipedia: ilium_ambient::SceneSettings::normalized(&self.wikipedia),
             ambient: self.ambient.normalized(),
             ..self.clone()
         }
@@ -328,6 +429,39 @@ impl AnimationSettings {
     }
 }
 
+/// Everything that changes how dot tones become Braille bits. Colour,
+/// brightness and the other look controls are not here: they never change
+/// which dots are lit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PackKey {
+    pub density_percent: u16,
+    pub dither: DitherMode,
+    pub contrast_percent: u16,
+    pub invert: bool,
+}
+
+impl PackKey {
+    /// A plain pattern: no contrast shaping, not inverted.
+    #[cfg(test)]
+    pub(crate) fn plain(density_percent: u16, dither: DitherMode) -> Self {
+        Self {
+            density_percent,
+            dither,
+            contrast_percent: 100,
+            invert: false,
+        }
+    }
+
+    pub(crate) fn of(settings: &AnimationSettings) -> Self {
+        Self {
+            density_percent: settings.density_percent,
+            dither: settings.dither,
+            contrast_percent: settings.appearance.pattern_contrast_percent,
+            invert: settings.appearance.pattern_invert,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameKey {
     kind: AnimationKind,
@@ -365,13 +499,16 @@ pub struct AnimationFrame {
     last_geometry: Option<FrameKey>,
     #[cfg(test)]
     pub(crate) geometry_render_count: usize,
-    last_pack: Option<(u16, DitherMode)>,
+    last_pack: Option<PackKey>,
     thresholds: Vec<f32>,
+    diffused: Vec<bool>,
     threshold_key: Option<(u16, u16, DitherMode)>,
     colors: Vec<[u8; 3]>,
     has_cell_colors: bool,
     host: AmbientHost,
     last_ambient: Option<AmbientRenderKey>,
+    wikipedia: WikipediaPresentation,
+    is_wikipedia: bool,
 }
 
 impl AnimationFrame {
@@ -389,6 +526,66 @@ impl AnimationFrame {
 
     pub fn host_mut(&mut self) -> &mut AmbientHost {
         &mut self.host
+    }
+
+    pub fn status(&self) -> Option<String> {
+        if self.is_wikipedia {
+            self.wikipedia.status()
+        } else {
+            self.host.status()
+        }
+    }
+
+    pub fn release_hosts(&mut self) {
+        self.host.release();
+        self.wikipedia.release();
+        self.is_wikipedia = false;
+        self.has_cell_colors = false;
+        self.last_ambient = None;
+        self.last_geometry = None;
+        self.cells.fill(0);
+    }
+
+    pub fn is_wikipedia(&self) -> bool {
+        self.is_wikipedia
+    }
+
+    pub fn article_symbol(&self, x: u16, y: u16) -> Option<&str> {
+        self.is_wikipedia
+            .then(|| self.wikipedia.cell(x, y))
+            .flatten()
+            .filter(|cell| cell.is_ink())
+            .map(|cell| cell.symbol())
+    }
+
+    pub fn article_is_continuation(&self, x: u16, y: u16) -> bool {
+        self.is_wikipedia
+            && self
+                .wikipedia
+                .cell(x, y)
+                .is_some_and(|cell| cell.is_continuation())
+    }
+
+    pub fn article_style(&self, x: u16, y: u16) -> (bool, bool) {
+        self.wikipedia
+            .cell(x, y)
+            .map_or((false, false), |cell| (cell.bold(), cell.italic()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_wikipedia_document_for_test(
+        &mut self,
+        document: std::sync::Arc<ilium_wikipedia::Document>,
+        settings: &WikipediaSettings,
+        columns: u16,
+    ) {
+        self.wikipedia
+            .inject_document_for_test(document, settings, columns);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wikipedia_layout_count_for_test(&self) -> Option<u64> {
+        self.wikipedia.layout_count_for_test()
     }
 
     fn resize(&mut self, width: u16, height: u16) {
@@ -412,6 +609,22 @@ impl AnimationFrame {
         elapsed: Duration,
     ) {
         let settings = settings.normalized();
+        if settings.kind == AnimationKind::Wikipedia {
+            self.host.release();
+            self.is_wikipedia = true;
+            self.last_geometry = None;
+            self.last_ambient = None;
+            if width != self.width || height != self.height {
+                self.resize(width, height);
+            }
+            self.cells.fill(0);
+            self.has_cell_colors = true;
+            self.wikipedia
+                .render(&settings.wikipedia, width, height, elapsed, 100);
+            return;
+        }
+        self.wikipedia.release();
+        self.is_wikipedia = false;
         if let Some(kind) = settings.kind.ambient() {
             self.render_ambient(kind, &settings, width, height, elapsed);
             return;
@@ -451,9 +664,9 @@ impl AnimationFrame {
         if width == 0 || height == 0 {
             return;
         }
-        if geometry_changed || self.last_pack != Some((settings.density_percent, settings.dither)) {
-            self.pack(settings.density_percent, settings.dither);
-            self.last_pack = Some((settings.density_percent, settings.dither));
+        if geometry_changed || self.last_pack != Some(PackKey::of(&settings)) {
+            self.pack(PackKey::of(&settings));
+            self.last_pack = Some(PackKey::of(&settings));
         }
     }
 
@@ -506,15 +719,18 @@ impl AnimationFrame {
         if width == 0 || height == 0 {
             return;
         }
-        if !is_reused || self.last_pack != Some((settings.density_percent, settings.dither)) {
-            self.pack(settings.density_percent, settings.dither);
-            self.last_pack = Some((settings.density_percent, settings.dither));
+        if !is_reused || self.last_pack != Some(PackKey::of(settings)) {
+            self.pack(PackKey::of(settings));
+            self.last_pack = Some(PackKey::of(settings));
         }
     }
 
     pub fn glyph(&self, x: u16, y: u16) -> char {
         if x >= self.width || y >= self.height {
             return ' ';
+        }
+        if let Some(glyph) = self.host.native_glyph(x, y) {
+            return glyph;
         }
         let bits = self.cells[usize::from(y) * usize::from(self.width) + usize::from(x)];
         if bits == 0 {
@@ -535,6 +751,16 @@ impl AnimationFrame {
         if !self.has_cell_colors || x >= self.width || y >= self.height {
             return None;
         }
+        if self.is_wikipedia {
+            return self
+                .wikipedia
+                .cell(x, y)
+                .filter(|cell| cell.is_ink())
+                .map(|cell| {
+                    let [red, green, blue] = cell.rgb();
+                    (red, green, blue)
+                });
+        }
         self.colors
             .get(usize::from(y) * usize::from(self.width) + usize::from(x))
             .map(|[red, green, blue]| (*red, *green, *blue))
@@ -546,7 +772,7 @@ impl AnimationFrame {
 
     pub(crate) fn load_packed_cells(&mut self, width: u16, height: u16, cells: &[u8]) {
         // Cached built-in frames replace any hosted scene and its worker ownership.
-        self.host.release();
+        self.release_hosts();
         if width != self.width || height != self.height {
             self.resize(width, height);
         }
@@ -559,29 +785,69 @@ impl AnimationFrame {
         self.last_ambient = None;
     }
 
-    fn pack(&mut self, density_percent: u16, dither: DitherMode) {
+    /// Turns dot tones into Braille bits: shape the tone (pattern contrast and
+    /// inversion), then threshold with the chosen dither matrix, or diffuse
+    /// the rounding error for the error-diffusion modes.
+    pub(crate) fn pack(&mut self, key: PackKey) {
         const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
-        let threshold_key = (self.width, self.height, dither);
-        if self.threshold_key != Some(threshold_key) {
-            self.thresholds.resize(self.raster.dots.len(), 0.0);
-            for y in 0..self.raster.height {
-                for x in 0..self.raster.width {
-                    self.thresholds[y * self.raster.width + x] = raster::threshold(x, y, dither);
-                }
-            }
-            self.threshold_key = Some(threshold_key);
-        }
         let width = usize::from(self.width);
         if width == 0 || self.height == 0 {
             return;
         }
-        let density = f32::from(density_percent) / 100.0;
+        let density = f32::from(key.density_percent) / 100.0;
         let dot_row_width = width * 2;
+        let shaping = Appearance {
+            pattern_contrast_percent: key.contrast_percent,
+            pattern_invert: key.invert,
+            ..Appearance::default()
+        };
+        let shaped: Option<Vec<f32>> = (!shaping.pattern_is_neutral()).then(|| {
+            self.raster
+                .dots
+                .iter()
+                .map(|dot| shaping.shape_dot(*dot))
+                .collect()
+        });
+        let dots: &[f32] = shaped.as_deref().unwrap_or(&self.raster.dots);
+        if key.dither.is_error_diffusion() {
+            ilium_ambient::dither::diffuse(
+                dots,
+                dot_row_width,
+                usize::from(self.height) * 4,
+                density,
+                key.dither,
+                &mut self.diffused,
+            );
+            for (row, cells) in self.cells.chunks_exact_mut(width).enumerate() {
+                for (column, cell) in cells.iter_mut().enumerate() {
+                    let mut bits = 0u8;
+                    for (dy, bit_row) in BITS.iter().enumerate() {
+                        for (dx, bit) in bit_row.iter().enumerate() {
+                            let index = (row * 4 + dy) * dot_row_width + column * 2 + dx;
+                            if self.diffused[index] {
+                                bits |= bit;
+                            }
+                        }
+                    }
+                    *cell = bits;
+                }
+            }
+            return;
+        }
+        let threshold_key = (self.width, self.height, key.dither);
+        if self.threshold_key != Some(threshold_key) {
+            self.thresholds.resize(self.raster.dots.len(), 0.0);
+            for y in 0..self.raster.height {
+                for x in 0..self.raster.width {
+                    self.thresholds[y * self.raster.width + x] =
+                        raster::threshold(x, y, key.dither);
+                }
+            }
+            self.threshold_key = Some(threshold_key);
+        }
         // Each cell row consumes four contiguous dot rows. Two-dot chunks
         // retain the Braille bit order without per-dot coordinate arithmetic.
-        for ((dots, thresholds), cells) in self
-            .raster
-            .dots
+        for ((dots, thresholds), cells) in dots
             .chunks_exact(dot_row_width * 4)
             .zip(self.thresholds.chunks_exact(dot_row_width * 4))
             .zip(self.cells.chunks_exact_mut(width))
@@ -604,3 +870,6 @@ impl AnimationFrame {
         }
     }
 }
+
+#[cfg(test)]
+mod galactic_empires_tests;

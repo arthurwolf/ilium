@@ -2473,6 +2473,18 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         KeyCode::Char('f') if state.tab == SettingsTab::Animations => {
             state.animation_fullscreen = true;
         }
+        // Previous / next scene from anywhere in the Animations list, wrapping.
+        KeyCode::Char(character @ ('[' | ']')) if state.tab == SettingsTab::Animations => {
+            let delta = if character == '[' { -1 } else { 1 };
+            let kind = crate::animation_settings_ui::adjacent_scene(app.animation_settings.kind, delta);
+            if let Some(index) = crate::background_animation::AnimationKind::ALL
+                .iter()
+                .position(|candidate| *candidate == kind)
+            {
+                state.selected_row = index;
+                app.settings_preview_select_animation_row(index);
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Animations => {
             state.selected_row = state.selected_row.saturating_sub(1);
             app.settings_preview_select_animation_row(state.selected_row);
@@ -3141,12 +3153,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         let model = app.animation_row_model();
         let row_count = model.len();
         state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
-        state.scroll = crate::animation_settings_ui::scroll_for_selection(
-            content_area,
-            &model,
-            state.selected_row,
-            state.scroll,
-        );
+        crate::animation_settings_ui::sync_scrolls(content_area, &model, &mut state);
     }
     if state.tab == SettingsTab::Cost {
         let row_count = crate::cost_settings_ui::rows(app).len();

@@ -4,11 +4,19 @@
 //! paints, see `background_composition::compose`). Render and input share the
 //! functions below: every position is derived from the `RowModel`, so a row
 //! that appears or disappears moves rendering, keyboard focus, mouse hits,
-//! scrolling and the scrollbar together.
+//! scrolling and the scrollbars together.
+//!
+//! Two columns. The LEFT column holds, at the top, a compact windowed list of
+//! the animations with a scrollbar and a Prev/Next button row, and under it
+//! the GLOBAL settings (display, color, pattern and motion) that every
+//! animation shares. The RIGHT column holds the selected animation's own
+//! settings. Each of the three regions (`Region`) scrolls independently, so a
+//! screen position is resolved through a `Scrolls` triple.
 
 use crate::{
-    animation_rows::{AnimationRow, RowKind, RowModel, RowView},
+    animation_rows::{AnimationRow, Region, RowKind, RowModel, RowView},
     app::{App, SettingsState},
+    background_animation::AnimationKind,
 };
 use ratatui::{
     layout::{Position, Rect},
@@ -20,18 +28,75 @@ use unicode_width::UnicodeWidthStr;
 
 /// Width of the controls panel; the field shows to its right and behind the
 /// settings chrome.
-pub const PANEL_WIDTH: u16 = 108;
-/// Rows above the list (title and a separator).
-const HEADER_ROWS: u16 = 2;
-/// Rows below the list: two help lines, the status line and the key hint.
+pub const PANEL_WIDTH: u16 = 112;
+/// Rows above each list: the column heading.
+const HEADER_ROWS: u16 = 1;
+/// Rows below the lists: two help lines, the status line and the key hint.
 const FOOTER_ROWS: u16 = 4;
+/// Rows of the Prev/Next button line under the scene list.
+const NAV_ROWS: u16 = 1;
+/// Widest button of the Prev/Next line, in cells.
+const NAV_BUTTON_WIDTH: u16 = 8;
+/// Label column of value rows in the narrower left column.
+const GLOBAL_LABEL_WIDTH: usize = 13;
+
+/// The scroll offset of each region, in region display rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Scrolls {
+    pub scenes: u16,
+    pub global: u16,
+    pub controls: u16,
+}
+
+impl Scrolls {
+    pub fn of(state: &SettingsState) -> Self {
+        Self {
+            scenes: state.scene_scroll,
+            global: state.global_scroll,
+            controls: state.scroll,
+        }
+    }
+
+    pub fn get(self, region: Region) -> u16 {
+        match region {
+            Region::Scenes => self.scenes,
+            Region::Global => self.global,
+            Region::Controls => self.controls,
+        }
+    }
+
+    pub fn set(&mut self, region: Region, value: u16) {
+        match region {
+            Region::Scenes => self.scenes = value,
+            Region::Global => self.global = value,
+            Region::Controls => self.controls = value,
+        }
+    }
+
+    pub fn store(self, state: &mut SettingsState) {
+        state.scene_scroll = self.scenes;
+        state.global_scroll = self.global;
+        state.scroll = self.controls;
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationLayout {
     /// The opaque controls panel, at the left edge of the settings content.
     pub panel: Rect,
+    /// The whole left column (scene list and global settings).
     pub scenes: Rect,
+    /// The whole right column (the selected animation's settings).
     pub controls: Rect,
+    pub scene_heading: Rect,
+    /// The visible window of the scene list (scrollbar column excluded).
+    pub scene_list: Rect,
+    /// The Prev/Next button line.
+    pub scene_nav: Rect,
+    pub global_heading: Rect,
+    pub global: Rect,
+    pub controls_heading: Rect,
+    pub controls_rows: Rect,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,32 +116,80 @@ pub enum AnimationHit {
         row: usize,
         value: i32,
     },
-    ScrollTo(u16),
+    /// A click on a region's scrollbar: scroll that region to the offset.
+    ScrollTo(Region, u16),
     /// The dim "unavailable" marker of a choice row: focus the row and show
     /// the reason, never change the value.
     DisabledOption(usize),
+    /// The Prev button under the scene list: select the previous scene,
+    /// wrapping from the first to the last.
+    PreviousScene,
+    /// The Next button: select the next scene, wrapping from the last to
+    /// the first.
+    NextScene,
 }
 
-pub fn layout(area: Rect) -> AnimationLayout {
-    let width = PANEL_WIDTH.min(area.width);
-    let scene_width = if width >= 100 {
-        32
-    } else if width >= 76 {
-        26
+/// Width of the left column (scene list and global settings), including its
+/// scrollbar and help-rail columns.
+fn left_width(panel_width: u16) -> u16 {
+    if panel_width >= 100 {
+        40
+    } else if panel_width >= 76 {
+        34
     } else {
-        (width / 3).max(1).min(width)
-    };
-    let gap = u16::from(width > scene_width);
+        (panel_width / 2).max(1).min(panel_width)
+    }
+}
+
+/// Column rectangles and row windows for a footer of `footer` rows.
+pub fn layout_with_footer(area: Rect, footer: u16) -> AnimationLayout {
+    let width = PANEL_WIDTH.min(area.width);
+    let left = left_width(width);
+    let gap = u16::from(width > left);
+    let available = area.height.saturating_sub(footer);
+    // Left column: heading, scene window, nav line, heading, global window.
+    let remaining = available.saturating_sub(2 * HEADER_ROWS + NAV_ROWS);
+    let scene_rows = (remaining / 3).clamp(3, 8).min(remaining);
+    let global_rows = remaining - scene_rows;
+    let list_width = left.saturating_sub(2);
+    let controls_x = area.x + left + gap;
+    let controls_width = width.saturating_sub(left + gap);
+    let scene_y = area.y + HEADER_ROWS;
+    let nav_y = scene_y + scene_rows;
+    let global_heading_y = nav_y + NAV_ROWS;
     AnimationLayout {
         panel: Rect::new(area.x, area.y, width, area.height),
-        scenes: Rect::new(area.x, area.y, scene_width, area.height),
-        controls: Rect::new(
-            area.x + scene_width + gap,
+        scenes: Rect::new(area.x, area.y, left, area.height),
+        controls: Rect::new(controls_x, area.y, controls_width, area.height),
+        scene_heading: Rect::new(area.x, area.y, left.saturating_sub(1), 1.min(available)),
+        scene_list: Rect::new(area.x, scene_y, list_width, scene_rows),
+        scene_nav: Rect::new(area.x, nav_y, list_width, u16::from(available > 3)),
+        global_heading: Rect::new(
+            area.x,
+            global_heading_y,
+            left.saturating_sub(1),
+            u16::from(available > 3),
+        ),
+        global: Rect::new(area.x, global_heading_y + HEADER_ROWS, list_width, global_rows),
+        controls_heading: Rect::new(
+            controls_x,
             area.y,
-            width.saturating_sub(scene_width + gap),
-            area.height,
+            controls_width.saturating_sub(1),
+            1.min(available),
+        ),
+        controls_rows: Rect::new(
+            controls_x,
+            area.y + HEADER_ROWS,
+            controls_width.saturating_sub(1),
+            available.saturating_sub(HEADER_ROWS),
         ),
     }
+}
+
+/// Column rectangles with the default footer height. Row windows depend on
+/// the footer, so row geometry uses `geometry` (which knows the model).
+pub fn layout(area: Rect) -> AnimationLayout {
+    layout_with_footer(area, FOOTER_ROWS)
 }
 
 fn footer_rows(area: Rect, model: &RowModel) -> u16 {
@@ -97,56 +210,132 @@ fn footer_rows(area: Rect, model: &RowModel) -> u16 {
     FOOTER_ROWS + if credits > 0 { credits as u16 + 1 } else { 0 }
 }
 
-fn visible_rows(area: Rect, model: &RowModel) -> u16 {
-    area.height
-        .saturating_sub(HEADER_ROWS + footer_rows(area, model))
+fn geometry(area: Rect, model: &RowModel) -> AnimationLayout {
+    layout_with_footer(area, footer_rows(area, model))
 }
 
-pub fn max_scroll(area: Rect, model: &RowModel) -> u16 {
+/// The row window of a region.
+fn window(layout: &AnimationLayout, region: Region) -> Rect {
+    match region {
+        Region::Scenes => layout.scene_list,
+        Region::Global => layout.global,
+        Region::Controls => layout.controls_rows,
+    }
+}
+
+pub fn visible_rows(area: Rect, model: &RowModel, region: Region) -> u16 {
+    window(&geometry(area, model), region).height
+}
+
+pub fn max_scroll(area: Rect, model: &RowModel, region: Region) -> u16 {
     model
-        .visual_height()
-        .saturating_sub(visible_rows(area, model))
+        .visual_height(region)
+        .saturating_sub(visible_rows(area, model, region))
 }
 
-pub fn scroll_for_selection(area: Rect, model: &RowModel, row: usize, scroll: u16) -> u16 {
-    let visible = visible_rows(area, model).max(1);
-    let row = model
-        .visual_row(row.min(model.len().saturating_sub(1)))
-        .unwrap_or(0);
-    let scroll = if row < scroll {
-        row
-    } else if row >= scroll.saturating_add(visible) {
-        row + 1 - visible
-    } else {
-        scroll
-    };
-    scroll.min(max_scroll(area, model))
+impl Scrolls {
+    /// Every offset limited to what its region can scroll.
+    pub fn clamped(mut self, area: Rect, model: &RowModel) -> Self {
+        for region in [Region::Scenes, Region::Global, Region::Controls] {
+            self.set(region, self.get(region).min(max_scroll(area, model, region)));
+        }
+        self
+    }
 }
 
-pub fn row_rect(area: Rect, model: &RowModel, row: usize, scroll: u16) -> Option<Rect> {
-    let geometry = layout(area);
-    let column = if matches!(model.row(row)?, AnimationRow::Scene(_)) {
-        geometry.scenes
-    } else {
-        geometry.controls
+/// Scrolls just enough that `row` is visible inside its own region; the other
+/// regions keep their offsets. Every call site that moves the selection uses
+/// this, so the selected row can never be off screen.
+pub fn follow_selection(area: Rect, model: &RowModel, row: usize, scrolls: Scrolls) -> Scrolls {
+    let mut scrolls = scrolls;
+    if let Some(region) = model.region(row) {
+        let visible = visible_rows(area, model, region).max(1);
+        let position = model.visual_row(row).unwrap_or(0);
+        let current = scrolls.get(region);
+        // Include the section heading above the row when scrolling up to it.
+        let top = if region == Region::Scenes {
+            position
+        } else {
+            position.saturating_sub(1)
+        };
+        let next = if top < current {
+            top
+        } else if position >= current.saturating_add(visible) {
+            position + 1 - visible
+        } else {
+            current
+        };
+        scrolls.set(region, next);
+    }
+    scrolls.clamped(area, model)
+}
+
+/// Keeps the selected row visible and every offset in range.
+pub fn sync_scrolls(area: Rect, model: &RowModel, state: &mut SettingsState) {
+    let scrolls = follow_selection(area, model, state.selected_row, Scrolls::of(state));
+    scrolls.store(state);
+}
+
+/// The region under a screen position: the left column splits at the global
+/// heading, the right column is the controls.
+pub fn region_at(area: Rect, model: &RowModel, position: Position) -> Option<Region> {
+    let layout = geometry(area, model);
+    if layout.scenes.contains(position) {
+        return Some(if position.y < layout.global_heading.y {
+            Region::Scenes
+        } else {
+            Region::Global
+        });
+    }
+    layout.controls.contains(position).then_some(Region::Controls)
+}
+
+/// Mouse-wheel scrolling of the region under `position` by `delta` rows.
+/// Returns false when the pointer is over no region (the caller falls back to
+/// the controls). The scene list scrolls its window without selecting.
+pub fn wheel_scroll(
+    area: Rect,
+    model: &RowModel,
+    scrolls: &mut Scrolls,
+    position: Position,
+    delta: i32,
+) -> bool {
+    let Some(region) = region_at(area, model, position) else {
+        return false;
     };
-    if column.width <= 1 || visible_rows(area, model) == 0 {
+    let maximum = i32::from(max_scroll(area, model, region));
+    let next = (i32::from(scrolls.get(region)) + delta).clamp(0, maximum);
+    scrolls.set(region, next as u16);
+    true
+}
+
+/// The scene before or after `kind` in list order, wrapping at both ends.
+pub fn adjacent_scene(kind: AnimationKind, delta: i32) -> AnimationKind {
+    let count = AnimationKind::ALL.len() as i32;
+    let index = AnimationKind::ALL
+        .iter()
+        .position(|candidate| *candidate == kind)
+        .unwrap_or(0) as i32;
+    AnimationKind::ALL[(index + delta).rem_euclid(count) as usize]
+}
+
+pub fn row_rect(area: Rect, model: &RowModel, row: usize, scrolls: Scrolls) -> Option<Rect> {
+    let region = model.region(row)?;
+    let rows = window(&geometry(area, model), region);
+    if rows.width <= 1 || rows.height == 0 {
         return None;
     }
-    let relative = model.visual_row(row)?.checked_sub(scroll)?;
-    if relative >= visible_rows(area, model) {
+    let relative = model
+        .visual_row(row)?
+        .checked_sub(scrolls.get(region))?;
+    if relative >= rows.height {
         return None;
     }
-    Some(Rect::new(
-        column.x,
-        column.y + HEADER_ROWS + relative,
-        column.width.saturating_sub(1),
-        1,
-    ))
+    Some(Rect::new(rows.x, rows.y + relative, rows.width, 1))
 }
 
-pub fn row_y(area: Rect, model: &RowModel, row: usize, scroll: u16) -> Option<u16> {
-    row_rect(area, model, row, scroll).map(|rectangle| rectangle.y)
+pub fn row_y(area: Rect, model: &RowModel, row: usize, scrolls: Scrolls) -> Option<u16> {
+    row_rect(area, model, row, scrolls).map(|rectangle| rectangle.y)
 }
 
 /// Labels and value readouts have their own rectangles. Only the track changes
@@ -155,12 +344,11 @@ pub fn slider_geometry(
     area: Rect,
     model: &RowModel,
     row: usize,
-    scroll: u16,
+    scrolls: Scrolls,
 ) -> Option<SliderGeometry> {
     model.view(row)?.slider()?;
-    let y = row_y(area, model, row, scroll)?;
-    let panel = layout(area).controls;
-    let usable = panel.width.saturating_sub(1);
+    let rect = row_rect(area, model, row, scrolls)?;
+    let usable = rect.width;
     if usable < 12 {
         return None;
     }
@@ -175,9 +363,9 @@ pub fn slider_geometry(
         return None;
     }
     Some(SliderGeometry {
-        label: Rect::new(panel.x, y, label_width, 1),
-        track: Rect::new(panel.x + label_width + 1, y, track_width, 1),
-        value: Rect::new(panel.right() - 1 - value_width, y, value_width, 1),
+        label: Rect::new(rect.x, rect.y, label_width, 1),
+        track: Rect::new(rect.x + label_width + 1, rect.y, track_width, 1),
+        value: Rect::new(rect.right() - value_width, rect.y, value_width, 1),
     })
 }
 
@@ -187,10 +375,10 @@ pub fn slider_value_at(
     area: Rect,
     model: &RowModel,
     row: usize,
-    scroll: u16,
+    scrolls: Scrolls,
     column: u16,
 ) -> Option<i32> {
-    let geometry = slider_geometry(area, model, row, scroll)?;
+    let geometry = slider_geometry(area, model, row, scrolls)?;
     let spec = model.view(row)?.slider()?;
     Some(spec.value_at(
         column.saturating_sub(geometry.track.x),
@@ -198,32 +386,68 @@ pub fn slider_value_at(
     ))
 }
 
-pub fn hit(area: Rect, model: &RowModel, scroll: u16, position: Position) -> Option<AnimationHit> {
-    let panel = layout(area).panel;
-    if !panel.contains(position) {
+/// The scrollbar column of a region: right of its row window.
+fn scrollbar_x(layout: &AnimationLayout, region: Region) -> u16 {
+    window(layout, region).right()
+}
+
+/// Label column cap of value rows in a region.
+fn label_cap(region: Region) -> usize {
+    if region == Region::Controls {
+        LABEL_COLUMN_WIDTH
+    } else {
+        GLOBAL_LABEL_WIDTH
+    }
+}
+
+pub fn hit(
+    area: Rect,
+    model: &RowModel,
+    scrolls: Scrolls,
+    position: Position,
+) -> Option<AnimationHit> {
+    let layout = geometry(area, model);
+    if !layout.panel.contains(position) {
         return None;
     }
-    let relative = position.y.checked_sub(panel.y + HEADER_ROWS)?;
-    let visible = visible_rows(area, model);
-    let maximum = max_scroll(area, model);
-    if position.x == panel.right().saturating_sub(1) && relative < visible && maximum > 0 {
-        let target =
-            u32::from(maximum) * u32::from(relative) / u32::from(visible.saturating_sub(1).max(1));
-        return Some(AnimationHit::ScrollTo(target as u16));
+    if layout.scene_nav.contains(position) {
+        let nav = layout.scene_nav;
+        if position.x < nav.x + NAV_BUTTON_WIDTH.min(nav.width / 2) {
+            return Some(AnimationHit::PreviousScene);
+        }
+        if position.x >= nav.right().saturating_sub(NAV_BUTTON_WIDTH.min(nav.width / 2)) {
+            return Some(AnimationHit::NextScene);
+        }
+        return None;
+    }
+    for region in [Region::Scenes, Region::Global, Region::Controls] {
+        let rows = window(&layout, region);
+        let maximum = max_scroll(area, model, region);
+        if position.x == scrollbar_x(&layout, region)
+            && position.y >= rows.y
+            && position.y < rows.bottom()
+            && maximum > 0
+        {
+            let relative = position.y - rows.y;
+            let target = u32::from(maximum) * u32::from(relative)
+                / u32::from(rows.height.saturating_sub(1).max(1));
+            return Some(AnimationHit::ScrollTo(region, target as u16));
+        }
     }
     let row = (0..model.len()).find(|&row| {
-        row_rect(area, model, row, scroll).is_some_and(|rect| rect.contains(position))
+        row_rect(area, model, row, scrolls).is_some_and(|rect| rect.contains(position))
     })?;
-    let panel = row_rect(area, model, row, scroll)?;
-    if let Some(geometry) = slider_geometry(area, model, row, scroll) {
+    let rect = row_rect(area, model, row, scrolls)?;
+    if let Some(geometry) = slider_geometry(area, model, row, scrolls) {
         if geometry.track.contains(position) {
-            return slider_value_at(area, model, row, scroll, position.x)
+            return slider_value_at(area, model, row, scrolls, position.x)
                 .map(|value| AnimationHit::Slider { row, value });
         }
     }
     let view = model.view(row)?;
-    if let Some(marker) = disabled_marker(view, panel.width.saturating_sub(1)) {
-        let start = panel.x + marker.offset;
+    let cap = label_cap(model.region(row)?);
+    if let Some(marker) = disabled_marker(view, rect.width.saturating_sub(1), cap) {
+        let start = rect.x + marker.offset;
         if (start..start + marker.width).contains(&position.x) {
             return Some(AnimationHit::DisabledOption(row));
         }
@@ -270,24 +494,24 @@ fn draw_slider(
     model: &RowModel,
     row: usize,
     view: &RowView,
-    scroll: u16,
+    scrolls: Scrolls,
     style: Style,
 ) {
     let Some(spec) = view.slider() else {
         return;
     };
-    let Some(y) = row_y(area, model, row, scroll) else {
+    let Some(rect) = row_rect(area, model, row, scrolls) else {
         return;
     };
-    let Some(geometry) = slider_geometry(area, model, row, scroll) else {
-        let panel = layout(area).controls;
+    let y = rect.y;
+    let Some(geometry) = slider_geometry(area, model, row, scrolls) else {
         frame.render_widget(
             Paragraph::new(fit(
                 &format!("{} {}", view.label, view.value),
-                usize::from(panel.width.saturating_sub(1)),
+                usize::from(rect.width),
             ))
             .style(style),
-            Rect::new(panel.x, y, panel.width.saturating_sub(1), 1),
+            rect,
         );
         return;
     };
@@ -312,26 +536,35 @@ fn draw_slider(
     }
 }
 
-fn draw_scrollbar(frame: &mut Frame, area: Rect, model: &RowModel, scroll: u16, ink: Style) {
-    let panel = layout(area).panel;
-    let visible = visible_rows(area, model);
-    let maximum = max_scroll(area, model);
-    if visible == 0 || maximum == 0 || panel.width == 0 {
+/// Draws the scrollbar of one region when it can scroll.
+fn draw_scrollbar(
+    frame: &mut Frame,
+    area: Rect,
+    model: &RowModel,
+    region: Region,
+    scroll: u16,
+    ink: Style,
+) {
+    let layout = geometry(area, model);
+    let rows = window(&layout, region);
+    let maximum = max_scroll(area, model, region);
+    if rows.height == 0 || maximum == 0 {
         return;
     }
-    let thumb_size = (u32::from(visible) * u32::from(visible)
-        / u32::from(model.visual_height().max(1)))
+    let x = scrollbar_x(&layout, region);
+    let thumb_size = (u32::from(rows.height) * u32::from(rows.height)
+        / u32::from(model.visual_height(region).max(1)))
     .max(1) as u16;
-    let travel = visible.saturating_sub(thumb_size);
+    let travel = rows.height.saturating_sub(thumb_size);
     let thumb_start =
         (u32::from(scroll.min(maximum)) * u32::from(travel) / u32::from(maximum)) as u16;
-    for offset in 0..visible {
+    for offset in 0..rows.height {
         let character = if (thumb_start..thumb_start + thumb_size).contains(&offset) {
             '\u{2503}'
         } else {
             '\u{2502}'
         };
-        frame.buffer_mut()[(panel.right() - 1, panel.y + HEADER_ROWS + offset)]
+        frame.buffer_mut()[(x, rows.y + offset)]
             .set_char(character)
             .set_style(ink.add_modifier(Modifier::DIM));
     }
@@ -366,7 +599,7 @@ fn bracketed_value(view: &RowView) -> String {
 /// current value. The wording shortens ("GPU (n/a)", "GPU \u{2717}") and the
 /// label column narrows until it fits in `row_width`; `None` when even the
 /// shortest form does not (the popover and help line still explain it).
-fn disabled_marker(view: &RowView, row_width: u16) -> Option<DisabledMarker> {
+fn disabled_marker(view: &RowView, row_width: u16, cap: usize) -> Option<DisabledMarker> {
     if view.disabled_options.is_empty() || !matches!(view.kind, RowKind::Choice) {
         return None;
     }
@@ -377,7 +610,7 @@ fn disabled_marker(view: &RowView, row_width: u16) -> Option<DisabledMarker> {
         |label| format!("{label} (n/a)"),
         |label| format!("{label} \u{2717}"),
     ];
-    let default_label_width = LABEL_COLUMN_WIDTH.min(row_width / 2);
+    let default_label_width = cap.min(row_width / 2);
     let narrowed = (UnicodeWidthStr::width(view.label.as_str()) + 1).min(default_label_width);
     for form in forms {
         let text = view
@@ -424,10 +657,10 @@ fn disabled_marker(view: &RowView, row_width: u16) -> Option<DisabledMarker> {
 }
 
 /// Text of one non-slider, non-scene row: label column then value.
-fn draw_value_row(frame: &mut Frame, row_area: Rect, view: &RowView, style: Style) {
-    let marker = disabled_marker(view, row_area.width);
+fn draw_value_row(frame: &mut Frame, row_area: Rect, view: &RowView, style: Style, cap: usize) {
+    let marker = disabled_marker(view, row_area.width, cap);
     let label_width = marker.as_ref().map_or_else(
-        || LABEL_COLUMN_WIDTH.min(usize::from(row_area.width) / 2),
+        || cap.min(usize::from(row_area.width) / 2),
         |marker| marker.label_width,
     );
     let value_width = marker.as_ref().map_or_else(
@@ -449,62 +682,117 @@ fn draw_value_row(frame: &mut Frame, row_area: Rect, view: &RowView, style: Styl
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let panel = layout(area).panel;
-    let ink = control_ink(app);
-    let model = app.animation_row_model();
-    frame.render_widget(Clear, panel);
-    frame.render_widget(Block::default().style(ink), panel);
-    let scenes = layout(area).scenes;
-    let scene_heading = if scenes.width >= 27 {
-        "Scenes \u{2014} select to preview"
-    } else {
-        "Scenes"
-    };
-    frame.render_widget(
-        Paragraph::new(fit(scene_heading, usize::from(scenes.width)))
-            .style(ink.add_modifier(Modifier::BOLD)),
-        Rect::new(scenes.x, scenes.y, scenes.width, 1),
-    );
-    let controls = layout(area).controls;
-    frame.render_widget(
-        Paragraph::new("Settings").style(ink.add_modifier(Modifier::BOLD)),
-        Rect::new(controls.x, controls.y, controls.width, 1),
-    );
+/// Section headings of the rows of `region` that are on screen.
+fn draw_section_headings(
+    frame: &mut Frame,
+    area: Rect,
+    model: &RowModel,
+    region: Region,
+    scroll: u16,
+    ink: Style,
+) {
+    let layout = geometry(area, model);
+    let rows = window(&layout, region);
     let mut previous_section = "";
-    for row in crate::background_animation::AnimationKind::ALL.len()..model.len() {
+    for row in model.region_rows(region) {
         let section = model.section(row);
         if section == previous_section {
             continue;
         }
         previous_section = section;
-        if let Some(relative) = model
+        let Some(relative) = model
             .visual_row(row)
             .and_then(|offset| offset.checked_sub(1))
-            .and_then(|offset| offset.checked_sub(state.scroll))
-        {
-            if relative < visible_rows(area, &model) {
-                frame.render_widget(
-                    Paragraph::new(fit(
-                        &format!("─ {section} ─"),
-                        usize::from(controls.width.saturating_sub(1)),
-                    ))
+            .and_then(|offset| offset.checked_sub(scroll))
+        else {
+            continue;
+        };
+        if relative < rows.height {
+            frame.render_widget(
+                Paragraph::new(fit(&format!("\u{2500} {section} \u{2500}"), usize::from(rows.width)))
                     .style(ink.add_modifier(Modifier::BOLD | Modifier::DIM)),
-                    Rect::new(
-                        controls.x,
-                        controls.y + HEADER_ROWS + relative,
-                        controls.width.saturating_sub(1),
-                        1,
-                    ),
-                );
-            }
+                Rect::new(rows.x, rows.y + relative, rows.width, 1),
+            );
         }
     }
+}
+
+/// The Prev / count / Next button line under the scene list.
+fn draw_scene_nav(frame: &mut Frame, area: Rect, model: &RowModel, app: &App, ink: Style) {
+    let nav = geometry(area, model).scene_nav;
+    if nav.width < 8 || nav.height == 0 {
+        return;
+    }
+    let index = AnimationKind::ALL
+        .iter()
+        .position(|kind| *kind == app.animation_settings.kind)
+        .unwrap_or(0);
+    let count = format!("{}/{}", index + 1, AnimationKind::ALL.len());
+    let button = |text: &str| format!("{text:<width$}", width = usize::from(NAV_BUTTON_WIDTH.min(nav.width / 2)));
+    let width = usize::from(nav.width);
+    let previous = button("\u{25c0} Prev");
+    let next = format!(
+        "{:>width$}",
+        "Next \u{25b6}",
+        width = usize::from(NAV_BUTTON_WIDTH.min(nav.width / 2))
+    );
+    let middle = width.saturating_sub(previous.chars().count() + next.chars().count());
+    let text = format!("{previous}{count:^middle$}{next}");
+    frame.render_widget(
+        Paragraph::new(fit(&text, width)).style(ink.add_modifier(Modifier::BOLD)),
+        nav,
+    );
+}
+
+pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let model = app.animation_row_model();
+    let layout = geometry(area, &model);
+    let panel = layout.panel;
+    let ink = control_ink(app);
+    let scrolls = Scrolls::of(state).clamped(area, &model);
+    frame.render_widget(Clear, panel);
+    frame.render_widget(Block::default().style(ink), panel);
+    let bold = ink.add_modifier(Modifier::BOLD);
+    let scene_heading = if layout.scene_heading.width >= 24 {
+        "Animations \u{2014} select to preview"
+    } else {
+        "Animations"
+    };
+    if layout.scene_heading.height > 0 {
+        frame.render_widget(
+            Paragraph::new(fit(scene_heading, usize::from(layout.scene_heading.width)))
+                .style(bold),
+            layout.scene_heading,
+        );
+    }
+    if layout.global_heading.height > 0 {
+        frame.render_widget(
+            Paragraph::new(fit(
+                "Look and display \u{2014} all animations",
+                usize::from(layout.global_heading.width),
+            ))
+            .style(bold),
+            layout.global_heading,
+        );
+    }
+    if layout.controls_heading.height > 0 {
+        frame.render_widget(
+            Paragraph::new(fit(
+                &format!("{} settings", app.animation_settings.kind.label()),
+                usize::from(layout.controls_heading.width),
+            ))
+            .style(bold),
+            layout.controls_heading,
+        );
+    }
+    for region in [Region::Global, Region::Controls] {
+        draw_section_headings(frame, area, &model, region, scrolls.get(region), ink);
+    }
     for (row, view) in model.views().iter().enumerate() {
-        let Some(row_area) = row_rect(area, &model, row, state.scroll) else {
+        let Some(row_area) = row_rect(area, &model, row, scrolls) else {
             continue;
         };
         let style = if row == state.selected_row {
@@ -533,12 +821,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 );
             }
             RowKind::Slider(_) => {
-                draw_slider(frame, area, &model, row, view, state.scroll, style);
+                draw_slider(frame, area, &model, row, view, scrolls, style);
             }
-            _ => draw_value_row(frame, row_area, view, style),
+            _ => draw_value_row(
+                frame,
+                row_area,
+                view,
+                style,
+                label_cap(model.region(row).unwrap_or(Region::Controls)),
+            ),
         }
     }
-    draw_scrollbar(frame, area, &model, state.scroll, ink);
+    draw_scene_nav(frame, area, &model, app, ink);
+    for region in [Region::Scenes, Region::Global, Region::Controls] {
+        draw_scrollbar(frame, area, &model, region, scrolls.get(region), ink);
+    }
     let footer_height = footer_rows(area, &model);
     if panel.height <= HEADER_ROWS + footer_height {
         return;
@@ -569,7 +866,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     );
     frame.render_widget(
         Paragraph::new(fit(
-            "\u{2191}\u{2193} row \u{b7} \u{2190}\u{2192} adjust \u{b7} Enter set \u{b7} f full screen",
+            "\u{2191}\u{2193} row \u{b7} \u{2190}\u{2192} adjust \u{b7} Enter set \u{b7} [ ] prev/next scene \u{b7} f full screen",
             usize::from(panel.width),
         ))
         .style(ink.add_modifier(Modifier::DIM)),
@@ -681,25 +978,33 @@ mod tests {
     }
 
     #[test]
-    fn overhaul_scene_and_controls_use_separate_columns_with_wide_tracks() {
+    fn two_columns_scenes_and_global_settings_left_animation_settings_right() {
         let settings = AnimationSettings::default();
         let model = RowModel::new(&settings, &RowContext::default());
         let area = Rect::new(0, 0, 120, 40);
-        let scene_y = row_y(area, &model, 0, 0).unwrap();
+        let columns = layout(area);
+        let none = Scrolls::default();
+        let scene = row_rect(area, &model, 0, none).unwrap();
+        assert_eq!((scene.x, scene.y), (area.x, area.y + 1), "list under heading");
         let control = model.first_control_index();
-        let control_y = row_y(area, &model, control, 0).unwrap();
-        assert!(control_y < scene_y + AnimationKind::ALL.len() as u16);
-        let slider = model
-            .rows()
-            .iter()
-            .position(|row| *row == AnimationRow::Common("speed"))
+        let control_rect = row_rect(area, &model, control, none).unwrap();
+        assert_eq!(control_rect.y, area.y + 2, "right column starts under its heading and section");
+        assert!(control_rect.x >= columns.scenes.right(), "controls sit right of the left column");
+        let global = model.region_rows(Region::Global).next().unwrap();
+        let global_rect = row_rect(area, &model, global, none).unwrap();
+        assert!(global_rect.x < columns.scenes.right() && global_rect.y > scene.y);
+        // Wide track for a right-column slider, narrower but usable on the left.
+        let right_slider = model
+            .region_rows(Region::Controls)
+            .find(|row| model.view(*row).is_some_and(|view| view.slider().is_some()))
             .unwrap();
-        let geometry = slider_geometry(area, &model, slider, 0).unwrap();
-        assert!(
-            geometry.track.width >= 32,
-            "track should double its old width: {geometry:?}"
-        );
-        assert!(geometry.label.x >= 24, "controls must be beside scenes");
+        assert!(slider_geometry(area, &model, right_slider, none).unwrap().track.width >= 32);
+        let left_slider = model
+            .region_rows(Region::Global)
+            .find(|row| model.view(*row).is_some_and(|view| view.slider().is_some()))
+            .unwrap();
+        let narrow = slider_geometry(area, &model, left_slider, none).unwrap();
+        assert!(narrow.track.width >= 8 && narrow.value.right() <= columns.scenes.right());
     }
 
     fn key(app: &mut App, code: KeyCode) {
@@ -778,7 +1083,7 @@ mod tests {
             panic!("Settings stays open");
         };
         state.selected_row = row;
-        state.scroll = scroll_for_selection(content, &model, row, state.scroll);
+        follow_selection(content, &model, row, Scrolls::of(state)).store(state);
     }
 
     /// Presses Up/Down until `target` is the selected row.
@@ -831,21 +1136,51 @@ mod tests {
             );
             assert_eq!(
                 list[AnimationKind::ALL.len()],
-                AnimationRow::Common("background")
+                AnimationRow::Common("panels"),
+                "global settings follow the scenes"
             );
             assert_eq!(list.last(), Some(&AnimationRow::FullScreenPreview));
+            // The look and display rows are shared by EVERY animation.
+            for id in [
+                "panels",
+                "background",
+                "look_preset",
+                "look_mode",
+                "look_palette",
+                "look_brightness",
+                "look_contrast",
+                "look_hue_shift",
+            ] {
+                assert!(
+                    list.contains(&AnimationRow::Common(id)),
+                    "{kind:?} shares {id}"
+                );
+            }
+            // Pattern and motion rows apply to dotted scenes, not the article.
             for id in [
                 "speed",
                 "density",
                 "dither",
-                "lightness",
-                "hue",
-                "saturation",
+                "fps_limit",
+                "look_pattern_contrast",
+                "look_pattern_invert",
             ] {
-                assert!(
+                assert_eq!(
                     list.contains(&AnimationRow::Common(id)),
-                    "{kind:?} shows {id}"
+                    kind != AnimationKind::Wikipedia,
+                    "{kind:?} common control {id}"
                 );
+            }
+            // The single ink color belongs to Monotone mode only.
+            for id in ["lightness", "hue", "saturation"] {
+                assert!(!list.contains(&AnimationRow::Common(id)), "{id} hides in Color mode");
+            }
+            // Region order: scenes, then global, then the animation's own.
+            let regions: Vec<Region> = list.iter().map(AnimationRow::region).collect();
+            assert!(regions.windows(2).all(|pair| (pair[0] as u8) <= (pair[1] as u8)), "{kind:?}");
+            if kind == AnimationKind::Wikipedia {
+                assert!(list.contains(&AnimationRow::SceneControl("wiki_scroll")));
+                assert!(list.contains(&AnimationRow::SceneControl("wiki_zoom")));
             }
             let controls = settings.scene_controls();
             let control_rows = list
@@ -853,7 +1188,7 @@ mod tests {
                 .filter(|row| matches!(row, AnimationRow::SceneControl(_)))
                 .count();
             assert_eq!(control_rows, controls.len(), "{kind:?}");
-            if !kind.is_ambient() {
+            if !kind.is_ambient() && kind != AnimationKind::Wikipedia {
                 // The shoreline lists its style choice and, in the default Rich
                 // style, fifteen more sliders after the four named ones.
                 let expected = if kind == AnimationKind::Shoreline {
@@ -883,10 +1218,36 @@ mod tests {
                 assert!(list.contains(&AnimationRow::SceneStatus));
                 assert_eq!(
                     list.contains(&AnimationRow::Location),
-                    kind.ambient().unwrap().uses_location(),
+                    kind.ambient()
+                        .is_some_and(|ambient| ambient.uses_location()),
                     "{kind:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn topographic_maps_rows_are_live_only_and_list_every_control() {
+        let settings = AnimationSettings {
+            kind: AnimationKind::TopographicMaps,
+            ..Default::default()
+        };
+        let list = rows(&settings, &RowContext::default());
+        let controls = settings.scene_controls();
+        let control_rows = list
+            .iter()
+            .filter(|row| matches!(row, AnimationRow::SceneControl(_)))
+            .count();
+        assert_eq!(control_rows, controls.len());
+        assert!(controls.len() > 15, "all world, view and contour controls");
+        assert!(list.contains(&AnimationRow::SceneStatus));
+        assert!(!list.contains(&AnimationRow::Location));
+        for hidden in [
+            AnimationRow::Common("playback"),
+            AnimationRow::Common("loop_seconds"),
+            AnimationRow::CacheStatus,
+        ] {
+            assert!(!list.contains(&hidden));
         }
     }
 
@@ -900,15 +1261,21 @@ mod tests {
         assert!(live.contains(&AnimationRow::Common("playback")));
         assert!(!live.contains(&AnimationRow::Common("loop_seconds")));
         assert!(!live.contains(&AnimationRow::CacheStatus));
-        // A scene that paints its own colors hides the palette rows.
-        let colored = RowContext {
-            scene_uses_cell_colors: true,
-            ..Default::default()
-        };
-        let list = rows(&settings, &colored);
+        // The ink rows appear only in Monotone mode; the palette only in Color.
+        let list = rows(&settings, &context);
         for id in ["lightness", "hue", "saturation"] {
             assert!(!list.contains(&AnimationRow::Common(id)), "{id} hides");
         }
+        assert!(list.contains(&AnimationRow::Common("look_palette")));
+        settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
+        let list = rows(&settings, &context);
+        for id in ["lightness", "hue", "saturation"] {
+            assert!(list.contains(&AnimationRow::Common(id)), "{id} shows");
+        }
+        assert!(!list.contains(&AnimationRow::Common("look_palette")));
+        settings.appearance.mode = ilium_ambient::style::ColorMode::Greyscale;
+        let list = rows(&settings, &context);
+        assert!(list.contains(&AnimationRow::Common("look_grey_tint")));
         assert!(list.contains(&AnimationRow::Common("speed")));
         // Location only for observer-aware scenes.
         let stars = AnimationSettings {
@@ -962,11 +1329,13 @@ mod tests {
             let count = model.len();
             let panel = layout(area).panel;
             for row in 0..count {
-                let scroll = scroll_for_selection(area, &model, row, 0);
+                let scroll = follow_selection(area, &model, row, Scrolls::default());
                 app.mode = Mode::Settings(SettingsState {
                     tab: SettingsTab::Animations,
                     selected_row: row,
-                    scroll,
+                    scroll: scroll.controls,
+                    scene_scroll: scroll.scenes,
+                    global_scroll: scroll.global,
                     ..Default::default()
                 });
                 let y = row_y(area, &model, row, scroll).expect("row visible after scrolling");
@@ -1057,8 +1426,11 @@ mod tests {
             assert_eq!(app.animation_settings.kind, AnimationKind::ALL[scene]);
             assert_eq!(selected_row(&app), scene);
         }
-        // The last scene (Solar system) is a live-only hosted scene: no playback rows.
-        assert_eq!(app.animation_settings.kind, AnimationKind::SolarSystem);
+        // The last scene is a live-only hosted scene: no playback rows.
+        assert_eq!(
+            Some(&app.animation_settings.kind),
+            AnimationKind::ALL.last()
+        );
         let model = app.animation_row_model();
         let count = model.len();
         for row in scene_count..count {
@@ -1068,14 +1440,17 @@ mod tests {
             };
             assert_eq!(state.selected_row, row);
             assert!(
-                row_y(area, &model, row, state.scroll).is_some(),
+                row_y(area, &model, row, Scrolls::of(state)).is_some(),
                 "row {row} remains visible"
             );
         }
         let Mode::Settings(state) = &app.mode else {
             panic!("Settings stays open");
         };
-        assert!(state.scroll > 0, "80x24 needs scrolling");
+        assert!(
+            state.global_scroll > 0,
+            "the global settings need their own scrolling at 80x24"
+        );
         // A built-in scene's slider persists through the same path.
         app.settings_adjust_animation_row(9, 1);
         assert_eq!(app.animation_settings.kind, AnimationKind::QuietPond);
@@ -1102,7 +1477,7 @@ mod tests {
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
             area.x,
-            row_y(area, &model, 5, 0).unwrap(),
+            row_y(area, &model, 5, Scrolls::default()).unwrap(),
         );
         assert_eq!(app.animation_settings.kind, AnimationKind::Kelp);
         assert_eq!(
@@ -1130,7 +1505,7 @@ mod tests {
             assert!(slider_rows.len() >= 8, "four scene + four shared sliders");
             for row in slider_rows {
                 let model = app.animation_row_model();
-                let scroll = scroll_for_selection(area, &model, row, 0);
+                let scroll = follow_selection(area, &model, row, Scrolls::default());
                 set_selected_row(&mut app, row);
                 let geometry = slider_geometry(area, &model, row, scroll).unwrap();
                 let spec = model.view(row).unwrap().slider().unwrap();
@@ -1185,14 +1560,18 @@ mod tests {
     #[test]
     fn owned_slider_drag_clamps_outside_the_track_and_releases_before_global_voice_control() {
         let (mut app, _probe, _project) = settings_app(140, 40);
+        // The single ink color rows exist in Monotone mode.
+        app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
         let area = content_area(&app);
         let lightness = row_index(&app, &AnimationRow::Common("lightness"));
         let model = app.animation_row_model();
-        let scroll = scroll_for_selection(area, &model, lightness, 0);
+        let scroll = follow_selection(area, &model, lightness, Scrolls::default());
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Animations,
             selected_row: lightness,
-            scroll,
+            scroll: scroll.controls,
+            scene_scroll: scroll.scenes,
+            global_scroll: scroll.global,
             ..Default::default()
         });
         let model = app.animation_row_model();
@@ -1349,7 +1728,7 @@ mod tests {
         assert!(!app.animation_settings.enabled);
         let dither = row_index(&app, &AnimationRow::Common("dither"));
         let model = app.animation_row_model();
-        let row_area = row_rect(area, &model, dither, 0).unwrap();
+        let row_area = row_rect(area, &model, dither, Scrolls::default()).unwrap();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -1494,7 +1873,7 @@ mod tests {
             content_area(&app),
             &model,
             row,
-            0
+            Scrolls::default()
         )
         .is_none_or(|y| y < credit_y)));
         assert!(panel.contains(Position::new(panel.x, credit_y)));
@@ -1565,7 +1944,7 @@ mod tests {
         let full_row = row_index(&app, &AnimationRow::FullScreenPreview);
         let area = content_area(&app);
         let model = app.animation_row_model();
-        let scroll = scroll_for_selection(area, &model, full_row, 0);
+        let scroll = follow_selection(area, &model, full_row, Scrolls::default());
         set_selected_row(&mut app, full_row);
         let row_area = row_rect(area, &model, full_row, scroll).unwrap();
         pointer(
@@ -1614,7 +1993,7 @@ mod tests {
         for (width, height) in [(100, 30), (60, 24), (20, 8), (5, 3), (0, 0)] {
             let area = Rect::new(3, 4, width, height);
             for row in 0..model.len() {
-                let scroll = scroll_for_selection(area, &model, row, 0);
+                let scroll = follow_selection(area, &model, row, Scrolls::default());
                 if let Some(y) = row_y(area, &model, row, scroll) {
                     assert!(layout(area).panel.contains(Position::new(area.x, y)));
                     let expected = match model.view(row).unwrap().kind {
@@ -1643,14 +2022,268 @@ mod tests {
     fn scroll_and_scrollbar_derive_from_the_row_count() {
         let area = Rect::new(0, 0, 60, 20);
         let model = RowModel::new(&AnimationSettings::default(), &RowContext::default());
-        assert_eq!(
-            max_scroll(area, &model),
-            model
-                .visual_height()
-                .saturating_sub(visible_rows(area, &model))
+        for region in [Region::Scenes, Region::Global, Region::Controls] {
+            assert_eq!(
+                max_scroll(area, &model, region),
+                model
+                    .visual_height(region)
+                    .saturating_sub(visible_rows(area, &model, region)),
+                "{region:?}"
+            );
+        }
+        let last = model.region_rows(Region::Global).last().unwrap();
+        let far = follow_selection(area, &model, last, Scrolls::default());
+        assert!(far.global > 0 && far.scenes == 0 && far.controls == 0);
+        assert!(row_y(area, &model, last, far).is_some());
+        let first = model.region_rows(Region::Global).next().unwrap();
+        assert_eq!(follow_selection(area, &model, first, far).global, 0);
+    }
+
+    fn screen_text(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Snapshot of the navigation fields tests assert on.
+    #[derive(Debug, Clone, Copy)]
+    struct Nav {
+        selected_row: usize,
+        scene_scroll: u16,
+        global_scroll: u16,
+        scroll: u16,
+    }
+
+    impl Nav {
+        fn scrolls(&self) -> Scrolls {
+            Scrolls {
+                scenes: self.scene_scroll,
+                global: self.global_scroll,
+                controls: self.scroll,
+            }
+        }
+    }
+
+    fn state_of(app: &App) -> Nav {
+        match &app.mode {
+            Mode::Settings(state) => Nav {
+                selected_row: state.selected_row,
+                scene_scroll: state.scene_scroll,
+                global_scroll: state.global_scroll,
+                scroll: state.scroll,
+            },
+            _ => panic!("Settings stays open"),
+        }
+    }
+
+    #[test]
+    fn global_region_lists_the_shared_look_and_the_right_column_only_the_animations_own_rows() {
+        for kind in AnimationKind::ALL {
+            let settings = AnimationSettings {
+                kind,
+                ..Default::default()
+            };
+            let model = RowModel::new(&settings, &RowContext::default());
+            let global: Vec<_> = model.region_rows(Region::Global).collect();
+            let controls: Vec<_> = model.region_rows(Region::Controls).collect();
+            assert!(global.iter().any(|row| *model.row(*row).unwrap() == AnimationRow::Common("look_brightness")));
+            for row in &controls {
+                assert!(
+                    !matches!(model.row(*row), Some(AnimationRow::Common(id)) if id.starts_with("look_") || matches!(*id, "panels" | "background" | "dither" | "density" | "speed")),
+                    "{kind:?}: shared row in the per-animation column"
+                );
+            }
+            assert!(controls
+                .iter()
+                .all(|row| model.region(*row) == Some(Region::Controls)));
+            assert_eq!(
+                global.len() + controls.len() + AnimationKind::ALL.len(),
+                model.len(),
+                "every row is in exactly one region"
+            );
+        }
+    }
+
+    #[test]
+    fn scene_list_is_a_compact_window_with_prev_next_buttons() {
+        let (mut app, _probe, project) = settings_app(100, 24);
+        let area = content_area(&app);
+        let model = app.animation_row_model();
+        let columns = layout(area);
+        assert!(
+            columns.scene_list.height < AnimationKind::ALL.len() as u16,
+            "the list is a window, not the whole catalog"
         );
-        let far = scroll_for_selection(area, &model, model.len() - 1, 0);
-        assert!(row_y(area, &model, model.len() - 1, far).is_some());
-        assert_eq!(scroll_for_selection(area, &model, 0, far), 0);
+        assert!(columns.scene_list.height >= 3 && columns.scene_list.height <= 8);
+        let terminal = draw(&mut app, 100, 24);
+        let text = screen_text(&terminal);
+        let nav = &text[usize::from(columns.scene_nav.y)];
+        assert!(nav.contains("Prev") && nav.contains("Next"), "{nav}");
+        assert!(nav.contains(&format!("1/{}", AnimationKind::ALL.len())), "{nav}");
+        // Mouse: Next / Prev select the adjacent scene, wrapping at the ends.
+        let next = Position::new(columns.scene_nav.right() - 2, columns.scene_nav.y);
+        let previous = Position::new(columns.scene_nav.x + 1, columns.scene_nav.y);
+        assert_eq!(hit(area, &model, Scrolls::default(), next), Some(AnimationHit::NextScene));
+        assert_eq!(hit(area, &model, Scrolls::default(), previous), Some(AnimationHit::PreviousScene));
+        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), next.x, next.y);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
+        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), previous.x, previous.y);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[0]);
+        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), previous.x, previous.y);
+        assert_eq!(app.animation_settings.kind, *AnimationKind::ALL.last().unwrap(), "Prev wraps");
+        // The window follows the selected scene.
+        let state = state_of(&app);
+        assert!(state.scene_scroll > 0);
+        assert!(row_y(area, &app.animation_row_model(), state.selected_row, state.scrolls()).is_some());
+        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), next.x, next.y);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[0], "Next wraps");
+        // Keyboard: ] and [ step through the scenes from any row.
+        key(&mut app, KeyCode::Char(']'));
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
+        key(&mut app, KeyCode::Char('['));
+        key(&mut app, KeyCode::Char('['));
+        assert_eq!(app.animation_settings.kind, *AnimationKind::ALL.last().unwrap());
+        assert_eq!(
+            crate::project_config::load(project.path()).unwrap().animation.kind,
+            *AnimationKind::ALL.last().unwrap(),
+            "navigation persists the scene"
+        );
+    }
+
+    #[test]
+    fn each_region_scrolls_on_its_own_and_the_wheel_is_scoped_to_the_region() {
+        let (mut app, _probe, _project) = settings_app(100, 24);
+        let area = content_area(&app);
+        let columns = layout(area);
+        let kind = app.animation_settings.kind;
+        // Wheel over the scene list scrolls its window without selecting.
+        let on_list = Position::new(columns.scene_list.x + 2, columns.scene_list.y + 1);
+        pointer(&mut app, MouseEventKind::ScrollDown, on_list.x, on_list.y);
+        let state = state_of(&app);
+        assert!(state.scene_scroll > 0, "scene window scrolled");
+        assert_eq!((state.global_scroll, state.scroll), (0, 0));
+        assert_eq!(app.animation_settings.kind, kind, "wheel never selects a scene");
+        // Wheel over the global settings scrolls only those.
+        let on_global = Position::new(columns.global.x + 2, columns.global.y + 1);
+        pointer(&mut app, MouseEventKind::ScrollDown, on_global.x, on_global.y);
+        let after = state_of(&app);
+        assert!(after.global_scroll > 0);
+        assert_eq!(after.scene_scroll, state.scene_scroll);
+        assert_eq!(after.scroll, 0);
+        pointer(&mut app, MouseEventKind::ScrollUp, on_global.x, on_global.y);
+        pointer(&mut app, MouseEventKind::ScrollUp, on_global.x, on_global.y);
+        assert_eq!(state_of(&app).global_scroll, 0, "scroll stops at the top");
+        // Wheel over the right column scrolls only the animation's own rows.
+        let model = app.animation_row_model();
+        let on_controls = Position::new(columns.controls_rows.x + 2, columns.controls_rows.y + 1);
+        let before = state_of(&app);
+        pointer(&mut app, MouseEventKind::ScrollDown, on_controls.x, on_controls.y);
+        let now = state_of(&app);
+        assert_eq!((now.scene_scroll, now.global_scroll), (before.scene_scroll, before.global_scroll));
+        let overflow = max_scroll(area, &model, Region::Controls) > 0;
+        assert_eq!(now.scroll > 0, overflow);
+    }
+
+    #[test]
+    fn scrollbar_clicks_jump_the_scene_list_and_the_global_settings() {
+        let (mut app, _probe, _project) = settings_app(100, 24);
+        let area = content_area(&app);
+        let model = app.animation_row_model();
+        let columns = layout(area);
+        for (region, rows) in [(Region::Scenes, columns.scene_list), (Region::Global, columns.global)] {
+            let maximum = max_scroll(area, &model, region);
+            assert!(maximum > 0, "{region:?} needs a scrollbar at 100x24");
+            let x = rows.right();
+            let bottom = Position::new(x, rows.bottom() - 1);
+            assert_eq!(
+                hit(area, &model, Scrolls::default(), bottom),
+                Some(AnimationHit::ScrollTo(region, maximum))
+            );
+            assert_eq!(
+                hit(area, &model, Scrolls::default(), Position::new(x, rows.y)),
+                Some(AnimationHit::ScrollTo(region, 0))
+            );
+            pointer(&mut app, MouseEventKind::Down(MouseButton::Left), bottom.x, bottom.y);
+            let state = state_of(&app);
+            assert_eq!(state.scrolls().get(region), maximum);
+        }
+        // The scrollbar column is drawn.
+        let terminal = draw(&mut app, 100, 24);
+        let text = screen_text(&terminal);
+        let glyphs = |x: u16, rows: Rect| -> String {
+            (rows.y..rows.bottom())
+                .map(|y| text[usize::from(y)].chars().nth(usize::from(x)).unwrap_or(' '))
+                .collect()
+        };
+        assert!(glyphs(columns.scene_list.right(), columns.scene_list).contains('\u{2503}'));
+        assert!(glyphs(columns.global.right(), columns.global).contains('\u{2503}'));
+    }
+
+    #[test]
+    fn global_slider_in_the_left_column_accepts_exact_endpoints() {
+        let (mut app, _probe, _project) = settings_app(100, 40);
+        let area = content_area(&app);
+        let row = row_index(&app, &AnimationRow::Common("look_brightness"));
+        set_selected_row(&mut app, row);
+        let model = app.animation_row_model();
+        let scrolls = state_of(&app).scrolls();
+        let geometry = slider_geometry(area, &model, row, scrolls).unwrap();
+        assert!(geometry.value.right() <= layout(area).scenes.right());
+        pointer(&mut app, MouseEventKind::Down(MouseButton::Left), geometry.track.right() - 1, geometry.track.y);
+        assert_eq!(app.animation_settings.appearance.brightness_percent, 200);
+        pointer(&mut app, MouseEventKind::Drag(MouseButton::Left), geometry.track.x, geometry.track.y);
+        assert_eq!(app.animation_settings.appearance.brightness_percent, 1);
+        pointer(&mut app, MouseEventKind::Up(MouseButton::Left), geometry.track.x, geometry.track.y);
+    }
+
+    #[test]
+    fn every_row_stays_visible_in_its_region_for_each_screen_size_and_keyboard_walk() {
+        for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+            let (mut app, _probe, _project) = settings_app(width, height);
+            let area = content_area(&app);
+            for step in 0..200 {
+                let model = app.animation_row_model();
+                let state = state_of(&app);
+                assert!(
+                    row_y(area, &model, state.selected_row, state.scrolls()).is_some(),
+                    "{width}x{height} step {step}: row {} hidden",
+                    state.selected_row
+                );
+                if state.selected_row + 1 >= model.len() {
+                    break;
+                }
+                key(&mut app, KeyCode::Down);
+            }
+            for _ in 0..200 {
+                key(&mut app, KeyCode::Up);
+                let model = app.animation_row_model();
+                let state = state_of(&app);
+                assert!(row_y(area, &model, state.selected_row, state.scrolls()).is_some());
+            }
+            assert_eq!(state_of(&app).selected_row, 0);
+        }
+    }
+
+    #[test]
+    fn rendered_screen_shows_both_columns_at_every_size() {
+        for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+            let (mut app, _probe, _project) = settings_app(width, height);
+            let terminal = draw(&mut app, width, height);
+            let text = screen_text(&terminal);
+            let joined = text.join("\n");
+            for needle in ["Animations", "Prev", "Next", "Look and display", "Show in", "Color mode", "Brightness"] {
+                assert!(joined.contains(needle), "{width}x{height} lacks {needle}\n{joined}");
+            }
+            let right = format!("{} settings", app.animation_settings.kind.label());
+            assert!(joined.contains(&right), "{width}x{height} lacks {right}");
+            if std::env::var_os("ILIUM_DUMP_ANIMATION_UI").is_some() {
+                eprintln!("--- {width}x{height}\n{joined}");
+            }
+        }
     }
 }

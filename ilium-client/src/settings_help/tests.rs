@@ -158,7 +158,7 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
     // numbered scene-control topics AN-39..AN-42.
     for kind in AnimationKind::ALL
         .into_iter()
-        .filter(|kind| !kind.is_ambient())
+        .filter(|kind| !kind.is_ambient() && *kind != AnimationKind::Wikipedia)
     {
         let selected = AnimationSettings {
             kind,
@@ -177,8 +177,34 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
     }
     // Scene rows map one-to-one onto AN-01.. in catalog order and name their scene.
     for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
-        let id = if kind == AnimationKind::SolarSystem {
+        let id = if kind == AnimationKind::VoxelLandscape {
+            "AN-52".to_owned()
+        } else if kind == AnimationKind::GalacticEmpires {
+            "AN-53".to_owned()
+        } else if kind == AnimationKind::Wikipedia {
+            "AN-54".to_owned()
+        } else if kind == AnimationKind::OpenStreetMap {
+            "AN-55".to_owned()
+        } else if kind == AnimationKind::TopographicMaps {
+            "AN-56".to_owned()
+        } else if kind == AnimationKind::Graph {
+            "AN-57".to_owned()
+        } else if kind == AnimationKind::Pi {
+            "AN-58".to_owned()
+        } else if kind == AnimationKind::Earthquakes {
+            "AN-59".to_owned()
+        } else if kind == AnimationKind::Aircraft {
+            "AN-60".to_owned()
+        } else if kind == AnimationKind::Boats {
+            "AN-61".to_owned()
+        } else if kind == AnimationKind::Chess {
+            "AN-62".to_owned()
+        } else if kind == AnimationKind::SolarSystem {
             "AN-49".to_owned()
+        } else if kind == AnimationKind::HexExpedition {
+            "AN-50".to_owned()
+        } else if kind == AnimationKind::VectorTd {
+            "AN-51".to_owned()
         } else {
             format!("AN-{:02}", index + 1)
         };
@@ -236,15 +262,18 @@ fn narrow_animation_settings_help_anchors_reach_every_lower_control() {
     let model = app.animation_row_model();
     let scene_controls = app.animation_settings.scene_controls();
     for row in 0..model.len() {
+        let scrolls = crate::animation_settings_ui::follow_selection(
+            layout.content_area,
+            &model,
+            row,
+            crate::animation_settings_ui::Scrolls::default(),
+        );
         let state = SettingsState {
             tab: SettingsTab::Animations,
             selected_row: row,
-            scroll: crate::animation_settings_ui::scroll_for_selection(
-                layout.content_area,
-                &model,
-                row,
-                0,
-            ),
+            scroll: scrolls.controls,
+            scene_scroll: scrolls.scenes,
+            global_scroll: scrolls.global,
             ..SettingsState::default()
         };
         let anchors = crate::settings_ui::settings_help_anchors(&layout, &app, &state);

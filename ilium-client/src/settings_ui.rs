@@ -437,7 +437,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             layout.content_area,
             app,
             &app.animation_row_model(),
-            state.scroll,
+            crate::animation_settings_ui::Scrolls::of(state),
         );
     }
 }
@@ -531,15 +531,21 @@ pub fn settings_help_anchors(
                         layout.content_area,
                         &model,
                         row,
-                        state.scroll,
+                        crate::animation_settings_ui::Scrolls::of(state),
                     ),
                     crate::animation_settings_ui::help_id_for_row(&model, app, row),
                 ) else {
                     continue;
                 };
+                // Rows of the left column (scenes and global settings) carry
+                    // their help anchor in the gap column right of the column;
+                    // the right column uses the shared help rail.
                 if matches!(
-                    model.rows().get(row),
-                    Some(crate::animation_rows::AnimationRow::Scene(_))
+                    model.region(row),
+                    Some(
+                        crate::animation_rows::Region::Scenes
+                            | crate::animation_rows::Region::Global
+                    )
                 ) {
                     let column = crate::animation_settings_ui::layout(layout.content_area).scenes;
                     if column.width > 0 {
@@ -1146,7 +1152,11 @@ pub(crate) fn render_scrollable(
 /// keyboard scrolling to this so the view can never scroll past its own end.
 pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area: Rect) -> u16 {
     if tab == SettingsTab::Animations {
-        return crate::animation_settings_ui::max_scroll(content_area, &app.animation_row_model());
+        return crate::animation_settings_ui::max_scroll(
+            content_area,
+            &app.animation_row_model(),
+            crate::animation_rows::Region::Controls,
+        );
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),

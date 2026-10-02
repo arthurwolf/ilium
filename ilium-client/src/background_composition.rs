@@ -1,8 +1,8 @@
 //! Final-buffer decoration; terminal bytes and render caches remain authoritative.
 //!
 //! Compose after the ordinary workspace and before overlays. Only known ambient
-//! regions and plain ASCII-space cells accept Braille. Wide glyph spans, native
-//! terminal continuations/cursors, styling, and diff controls remain untouched.
+//! regions and safe native blank cells accept Braille or article text. Wide glyph
+//! spans, native continuations/cursors, styling, and diff controls stay untouched.
 
 use std::time::Duration;
 
@@ -69,7 +69,10 @@ pub fn ambient_is_visible(app: &App) -> bool {
 fn live_animation_is_visible(app: &App) -> bool {
     !app.layout.screen_area.is_empty()
         && (app.is_animation_preview_visible()
-            || (ambient_is_visible(app) && app.ui_settings.motion_level != MotionLevel::Off))
+            || (ambient_is_visible(app)
+                && (app.ui_settings.motion_level != MotionLevel::Off
+                    || app.animation_settings.kind
+                        == crate::background_animation::AnimationKind::Wikipedia)))
 }
 
 /// `None` means animation contributes no recurring deadline. Preview remains
@@ -124,26 +127,54 @@ fn render_field(
 /// The same field also backs the Settings -> Animations preview: identical
 /// dimensions, coordinates, clock and hosted scene, revealed through every
 /// safe blank of the settings screen (its controls panel is opaque). The
-/// hosted scene is dropped whenever neither surface is visible.
+/// hosted scene and article worker are dropped whenever neither surface is visible.
 pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     let is_preview = app.is_animation_preview_visible();
     if buffer.area.is_empty() || !(is_preview || ambient_is_visible(app)) {
-        app.animation_frame.host_mut().release();
+        app.animation_frame.release_hosts();
         app.animation_cache.borrow_mut().pause();
         return;
     }
-    let settings = app.animation_settings.normalized();
+    let mut settings = app.animation_settings.normalized();
+    let frozen_article = !is_preview
+        && app.ui_settings.motion_level == MotionLevel::Off
+        && settings.kind == crate::background_animation::AnimationKind::Wikipedia;
+    if frozen_article {
+        // Keep wall time for loader retries and readiness, but pause article travel.
+        settings.wikipedia.scroll_tenths = 0;
+    }
     // Motion Off freezes the ambient background; the explicit preview stays live.
-    let elapsed = if !is_preview && app.ui_settings.motion_level == MotionLevel::Off {
-        Duration::ZERO
-    } else {
-        quantized_elapsed_at(elapsed, app.animation_frames_per_second())
-    };
+    let elapsed =
+        if !is_preview && app.ui_settings.motion_level == MotionLevel::Off && !frozen_article {
+            Duration::ZERO
+        } else {
+            quantized_elapsed_at(elapsed, app.animation_frames_per_second())
+        };
     render_field(app, &settings, buffer.area, elapsed);
     let (red, green, blue) = settings.foreground_rgb();
     let foreground = Color::Rgb(red, green, blue);
+    let look = LookPaint {
+        appearance: &settings.appearance,
+        ink: [red, green, blue],
+        columns: app.animation_frame.width(),
+        rows: app.animation_frame.height(),
+        seconds: elapsed.as_secs_f32(),
+    };
     if is_preview {
         let area = buffer.area;
+        // Article letters in label whitespace become part of the UI wording.
+        // Keep the same page coordinates, but leave Settings chrome opaque.
+        let preview_area =
+            if app.animation_frame.is_wikipedia() && settings.wikipedia.uses_native_text() {
+                match &app.mode {
+                    Mode::Settings(state) if !state.animation_fullscreen => {
+                        crate::settings_ui::compute_layout(area).content_area
+                    }
+                    _ => Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)),
+                }
+            } else {
+                area
+            };
         let opaque_panel = match &app.mode {
             Mode::Settings(state) if !state.animation_fullscreen => Some(
                 crate::animation_settings_ui::layout(
@@ -153,47 +184,51 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             ),
             _ => None,
         };
-        paint_region_with_colors(
+        paint_region_with_field(
             buffer,
-            area,
+            preview_area,
             None,
             foreground,
             |column, row| {
                 if opaque_panel.is_some_and(|panel| {
                     panel.contains(Position::new(area.x + column, area.y + row))
                 }) {
-                    ' '
+                    FieldCell::Empty
                 } else {
-                    app.animation_frame.glyph(column, row)
+                    field_cell(app, &look, column, row)
                 }
             },
-            |column, row| field_color(app, column, row),
+            app.animation_frame.is_wikipedia(),
         );
         return;
     }
-    paint_region_with_colors(
-        buffer,
-        panel_inner(app.layout.tree_area),
-        None,
-        foreground,
-        |column, row| app.animation_frame.glyph(column, row),
-        |column, row| field_color(app, column, row),
-    );
+    if settings.panels.shows_left() {
+        paint_region_with_field(
+            buffer,
+            panel_inner(app.layout.tree_area),
+            None,
+            foreground,
+            |column, row| field_cell(app, &look, column, row),
+            app.animation_frame.is_wikipedia(),
+        );
+    }
 
-    if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {
+    if !settings.panels.shows_right()
+        || matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+    {
         return;
     }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         // This is draw_pane's known empty/loading placeholder, not an unknown
         // editor, board, search, settings, or chatroom surface.
-        paint_region_with_colors(
+        paint_region_with_field(
             buffer,
             panel_inner(app.layout.pane_area),
             None,
             foreground,
-            |column, row| app.animation_frame.glyph(column, row),
-            |column, row| field_color(app, column, row),
+            |column, row| field_cell(app, &look, column, row),
+            app.animation_frame.is_wikipedia(),
         );
         return;
     }
@@ -205,23 +240,110 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             .completed_agent_close_action(viewport)
             .map_or(viewport.content_area, |action| action.terminal_area);
         terminal.with_screen(|screen| {
-            paint_region_with_colors(
+            paint_region_with_field(
                 buffer,
                 area,
                 Some(screen),
                 foreground,
-                |column, row| app.animation_frame.glyph(column, row),
-                |column, row| field_color(app, column, row),
+                |column, row| field_cell(app, &look, column, row),
+                app.animation_frame.is_wikipedia(),
             );
         });
     }
 }
 
-/// The scene-supplied color of one field cell; `None` paints the user palette.
-fn field_color(app: &App, column: u16, row: u16) -> Option<Color> {
-    app.animation_frame
-        .cell_color(column, row)
-        .map(|(red, green, blue)| Color::Rgb(red, green, blue))
+/// Everything needed to colour one ink cell through the shared look.
+struct LookPaint<'a> {
+    appearance: &'a ilium_ambient::style::Appearance,
+    ink: [u8; 3],
+    /// Field size in cells, for the position of a cell on the screen.
+    columns: u16,
+    rows: u16,
+    seconds: f32,
+}
+
+impl LookPaint<'_> {
+    /// The colour of a cell. `None` means "paint the plain ink": nothing in
+    /// the look changes it and the scene supplied no colour.
+    fn color(&self, app: &App, column: u16, row: u16, is_text: bool) -> Option<Color> {
+        let scene = app
+            .animation_frame
+            .cell_color(column, row)
+            .map(|(r, g, b)| [r, g, b]);
+        if self.appearance.is_neutral() {
+            return scene.map(|[r, g, b]| Color::Rgb(r, g, b));
+        }
+        let coverage = if is_text {
+            1.0
+        } else {
+            app.animation_frame
+                .packed_cells()
+                .get(usize::from(row) * usize::from(self.columns) + usize::from(column))
+                .map_or(1.0, |bits| f32::from(bits.count_ones() as u8) / 8.0)
+        };
+        let fraction = |value: u16, extent: u16| {
+            if extent <= 1 {
+                0.5
+            } else {
+                f32::from(value) / f32::from(extent - 1)
+            }
+        };
+        let [r, g, b] = self.appearance.shade(
+            self.ink,
+            scene,
+            &ilium_ambient::style::CellContext {
+                coverage,
+                x: fraction(column, self.columns),
+                y: fraction(row, self.rows),
+                seconds: self.seconds,
+            },
+        );
+        Some(Color::Rgb(r, g, b))
+    }
+}
+
+enum FieldCell {
+    Empty,
+    Continuation,
+    Ink {
+        symbol: String,
+        color: Option<Color>,
+        modifier: Modifier,
+    },
+}
+
+fn field_cell(app: &App, look: &LookPaint<'_>, column: u16, row: u16) -> FieldCell {
+    let frame = &app.animation_frame;
+    if frame.is_wikipedia() {
+        if frame.article_is_continuation(column, row) {
+            return FieldCell::Continuation;
+        }
+        let Some(symbol) = frame.article_symbol(column, row) else {
+            return FieldCell::Empty;
+        };
+        let (bold, italic) = frame.article_style(column, row);
+        let mut modifier = Modifier::empty();
+        if bold {
+            modifier |= Modifier::BOLD;
+        }
+        if italic {
+            modifier |= Modifier::ITALIC;
+        }
+        return FieldCell::Ink {
+            symbol: symbol.to_owned(),
+            color: look.color(app, column, row, true),
+            modifier,
+        };
+    }
+    let symbol = frame.glyph(column, row);
+    if symbol == ' ' {
+        return FieldCell::Empty;
+    }
+    FieldCell::Ink {
+        symbol: symbol.to_string(),
+        color: look.color(app, column, row, false),
+        modifier: Modifier::empty(),
+    }
 }
 
 fn panel_inner(area: Rect) -> Rect {
@@ -290,13 +412,80 @@ fn paint_region(
     paint_region_with_colors(buffer, region, screen, foreground, glyph, |_, _| None);
 }
 
+#[cfg(test)]
 fn paint_region_with_colors(
     buffer: &mut Buffer,
     region: Rect,
     screen: Option<&vt100::Screen>,
     foreground: Color,
-    mut glyph: impl FnMut(u16, u16) -> char,
+    glyph: impl FnMut(u16, u16) -> char,
     mut cell_color: impl FnMut(u16, u16) -> Option<Color>,
+) {
+    paint_region_with_style(
+        buffer,
+        region,
+        screen,
+        foreground,
+        glyph,
+        |column, row| (cell_color(column, row), Modifier::empty()),
+        false,
+    );
+}
+
+/// Legacy tests exercise the same compositor through a char-only source.
+#[cfg(test)]
+fn paint_region_with_style(
+    buffer: &mut Buffer,
+    region: Rect,
+    screen: Option<&vt100::Screen>,
+    foreground: Color,
+    mut glyph: impl FnMut(u16, u16) -> char,
+    mut cell_style: impl FnMut(u16, u16) -> (Option<Color>, Modifier),
+    allow_text: bool,
+) {
+    paint_region_with_field(
+        buffer,
+        region,
+        screen,
+        foreground,
+        |column, row| {
+            let (color, modifier) = cell_style(column, row);
+            FieldCell::Ink {
+                symbol: glyph(column, row).to_string(),
+                color,
+                modifier,
+            }
+        },
+        allow_text,
+    );
+}
+
+fn safe_target(
+    buffer: &Buffer,
+    region: Rect,
+    screen: Option<&vt100::Screen>,
+    cursor: Option<Position>,
+    column: u16,
+    row: u16,
+) -> bool {
+    let cell = &buffer[(column, row)];
+    UnicodeWidthStr::width(cell.symbol()) == 1
+        && is_safe_blank(cell)
+        && cursor != Some(Position::new(column, row))
+        && !screen
+            .and_then(|screen| screen.cell(row - region.y, column - region.x))
+            .is_some_and(vt100::Cell::is_wide_continuation)
+}
+
+/// A two-column article glyph is committed only with a typed continuation
+/// and two safe native destination cells. Ordinary scenes stay Braille-only.
+fn paint_region_with_field(
+    buffer: &mut Buffer,
+    region: Rect,
+    screen: Option<&vt100::Screen>,
+    foreground: Color,
+    mut field: impl FnMut(u16, u16) -> FieldCell,
+    allow_text: bool,
 ) {
     let clipped = region.intersection(buffer.area);
     if clipped.is_empty() {
@@ -315,32 +504,52 @@ fn paint_region_with_colors(
             let cell = &buffer[(column, row)];
             let width = UnicodeWidthStr::width(cell.symbol());
             remaining_continuations = width.saturating_sub(1);
-            if column < clipped.left()
-                || width != 1
-                || !is_safe_blank(cell)
-                || cursor == Some(Position::new(column, row))
+            if column < clipped.left() || !safe_target(buffer, region, screen, cursor, column, row)
             {
                 continue;
             }
-            let native_continuation = screen
-                .and_then(|screen| screen.cell(row - region.y, column - region.x))
-                .is_some_and(vt100::Cell::is_wide_continuation);
-            if native_continuation {
+            let FieldCell::Ink {
+                symbol,
+                color,
+                modifier,
+            } = field(column - buffer.area.x, row - buffer.area.y)
+            else {
                 continue;
-            }
-            let character = glyph(column - buffer.area.x, row - buffer.area.y);
-            // Empty Braille remains an ordinary space. An invalid engine glyph
-            // must not introduce a wide symbol into this single-cell overlay.
-            if !('\u{2801}'..='\u{28ff}').contains(&character) {
+            };
+            let symbol_width = crate::background_animation::wikipedia_symbol_width(&symbol);
+            let is_braille = symbol_width == Some(1)
+                && symbol.chars().count() == 1
+                && symbol
+                    .chars()
+                    .next()
+                    .is_some_and(|character| ('\u{2801}'..='\u{28ff}').contains(&character));
+            let Some(symbol_width) = symbol_width.filter(|_| allow_text || is_braille) else {
                 continue;
+            };
+            if symbol_width == 2 {
+                let next_column = column.saturating_add(1);
+                if next_column >= clipped.right()
+                    || !matches!(
+                        field(next_column - buffer.area.x, row - buffer.area.y),
+                        FieldCell::Continuation
+                    )
+                    || !safe_target(buffer, region, screen, cursor, next_column, row)
+                {
+                    continue;
+                }
             }
-            let color =
-                cell_color(column - buffer.area.x, row - buffer.area.y).unwrap_or(foreground);
+            let color = color.unwrap_or(foreground);
             let cell = &mut buffer[(column, row)];
             // Drop the blank's bold/dim/italic so the field keeps one look, and
             // reset an explicit black fill to the default background.
-            cell.set_char(character).set_fg(color).set_bg(Color::Reset);
-            cell.modifier = Modifier::empty();
+            cell.set_symbol(&symbol).set_fg(color).set_bg(Color::Reset);
+            cell.modifier = modifier & (Modifier::BOLD | Modifier::ITALIC);
+            if symbol_width == 2 {
+                let next = &mut buffer[(column + 1, row)];
+                next.set_symbol(" ").set_fg(color).set_bg(Color::Reset);
+                next.modifier = Modifier::empty();
+                remaining_continuations = 1;
+            }
         }
     }
 }
@@ -357,6 +566,251 @@ mod tests {
     fn paint_all(buffer: &mut Buffer) {
         let area = buffer.area;
         paint_region(buffer, area, None, Color::White, |_, _| '\u{28ff}');
+    }
+
+    #[test]
+    fn wikipedia_text_styles_only_safe_blanks() {
+        let area = Rect::new(0, 0, 5, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(1, 0)].set_char('P').set_fg(Color::Yellow);
+        buffer[(2, 0)].set_bg(Color::Blue);
+        buffer[(3, 0)].modifier = Modifier::UNDERLINED;
+        let original = buffer.clone();
+        paint_region_with_style(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |_, _| 'A',
+            |_, _| (Some(Color::Cyan), Modifier::BOLD | Modifier::ITALIC),
+            true,
+        );
+        assert_eq!(buffer[(0, 0)].symbol(), "A");
+        assert_eq!(buffer[(0, 0)].fg, Color::Cyan);
+        assert_eq!(buffer[(0, 0)].modifier, Modifier::BOLD | Modifier::ITALIC);
+        for column in 1..=3 {
+            assert_eq!(buffer[(column, 0)], original[(column, 0)]);
+        }
+    }
+
+    #[test]
+    fn wikipedia_text_preview_preserves_settings_navigation_spaces() {
+        use crate::background_animation::AnimationKind;
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("host".into(), project.path().to_path_buf());
+        let area = Rect::new(0, 0, 160, 48);
+        app.set_screen_area(area);
+        app.animation_settings.kind = AnimationKind::Wikipedia;
+        app.animation_settings
+            .set_scene_control("wiki_render_mode", ilium_ambient::ControlValue::Index(1))
+            .unwrap();
+        app.animation_settings.wikipedia.scroll_tenths = 0;
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Animations,
+            ..Default::default()
+        });
+        // A synthetic long article puts ink behind both chrome and the preview.
+        let html = format!("<p>{}</p>", "article words ".repeat(2000));
+        let document = std::sync::Arc::new(
+            ilium_wikipedia::parse_article(
+                "Preview fixture",
+                "https://en.wikipedia.org/wiki/Fixture",
+                "2026-10-02",
+                &html,
+            )
+            .unwrap(),
+        );
+        app.animation_frame.inject_wikipedia_document_for_test(
+            document,
+            &app.animation_settings.wikipedia,
+            area.width,
+        );
+        let geometry = crate::settings_ui::compute_layout(area);
+        let mut buffer = Buffer::empty(area);
+        buffer.set_string(2, 6, "Agent Cost", ratatui::style::Style::default());
+        let before = buffer.clone();
+        compose(&mut buffer, &mut app, Duration::ZERO);
+        for region in [
+            geometry.header_area,
+            geometry.tab_list_area,
+            geometry.help_rail_area,
+            Rect::new(area.x, area.bottom() - 1, area.width, 1),
+        ] {
+            for row in region.top()..region.bottom() {
+                for column in region.left()..region.right() {
+                    assert_eq!(
+                        buffer[(column, row)],
+                        before[(column, row)],
+                        "chrome at {column},{row}"
+                    );
+                }
+            }
+        }
+        let panel = crate::animation_settings_ui::layout(geometry.content_area).panel;
+        assert!(
+            (panel.right()..geometry.content_area.right()).any(|column| {
+                (geometry.content_area.top()..geometry.content_area.bottom())
+                    .any(|row| buffer[(column, row)].symbol() != " ")
+            }),
+            "the article remains visible beside the controls"
+        );
+    }
+
+    #[test]
+    fn wide_article_text_requires_its_reserved_second_blank() {
+        let area = Rect::new(0, 0, 4, 1);
+        let draw = |buffer: &mut Buffer, reserve: bool| {
+            paint_region_with_field(
+                buffer,
+                area,
+                None,
+                Color::White,
+                |column, _| match column {
+                    0 => FieldCell::Ink {
+                        symbol: "界".into(),
+                        color: Some(Color::Cyan),
+                        modifier: Modifier::BOLD,
+                    },
+                    1 if reserve => FieldCell::Continuation,
+                    _ => FieldCell::Empty,
+                },
+                true,
+            );
+        };
+        let mut valid = Buffer::empty(area);
+        draw(&mut valid, true);
+        assert_eq!(valid[(0, 0)].symbol(), "界");
+        assert_eq!(valid[(1, 0)].symbol(), " ");
+        assert_eq!(valid[(0, 0)].fg, Color::Cyan);
+        assert_eq!(valid[(0, 0)].modifier, Modifier::BOLD);
+
+        let mut unreserved = Buffer::empty(area);
+        draw(&mut unreserved, false);
+        assert_eq!(unreserved[(0, 0)].symbol(), " ");
+
+        let mut styled = Buffer::empty(area);
+        styled[(1, 0)].set_bg(Color::Blue);
+        let original = styled.clone();
+        draw(&mut styled, true);
+        assert_eq!(styled, original);
+
+        let mut boundary = Buffer::empty(area);
+        paint_region_with_field(
+            &mut boundary,
+            Rect::new(0, 0, 1, 1),
+            None,
+            Color::White,
+            |column, _| {
+                if column == 0 {
+                    FieldCell::Ink {
+                        symbol: "界".into(),
+                        color: None,
+                        modifier: Modifier::empty(),
+                    }
+                } else {
+                    FieldCell::Continuation
+                }
+            },
+            true,
+        );
+        assert_eq!(boundary[(0, 0)].symbol(), " ");
+    }
+
+    #[test]
+    fn wide_article_text_preserves_native_cursor_and_continuation() {
+        let area = Rect::new(0, 0, 4, 1);
+        let mut parser = vt100::Parser::new(1, 4, 0);
+        parser.process("\u{1b}[1;2H".as_bytes());
+        let mut buffer = Buffer::empty(area);
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            Some(parser.screen()),
+            Color::White,
+            |column, _| match column {
+                0 => FieldCell::Ink {
+                    symbol: "界".into(),
+                    color: None,
+                    modifier: Modifier::empty(),
+                },
+                1 => FieldCell::Continuation,
+                _ => FieldCell::Empty,
+            },
+            true,
+        );
+        assert_eq!(buffer[(0, 0)].symbol(), " ");
+        parser.process("\u{1b}[1;1H界\u{1b}[1;4H".as_bytes());
+        let mut buffer = Buffer::empty(area);
+        // Mirror the already-rendered native glyph. The clipped region starts
+        // after its leading cell, so that cell still reserves its continuation.
+        buffer[(0, 0)].set_symbol("界");
+        paint_region_with_field(
+            &mut buffer,
+            Rect::new(1, 0, 3, 1),
+            Some(parser.screen()),
+            Color::White,
+            |_, _| FieldCell::Ink {
+                symbol: "A".into(),
+                color: None,
+                modifier: Modifier::empty(),
+            },
+            true,
+        );
+        assert_eq!(buffer[(1, 0)].symbol(), " ");
+    }
+
+    #[test]
+    fn wikipedia_overlay_preserves_native_cursor_wide_cells_and_screen_bytes() {
+        let area = Rect::new(0, 0, 8, 1);
+        let mut parser = vt100::Parser::new(1, 8, 0);
+        parser.process("界\u{1b}[1;5H".as_bytes());
+        let source_before = parser.screen().contents_formatted();
+        let mut buffer = Buffer::empty(area);
+        buffer[(0, 0)].set_symbol("界");
+        let original = buffer.clone();
+        paint_region_with_style(
+            &mut buffer,
+            area,
+            Some(parser.screen()),
+            Color::White,
+            |_, _| 'A',
+            |_, _| (None, Modifier::BOLD),
+            true,
+        );
+        for column in [0, 1, 4] {
+            assert_eq!(buffer[(column, 0)], original[(column, 0)]);
+        }
+        assert_eq!(buffer[(2, 0)].symbol(), "A");
+        assert_eq!(parser.screen().contents_formatted(), source_before);
+    }
+
+    #[test]
+    fn article_overlay_rejects_wide_combining_and_control_characters() {
+        for character in ['界', '\u{301}', '\n', '\u{1b}', '\u{2800}'] {
+            let area = Rect::new(0, 0, 1, 1);
+            let mut buffer = Buffer::empty(area);
+            paint_region_with_style(
+                &mut buffer,
+                area,
+                None,
+                Color::White,
+                |_, _| character,
+                |_, _| (None, Modifier::empty()),
+                true,
+            );
+            assert_eq!(buffer[(0, 0)].symbol(), " ");
+        }
+        let area = Rect::new(0, 0, 1, 1);
+        let mut buffer = Buffer::empty(area);
+        paint_region_with_colors(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |_, _| 'A',
+            |_, _| None,
+        );
+        assert_eq!(buffer[(0, 0)].symbol(), " ");
     }
 
     #[test]
@@ -918,6 +1372,90 @@ mod tests {
             .collect();
         assert!(colors.contains(&Color::Rgb(200, 20, 40)), "{colors:?}");
         assert!(colors.contains(&Color::Rgb(20, 40, 200)), "{colors:?}");
+    }
+
+    fn ink_colors(buffer: &Buffer) -> Vec<Color> {
+        buffer
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() != " ")
+            .map(|cell| cell.fg)
+            .collect()
+    }
+
+    fn brightness_of(color: Color) -> u32 {
+        match color {
+            Color::Rgb(red, green, blue) => u32::from(red) + u32::from(green) + u32::from(blue),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn the_shared_look_recolors_every_scene_and_brightness_dims_it() {
+        use ilium_ambient::style::{ColorMode, ColorSource};
+        let (mut app, probe, _project) = ambient_app();
+        // A scene without its own colors: monotone ink by default.
+        let (red, green, blue) = app.animation_settings.foreground_rgb();
+        assert!(ink_colors(&compose_at(&mut app, 0))
+            .iter()
+            .all(|color| *color == Color::Rgb(red, green, blue)));
+        // A palette colors it by position, so several colors appear.
+        app.animation_settings.appearance.palette = 1;
+        app.animation_settings.appearance.source = ColorSource::Horizontal;
+        let colored = ink_colors(&compose_at(&mut app, 0));
+        let distinct: std::collections::HashSet<_> = colored.iter().copied().collect();
+        assert!(distinct.len() > 2, "{distinct:?}");
+        // Brightness dims the same picture.
+        let bright: u32 = colored.iter().map(|color| brightness_of(*color)).sum();
+        app.animation_settings.appearance.brightness_percent = 25;
+        let dim: u32 = ink_colors(&compose_at(&mut app, 0))
+            .iter()
+            .map(|color| brightness_of(*color))
+            .sum();
+        assert!(dim * 100 < bright * 35, "{dim} vs {bright}");
+        // Greyscale has equal channels; monotone has exactly one color.
+        app.animation_settings.appearance.brightness_percent = 100;
+        app.animation_settings.appearance.mode = ColorMode::Greyscale;
+        assert!(ink_colors(&compose_at(&mut app, 0))
+            .iter()
+            .all(|color| matches!(
+                color,
+                Color::Rgb(r, g, b) if r == g && g == b
+            )));
+        app.animation_settings.appearance.mode = ColorMode::Monotone;
+        let mono: std::collections::HashSet<_> =
+            ink_colors(&compose_at(&mut app, 0)).into_iter().collect();
+        assert_eq!(mono.len(), 1);
+        // A scene's own colors go through the palette too.
+        probe
+            .uses_colors
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        app.animation_settings.appearance.mode = ColorMode::Color;
+        app.animation_settings.appearance.palette = 0;
+        let own: std::collections::HashSet<_> =
+            ink_colors(&compose_at(&mut app, 1)).into_iter().collect();
+        assert!(own.contains(&Color::Rgb(200, 20, 40)));
+        app.animation_settings.appearance.palette = 20;
+        let recolored: std::collections::HashSet<_> =
+            ink_colors(&compose_at(&mut app, 1)).into_iter().collect();
+        assert!(
+            !recolored.contains(&Color::Rgb(200, 20, 40)),
+            "{recolored:?}"
+        );
+    }
+
+    #[test]
+    fn the_panel_choice_limits_where_the_animation_shows() {
+        use crate::background_animation::PanelTarget;
+        let (mut app, _probe, _project) = ambient_app();
+        let both = braille_cells(&compose_at(&mut app, 0));
+        app.animation_settings.panels = PanelTarget::Left;
+        let left = braille_cells(&compose_at(&mut app, 0));
+        app.animation_settings.panels = PanelTarget::Right;
+        let right = braille_cells(&compose_at(&mut app, 0));
+        assert!(left > 0 && right > 0, "left {left} right {right}");
+        assert!(left < both && right < both, "{left} {right} {both}");
+        assert_eq!(left + right, both, "the panels do not overlap");
     }
 
     #[test]

@@ -199,7 +199,13 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
     let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
     let model = app.animation_row_model();
     assert!(
-        crate::animation_settings_ui::row_y(area, &model, lightness_row, state.scroll).is_some()
+        crate::animation_settings_ui::row_y(
+            area,
+            &model,
+            lightness_row,
+            crate::animation_settings_ui::Scrolls::of(state),
+        )
+        .is_some()
     );
 }
 

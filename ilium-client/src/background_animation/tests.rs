@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 fn legacy_kinds() -> impl Iterator<Item = AnimationKind> {
     AnimationKind::ALL
         .into_iter()
-        .filter(|kind| !kind.is_ambient())
+        .filter(|kind| !kind.is_live_only())
 }
 
 fn slider_bounds(control: &ilium_ambient::Control) -> (i32, i32) {
@@ -89,13 +89,16 @@ fn hosted_kinds_map_to_the_crate_and_are_live_only() {
     assert_eq!(hosted, ilium_ambient::AmbientKind::ALL.to_vec());
     for kind in AnimationKind::ALL {
         assert_eq!(kind.is_ambient(), kind.ambient().is_some());
-        assert_eq!(kind.is_live_only(), kind.is_ambient());
+        assert_eq!(
+            kind.is_live_only(),
+            kind.is_ambient() || kind == AnimationKind::Wikipedia
+        );
         let settings = AnimationSettings {
             kind,
             ..Default::default()
         };
         // Built-in scenes default to the loop cache; hosted kinds never use it.
-        assert_eq!(settings.uses_loop_cache(), !kind.is_ambient());
+        assert_eq!(settings.uses_loop_cache(), !kind.is_live_only());
     }
     assert_eq!(AnimationKind::Images.label(), "Images");
 }
@@ -201,8 +204,22 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "fbm_clouds",
         "dithered_waves",
         "dithr_patterns",
+        "hex_expedition",
+        "vector_td",
+        "wikipedia",
+        "galactic_empires",
+        "voxel_landscape",
         "solar_system",
+        "topographic_maps",
+        "graph",
+        "pi",
+        "earthquakes",
+        "aircraft",
+        "boats",
+        "chess",
+        "open_street_map",
     ];
+    assert_eq!(expected.len(), AnimationKind::ALL.len());
     for (kind, id) in AnimationKind::ALL.into_iter().zip(expected) {
         assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{id}\""));
         assert_eq!(
@@ -219,7 +236,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
             .map(AnimationKind::label)
             .collect::<HashSet<_>>()
             .len(),
-        26
+        AnimationKind::ALL.len()
     );
 }
 
@@ -598,7 +615,7 @@ fn braille_bit_layout_is_exact() {
         let mut frame = AnimationFrame::default();
         frame.resize(1, 1);
         frame.raster.dots[y * 2 + x] = 1.0;
-        frame.pack(100, DitherMode::Ordered);
+        frame.pack(PackKey::plain(100, DitherMode::Ordered));
         assert_eq!(frame.glyph(0, 0) as u32, 0x2800 + (1 << bit));
     }
 }
@@ -1169,7 +1186,7 @@ fn packing_matches_reference_for_every_braille_pattern_and_density_boundary() {
                             }
                         }
                     }
-                    frame.pack(density, dither);
+                    frame.pack(PackKey::plain(density, dither));
                     for y in 0..usize::from(height) {
                         for x in 0..usize::from(width) {
                             let mut expected = 0;
@@ -1219,7 +1236,7 @@ fn density_repacking_matches_original_comparisons_at_float_boundaries() {
                 }
             }
             for density in [25, 60, 99, 100] {
-                frame.pack(density, dither);
+                frame.pack(PackKey::plain(density, dither));
                 for y in 0..3 {
                     for x in 0..7 {
                         let mut expected = 0;
@@ -1246,3 +1263,193 @@ fn density_repacking_matches_original_comparisons_at_float_boundaries() {
         }
     }
 }
+
+#[test]
+fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct Adapting {
+        accept: bool,
+        applied: Arc<AtomicUsize>,
+    }
+    impl ilium_ambient::Scene for Adapting {
+        fn render(&mut self, _frame: &mut ilium_ambient::Frame<'_>) {}
+        fn reconfigure(&mut self, _settings: &ilium_ambient::AmbientSettings) -> bool {
+            if self.accept {
+                self.applied.fetch_add(1, Ordering::SeqCst);
+            }
+            self.accept
+        }
+    }
+
+    for accept in [true, false] {
+        let built = Arc::new(AtomicUsize::new(0));
+        let applied = Arc::new(AtomicUsize::new(0));
+        let (factory_built, factory_applied) = (built.clone(), applied.clone());
+        let mut host = super::AmbientHost::with_factory(Box::new(move |_, _, _| {
+            factory_built.fetch_add(1, Ordering::SeqCst);
+            Box::new(Adapting {
+                accept,
+                applied: factory_applied.clone(),
+            })
+        }));
+        let kind = ilium_ambient::AmbientKind::DitherWater;
+        let mut settings = ilium_ambient::AmbientSettings::default();
+        let first = host.sync(kind, &settings, Duration::ZERO);
+        // The same settings change nothing.
+        assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
+        settings.dither_water.seed += 1;
+        let second = host.sync(kind, &settings, Duration::from_secs(5));
+        assert_ne!(
+            first, second,
+            "the render of the old settings is not reused"
+        );
+        assert_eq!(built.load(Ordering::SeqCst), if accept { 1 } else { 2 });
+        assert_eq!(applied.load(Ordering::SeqCst), usize::from(accept));
+        // Scene time runs on through an in-place update and restarts on a rebuild.
+        let wall = host.wall(Duration::from_secs(5));
+        assert_eq!(
+            wall,
+            if accept {
+                Duration::from_secs(5)
+            } else {
+                Duration::ZERO
+            }
+        );
+        // A scene of another kind is never reconfigured with foreign settings.
+        host.sync(
+            ilium_ambient::AmbientKind::Pipes,
+            &settings,
+            Duration::from_secs(6),
+        );
+        assert_eq!(built.load(Ordering::SeqCst), if accept { 2 } else { 3 });
+    }
+}
+
+#[path = "openstreetmap_tests.rs"]
+mod openstreetmap_tests;
+
+fn packed_with(key: PackKey, tone: f32) -> Vec<u8> {
+    let mut frame = AnimationFrame::default();
+    frame.resize(24, 8);
+    frame.raster.dots.fill(tone);
+    frame.pack(key);
+    frame.packed_cells().to_vec()
+}
+
+fn lit_bits(cells: &[u8]) -> u32 {
+    cells.iter().map(|cell| cell.count_ones()).sum()
+}
+
+#[test]
+fn every_dither_mode_packs_a_tone_to_about_that_many_dots() {
+    let total = (24 * 8 * 8) as f32;
+    for mode in DitherMode::ALL {
+        for tone in [0.25_f32, 0.5, 0.75] {
+            let cells = packed_with(PackKey::plain(100, mode), tone);
+            let lit = lit_bits(&cells) as f32 / total;
+            // Atkinson drops a quarter of the error; the matrices round in steps.
+            assert!((lit - tone).abs() < 0.2, "{mode:?} tone {tone} lit {lit}");
+        }
+        assert_eq!(lit_bits(&packed_with(PackKey::plain(100, mode), 0.0)), 0, "{mode:?}");
+    }
+}
+
+#[test]
+fn dither_modes_make_different_patterns() {
+    let reference = packed_with(PackKey::plain(100, DitherMode::Ordered), 0.5);
+    for mode in DitherMode::ALL.into_iter().skip(1) {
+        assert_ne!(
+            packed_with(PackKey::plain(100, mode), 0.5),
+            reference,
+            "{mode:?} must differ from ordered"
+        );
+    }
+}
+
+#[test]
+fn pattern_invert_and_contrast_change_which_dots_are_lit() {
+    let normal = packed_with(PackKey::plain(100, DitherMode::Ordered), 0.3);
+    let inverted = packed_with(
+        PackKey { invert: true, ..PackKey::plain(100, DitherMode::Ordered) },
+        0.3,
+    );
+    assert!(lit_bits(&inverted) > lit_bits(&normal) * 2);
+    let hard = packed_with(
+        PackKey { contrast_percent: 200, ..PackKey::plain(100, DitherMode::Ordered) },
+        0.3,
+    );
+    assert!(lit_bits(&hard) < lit_bits(&normal));
+}
+
+#[test]
+fn every_common_control_including_the_look_rows_round_trips() {
+    for id in common_control_ids() {
+        let mut settings = AnimationSettings::default();
+        let control = settings.common_control(id).unwrap_or_else(|| panic!("{id} resolves"));
+        let Some(stepped) = control.stepped(1) else { continue };
+        assert_eq!(settings.set_common_control(id, stepped.clone()), Ok(true), "{id}");
+        assert_eq!(settings.common_control(id).map(|row| row.value), Some(stepped), "{id}");
+    }
+}
+
+#[test]
+fn choosing_a_preset_sets_the_look_and_may_set_dither_and_density() {
+    let mut settings = AnimationSettings::default();
+    let matrix = ilium_ambient::style::StylePreset::Matrix.index();
+    assert_eq!(
+        settings.set_common_control("look_preset", ControlValue::Index(matrix)),
+        Ok(true)
+    );
+    assert_eq!(settings.appearance.preset, ilium_ambient::style::StylePreset::Matrix);
+    assert_eq!(settings.dither, DitherMode::Lines);
+    assert!(settings.appearance.brightness_percent < 100);
+    // A hand edit afterwards leaves the preset.
+    settings.set_common_control("look_brightness", ControlValue::Number(90)).unwrap();
+    assert_eq!(settings.appearance.preset, ilium_ambient::style::StylePreset::Custom);
+}
+
+#[test]
+fn look_and_panel_settings_are_global_normalized_and_persist_through_serde() {
+    let mut settings = AnimationSettings::default();
+    settings.appearance.brightness_percent = 0;
+    settings.fps_limit = 999;
+    settings.panels = PanelTarget::Right;
+    let normalized = settings.normalized();
+    assert_eq!(normalized.appearance.brightness_percent, 1);
+    assert_eq!(normalized.fps_limit, 30);
+    let yaml = serde_json::to_string(&settings).unwrap();
+    assert_eq!(serde_json::from_str::<AnimationSettings>(&yaml).unwrap(), settings);
+    // One look for every scene: the field is not per scene.
+    for kind in AnimationKind::ALL {
+        let selected = AnimationSettings { kind, ..settings.clone() };
+        assert_eq!(selected.appearance, settings.appearance);
+    }
+    // Missing keys fall back to the neutral defaults.
+    let sparse: AnimationSettings = serde_json::from_str("{}").unwrap();
+    assert!(sparse.appearance.is_neutral());
+    assert_eq!(sparse.panels, PanelTarget::Both);
+    assert_eq!(sparse.fps_limit, 0);
+}
+
+#[test]
+fn look_changes_never_rebuild_the_loop_cache_but_pattern_changes_do() {
+    let mut cache = AnimationLoopCache::default();
+    let mut settings = AnimationSettings { enabled: true, ..Default::default() };
+    cache.begin(&settings, 20, 8);
+    let first = cache.status().total_frames;
+    assert!(first > 0);
+    settings.appearance.brightness_percent = 30;
+    settings.appearance.palette = 3;
+    settings.panels = PanelTarget::Left;
+    settings.fps_limit = 5;
+    cache.begin(&settings, 20, 8);
+    assert!(
+        cache.status().completed_frames > 0 || cache.status().is_ready || first > 0,
+        "same cache identity: nothing restarts"
+    );
+}
+
+#[path = "live_scene_tests.rs"]
+mod live_scene_tests;

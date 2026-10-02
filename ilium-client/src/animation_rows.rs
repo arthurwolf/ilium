@@ -39,6 +39,31 @@ pub enum AnimationRow {
     FullScreenPreview,
 }
 
+/// Which part of the Settings panel a row lives in: the compact scene list,
+/// the global settings under it (look, display, pattern: shared by every
+/// animation) or the selected animation's own settings on the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Region {
+    Scenes,
+    Global,
+    Controls,
+}
+
+impl AnimationRow {
+    pub fn region(&self) -> Region {
+        match self {
+            Self::Scene(_) => Region::Scenes,
+            Self::Common("playback" | "loop_seconds") => Region::Controls,
+            Self::Common(_) => Region::Global,
+            Self::SceneControl(_)
+            | Self::Location
+            | Self::CacheStatus
+            | Self::SceneStatus
+            | Self::FullScreenPreview => Region::Controls,
+        }
+    }
+}
+
 /// Runtime facts the row list depends on besides the settings.
 #[derive(Debug, Clone, Default)]
 pub struct RowContext {
@@ -222,31 +247,40 @@ impl RowModel {
         Self { rows, views }
     }
 
+    pub fn region(&self, row: usize) -> Option<Region> {
+        self.row(row).map(AnimationRow::region)
+    }
+
+    /// The heading of the section a row sits under, within its region.
     pub fn section(&self, row: usize) -> &'static str {
         match self.row(row) {
             Some(AnimationRow::Scene(_)) => "Scenes",
-            Some(
-                AnimationRow::SceneControl(_)
-                | AnimationRow::Location
-                | AnimationRow::Common("background"),
-            ) => "Scene settings",
-            Some(AnimationRow::Common("lightness" | "hue" | "saturation")) => "Color",
+            Some(AnimationRow::Common("background" | "panels")) => "Display",
+            Some(AnimationRow::Common(
+                "speed" | "fps_limit" | "density" | "dither" | "look_pattern_contrast"
+                | "look_pattern_invert",
+            )) => "Pattern and motion",
+            Some(AnimationRow::Common(_)) => "Color",
+            Some(AnimationRow::SceneControl(_) | AnimationRow::Location) => "Scene settings",
             Some(AnimationRow::Common("playback" | "loop_seconds") | AnimationRow::CacheStatus) => {
                 "Playback and cache"
             }
-            Some(AnimationRow::Common(_)) => "Motion and rendering",
             _ => "Preview and status",
         }
     }
+
+    /// Display position of a row inside its region, counting the section
+    /// headings above it (headings only exist in the Global and Controls
+    /// regions; the scene list is a plain list).
     pub fn visual_row(&self, row: usize) -> Option<u16> {
-        self.row(row)?;
-        let scene_count = AnimationKind::ALL.len();
-        if row < scene_count {
-            return u16::try_from(row).ok();
+        let region = self.region(row)?;
+        if region == Region::Scenes {
+            return u16::try_from(self.rows[..row].iter().filter(|r| r.region() == region).count())
+                .ok();
         }
         let mut position = 0u16;
         let mut previous = "";
-        for index in scene_count..=row {
+        for index in (0..=row).filter(|index| self.region(*index) == Some(region)) {
             let section = self.section(index);
             if section != previous {
                 position = position.saturating_add(1);
@@ -259,11 +293,17 @@ impl RowModel {
         }
         None
     }
-    pub fn visual_height(&self) -> u16 {
-        self.visual_row(self.len().saturating_sub(1))
-            .unwrap_or(0)
-            .saturating_add(1)
-            .max(AnimationKind::ALL.len() as u16)
+
+    /// Rows (headings included) a region needs to show everything.
+    pub fn visual_height(&self, region: Region) -> u16 {
+        let last = (0..self.len()).rev().find(|row| self.region(*row) == Some(region));
+        last.and_then(|row| self.visual_row(row))
+            .map_or(0, |position| position.saturating_add(1))
+    }
+
+    /// Indexes of every row in a region, in display order.
+    pub fn region_rows(&self, region: Region) -> impl Iterator<Item = usize> + '_ {
+        (0..self.len()).filter(move |row| self.region(*row) == Some(region))
     }
 
     pub fn len(&self) -> usize {
@@ -290,30 +330,50 @@ impl RowModel {
         &self.views
     }
 
-    /// Index of the first row of the selected scene's controls, or of
-    /// Background when the scene has none: where Enter on a scene row lands.
+    /// Index of the first row of the selected scene's controls, or of the
+    /// first row on the right when the scene has none: where Enter on a
+    /// scene row lands.
     pub fn first_control_index(&self) -> usize {
         self.rows
             .iter()
             .position(|row| matches!(row, AnimationRow::SceneControl(_)))
-            .or_else(|| {
-                self.rows
-                    .iter()
-                    .position(|row| *row == AnimationRow::Common("background"))
-            })
+            .or_else(|| self.region_rows(Region::Controls).next())
             .unwrap_or(0)
     }
 }
 
 /// The ordered row list for `settings`.
-pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<AnimationRow> {
+pub fn rows(settings: &AnimationSettings, _context: &RowContext) -> Vec<AnimationRow> {
     let kind = settings.kind;
     let mut rows: Vec<AnimationRow> = AnimationKind::ALL
         .iter()
         .copied()
         .map(AnimationRow::Scene)
         .collect();
-    rows.push(AnimationRow::Common("background"));
+    // Global settings, shared by every animation: display, color, pattern.
+    rows.extend(["panels", "background"].into_iter().map(AnimationRow::Common));
+    for control in settings.appearance.controls() {
+        rows.push(AnimationRow::Common(control.id));
+        // The single ink color of Monotone mode sits right under the mode.
+        if control.id == "look_mode" && settings.appearance.mode == ilium_ambient::style::ColorMode::Monotone {
+            rows.extend(["lightness", "hue", "saturation"].into_iter().map(AnimationRow::Common));
+        }
+    }
+    if kind != AnimationKind::Wikipedia {
+        rows.extend(
+            ["speed", "fps_limit", "density", "dither"]
+                .into_iter()
+                .map(AnimationRow::Common),
+        );
+        rows.extend(
+            settings
+                .appearance
+                .pattern_controls()
+                .into_iter()
+                .map(|control| AnimationRow::Common(control.id)),
+        );
+    }
+    // The selected animation's own settings.
     rows.extend(
         settings
             .scene_controls()
@@ -326,18 +386,6 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
     {
         rows.push(AnimationRow::Location);
     }
-    rows.extend(
-        ["speed", "density", "dither"]
-            .into_iter()
-            .map(AnimationRow::Common),
-    );
-    if !context.scene_uses_cell_colors {
-        rows.extend(
-            ["lightness", "hue", "saturation"]
-                .into_iter()
-                .map(AnimationRow::Common),
-        );
-    }
     if !kind.is_live_only() {
         rows.push(AnimationRow::Common("playback"));
         if settings.playback_mode == AnimationPlaybackMode::Loop {
@@ -345,7 +393,7 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
             rows.push(AnimationRow::CacheStatus);
         }
     }
-    if kind.is_ambient() {
+    if kind.is_ambient() || kind == AnimationKind::Wikipedia {
         rows.push(AnimationRow::SceneStatus);
     }
     rows.push(AnimationRow::FullScreenPreview);
@@ -494,8 +542,13 @@ impl AnimationRow {
                 label: "Scene status".to_owned(),
                 value: context.scene_status.clone().unwrap_or_else(|| "OK".to_owned()),
                 kind: RowKind::Status,
-                help: "What the running scene reports: downloads, missing tools, missing devices."
-                    .to_owned(),
+                help: if settings.kind == AnimationKind::Wikipedia {
+                    "Article title, source URL, revision, offline state, missing images and font coverage."
+                        .to_owned()
+                } else {
+                    "What the running scene reports: downloads, missing tools, missing devices."
+                        .to_owned()
+                },
                 disabled_options: Vec::new(),
             },
             Self::FullScreenPreview => RowView {
@@ -514,13 +567,29 @@ impl AnimationRow {
     /// numbered topics instead of needing their own catalog entry.
     pub fn help_id(&self, scene_controls: &[Control]) -> String {
         match self {
+            Self::Scene(AnimationKind::GalacticEmpires) => "AN-53".to_owned(),
+            Self::Scene(AnimationKind::Wikipedia) => "AN-54".to_owned(),
             Self::Scene(AnimationKind::SolarSystem) => "AN-49".to_owned(),
+            Self::Scene(AnimationKind::HexExpedition) => "AN-50".to_owned(),
+            Self::Scene(AnimationKind::VectorTd) => "AN-51".to_owned(),
+            Self::Scene(AnimationKind::VoxelLandscape) => "AN-52".to_owned(),
+            Self::Scene(AnimationKind::TopographicMaps) => "AN-56".to_owned(),
+            Self::Scene(AnimationKind::OpenStreetMap) => "AN-55".to_owned(),
+            Self::Scene(AnimationKind::Graph) => "AN-57".to_owned(),
+            Self::Scene(AnimationKind::Pi) => "AN-58".to_owned(),
+            Self::Scene(AnimationKind::Earthquakes) => "AN-59".to_owned(),
+            Self::Scene(AnimationKind::Aircraft) => "AN-60".to_owned(),
+            Self::Scene(AnimationKind::Boats) => "AN-61".to_owned(),
+            Self::Scene(AnimationKind::Chess) => "AN-62".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()
                     .position(|candidate| candidate == kind)
                     .unwrap_or(0);
                 format!("AN-{:02}", index + 1)
+            }
+            Self::Common(id) if style_help_id(id).is_some() => {
+                style_help_id(id).unwrap_or_default().to_owned()
             }
             Self::Common(id) => {
                 let offset = match *id {
@@ -552,6 +621,38 @@ impl AnimationRow {
     }
 }
 
+/// Help topic ids of the shared look, display and pattern rows. They are
+/// separate from the numbered scene topics so they never renumber them.
+pub const STYLE_HELP_IDS: [(&str, &str); 20] = [
+    ("look_preset", "AN-C01"),
+    ("look_mode", "AN-C02"),
+    ("look_palette", "AN-C03"),
+    ("look_source", "AN-C04"),
+    ("look_reverse", "AN-C05"),
+    ("look_shift", "AN-C06"),
+    ("look_spread", "AN-C07"),
+    ("look_grey_hue", "AN-C08"),
+    ("look_grey_tint", "AN-C09"),
+    ("look_brightness", "AN-C10"),
+    ("look_contrast", "AN-C11"),
+    ("look_gamma", "AN-C12"),
+    ("look_saturation", "AN-C13"),
+    ("look_hue_shift", "AN-C14"),
+    ("look_invert", "AN-C15"),
+    ("look_vignette", "AN-C16"),
+    ("look_pattern_contrast", "AN-C17"),
+    ("look_pattern_invert", "AN-C18"),
+    ("fps_limit", "AN-C19"),
+    ("panels", "AN-C20"),
+];
+
+fn style_help_id(id: &str) -> Option<&'static str> {
+    STYLE_HELP_IDS
+        .iter()
+        .find(|(row, _)| *row == id)
+        .map(|(_, help)| *help)
+}
+
 /// How many numbered "scene control" help topics the catalog carries.
 pub const SCENE_CONTROL_TOPICS: usize = 10;
 
@@ -559,10 +660,27 @@ pub const SCENE_CONTROL_TOPICS: usize = 10;
 /// Every help id the row model can produce: scene rows, common and special
 /// rows, then the numbered scene-control topics.
 pub fn help_ids() -> Vec<String> {
-    let count = 25 + 13 + SCENE_CONTROL_TOPICS + 1;
-    (1..=count)
+    let count = 25 + 13 + SCENE_CONTROL_TOPICS + 4;
+    let mut ids: Vec<String> = (1..=count)
         .map(|number| format!("AN-{number:02}"))
-        .collect()
+        .collect();
+    if !ids.iter().any(|id| id == "AN-54") {
+        ids.push("AN-54".to_owned());
+    }
+    if !ids.iter().any(|id| id == "AN-53") {
+        ids.push("AN-53".to_owned());
+    }
+    ids.extend(STYLE_HELP_IDS.iter().map(|(_, help)| (*help).to_owned()));
+    if !ids.iter().any(|id| id == "AN-55") {
+        ids.push("AN-55".to_owned());
+    }
+    if !ids.iter().any(|id| id == "AN-56") {
+        ids.push("AN-56".to_owned());
+    }
+    for number in 57..=62 {
+        ids.push(format!("AN-{number:02}"));
+    }
+    ids
 }
 
 #[cfg(test)]

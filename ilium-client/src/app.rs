@@ -965,6 +965,11 @@ pub struct SettingsState {
     /// terminal too short to show every row at once. See
     /// `crate::settings_ui::content_scroll_bounds`.
     pub scroll: u16,
+    /// Animations: scroll offset of the compact scene list (left column, top).
+    pub scene_scroll: u16,
+    /// Animations: scroll offset of the global settings (left column, below
+    /// the scene list). `scroll` is the right column.
+    pub global_scroll: u16,
     /// An Animations slider owns its left-button gesture until release.
     pub animation_slider_drag: Option<usize>,
     /// The Animations tab hides its controls so the live field fills the
@@ -1081,6 +1086,8 @@ impl SettingsState {
             tab: SettingsTab::Appearance,
             selected_row: 0,
             scroll: 0,
+            scene_scroll: 0,
+            global_scroll: 0,
             animation_slider_drag: None,
             animation_fullscreen: false,
             icons_preview_real: false,
@@ -6060,8 +6067,17 @@ impl App {
     pub fn animation_row_context(&self) -> crate::animation_rows::RowContext {
         let screen = self.layout.screen_area;
         crate::animation_rows::RowContext {
-            scene_uses_cell_colors: self.animation_frame.host().uses_cell_colors(),
-            scene_status: self.animation_frame.host().status(),
+            scene_uses_cell_colors: self.animation_settings.kind
+                == crate::background_animation::AnimationKind::Wikipedia
+                || self.animation_frame.host().uses_cell_colors(),
+            scene_status: if self.animation_settings.kind
+                == crate::background_animation::AnimationKind::Wikipedia
+                && !self.animation_frame.is_wikipedia()
+            {
+                Some("Loading Wikipedia".to_owned())
+            } else {
+                self.animation_frame.status()
+            },
             cache: self.animation_cache.borrow().status(),
             loop_bytes: self
                 .animation_settings
@@ -6081,7 +6097,19 @@ impl App {
     /// The redraw cadence of the field on screen: the hosted scene's request,
     /// or 30 frames per second for built-in scenes and before a scene exists.
     pub fn animation_frames_per_second(&self) -> u32 {
-        if self.animation_settings.kind.is_ambient() {
+        let scene = self.scene_frames_per_second();
+        match self.animation_settings.fps_limit {
+            0 => scene,
+            limit => scene.min(u32::from(limit)),
+        }
+    }
+
+    fn scene_frames_per_second(&self) -> u32 {
+        if self.animation_settings.kind == crate::background_animation::AnimationKind::Wikipedia {
+            // Smooth quarter-row Braille travel and prompt loader/status refreshes
+            // need no 30 Hz scene cadence.
+            4
+        } else if self.animation_settings.kind.is_ambient() {
             self.animation_frame
                 .host()
                 .frames_per_second()

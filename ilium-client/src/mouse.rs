@@ -1769,7 +1769,7 @@ fn update_animation_hover(
     let row = match crate::animation_settings_ui::hit(
         layout.content_area,
         &model,
-        state.scroll,
+        crate::animation_settings_ui::Scrolls::of(state),
         position,
     ) {
         Some(
@@ -1990,11 +1990,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             .iter()
                             .position(|kind| *kind == app.animation_settings.kind)
                             .unwrap_or(0);
-                        state.scroll = crate::animation_settings_ui::scroll_for_selection(
+                        state.scene_scroll = 0;
+                        state.global_scroll = 0;
+                        state.scroll = 0;
+                        crate::animation_settings_ui::sync_scrolls(
                             layout.content_area,
                             &app.animation_row_model(),
-                            state.selected_row,
-                            0,
+                            &mut state,
                         );
                     } else {
                         state.scroll = 0;
@@ -2008,9 +2010,23 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 match crate::animation_settings_ui::hit(
                     layout.content_area,
                     &model,
-                    state.scroll,
+                    crate::animation_settings_ui::Scrolls::of(&state),
                     position,
                 ) {
+                    Some(direction @ (AnimationHit::PreviousScene | AnimationHit::NextScene)) => {
+                        let delta = if direction == AnimationHit::PreviousScene { -1 } else { 1 };
+                        let kind = crate::animation_settings_ui::adjacent_scene(
+                            app.animation_settings.kind,
+                            delta,
+                        );
+                        if let Some(index) = crate::background_animation::AnimationKind::ALL
+                            .iter()
+                            .position(|candidate| *candidate == kind)
+                        {
+                            state.selected_row = index;
+                            app.settings_preview_select_animation_row(index);
+                        }
+                    }
                     Some(AnimationHit::Select(row)) => {
                         state.selected_row = row;
                         app.settings_preview_select_animation_row(row);
@@ -2044,7 +2060,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         state.animation_slider_drag = Some(row);
                         app.settings_set_animation_slider(row, value);
                     }
-                    Some(AnimationHit::ScrollTo(scroll)) => state.scroll = scroll,
+                    Some(AnimationHit::ScrollTo(region, offset)) => {
+                        let mut scrolls = crate::animation_settings_ui::Scrolls::of(&state);
+                        scrolls.set(region, offset);
+                        scrolls.store(&mut state);
+                    }
                     Some(AnimationHit::DisabledOption(row)) => {
                         state.selected_row = row;
                         if let Some(notice) =
@@ -2443,7 +2463,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         layout.content_area,
                         &app.animation_row_model(),
                         row,
-                        state.scroll,
+                        crate::animation_settings_ui::Scrolls::of(&state),
                         mouse.column,
                     ) {
                         app.settings_set_animation_slider(row, value);
@@ -2452,21 +2472,48 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             }
         }
         MouseEventKind::Up(MouseButton::Left) => state.animation_slider_drag = None,
-        MouseEventKind::ScrollUp => {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             state.animation_slider_drag = None;
-            state.scroll = state.scroll.saturating_sub(SETTINGS_WHEEL_SCROLL_LINES);
-        }
-        MouseEventKind::ScrollDown => {
-            state.animation_slider_drag = None;
-            state.scroll = state.scroll.saturating_add(SETTINGS_WHEEL_SCROLL_LINES);
+            let delta = i32::from(SETTINGS_WHEEL_SCROLL_LINES);
+            let delta = if mouse.kind == MouseEventKind::ScrollUp { -delta } else { delta };
+            // On the Animations tab the wheel scrolls the region under the
+            // pointer (scene list, global settings or the right column); the
+            // scene list scrolls its window without selecting a scene.
+            let mut scrolls = crate::animation_settings_ui::Scrolls::of(&state);
+            let handled = state.tab == crate::app::SettingsTab::Animations
+                && !state.animation_fullscreen
+                && crate::animation_settings_ui::wheel_scroll(
+                    layout.content_area,
+                    &app.animation_row_model(),
+                    &mut scrolls,
+                    position,
+                    delta,
+                );
+            if handled {
+                scrolls.store(&mut state);
+            } else {
+                state.scroll = if delta < 0 {
+                    state.scroll.saturating_sub(delta.unsigned_abs() as u16)
+                } else {
+                    state.scroll.saturating_add(delta as u16)
+                };
+            }
         }
         _ => {}
     }
 
     if state.tab == crate::app::SettingsTab::Animations {
         // A scene switch can change the row count under the selection.
-        let last_row = app.animation_row_model().len().saturating_sub(1);
-        state.selected_row = state.selected_row.min(last_row);
+        let model = app.animation_row_model();
+        state.selected_row = state.selected_row.min(model.len().saturating_sub(1));
+        crate::animation_settings_ui::Scrolls::of(&state)
+            .clamped(layout.content_area, &model)
+            .store(&mut state);
+        // Keyboard-less selection changes (a click, Prev/Next) keep the
+        // selected row visible in its own region.
+        if mouse.kind != MouseEventKind::ScrollUp && mouse.kind != MouseEventKind::ScrollDown {
+            crate::animation_settings_ui::sync_scrolls(layout.content_area, &model, &mut state);
+        }
     }
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);

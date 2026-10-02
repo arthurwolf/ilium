@@ -68,7 +68,7 @@ pub(in crate::background_animation) fn reference_frame(
     if width > 0 && height > 0 {
         let seconds = elapsed.as_secs_f64() * f64::from(settings.speed_percent) / 100.0;
         reference_cloudlets(&mut frame.raster, &settings, seconds as f32);
-        frame.pack(settings.density_percent, settings.dither);
+        frame.pack(crate::background_animation::PackKey::of(&settings));
     }
     frame
 }

@@ -67,7 +67,7 @@ pub(in crate::background_animation) fn reference_frame(
             &base,
             &columns,
         );
-        frame.pack(settings.density_percent, settings.dither);
+        frame.pack(crate::background_animation::PackKey::of(&settings));
     }
     frame
 }

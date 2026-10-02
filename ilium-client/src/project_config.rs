@@ -575,7 +575,11 @@ animation:
         assert_eq!(reloaded.project_name.as_deref(), Some("Pond"));
         assert_eq!(reloaded.project_icon.as_deref(), Some("🧭"));
         let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: solar_system"));
+        let last_kind = serde_json::to_string(AnimationKind::ALL.last().unwrap()).unwrap();
+        assert!(
+            saved.contains(&format!("kind: {}", last_kind.trim_matches('"'))),
+            "{saved}"
+        );
         assert!(!saved.contains("breathing_mountain"));
         assert!(saved.contains("custom: keep-me"));
         assert!(saved.contains("ratio: .inf"));
@@ -603,6 +607,95 @@ animation:
         let reloaded = load(project.path()).unwrap().animation;
         assert_eq!(reloaded, settings);
         assert!((reloaded.ambient.location.latitude - 69.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn openstreetmap_controls_survive_project_write_reload() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+        use ilium_ambient::SceneSettings;
+        let project = tempfile::tempdir().unwrap();
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::OpenStreetMap,
+            enabled: true,
+            ..Default::default()
+        };
+        for control in settings.ambient.openstreetmap.controls() {
+            if let Some(value) = control.stepped(1) {
+                settings
+                    .ambient
+                    .openstreetmap
+                    .set_control(control.id, value)
+                    .unwrap();
+            }
+        }
+        set_animation(project.path(), settings.clone()).unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("kind: open_street_map"), "{saved}");
+        assert!(saved.contains("openstreetmap:"), "{saved}");
+        assert_eq!(load(project.path()).unwrap().animation, settings);
+        assert_ne!(
+            load(tempfile::tempdir().unwrap().path()).unwrap().animation,
+            settings
+        );
+    }
+
+    #[test]
+    fn topographic_scene_controls_survive_project_write_reload() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+        use ilium_ambient::SceneSettings;
+        let project = tempfile::tempdir().unwrap();
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::TopographicMaps,
+            enabled: true,
+            ..Default::default()
+        };
+        for control in settings.ambient.topographic_maps.controls() {
+            if let Some(value) = control.stepped(1) {
+                settings
+                    .ambient
+                    .topographic_maps
+                    .set_control(control.id, value)
+                    .unwrap();
+            }
+        }
+        set_animation(project.path(), settings.clone()).unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("kind: topographic_maps"), "{saved}");
+        assert!(saved.contains("topographic_maps:"), "{saved}");
+        assert_eq!(load(project.path()).unwrap().animation, settings);
+    }
+
+    #[test]
+    fn voxel_scene_controls_survive_project_write_reload_and_remain_project_local() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+        use ilium_ambient::SceneSettings;
+        let project = tempfile::tempdir().unwrap();
+        let other_project = tempfile::tempdir().unwrap();
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::VoxelLandscape,
+            enabled: true,
+            ..Default::default()
+        };
+        for control in settings.ambient.voxel_landscape.controls() {
+            if let Some(value) = control.stepped(1) {
+                settings
+                    .ambient
+                    .voxel_landscape
+                    .set_control(control.id, value)
+                    .unwrap();
+            }
+        }
+        settings.ambient.voxel_landscape.seed = u32::MAX;
+        set_animation(project.path(), settings.clone()).unwrap();
+        let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
+        assert!(saved.contains("kind: voxel_landscape"), "{saved}");
+        assert!(saved.contains("voxel_landscape:"), "{saved}");
+        assert!(!saved.contains("ambient:"), "{saved}");
+        assert_eq!(load(project.path()).unwrap().animation, settings);
+        assert_eq!(
+            load(other_project.path()).unwrap().animation,
+            AnimationSettings::default()
+        );
     }
 
     #[test]

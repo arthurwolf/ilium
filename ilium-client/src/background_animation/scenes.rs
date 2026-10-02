@@ -303,7 +303,8 @@ impl SceneCache {
                         surfaces.push(surface);
                     }
                 }
-                let texture = Texture::new(raster.width, raster.height, caustic_texture);
+                let sites = CausticSites::new();
+                let texture = Texture::new(raster.width, raster.height, |u, v| sites.sample(u, v));
                 PreparedScene::Stones { surfaces, texture }
             }
             AnimationKind::Cloudlets => PreparedScene::Cloudlets {
@@ -964,6 +965,59 @@ pub(super) fn stone_surface(
     surface
 }
 
+/// Full translated Voronoi sites needed by Texture::new's normalized domain.
+/// Evaluate each original f32 site expression once, including gx/gy before the
+/// additions. Translating a wrapped, pre-rounded site would not be bit-exact.
+struct CausticSites {
+    sites: [[(f32, f32); 10]; 8],
+}
+
+impl CausticSites {
+    fn new() -> Self {
+        let mut sites = [[(0.0, 0.0); 10]; 8];
+        for (row, site_row) in sites.iter_mut().enumerate() {
+            let gy = row as i32 - 1;
+            for (column, site) in site_row.iter_mut().enumerate() {
+                let gx = column as i32 - 1;
+                *site = (
+                    gx as f32 + 0.22 + hash(gx.rem_euclid(8), gy.rem_euclid(6)) * 0.56,
+                    gy as f32 + 0.22 + hash(gx.rem_euclid(8) + 88, gy.rem_euclid(6)) * 0.56,
+                );
+            }
+        }
+        Self { sites }
+    }
+
+    fn sample(&self, u: f32, v: f32) -> f32 {
+        let sample_x = u * 8.0;
+        let sample_y = v * 6.0;
+        // Keep the exact scalar behavior for out-of-domain/rounded endpoints.
+        // All ordinary Texture::new samples fall in this half-open rectangle.
+        if !(0.0..8.0).contains(&sample_x) || !(0.0..6.0).contains(&sample_y) {
+            return caustic_texture(u, v);
+        }
+        let cell_x = sample_x.floor() as usize;
+        let cell_y = sample_y.floor() as usize;
+        let mut nearest = f32::INFINITY;
+        let mut second = f32::INFINITY;
+        // Table index is signed lattice coordinate + 1. These slices enumerate
+        // gy = cell_y-1..=cell_y+1, then gx = cell_x-1..=cell_x+1, exactly as R04.
+        for row in &self.sites[cell_y..cell_y + 3] {
+            for &(site_x, site_y) in &row[cell_x..cell_x + 3] {
+                let distance = (sample_x - site_x).powi(2) + (sample_y - site_y).powi(2);
+                if distance < nearest {
+                    second = nearest;
+                    nearest = distance;
+                } else if distance < second {
+                    second = distance;
+                }
+            }
+        }
+        let separation = (second - nearest) / (nearest.sqrt() + second.sqrt() + 0.0001);
+        1.0 - smoothstep(0.015, 0.072, separation)
+    }
+}
+
 fn caustic_texture(u: f32, v: f32) -> f32 {
     let sample_x = u * 8.0;
     let sample_y = v * 6.0;
@@ -1610,4 +1664,9 @@ pub(super) mod r05_cloudlet_tests {
 #[cfg(test)]
 pub(super) mod r06_pond_tests {
     include!("r06_pond_tests.rs");
+}
+
+#[cfg(test)]
+pub(super) mod r07_caustic_tests {
+    include!("r07_caustic_tests.rs");
 }

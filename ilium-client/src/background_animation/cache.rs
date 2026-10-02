@@ -103,6 +103,15 @@ impl AnimationLoopCache {
         settings.lightness_percent = 50;
         settings.hue_degrees = 0;
         settings.saturation_percent = 0;
+        // The look (colors, brightness, panels, frame cap) is applied when a
+        // frame is shown; only the pattern controls change packed geometry.
+        settings.appearance = ilium_ambient::style::Appearance {
+            pattern_contrast_percent: settings.appearance.pattern_contrast_percent,
+            pattern_invert: settings.appearance.pattern_invert,
+            ..Default::default()
+        };
+        settings.panels = super::PanelTarget::Both;
+        settings.fps_limit = 0;
         if self.settings.as_ref() == Some(&settings) && self.width == width && self.height == height
         {
             return;
@@ -283,7 +292,7 @@ fn render_loop_sample(
     for (dot, target) in generator.raster.dots.iter_mut().zip(&head.raster.dots) {
         *dot = *dot * (1.0 - weight) + target * weight;
     }
-    generator.pack(settings.density_percent, settings.dither);
+    generator.pack(super::PackKey::of(settings));
 }
 
 #[cfg(test)]

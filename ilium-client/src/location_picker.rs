@@ -1022,12 +1022,17 @@ mod tests {
             .unwrap();
         let area = crate::settings_ui::compute_layout(SCREEN).content_area;
         let model = app.animation_row_model();
-        let scroll = crate::animation_settings_ui::scroll_for_selection(area, &model, row, 0);
+        let scroll = crate::animation_settings_ui::follow_selection(
+            area,
+            &model,
+            row,
+            crate::animation_settings_ui::Scrolls::default(),
+        );
         let Mode::Settings(state) = &mut app.mode else {
             panic!("Settings is open");
         };
         state.selected_row = row;
-        state.scroll = scroll;
+        scroll.store(state);
         let row_area = crate::animation_settings_ui::row_rect(area, &model, row, scroll).unwrap();
         click(&mut app, Position::new(row_area.x + 2, row_area.y));
         assert!(

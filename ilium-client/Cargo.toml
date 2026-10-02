@@ -15,6 +15,7 @@ path = "src/lib.rs"
 gpu = ["ilium-gpu/gpu"]
 
 [dependencies]
+ilium-wikipedia = { version = "0.1.0", path = "../ilium-wikipedia" }
 ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
 anyhow = "1.0.103"
 arboard = "3.6.1"

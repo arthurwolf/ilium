@@ -4,7 +4,11 @@
 use super::*;
 use crate::background_animation::{scenes, AnimationKind};
 
-const KINDS: &[AnimationKind] = &[AnimationKind::Cloudlets, AnimationKind::QuietPond];
+const KINDS: &[AnimationKind] = &[
+    AnimationKind::Cloudlets,
+    AnimationKind::QuietPond,
+    AnimationKind::StoneCaustics,
+];
 
 fn oracle(
     settings: &AnimationSettings,
@@ -18,6 +22,9 @@ fn oracle(
         }
         AnimationKind::QuietPond => {
             scenes::r06_pond_tests::reference_frame(settings, width, height, elapsed)
+        }
+        AnimationKind::StoneCaustics => {
+            scenes::r07_caustic_tests::reference_frame(settings, width, height, elapsed)
         }
         _ => panic!("missing frozen renderer oracle"),
     }
@@ -36,6 +43,10 @@ fn changed_settings(kind: AnimationKind) -> AnimationSettings {
         AnimationKind::QuietPond => {
             settings.quiet_pond.pad_count = 24;
             settings.quiet_pond.natural_placement = true;
+        }
+        AnimationKind::StoneCaustics => {
+            settings.stone_caustics.caustic_scale_percent = 150;
+            settings.stone_caustics.dome_height_percent = 175;
         }
         _ => panic!("missing replacement settings"),
     }
@@ -61,7 +72,7 @@ fn expected_sample(settings: &AnimationSettings, width: u16, height: u16, index:
         for (dot, target) in frame.raster.dots.iter_mut().zip(&head.raster.dots) {
             *dot = *dot * (1.0 - weight) + target * weight;
         }
-        frame.pack(settings.density_percent, settings.dither);
+        frame.pack(crate::background_animation::PackKey::of(&settings));
     }
     frame.packed_cells().to_vec()
 }
