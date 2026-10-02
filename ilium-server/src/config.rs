@@ -47,7 +47,7 @@ pub struct DetectionConfig {
     /// registered key straight into the pty -- currently just Claude Code's
     /// "resume full session" prompt. Defaults on: the registry only contains
     /// dialogs verified safe to answer the same way every time, and the
-    /// per-pid latch (`TerminalPaneRuntime::auto_answered_interstitial_prompt_for_pid`)
+    /// process-identity attempt (`TerminalPaneRuntime::auto_answer_attempt`)
     /// bounds it to exactly one keystroke per agent process.
     pub auto_answer_interstitial_prompts: bool,
 }

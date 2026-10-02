@@ -30,7 +30,6 @@ use regex::Regex;
 use tokio::sync::mpsc;
 
 use crate::ipc::handlers::submit_text_trigger_if_current;
-use crate::pane::PaneResource;
 use crate::state::ServerState;
 
 /// Grace period measured from the first scan observing an admission missing.
@@ -332,6 +331,7 @@ fn slice_end(bytes: &[u8], start: usize, newline_budget: usize) -> usize {
 #[derive(Default)]
 pub struct TriggerTracker {
     shadow: vt100::Parser,
+    needs_resync: bool,
     /// Main-screen and alternate-screen instances are remembered separately:
     /// leaving the alternate screen restores the main text unchanged and must
     /// not read as new output.
@@ -361,6 +361,7 @@ impl TriggerTracker {
         let mut parser = vt100::Parser::new(rows.max(1), cols.max(1), 0);
         parser.process(formatted_state);
         self.shadow = parser;
+        self.needs_resync = false;
     }
 
     /// Feeds `bytes` (an empty slice only rescans) and returns the id of the
@@ -514,20 +515,28 @@ pub async fn process_output(
     bytes: &[u8],
     delivery_sender: &mpsc::Sender<TriggerDelivery>,
 ) {
-    let size = state
-        .panes
-        .read()
-        .await
-        .get(&pane_id)
-        .and_then(|resource| match resource {
-            PaneResource::Terminal(runtime) => {
-                Some(runtime.session.with_screen(vt100::Screen::size))
-            }
-            PaneResource::Editor { .. } => None,
-        });
-    if let Some((rows, cols)) = size {
+    let bytes = if tracker.needs_resync {
+        let Some(((rows, cols), formatted)) =
+            crate::pane::read_current_terminal_screen(state, pane_id, |screen| {
+                (screen.size(), screen.state_formatted())
+            })
+            .await
+        else {
+            return;
+        };
+        tracker.replace_screen(rows, cols, &formatted);
+        // The current frame already contains this chunk; do not replay it.
+        &[]
+    } else {
+        let Some((rows, cols)) =
+            crate::pane::read_current_terminal_screen(state, pane_id, vt100::Screen::size).await
+        else {
+            tracker.needs_resync = true;
+            return;
+        };
         tracker.resize(rows, cols, Instant::now());
-    }
+        bytes
+    };
     let Some(context) = load_context(state, pane_id).await else {
         return;
     };
@@ -548,20 +557,12 @@ pub async fn resync_after_gap(
     tracker: &mut TriggerTracker,
     delivery_sender: &mpsc::Sender<TriggerDelivery>,
 ) {
-    let snapshot = state
-        .panes
-        .read()
-        .await
-        .get(&pane_id)
-        .and_then(|resource| match resource {
-            PaneResource::Terminal(runtime) => Some(
-                runtime
-                    .session
-                    .with_screen(|screen| (screen.size(), screen.state_formatted())),
-            ),
-            PaneResource::Editor { .. } => None,
-        });
+    let snapshot = crate::pane::read_current_terminal_screen(state, pane_id, |screen| {
+        (screen.size(), screen.state_formatted())
+    })
+    .await;
     let Some(((rows, cols), formatted_state)) = snapshot else {
+        tracker.needs_resync = true;
         return;
     };
     tracker.replace_screen(rows, cols, &formatted_state);
@@ -941,7 +942,9 @@ mod tests {
         let mut authoritative = vt100::Parser::new(6, 40, 0);
         authoritative.process(b"abracrabdara one\r\nlost output\r\n");
         let formatted = authoritative.screen().state_formatted();
+        harness.tracker.needs_resync = true;
         harness.tracker.replace_screen(6, 40, &formatted);
+        assert!(!harness.tracker.needs_resync);
         assert_eq!(harness.rescan(), 0);
         authoritative.process(b"abracrabdara two\r\n");
         let formatted = authoritative.screen().state_formatted();

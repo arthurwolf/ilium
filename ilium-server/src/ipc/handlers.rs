@@ -16,15 +16,15 @@ use ilium_agent_debug::{
     AgentDebugSource, PaneResizeCause,
 };
 use ilium_core::{
-    AgentProvider, BuiltinAgentProvider, NodeId, NodeKind, PaneContentKind, PaneStatus,
-    PaneTitleSource, PromptQueueDelivery, QueuedPrompt, RestructurePlan, ScheduledPaneInput,
-    SessionIdentityTransitionRule, Tree, TreeError,
+    AgentProcessKey, AgentProvider, AgentRecovery, BuiltinAgentProvider, NodeId, NodeKind,
+    PaneContentKind, PaneStatus, PaneTitleSource, PromptQueueDelivery, QueuedPrompt,
+    RestructurePlan, ScheduledPaneInput, SessionIdentityTransitionRule, Tree, TreeError,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
 };
 use ilium_platform::paths;
-use ilium_pty::PtyError;
+use ilium_pty::{OwnerStatus, PtyError, PtyInput, ShutdownReason};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::mouse::to_crossterm_event;
@@ -438,6 +438,22 @@ pub async fn handle_request(
                 .await;
             false
         }
+        ClientRequest::ReportAgentPromptFromTranscript {
+            pane_id,
+            expected_session_id,
+            prompt_epoch,
+            last_prompt,
+        } => {
+            handle_exact_agent_prompt_from_transcript(
+                state,
+                pane_id,
+                &expected_session_id,
+                &prompt_epoch,
+                last_prompt,
+            )
+            .await;
+            false
+        }
         ClientRequest::CheckPaneProgressMonitor {
             request_id,
             pane_id,
@@ -543,7 +559,25 @@ pub async fn handle_request(
             bytes,
             submission,
         } => {
-            handle_key_input(state, pane_id, &bytes, submission, direct_tx).await;
+            handle_key_input(state, pane_id, &bytes, submission, false, None, direct_tx).await;
+            false
+        }
+        ClientRequest::UserKeyInput {
+            pane_id,
+            bytes,
+            submission,
+            prompt_epoch,
+        } => {
+            handle_key_input(
+                state,
+                pane_id,
+                &bytes,
+                submission,
+                true,
+                prompt_epoch,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::SubmitTerminalText {
@@ -931,6 +965,30 @@ pub(crate) async fn record_node_activity(
     Ok(update.activity_revision)
 }
 
+/// A completed PTY write may outlive its pane. Revalidate the exact owner
+/// while holding the final tree mutation lock (tree before panes), so a new
+/// runtime at the same NodeId never receives stale activity bookkeeping.
+async fn record_input_activity_if_current(
+    state: &ServerState,
+    pane_id: NodeId,
+    input: &PtyInput,
+) -> Result<bool, String> {
+    let update = {
+        let mut tree = state.tree.write().await;
+        let panes = state.panes.read().await;
+        let is_current = matches!(panes.get(&pane_id),
+            Some(PaneResource::Terminal(runtime))
+                if input.same_session(&runtime.session.input_handle()));
+        if !is_current {
+            return Ok(false);
+        }
+        tree.record_node_activity(pane_id)
+            .map_err(|error| format!("could not record activity for {pane_id:?}: {error}"))?
+    };
+    publish_node_activity_update(state, pane_id, update);
+    Ok(true)
+}
+
 /// Advances output activity without broadcasting revisions a hidden pane's
 /// clients cannot render. The first unread/unrestructured edge is always
 /// published; a later visible-pane subscription explicitly synchronizes the
@@ -1055,11 +1113,14 @@ async fn handle_enqueue_prompt(
     let event_text = text.clone();
     let event_delivery = format!("{delivery:?}");
     let _transaction = state.prompt_queue_transaction.lock().await;
-    let result = state
-        .tree
-        .write()
-        .await
-        .enqueue_prompt(pane_id, QueuedPrompt { text, delivery });
+    let result = state.tree.write().await.enqueue_prompt(
+        pane_id,
+        QueuedPrompt {
+            text,
+            delivery,
+            attempted_delivery: false,
+        },
+    );
     drop(_transaction);
     if let Err(error) = result {
         send_direct_error(direct_tx, format!("failed to enqueue prompt: {error}")).await;
@@ -1823,57 +1884,113 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
     }
 }
 
-/// Applies the last-user-message a background client worker found in the
-/// agent CLI's own session transcript (see `ilium-client`'s
-/// `transcript_context::recent_user_prompts`). Preferred over live keystroke
-/// reconstruction when the two disagree: the transcript is the agent's own
-/// authoritative record, so it stays correct even for a submission live
-/// tracking could not reconstruct exactly (shell history recall, an
-/// unsupported escape sequence, ...). Discarded, same as a stale title
-/// result, when the pane's session has since changed or been invalidated --
-/// `expected_session_id` was captured before the worker's (possibly slow)
-/// transcript read, so the pane may already be on a different session by
-/// the time this arrives.
+/// Compatibility request without a submission token: bootstrap a wholly
+/// empty prompt only. It cannot replace any input observed since attach.
 async fn handle_last_prompt_from_transcript(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     expected_session_id: &str,
     last_prompt: String,
 ) {
-    let panes = state.panes.read().await;
-    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+    if last_prompt.is_empty() {
+        return;
+    }
+    let mut tree = state.tree.write().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        return;
+    };
+    let Some(owner) = runtime.agent_process_key.as_ref() else {
         return;
     };
     if runtime.is_session_identity_invalidated
         || runtime.session_id.as_deref() != Some(expected_session_id)
+        || runtime.session_agent_class.as_ref() != Some(&owner.class)
+        || runtime.session_process_id != Some(owner.process_id)
+        || runtime.session_process_started_at_unix_seconds != Some(owner.started_at_unix_seconds)
+        || runtime.legacy_prompt_fallback_blocked
+        || runtime.last_agent_prompt.is_some()
+        || tree.last_prompt(pane_id).is_some()
     {
-        drop(panes);
-        let _ = crate::agent_debug::record(
-            state,
-            pane_id,
-            AgentDebugSource::Inference,
-            AgentDebugEventDraft {
-                severity: AgentDebugSeverity::Warning,
-                kind: AgentDebugEventKind::Custom("last_prompt_transcript_discarded".to_string()),
-                summary: "Stale transcript-sourced last prompt rejected by the server".to_string(),
-                fields: vec![AgentDebugField::plain(
-                    "expected session",
-                    expected_session_id.to_string(),
-                )],
-                correlation_id: None,
-                metadata: Default::default(),
-            },
-        )
-        .await;
         return;
     }
-    drop(panes);
-    let updated = {
-        let mut tree = state.tree.write().await;
-        tree.set_last_prompt(pane_id, Some(last_prompt.clone()))
-            .is_ok()
+    runtime.last_agent_prompt = Some(last_prompt.clone());
+    update_unavailable_recovery_prompt(
+        &mut tree,
+        pane_id,
+        owner,
+        Some(&last_prompt),
+        None,
+        false,
+        state,
+    );
+    if tree
+        .set_last_prompt(pane_id, Some(last_prompt.clone()))
+        .is_ok()
+    {
+        state.request_snapshot_save();
+        state.broadcast(ServerEvent::PaneLastPromptChanged {
+            pane_id,
+            last_prompt: Some(last_prompt),
+        });
+    }
+}
+
+/// Exact provider text is a correction to one confirmed physical Enter.
+/// The epoch was bound to this invocation only after PTY delivery; a later
+/// successful submission or unattributed byte batch revokes it.
+async fn handle_exact_agent_prompt_from_transcript(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    expected_session_id: &str,
+    prompt_epoch: &str,
+    last_prompt: String,
+) {
+    if last_prompt.is_empty() {
+        return;
+    }
+    let mut tree = state.tree.write().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        return;
     };
-    if updated {
+    let Some(epoch) = runtime.prompt_transcript_epoch.as_ref() else {
+        return;
+    };
+    if epoch.token != prompt_epoch
+        || epoch.session_id != expected_session_id
+        || epoch.generation != runtime.agent_generation
+        // Provider stores can flush a previous row after this Enter. An
+        // exact PTY-receipt-backed prompt is already authoritative; only an
+        // unknown latest prompt can be repaired by transcript evidence.
+        || !runtime.latest_agent_prompt_unavailable
+        || runtime.agent_process_key.as_ref() != Some(&epoch.process)
+        || runtime.is_session_identity_invalidated
+        || runtime.session_id.as_deref() != Some(expected_session_id)
+        || runtime.session_agent_class.as_ref() != Some(&epoch.process.class)
+        || runtime.session_process_id != Some(epoch.process.process_id)
+        || runtime.session_process_started_at_unix_seconds
+            != Some(epoch.process.started_at_unix_seconds)
+    {
+        return;
+    }
+    let owner = epoch.process.clone();
+    runtime.prompt_transcript_epoch = None;
+    runtime.last_agent_prompt = Some(last_prompt.clone());
+    runtime.latest_agent_prompt_unavailable = false;
+    update_unavailable_recovery_prompt(
+        &mut tree,
+        pane_id,
+        &owner,
+        Some(&last_prompt),
+        None,
+        false,
+        state,
+    );
+    if tree
+        .set_last_prompt(pane_id, Some(last_prompt.clone()))
+        .is_ok()
+    {
         state.request_snapshot_save();
         state.broadcast(ServerEvent::PaneLastPromptChanged {
             pane_id,
@@ -3561,7 +3678,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
             // Subscribe before registration so the receiver retains output
             // produced during the short registration window. The task itself
             // starts only after the runtime is addressable (below).
-            let output_receiver = session.subscribe_output_bytes();
+            let output_receiver = (session.subscribe_output_bytes(), session.input_handle());
             let mut runtime = crate::pane::TerminalPaneRuntime::new(
                 session,
                 origin,
@@ -3606,11 +3723,12 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
 
     let mut panes = state.panes.write().await;
     panes.insert(pane_id, resource);
-    if let Some(output_receiver) = output_receiver {
+    if let Some((output_receiver, input)) = output_receiver {
         let forward_task = tokio::spawn(forward_output_bytes(
             Arc::clone(state),
             pane_id,
             output_receiver,
+            input,
         ));
         let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
             forward_task.abort();
@@ -3635,7 +3753,19 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
 async fn forward_output_bytes(
     state: Arc<ServerState>,
     pane_id: NodeId,
+    receiver: tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+    input: PtyInput,
+) {
+    let owner_status = input.subscribe_status();
+    forward_output_with_owner_status(state, pane_id, receiver, input, owner_status).await;
+}
+
+async fn forward_output_with_owner_status(
+    state: Arc<ServerState>,
+    pane_id: NodeId,
     mut receiver: tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+    input: PtyInput,
+    mut owner_status: tokio::sync::watch::Receiver<OwnerStatus>,
 ) {
     let mut activity_gate = OutputActivityGate::new();
     let mut subscription_cache = TerminalSubscriptionCache::new();
@@ -3648,8 +3778,47 @@ async fn forward_output_bytes(
             trigger_delivery_receiver,
         ),
     ));
+    let mut owner_finished = false;
     loop {
-        match receiver.recv().await {
+        {
+            let panes = state.panes.read().await;
+            if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+                if input.same_session(&runtime.session.input_handle()))
+            {
+                break;
+            }
+        }
+        // Inspect the initial state too: failure may precede registration.
+        if !owner_finished {
+            let status = owner_status.borrow_and_update().clone();
+            if let OwnerStatus::Stopped { reason, error } = status {
+                owner_finished = true;
+                if !matches!(reason, ShutdownReason::Requested | ShutdownReason::Eof) {
+                    let message =
+                        format!("Terminal input/output stopped for pane {pane_id:?}: {reason:?}");
+                    let panes = state.panes.read().await;
+                    let is_current = matches!(panes.get(&pane_id),
+                        Some(PaneResource::Terminal(runtime))
+                            if input.same_session(&runtime.session.input_handle()));
+                    if is_current {
+                        tracing::error!(pane_id = pane_id.0, %message, ?error, "PTY owner failed");
+                        state.broadcast(ServerEvent::Error { message });
+                    }
+                }
+            }
+        }
+        // Continue forwarding already-published bytes after a terminal status;
+        // this task remains owned/cancelled by the same pane runtime as before.
+        let received = tokio::select! {
+            received = receiver.recv() => received,
+            changed = owner_status.changed(), if !owner_finished => {
+                if changed.is_err() {
+                    owner_finished = true;
+                }
+                continue;
+            }
+        };
+        match received {
             Ok(first_chunk) => {
                 if activity_gate.should_record(std::time::Instant::now()) {
                     if let Err(error) = record_terminal_output_activity(&state, pane_id).await {
@@ -4164,23 +4333,29 @@ async fn handle_resize_pane(
     cause: PaneResizeCause,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    // Compute the outcome under the read lock, then drop it before awaiting
-    // `send_direct` below -- awaiting a possibly-full direct-reply channel
-    // while still holding `state.panes` would stall every other pane's
-    // resize/key/mouse handling on this one connection's slow client.
-    let panes = state.panes.read().await;
-    let error_message = match panes.get(&pane_id) {
-        Some(PaneResource::Terminal(runtime)) => runtime
-            .session
-            .resize(rows, cols)
-            .err()
-            .map(|error| format!("failed to resize pane {pane_id:?}: {error}")),
-        Some(PaneResource::Editor { .. }) => {
-            Some(format!("pane {pane_id:?} is an editor, not a terminal"))
+    let input = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => Ok(runtime.session.input_handle()),
+            Some(PaneResource::Editor { .. }) => {
+                Err(format!("pane {pane_id:?} is an editor, not a terminal"))
+            }
+            None => Err(format!("no pane found for node {pane_id:?}")),
         }
-        None => Some(format!("no pane found for node {pane_id:?}")),
     };
-    drop(panes);
+    let error_message = match input {
+        Ok(input) => match input.resize(rows, cols) {
+            Ok(receipt) => receipt
+                .wait()
+                .await
+                .err()
+                .map(|error| format!("failed to resize pane {pane_id:?}: {error}")),
+            Err(error) => Some(format!(
+                "failed to admit resize for pane {pane_id:?}: {error}"
+            )),
+        },
+        Err(message) => Some(message),
+    };
 
     if let Some(message) = error_message {
         send_direct_error(direct_tx, message).await;
@@ -4209,8 +4384,24 @@ async fn handle_resize_pane(
 /// automated PTY deliveries never do, because a written result message is not
 /// proof that anyone read it.
 pub(crate) async fn acknowledge_progress_outcome(state: &ServerState, pane_id: NodeId) {
+    acknowledge_progress_outcome_for_input(state, pane_id, None).await;
+}
+
+async fn acknowledge_progress_outcome_for_input(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected_input: Option<&PtyInput>,
+) {
     let acknowledged = {
         let mut tree = state.tree.write().await;
+        let mut panes = state.panes.write().await;
+        if let Some(expected) = expected_input {
+            if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+                if expected.same_session(&runtime.session.input_handle()))
+            {
+                return;
+            }
+        }
         let acknowledged = match tree.acknowledge_progress_outcome(pane_id) {
             Ok(acknowledged) => acknowledged,
             Err(error) => {
@@ -4225,7 +4416,6 @@ pub(crate) async fn acknowledge_progress_outcome(state: &ServerState, pane_id: N
         if let Some(progress) = acknowledged.as_ref() {
             // The runtime copy is what crash-recovery persists; keep both in
             // step so a restart does not resurrect an already-read outcome.
-            let mut panes = state.panes.write().await;
             if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
                 runtime.update_progress_monitor_progress(progress.monitor_id, progress.clone());
             }
@@ -4246,11 +4436,30 @@ async fn handle_key_input(
     pane_id: NodeId,
     bytes: &[u8],
     submission: Option<PromptSubmissionSource>,
+    is_user_directed: bool,
+    prompt_epoch: Option<String>,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let result = write_key_input(state, pane_id, bytes, submission).await;
+    let expected_input = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => Some(runtime.session.input_handle()),
+            _ => None,
+        }
+    };
+    let result = write_key_input_with_origin(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        is_user_directed,
+        prompt_epoch.as_deref(),
+    )
+    .await;
     if result.is_ok() && !bytes.is_empty() {
-        acknowledge_progress_outcome(state, pane_id).await;
+        if let Some(input) = expected_input.as_ref() {
+            acknowledge_progress_outcome_for_input(state, pane_id, Some(input)).await;
+        }
     }
     if let Err(message) = result {
         // `write_key_input` returns this same `Err(String)` both for an
@@ -4291,10 +4500,31 @@ pub(crate) async fn write_key_input(
     bytes: &[u8],
     submission: Option<PromptSubmissionSource>,
 ) -> Result<(), String> {
+    write_key_input_with_origin(state, pane_id, bytes, submission, false, None).await
+}
+
+async fn write_key_input_with_origin(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    is_user_directed: bool,
+    prompt_epoch: Option<&str>,
+) -> Result<(), String> {
     if submission.is_some() && bytes.last() != Some(&b'\r') {
         return Err("prompt submission metadata requires a trailing Enter".to_owned());
     }
-
+    if prompt_epoch.is_some() && (!is_user_directed || submission.is_none()) {
+        return Err("prompt epoch requires a direct user Enter".to_owned());
+    }
+    if is_user_directed
+        && !matches!(
+            submission,
+            None | Some(PromptSubmissionSource::Keyboard | PromptSubmissionSource::VoiceControl)
+        )
+    {
+        return Err("user terminal input cannot claim automated submission".to_owned());
+    }
     let input_gate = pane_input_gate(state, pane_id).await?;
     let _input_guard = input_gate.lock().await;
     let is_initial_prompt = submission == Some(PromptSubmissionSource::InitialAgentPrompt);
@@ -4304,6 +4534,8 @@ pub(crate) async fn write_key_input(
         bytes,
         submission,
         is_initial_prompt,
+        is_user_directed,
+        prompt_epoch,
         &input_gate,
     )
     .await
@@ -4333,7 +4565,17 @@ pub(crate) async fn write_scheduled_key_input(
             ));
         }
     }
-    write_key_input_unlocked(state, pane_id, bytes, submission, false, &input_gate).await
+    write_key_input_unlocked(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        false,
+        false,
+        None,
+        &input_gate,
+    )
+    .await
 }
 
 async fn pane_input_gate(
@@ -4419,7 +4661,7 @@ pub(crate) async fn submit_terminal_text_locked(
     source: PromptSubmissionSource,
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
-    let wants_bracketed_paste = {
+    {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             return Err(format!("pane {pane_id:?} closed before text insertion"));
@@ -4427,10 +4669,11 @@ pub(crate) async fn submit_terminal_text_locked(
         if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
             return Err(format!("pane {pane_id:?} changed before text insertion"));
         }
-        runtime
-            .session
-            .with_screen(|screen| screen.bracketed_paste())
-    };
+    }
+    let wants_bracketed_paste =
+        crate::pane::read_current_terminal_screen(state, pane_id, vt100::Screen::bracketed_paste)
+            .await
+            .ok_or_else(|| format!("pane {pane_id:?} has no current screen for text insertion"))?;
     let body = automated_submission_body(text.as_bytes(), wants_bracketed_paste)?;
     submit_terminal_body_locked(state, pane_id, &body, source, input_gate).await
 }
@@ -4450,6 +4693,14 @@ pub(crate) async fn submit_terminal_body_locked(
         if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
             return Err(format!("pane {pane_id:?} changed before automated input"));
         }
+        if !matches!(
+            runtime.session.input_handle().status(),
+            OwnerStatus::Running
+        ) {
+            return Err(format!(
+                "pane {pane_id:?} PTY owner stopped before automated input"
+            ));
+        }
         if let Some(reason) = &runtime.missing_workspace {
             return Err(format!(
                 "pane {pane_id:?} is waiting for its worktree; automated input was held: {reason}"
@@ -4458,8 +4709,40 @@ pub(crate) async fn submit_terminal_body_locked(
     }
     let is_initial_prompt = source == PromptSubmissionSource::InitialAgentPrompt;
     if !body.is_empty() {
-        write_key_input_unlocked(state, pane_id, body, None, is_initial_prompt, input_gate).await?;
+        write_key_input_unlocked(
+            state,
+            pane_id,
+            body,
+            None,
+            is_initial_prompt,
+            false,
+            None,
+            input_gate,
+        )
+        .await?;
         tokio::time::sleep(AUTOMATED_ENTER_DELAY).await;
+    }
+    {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(format!("pane {pane_id:?} closed before automated input"));
+        };
+        if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
+            return Err(format!("pane {pane_id:?} changed before automated input"));
+        }
+        if !matches!(
+            runtime.session.input_handle().status(),
+            OwnerStatus::Running
+        ) {
+            return Err(format!(
+                "pane {pane_id:?} PTY owner stopped before automated input"
+            ));
+        }
+        if let Some(reason) = &runtime.missing_workspace {
+            return Err(format!(
+                "pane {pane_id:?} is waiting for its worktree; automated input was held: {reason}"
+            ));
+        }
     }
     write_key_input_unlocked(
         state,
@@ -4467,6 +4750,8 @@ pub(crate) async fn submit_terminal_body_locked(
         b"\r",
         Some(source),
         is_initial_prompt,
+        false,
+        None,
         input_gate,
     )
     .await
@@ -4497,6 +4782,99 @@ fn automated_submission_body(bytes: &[u8], wants_bracketed_paste: bool) -> Resul
     Ok(framed)
 }
 
+/// Updates a stopped pane's recovery object in the same receipt-backed
+/// transaction as its tree prompt. Same-invocation evidence survives a crash
+/// while an unrelated replacement can never inherit it.
+fn update_unavailable_recovery_prompt(
+    tree: &mut Tree,
+    pane_id: NodeId,
+    owner: &AgentProcessKey,
+    latest: Option<&str>,
+    previous: Option<&str>,
+    latest_unavailable: bool,
+    state: &ServerState,
+) {
+    let Some(NodeKind::Pane {
+        status: PaneStatus::AgentUnavailable(recovery),
+        ..
+    }) = tree.get(pane_id).map(|node| &node.kind)
+    else {
+        return;
+    };
+    if &recovery.process != owner {
+        return;
+    }
+    let mut recovery = (**recovery).clone();
+    set_recovery_prompt(&mut recovery, latest, previous, latest_unavailable);
+    let status = PaneStatus::AgentUnavailable(Box::new(recovery));
+    if tree.set_pane_status(pane_id, status.clone()).is_ok() {
+        state.request_snapshot_save();
+        state.broadcast(ServerEvent::PaneStatusChanged { pane_id, status });
+    }
+}
+
+fn set_recovery_prompt(
+    recovery: &mut AgentRecovery,
+    latest: Option<&str>,
+    previous: Option<&str>,
+    latest_unavailable: bool,
+) {
+    recovery.last_prompt = latest.map(str::to_owned);
+    recovery.previous_exact_prompt = latest_unavailable
+        .then(|| previous.map(str::to_owned))
+        .flatten();
+    recovery.latest_prompt_unavailable = latest_unavailable;
+}
+
+/// A cancelled or partially known PTY write may already have reached the
+/// composer. Fence its transcript epoch and never replay it as exact input.
+async fn invalidate_uncertain_agent_input(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    expected_generation: u64,
+    expected_process: &Option<AgentProcessKey>,
+    possibly_submitted: bool,
+) {
+    let mut tree = state.tree.write().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        return;
+    };
+    if !Arc::ptr_eq(expected_input_gate, &runtime.input_gate)
+        || runtime.agent_generation != expected_generation
+        || &runtime.agent_process_key != expected_process
+    {
+        return;
+    }
+    runtime
+        .agent_prompt_tracker
+        .observe_unattributed_written(&[]);
+    runtime.prompt_transcript_epoch = None;
+    runtime.legacy_prompt_fallback_blocked = true;
+    if possibly_submitted {
+        runtime.latest_agent_prompt_unavailable = true;
+        if tree.set_last_prompt(pane_id, None).is_ok() {
+            state.request_snapshot_save();
+            state.broadcast(ServerEvent::PaneLastPromptChanged {
+                pane_id,
+                last_prompt: None,
+            });
+        }
+        if let Some(owner) = expected_process.as_ref() {
+            update_unavailable_recovery_prompt(
+                &mut tree,
+                pane_id,
+                owner,
+                None,
+                runtime.last_agent_prompt.as_deref(),
+                true,
+                state,
+            );
+        }
+    }
+}
+
 /// The established title, session-identity, activity and event path for one
 /// physical PTY write. Call only while holding this pane's `input_gate`.
 async fn write_key_input_unlocked(
@@ -4505,6 +4883,8 @@ async fn write_key_input_unlocked(
     bytes: &[u8],
     submission: Option<PromptSubmissionSource>,
     is_initial_prompt: bool,
+    is_user_directed: bool,
+    prompt_epoch: Option<&str>,
     expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
     // The tracker below decides whether these bytes actually completed a
@@ -4515,25 +4895,113 @@ async fn write_key_input_unlocked(
     // One cheap tree read supplies both title-tracking eligibility and the
     // currently detected provider. Session discovery can temporarily have no
     // accepted ID, but `/clear` must still honor a verified Claude/Codex pane.
-    let (is_automatic_plain_shell, detected_agent_class) = {
+    let is_automatic_plain_shell = {
         let tree = state.tree.read().await;
-        tree.get(pane_id).map_or((false, None), |node| {
+        tree.get(pane_id).is_some_and(|node| {
             let NodeKind::Pane {
                 status,
                 title_source,
                 ..
             } = &node.kind
             else {
-                return (false, None);
+                return false;
             };
-            let agent_class = status.agent_state().map(|agent| agent.class.clone());
-            (
-                matches!(status, PaneStatus::PlainShell)
-                    && *title_source == PaneTitleSource::Automatic,
-                agent_class,
-            )
+            matches!(status, PaneStatus::PlainShell) && *title_source == PaneTitleSource::Automatic
         })
     };
+
+    // Validate current ownership immediately before PTY admission. The pane
+    // input gate is held by the caller, while global locks are dropped before
+    // waiting for the ordered writer receipt.
+    let (
+        input,
+        was_shell_foreground,
+        expected_generation,
+        expected_process,
+        prewrite_agent_class,
+        mut cancel_automated,
+    ) = {
+        let tree = state.tree.read().await;
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            return Err(format!("pane {pane_id:?} closed before input delivery"));
+        };
+        if !Arc::ptr_eq(expected_input_gate, &runtime.input_gate) {
+            return Err(format!("pane {pane_id:?} changed before input delivery"));
+        }
+        let Some(NodeKind::Pane { status, .. }) = tree.get(pane_id).map(|node| &node.kind) else {
+            return Err(format!("pane {pane_id:?} has no terminal state"));
+        };
+        let rejection = runtime.automated_agent_input_rejection(status);
+        let active_agent = runtime.agent_process_key.is_some() && rejection.is_none();
+        if !is_user_directed {
+            if let Some(reason) = rejection {
+                return Err(format!(
+                    "automatic input refused for pane {pane_id:?}: {reason}"
+                ));
+            }
+        }
+        let prewrite_agent_class = active_agent
+            .then(|| status.agent_state().map(|agent| agent.class.clone()))
+            .flatten();
+        if !bytes.is_empty() && !is_initial_prompt {
+            runtime.cancel_initial_prompt_delivery();
+        }
+        let shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
+            && runtime.session.shell_owns_terminal().unwrap_or(false);
+        (
+            runtime.session.input_handle(),
+            shell_foreground,
+            runtime.agent_generation,
+            runtime.agent_process_key.clone(),
+            prewrite_agent_class,
+            runtime.agent_input_cancel.subscribe(),
+        )
+    };
+    let receipt = input
+        .write(bytes)
+        .map_err(|error| format!("failed to admit input for pane {pane_id:?}: {error}"))?;
+    let delivered = if is_user_directed || expected_process.is_none() {
+        Some(receipt.wait().await)
+    } else {
+        tokio::select! {
+            biased;
+            result = receipt.wait() => Some(result),
+            _ = cancel_automated.changed() => None,
+        }
+    };
+    let Some(delivered) = delivered else {
+        // Dropping the receipt requests cancellation. A prefix may have
+        // reached the PTY; its next transcript record is not an exact proof.
+        invalidate_uncertain_agent_input(
+            state,
+            pane_id,
+            expected_input_gate,
+            expected_generation,
+            &expected_process,
+            bytes.last() == Some(&b'\r') && prewrite_agent_class.is_some(),
+        )
+        .await;
+        return Err(format!(
+            "automatic input cancelled for pane {pane_id:?}; delivery disposition uncertain"
+        ));
+    };
+    if let Err(error) = delivered {
+        if !error.proves_zero_delivery() {
+            invalidate_uncertain_agent_input(
+                state,
+                pane_id,
+                expected_input_gate,
+                expected_generation,
+                &expected_process,
+                bytes.last() == Some(&b'\r') && prewrite_agent_class.is_some(),
+            )
+            .await;
+        }
+        return Err(format!(
+            "failed to deliver input for pane {pane_id:?}: {error}"
+        ));
+    }
 
     // Write lock (not read) on `panes`: a `KeyInput` always targets the
     // client's currently-focused pane (the client only ever forwards raw
@@ -4543,45 +5011,39 @@ async fn write_key_input_unlocked(
     // exception: it's the clearest possible signal a command/prompt was
     // just submitted, so it still forces an immediate (debounced) recheck
     // below, rather than waiting up to one base tick.
-    // As with the read lock above: compute the outcome (including any
-    // error message) while holding the write lock, then drop it before
-    // returning an error -- this is `state.panes`' write lock, held by every
-    // pane's key/mouse/resize handling, so no caller may await unrelated work
-    // while it remains held.
+    // This is `state.panes`' write lock, held by every pane's input handling;
+    // release it before any later asynchronous bookkeeping.
+    let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
     let mut observed_title = None;
     let mut cleared_session_origin_name = None;
     let mut cleared_session_title_generation = None;
     let mut cleared_conversation_title_generation = None;
     let mut detection_was_forced = false;
-    let mut tracked_submission = None;
+    let tracked_submission;
     let mut goal_was_cleared = false;
     let mut session_transition_observation = None;
     let mut conversation_title_generation_before = None;
-    let error_message = match panes.get_mut(&pane_id) {
+    match panes.get_mut(&pane_id) {
         Some(PaneResource::Terminal(runtime))
-            if !std::sync::Arc::ptr_eq(expected_input_gate, &runtime.input_gate) =>
+            if !Arc::ptr_eq(expected_input_gate, &runtime.input_gate)
+                || !input.same_session(&runtime.session.input_handle())
+                || runtime.agent_generation != expected_generation
+                || runtime.agent_process_key != expected_process =>
         {
-            Some(format!(
-                "pane {pane_id:?} runtime changed during input delivery"
-            ))
+            // The completed delivery belongs to the old runtime. It must
+            // never be reported as a retryable failure or booked on the new.
+            return Ok(());
         }
         Some(PaneResource::Terminal(runtime)) => {
-            if !bytes.is_empty() && !is_initial_prompt {
-                runtime.cancel_initial_prompt_delivery();
-            }
             // A typed command only becomes a title while the shell itself owns
             // the terminal, which is how "the user is typing at a prompt" is
             // told apart from "a running command owns the terminal". A
             // platform that cannot tell answers `None`, and this stays false:
             // inferring a title without knowing who owns the terminal would
             // retitle panes from keystrokes typed into a running program.
-            let is_shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
-                && runtime.session.shell_owns_terminal().unwrap_or(false);
-            let should_track_title = is_automatic_plain_shell && is_shell_foreground;
-            if let Err(error) = runtime.session.write(bytes) {
-                Some(format!("failed to write to pane {pane_id:?}: {error}"))
-            } else {
+            let should_track_title = is_automatic_plain_shell && was_shell_foreground;
+            {
                 if let Some(tracker) = &mut runtime.shell_command_tracker {
                     if should_track_title {
                         observed_title = tracker.observe(bytes);
@@ -4601,9 +5063,87 @@ async fn write_key_input_unlocked(
                     .as_ref()
                     .and_then(|submission| submission.exact_text().map(str::to_owned));
                 tracked_submission = submitted_input;
-                if submitted_line
-                    .as_deref()
-                    .is_some_and(crate::pane::clears_agent_goal)
+                if prewrite_agent_class.is_some() && !bytes.is_empty() {
+                    // A delayed unfenced bootstrap report cannot claim a
+                    // transcript line after this invocation received input.
+                    runtime.legacy_prompt_fallback_blocked = true;
+                }
+                if !is_user_directed && !bytes.is_empty() {
+                    runtime.prompt_transcript_epoch = None;
+                }
+                if prewrite_agent_class.is_some() {
+                    let observed = if is_user_directed {
+                        runtime.agent_prompt_tracker.observe_written(bytes)
+                    } else {
+                        runtime
+                            .agent_prompt_tracker
+                            .observe_unattributed_written(bytes)
+                    };
+                    if let Some(prompt) = observed {
+                        runtime.legacy_prompt_fallback_blocked = true;
+                        runtime.prompt_transcript_epoch = None;
+                        match prompt.exact_text {
+                            Some(text) if !text.is_empty() => {
+                                runtime.last_agent_prompt = Some(text.clone());
+                                runtime.latest_agent_prompt_unavailable = false;
+                                if tree.set_last_prompt(pane_id, Some(text.clone())).is_ok() {
+                                    state.request_snapshot_save();
+                                    state.broadcast(ServerEvent::PaneLastPromptChanged {
+                                        pane_id,
+                                        last_prompt: Some(text.clone()),
+                                    });
+                                }
+                                if let Some(owner) = expected_process.as_ref() {
+                                    update_unavailable_recovery_prompt(
+                                        &mut tree,
+                                        pane_id,
+                                        owner,
+                                        Some(&text),
+                                        runtime.last_agent_prompt.as_deref(),
+                                        false,
+                                        state,
+                                    );
+                                }
+                            }
+                            Some(_) => {}
+                            None => {
+                                runtime.latest_agent_prompt_unavailable = true;
+                                if tree.set_last_prompt(pane_id, None).is_ok() {
+                                    state.request_snapshot_save();
+                                    state.broadcast(ServerEvent::PaneLastPromptChanged {
+                                        pane_id,
+                                        last_prompt: None,
+                                    });
+                                }
+                                if let Some(owner) = expected_process.as_ref() {
+                                    update_unavailable_recovery_prompt(
+                                        &mut tree,
+                                        pane_id,
+                                        owner,
+                                        None,
+                                        runtime.last_agent_prompt.as_deref(),
+                                        true,
+                                        state,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    if submission.is_some() {
+                        runtime.prompt_transcript_epoch = prompt_epoch.and_then(|token| {
+                            Some(crate::pane::PromptTranscriptEpoch {
+                                token: token.to_owned(),
+                                generation: runtime.agent_generation,
+                                process: expected_process.clone()?,
+                                session_id: runtime.session_id.clone()?,
+                            })
+                        });
+                    }
+                }
+                if prewrite_agent_class.is_some()
+                    && submitted_line
+                        .as_deref()
+                        .is_some_and(crate::pane::clears_agent_goal)
                 {
                     // The successful PTY write is authoritative user intent.
                     // Clear retained ownership immediately so a footer-hidden
@@ -4611,10 +5151,7 @@ async fn write_key_input_unlocked(
                     runtime.confirmed_goal_owner = None;
                     goal_was_cleared = true;
                 }
-                let active_agent_class = runtime
-                    .session_agent_class
-                    .clone()
-                    .or_else(|| detected_agent_class.clone());
+                let active_agent_class = prewrite_agent_class.clone();
                 let session_transition_rule =
                     submitted_line.as_deref().and_then(|submitted_line| {
                         crate::pane::agent_session_identity_transition_rule(
@@ -4636,6 +5173,7 @@ async fn write_key_input_unlocked(
                     let previous_agent_class = active_agent_class.clone();
                     let previous_process_id = runtime.session_process_id;
                     runtime.is_session_identity_invalidated = true;
+                    runtime.prompt_transcript_epoch = None;
                     runtime.pending_generated_session_id = None;
                     runtime.title_generation = runtime.title_generation.wrapping_add(1);
                     runtime.pending_session_transition_correlation_id =
@@ -4679,42 +5217,43 @@ async fn write_key_input_unlocked(
                         std::time::Instant::now(),
                     );
                 }
-                None
             }
         }
-        Some(PaneResource::Editor { .. }) => {
-            Some(format!("pane {pane_id:?} is an editor, not a terminal"))
-        }
-        None => Some(format!("no pane found for node {pane_id:?}")),
+        Some(PaneResource::Editor { .. }) | None => return Ok(()),
     };
     drop(panes);
+    drop(tree);
 
     if detection_was_forced {
         state.detection_schedule_changed.notify_one();
-    }
-
-    if let Some(message) = error_message {
-        return Err(message);
     }
 
     // Fresh terminal input also acknowledges a completed turn. This
     // conditional tree transition cannot overwrite a concurrent detector's
     // newer Working/Waiting state.
     if !bytes.is_empty() {
-        if let Err(error) = record_node_activity(state, pane_id).await {
+        if let Err(error) = record_input_activity_if_current(state, pane_id, &input).await {
             // The PTY write already succeeded. A later tree mutation must not
             // turn this into a retryable delivery failure for queued work.
             tracing::warn!(pane_id = pane_id.0, %error, "input activity bookkeeping failed after PTY write");
         }
         let acknowledged_status = {
             let mut tree = state.tree.write().await;
-            match tree.acknowledge_agent_completion(pane_id) {
-                Ok(status) => status,
-                Err(error) => {
-                    tracing::error!(
+            let panes = state.panes.read().await;
+            let is_current = matches!(panes.get(&pane_id),
+                Some(PaneResource::Terminal(runtime))
+                    if input.same_session(&runtime.session.input_handle()));
+            if !is_current {
+                None
+            } else {
+                match tree.acknowledge_agent_completion(pane_id) {
+                    Ok(status) => status,
+                    Err(error) => {
+                        tracing::error!(
                         "agent completion acknowledgement rejected for pane {pane_id:?}: {error}"
                     );
-                    None
+                        None
+                    }
                 }
             }
         };
@@ -4786,28 +5325,6 @@ async fn write_key_input_unlocked(
             .with_correlation_id(submission_correlation_id.clone()),
         )
         .await;
-
-        // Only a hand-typed or pasted, exactly reconstructed line updates the
-        // banner -- other submission sources (voice, scheduled/queued
-        // prompts, toolbar actions) already have their own presentation, and
-        // an inexact/opaque reconstruction must leave the last good value in
-        // place rather than overwrite it with placeholder text.
-        if submission == Some(PromptSubmissionSource::Keyboard)
-            && exactness == "exact"
-            && !text.is_empty()
-        {
-            let updated = {
-                let mut tree = state.tree.write().await;
-                tree.set_last_prompt(pane_id, Some(text.clone())).is_ok()
-            };
-            if updated {
-                state.request_snapshot_save();
-                state.broadcast(ServerEvent::PaneLastPromptChanged {
-                    pane_id,
-                    last_prompt: Some(text),
-                });
-            }
-        }
     }
 
     if goal_was_cleared {
@@ -4938,6 +5455,12 @@ async fn write_key_input_unlocked(
     // foreground detection race.
     let tree_changed = {
         let mut tree = state.tree.write().await;
+        let panes = state.panes.read().await;
+        if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+            if input.same_session(&runtime.session.input_handle()))
+        {
+            return Ok(());
+        }
         if cleared_conversation_title_generation.is_some() {
             match tree
                 .reset_terminal_pane_for_fresh_conversation(pane_id, crate::pane::FRESH_AGENT_TITLE)
@@ -4992,33 +5515,47 @@ async fn handle_mouse_input(
         }
     };
     let _input_guard = input_gate.lock().await;
-    let panes = state.panes.read().await;
-    let error_message = match panes.get(&pane_id) {
-        Some(PaneResource::Terminal(runtime))
-            if std::sync::Arc::ptr_eq(&input_gate, &runtime.input_gate) =>
-        {
-            let event = to_crossterm_event(kind, column, row, modifiers);
-            runtime
-                .session
-                .write_mouse_input(event, column, row)
-                .err()
-                .map(|error| format!("failed to forward mouse input to pane {pane_id:?}: {error}"))
+    let input = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if Arc::ptr_eq(&input_gate, &runtime.input_gate) =>
+            {
+                Ok(runtime.session.input_handle())
+            }
+            Some(PaneResource::Terminal(_)) => {
+                Err(format!("pane {pane_id:?} changed before mouse input"))
+            }
+            Some(PaneResource::Editor { .. }) => {
+                Err(format!("pane {pane_id:?} is an editor, not a terminal"))
+            }
+            None => Err(format!("no pane found for node {pane_id:?}")),
         }
-        Some(PaneResource::Editor { .. }) => {
-            Some(format!("pane {pane_id:?} is an editor, not a terminal"))
-        }
-        Some(PaneResource::Terminal(_)) => {
-            Some(format!("pane {pane_id:?} changed before mouse input"))
-        }
-        None => Some(format!("no pane found for node {pane_id:?}")),
     };
-    drop(panes);
+    let (input, error_message) = match input {
+        Ok(input) => {
+            let event = to_crossterm_event(kind, column, row, modifiers);
+            let error = match input.write_mouse_input(event, column, row) {
+                Ok(receipt) => receipt.wait().await.err(),
+                Err(error) => Some(error),
+            };
+            (
+                Some(input),
+                error.map(|error| {
+                    format!("failed to forward mouse input to pane {pane_id:?}: {error}")
+                }),
+            )
+        }
+        Err(message) => (None, Some(message)),
+    };
     drop(_input_guard);
 
     if let Some(message) = error_message {
         send_direct_error(direct_tx, message).await;
-    } else if let Err(error) = record_node_activity(state, pane_id).await {
-        send_direct_error(direct_tx, error).await;
+    } else if let Some(input) = input {
+        if let Err(error) = record_input_activity_if_current(state, pane_id, &input).await {
+            send_direct_error(direct_tx, error).await;
+        }
     }
 }
 
@@ -5221,6 +5758,228 @@ mod tests {
     use crate::initial_prompt::initial_input_bytes;
     use ilium_core::{NodeId, RestructureNode, SplitOrientation};
     use std::time::Duration;
+
+    #[test]
+    fn same_epoch_exact_transcript_repairs_unknown_historical_prompt() {
+        let mut recovery = ilium_core::AgentRecovery {
+            last_known_state: ilium_core::AgentState::from_activity(
+                ilium_core::AgentClass::Codex,
+                ilium_core::AgentActivity::Working,
+                None,
+            ),
+            process: ilium_core::AgentProcessKey {
+                class: ilium_core::AgentClass::Codex,
+                process_id: 42,
+                started_at_unix_seconds: 1,
+            },
+            availability: ilium_core::AgentAvailability::Unverified,
+            signal_name: None,
+            session_id: Some("verified-session".to_string()),
+            last_prompt: None,
+            previous_exact_prompt: Some("older exact".to_string()),
+            latest_prompt_unavailable: true,
+        };
+
+        // The token/session/process fence is checked by the caller before
+        // this mutation. An opaque direct Enter can later gain exact provider
+        // evidence for that same still-pending epoch, including trailing text.
+        set_recovery_prompt(&mut recovery, Some("new\nline  "), None, false);
+        assert_eq!(recovery.last_prompt.as_deref(), Some("new\nline  "));
+        assert_eq!(recovery.previous_exact_prompt, None);
+        assert!(!recovery.latest_prompt_unavailable);
+    }
+
+    #[tokio::test]
+    async fn delayed_transcript_cannot_replace_exact_receipt_backed_prompt() {
+        let directory = tempfile::tempdir().expect("create transcript recovery test directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "exact-prompt-transcript-fence".to_string(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("exact-prompt.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            let group_id = tree.add_group(project_id, "work").unwrap();
+            tree.add_pane(group_id, "agent", PaneContentKind::Terminal)
+                .unwrap()
+        };
+        spawn_and_register_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await
+        .expect("register command-backed test terminal");
+
+        let owner = AgentProcessKey {
+            class: ilium_core::AgentClass::Codex,
+            process_id: 42,
+            started_at_unix_seconds: 1,
+        };
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("registered pane must be a terminal");
+            };
+            let unverified_agent = PaneStatus::from_activity(
+                ilium_core::AgentClass::Codex,
+                ilium_core::AgentActivity::Working,
+                None,
+            );
+            assert!(runtime
+                .automated_agent_input_rejection(&unverified_agent)
+                .is_some());
+            assert!(runtime
+                .automated_agent_input_rejection(&PaneStatus::PlainShell)
+                .is_none());
+            runtime.agent_process_key = Some(owner.clone());
+            runtime.agent_generation = 7;
+            runtime.session_id = Some("verified-session".to_string());
+            runtime.session_agent_class = Some(owner.class.clone());
+            runtime.session_process_id = Some(owner.process_id);
+            runtime.session_process_started_at_unix_seconds = Some(owner.started_at_unix_seconds);
+            runtime.prompt_transcript_epoch = Some(crate::pane::PromptTranscriptEpoch {
+                token: "epoch-7".to_string(),
+                generation: 7,
+                process: owner.clone(),
+                session_id: "verified-session".to_string(),
+            });
+            runtime.last_agent_prompt = Some("current exact  ".to_string());
+            runtime.latest_agent_prompt_unavailable = false;
+        }
+        {
+            let mut tree = state.tree.write().await;
+            tree.set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        ilium_core::AgentClass::Codex,
+                        ilium_core::AgentActivity::Working,
+                        None,
+                    ),
+                    process: owner,
+                    availability: ilium_core::AgentAvailability::Unverified,
+                    signal_name: None,
+                    session_id: Some("verified-session".to_string()),
+                    last_prompt: Some("current exact  ".to_string()),
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+            tree.set_last_prompt(pane_id, Some("current exact  ".to_string()))
+                .unwrap();
+        }
+
+        // A prior provider row can be flushed after the Enter baseline and
+        // pass the worker's offset/timestamp checks. The exact PTY receipt
+        // remains authoritative for this same epoch.
+        handle_exact_agent_prompt_from_transcript(
+            &state,
+            pane_id,
+            "verified-session",
+            "epoch-7",
+            "older delayed row".to_string(),
+        )
+        .await;
+
+        let tree = state.tree.read().await;
+        assert_eq!(tree.last_prompt(pane_id), Some("current exact  "));
+        let Some(NodeKind::Pane {
+            status: PaneStatus::AgentUnavailable(recovery),
+            ..
+        }) = tree.get(pane_id).map(|node| &node.kind)
+        else {
+            panic!("historical recovery must remain available");
+        };
+        assert_eq!(recovery.last_prompt.as_deref(), Some("current exact  "));
+        assert!(!recovery.latest_prompt_unavailable);
+        drop(tree);
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            panic!("registered pane must remain a terminal");
+        };
+        assert_eq!(
+            runtime.last_agent_prompt.as_deref(),
+            Some("current exact  ")
+        );
+        drop(panes);
+
+        // The real handler must also repair opaque input only for the same
+        // retained invocation/session/Enter, including after the agent exits.
+        {
+            let mut tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("registered pane must remain a terminal");
+            };
+            runtime.latest_agent_prompt_unavailable = true;
+            let owner = runtime.agent_process_key.clone().unwrap();
+            tree.set_last_prompt(pane_id, None).unwrap();
+            update_unavailable_recovery_prompt(
+                &mut tree,
+                pane_id,
+                &owner,
+                None,
+                runtime.last_agent_prompt.as_deref(),
+                true,
+                &state,
+            );
+        }
+        for (session_id, epoch) in [
+            ("replacement-session", "epoch-7"),
+            ("verified-session", "obsolete-enter"),
+        ] {
+            handle_exact_agent_prompt_from_transcript(
+                &state,
+                pane_id,
+                session_id,
+                epoch,
+                "stale correction".to_string(),
+            )
+            .await;
+            assert_eq!(state.tree.read().await.last_prompt(pane_id), None);
+        }
+        let repaired_prompt = "recovered\nexact trailing  ";
+        handle_exact_agent_prompt_from_transcript(
+            &state,
+            pane_id,
+            "verified-session",
+            "epoch-7",
+            repaired_prompt.to_string(),
+        )
+        .await;
+        {
+            let tree = state.tree.read().await;
+            assert_eq!(tree.last_prompt(pane_id), Some(repaired_prompt));
+            let recovery = tree.agent_recovery(pane_id).unwrap();
+            assert_eq!(recovery.last_prompt.as_deref(), Some(repaired_prompt));
+            assert!(!recovery.latest_prompt_unavailable);
+            assert_eq!(recovery.previous_exact_prompt, None);
+        }
+        {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("registered pane must remain a terminal");
+            };
+            assert_eq!(runtime.last_agent_prompt.as_deref(), Some(repaired_prompt));
+            assert!(runtime.prompt_transcript_epoch.is_none());
+        }
+        teardown_state_panes(&state);
+        sound_task.abort();
+    }
 
     #[test]
     fn automated_multiline_body_preserves_literal_text_inside_bracketed_paste() {
@@ -7295,5 +8054,9 @@ mod tests {
             .lock()
             .await
             .contains_key(&project_id));
+    }
+    mod ordered_owner_regressions {
+        use super::*;
+        include!("ordered_owner_regressions.rs");
     }
 }

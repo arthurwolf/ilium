@@ -115,6 +115,16 @@ pub enum FixtureBehavior {
     /// `/goal resume`, recording each semantic submission in order.
     GoalLifecycle { log_path: PathBuf },
 
+    /// Accepts one complete submission, records its exact bytes, prints a fatal
+    /// error and exits without flushing the optional held transcript. Terminal
+    /// mouse negotiation deliberately remains enabled to reproduce a crash.
+    CrashAfterSubmittedPrompt {
+        prompt_path: PathBuf,
+        transcript_path: Option<PathBuf>,
+        exit_code: i32,
+        mouse_tracking: bool,
+    },
+
     /// Prints the current contents of one file and exits. Used as a portable
     /// progress probe without depending on `cat`, PowerShell, or Python.
     PrintFile { path: PathBuf },
@@ -351,6 +361,7 @@ mod tests {
             | FixtureBehavior::ClearTransition { .. }
             | FixtureBehavior::ChangeOnly
             | FixtureBehavior::GoalLifecycle { .. }
+            | FixtureBehavior::CrashAfterSubmittedPrompt { .. }
             | FixtureBehavior::PrintFile { .. }
             | FixtureBehavior::RepaintThenReappear
             | FixtureBehavior::EchoSubmittedLine { .. }
@@ -383,6 +394,12 @@ mod tests {
             FixtureBehavior::ChangeOnly,
             FixtureBehavior::GoalLifecycle {
                 log_path: PathBuf::from("/tmp/goal-lifecycle"),
+            },
+            FixtureBehavior::CrashAfterSubmittedPrompt {
+                prompt_path: PathBuf::from("/tmp/crash-prompt"),
+                transcript_path: Some(PathBuf::from("/tmp/crash-transcript")),
+                exit_code: 42,
+                mouse_tracking: true,
             },
             FixtureBehavior::PrintFile {
                 path: PathBuf::from("/tmp/progress-report"),

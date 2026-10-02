@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub mod agent_recovery;
 pub mod animation_recommendation;
+
+pub use agent_recovery::{AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -782,13 +785,33 @@ pub enum PaneStatus {
     Editor { dirty: bool },
     /// A client-local kanban board backed by a user-selected path.
     Board,
+    /// Historical agent data without a currently authorized live composer.
+    AgentUnavailable(Box<AgentRecovery>),
 }
 
 impl PaneStatus {
     pub const fn agent_state(&self) -> Option<&AgentState> {
         match self {
             Self::Agent(state) => Some(state),
+            Self::PlainShell | Self::Editor { .. } | Self::Board | Self::AgentUnavailable(_) => {
+                None
+            }
+        }
+    }
+
+    /// Presentation/recovery only. Do not use this to authorize terminal input.
+    pub const fn known_agent_state(&self) -> Option<&AgentState> {
+        match self {
+            Self::Agent(state) => Some(state),
+            Self::AgentUnavailable(recovery) => Some(&recovery.last_known_state),
             Self::PlainShell | Self::Editor { .. } | Self::Board => None,
+        }
+    }
+
+    pub const fn agent_recovery(&self) -> Option<&AgentRecovery> {
+        match self {
+            Self::AgentUnavailable(recovery) => Some(recovery),
+            _ => None,
         }
     }
 
@@ -810,6 +833,9 @@ enum PaneStatusWire {
     AgentWithGoal(AgentClass, AgentActivity, GoalState),
     Editor { dirty: bool },
     Board,
+    // Append only. Existing variant indices and payloads remain unchanged.
+    // Older peers cannot decode this new variant; this is not a negotiation.
+    AgentUnavailable(Box<AgentRecovery>),
 }
 
 impl Serialize for PaneStatus {
@@ -827,6 +853,7 @@ impl Serialize for PaneStatus {
             },
             Self::Editor { dirty } => PaneStatusWire::Editor { dirty: *dirty },
             Self::Board => PaneStatusWire::Board,
+            Self::AgentUnavailable(recovery) => PaneStatusWire::AgentUnavailable(recovery.clone()),
         };
         wire.serialize(serializer)
     }
@@ -845,6 +872,7 @@ impl<'de> Deserialize<'de> for PaneStatus {
             }
             PaneStatusWire::Editor { dirty } => Self::Editor { dirty },
             PaneStatusWire::Board => Self::Board,
+            PaneStatusWire::AgentUnavailable(recovery) => Self::AgentUnavailable(recovery),
         })
     }
 }
@@ -926,6 +954,7 @@ pub enum NowSignal {
     FinishedUnread,
     Idle,
     ShellOutput(ShellOutputPhase),
+    AgentUnavailable(AgentAvailability),
 }
 
 /// Both state slots of one sidebar row. Identity is rendered separately.
@@ -952,6 +981,22 @@ pub fn project_pane_signals(
 ) -> PaneSignals {
     let agent = match status {
         PaneStatus::Agent(agent) => agent.clone(),
+        PaneStatus::AgentUnavailable(recovery) => {
+            // A task may still run independently. A historical provider goal
+            // must not look like a live commitment of an absent composer.
+            let (objective, objective_rule) =
+                project_objective_signal(progress, None, has_scheduled_input);
+            return PaneSignals {
+                objective,
+                now: NowSignal::AgentUnavailable(recovery.availability),
+                objective_rule,
+                now_rule: match recovery.availability {
+                    AgentAvailability::Unverified => "A10",
+                    AgentAvailability::ShellForeground => "A11",
+                    AgentAvailability::Exited(_) => "A12",
+                },
+            };
+        }
         PaneStatus::PlainShell => {
             let (objective, objective_rule) =
                 project_objective_signal(progress, None, has_scheduled_input);
@@ -1110,6 +1155,10 @@ impl PromptQueueDelivery {
 pub struct QueuedPrompt {
     pub text: String,
     pub delivery: PromptQueueDelivery,
+    /// Persisted before the first PTY byte is admitted. An attempted head is
+    /// retained for inspection but never replayed after an uncertain exit.
+    #[serde(default)]
+    pub attempted_delivery: bool,
 }
 
 impl QueuedPrompt {
@@ -3607,9 +3656,9 @@ impl Tree {
         Ok(())
     }
 
-    /// Returns the FIFO head without consuming it. The server writes it to
-    /// the PTY before acknowledging delivery, so a failed write leaves it
-    /// queued for the next genuine completion.
+    /// Returns the FIFO head without consuming it. The server persists its
+    /// attempt bit before sending bytes; an attempted head remains visible but
+    /// must not be sent again on a later completion.
     pub fn next_queued_prompt(&self, id: NodeId) -> Result<Option<&QueuedPrompt>, TreeError> {
         let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
         let NodeKind::Pane {
@@ -3624,6 +3673,27 @@ impl Tree {
             return Err(TreeError::NotATerminal(id));
         }
         Ok(prompt_queue.first())
+    }
+
+    /// Compare-and-mark the current head before any irreversible PTY write.
+    /// A stale completion cannot mark a replacement prompt after Clear.
+    pub fn mark_queued_prompt_attempted(
+        &mut self,
+        id: NodeId,
+        expected: &QueuedPrompt,
+    ) -> Result<bool, TreeError> {
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane { prompt_queue, .. } = &mut node.kind else {
+            return Err(TreeError::NotAPane(id));
+        };
+        let Some(head) = prompt_queue.first_mut() else {
+            return Ok(false);
+        };
+        if &*head != expected || head.attempted_delivery {
+            return Ok(false);
+        }
+        head.attempted_delivery = true;
+        Ok(true)
     }
 
     /// Acknowledges delivery only when the current FIFO head is still the
@@ -3656,6 +3726,7 @@ impl Tree {
         // Removed before deciding delivery so a rotation and a permanent
         // removal share the same single mutation site.
         let mut delivered = prompt_queue.remove(0);
+        delivered.attempted_delivery = false;
         match &mut delivered.delivery {
             PromptQueueDelivery::Once => {}
             PromptQueueDelivery::Times { remaining_runs } if *remaining_runs > 1 => {
@@ -3684,6 +3755,14 @@ impl Tree {
     pub fn last_prompt(&self, id: NodeId) -> Option<&str> {
         match &self.get(id)?.kind {
             NodeKind::Pane { last_prompt, .. } => last_prompt.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Historical recovery data, independent of live-agent eligibility.
+    pub fn agent_recovery(&self, id: NodeId) -> Option<&AgentRecovery> {
+        match &self.get(id)?.kind {
+            NodeKind::Pane { status, .. } => status.agent_recovery(),
             _ => None,
         }
     }
@@ -5355,10 +5434,12 @@ mod tests {
         let once = QueuedPrompt {
             text: "first".to_string(),
             delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
         };
         let repeat = QueuedPrompt {
             text: "second".to_string(),
             delivery: PromptQueueDelivery::Times { remaining_runs: 2 },
+            attempted_delivery: false,
         };
         tree.enqueue_prompt(terminal, once.clone()).unwrap();
         tree.enqueue_prompt(terminal, repeat.clone()).unwrap();
@@ -5383,6 +5464,34 @@ mod tests {
         assert_eq!(tree.prompt_queue_len(terminal), Some(0));
     }
 
+    #[test]
+    fn queued_prompt_attempt_is_a_compare_and_set_replay_fence() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let prompt = QueuedPrompt {
+            text: "one".to_string(),
+            delivery: PromptQueueDelivery::Forever,
+            attempted_delivery: false,
+        };
+        tree.enqueue_prompt(terminal, prompt.clone()).unwrap();
+        assert!(tree
+            .mark_queued_prompt_attempted(terminal, &prompt)
+            .unwrap());
+        assert!(!tree
+            .mark_queued_prompt_attempted(terminal, &prompt)
+            .unwrap());
+        let attempted = tree.next_queued_prompt(terminal).unwrap().unwrap().clone();
+        assert!(attempted.attempted_delivery);
+        assert!(!tree.acknowledge_queued_prompt(terminal, &prompt).unwrap());
+        assert!(tree
+            .acknowledge_queued_prompt(terminal, &attempted)
+            .unwrap());
+        assert_eq!(tree.next_queued_prompt(terminal).unwrap(), Some(&prompt));
+    }
+
     /// Regression test for a leak/starvation bug: a `Forever` entry ahead of
     /// other queued prompts used to stay pinned at index 0 forever, so
     /// everything queued behind it was permanently unreachable and the queue
@@ -5399,14 +5508,17 @@ mod tests {
         let forever = QueuedPrompt {
             text: "reminder".to_string(),
             delivery: PromptQueueDelivery::Forever,
+            attempted_delivery: false,
         };
         let once_a = QueuedPrompt {
             text: "one-shot-a".to_string(),
             delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
         };
         let once_b = QueuedPrompt {
             text: "one-shot-b".to_string(),
             delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
         };
         tree.enqueue_prompt(terminal, forever.clone()).unwrap();
         tree.enqueue_prompt(terminal, once_a.clone()).unwrap();
@@ -5449,6 +5561,7 @@ mod tests {
                 QueuedPrompt {
                     text: format!("prompt-{index}"),
                     delivery: PromptQueueDelivery::Once,
+                    attempted_delivery: false,
                 },
             )
             .unwrap();
@@ -5460,6 +5573,7 @@ mod tests {
         let overflow = QueuedPrompt {
             text: "one-too-many".to_string(),
             delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
         };
         assert!(matches!(
             tree.enqueue_prompt(terminal, overflow),
@@ -7086,6 +7200,7 @@ mod pane_signal_tests {
                 NowSignal::Idle => 7,
                 NowSignal::ShellOutput(_) => 8,
                 NowSignal::None => 9,
+                NowSignal::AgentUnavailable(_) => 10,
             };
             let objective = match signals.objective {
                 ObjectiveSignal::None => 0,

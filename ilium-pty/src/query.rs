@@ -14,13 +14,15 @@
 //!
 //! This module performs no I/O of its own. [`TerminalQueryResponder`] only
 //! *composes* reply bytes into a buffer while `vt100::Parser::process` runs;
-//! the owning `PtySession` reader thread drains that buffer with
-//! [`TerminalQueryResponder::take_pending_replies`] once it has released the
-//! parser lock, and it is that thread -- not the parser callback -- that
-//! writes the bytes down the pty. Keeping the write outside the callback is
-//! what guarantees a child whose stdin buffer is full can never stall the
-//! parser lock (and with it every screen read, resize, and teardown) behind
-//! a blocking `write_all`.
+//! its driver drains that buffer with
+//! [`TerminalQueryResponder::take_pending_replies`] under the parser lock,
+//! then releases that lock before transport I/O. The ordered owner completes
+//! the entire reply write before processing the next queued command or
+//! resize. Eligible output can still be parsed while a write is pending; its
+//! replies wait behind the current complete input payload. If a reply fails
+//! or remains unconfirmed, the owner closes admission
+//! instead of letting an old-geometry reply cross a later resize. The callback
+//! itself performs no I/O, and a stalled writer never holds the parser lock.
 
 /// Upper bound on how many capability-query replies [`TerminalQueryResponder`]
 /// will queue per PTY read chunk (see
@@ -62,7 +64,7 @@ impl TerminalQueryResponder {
     /// The owning `PtySession` calls this immediately after each
     /// `Parser::process` call and writes the returned bytes to the pty's
     /// write half, so a reply lands on the child's stdin exactly like a
-    /// keystroke would. Draining *is* the budget reset, which is why the
+    /// keystroke would, after any active input payload. Draining *is* the budget reset, which is why the
     /// budget cannot drift out of step with the chunk boundary: a burst is
     /// capped, but the responder still answers normally on the next chunk.
     pub(crate) fn take_pending_replies(&mut self) -> Vec<u8> {

@@ -208,6 +208,18 @@ mod tests {
                 bytes: vec![0x1b, b'[', b'A'],
                 submission: None,
             },
+            ClientRequest::UserKeyInput {
+                pane_id: NodeId(2),
+                bytes: b"direct user input\r".to_vec(),
+                submission: Some(PromptSubmissionSource::Keyboard),
+                prompt_epoch: Some("epoch-1".to_string()),
+            },
+            ClientRequest::ReportAgentPromptFromTranscript {
+                pane_id: NodeId(2),
+                expected_session_id: "session-1".to_string(),
+                prompt_epoch: "epoch-1".to_string(),
+                last_prompt: "exact\ntrailing  ".to_string(),
+            },
             ClientRequest::MouseInput {
                 pane_id: NodeId(2),
                 kind: MouseEventKind::Down(MouseButton::Left),
@@ -1079,6 +1091,21 @@ mod tests {
             submission: Some(PromptSubmissionSource::Keyboard),
         };
         assert!(!submitted_key.is_high_frequency_diagnostic());
+        let direct_user_input = ClientRequest::UserKeyInput {
+            pane_id: NodeId(2),
+            bytes: b"user text".to_vec(),
+            submission: None,
+            prompt_epoch: None,
+        };
+        assert_eq!(direct_user_input.diagnostic_name(), "user_key_input");
+        assert!(direct_user_input.is_high_frequency_diagnostic());
+        let submitted_user_input = ClientRequest::UserKeyInput {
+            pane_id: NodeId(2),
+            bytes: b"\r".to_vec(),
+            submission: Some(PromptSubmissionSource::Keyboard),
+            prompt_epoch: Some("epoch-2".to_string()),
+        };
+        assert!(!submitted_user_input.is_high_frequency_diagnostic());
     }
 
     /// The voice-text messages form one contiguous block of variants at the

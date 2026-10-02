@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ilium_core::{
-    AgentClass, AgentProvider, BuiltinAgentProvider, NodeId, PaneProgress,
-    SessionIdentityTransitionRule,
+    AgentClass, AgentExitOutcome, AgentProcessKey, AgentProvider, BuiltinAgentProvider, NodeId,
+    PaneProgress, PaneStatus, SessionIdentityTransitionRule,
 };
 use ilium_ipc::ProgressMonitorStatus;
 use ilium_pty::{PtyCommand, PtyError, PtySession};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::progress_monitor::{
@@ -34,6 +34,68 @@ pub const DEFAULT_PANE_COLS: u16 = 80;
 /// Deliberately neutral title shown after an agent discards its conversation.
 /// The next verified session may replace it through normal title inference.
 pub const FRESH_AGENT_TITLE: &str = "<new>";
+
+/// Waits for an authoritative screen outside the pane registry lock. The input
+/// handle fences replacement; watches are subscribed before the first attempt
+/// so a resize completion cannot be lost between the read and the wait.
+pub(crate) async fn read_current_terminal_screen<R>(
+    state: &crate::state::ServerState,
+    pane_id: NodeId,
+    read: impl Fn(&vt100::Screen) -> R,
+) -> Option<R> {
+    let (input, mut changed, mut status) = {
+        let panes = state.panes.read().await;
+        let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+            return None;
+        };
+        let input = runtime.session.input_handle();
+        let status = input.subscribe_status();
+        (input, runtime.session.subscribe_screen_changed(), status)
+    };
+    // A native OS resize may be uninterruptible. Bound this caller's wait,
+    // without replaying input or discarding the owner's native resources.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        {
+            let panes = state.panes.read().await;
+            let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+                return None;
+            };
+            if !runtime.session.input_handle().same_session(&input) {
+                return None;
+            }
+            if let Some(result) = runtime.session.try_with_screen(&read) {
+                return Some(result);
+            }
+        }
+        if !matches!(input.status(), ilium_pty::OwnerStatus::Running) {
+            return None;
+        }
+        tokio::select! {
+            result = changed.changed() => { if result.is_err() { return None; } }
+            result = status.changed() => { if result.is_err() { return None; } }
+            () = tokio::time::sleep_until(deadline) => return None,
+        }
+    }
+}
+
+/// This latch is bound to a process generation, not a repaint of its dialog.
+/// An accepted but interrupted attempt remains InFlight and cannot be replayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoAnswerPhase {
+    InFlight,
+    Delivered,
+    RetryableZero,
+    Suppressed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoAnswerAttempt {
+    pub identity: ilium_detect::AgentIdentity,
+    pub key: &'static str,
+    pub attempts: u8,
+    pub phase: AutoAnswerPhase,
+}
 
 /// What Ilium durably knows about one automated progress-owned PTY delivery.
 /// `DeliveredToPty` deliberately does not claim the agent consumed the text.
@@ -164,6 +226,9 @@ pub struct TerminalPaneRuntime {
     /// discovery sees the replacement transcript. It is never used to infer
     /// an ID from content.
     pub session_command_tracker: ShellCommandTracker,
+    /// Unbounded exact agent composer evidence, separate from 4096-byte
+    /// shell-command title reconstruction.
+    pub agent_prompt_tracker: crate::agent_prompt::AgentPromptTracker,
     /// While true, launch arguments describe the pre-transition session and
     /// are forbidden as identity evidence. Only a PID-held transcript can
     /// resolve the new session and clear this flag.
@@ -218,21 +283,28 @@ pub struct TerminalPaneRuntime {
     /// One raw Idle sample after an active turn is provisional. The next
     /// coherent sample must also be Idle before completion becomes unread.
     pub pending_idle_confirmation: bool,
+    pub agent_process_key: Option<AgentProcessKey>,
+    pub agent_generation: u64,
+    pub agent_input_available: bool,
+    /// Invalidates admitted automated delivery when this invocation exits or
+    /// is replaced. Manual input still awaits its receipt for recovery.
+    pub agent_input_cancel: watch::Sender<u64>,
+    pub verified_agent_exit: Option<VerifiedAgentExit>,
+    pub last_agent_prompt: Option<String>,
+    pub latest_agent_prompt_unavailable: bool,
+    /// Unfenced legacy transcript reports are bootstrap-only after input.
+    pub legacy_prompt_fallback_blocked: bool,
+    /// Latest manual Enter eligible for a provider transcript correction.
+    pub prompt_transcript_epoch: Option<PromptTranscriptEpoch>,
+    pub session_process_started_at_unix_seconds: Option<u64>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
     pub session_process_id: Option<u32>,
-    /// OS pid of the agent process this pane already sent an auto-answer key
-    /// to for a known interstitial dialog (see
-    /// `ilium_detect::interstitial_prompt_response`). Keyed to the pid, not
-    /// to a screen/detection generation counter: the dialog can repaint
-    /// (e.g. nothing external, but any redraw bumps `screen_generation`)
-    /// while still on screen, and re-keying on generation would resend the
-    /// answer every tick -- for a numbered-choice prompt that types straight
-    /// into the next composer, repeated digits can get typed and even
-    /// submitted. At most one auto-answer per agent process, ever; cleared
-    /// only when a different pid is detected.
-    pub auto_answered_interstitial_prompt_for_pid: Option<u32>,
+    /// A generation-bound attempt. Unconfirmed or partial delivery suppresses
+    /// repeats; only a verified zero-byte failure can permit one retry.
+    pub auto_answer_attempt: Option<AutoAnswerAttempt>,
+    auto_answer_task: Option<JoinHandle<()>>,
     /// Forwards `session.subscribe_output_bytes()` chunks to the session's
     /// broadcast channel as `ServerEvent::ScreenUpdate` frames. Owned here
     /// so closing this pane has a single, unambiguous place to cancel it
@@ -279,6 +351,7 @@ impl TerminalPaneRuntime {
             shell_command_tracker: matches!(&origin, TerminalOrigin::PlainShell)
                 .then(ShellCommandTracker::default),
             session_command_tracker: ShellCommandTracker::default(),
+            agent_prompt_tracker: crate::agent_prompt::AgentPromptTracker::default(),
             is_session_identity_invalidated: false,
             invalidated_session_id: None,
             pending_session_transition_correlation_id: None,
@@ -311,8 +384,19 @@ impl TerminalPaneRuntime {
             detected_agent_process_id: None,
             detected_agent_class: None,
             pending_idle_confirmation: false,
+            agent_process_key: None,
+            agent_generation: 0,
+            agent_input_available: false,
+            agent_input_cancel: watch::channel(0).0,
+            verified_agent_exit: None,
+            last_agent_prompt: None,
+            latest_agent_prompt_unavailable: false,
+            legacy_prompt_fallback_blocked: false,
+            prompt_transcript_epoch: None,
+            session_process_started_at_unix_seconds: None,
             session_process_id: None,
-            auto_answered_interstitial_prompt_for_pid: None,
+            auto_answer_attempt: None,
+            auto_answer_task: None,
             forward_task: None,
             initial_prompt_task: None,
             progress_monitor_task: None,
@@ -322,6 +406,127 @@ impl TerminalPaneRuntime {
             progress_monitor: None,
             notified_progress_outcome_monitor_id: None,
         }
+    }
+
+    pub(crate) fn adopt_agent_process(
+        &mut self,
+        identity: &ilium_detect::AgentIdentity,
+    ) -> Result<bool, &'static str> {
+        let key = agent_process_key(identity);
+        if self.agent_process_key.as_ref() == Some(&key) {
+            return Ok(false);
+        }
+        let next = self
+            .agent_generation
+            .checked_add(1)
+            .ok_or("agent invocation generation exhausted")?;
+        let replaced = self.agent_process_key.is_some();
+        self.agent_generation = next;
+        self.agent_process_key = Some(key);
+        self.agent_input_available = false;
+        self.agent_input_cancel
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
+        self.verified_agent_exit = None;
+        self.last_agent_prompt = None;
+        self.latest_agent_prompt_unavailable = false;
+        self.prompt_transcript_epoch = None;
+        self.agent_prompt_tracker.reset();
+        self.pending_idle_confirmation = false;
+        self.cancel_auto_answer_task();
+        self.auto_answer_attempt = None;
+        if replaced {
+            self.legacy_prompt_fallback_blocked = true;
+            self.pending_generated_session_id = None;
+            self.is_session_identity_invalidated = false;
+            self.invalidated_session_id = None;
+            self.pending_session_transition_correlation_id = None;
+            self.session_command_tracker.reset_pending_line();
+            self.cancel_agent_owned_delivery();
+        }
+        Ok(replaced)
+    }
+
+    pub(crate) fn record_verified_agent_exit(
+        &mut self,
+        expected_generation: u64,
+        expected_process: &AgentProcessKey,
+        outcome: AgentExitOutcome,
+        signal_name: Option<&str>,
+    ) -> bool {
+        if self.agent_generation != expected_generation
+            || self.agent_process_key.as_ref() != Some(expected_process)
+            || self.verified_agent_exit.is_some()
+        {
+            return false;
+        }
+        self.verified_agent_exit = Some(VerifiedAgentExit {
+            generation: expected_generation,
+            process: expected_process.clone(),
+            outcome,
+            signal_name: signal_name.map(str::to_owned),
+        });
+        self.agent_input_available = false;
+        self.agent_input_cancel
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
+        self.pending_idle_confirmation = false;
+        // A confirmed Enter may still be in the provider's transcript write
+        // queue. Keep its epoch for a same-process historical CAS result.
+        self.cancel_agent_owned_delivery();
+        self.detection_schedule.identity_system_generation = None;
+        self.detection_schedule.cached_screen_classification = None;
+        let now = Instant::now();
+        crate::detection::force_check(&mut self.detection_schedule, now);
+        self.detection_schedule.next_due = now;
+        true
+    }
+
+    pub(crate) fn cancel_agent_owned_delivery(&mut self) {
+        self.cancel_initial_prompt_delivery();
+        self.cancel_progress_delivery_task();
+        self.cancel_auto_answer_task();
+        if let Some(monitor) = self.progress_monitor.as_mut() {
+            monitor.result_delivery = match monitor.result_delivery {
+                ProgressDeliveryState::Queued => ProgressDeliveryState::NotDeliverable,
+                ProgressDeliveryState::Attempted => ProgressDeliveryState::Uncertain,
+                other => other,
+            };
+        }
+    }
+
+    /// A negative process scan never proves exit, but it cannot authorize
+    /// automated input. Refresh the exact PID before each body and Enter.
+    pub(crate) fn automated_agent_input_rejection(&self, status: &PaneStatus) -> Option<String> {
+        let Some(owner) = self.agent_process_key.as_ref() else {
+            return status
+                .known_agent_state()
+                .map(|_| "agent ownership is not established".to_string());
+        };
+        if self.missing_workspace.is_some()
+            || !self.agent_input_available
+            || self.verified_agent_exit.is_some()
+            || status
+                .agent_state()
+                .is_none_or(|agent| agent.class != owner.class)
+            || self
+                .detection_schedule
+                .cached_identity
+                .as_ref()
+                .is_none_or(|identity| agent_process_key(identity) != *owner)
+        {
+            return Some("historical agent identity does not authorize terminal input".to_string());
+        }
+        if matches!(&self.origin, TerminalOrigin::PlainShell)
+            && self.session.shell_owns_terminal() != Some(false)
+        {
+            return Some("agent foreground ownership is unavailable".to_string());
+        }
+        let Some(identity) = self.detection_schedule.cached_identity.as_ref() else {
+            return Some("agent identity is not cached".to_string());
+        };
+        if !crate::agent_identity_guard::matches_current_agent_identity(identity) {
+            return Some("fresh agent process identity could not be confirmed".to_string());
+        }
+        None
     }
 
     /// Installs the output forwarder only after this runtime is present in
@@ -346,6 +551,18 @@ impl TerminalPaneRuntime {
     /// interacting with this newly-created terminal themselves.
     pub fn cancel_initial_prompt_delivery(&mut self) {
         if let Some(task) = self.initial_prompt_task.take() {
+            task.abort();
+        }
+    }
+
+    pub fn set_auto_answer_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous) = self.auto_answer_task.replace(task) {
+            previous.abort();
+        }
+    }
+
+    pub fn cancel_auto_answer_task(&mut self) {
+        if let Some(task) = self.auto_answer_task.take() {
             task.abort();
         }
     }
@@ -513,7 +730,32 @@ impl TerminalPaneRuntime {
             forward_task.abort();
         }
         self.cancel_initial_prompt_delivery();
+        self.cancel_auto_answer_task();
         self.cancel_progress_monitor();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedAgentExit {
+    pub generation: u64,
+    pub process: AgentProcessKey,
+    pub outcome: AgentExitOutcome,
+    pub signal_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptTranscriptEpoch {
+    pub token: String,
+    pub generation: u64,
+    pub process: AgentProcessKey,
+    pub session_id: String,
+}
+
+pub(crate) fn agent_process_key(identity: &ilium_detect::AgentIdentity) -> AgentProcessKey {
+    AgentProcessKey {
+        class: identity.class.clone(),
+        process_id: identity.pid,
+        started_at_unix_seconds: identity.started_at_unix_seconds,
     }
 }
 

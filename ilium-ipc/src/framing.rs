@@ -39,7 +39,9 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
 
-const FRAME_SCHEMA_TAG: u32 = 0xA800_0000;
+// Historical agent recovery and explicit user-origin prompt epochs require
+// a matching peer. The tag must occupy only bits in FRAME_SCHEMA_MASK.
+const FRAME_SCHEMA_TAG: u32 = 0xB800_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -492,5 +494,16 @@ mod tests {
         let decoded: crate::ServerEvent = read_frame(&mut Cursor::new(buffer)).await.unwrap();
         assert_eq!(decoded, event);
         assert_eq!(tree.project_animation_generation(project_id).unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+mod prompt_attempt_wire_tests {
+    use super::*;
+    #[test]
+    fn previous_schema_is_rejected_before_decoding_changed_prompt_queue_shape() {
+        assert!(frame_payload_length(0xA800_0000 | 16).is_err());
+        assert!(frame_payload_length(0xB000_0000 | 16).is_err());
+        assert_eq!(frame_payload_length(frame_length_word(16)).unwrap(), 16);
     }
 }

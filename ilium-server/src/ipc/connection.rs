@@ -243,6 +243,12 @@ async fn read_requests<R>(
             pane_id,
             bytes,
             submission: Some(submission),
+        }
+        | ClientRequest::UserKeyInput {
+            pane_id,
+            bytes,
+            submission: Some(submission),
+            ..
         } = &request
         {
             tracing::info!(
@@ -1209,7 +1215,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod text_trigger_writer_tests {
     use super::*;
@@ -1419,7 +1424,6 @@ mod text_trigger_writer_tests {
         assert!(sequences.is_empty());
     }
 }
-
 
 #[cfg(test)]
 mod text_trigger_ordering_regressions {

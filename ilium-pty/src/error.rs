@@ -8,6 +8,12 @@
 /// process, from opening the pty through to writing input into it.
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
+    /// Ordered admission, completed delivery, cancellation, or geometry failure.
+    /// Legacy synchronous methods retain completion semantics when integrated;
+    /// accepting a DeliveryReceipt alone never returns Ok from those methods.
+    #[error(transparent)]
+    Delivery(#[from] crate::delivery::DeliveryError),
+
     /// The OS failed to allocate a pty pair (`openpty`-equivalent).
     #[error("failed to open pty: {0}")]
     Open(#[source] anyhow::Error),

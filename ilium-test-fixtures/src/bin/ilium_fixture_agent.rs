@@ -10,7 +10,7 @@
 //! Windows' ConPTY -- which is the entire point of the crate.
 
 use std::fs::File;
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -52,6 +52,17 @@ fn main() {
         } => run_clear_transition(first_argument_index, second_argument_index),
         FixtureBehavior::ChangeOnly => run_change_only(),
         FixtureBehavior::GoalLifecycle { log_path } => run_goal_lifecycle(&log_path),
+        FixtureBehavior::CrashAfterSubmittedPrompt {
+            prompt_path,
+            transcript_path,
+            exit_code,
+            mouse_tracking,
+        } => run_crash_after_submitted_prompt(
+            &prompt_path,
+            transcript_path.as_deref(),
+            exit_code,
+            mouse_tracking,
+        ),
         FixtureBehavior::PrintFile { path } => {
             let contents = std::fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("fixture reading {}: {error}", path.display()));
@@ -270,6 +281,71 @@ fn read_submitted_line() -> Option<String> {
     match std::io::stdin().lock().read_line(&mut line) {
         Ok(0) | Err(_) => None,
         Ok(_) => Some(line.trim_end_matches(['\r', '\n']).to_string()),
+    }
+}
+
+fn run_crash_after_submitted_prompt(
+    prompt_path: &std::path::Path,
+    transcript_path: Option<&std::path::Path>,
+    exit_code: i32,
+    mouse_tracking: bool,
+) {
+    assert_ne!(exit_code, 0, "crash fixture requires a nonzero exit code");
+    // Read-only and retained until exit: descriptor ownership must be visible,
+    // while the provider's unflushed transcript remains byte-for-byte unchanged.
+    let _held_transcript = transcript_path.map(|path| {
+        File::open(path).unwrap_or_else(|error| panic!("open {}: {error}", path.display()))
+    });
+    let is_terminal = std::io::stdin().is_terminal();
+    if is_terminal {
+        crossterm::terminal::enable_raw_mode().expect("enable crash fixture raw mode");
+    }
+    let is_claude = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
+        .is_some_and(|name| name.contains("claude"));
+    if is_claude {
+        emit("Claude Code\r\n\x1b[?2004h❯ ");
+    } else {
+        render_goal_composer(true);
+    }
+    if mouse_tracking {
+        emit("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h");
+    }
+    let submission = read_crash_submission().expect("read complete crash fixture submission");
+    std::fs::write(prompt_path, submission)
+        .unwrap_or_else(|error| panic!("write {}: {error}", prompt_path.display()));
+    emit("\r\nFATAL_FIXTURE_CRASH: agent exited before transcript flush\r\n");
+    // Restore the OS input discipline as the existing fixtures do, but never
+    // emit mouse/paste disable escapes: the screen retains crash negotiation.
+    if is_terminal {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+    std::process::exit(exit_code);
+}
+
+fn read_crash_submission() -> Option<Vec<u8>> {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+    let mut bytes = Vec::new();
+    let mut byte = [0_u8; 1];
+    let mut in_paste = false;
+    loop {
+        match std::io::stdin().read(&mut byte) {
+            Ok(0) | Err(_) => return None,
+            Ok(_) if !in_paste && matches!(byte[0], b'\r' | b'\n') => return Some(bytes),
+            Ok(_) => bytes.push(byte[0]),
+        }
+        if !in_paste && bytes.ends_with(PASTE_START) {
+            bytes.truncate(bytes.len() - PASTE_START.len());
+            in_paste = true;
+        } else if in_paste && bytes.ends_with(PASTE_END) {
+            bytes.truncate(bytes.len() - PASTE_END.len());
+            in_paste = false;
+        }
     }
 }
 

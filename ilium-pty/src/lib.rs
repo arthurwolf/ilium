@@ -4,9 +4,9 @@
 //! gap) until it exits or is killed. That is the entire contract this crate
 //! exposes -- see [`PtySession`] for the individual operations.
 //!
-//! This is the only crate that touches `portable_pty::*` directly, and the
-//! only one that owns a `vt100` parser fed by a real pty: everything the
-//! rest of the system knows about a pane's screen either comes from
+//! This crate owns the `vt100` parser fed by a real pty. Native descriptor,
+//! transport, and cancellation decisions live in `ilium-platform::pty_io`;
+//! everything the rest of the system knows about a pane's screen comes from
 //! [`PtySession::with_screen`]/[`ScreenSnapshot`] or is re-derived by
 //! replaying this crate's output bytes through a second, pty-less parser on
 //! the far side of IPC (`ilium-client`'s `terminal_view`), never by reaching
@@ -22,12 +22,22 @@
 //! detection concerns, so they belong behind the same boundary as the pty
 //! itself.
 
+mod delivery;
 mod error;
 mod mouse;
+mod owner;
+mod owner_queue;
 mod query;
+mod screen_reader;
 mod session;
 
+pub use delivery::{
+    Delivery, DeliveryError, DeliveryFailure, DeliveryObserver, DeliveryReceipt, OperationKind,
+    ShutdownReason,
+};
 pub use error::PtyError;
+pub use owner::{OwnerLimits, OwnerStatus, PtyInput, QueueLoad, ShutdownReport};
 pub use session::{
-    PtyCommand, PtyOutputChunk, PtyOutputRecovery, PtyOutputReplay, PtySession, ScreenSnapshot,
+    PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputRecovery, PtyOutputReplay,
+    PtySession, ScreenSnapshot,
 };

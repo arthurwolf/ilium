@@ -35,6 +35,8 @@
 //!   work never competes with keystrokes and rendering.
 //! - [`open_external`] -- handing a URL or path to the OS's own default
 //!   browser/file-manager handler.
+//! - [`owned_worker`] -- bounded worker admission, cancellation and retained
+//!   join ownership; a deadline never counts as proof that a worker exited.
 //!
 //! Where a question genuinely cannot be answered -- [`process_info`] outside
 //! Linux, macOS and Windows, where no implementation exists at all, or on any
@@ -51,9 +53,11 @@ pub mod minecraft;
 #[cfg(windows)]
 mod nofollow_windows;
 pub mod open_external;
+pub mod owned_worker;
 pub mod paths;
 pub mod process_control;
 pub mod process_info;
+pub mod pty_io;
 pub mod runtime_dir;
 pub mod secure_fs;
 pub mod thread_priority;

@@ -19,7 +19,10 @@ use ilium_agent_debug::{
     AgentDebugSeverity, AgentDebugSource,
 };
 use ilium_agent_session::TranscriptLocator;
-use ilium_core::{AgentActivity, AgentState, AgentTurn, NodeId, PaneStatus};
+use ilium_core::{
+    AgentActivity, AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery, AgentState,
+    AgentTurn, NodeId, PaneStatus,
+};
 use ilium_ipc::{DetectionReason, PaneDetectionEvidence, ServerEvent};
 use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use std::sync::Arc;
@@ -28,9 +31,12 @@ use sysinfo::{Pid, System};
 use tokio::task::JoinHandle;
 
 use crate::notifications::{self, PendingNotification};
-use crate::pane::{ConfirmedGoalOwner, PaneResource};
+use crate::pane::{
+    agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
+};
 use crate::sounds::{self, PlaybackRequest};
 use crate::state::ServerState;
+use ilium_pty::PtyExitCause;
 use ilium_sound::NotificationEvent;
 
 /// Minimum time between two "force an immediate recheck" requests actually
@@ -337,8 +343,139 @@ fn partition_session_claims(
 ///    already-computed results (tree status update, schedule/tracker
 ///    updates, notification queuing, broadcast) -- the part that actually
 ///    needs mutable access.
+struct PendingAutoAnswer {
+    pane_id: NodeId,
+    input: ilium_pty::PtyInput,
+    input_gate: Arc<tokio::sync::Mutex<()>>,
+    attempt: AutoAnswerAttempt,
+    settings_revision: u64,
+}
+
+/// The pane owns this task. Admission is the only action under a registry
+/// read lock; actual delivery may wait for backpressure without blocking a
+/// detection tick, another pane, or the Tokio executor.
+async fn deliver_auto_answer(state: Arc<ServerState>, pending: PendingAutoAnswer) {
+    let _input_guard = pending.input_gate.lock().await;
+    let (admitted, mut cancel_automated) = {
+        let settings = state.agent_detection_settings.read().await;
+        if settings.revision != pending.settings_revision
+            || !settings.detection.auto_answer_interstitial_prompts
+        {
+            return;
+        }
+        drop(settings);
+        let tree = state.tree.read().await;
+        let Some(ilium_core::NodeKind::Pane { status, .. }) =
+            tree.get(pending.pane_id).map(|node| &node.kind)
+        else {
+            return;
+        };
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pending.pane_id) else {
+            return;
+        };
+        if !matches!(pending.input.status(), ilium_pty::OwnerStatus::Running)
+            || !Arc::ptr_eq(&pending.input_gate, &runtime.input_gate)
+            || !runtime.session.input_handle().same_session(&pending.input)
+            || runtime.auto_answer_attempt.as_ref() != Some(&pending.attempt)
+            || runtime.detection_schedule.cached_identity.as_ref()
+                != Some(&pending.attempt.identity)
+            || runtime.automated_agent_input_rejection(status).is_some()
+            || !runtime.session.try_screen_snapshot().is_some_and(|screen| {
+                ilium_detect::interstitial_prompt_response(
+                    &pending.attempt.identity.class,
+                    &screen.text,
+                ) == Some(pending.attempt.key)
+            })
+        {
+            return;
+        }
+        // No await separates the fresh process/foreground preflight from
+        // admission. The watch cancels bytes still queued when ownership ends.
+        (
+            pending.input.write(pending.attempt.key.as_bytes()),
+            runtime.agent_input_cancel.subscribe(),
+        )
+    };
+    let result = match admitted {
+        Ok(receipt) => tokio::select! {
+            biased;
+            result = receipt.wait() => Some(result.map(|_| ())),
+            _ = cancel_automated.changed() => None,
+        },
+        Err(error) => Some(Err(error)),
+    };
+    let Some(result) = result else {
+        // The dropped receipt requests owner cancellation. Delivery may have
+        // been partial; suppress retries for this attempt.
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pending.pane_id) {
+            if runtime.session.input_handle().same_session(&pending.input) {
+                if let Some(attempt) = runtime.auto_answer_attempt.as_mut() {
+                    if *attempt == pending.attempt {
+                        attempt.phase = AutoAnswerPhase::Suppressed;
+                    }
+                }
+            }
+        }
+        return;
+    };
+    let settings_valid = {
+        let settings = state.agent_detection_settings.read().await;
+        settings.revision == pending.settings_revision
+            && settings.detection.auto_answer_interstitial_prompts
+    };
+    let process_valid =
+        crate::agent_identity_guard::matches_current_agent_identity(&pending.attempt.identity);
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pending.pane_id) else {
+        return;
+    };
+    if !runtime.session.input_handle().same_session(&pending.input)
+        || runtime.auto_answer_attempt.as_ref() != Some(&pending.attempt)
+    {
+        return;
+    }
+    let context_valid = settings_valid
+        && process_valid
+        && matches!(pending.input.status(), ilium_pty::OwnerStatus::Running)
+        && runtime.detection_schedule.cached_identity.as_ref() == Some(&pending.attempt.identity)
+        && runtime.session.try_screen_snapshot().is_some_and(|screen| {
+            ilium_detect::interstitial_prompt_response(
+                &pending.attempt.identity.class,
+                &screen.text,
+            ) == Some(pending.attempt.key)
+        });
+    let phase = auto_answer_completion_phase(&result, pending.attempt.attempts, context_valid);
+    if let Some(attempt) = runtime.auto_answer_attempt.as_mut() {
+        attempt.phase = phase;
+    }
+    match result {
+        Ok(()) => {
+            tracing::info!(pane_id = ?pending.pane_id, agent_pid = pending.attempt.identity.pid,
+            key = pending.attempt.key, "auto-answered interstitial prompt")
+        }
+        Err(error) => tracing::warn!(pane_id = ?pending.pane_id, %error, ?phase,
+            "auto-answer delivery failed; replay policy applied"),
+    }
+}
+
+fn auto_answer_completion_phase(
+    result: &Result<(), ilium_pty::DeliveryError>,
+    attempts: u8,
+    context_valid: bool,
+) -> AutoAnswerPhase {
+    match result {
+        Ok(()) => AutoAnswerPhase::Delivered,
+        Err(error) if error.proves_zero_delivery() && attempts < 2 && context_valid => {
+            AutoAnswerPhase::RetryableZero
+        }
+        Err(_) => AutoAnswerPhase::Suppressed,
+    }
+}
+
 async fn run_due_panes(
-    state: &ServerState,
+    state: &Arc<ServerState>,
     system: &mut System,
     children_index: &ilium_detect::ProcessChildrenIndex,
     system_generation: u64,
@@ -359,6 +496,7 @@ async fn run_due_panes(
         is_session_identity_invalidated: bool,
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
+        session_process_started_at_unix_seconds: Option<u64>,
         pending_generated_session_id: Option<String>,
         identity_system_generation: Option<u64>,
         cached_identity: Option<ilium_detect::AgentIdentity>,
@@ -380,7 +518,10 @@ async fn run_due_panes(
         let (claimed_session_ids, ambiguous_session_ids) =
             partition_session_claims(panes.iter().filter_map(|(pane_id, resource)| {
                 match resource {
-                    PaneResource::Terminal(runtime) if !runtime.is_session_identity_invalidated => {
+                    PaneResource::Terminal(runtime)
+                        if !runtime.is_session_identity_invalidated
+                            && runtime.verified_agent_exit.is_none() =>
+                    {
                         runtime
                             .session_id
                             .as_ref()
@@ -408,6 +549,8 @@ async fn run_due_panes(
                 is_session_identity_invalidated: runtime.is_session_identity_invalidated,
                 invalidated_session_id: runtime.invalidated_session_id.clone(),
                 session_process_id: runtime.session_process_id,
+                session_process_started_at_unix_seconds: runtime
+                    .session_process_started_at_unix_seconds,
                 pending_generated_session_id: runtime.pending_generated_session_id.clone(),
                 identity_system_generation: runtime.detection_schedule.identity_system_generation,
                 cached_identity: runtime.detection_schedule.cached_identity.clone(),
@@ -585,6 +728,7 @@ async fn run_due_panes(
                     due_pane.session_id.as_deref(),
                     due_pane.session_agent_class.as_ref(),
                     due_pane.session_process_id,
+                    due_pane.session_process_started_at_unix_seconds,
                     due_pane.is_session_identity_invalidated,
                     identity,
                     &ambiguous_session_ids,
@@ -807,6 +951,7 @@ async fn run_due_panes(
     let mut tree_snapshot_changed = false;
     let mut pending_debug_events = Vec::new();
     let mut pending_detection_evidence = Vec::new();
+    let mut pending_auto_answers = Vec::new();
     {
         // Lock ordering: `tree` before `panes` (see `ServerState` docs).
         let mut tree = state.tree.write().await;
@@ -859,8 +1004,78 @@ async fn run_due_panes(
             let screen_changed_after_snapshot = classified_pane.identity.is_some()
                 && runtime.session.screen_generation() != classified_pane.screen_generation;
 
-            let previous_detected_identity = runtime.detection_schedule.cached_identity.clone();
-            runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
+            let previous_process_key = runtime.agent_process_key.clone();
+            // Only the PTY's directly owned child receipt can prove a cause.
+            // A nested agent's missing process-table row is never its exit
+            // receipt, even when the original pane shell has exited.
+            if let (Some(owner), Some(exit)) = (
+                runtime.agent_process_key.clone(),
+                runtime.session.child_exit(),
+            ) {
+                if exit.process_id == Some(owner.process_id) {
+                    let (outcome, signal_name) = match &exit.cause {
+                        PtyExitCause::ExitCode(code) => (AgentExitOutcome::ExitCode(*code), None),
+                        PtyExitCause::Signal(signal) => {
+                            (AgentExitOutcome::Signal, Some(signal.as_str()))
+                        }
+                    };
+                    runtime.record_verified_agent_exit(
+                        runtime.agent_generation,
+                        &owner,
+                        outcome,
+                        signal_name,
+                    );
+                }
+            }
+            let process_was_replaced = if let Some(identity) = classified_pane.identity.as_ref() {
+                match runtime.adopt_agent_process(identity) {
+                    Ok(replaced) => replaced,
+                    Err(error) => {
+                        runtime.agent_input_available = false;
+                        runtime.cancel_agent_owned_delivery();
+                        tracing::error!(?pane_id, %error, "agent ownership update refused");
+                        continue;
+                    }
+                }
+            } else {
+                false
+            };
+            let shell_ownership =
+                if matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell) {
+                    runtime.session.shell_owns_terminal()
+                } else {
+                    Some(false)
+                };
+            let shell_foreground = shell_ownership == Some(true);
+            let was_input_available = runtime.agent_input_available;
+            runtime.agent_input_available = classified_pane.identity.is_some()
+                && runtime.verified_agent_exit.is_none()
+                // An unreadable foreground probe cannot keep an admitted
+                // automatic writer alive; None is not evidence of an agent.
+                && shell_ownership == Some(false);
+            if was_input_available && !runtime.agent_input_available {
+                // Losing a nested agent has no direct PTY child-exit receipt,
+                // but it immediately revokes queued agent-owned writes. A
+                // manually delivered Enter keeps its historical epoch.
+                runtime
+                    .agent_input_cancel
+                    .send_modify(|generation| *generation = generation.wrapping_add(1));
+                runtime.cancel_agent_owned_delivery();
+            }
+            if runtime.agent_input_available {
+                runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
+            }
+            if process_was_replaced {
+                runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                pending_title_clears.push((pane_id, runtime.title_generation));
+                if tree.set_last_prompt(pane_id, None).is_ok() {
+                    state.broadcast(ServerEvent::PaneLastPromptChanged {
+                        pane_id,
+                        last_prompt: None,
+                    });
+                }
+                state.request_snapshot_save();
+            }
             runtime.detection_schedule.identity_system_generation = Some(system_generation);
             runtime.detection_schedule.cached_identity = classified_pane.identity.clone();
             runtime.detection_schedule.cached_screen_classification =
@@ -898,22 +1113,56 @@ async fn run_due_panes(
                 .as_ref()
                 .is_some_and(|monitor| monitor.latest_progress.is_live());
             let same_process = classified_pane.identity.as_ref().is_some_and(|identity| {
-                previous_detected_identity.as_ref().is_some_and(|previous| {
-                    previous.pid == identity.pid
-                        && previous.started_at_unix_seconds == identity.started_at_unix_seconds
-                        && previous.class == identity.class
-                })
+                previous_process_key.as_ref() == Some(&agent_process_key(identity))
             });
-            let new_status = settle_agent_status(
-                classified_pane.status,
-                previous_status.as_ref(),
-                same_process,
-                is_parked_on_monitor,
-                &mut runtime.pending_idle_confirmation,
-            );
+            let new_status = if runtime.agent_input_available {
+                settle_agent_status(
+                    classified_pane.status,
+                    previous_status.as_ref(),
+                    same_process,
+                    is_parked_on_monitor,
+                    &mut runtime.pending_idle_confirmation,
+                )
+            } else {
+                runtime.pending_idle_confirmation = false;
+                let availability = runtime
+                    .verified_agent_exit
+                    .as_ref()
+                    .filter(|exit| {
+                        exit.generation == runtime.agent_generation
+                            && runtime.agent_process_key.as_ref() == Some(&exit.process)
+                    })
+                    .map(|exit| AgentAvailability::Exited(exit.outcome))
+                    .unwrap_or_else(|| {
+                        if shell_foreground {
+                            AgentAvailability::ShellForeground
+                        } else {
+                            AgentAvailability::Unverified
+                        }
+                    });
+                unavailable_agent_status(
+                    previous_status.as_ref(),
+                    runtime.agent_process_key.as_ref(),
+                    availability,
+                    runtime.session_id.as_deref(),
+                    runtime.last_agent_prompt.as_deref(),
+                    runtime.latest_agent_prompt_unavailable,
+                    runtime
+                        .verified_agent_exit
+                        .as_ref()
+                        .and_then(|exit| exit.signal_name.as_deref()),
+                )
+            };
             let previous_signals = previous_status.as_ref().map(|status| {
+                let effect_baseline = if same_process {
+                    status
+                        .agent_recovery()
+                        .map(|recovery| PaneStatus::Agent(recovery.last_known_state.clone()))
+                } else {
+                    None
+                };
                 ilium_core::project_pane_signals(
-                    status,
+                    effect_baseline.as_ref().unwrap_or(status),
                     previous_progress.as_deref(),
                     has_scheduled_input,
                     None,
@@ -965,36 +1214,49 @@ async fn run_due_panes(
                 .map(|identity| identity.pid);
             runtime.detected_agent_class = detected_agent_class.clone();
 
-            // A different agent process than the one we last auto-answered a
-            // dialog for (new invocation in the same pane) re-arms the latch.
-            if runtime.auto_answered_interstitial_prompt_for_pid.is_some()
-                && runtime.auto_answered_interstitial_prompt_for_pid
-                    != runtime.detected_agent_process_id
+            // Reserve before leaving this lock. A repaint of the same dialog
+            // cannot schedule another key, and a reused PID has a different
+            // process generation. No PTY write occurs inside tree/panes locks.
+            if runtime
+                .auto_answer_attempt
+                .as_ref()
+                .is_some_and(|attempt| Some(&attempt.identity) != classified_pane.identity.as_ref())
             {
-                runtime.auto_answered_interstitial_prompt_for_pid = None;
+                runtime.cancel_auto_answer_task();
+                runtime.auto_answer_attempt = None;
             }
-            if detection_config.auto_answer_interstitial_prompts {
-                if let (Some(key_to_send), Some(agent_pid)) = (
+            if detection_config.auto_answer_interstitial_prompts && runtime.agent_input_available {
+                if let (Some(key), Some(identity)) = (
                     classified_pane.interstitial_prompt_response,
-                    runtime.detected_agent_process_id,
+                    classified_pane.identity.as_ref(),
                 ) {
-                    if runtime.auto_answered_interstitial_prompt_for_pid != Some(agent_pid) {
-                        match runtime.session.write(key_to_send.as_bytes()) {
-                            Ok(()) => {
-                                runtime.auto_answered_interstitial_prompt_for_pid = Some(agent_pid);
-                                tracing::info!(
-                                    pane_id = ?pane_id,
-                                    agent_pid,
-                                    key = key_to_send,
-                                    "auto-answered interstitial prompt"
-                                );
-                            }
-                            Err(error) => tracing::warn!(
-                                pane_id = ?pane_id,
-                                %error,
-                                "detection loop: failed to auto-answer interstitial prompt"
-                            ),
+                    let attempts = match runtime.auto_answer_attempt.as_ref() {
+                        None => Some(1),
+                        Some(previous)
+                            if previous.identity == *identity
+                                && previous.key == key
+                                && previous.phase == AutoAnswerPhase::RetryableZero
+                                && previous.attempts < 2 =>
+                        {
+                            Some(previous.attempts + 1)
                         }
+                        _ => None,
+                    };
+                    if let Some(attempts) = attempts {
+                        let attempt = AutoAnswerAttempt {
+                            identity: identity.clone(),
+                            key,
+                            attempts,
+                            phase: AutoAnswerPhase::InFlight,
+                        };
+                        runtime.auto_answer_attempt = Some(attempt.clone());
+                        pending_auto_answers.push(PendingAutoAnswer {
+                            pane_id,
+                            input: runtime.session.input_handle(),
+                            input_gate: Arc::clone(&runtime.input_gate),
+                            attempt,
+                            settings_revision: detection_settings_revision,
+                        });
                     }
                 }
             }
@@ -1029,17 +1291,12 @@ async fn run_due_panes(
                 && runtime.session_agent_class.is_some()
                 && detected_agent_class.is_some()
                 && runtime.session_agent_class != detected_agent_class;
-            let owning_process_disappeared = runtime.session_id.is_some()
-                && runtime.session_process_id.is_some()
-                && classified_pane.identity.is_none()
-                && matches!(previous_status.as_ref(), Some(PaneStatus::Agent(..)))
-                && matches!(&new_status, PaneStatus::PlainShell);
             let owning_process_changed_without_reverification = runtime.session_id.is_some()
-                && runtime.session_process_id.is_some()
-                && classified_pane
-                    .identity
-                    .as_ref()
-                    .is_some_and(|identity| Some(identity.pid) != runtime.session_process_id)
+                && classified_pane.identity.as_ref().is_some_and(|identity| {
+                    Some(identity.pid) != runtime.session_process_id
+                        || Some(identity.started_at_unix_seconds)
+                            != runtime.session_process_started_at_unix_seconds
+                })
                 && discovered_session_ids.get(&pane_id) != runtime.session_id.as_ref();
             let session_is_ambiguously_claimed = runtime
                 .session_id
@@ -1048,7 +1305,6 @@ async fn run_due_panes(
             let should_clear_session_id = session_identity_is_stale(
                 runtime.is_session_identity_invalidated,
                 session_belongs_to_different_class,
-                owning_process_disappeared,
                 owning_process_changed_without_reverification,
                 session_is_ambiguously_claimed,
             );
@@ -1066,6 +1322,7 @@ async fn run_due_panes(
                 runtime.session_agent_class = None;
                 if !runtime.is_session_identity_invalidated {
                     runtime.session_process_id = None;
+                    runtime.session_process_started_at_unix_seconds = None;
                 }
                 state.request_snapshot_save();
                 state.broadcast(ServerEvent::PaneSessionIdCleared {
@@ -1097,6 +1354,10 @@ async fn run_due_panes(
                         .identity
                         .as_ref()
                         .map(|identity| identity.pid);
+                    runtime.session_process_started_at_unix_seconds = classified_pane
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.started_at_unix_seconds);
                     runtime.is_session_identity_invalidated = false;
                     runtime.invalidated_session_id = None;
                     runtime.pending_generated_session_id = None;
@@ -1111,12 +1372,21 @@ async fn run_due_panes(
                     });
                 } else {
                     let previous_process_id = runtime.session_process_id;
+                    let previous_process_start = runtime.session_process_started_at_unix_seconds;
                     runtime.session_agent_class = detected_agent_class;
                     runtime.session_process_id = classified_pane
                         .identity
                         .as_ref()
                         .map(|identity| identity.pid);
-                    if runtime.session_process_id != previous_process_id {
+                    runtime.session_process_started_at_unix_seconds = classified_pane
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.started_at_unix_seconds);
+                    if runtime.session_process_id != previous_process_id
+                        || runtime.session_process_started_at_unix_seconds != previous_process_start
+                        || process_was_replaced
+                    {
+                        state.request_snapshot_save();
                         state.broadcast(ServerEvent::PaneSessionIdResolved {
                             pane_id,
                             session_id: session_id.clone(),
@@ -1314,9 +1584,6 @@ async fn run_due_panes(
                 if session_belongs_to_different_class {
                     reasons.push("a different agent provider now owns the pane");
                 }
-                if owning_process_disappeared {
-                    reasons.push("the process that owned the session disappeared");
-                }
                 if owning_process_changed_without_reverification {
                     reasons.push("the agent process changed without re-verifying the session");
                 }
@@ -1503,6 +1770,23 @@ async fn run_due_panes(
         }
     }
     drop(current_detection_settings);
+
+    for pending in pending_auto_answers {
+        let pane_id = pending.pane_id;
+        let expected_input = pending.input.clone();
+        let expected_attempt = pending.attempt.clone();
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            if runtime.session.input_handle().same_session(&expected_input)
+                && runtime.auto_answer_attempt.as_ref() == Some(&expected_attempt)
+            {
+                // Spawn and transfer ownership without an intervening await;
+                // cancelling the detector can never detach this task.
+                let task = tokio::spawn(deliver_auto_answer(Arc::clone(state), pending));
+                runtime.set_auto_answer_task(task);
+            }
+        }
+    }
 
     for (pane_id, update) in pending_activity_updates {
         crate::ipc::handlers::publish_node_activity_update(state, pane_id, update);
@@ -1807,6 +2091,12 @@ fn describe_pane_status(
 ) -> String {
     let state = match status {
         PaneStatus::PlainShell => "Plain shell; no agent badge is applied.".to_string(),
+        PaneStatus::AgentUnavailable(recovery) => format!(
+            "{} historical agent; {}. {}",
+            agent_class_name(&recovery.last_known_state.class),
+            recovery.availability.label(),
+            recovery.availability.explanation(),
+        ),
         PaneStatus::Agent(agent) => match agent.goal {
             Some(goal) => format!(
                 "{} agent; activity is {}; {} goal badge shown{}.",
@@ -1904,6 +2194,7 @@ fn session_owner_is_stable(
     session_id: Option<&str>,
     session_agent_class: Option<&ilium_core::AgentClass>,
     session_process_id: Option<u32>,
+    session_process_started_at_unix_seconds: Option<u64>,
     is_invalidated: bool,
     identity: &ilium_detect::AgentIdentity,
     ambiguous_session_ids: &std::collections::HashSet<String>,
@@ -1911,6 +2202,7 @@ fn session_owner_is_stable(
     session_id.is_some()
         && session_agent_class == Some(&identity.class)
         && session_process_id == Some(identity.pid)
+        && session_process_started_at_unix_seconds == Some(identity.started_at_unix_seconds)
         && !is_invalidated
         && !session_id.is_some_and(|session_id| ambiguous_session_ids.contains(session_id))
 }
@@ -1933,24 +2225,29 @@ mod stopped_agent_recovery_tests {
 
     #[test]
     fn agent_disappearance_preserves_recovery_identity_without_completion() {
-        let previous = PaneStatus::from_activity(
-            AgentClass::Codex,
-            AgentActivity::Working,
+        let previous = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
+        let owner = AgentProcessKey {
+            class: AgentClass::Codex,
+            process_id: 42,
+            started_at_unix_seconds: 1,
+        };
+        let result = unavailable_agent_status(
+            Some(&previous),
+            Some(&owner),
+            AgentAvailability::Unverified,
+            Some("session-a"),
+            Some("exact last prompt"),
+            false,
             None,
         );
-        let mut pending = false;
-        let result = settle_agent_status(
-            PaneStatus::PlainShell,
-            Some(&previous),
-            false,
-            false,
-            &mut pending,
-        );
-        let recovered = result.agent_state().expect("stopped agent must retain recovery identity");
-        assert_eq!(recovered.class, AgentClass::Codex);
-        assert_ne!(recovered.turn, AgentTurn::Working);
-        assert!(!recovered.completion_unread);
-        assert!(!pending);
+        assert!(result.agent_state().is_none());
+        let recovered = result
+            .agent_recovery()
+            .expect("historical agent identity remains");
+        assert_eq!(recovered.last_known_state.class, AgentClass::Codex);
+        assert_eq!(recovered.session_id.as_deref(), Some("session-a"));
+        assert_eq!(recovered.last_prompt.as_deref(), Some("exact last prompt"));
+        assert!(!recovered.last_known_state.completion_unread);
     }
 }
 
@@ -1973,13 +2270,11 @@ mod prompt_queue_transition_tests {
 fn session_identity_is_stale(
     is_session_identity_invalidated: bool,
     session_belongs_to_different_class: bool,
-    owning_process_disappeared: bool,
     owning_process_changed_without_reverification: bool,
     session_is_ambiguously_claimed: bool,
 ) -> bool {
     is_session_identity_invalidated
         || session_belongs_to_different_class
-        || owning_process_disappeared
         || owning_process_changed_without_reverification
         || session_is_ambiguously_claimed
 }
@@ -2154,6 +2449,47 @@ fn classify_identity(
 /// the persisted/wire `PaneStatus`. One Idle sample after an active turn is
 /// provisional; a second consecutive sample is needed before the bell/sound
 /// becomes unread. Process replacement cannot inherit the prior turn.
+/// Historical identity remains available when live composer ownership is
+/// inconclusive. This does not turn disappearance into a crash diagnosis.
+fn unavailable_agent_status(
+    previous: Option<&PaneStatus>,
+    process: Option<&AgentProcessKey>,
+    availability: AgentAvailability,
+    session_id: Option<&str>,
+    last_prompt: Option<&str>,
+    latest_prompt_unavailable: bool,
+    signal_name: Option<&str>,
+) -> PaneStatus {
+    let Some(process) = process else {
+        return PaneStatus::PlainShell;
+    };
+    let Some(last_known_state) = previous.and_then(PaneStatus::known_agent_state) else {
+        return PaneStatus::PlainShell;
+    };
+    if last_known_state.class != process.class {
+        return PaneStatus::PlainShell;
+    }
+    PaneStatus::AgentUnavailable(Box::new(AgentRecovery {
+        last_known_state: last_known_state.clone(),
+        process: process.clone(),
+        availability,
+        signal_name: matches!(
+            availability,
+            AgentAvailability::Exited(AgentExitOutcome::Signal)
+        )
+        .then(|| signal_name.map(str::to_owned))
+        .flatten(),
+        session_id: session_id.map(str::to_owned),
+        last_prompt: (!latest_prompt_unavailable)
+            .then(|| last_prompt.map(str::to_owned))
+            .flatten(),
+        previous_exact_prompt: latest_prompt_unavailable
+            .then(|| last_prompt.map(str::to_owned))
+            .flatten(),
+        latest_prompt_unavailable,
+    }))
+}
+
 fn settle_agent_status(
     raw: PaneStatus,
     previous: Option<&PaneStatus>,
@@ -2321,6 +2657,7 @@ mod tests {
             Some("session-a"),
             Some(&AgentClass::Codex),
             Some(42),
+            Some(1),
             false,
             &identity,
             &ambiguous,
@@ -2331,6 +2668,7 @@ mod tests {
             Some("session-a"),
             Some(&AgentClass::Codex),
             Some(42),
+            Some(1),
             false,
             &identity,
             &ambiguous,
@@ -2340,6 +2678,7 @@ mod tests {
             Some("session-a"),
             Some(&AgentClass::Codex),
             Some(99),
+            Some(1),
             false,
             &identity,
             &ambiguous,
@@ -2348,7 +2687,17 @@ mod tests {
             Some("session-a"),
             Some(&AgentClass::Codex),
             Some(42),
+            Some(1),
             true,
+            &identity,
+            &ambiguous,
+        ));
+        assert!(!session_owner_is_stable(
+            Some("session-a"),
+            Some(&AgentClass::Codex),
+            Some(42),
+            Some(2),
+            false,
             &identity,
             &ambiguous,
         ));
@@ -2877,14 +3226,11 @@ mod tests {
 
     #[test]
     fn every_ownership_break_clears_a_stale_session_identity() {
-        assert!(session_identity_is_stale(true, false, false, false, false));
-        assert!(session_identity_is_stale(false, true, false, false, false));
-        assert!(session_identity_is_stale(false, false, true, false, false));
-        assert!(session_identity_is_stale(false, false, false, true, false));
-        assert!(session_identity_is_stale(false, false, false, false, true));
-        assert!(!session_identity_is_stale(
-            false, false, false, false, false
-        ));
+        assert!(session_identity_is_stale(true, false, false, false));
+        assert!(session_identity_is_stale(false, true, false, false));
+        assert!(session_identity_is_stale(false, false, true, false));
+        assert!(session_identity_is_stale(false, false, false, true));
+        assert!(!session_identity_is_stale(false, false, false, false));
     }
 
     #[test]
@@ -3098,6 +3444,56 @@ mod tests {
             direct_elapsed.as_nanos() / ITERATIONS as u128,
             unreserved_elapsed.as_nanos() / ITERATIONS as u128,
             reserved_elapsed.as_nanos() / ITERATIONS as u128,
+        );
+    }
+}
+
+#[cfg(test)]
+mod ordered_auto_answer_tests {
+    use super::*;
+    #[test]
+    fn retry_requires_zero_delivery_current_context_and_one_remaining_attempt() {
+        let zero = Err(ilium_pty::DeliveryError {
+            operation_id: Some(1),
+            failure: ilium_pty::DeliveryFailure::Timeout,
+        });
+        assert_eq!(
+            auto_answer_completion_phase(&zero, 1, true),
+            AutoAnswerPhase::RetryableZero
+        );
+        assert_eq!(
+            auto_answer_completion_phase(&zero, 2, true),
+            AutoAnswerPhase::Suppressed
+        );
+        assert_eq!(
+            auto_answer_completion_phase(&zero, 1, false),
+            AutoAnswerPhase::Suppressed
+        );
+        for failure in [
+            ilium_pty::DeliveryFailure::PartialWrite {
+                requested: 2,
+                written: 1,
+                cause: ilium_platform::pty_io::WriteFailureKind::Timeout,
+            },
+            ilium_pty::DeliveryFailure::UnconfirmedWrite {
+                requested: 2,
+                definitely_written: 0,
+                possibly_written: 2,
+                cause: ilium_platform::pty_io::WriteFailureKind::Cancelled,
+            },
+        ] {
+            let result = Err(ilium_pty::DeliveryError {
+                operation_id: Some(1),
+                failure,
+            });
+            assert_eq!(
+                auto_answer_completion_phase(&result, 1, true),
+                AutoAnswerPhase::Suppressed
+            );
+        }
+        assert_eq!(
+            auto_answer_completion_phase(&Ok(()), 1, false),
+            AutoAnswerPhase::Delivered
         );
     }
 }

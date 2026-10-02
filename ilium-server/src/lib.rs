@@ -16,6 +16,8 @@
 
 mod agent_debug;
 mod agent_delivery;
+mod agent_identity_guard;
+mod agent_prompt;
 pub mod config;
 mod detection;
 pub mod error;

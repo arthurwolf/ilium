@@ -115,7 +115,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod identity_tests {
     use super::*;

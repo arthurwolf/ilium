@@ -2703,6 +2703,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "ureq",
+ "url",
 ]
 
 [[package]]
@@ -2750,6 +2751,7 @@ dependencies = [
  "directories",
  "getrandom 0.3.4",
  "libc",
+ "portable-pty",
  "tempfile",
  "tracing",
  "windows-sys 0.61.2",
@@ -2773,12 +2775,10 @@ dependencies = [
  "anyhow",
  "crossterm",
  "ilium-platform",
- "libc",
  "portable-pty",
  "thiserror 2.0.18",
  "tokio",
  "vt100",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

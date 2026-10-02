@@ -73,7 +73,9 @@ pub(crate) async fn deliver_initial_prompt_when_ready(
 }
 
 fn initial_prompt_is_ready(runtime: &crate::pane::TerminalPaneRuntime) -> bool {
-    let screen = runtime.session.screen_snapshot();
+    let Some(screen) = runtime.session.try_screen_snapshot() else {
+        return false;
+    };
     // Codex can draw an empty composer before its startup finishes. An Enter
     // sent at that point can be consumed by startup, leaving the initial task
     // in the composer indefinitely (S09 take 20260927-012123).
@@ -270,7 +272,9 @@ pub(crate) fn runtime_has_ready_composer(runtime: &crate::pane::TerminalPaneRunt
     let Some(agent_class) = runtime.detected_agent_class.as_ref() else {
         return false;
     };
-    let screen = runtime.session.screen_snapshot();
+    let Some(screen) = runtime.session.try_screen_snapshot() else {
+        return false;
+    };
     ilium_detect::is_agent_prompt_ready_at_cursor(
         agent_class,
         &screen.text,

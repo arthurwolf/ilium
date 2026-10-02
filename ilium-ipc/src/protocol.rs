@@ -878,6 +878,24 @@ pub enum ClientRequest {
         plan: ilium_core::animation_recommendation::RecommendedRestructurePlan,
         inference_activity_revisions: Vec<NodeActivityRevision>,
     },
+    /// Direct user terminal typing, paste, or explicit voice/control keys.
+    /// Append-only variant keeps existing KeyInput bincode discriminants.
+    UserKeyInput {
+        pane_id: NodeId,
+        bytes: Vec<u8>,
+        submission: Option<PromptSubmissionSource>,
+        /// Unique per Enter. The server binds this to the invocation after
+        /// receipt-backed delivery; composition and paste have no token.
+        prompt_epoch: Option<String>,
+    },
+    /// An exact user text record from the verified transcript suffix after
+    /// the matching Enter. The server CAS-checks epoch and invocation.
+    ReportAgentPromptFromTranscript {
+        pane_id: NodeId,
+        expected_session_id: String,
+        prompt_epoch: String,
+        last_prompt: String,
+    },
 }
 
 impl ClientRequest {
@@ -887,6 +905,8 @@ impl ClientRequest {
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
             Self::Attach { .. } => "attach",
+            Self::UserKeyInput { .. } => "user_key_input",
+            Self::ReportAgentPromptFromTranscript { .. } => "report_agent_prompt_from_transcript",
             Self::NewPane { .. } => "new_pane",
             Self::ClosePane { .. } => "close_pane",
             Self::MoveNode { .. } => "move_node",
@@ -966,6 +986,10 @@ impl ClientRequest {
             self,
             Self::ResizePane { .. }
                 | Self::KeyInput {
+                    submission: None,
+                    ..
+                }
+                | Self::UserKeyInput {
                     submission: None,
                     ..
                 }

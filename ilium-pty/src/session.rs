@@ -1,63 +1,25 @@
-//! `PtySession`: spawn a command behind a pty, get a handle to write input,
-//! resize, and read screen state. This is the entire contract this crate
-//! exposes -- no tree, no agent detection, nothing that knows what the
-//! spawned command *is*, only that it's a process behind a pty.
-//!
-//! The live pty output is consumed by a background reader thread that owns
-//! the *only* long-lived write access to the shared `vt100::Parser`; other
-//! code only ever takes a read lock (`with_screen`) except when resizing.
-//! The parser is wrapped in `Arc<RwLock<_>>` so both sides can reach it
-//! without the reader thread blocking a caller's read for longer than a
-//! single `process()` call.
-//!
-//! `portable_pty`'s I/O is blocking (`std::io::Read`/`Write`, not tokio),
-//! so the reader stays a dedicated `std::thread` rather than an async task.
-//! To let async callers (the detection loop, later, in `ilium-server`)
-//! observe screen changes without polling, the reader thread also notifies
-//! a `tokio::sync::watch::channel(())` after every chunk it parses. The
-//! channel carries no payload -- it is purely a "something changed, go
-//! re-read the shared parser via `with_screen`/`screen_text`" signal, not a
-//! snapshot of the screen itself. That keeps the (fairly large) `vt100`
-//! screen state single-sourced in the `Arc<RwLock<_>>` instead of cloning
-//! it through a channel on every byte chunk, and it matches exactly how
-//! synchronous callers already read the screen: on demand, not by being
-//! handed a copy.
-//!
-//! The reader thread separately broadcasts the *raw* bytes it read (before
-//! `vt100` parsing) over a `tokio::sync::broadcast::channel`. This is for
-//! `ilium-server`'s IPC layer, which forwards `ScreenUpdate` frames to
-//! attached clients as raw bytes so each client can drive its own
-//! `vt100::Parser` for rendering (see `ilium-ipc::ServerEvent::ScreenUpdate`
-//! doc comment for why raw bytes were chosen over a server-computed diff).
-//! `broadcast` rather than another `watch` because this payload is a byte
-//! chunk, not a "something changed" pulse -- every chunk matters and none
-//! may be skipped, and `broadcast` (unlike `watch`) supports that plus
-//! multiple independent subscribers (`ilium-server` may run more than one
-//! forwarder per pane across reconnects).
-//!
-//! The reader thread's own cancellation path is `PtySession::drop`, via
-//! `reader_should_stop` and the `CancellableReader` trait -- see their doc
-//! comments. That exists specifically so a killed pane's thread (and the
-//! `Arc` clones of the parser/journal/child it holds) doesn't stay alive
-//! for the rest of the server process just because some descendant of the
-//! spawned child inherited the pty's slave fd and is still holding it open.
+//! One spawned PTY, its shared screen/journal read views, and a single owned
+//! state actor. Only that actor parses output, commits geometry, and orders
+//! input, mouse events, and terminal-query replies. Native pumps move bytes.
+//! Synchronous compatibility calls wait for completed receipts; async server
+//! callers clone `PtyInput` and await outside pane/tree registry locks.
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
-#[cfg(not(unix))]
-use std::io::Read;
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crossterm::event::MouseEvent;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, ExitStatus, PtySize};
 use tokio::sync::{broadcast, watch};
 
 use crate::error::PtyError;
-use crate::mouse::encode_mouse_event;
+use crate::owner::{OwnerLimits, PtyInput, PtyOwner, TerminalState};
 use crate::query::TerminalQueryResponder;
+use crate::screen_reader::ScreenReader;
+use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
+use ilium_platform::pty_io::ShellProbe;
 
 /// Terminal identity exported to every application running behind Ilium's
 /// `vt100` emulator. This must describe the emulator, not the terminal that
@@ -176,43 +138,52 @@ impl PtyCommand {
     }
 }
 
+/// An authoritative wait observation for this session's directly spawned child.
+/// It says nothing about descendants such as an agent started by a shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtyChildExit {
+    pub process_id: Option<u32>,
+    pub cause: PtyExitCause,
+}
+
+/// Preserve a named signal rather than portable-pty's placeholder code of one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PtyExitCause {
+    ExitCode(u32),
+    Signal(String),
+}
+
+fn retain_child_exit(
+    receipt: &Mutex<Option<PtyChildExit>>,
+    process_id: Option<u32>,
+    status: ExitStatus,
+) {
+    let mut retained = receipt.lock().unwrap_or_else(|error| error.into_inner());
+    if retained.is_none() {
+        let cause = match status.signal() {
+            Some(signal) => PtyExitCause::Signal(signal.to_string()),
+            None => PtyExitCause::ExitCode(status.exit_code()),
+        };
+        *retained = Some(PtyChildExit { process_id, cause });
+    }
+}
+
 /// One spawned command behind a pty, plus the `vt100` parser that turns its
 /// raw byte stream into a renderable/queryable screen.
 pub struct PtySession {
-    // Shared with the background reader thread; `with_screen`/`resize` take
-    // a read/write lock respectively (see module docs for the locking
-    // discipline).
+    // The actor owns all parser writes, geometry control, and transport writes.
+    // This handle only exposes admission and cancellation to other threads.
+    #[cfg(test)]
     parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
-    /// Monotonic revision of the visible parser grid. The reader increments it
-    /// while holding the parser write lock, so [`Self::screen_snapshot`] can
-    /// return text and a revision that describe exactly the same frame.
     screen_generation: Arc<AtomicU64>,
-    // The pty master's write half; writing here sends bytes to the child's
-    // stdin (as seen through the pty). Shared with the reader thread, which
-    // uses it to send the terminal capability-query replies
-    // `TerminalQueryResponder` composed while parsing a chunk back down the
-    // same channel.
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    // The pty master's control handle; used for resizing. Wrapped in a
-    // `Mutex` (rather than a bare field) because `portable_pty::PtyPair`
-    // hands this back as `Box<dyn MasterPty + Send>` -- not `+ Sync` -- so
-    // without this wrapper `PtySession` itself would not be `Sync`, which
-    // `ilium-server` needs (it shares pane state across concurrently
-    // running tokio tasks via `Arc<ServerState>`). `MasterPty::resize`
-    // only takes `&self`, so this mutex is purely a marker/synchronizer
-    // for concurrent callers, not protecting any actual interior state
-    // this crate owns.
-    master: Mutex<Box<dyn MasterPty + Send>>,
-    // The spawned child process handle; used for exit-status polling.
-    // Wrapped in `Arc<Mutex<_>>` (like `writer` above) so the background
-    // reader thread can share it: `portable_pty`'s `Child::kill` (used by
-    // `kill`/`Drop` below) sends SIGHUP and only escalates to an
-    // un-reaped SIGKILL if the child ignores that for ~250ms, so relying
-    // solely on some *future* caller of `has_exited`/`kill` to collect the
-    // exit status would leave a stubborn child as a zombie for the rest
-    // of this (potentially long-lived) server process's life. The reader
-    // thread reaps it itself once its read loop ends (see `spawn`).
+    screen_reader: ScreenReader,
+    owner: PtyOwner,
+    shell_probe: ShellProbe,
+    // The reaper holds only the child, never parser or journal. It polls even
+    // when a descendant keeps the slave fd open after the direct child exits.
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    _child_reaper: OwnedWorker,
+    child_exit: Arc<Mutex<Option<PtyChildExit>>>,
     // OS pid of the directly-spawned child, if the platform reported one.
     process_id: Option<u32>,
     // Captured while the PTY child is still owned. Worktree teardown must
@@ -231,20 +202,6 @@ pub struct PtySession {
     /// pane began producing output, so a live-only broadcast cannot be the
     /// sole source for its terminal parser or its scrollback.
     output_journal: Arc<Mutex<OutputJournal>>,
-    /// Cancellation flag for the background reader thread, set by `Drop`.
-    /// The thread checks this between *and during* its waits for pty
-    /// output -- on unix via a wake pipe (`PollableMasterReader`),
-    /// and on every other target via a bounded channel receive against a
-    /// decoupled pump thread (`BlockingMasterReader`) -- so it can exit,
-    /// and release its `Arc` clones of `parser`/`output_journal`/`child`
-    /// above, even when a descendant of the spawned child is still holding
-    /// the pty's slave fd open and would otherwise keep a plain blocking
-    /// `read()` stuck forever. See `CancellableReader`.
-    reader_should_stop: Arc<AtomicBool>,
-    /// Owner-side wake handle paired with the background reader. Unix uses
-    /// a pipe-backed interrupt; other platforms retain their existing
-    /// bounded/cancellable reader implementation behind the same contract.
-    reader_cancellation: ReaderCancellation,
 }
 
 /// One ordered piece of raw output from a PTY. The sequence belongs to the
@@ -328,11 +285,16 @@ impl OutputJournal {
     /// chunk really is allocated once: `Arc<[u8]>` cannot adopt a `Vec`'s
     /// allocation (it needs room for the reference count in front of the
     /// bytes), so handing one in would copy the chunk a second time.
+    #[cfg(test)]
     fn append(&mut self, bytes: &[u8]) -> PtyOutputChunk {
+        self.append_shared(Arc::from(bytes))
+    }
+
+    fn append_shared(&mut self, bytes: Arc<[u8]>) -> PtyOutputChunk {
         self.next_sequence = self.next_sequence.saturating_add(1);
         let chunk = PtyOutputChunk {
             sequence: self.next_sequence,
-            bytes: Arc::from(bytes),
+            bytes,
         };
         self.retained_bytes = self.retained_bytes.saturating_add(chunk.bytes.len());
         self.chunks.push_back(chunk.clone());
@@ -406,347 +368,6 @@ impl OutputJournal {
     }
 }
 
-/// Outcome of one attempt to fetch the next chunk of pty output, reported
-/// by a [`CancellableReader`] to the background reader thread's loop in
-/// [`PtySession::spawn`].
-enum ReadOutcome {
-    /// `usize` bytes were read into the caller's buffer.
-    Data(usize),
-    /// The pty's slave side is fully closed; nothing more will ever arrive.
-    Eof,
-    /// The owning `PtySession` asked this thread to stop (see
-    /// `reader_should_stop`) before any more data arrived.
-    Stopped,
-    /// An unrecoverable I/O error; treated the same as `Eof` by the caller.
-    Error,
-}
-
-/// Reads the next chunk of a pty's output while being able to notice a
-/// cancellation request even when no output is currently available. A plain
-/// blocking `Read::read` cannot do this: killing the directly-spawned child
-/// (always the pty's session leader and controlling-terminal owner --
-/// `portable_pty` calls `setsid()`/`TIOCSCTTY` for it) makes Linux hang up
-/// the pty for every remaining fd still referencing it, which is enough to
-/// unblock a plain `read()` for most descendants. It is *not* enough for one
-/// that called `setsid()` itself and re-parented into its own session while
-/// still holding the inherited, unredirected slave fd (verified empirically
-/// -- see the crate's test suite): that descendant is no longer a member of
-/// the session the hangup tears down, so it can keep the fd open
-/// indefinitely, and a `read()` blocked on it has no way to be woken by
-/// anything other than bytes actually arriving. See the `unix` impl below
-/// for how this is solved with a bounded `poll()` wait instead of an
-/// unbounded `read()`.
-trait CancellableReader: Send {
-    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome;
-}
-
-/// Unix `CancellableReader`: an owned duplicate of the pty master plus an
-/// explicit wake pipe. The platform adapter blocks indefinitely on both,
-/// eliminating periodic idle wakeups while preserving prompt cancellation.
-#[cfg(unix)]
-struct PollableMasterReader {
-    reader: ilium_platform::interruptible_reader::InterruptibleReader,
-}
-
-#[cfg(unix)]
-impl PollableMasterReader {
-    fn duplicate_from(
-        master: &(dyn MasterPty + Send),
-    ) -> Result<(Self, ilium_platform::interruptible_reader::ReaderInterrupt), PtyError> {
-        let master_fd = master
-            .as_raw_fd()
-            .ok_or_else(|| PtyError::Io(anyhow::anyhow!("pty master exposed no raw fd")))?;
-        let (reader, interrupt) =
-            ilium_platform::interruptible_reader::InterruptibleReader::duplicate(master_fd)
-                .map_err(anyhow::Error::from)
-                .map_err(PtyError::Io)?;
-        Ok((Self { reader }, interrupt))
-    }
-}
-
-#[cfg(unix)]
-impl CancellableReader for PollableMasterReader {
-    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome {
-        loop {
-            if should_stop.load(Ordering::Acquire) {
-                return ReadOutcome::Stopped;
-            }
-            match self.reader.read(buf) {
-                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Data(bytes_read)) => {
-                    return ReadOutcome::Data(bytes_read);
-                }
-                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Eof) => {
-                    return ReadOutcome::Eof;
-                }
-                Ok(ilium_platform::interruptible_reader::InterruptibleRead::Interrupted) => {
-                    return ReadOutcome::Stopped;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => return ReadOutcome::Error,
-            }
-        }
-    }
-}
-
-/// Owner-side cancellation path corresponding to one `CancellableReader`.
-struct ReaderCancellation {
-    #[cfg(unix)]
-    interrupt: ilium_platform::interruptible_reader::ReaderInterrupt,
-}
-
-impl ReaderCancellation {
-    fn interrupt(&self) {
-        #[cfg(unix)]
-        self.interrupt.interrupt();
-    }
-}
-
-/// One outcome of a single `read()` call made by the dedicated pump thread
-/// `BlockingMasterReader` spawns (see its doc comment) -- forwarded to the
-/// owning `CancellableReader::read_next` over a bounded channel.
-#[cfg(not(unix))]
-enum MasterReadMessage {
-    /// Bytes read from the pty master. Owned (`Vec<u8>`, not a borrow) since
-    /// it must cross the channel to a different thread.
-    Data(Vec<u8>),
-    /// The pty's slave side is fully closed; nothing more will ever arrive.
-    Eof,
-    /// An unrecoverable I/O error occurred on the underlying `read()`.
-    Error,
-}
-
-/// Non-unix `CancellableReader`. There is no portable equivalent of
-/// `poll()` available here, so a single thread cannot both block on
-/// `Read::read` and receive an owner wakeup through the same poll set the way
-/// `PollableMasterReader` does on unix. Splitting the work across two
-/// threads recovers that invariant for the state that actually matters:
-///
-/// - A dedicated **pump thread**, spawned once by [`Self::spawn_pumping_from`]
-///   and owning nothing but the raw `Box<dyn Read + Send>` handle and a
-///   bounded channel's sender half, does the actual blocking `read()` calls
-///   in an unbroken loop and forwards each outcome down the channel. It
-///   holds no `Arc` clone of `parser`/`output_journal`/`child` -- those
-///   never reach this thread -- so if a descendant of the killed child is
-///   still holding the pty's slave fd open (see the module docs' worked
-///   example) and this thread's `read()` blocks forever, the *only* things
-///   it leaks for the rest of the process are itself (one OS thread) and
-///   the raw reader handle. That is a small, bounded, non-growing cost --
-///   nothing like the per-pane `vt100` screen grid, the up-to-32-MiB output
-///   journal, or the child handle the old single-thread design also kept
-///   captive.
-/// - `read_next` itself runs on the existing background reader thread (see
-///   `PtySession::spawn`), which is the one holding those `Arc`s. It never
-///   calls `read()`; it only ever waits on the channel with a bounded
-///   timeout, exactly mirroring the unix `poll()` loop's shape, so it can
-///   still notice `should_stop` and return `Stopped` -- releasing its
-///   `Arc` clones -- within about one timeout interval regardless of
-///   whether the pump thread's `read()` ever returns.
-///
-/// On Windows the pump thread's own blocked `read()` *is* cancelled, by
-/// [`PumpThreadCancellation`]: `CancelSynchronousIo` aborts a synchronous
-/// `ReadFile` in progress on a named thread, which is exactly what a ConPTY
-/// read is. So the residual leak described above does not survive there --
-/// dropping this reader stops the pump thread even mid-read.
-///
-/// Any other non-unix target keeps the residual case: the split above bounds
-/// it to one OS thread and one reader handle, and nothing else.
-#[cfg(not(unix))]
-struct BlockingMasterReader {
-    read_messages: std::sync::mpsc::Receiver<MasterReadMessage>,
-    /// Bytes already pulled off `read_messages` but not yet handed to a
-    /// caller, when the pump thread's chunk was larger than the caller's
-    /// `buf`. Keeps `read_next` correct for any `buf` length rather than
-    /// assuming it always matches the pump thread's own internal read size.
-    pending_bytes: Vec<u8>,
-    /// Held only so that dropping this reader stops the pump thread; nothing
-    /// reads it. See [`PumpThreadCancellation`].
-    #[cfg(windows)]
-    _pump_cancellation: PumpThreadCancellation,
-}
-
-/// Stops a pump thread that is blocked inside `read()`.
-///
-/// Two parts, both needed. `stop` is what the pump checks between reads, and
-/// handles the common case where it is not currently blocked. `CancelSynchronousIo`
-/// against the thread's own handle handles the case that flag cannot reach: a
-/// `ReadFile` already in progress, which on an idle pane is where the pump
-/// spends essentially all of its time.
-///
-/// The retry loop closes the gap between them. `CancelSynchronousIo` reports
-/// `ERROR_NOT_FOUND` when the thread has no I/O pending, which happens if it
-/// is momentarily between the flag check and the read -- and if that is all
-/// that was tried, the thread would then enter a read nothing would ever
-/// cancel. Retrying briefly means the cancel lands whichever side of that
-/// window the thread is on.
-#[cfg(windows)]
-struct PumpThreadCancellation {
-    /// Kept solely to own the thread handle `cancel` targets. Never joined:
-    /// see `spawn_pumping_from`.
-    pump_thread: std::thread::JoinHandle<()>,
-    stop: Arc<AtomicBool>,
-    exited: Arc<AtomicBool>,
-}
-
-#[cfg(windows)]
-impl PumpThreadCancellation {
-    /// How many times to re-issue the cancel while waiting for the pump
-    /// thread to actually exit.
-    const CANCEL_ATTEMPTS: usize = 10;
-    /// Gap between attempts. Ten of these bounds pane teardown at ~100ms,
-    /// which is imperceptible next to closing a pane, while being far longer
-    /// than the microsecond-scale window it exists to cover.
-    const CANCEL_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
-}
-
-#[cfg(windows)]
-impl Drop for PumpThreadCancellation {
-    fn drop(&mut self) {
-        use std::os::windows::io::AsRawHandle;
-
-        use windows_sys::Win32::System::IO::CancelSynchronousIo;
-
-        self.stop.store(true, Ordering::Release);
-        let thread_handle = self.pump_thread.as_raw_handle();
-        for _ in 0..Self::CANCEL_ATTEMPTS {
-            if self.exited.load(Ordering::Acquire) {
-                return;
-            }
-            // SAFETY: `thread_handle` is owned by `pump_thread`, which this
-            // struct owns and has not joined, so it is live for this call.
-            // Cancelling when nothing is pending is a no-op that reports
-            // `ERROR_NOT_FOUND`; the return value is deliberately unused
-            // because both outcomes are handled by looping.
-            unsafe { CancelSynchronousIo(thread_handle) };
-            std::thread::sleep(Self::CANCEL_RETRY_INTERVAL);
-        }
-    }
-}
-
-#[cfg(not(unix))]
-impl BlockingMasterReader {
-    /// How long a single channel receive waits before returning control to
-    /// the caller to re-check `should_stop`. Mirrors
-    /// the former Unix timeout: short enough that cancellation (pane close)
-    /// is never noticeably delayed on non-Unix targets.
-    const RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
-
-    /// Bound on in-flight, not-yet-consumed read messages. Without a bound
-    /// the pump thread could read arbitrarily far ahead of a slow consumer
-    /// (the owning reader thread spends real time inside `parser.process()`
-    /// and the journal mutex between receives), turning the channel itself
-    /// into the same kind of unbounded per-pane growth this fix removes
-    /// elsewhere. A small bound is enough to keep the pump thread from
-    /// idling on backpressure during ordinary bursts; once full, its
-    /// blocking `send` simply waits for the consumer, which is exactly the
-    /// backpressure a single-threaded blocking `read()` used to provide for
-    /// free.
-    const CHANNEL_CAPACITY: usize = 16;
-
-    /// Spawns the pump thread described in this type's doc comment and
-    /// returns the `CancellableReader` side that receives from it.
-    ///
-    /// The pump thread is never joined: on a target without
-    /// [`PumpThreadCancellation`] it may block on `read()` forever, so joining
-    /// it from anywhere -- including `PtySession::drop` -- could block the
-    /// joiner for the rest of the process's life. Windows keeps its
-    /// `JoinHandle` alive anyway, purely to own the thread handle the cancel
-    /// targets, and still never joins it.
-    ///
-    /// Its baseline cancellation path is structural rather than a stop flag:
-    /// once `read_next`'s caller (the background reader thread) observes
-    /// `should_stop` and returns, it drops this `BlockingMasterReader`, which
-    /// drops `read_messages`: the pump thread's next `send` then fails
-    /// immediately (a `sync_channel` send errors as soon as its receiver is
-    /// dropped, even mid-block on a full queue) and the pump thread exits on
-    /// its own without ever needing to complete another `read()`. A pump
-    /// thread already blocked *inside* `read()` at that moment cannot observe
-    /// that -- which is what `PumpThreadCancellation` exists to handle on
-    /// Windows.
-    fn spawn_pumping_from(mut reader: Box<dyn Read + Send>) -> Self {
-        let (message_sender, read_messages) = std::sync::mpsc::sync_channel(Self::CHANNEL_CAPACITY);
-        let stop = Arc::new(AtomicBool::new(false));
-        let exited = Arc::new(AtomicBool::new(false));
-        let pump_stop = Arc::clone(&stop);
-        let pump_exited = Arc::clone(&exited);
-        let pump_thread = std::thread::spawn(move || {
-            let mut buf = [0u8; 8192];
-            loop {
-                // Checked before each read so an already-stopped pump never
-                // enters another one. The read in flight when the stop is
-                // requested is handled by the cancel, not by this check.
-                if pump_stop.load(Ordering::Acquire) {
-                    break;
-                }
-                let message = match reader.read(&mut buf) {
-                    Ok(0) => MasterReadMessage::Eof,
-                    Ok(bytes_read) => MasterReadMessage::Data(buf[..bytes_read].to_vec()),
-                    Err(_) => MasterReadMessage::Error,
-                };
-                // `Eof`/`Error` are terminal for the underlying handle --
-                // nothing meaningful can be read from it again -- so there
-                // is nothing left to pump either way once one is sent. A
-                // cancelled read arrives here as `Error`, which is correct:
-                // the handle is being torn down.
-                let is_terminal = !matches!(message, MasterReadMessage::Data(_));
-                if message_sender.send(message).is_err() || is_terminal {
-                    break;
-                }
-            }
-            pump_exited.store(true, Ordering::Release);
-        });
-
-        // Nothing to cancel with on a non-Windows, non-unix target: the thread
-        // is detached and the two flags only ever served the cancel path.
-        #[cfg(not(windows))]
-        {
-            drop(pump_thread);
-            drop((stop, exited));
-        }
-
-        Self {
-            read_messages,
-            pending_bytes: Vec::new(),
-            #[cfg(windows)]
-            _pump_cancellation: PumpThreadCancellation {
-                pump_thread,
-                stop,
-                exited,
-            },
-        }
-    }
-}
-
-#[cfg(not(unix))]
-impl CancellableReader for BlockingMasterReader {
-    fn read_next(&mut self, buf: &mut [u8], should_stop: &AtomicBool) -> ReadOutcome {
-        loop {
-            if !self.pending_bytes.is_empty() {
-                let length = self.pending_bytes.len().min(buf.len());
-                buf[..length].copy_from_slice(&self.pending_bytes[..length]);
-                self.pending_bytes.drain(..length);
-                return ReadOutcome::Data(length);
-            }
-            if should_stop.load(Ordering::Acquire) {
-                return ReadOutcome::Stopped;
-            }
-            match self.read_messages.recv_timeout(Self::RECV_TIMEOUT) {
-                Ok(MasterReadMessage::Data(bytes)) => {
-                    self.pending_bytes = bytes;
-                    continue;
-                }
-                Ok(MasterReadMessage::Eof) => return ReadOutcome::Eof,
-                Ok(MasterReadMessage::Error) => return ReadOutcome::Error,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                // The pump thread only ever exits after sending a terminal
-                // message (see `spawn_pumping_from`), so an unexpected
-                // disconnect (e.g. it panicked) has no more information to
-                // offer than a clean `Eof` does.
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return ReadOutcome::Eof,
-            }
-        }
-    }
-}
-
 /// The smallest pty dimension this crate will ever forward to the OS pty or
 /// the `vt100` parser. `vt100`'s grid arithmetic (`rows - 1`, `cols - 1`,
 /// used pervasively in `Grid::new`/`set_size`/cursor clamping) underflows the
@@ -767,18 +388,13 @@ fn clamp_pty_dimension(requested: u16) -> u16 {
     requested.max(MINIMUM_PTY_DIMENSION)
 }
 
-/// How long the background reader thread sleeps between non-blocking
-/// `try_wait` polls while reaping the child after its read loop ends. Kept
-/// short so a killed pane's exit status is collected promptly; the poll only
-/// runs at all in the brief window between the read loop ending and the
-/// child actually exiting (or, for a child that closed its tty without
-/// exiting, until `kill`/`Drop` ends it). See the reap loop in
-/// [`PtySession::spawn`] for why this polls instead of blocking in `wait()`.
+/// Child reaping is independent of PTY output, since a descendant may keep
+/// its inherited slave fd open after the direct child exits.
 const CHILD_REAP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
 impl PtySession {
-    /// Spawns `command` behind a new pty and starts the background reader
-    /// thread that feeds its output into the shared `vt100::Parser`.
+    /// Spawns `command` behind a new pty and starts the transport pumps and
+    /// the sole state owner that feeds its output into `vt100::Parser`.
     pub fn spawn(command: PtyCommand) -> Result<Self, PtyError> {
         // Clamped once, up front, so the OS pty size and the `vt100`
         // parser's initial size can never diverge (see
@@ -811,45 +427,61 @@ impl PtySession {
         // monochrome.
         configure_emulated_terminal_environment(&mut cmd, &command.env);
 
-        let mut child = pair.slave.spawn_command(cmd).map_err(PtyError::Spawn)?;
+        let child = pair.slave.spawn_command(cmd).map_err(PtyError::Spawn)?;
         // Drop our end of the slave once the child has it; keeping it open
         // would prevent the child from ever seeing EOF/HUP on its tty.
         drop(pair.slave);
 
         // From here on the child is already running and nothing else owns
         // it yet -- no `PtySession` exists to `kill()` it on a later `Drop`,
-        // and no reader thread exists yet to reap it either (that thread is
-        // only spawned once setup below succeeds). If either setup step
+        // and no reaper exists yet. If a later setup step
         // below fails (e.g. `dup`-equivalent fd exhaustion), we must kill
         // *and reap* the child explicitly before returning `Err`, or it
-        // leaks as a zombie: `child` is a plain `std::process::Child` under
-        // the hood, which neither terminates nor reaps its process on drop.
-        let (mut reader, reader_cancellation) = match Self::open_cancellable_reader(&*pair.master) {
-            Ok(reader) => reader,
-            Err(err) => {
-                let _ = child.kill();
-                // `kill()` above only guarantees reaping when the child
-                // dies promptly after SIGHUP; reap explicitly so this
-                // early-return path can never leave a zombie behind (see
-                // the `child` field doc comment).
-                let _ = child.wait();
-                return Err(err);
-            }
-        };
-        let writer: Arc<Mutex<Box<dyn Write + Send>>> = match pair.master.take_writer() {
-            Ok(writer) => Arc::new(Mutex::new(writer)),
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PtyError::Io(err));
-            }
-        };
+        // leaks as a zombie: dropping portable-pty's child does not prove its
+        // process has exited or been reaped.
         let process_id = child.process_id();
         let pty_process_identity = process_id.and_then(|process_id| {
             ilium_platform::process_control::capture_pty_process(process_id).ok()
         });
         let child = Arc::new(Mutex::new(child));
-
+        let child_exit = Arc::new(Mutex::new(None));
+        let reaper_exit = Arc::clone(&child_exit);
+        let reaper_child = Arc::clone(&child);
+        let child_reaper = match spawn_owned(
+            "ilium-pty-child-reaper",
+            WorkerKind::Cooperative,
+            StopToken::default(),
+            || {},
+            move |_stop| loop {
+                let exited = {
+                    let mut child = reaper_child
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    // A status-query failure is not proof that the owned
+                    // child was reaped. Keep custody and retry; shutdown may
+                    // honestly report a pending reaper if the OS never answers.
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            retain_child_exit(&reaper_exit, process_id, status);
+                            true
+                        }
+                        Ok(None) | Err(_) => false,
+                    }
+                };
+                if exited {
+                    break;
+                }
+                std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
+            },
+        ) {
+            Ok(worker) => worker,
+            Err(error) => {
+                let mut child = child.lock().unwrap_or_else(|poison| poison.into_inner());
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(PtyError::Io(error.into()));
+            }
+        };
         let parser = Arc::new(RwLock::new(vt100::Parser::new_with_callbacks(
             rows,
             cols,
@@ -857,16 +489,8 @@ impl PtySession {
             TerminalQueryResponder::new(),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
+        let screen_reader = ScreenReader::new(Arc::clone(&parser), Arc::clone(&screen_generation));
         let (screen_changed_tx, screen_changed_rx) = watch::channel(());
-        // Capacity is chunks-buffered, not bytes: at up to one 64 KiB read per
-        // chunk this comfortably absorbs a slow/momentarily-disconnected
-        // subscriber (e.g. `ilium-server`'s forwarder task between polls)
-        // without unbounded memory growth -- and each buffered chunk is an
-        // `Arc` the journal below usually holds anyway, so the buffer's own
-        // added cost is only whatever the journal has already discarded. A
-        // lagging subscriber gets `RecvError::Lagged` rather than silently
-        // missing data forever -- the caller decides how to handle that (see
-        // `subscribe_output_bytes`).
         const OUTPUT_BYTES_CHANNEL_CAPACITY: usize = 256;
         let (output_bytes_tx, _) = broadcast::channel(OUTPUT_BYTES_CHANNEL_CAPACITY);
         let output_journal = Arc::new(Mutex::new(OutputJournal {
@@ -875,271 +499,141 @@ impl PtySession {
             next_sequence: 0,
             is_complete: true,
         }));
-        let reader_should_stop = Arc::new(AtomicBool::new(false));
-        {
-            let parser = Arc::clone(&parser);
-            let screen_generation = Arc::clone(&screen_generation);
-            let output_bytes_tx = output_bytes_tx.clone();
-            let output_journal = Arc::clone(&output_journal);
-            let child = Arc::clone(&child);
-            let reader_should_stop = Arc::clone(&reader_should_stop);
-            // Needed so this thread can send the terminal-query replies that
-            // `process()` composes -- see the drain below.
-            let writer = Arc::clone(&writer);
-            // Not keeping the `JoinHandle` around, but this thread is not
-            // fire-and-forget: `reader_should_stop` (set by `Drop` below) is
-            // its cancellation path, checked by `CancellableReader::read_next`
-            // between -- and *during*, via a wake pipe on unix or a
-            // bounded channel receive against a decoupled pump thread on
-            // every other target (see `PollableMasterReader`/
-            // `BlockingMasterReader`) -- waits for more pty output. That is
-            // what lets this thread exit (and release its `Arc` clones of
-            // `parser`/`output_journal`/`child`) promptly even if a
-            // descendant of the spawned child is still holding the pty's
-            // slave fd open, which killing only the direct child (see the
-            // `child` field doc comment) cannot by itself unblock a plain
-            // blocking `read()` from. Not joining the handle is deliberate
-            // too: non-Unix callers can still block for up to
-            // `RECV_TIMEOUT`, which synchronous pane teardown should not pay.
-            std::thread::spawn(move || {
-                // A larger reusable buffer lets the Unix interruptible reader
-                // drain one already-ready PTY burst into a single parser,
-                // journal, watch, and broadcast operation. It is allocated
-                // once per pane reader thread, never once per chunk.
-                let mut buf = [0u8; 64 * 1024];
-                while let ReadOutcome::Data(bytes_read) =
-                    reader.read_next(&mut buf, &reader_should_stop)
-                {
-                    // A chunk may have arrived in the same instant `Drop`
-                    // requested a stop; drop it rather than growing the
-                    // parser/journal state past the point the owner asked
-                    // this thread to stop retaining anything.
-                    if reader_should_stop.load(Ordering::Acquire) {
-                        break;
-                    }
-                    // Scope the write guard to this single `process()` call
-                    // so a concurrent `with_screen`/`resize` never waits on
-                    // us longer than one chunk's worth of parsing.
-                    //
-                    // `process()` may answer terminal capability queries the
-                    // child sent (`TerminalQueryResponder`), but it only
-                    // *composes* those replies into a buffer -- taking them
-                    // out is a `mem::take`, and the actual pty write happens
-                    // below, after this guard is dropped. That ordering is
-                    // deliberate: writing to a child that is not draining its
-                    // own stdin can block indefinitely, and doing that under
-                    // the parser lock would stall every screen read, resize,
-                    // and teardown behind it.
-                    let pending_query_replies = {
-                        // The lock is only ever held by this thread (here)
-                        // and the owning `PtySession` (read/resize); a
-                        // poisoned lock means one of those panicked, which
-                        // we treat as unrecoverable for this pane.
-                        let mut parser = parser.write().unwrap();
-                        parser.process(&buf[..bytes_read]);
-                        screen_generation.fetch_add(1, Ordering::Release);
-                        parser.callbacks_mut().take_pending_replies()
-                    };
-                    if !pending_query_replies.is_empty() {
-                        // Best-effort: a capability-query reply that fails to
-                        // send is no worse than the unanswered query the
-                        // responder exists to fix, and a poisoned lock here
-                        // means the pane is already being torn down.
-                        if let Ok(mut writer) = writer.lock() {
-                            let _ = writer.write_all(&pending_query_replies);
-                            let _ = writer.flush();
+        let journal_for_owner = Arc::clone(&output_journal);
+        let broadcast_for_owner = output_bytes_tx.clone();
+        let terminal = TerminalState {
+            screen_reader: screen_reader.clone(),
+            parser: Arc::clone(&parser),
+            generation: Arc::clone(&screen_generation),
+            changed: screen_changed_tx,
+            publish: Box::new(move |bytes| {
+                let chunk = journal_for_owner
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .append_shared(bytes);
+                let _ = broadcast_for_owner.send(chunk);
+            }),
+        };
+        let cleanup_child = Arc::clone(&child);
+        let cleanup_exit = Arc::clone(&child_exit);
+        let (owner, shell_probe) =
+            PtyOwner::spawn(pair.master, terminal, OwnerLimits::default(), move || {
+                let mut child = cleanup_child
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                match child.try_wait() {
+                    Ok(Some(status)) => retain_child_exit(&cleanup_exit, process_id, status),
+                    Ok(None) | Err(_) => {
+                        let _ = child.kill();
+                        if let Ok(status) = child.wait() {
+                            retain_child_exit(&cleanup_exit, process_id, status);
                         }
                     }
-                    // Best-effort: `send` only errors once every receiver
-                    // (including the one kept alive by this `PtySession`)
-                    // has been dropped, i.e. the pane is already gone and
-                    // this thread is about to exit on its own via the next
-                    // failed read.
-                    let _ = screen_changed_tx.send(());
-                    // Also best-effort: a `broadcast::Sender::send` only
-                    // errors when there are currently zero receivers (no
-                    // client attached right now), which is a normal state
-                    // for a detached pane, not a failure.
-                    let output_chunk = output_journal.lock().unwrap().append(&buf[..bytes_read]);
-                    let _ = output_bytes_tx.send(output_chunk);
                 }
-                // The read loop above ends once the pty's slave side is
-                // fully closed (EOF), an unrecoverable I/O error occurs, or
-                // `Drop` requested a stop. `kill()`/`Drop` deliberately only
-                // *signal* the direct child (see the `child` field doc
-                // comment for why), so this thread is the one place that
-                // actually collects its exit status -- without this, a
-                // child that needed a SIGKILL escalation to die would be
-                // left as a zombie for the rest of this process's life.
-                //
-                // Reaping polls `try_wait` rather than calling the blocking
-                // `wait()`: the `child` mutex is shared with `kill`/
-                // `has_exited`/`Drop`, and EOF does not imply the child has
-                // exited -- a child that redirects its stdio away from the
-                // tty and keeps running closes every slave fd (EOF here)
-                // while staying alive indefinitely. A blocking `wait()`
-                // under the mutex in that state would deadlock `kill()`,
-                // the very call that could have ended the child. Polling
-                // holds the lock only for a non-blocking check, and once
-                // `Drop`/`kill` signal the child (`portable_pty` escalates
-                // SIGHUP to an unignorable SIGKILL inside `kill()` itself),
-                // the next poll reaps it.
-                loop {
-                    // Poisoned-lock panic is an invariant violation (see
-                    // the parser-lock comment above). `Err` from `try_wait`
-                    // means the status cannot be determined at all; there
-                    // is nothing more this thread can do about the child.
-                    match child.lock().unwrap().try_wait() {
-                        Ok(Some(_)) | Err(_) => break,
-                        Ok(None) => {}
-                    }
-                    std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
-                }
-            });
-        }
+            })
+            .map_err(|error| PtyError::Io(error.into()))?;
 
         Ok(Self {
+            #[cfg(test)]
             parser,
             screen_generation,
-            writer,
-            master: Mutex::new(pair.master),
+            screen_reader,
+            owner,
+            shell_probe,
             child,
+            _child_reaper: child_reaper,
+            child_exit,
             process_id,
             pty_process_identity,
             screen_changed: screen_changed_rx,
             output_bytes: output_bytes_tx,
-            reader_should_stop,
             output_journal,
-            reader_cancellation,
         })
     }
 
-    /// Opens the `CancellableReader` the background reader thread will use
-    /// for the lifetime of this session. Unix gets a `poll()`-capable
-    /// duplicate of the master fd; every other target falls back to
-    /// `portable_pty`'s own plain blocking reader (see `BlockingMasterReader`).
-    #[cfg(unix)]
-    fn open_cancellable_reader(
-        master: &(dyn MasterPty + Send),
-    ) -> Result<(Box<dyn CancellableReader>, ReaderCancellation), PtyError> {
-        let (reader, interrupt) = PollableMasterReader::duplicate_from(master)?;
-        Ok((Box::new(reader), ReaderCancellation { interrupt }))
+    /// Clone under a server registry lock, then release that lock before
+    /// waiting for actual delivery. The handle cannot keep the child alive.
+    pub fn input_handle(&self) -> PtyInput {
+        self.owner.input()
     }
 
-    #[cfg(not(unix))]
-    fn open_cancellable_reader(
-        master: &(dyn MasterPty + Send),
-    ) -> Result<(Box<dyn CancellableReader>, ReaderCancellation), PtyError> {
-        let reader = master.try_clone_reader().map_err(PtyError::Io)?;
-        Ok((
-            Box::new(BlockingMasterReader::spawn_pumping_from(reader)),
-            ReaderCancellation {},
-        ))
+    /// Explicitly terminates this session's direct child and requests owner
+    /// cancellation, then observes worker joins within one shared deadline.
+    /// Use only for an owned session being closed, outside Tokio and shared
+    /// registry locks. Pending handles remain owned by the platform supervisor.
+    pub fn shutdown_blocking(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<crate::owner::ShutdownReport, PtyError> {
+        let timeout = timeout.min(std::time::Duration::from_secs(60));
+        let deadline = std::time::Instant::now() + timeout;
+        self.kill()?;
+        let mut report = self
+            .owner
+            .shutdown_blocking(deadline.saturating_duration_since(std::time::Instant::now()));
+        let ticket = self._child_reaper.ticket();
+        match ticket.join_until(deadline) {
+            Ok(ilium_platform::owned_worker::WorkerExit::Joined) => report.joined.push(ticket.id()),
+            Ok(ilium_platform::owned_worker::WorkerExit::Panicked) => {
+                report.panicked.push(ticket.id())
+            }
+            Err(_) => report.pending.push(ticket.id()),
+        }
+        Ok(report)
     }
 
-    /// Writes raw bytes (already-encoded key input) to the pty.
+    /// Compatibility path for synchronous callers outside Tokio/registry locks.
     pub fn write(&self, bytes: &[u8]) -> Result<(), PtyError> {
-        // Poisoned-lock panic is an invariant violation (see `spawn`).
-        let mut writer = self.writer.lock().unwrap();
-        writer.write_all(bytes).map_err(PtyError::Write)?;
-        writer.flush().map_err(PtyError::Write)?;
+        self.input_handle().write(bytes)?.wait_blocking()?;
         Ok(())
     }
 
-    /// Forwards one host-terminal mouse event to the pty only when the
-    /// application inside it explicitly enabled an xterm mouse protocol.
-    /// Coordinates are zero-based and relative to the pane content box.
     pub fn write_mouse_input(
         &self,
         event: MouseEvent,
         column: u16,
         row: u16,
     ) -> Result<(), PtyError> {
-        let encoded = self.with_screen(|screen| {
-            encode_mouse_event(
-                event,
-                column,
-                row,
-                screen.mouse_protocol_mode(),
-                screen.mouse_protocol_encoding(),
-            )
-        });
-        if let Some(encoded) = encoded {
-            self.write(&encoded)?;
-        }
+        self.input_handle()
+            .write_mouse_input(event, column, row)?
+            .wait_blocking()?;
         Ok(())
     }
 
-    /// Resizes both the OS pty and the `vt100` parser's screen. `rows`/`cols`
-    /// are clamped to [`MINIMUM_PTY_DIMENSION`] before use -- see that
-    /// constant's doc comment for why a `0` here must never reach the
-    /// `vt100` parser.
-    ///
-    /// Both sizes are updated under one continuous hold of the `master`
-    /// mutex, because they must never disagree. `ilium-server` resizes a pane
-    /// from whichever connection task handled the request while holding only a
-    /// *read* lock on its pane registry, so two attached clients with
-    /// different window sizes genuinely can call this concurrently. Taking the
-    /// mutex per statement would let their updates interleave -- pty set to A
-    /// then B, parser set to B then A -- leaving the child rendering for one
-    /// geometry into a grid sized for the other until some unrelated later
-    /// resize happened to line them back up.
-    ///
-    /// This is the crate's only nested lock acquisition, and it fixes the
-    /// order as `master` -> `parser`. It cannot deadlock and must not be
-    /// "simplified" back: every other holder takes exactly one of this
-    /// session's locks at a time (the reader thread takes `parser`, releases
-    /// it, then `writer`, then `output_journal`), so no path anywhere takes
-    /// `parser` or `writer` before `master`.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), PtyError> {
-        let rows = clamp_pty_dimension(rows);
-        let cols = clamp_pty_dimension(cols);
-        // Poisoned-lock panic is an invariant violation (see `spawn`).
-        let master = self.master.lock().unwrap();
-        master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(PtyError::Resize)?;
-        // See the comment in `spawn`'s reader thread: a poisoned lock here
-        // means some other holder already panicked, which we can't recover
-        // from anyway. A failed OS resize returned above without reaching
-        // this, so both sides simply keep the previous size instead of ending
-        // up half-applied.
-        let mut parser = self.parser.write().unwrap();
-        parser.screen_mut().set_size(rows, cols);
-        self.screen_generation.fetch_add(1, Ordering::Release);
+        self.input_handle().resize(rows, cols)?.wait_blocking()?;
         Ok(())
     }
 
-    /// Runs `f` with a read lock on the current `vt100::Screen`.
-    ///
-    /// `f` runs while this session's parser lock is held, so it must not call
-    /// back into any other method on the same session: `resize` alone would
-    /// deadlock on the parser's own write lock, and it also holds `master`
-    /// while waiting for that write lock, which is the reverse of the order a
-    /// closure reaching for `shell_owns_terminal` would take (see `resize`).
-    /// Read the screen here, do everything else after returning.
+    /// Reads a consistent screen without waiting for parser mutation. During a
+    /// resize it may return the retained pre-resize frame. The callback on a
+    /// current frame holds a parser read guard and must not wait for mutation.
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
-        // Poisoned-lock panic is an invariant violation (see `spawn`).
-        let guard = self.parser.read().unwrap();
-        f(guard.screen())
+        self.screen_reader.with_frame(|screen, _| f(screen))
     }
 
-    /// Plain-text dump of the current screen.
+    /// Current-only nonblocking read. Automation must not use retained frames.
+    pub fn try_with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> Option<R> {
+        self.screen_reader.try_with_frame(|screen, _| f(screen))
+    }
+
     pub fn screen_text(&self) -> String {
         self.with_screen(|screen| screen.contents())
     }
 
-    /// Returns visible text and its monotonic parser generation under one read
-    /// lock, preventing a detection pass from pairing text from one frame with
-    /// the revision of another.
+    /// Text, cursor, attributes and generation always belong to one frame.
+    /// Presentation may receive the retained frame while the parser is busy.
     pub fn screen_snapshot(&self) -> ScreenSnapshot {
-        let parser = self.parser.read().unwrap();
-        let screen = parser.screen();
+        self.screen_reader.with_frame(Self::snapshot_from_screen)
+    }
+
+    /// Returns no frame when mutation is underway, instead of stale evidence.
+    pub fn try_screen_snapshot(&self) -> Option<ScreenSnapshot> {
+        self.screen_reader
+            .try_with_frame(Self::snapshot_from_screen)
+    }
+
+    fn snapshot_from_screen(screen: &vt100::Screen, generation: u64) -> ScreenSnapshot {
         let (rows, columns) = screen.size();
         let mut dimmed_cells = Vec::new();
         for row in 0..rows {
@@ -1153,7 +647,7 @@ impl PtySession {
             }
         }
         ScreenSnapshot {
-            generation: self.screen_generation.load(Ordering::Acquire),
+            generation,
             text: screen.contents(),
             cursor_position: screen.cursor_position(),
             dimmed_cells,
@@ -1214,25 +708,7 @@ impl PtySession {
     /// the terminal would retitle panes from keystrokes typed into a running
     /// program.
     pub fn shell_owns_terminal(&self) -> Option<bool> {
-        #[cfg(unix)]
-        {
-            // Poisoned-lock panic is an invariant violation (see `spawn`).
-            let process_group_id = self.master.lock().unwrap().process_group_leader()?;
-            let process_group_id = u32::try_from(process_group_id).ok()?;
-            Some(process_group_id == self.process_id?)
-        }
-
-        #[cfg(windows)]
-        {
-            let shell_process_id = self.process_id?;
-            ilium_platform::process_info::has_live_child(shell_process_id)
-                .map(|has_child| !has_child)
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            None
-        }
+        self.shell_probe.shell_owns_terminal(self.process_id?)
     }
 
     /// Non-blocking check of whether the child process has exited.
@@ -1240,7 +716,35 @@ impl PtySession {
         // Poisoned-lock panic is an invariant violation (see `spawn`).
         // `try_wait` returning `Err` means we couldn't determine status;
         // treat that as "not (known to be) exited" rather than guessing.
-        matches!(self.child.lock().unwrap().try_wait(), Ok(Some(_)))
+        self.child_exit().is_some()
+    }
+
+    /// Returns the retained direct-child exit cause, refreshing it with a
+    /// non-blocking wait query when necessary. Query errors never invent an exit.
+    pub fn child_exit(&self) -> Option<PtyChildExit> {
+        {
+            let retained = self
+                .child_exit
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if retained.is_some() {
+                return retained.clone();
+            }
+        }
+        // Cleanup may be waiting to reap the child. Status inspection must
+        // not wait behind it while the caller owns a server registry lock.
+        let mut child = match self.child.try_lock() {
+            Ok(child) => child,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        if let Ok(Some(status)) = child.try_wait() {
+            retain_child_exit(&self.child_exit, self.process_id, status);
+        }
+        self.child_exit
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
     }
 
     /// Returns a fresh `watch::Receiver` that resolves on `.changed().await`
@@ -1299,7 +803,8 @@ impl PtySession {
         // process into a spurious `PtyError::Kill` instead of the `Ok(())`
         // this method promises for that case.
         let mut child = self.child.lock().unwrap();
-        if matches!(child.try_wait(), Ok(Some(_))) {
+        if let Ok(Some(status)) = child.try_wait() {
+            retain_child_exit(&self.child_exit, self.process_id, status);
             return Ok(());
         }
         child.kill().map_err(PtyError::Kill)
@@ -1307,63 +812,21 @@ impl PtySession {
 }
 
 impl Drop for PtySession {
-    /// Best-effort kill of the spawned child, then an unconditional request
-    /// for the background reader thread (see `spawn`) to stop, so a
-    /// `PtySession` dropped without a preceding, successful `kill()` call
-    /// (an error path, a future call site that forgets, a panic unwind)
-    /// can't leave that thread -- and its `Arc` clones of the (fairly
-    /// large) `vt100::Parser` screen state, the bounded output journal, and
-    /// the child handle -- alive for the rest of this (potentially
-    /// long-lived) server process.
-    ///
-    /// Order matters: the child is killed *before* `reader_should_stop` is
-    /// set. `kill()` sends an unignorable SIGKILL-equivalent to the direct
-    /// child, so it dies promptly regardless of whether anything is
-    /// reading its output; only once that signal is sent do we ask the
-    /// reader thread to stop, so its final `try_wait` reap loop (see
-    /// `spawn`) polls a process that is already dying rather than a live
-    /// one still waiting to be killed.
-    ///
-    /// This does not depend on the direct child's tty actually closing.
-    /// Killing the direct child -- the pty's session leader -- makes Linux
-    /// hang up the pty for every fd still referencing it *within that
-    /// session*, which already unblocks a plain `read()` for most
-    /// descendants (an ordinary backgrounded job, for instance). It does
-    /// not reach a descendant that called `setsid()` itself and re-parented
-    /// into its own session while still holding the inherited, unredirected
-    /// slave fd (some daemonizing code does this without also redirecting
-    /// stdio away) -- that fd can stay open indefinitely. For exactly that
-    /// remaining case, `CancellableReader::read_next` re-checks
-    /// `reader_should_stop` through an explicit wake pipe on unix
-    /// (`PollableMasterReader`), or via a bounded receive against a
-    /// decoupled pump thread everywhere else (`BlockingMasterReader`) --
-    /// instead of only ever waking on incoming bytes, so the reader thread
-    /// exits promptly regardless of what any descendant does. That descendant itself is
-    /// not signaled -- `kill()`/`Drop` only ever reach the directly-spawned
-    /// child, the same limitation every terminal multiplexer has -- but its
-    /// orphaned output no longer has anywhere in this process left to
-    /// accumulate into once the reader thread has exited and dropped its
-    /// `Arc` clones.
-    ///
-    /// Matches `kill()`'s own semantics: a child that already exited (the
-    /// ordinary case, since callers normally call `kill()` explicitly
-    /// before a `PtySession` is dropped) is not an error, and a failure to
-    /// signal an already-gone process is not worth surfacing from `Drop`.
     fn drop(&mut self) {
+        // Preserve direct-child custody. The independently owned reaper will
+        // observe and collect its exit even if a descendant holds the PTY open.
         {
-            // Poisoned-lock panic is an invariant violation (see `spawn`).
-            // As in `kill()`, the exited-check and the kill share one lock
-            // acquisition: with separate acquisitions the reader thread's
-            // reap loop (see `spawn`) could collect the child in between,
-            // and the kill would then signal a raw pid the OS may already
-            // have recycled for an unrelated process.
-            let mut child = self.child.lock().unwrap();
-            if !matches!(child.try_wait(), Ok(Some(_))) {
-                let _ = child.kill();
+            let mut child = self.child.lock().unwrap_or_else(|error| error.into_inner());
+            match child.try_wait() {
+                Ok(Some(status)) => retain_child_exit(&self.child_exit, self.process_id, status),
+                Ok(None) | Err(_) => {
+                    let _ = child.kill();
+                }
             }
         }
-        self.reader_should_stop.store(true, Ordering::Release);
-        self.reader_cancellation.interrupt();
+        self.owner.request_shutdown();
+        // `child_reaper` and owner transport workers retain JoinHandles in
+        // ilium-platform until each thread exits. Drop never blocks Tokio.
     }
 }
 
@@ -1374,6 +837,57 @@ mod owner_regression_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_exit_receipt_preserves_unsigned_codes_and_the_first_observation() {
+        let receipt = Mutex::new(None);
+        retain_child_exit(&receipt, Some(42), ExitStatus::with_exit_code(u32::MAX));
+        retain_child_exit(&receipt, Some(42), ExitStatus::with_exit_code(0));
+        assert_eq!(
+            receipt.into_inner().unwrap(),
+            Some(PtyChildExit {
+                process_id: Some(42),
+                cause: PtyExitCause::ExitCode(u32::MAX),
+            }),
+        );
+    }
+
+    #[test]
+    fn child_exit_receipt_preserves_a_signal_without_its_placeholder_code() {
+        let receipt = Mutex::new(None);
+        retain_child_exit(&receipt, None, ExitStatus::with_signal("SIGTERM"));
+        assert_eq!(
+            receipt.into_inner().unwrap(),
+            Some(PtyChildExit {
+                process_id: None,
+                cause: PtyExitCause::Signal("SIGTERM".to_string()),
+            }),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_exit_receipt_survives_real_reaping_and_idempotent_kill() {
+        for code in [0, 37] {
+            let mut session = PtySession::spawn(
+                PtyCommand::new("sh", std::env::temp_dir(), 24, 80)
+                    .arg("-c")
+                    .arg(format!("exit {code}")),
+            )
+            .expect("spawn owned fixture shell");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !session.has_exited() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let expected = Some(PtyChildExit {
+                process_id: session.process_id(),
+                cause: PtyExitCause::ExitCode(code),
+            });
+            assert_eq!(session.child_exit(), expected);
+            session.kill().expect("already reaped child is harmless");
+            assert_eq!(session.child_exit(), expected);
+        }
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

@@ -37,10 +37,11 @@ impl InterruptibleReader {
     /// the *same* open file description, and `O_NONBLOCK` lives on that shared
     /// description -- so switching this duplicate to nonblocking mode would
     /// also switch the caller's own descriptor, and every writer cloned from
-    /// it. For a pty master that turns a momentarily full input buffer into a
-    /// failed `write_all` and silently dropped user input. `read` therefore
-    /// bounds its drain with a zero-timeout `poll` instead of relying on
-    /// `EAGAIN` (see `data_has_queued_bytes`).
+    /// it. This reader never changes that policy. The ordered PTY transport
+    /// deliberately enables O_NONBLOCK for its sole partial-write-aware writer;
+    /// the existing WouldBlock branch below safely re-polls that shared mode.
+    /// Other users may retain blocking descriptors: `read` still bounds its
+    /// drain with a zero-timeout `poll` (see `data_has_queued_bytes`).
     pub fn duplicate(data_fd: RawFd) -> io::Result<(Self, ReaderInterrupt)> {
         // SAFETY: `data_fd` is borrowed only for `fcntl`; successful `dup`
         // returns an independently owned descriptor.
