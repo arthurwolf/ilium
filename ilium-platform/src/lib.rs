@@ -47,9 +47,9 @@ pub mod detached;
 pub mod file_lock;
 #[cfg(unix)]
 pub mod interruptible_reader;
+pub mod minecraft;
 #[cfg(windows)]
 mod nofollow_windows;
-pub mod minecraft;
 pub mod open_external;
 pub mod paths;
 pub mod process_control;

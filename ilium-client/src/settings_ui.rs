@@ -564,8 +564,8 @@ pub fn settings_help_anchors(
                     continue;
                 };
                 // Rows of the left column (scenes and global settings) carry
-                    // their help anchor in the gap column right of the column;
-                    // the right column uses the shared help rail.
+                // their help anchor in the gap column right of the column;
+                // the right column uses the shared help rail.
                 if matches!(
                     model.region(row),
                     Some(
@@ -5017,8 +5017,8 @@ mod tests {
                     // The scene list and the global rows are scrolled windows,
                     // so walk every region's offsets; the ink rows exist only
                     // in Monotone and the tint row only in Greyscale.
-                    use ilium_ambient::style::ColorMode;
                     use crate::animation_rows::Region;
+                    use ilium_ambient::style::ColorMode;
                     for mode in [ColorMode::Color, ColorMode::Greyscale, ColorMode::Monotone] {
                         app.animation_settings.appearance.mode = mode;
                         for kind in crate::background_animation::AnimationKind::ALL {

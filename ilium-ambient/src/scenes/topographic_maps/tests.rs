@@ -411,7 +411,7 @@ fn reconfigure_keeps_the_loaded_world_unless_the_world_changes() {
             zoom_percent: 300,
             ..base.clone()
         },
-        ..Default::default()
+        ..AmbientSettings::default()
     };
     assert!(scene.reconfigure(&ambient));
     let current = scene.current.as_ref().expect("still loaded");

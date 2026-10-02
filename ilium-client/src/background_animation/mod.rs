@@ -530,7 +530,8 @@ impl AnimationFrame {
 
     /// Record normalized field position without consuming any UI mouse input.
     pub fn pointer(&mut self, position: Option<[f32; 2]>) {
-        self.pointer = position.filter(|point| point.iter().all(|coordinate| coordinate.is_finite()))
+        self.pointer = position
+            .filter(|point| point.iter().all(|coordinate| coordinate.is_finite()))
             .map(|point| point.map(|coordinate| coordinate.clamp(0.0, 1.0)));
     }
 

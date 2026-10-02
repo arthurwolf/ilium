@@ -64,24 +64,26 @@ impl TerrainFields {
         let (x, z) = (i64::from(x), i64::from(z));
         // The warp is smaller than its lattice period. Quantized offsets stay
         // coordinate safe and do not depend on a chunk origin or sampling order.
-        let warped_x = x + (96.0 * fbm2(self.seed ^ 0x7761_7270_78, x, z, 1024, 3)).round() as i64;
-        let warped_z = z + (96.0 * fbm2(self.seed ^ 0x7761_7270_7a, x, z, 1024, 3)).round() as i64;
+        let warped_x =
+            x + (96.0 * fbm2(self.seed ^ 0x0077_6172_7078, x, z, 1024, 3)).round() as i64;
+        let warped_z =
+            z + (96.0 * fbm2(self.seed ^ 0x0077_6172_707a, x, z, 1024, 3)).round() as i64;
         let field =
             |salt, period, octaves| fbm2(self.seed ^ salt, warped_x, warped_z, period, octaves);
-        let weirdness = field(0x7765_6972_64, 384, 4);
+        let weirdness = field(0x0077_6569_7264, 384, 4);
         // Two non-aligned fields give rivers coherent curved valleys without
         // excluding any repeating row or imposing a global compass direction.
-        let river_field = 0.72 * field(0x7269_7665_72, 512, 4)
+        let river_field = 0.72 * field(0x0072_6976_6572, 512, 4)
             + 0.28 * fbm2(self.seed ^ 0x7269_7665_7232, warped_z, -warped_x, 896, 3);
         TerrainClimate {
-            continentalness: field(0x636f_6e74_69, 1536, 5),
-            temperature: (0.5 + 0.9 * field(0x7465_6d70_65, 1280, 4)).clamp(0.0, 1.0),
-            humidity: (0.5 + 0.95 * field(0x6875_6d69_64, 1024, 4)).clamp(0.0, 1.0),
-            erosion: field(0x6572_6f73_69, 768, 4),
+            continentalness: field(0x0063_6f6e_7469, 1536, 5),
+            temperature: (0.5 + 0.9 * field(0x0074_656d_7065, 1280, 4)).clamp(0.0, 1.0),
+            humidity: (0.5 + 0.95 * field(0x0068_756d_6964, 1024, 4)).clamp(0.0, 1.0),
+            erosion: field(0x0065_726f_7369, 768, 4),
             weirdness,
             ridge: (1.0 - 2.0 * weirdness.abs()).clamp(0.0, 1.0),
             river_distance: river_field.abs().clamp(0.0, 1.0),
-            detail: fbm2(self.seed ^ 0x6465_7461_69, x, z, 80, 4),
+            detail: fbm2(self.seed ^ 0x0064_6574_6169, x, z, 80, 4),
             island: field(0x6973_6c61_6e64, 256, 3),
         }
     }

@@ -1310,9 +1310,8 @@ mod tests {
             ),
             (300, 180, 50)
         );
-        // Extreme (clamped) settings still produce a colour, never a panic.
-        let color = wild.shade([0; 3], None, &context());
-        assert_eq!(color.len(), 3);
+        // Shading must complete for extreme settings; u8 channels cannot overflow.
+        let _color = wild.shade([0; 3], None, &context());
     }
 
     #[test]

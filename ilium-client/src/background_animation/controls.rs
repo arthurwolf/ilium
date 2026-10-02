@@ -10,8 +10,8 @@
 //!   `AmbientSettings::set_control`.
 
 use super::{AnimationKind, AnimationPlaybackMode, AnimationSettings, DitherMode, PanelTarget};
-use ilium_ambient::style::ColorMode;
 use ilium_ambient::control::{self, Control, ControlValue, SceneSettings};
+use ilium_ambient::style::ColorMode;
 
 /// Stable ids of the four named sliders of a built-in scene.
 pub const LEGACY_CONTROL_IDS: [&str; 4] = [
@@ -204,18 +204,23 @@ impl AnimationSettings {
 
     /// An appearance row by id, even when the current color mode hides it.
     fn appearance_control(&self, id: &str) -> Option<Control> {
-        [self.appearance.mode, ColorMode::Color, ColorMode::Greyscale, ColorMode::Monotone]
-            .into_iter()
-            .find_map(|mode| {
-                let look = ilium_ambient::style::Appearance {
-                    mode,
-                    ..self.appearance.clone()
-                };
-                look.controls()
-                    .into_iter()
-                    .chain(look.pattern_controls())
-                    .find(|control| control.id == id)
-            })
+        [
+            self.appearance.mode,
+            ColorMode::Color,
+            ColorMode::Greyscale,
+            ColorMode::Monotone,
+        ]
+        .into_iter()
+        .find_map(|mode| {
+            let look = ilium_ambient::style::Appearance {
+                mode,
+                ..self.appearance.clone()
+            };
+            look.controls()
+                .into_iter()
+                .chain(look.pattern_controls())
+                .find(|control| control.id == id)
+        })
     }
 
     /// Applies one edit to a common control. `Ok(false)` for an unknown id, a
@@ -267,8 +272,8 @@ impl AnimationSettings {
                 None => return Ok(false),
             },
             "look_preset" => {
-                let Some(preset) = control::index(&value)
-                    .and_then(ilium_ambient::style::StylePreset::from_index)
+                let Some(preset) =
+                    control::index(&value).and_then(ilium_ambient::style::StylePreset::from_index)
                 else {
                     return Ok(false);
                 };
