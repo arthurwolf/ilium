@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "ilium-animation-js",
     "ilium-wikipedia",
     "ilium-ambient",
     "ilium-agent-debug",
@@ -8,6 +9,7 @@ members = [
     "ilium-client",
     "ilium-core",
     "ilium-detect",
+    "ilium-execution",
     "ilium-git",
     "ilium-gpu",
     "ilium-ipc",
@@ -27,7 +29,11 @@ members = [
 ]
 # The patched third-party crate remains a dependency, not an ilium workspace
 # package; this also lets its own upstream-style unit tests run independently.
-exclude = ["vendor/vt100"]
+exclude = [
+    "vendor/vt100",
+    "vendor/crossterm-0.29.0",
+    "vendor/ratatui-image-11.0.6",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -42,3 +48,5 @@ repository = "https://github.com/arthurwolf/ilium"
 # local and reproducible until a fixed crate release exists.
 [patch.crates-io]
 vt100 = { path = "vendor/vt100" }
+crossterm = { path = "vendor/crossterm-0.29.0" }
+ratatui-image = { path = "vendor/ratatui-image-11.0.6" }
