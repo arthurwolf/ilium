@@ -39,6 +39,9 @@ pub enum TextureLocation {
 #[derive(Clone, Debug)]
 pub enum ScheduleSource {
     AutomaticJava,
+    /// Candidate-local policy only when the selected Java member has no
+    /// animation section. Real .mcmeta remains authoritative.
+    AutomaticJavaWithMissing(MissingAnimation),
     NoMetadata,
     ExplicitPath(AssetPath),
     BedrockFlipbook {
@@ -375,7 +378,8 @@ impl<'a> TextureImporter<'a> {
                     let metadata_path = match policy {
                         ScheduleSource::NoMetadata => None,
                         ScheduleSource::ExplicitPath(path) => Some(path.clone()),
-                        ScheduleSource::AutomaticJava => {
+                        ScheduleSource::AutomaticJava
+                        | ScheduleSource::AutomaticJavaWithMissing(_) => {
                             if pack.layout() == MountLayout::Bedrock {
                                 return Err(metadata::invalid("Bedrock animation requires explicit flipbook or no-metadata policy"));
                             }
@@ -398,10 +402,14 @@ impl<'a> TextureImporter<'a> {
                             "explicit animation metadata path is missing",
                         ));
                     }
+                    let missing_animation = match policy {
+                        ScheduleSource::AutomaticJavaWithMissing(missing) => missing,
+                        _ => &request.missing_animation,
+                    };
                     AnimationPlan::build(
                         image.dimensions(),
                         metadata_blob.as_ref(),
-                        &request.missing_animation,
+                        missing_animation,
                         &self.limits,
                         &self.budget,
                         cancel,

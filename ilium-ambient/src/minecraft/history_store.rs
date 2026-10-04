@@ -152,6 +152,12 @@ pub struct BoundMap {
     directory_generation: (u64, u64),
 }
 impl BoundMap {
+    /// Heap capacities owned by this receipt; the parent vector charges Self.
+    pub(crate) fn retained_heap_charge(&self) -> Option<usize> {
+        self.directory
+            .capacity()
+            .checked_add(self.root_key.capacity())
+    }
     pub fn verify(&self, canonical_root: &Path) -> Result<(), Error> {
         require_direct_child(canonical_root, &self.directory)?;
         if minecraft::native_path_key(canonical_root)? != self.root_key

@@ -5,7 +5,10 @@ use crate::raster::DitherMode;
 use std::time::Duration;
 
 fn scene_with(settings: &BoxMachineSettings) -> BoxMachineScene {
-    BoxMachineScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    BoxMachineScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_at(scene: &mut BoxMachineScene, cells: (u16, u16), time: f64) -> Rendered {
@@ -245,7 +248,7 @@ fn inspired_by_lists_the_source() {
     assert_eq!(
         BoxMachineScene::new(
             &BoxMachineSettings::default(),
-            &SceneEnv::for_test(std::env::temp_dir())
+            &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources())
         )
         .frames_per_second(),
         10

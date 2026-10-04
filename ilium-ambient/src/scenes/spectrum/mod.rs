@@ -12,9 +12,17 @@ mod capture;
 mod draw;
 mod dsp;
 
+pub use capture::{
+    pipewire_command as native_pipewire_audio_command, pulse_command as native_pulse_audio_command,
+    CaptureCommand as NativeAudioCommand, CaptureTarget as NativeAudioTarget,
+    PcmDecoder as NativeAudioPcmDecoder,
+};
+pub use dsp::Fft as AudioFft;
+
 use crate::control::{self, Control, ControlValue, SceneSettings};
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
+use crate::style::ScenePalette;
 use capture::{
     new_shared, plan_factory, spawn_capture, AnalysisConfig, CaptureTarget, Shared, Snapshot,
     SourceFactory, WorkerStatus, WAVEFORM_LEN,
@@ -565,13 +573,21 @@ pub struct SpectrumScene {
     values: Vec<f32>,
     peaks: Vec<f32>,
     waveform: Vec<f32>,
+    palette: ScenePalette,
 }
 
 impl SpectrumScene {
-    pub fn new(settings: &SpectrumSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. This scene follows it natively: its cell colours are mapped onto the
+    // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
+    // `Scene::set_palette` delivers later changes (applied from the next render).
+    // With no palette provided the colours are untouched.
+    pub fn new(settings: &SpectrumSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let target = CaptureTarget::from_settings(settings.input, &settings.device_name);
-        Self::with_factory(&settings, plan_factory(target))
+        let mut scene = Self::with_factory(&settings, plan_factory(target));
+        scene.palette = env.palette.clone();
+        scene
     }
 
     fn with_factory(settings: &SpectrumSettings, factory: SourceFactory) -> Self {
@@ -623,6 +639,7 @@ impl SpectrumScene {
             values: vec![0.0; bands],
             peaks: vec![0.0; bands],
             waveform: vec![0.0; WAVEFORM_LEN],
+            palette: ScenePalette::default(),
         }
     }
 
@@ -809,7 +826,16 @@ impl Scene for SpectrumScene {
                 frame.raster,
                 &self.settings,
             );
+            self.palette.recolor_cells(frame.cell_colors);
         }
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {
@@ -1311,6 +1337,28 @@ mod tests {
     }
 
     #[test]
+    fn palette_recolours_spectrum_cells_and_none_leaves_them() {
+        let settings = SpectrumSettings {
+            color_mode: ColorMode::Heat,
+            ..SpectrumSettings::default()
+        };
+        let (mut scene, _dropped) = live_scene(&settings, 500.0, 0.4);
+        assert!(scene.follows_palette());
+        let plain = run_frames(&mut scene, 40, 10, 1);
+        scene.set_palette(&crate::style::ScenePalette {
+            stops: vec![[0, 0, 255], [0, 0, 255]],
+            reverse: false,
+            shift_percent: 0,
+        });
+        let tinted = run_frames(&mut scene, 40, 10, 1);
+        assert_ne!(plain.cell_colors, tinted.cell_colors);
+        assert!(tinted.cell_colors.iter().all(|c| *c == [0, 0, 255]));
+        scene.set_palette(&crate::style::ScenePalette::default());
+        let restored = run_frames(&mut scene, 40, 10, 1);
+        assert!(restored.cell_colors.iter().any(|c| *c != [0, 0, 255]));
+    }
+
+    #[test]
     fn colour_modes_fill_cell_colours_for_every_cell() {
         for mode in [ColorMode::Rainbow, ColorMode::Heat, ColorMode::Ice] {
             let settings = SpectrumSettings {
@@ -1351,8 +1399,19 @@ mod tests {
     #[test]
     fn dropping_the_scene_stops_capture_promptly() {
         let (scene, dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.4);
+        let ticket = scene._worker.join_observer().unwrap();
         let started = Instant::now();
         drop(scene);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "nonblocking drop"
+        );
+        assert_eq!(
+            ticket
+                .join_until(Instant::now() + Duration::from_secs(1))
+                .unwrap(),
+            ilium_platform::owned_worker::WorkerExit::Joined
+        );
         assert!(
             dropped.load(Ordering::SeqCst),
             "source released by the worker"

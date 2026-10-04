@@ -7,11 +7,14 @@
 
 use super::discover::MediaInput;
 use super::settings::FitMode;
+use crate::resources::{AmbientResources, WorkerCost, WorkerReservation};
+use crate::source::Worker;
+use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::io::Read;
-use std::process::{Child, Command, Stdio};
+use std::io::{self, Read};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub const FFMPEG_PROGRAM: &str = "ffmpeg";
@@ -114,8 +117,10 @@ fn protocols_for(input: &MediaInput) -> &'static str {
 
 /// The `-vf` chain: square pixels, optional slow motion, frame-rate
 /// conversion, fit to exactly `width x height` dots, optional sharpening.
+/// Crop before scaling Fill; Fit scales directly to bounded square-pixel
+/// dimensions. Neither creates a source-sized SAR correction intermediate.
 pub fn filter_chain(width: u32, height: u32, options: &StreamOptions) -> String {
-    let mut filters = vec!["scale=trunc(iw*sar):ih".to_owned(), "setsar=1".to_owned()];
+    let mut filters = Vec::new();
     if let Some(percent) = options.slowed_percent.filter(|percent| *percent < 100) {
         filters.push(format!("setpts=PTS/{}", f64::from(percent) / 100.0));
     }
@@ -123,19 +128,24 @@ pub fn filter_chain(width: u32, height: u32, options: &StreamOptions) -> String 
     match options.fit {
         FitMode::Fit => {
             filters.push(format!(
-                "scale={width}:{height}:force_original_aspect_ratio=decrease:flags=area"
+                "scale=w='max(1,min({width},trunc({height}*dar)))':h='max(1,min({height},trunc({width}/dar)))':flags=area"
             ));
+            filters.push("setsar=1".to_owned());
             filters.push(format!("pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"));
         }
         FitMode::Fill => {
             filters.push(format!(
-                "scale={width}:{height}:force_original_aspect_ratio=increase:flags=area"
+                "crop=w='max(1,min(iw,ih*{width}/{height}/sar))':h='max(1,min(ih,iw*sar*{height}/{width}))':exact=1"
             ));
-            filters.push(format!("crop={width}:{height}"));
+            filters.push(format!("scale={width}:{height}:flags=area"));
+            filters.push("setsar=1".to_owned());
         }
-        FitMode::Stretch => filters.push(format!("scale={width}:{height}:flags=area")),
+        FitMode::Stretch => {
+            filters.push(format!("scale={width}:{height}:flags=area"));
+            filters.push("setsar=1".to_owned());
+        }
     }
-    if options.detail > 0 {
+    if options.detail > 0 && width >= 5 && height >= 5 {
         let amount = f64::from(options.detail) / 100.0 * 1.5;
         filters.push(format!("unsharp=5:5:{amount:.2}:5:5:0"));
     }
@@ -145,7 +155,15 @@ pub fn filter_chain(width: u32, height: u32, options: &StreamOptions) -> String 
 pub fn ffmpeg_spec(request: &PlayRequest, options: &StreamOptions) -> CommandSpec {
     let mut args: Vec<OsString> = Vec::new();
     let mut push = |items: &[&str]| args.extend(items.iter().map(OsString::from));
-    push(&["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats"]);
+    push(&[
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-max_alloc",
+        "134217728",
+    ]);
     if request.input.is_url() {
         // Identify ourselves politely; option documented in the http section
         // of https://ffmpeg.org/ffmpeg-protocols.html.
@@ -177,6 +195,7 @@ pub fn ffmpeg_spec(request: &PlayRequest, options: &StreamOptions) -> CommandSpe
     ]);
     push(&["-vf", &chain]);
     push(&["-pix_fmt", options.pixel_format.ffmpeg_name()]);
+    push(&["-threads", "1"]);
     push(&["-f", "rawvideo", "pipe:1"]);
     CommandSpec {
         program: OsString::from(FFMPEG_PROGRAM),
@@ -185,10 +204,19 @@ pub fn ffmpeg_spec(request: &PlayRequest, options: &StreamOptions) -> CommandSpe
 }
 
 pub fn ffprobe_spec(input: &MediaInput) -> CommandSpec {
-    let mut args: Vec<OsString> = ["-v", "error", "-hide_banner", "-protocol_whitelist"]
-        .iter()
-        .map(OsString::from)
-        .collect();
+    let mut args: Vec<OsString> = [
+        "-v",
+        "error",
+        "-hide_banner",
+        "-max_alloc",
+        "134217728",
+        "-threads",
+        "2",
+        "-protocol_whitelist",
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect();
     args.push(OsString::from(protocols_for(input)));
     if input.is_url() {
         args.push(OsString::from("-rw_timeout"));
@@ -229,6 +257,13 @@ pub trait ChildControl: Send + Sync {
     fn kill(&self);
     /// Wait up to `timeout` for the child to be reaped. `true` when gone.
     fn reap(&self, timeout: Duration) -> bool;
+    /// Available native exit status. Fixtures may have no OS process status.
+    fn successful_exit(&self) -> Option<bool> {
+        None
+    }
+    fn diagnostic_tail(&self) -> String {
+        String::new()
+    }
 }
 
 pub struct SpawnedChild {
@@ -240,22 +275,39 @@ pub trait CommandRunner: Send + Sync {
     fn spawn(&self, spec: &CommandSpec) -> std::io::Result<SpawnedChild>;
 }
 
-/// Runs real processes: stdin and stderr closed, stdout piped.
-pub struct SystemRunner;
+/// Native children are admitted against the host before spawn. A prestarted
+/// custodian retains delayed children and their physical credit until OS exit.
+pub struct SystemRunner {
+    resources: AmbientResources,
+    custodian: Mutex<Option<Arc<ChildCustodian>>>,
+}
 
 const MAX_VIDEO_CHILDREN: usize = 4;
+const HELPER_BYTES: usize = 8 * 1024 * 1024;
+const NATIVE_BYTES: usize = 1024 * 1024 * 1024;
+// These are declared known FFmpeg roles, not a proven aggregate OS-thread cap.
+const DECLARED_NATIVE_THREADS: usize = 5;
+const STDERR_TAIL_BYTES: usize = 2048;
 static ACTIVE_VIDEO_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+fn admission_error(error: impl std::fmt::Debug) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::WouldBlock,
+        format!("Video host admission rejected: {error:?}"),
+    )
+}
+
 struct ChildAdmission;
 impl ChildAdmission {
-    fn acquire() -> std::io::Result<Self> {
+    fn acquire() -> io::Result<Self> {
         ACTIVE_VIDEO_CHILDREN
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < MAX_VIDEO_CHILDREN).then_some(count + 1)
             })
             .map(|_| Self)
             .map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::WouldBlock,
+                io::Error::new(
+                    io::ErrorKind::WouldBlock,
                     "previous video helpers are still stopping; retry shortly",
                 )
             })
@@ -266,15 +318,123 @@ impl Drop for ChildAdmission {
         ACTIVE_VIDEO_CHILDREN.fetch_sub(1, Ordering::AcqRel);
     }
 }
+
 struct RetiredChild {
     child: Child,
     _admission: ChildAdmission,
+    _physical: WorkerReservation,
+    exit: Option<ExitStatus>,
+    logged_wait_error: bool,
 }
-struct SystemChild {
-    child: Mutex<Option<Child>>,
-    admission: Option<ChildAdmission>,
+impl RetiredChild {
+    fn check_exit(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(exit) = self.exit {
+            return Ok(Some(exit));
+        }
+        let status = self.child.try_wait()?;
+        self.exit = status;
+        Ok(status)
+    }
 }
 
+struct ChildCustodian {
+    sender: mpsc::Sender<RetiredChild>,
+    _worker: Worker,
+}
+impl ChildCustodian {
+    fn start(resources: &AmbientResources) -> io::Result<Arc<Self>> {
+        let reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HELPER_BYTES,
+            })
+            .map_err(admission_error)?;
+        let (sender, receiver) = mpsc::channel::<RetiredChild>();
+        let worker = Worker::start_admitted("video-child-custodian", reservation, move |_| {
+            let mut pending = Vec::with_capacity(MAX_VIDEO_CHILDREN);
+            let mut disconnected = false;
+            loop {
+                if disconnected {
+                    std::thread::sleep(Duration::from_millis(25));
+                } else {
+                    match receiver.recv_timeout(Duration::from_millis(25)) {
+                        Ok(child) => pending.push(child),
+                        Err(mpsc::RecvTimeoutError::Disconnected) => disconnected = true,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+                let mut index = 0;
+                while index < pending.len() {
+                    match pending[index].check_exit() {
+                        Ok(Some(_)) => {
+                            pending.swap_remove(index);
+                        }
+                        Ok(None) => index += 1,
+                        Err(error) => {
+                            if !pending[index].logged_wait_error {
+                                tracing::warn!(%error, "cannot verify retired video child exit");
+                                pending[index].logged_wait_error = true;
+                            }
+                            index += 1;
+                        }
+                    }
+                }
+                if disconnected && pending.is_empty() {
+                    return;
+                }
+            }
+        })?;
+        Ok(Arc::new(Self {
+            sender,
+            _worker: worker,
+        }))
+    }
+
+    fn retire(&self, child: RetiredChild) {
+        if let Err(error) = self.sender.send(child) {
+            // The worker unexpectedly exited. Preserve both the OS handle and
+            // native debit; dropping either would report false retirement.
+            static EMERGENCY: OnceLock<Mutex<Vec<RetiredChild>>> = OnceLock::new();
+            EMERGENCY
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(error.0);
+            tracing::error!(
+                "video child custodian unavailable; child retained for process lifetime"
+            );
+        }
+    }
+}
+
+impl SystemRunner {
+    pub fn new(resources: AmbientResources) -> Self {
+        Self {
+            resources,
+            custodian: Mutex::new(None),
+        }
+    }
+
+    fn custodian(&self) -> io::Result<Arc<ChildCustodian>> {
+        let mut owned = self
+            .custodian
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(custodian) = owned.as_ref() {
+            return Ok(Arc::clone(custodian));
+        }
+        let custodian = ChildCustodian::start(&self.resources)?;
+        *owned = Some(Arc::clone(&custodian));
+        Ok(custodian)
+    }
+}
+
+struct SystemChild {
+    child: Mutex<Option<RetiredChild>>,
+    custodian: Arc<ChildCustodian>,
+    stderr_tail: Arc<Mutex<VecDeque<u8>>>,
+    _stderr_worker: Worker,
+}
 impl Drop for SystemChild {
     fn drop(&mut self) {
         let Some(mut child) = self
@@ -285,63 +445,56 @@ impl Drop for SystemChild {
         else {
             return;
         };
-        let _ = child.kill();
-        if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
-            return;
+        if !matches!(child.check_exit(), Ok(Some(_))) {
+            let _ = child.child.kill();
         }
-        // Keep ownership when an OS-delayed child outlasts the ordinary reap
-        // deadline. One portable reaper handles every such child.
-        let Some(admission) = self.admission.take() else {
-            return;
-        };
-        let child = RetiredChild {
-            child,
-            _admission: admission,
-        };
-        static REAPER: OnceLock<std::sync::mpsc::Sender<RetiredChild>> = OnceLock::new();
-        let sender = REAPER.get_or_init(|| {
-            let (sender, receiver) = std::sync::mpsc::channel::<RetiredChild>();
-            let result = std::thread::Builder::new()
-                .name("ilium-video-child-reaper".into())
-                .spawn(move || {
-                    let mut pending: Vec<RetiredChild> = Vec::new();
-                    loop {
-                        match receiver.recv_timeout(Duration::from_millis(25)) {
-                            Ok(child) => pending.push(child),
-                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                        }
-                        let mut index = 0;
-                        while index < pending.len() {
-                            if matches!(pending[index].child.try_wait(), Ok(Some(_)) | Err(_)) {
-                                let mut finished = pending.swap_remove(index);
-                                let _ = finished.child.wait();
-                            } else {
-                                index += 1;
-                            }
-                        }
-                    }
-                });
-            if let Err(error) = result {
-                tracing::warn!(%error, "video child reaper could not start");
-            }
-            sender
-        });
-        if sender.send(child).is_err() {
-            tracing::warn!("video child cleanup owner unavailable");
+        if !matches!(child.check_exit(), Ok(Some(_))) {
+            self.custodian.retire(child);
         }
     }
 }
-
 impl ChildControl for SystemChild {
-    fn kill(&self) {
-        let mut child = self
-            .child
+    fn successful_exit(&self) -> Option<bool> {
+        self.child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_mut()?
+            .check_exit()
+            .ok()
+            .flatten()
+            .map(|status| status.success())
+    }
+
+    fn diagnostic_tail(&self) -> String {
+        let tail = self
+            .stderr_tail
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // Error means "already exited", which is what we want.
-        if let Some(child) = child.as_mut() {
-            let _ = child.kill();
+        let bytes: Vec<u8> = tail.iter().copied().collect();
+        String::from_utf8_lossy(&bytes)
+            .chars()
+            .map(|character| {
+                if character.is_control() {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    }
+
+    fn kill(&self) {
+        if let Some(child) = self
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_mut()
+        {
+            if !matches!(child.check_exit(), Ok(Some(_))) {
+                let _ = child.child.kill();
+            }
         }
     }
 
@@ -356,9 +509,8 @@ impl ChildControl for SystemChild {
                 let Some(child) = child.as_mut() else {
                     return true;
                 };
-                match child.try_wait() {
-                    Ok(Some(_)) | Err(_) => return true,
-                    Ok(None) => {}
+                if matches!(child.check_exit(), Ok(Some(_))) {
+                    return true;
                 }
             }
             if Instant::now() >= deadline {
@@ -369,25 +521,102 @@ impl ChildControl for SystemChild {
     }
 }
 
+fn retire_failed_setup(mut child: RetiredChild, custodian: &ChildCustodian) {
+    let _ = child.child.kill();
+    if !matches!(child.check_exit(), Ok(Some(_))) {
+        custodian.retire(child);
+    }
+}
+
 impl CommandRunner for SystemRunner {
-    fn spawn(&self, spec: &CommandSpec) -> std::io::Result<SpawnedChild> {
+    fn spawn(&self, spec: &CommandSpec) -> io::Result<SpawnedChild> {
         let admission = ChildAdmission::acquire()?;
-        let mut child = Command::new(&spec.program)
+        // The cleanup owner and every host debit exist before the native spawn.
+        let custodian = self.custodian()?;
+        let native = self
+            .resources
+            .reserve_worker(WorkerCost {
+                threads: DECLARED_NATIVE_THREADS,
+                resident_bytes: NATIVE_BYTES,
+            })
+            .map_err(admission_error)?;
+        let diagnostics = self
+            .resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HELPER_BYTES,
+            })
+            .map_err(admission_error)?;
+        let mut command = Command::new(&spec.program);
+        command
             .args(&spec.args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let Some(stdout) = child.stdout.take() else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(std::io::Error::other("child has no stdout pipe"));
+            .stderr(Stdio::piped())
+            .env("OPENBLAS_NUM_THREADS", "1")
+            .env("OMP_NUM_THREADS", "1");
+        match ilium_platform::child_limits::configure_child_address_space_limit(
+            &mut command,
+            NATIVE_BYTES,
+        ) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::Unsupported => {
+                tracing::debug!(%error, "native video address-space limit unavailable on this platform");
+            }
+            Err(error) => return Err(error),
+        }
+        let child = command.spawn()?;
+        let mut owned = RetiredChild {
+            child,
+            _admission: admission,
+            _physical: native,
+            exit: None,
+            logged_wait_error: false,
+        };
+        let Some(stdout) = owned.child.stdout.take() else {
+            retire_failed_setup(owned, &custodian);
+            return Err(io::Error::other("child has no stdout pipe"));
+        };
+        let Some(mut stderr) = owned.child.stderr.take() else {
+            retire_failed_setup(owned, &custodian);
+            return Err(io::Error::other("child has no stderr pipe"));
+        };
+        let tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_BYTES)));
+        let writer = Arc::clone(&tail);
+        let stderr_worker = match Worker::start_admitted("video-stderr", diagnostics, move |_| {
+            let mut chunk = [0u8; 512];
+            loop {
+                match stderr.read(&mut chunk) {
+                    Ok(0) => return,
+                    Ok(count) => {
+                        let mut tail = writer
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        for byte in &chunk[..count] {
+                            if tail.len() == STDERR_TAIL_BYTES {
+                                tail.pop_front();
+                            }
+                            tail.push_back(*byte);
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => return,
+                }
+            }
+        }) {
+            Ok(worker) => worker,
+            Err(error) => {
+                retire_failed_setup(owned, &custodian);
+                return Err(error);
+            }
         };
         Ok(SpawnedChild {
             stdout: Box::new(stdout),
             control: Arc::new(SystemChild {
-                child: Mutex::new(Some(child)),
-                admission: Some(admission),
+                child: Mutex::new(Some(owned)),
+                custodian,
+                stderr_tail: tail,
+                _stderr_worker: stderr_worker,
             }),
         })
     }
@@ -428,6 +657,10 @@ impl ChildSlot {
         true
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.lock().closed
+    }
+
     pub fn clear(&self) {
         let mut state = self.lock();
         state.current = None;
@@ -442,9 +675,15 @@ impl ChildSlot {
         self.lock().timed_out
     }
 
-    pub fn watchdog(&self) -> std::io::Result<crate::source::Worker> {
+    pub fn watchdog(&self, resources: &AmbientResources) -> io::Result<Worker> {
+        let reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HELPER_BYTES,
+            })
+            .map_err(admission_error)?;
         let slot = self.clone();
-        crate::source::Worker::try_spawn("video-watchdog", move |stop| {
+        Worker::start_admitted("video-watchdog", reservation, move |stop| {
             while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                 let expired = {
                     let mut state = slot.lock();
@@ -527,6 +766,8 @@ mod tests {
                 "-loglevel",
                 "error",
                 "-nostats",
+                "-max_alloc",
+                "134217728",
                 "-protocol_whitelist",
                 "file,crypto",
                 "-threads",
@@ -541,9 +782,11 @@ mod tests {
                 "-filter_threads",
                 "1",
                 "-vf",
-                "scale=trunc(iw*sar):ih,setsar=1,fps=12,scale=120:80:force_original_aspect_ratio=decrease:flags=area,pad=120:80:(ow-iw)/2:(oh-ih)/2:black",
+                "fps=12,scale=w='max(1,min(120,trunc(80*dar)))':h='max(1,min(80,trunc(120/dar)))':flags=area,setsar=1,pad=120:80:(ow-iw)/2:(oh-ih)/2:black",
                 "-pix_fmt",
                 "gray",
+                "-threads",
+                "1",
                 "-f",
                 "rawvideo",
                 "pipe:1",
@@ -557,7 +800,7 @@ mod tests {
         slowed.slowed_percent = Some(25);
         assert_eq!(
             filter_chain(40, 16, &slowed),
-            "scale=trunc(iw*sar):ih,setsar=1,setpts=PTS/0.25,fps=12,scale=40:16:flags=area"
+            "setpts=PTS/0.25,fps=12,scale=40:16:flags=area,setsar=1"
         );
         assert!((slowed.speed_ratio() - 0.25).abs() < 1e-12);
         slowed.slowed_percent = Some(100);
@@ -586,7 +829,7 @@ mod tests {
         fill.pixel_format = PixelFormat::Rgb24;
         let chain = filter_chain(200, 100, &fill);
         assert!(chain.contains(
-            "scale=200:100:force_original_aspect_ratio=increase:flags=area,crop=200:100"
+            "crop=w='max(1,min(iw,ih*200/100/sar))':h='max(1,min(ih,iw*sar*100/200))':exact=1,scale=200:100:flags=area,setsar=1"
         ));
         assert!(chain.ends_with("unsharp=5:5:0.60:5:5:0"));
         let spec = ffmpeg_spec(&request(MediaInput::File("x.mp4".into())), &fill);
@@ -619,6 +862,10 @@ mod tests {
                 "-v",
                 "error",
                 "-hide_banner",
+                "-max_alloc",
+                "134217728",
+                "-threads",
+                "2",
                 "-protocol_whitelist",
                 "file,crypto",
                 "-show_entries",
@@ -670,5 +917,175 @@ mod tests {
             0,
             "caller kills refused children itself"
         );
+    }
+    fn isolated_resources(
+        threads: usize,
+        bytes: usize,
+    ) -> (
+        ilium_execution::Execution,
+        AmbientResources,
+        ilium_execution::QuotaGroup,
+    ) {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+        };
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: threads,
+            worker_bytes: bytes,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .unwrap();
+        (execution, AmbientResources::new(client), quota)
+    }
+
+    #[test]
+    fn host_rejection_happens_before_native_spawn() {
+        let (mut execution, resources, _) = isolated_resources(2, 32 * 1024 * 1024);
+        let runner = SystemRunner::new(resources);
+        let error = match runner.spawn(&CommandSpec {
+            program: OsString::from("this-program-must-not-run"),
+            args: Vec::new(),
+        }) {
+            Ok(_) => panic!("native child unexpectedly spawned"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert!(error.to_string().contains("host admission rejected"));
+        drop(runner);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_native_exit_keeps_credit_until_control_drop_and_exposes_bounded_stderr() {
+        let (mut execution, resources, quota) = isolated_resources(10, 2 * 1024 * 1024 * 1024);
+        let before = quota.snapshot().worker_bytes;
+        let runner = SystemRunner::new(resources);
+        let mut child = runner
+            .spawn(&CommandSpec {
+                program: OsString::from("/bin/sh"),
+                args: ["-c", "printf 'invalid media' >&2; exit 7"]
+                    .map(OsString::from)
+                    .to_vec(),
+            })
+            .unwrap();
+        let mut stdout = Vec::new();
+        child.stdout.read_to_end(&mut stdout).unwrap();
+        assert!(stdout.is_empty());
+        assert!(child.control.reap(Duration::from_secs(2)));
+        assert_eq!(child.control.successful_exit(), Some(false));
+        assert!(quota.snapshot().worker_bytes >= before + NATIVE_BYTES);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !child.control.diagnostic_tail().contains("invalid media")
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(child.control.diagnostic_tail().contains("invalid media"));
+        drop(child);
+        assert!(quota.snapshot().worker_bytes < before + NATIVE_BYTES);
+        drop(runner);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+
+    /// Reject source-sized intermediate allocation while retaining a valid
+    /// small picture. The native allocation ceiling keeps the RED run safe.
+    #[test]
+    #[ignore = "runs the real ffmpeg"]
+    fn real_ffmpeg_extreme_sar_uses_bounded_intermediate_frames() {
+        let runner = SystemRunner::new(crate::resources::test_resources());
+        for fit in [FitMode::Fit, FitMode::Fill, FitMode::Stretch] {
+            let mut args: Vec<OsString> = [
+                "-hide_banner",
+                "-nostdin",
+                "-v",
+                "error",
+                "-max_alloc",
+                "1048576",
+                "-threads",
+                "2",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=16x16:rate=6:duration=0.5,setsar=10000:max=10000",
+                "-filter_threads",
+                "1",
+                "-vf",
+            ]
+            .map(OsString::from)
+            .to_vec();
+            args.push(filter_chain(120, 80, &options(fit)).into());
+            args.extend(
+                [
+                    "-pix_fmt",
+                    "gray",
+                    "-threads",
+                    "1",
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "rawvideo",
+                    "pipe:1",
+                ]
+                .map(OsString::from),
+            );
+            let mut child = runner
+                .spawn(&CommandSpec {
+                    program: OsString::from(FFMPEG_PROGRAM),
+                    args,
+                })
+                .expect("ffmpeg is installed and admitted");
+            let mut output = Vec::new();
+            child.stdout.read_to_end(&mut output).unwrap();
+            assert!(child.control.reap(Duration::from_secs(2)));
+            assert_eq!(
+                child.control.successful_exit(),
+                Some(true),
+                "{fit:?}: {}",
+                child.control.diagnostic_tail()
+            );
+            assert_eq!(output.len(), 9600, "{fit:?}");
+        }
     }
 }

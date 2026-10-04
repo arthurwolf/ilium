@@ -1,13 +1,29 @@
 use ilium_wikipedia::{main_page_titles, parse_article, Block, ImageFloat};
 
 fn parse(html: &str) -> ilium_wikipedia::Document {
-    parse_article(
+    let original = parse_article(
         "Example",
         "https://en.wikipedia.org/wiki/Example",
         "2026-10-02",
         html,
     )
-    .unwrap()
+    .unwrap();
+    let bounded = ilium_wikipedia::parse_article_bounded(
+        "Example",
+        "https://en.wikipedia.org/wiki/Example",
+        "2026-10-02",
+        html,
+        ilium_wikipedia::ArticleLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(bounded.title, original.title);
+    assert_eq!(bounded.url, original.url);
+    assert_eq!(bounded.date, original.date);
+    assert_eq!(bounded.revision, original.revision);
+    assert_eq!(bounded.blocks, original.blocks);
+    assert_eq!(bounded.warnings, original.warnings);
+    assert!(bounded.images.is_empty());
+    original
 }
 
 #[test]

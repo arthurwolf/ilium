@@ -1142,10 +1142,21 @@ mod tests {
             );
         }
         let started = Instant::now();
+        let ticket = worker.join_observer().unwrap();
         drop(worker);
         assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "nonblocking drop"
+        );
+        assert_eq!(
+            ticket
+                .join_until(Instant::now() + Duration::from_secs(1))
+                .unwrap(),
+            ilium_platform::owned_worker::WorkerExit::Joined
+        );
+        assert!(
             dropped.load(Ordering::SeqCst),
-            "source dropped by the worker before join returned"
+            "source dropped by the supervised worker before join returned"
         );
         assert!(
             started.elapsed() < Duration::from_secs(1),
@@ -1256,7 +1267,14 @@ mod tests {
         let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
         std::thread::sleep(Duration::from_millis(80));
         assert_eq!(lock(&shared).snapshot.seq, 0);
+        let ticket = worker.join_observer().unwrap();
         drop(worker);
+        assert_eq!(
+            ticket
+                .join_until(Instant::now() + Duration::from_secs(1))
+                .unwrap(),
+            ilium_platform::owned_worker::WorkerExit::Joined
+        );
         assert!(dropped.load(Ordering::SeqCst));
     }
 

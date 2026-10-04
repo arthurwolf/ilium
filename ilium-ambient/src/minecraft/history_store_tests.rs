@@ -7,7 +7,8 @@ fn fixture() -> (tempfile::TempDir, Repository, PathBuf, Vec<PathBuf>) {
     let root = temp.path().join("saves");
     std::fs::create_dir(&root).unwrap();
     let root = paths::canonicalize(&root).unwrap();
-    let paths = ["same metadata", "雪 "]
+    // Keep Unicode and embedded-space coverage with a Win32-valid directory name.
+    let paths = ["same metadata", "雪 map"]
         .map(|name| {
             let path = root.join(name);
             std::fs::create_dir(&path).unwrap();
@@ -430,4 +431,20 @@ fn cancellation_arriving_after_last_publish_checkpoint_is_reported_as_committed(
     assert!(requested.get());
     assert_eq!(committed.revision(), 2);
     assert_eq!(store.load(&|| false).unwrap(), committed);
+}
+
+#[test]
+fn catalog_retained_bound_map_counts_owned_capacities() {
+    let mut directory = std::path::PathBuf::from("/synthetic/canonical/world");
+    directory.reserve(4096);
+    let root_key = Vec::with_capacity(8192);
+    let expected = directory.capacity() + root_key.capacity();
+    let map = BoundMap {
+        directory,
+        map: MapId([7; 16]),
+        root_key,
+        root_generation: (1, 2),
+        directory_generation: (3, 4),
+    };
+    assert_eq!(map.retained_heap_charge(), Some(expected));
 }

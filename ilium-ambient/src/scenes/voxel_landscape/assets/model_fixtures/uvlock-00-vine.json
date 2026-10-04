@@ -1,0 +1,134 @@
+{
+  "multipart": [
+    {
+      "when": {
+        "north": "true"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine" },
+        { "model": "minecraft:block/vine_alt_1" },
+        { "model": "minecraft:block/vine_alt_2" },
+        { "model": "minecraft:block/vine_alt_3" }
+      ]
+    },
+    {
+      "when": {
+        "east": "false",
+        "north": "false",
+        "south": "false",
+        "up": "false",
+        "west": "false"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine" },
+        { "model": "minecraft:block/vine_alt_1" },
+        { "model": "minecraft:block/vine_alt_2" },
+        { "model": "minecraft:block/vine_alt_3" }
+      ]
+    },
+    {
+      "when": {
+        "east": "true"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 90 }
+      ]
+    },
+    {
+      "when": {
+        "east": "false",
+        "north": "false",
+        "south": "false",
+        "up": "false",
+        "west": "false"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 90 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 90 }
+      ]
+    },
+    {
+      "when": {
+        "south": "true"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 180 }
+      ]
+    },
+    {
+      "when": {
+        "east": "false",
+        "north": "false",
+        "south": "false",
+        "up": "false",
+        "west": "false"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 180 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 180 }
+      ]
+    },
+    {
+      "when": {
+        "west": "true"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 270 }
+      ]
+    },
+    {
+      "when": {
+        "east": "false",
+        "north": "false",
+        "south": "false",
+        "up": "false",
+        "west": "false"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "y": 270 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "y": 270 }
+      ]
+    },
+    {
+      "when": {
+        "up": "true"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "x": 270 }
+      ]
+    },
+    {
+      "when": {
+        "east": "false",
+        "north": "false",
+        "south": "false",
+        "up": "false",
+        "west": "false"
+      },
+      "apply": [
+        { "model": "minecraft:block/vine", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_1", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_2", "uvlock": true, "x": 270 },
+        { "model": "minecraft:block/vine_alt_3", "uvlock": true, "x": 270 }
+      ]
+    }
+  ]
+}

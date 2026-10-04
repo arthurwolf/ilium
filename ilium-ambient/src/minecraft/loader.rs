@@ -9,6 +9,10 @@ use std::{
 const MAX_CHUNKS: usize = 128;
 const MAX_SECTIONS: usize = 32;
 const MAX_STORAGE_CHARGE: usize = 128 << 20;
+// The projected route source is a separately admitted, bounded read. Catalog
+// windows retain their original 128-chunk and 32-MiB defaults.
+pub const MAX_PROJECTED_CHUNKS: usize = 512;
+pub const MAX_PROJECTED_STORAGE_CHARGE: usize = 192 << 20;
 
 /// Chunk-coordinate request around a Minecraft [x, z] block anchor. This only
 /// selects coordinates; load_window must independently qualify saved coverage.
@@ -102,6 +106,8 @@ pub struct LoadedWindow {
     pub coverage: Coverage,
     pub rejected_chunks: usize,
     pub issues: Vec<Issue>,
+    /// Conservative retained charge computed by the loader before publication.
+    pub(crate) retained_storage_charge: usize,
 }
 
 /// Runs blocking filesystem/decompression work; call only from the preparation
@@ -112,6 +118,45 @@ pub fn load_window(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<LoadedWindow, Error> {
+    load_window_with_ceiling(
+        region_directory,
+        requested,
+        limits,
+        [MAX_CHUNKS, MAX_STORAGE_CHARGE],
+        cancelled,
+    )
+}
+
+/// A route's complete inverse-projected source, including the native biome
+/// and adjacent-state support ring. The caller must hold a reservation for the
+/// full projected storage ceiling while this function runs and must require
+/// `loaded.coverage.chunks == requested` before accepting any output. Missing,
+/// rejected, or over-limit chunks cannot be turned into synthetic air.
+pub fn load_projected_window(
+    region_directory: &Path,
+    requested: &BTreeSet<[i32; 2]>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<LoadedWindow, Error> {
+    load_window_with_ceiling(
+        region_directory,
+        requested,
+        Limits {
+            max_chunks: MAX_PROJECTED_CHUNKS,
+            max_storage_charge: MAX_PROJECTED_STORAGE_CHARGE,
+            ..Limits::default()
+        },
+        [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
+        cancelled,
+    )
+}
+
+fn load_window_with_ceiling(
+    region_directory: &Path,
+    requested: &BTreeSet<[i32; 2]>,
+    limits: Limits,
+    ceiling: [usize; 2],
+    cancelled: &dyn Fn() -> bool,
+) -> Result<LoadedWindow, Error> {
     // The aggregate chunk count and per-chunk decoded collection limits bound
     // retained output independently of the much larger allocation inventory.
     let decode_limits = chunk::Limits {
@@ -120,7 +165,7 @@ pub fn load_window(
         max_properties: 8192,
         max_text_units: 262144,
     };
-    load_with(requested, limits, cancelled, |position| {
+    load_with_ceiling(requested, limits, ceiling, cancelled, |position| {
         let Some(stored) = region::read_chunk(
             region_directory,
             position,
@@ -139,20 +184,37 @@ pub fn load_window(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn load_with(
     requested: &BTreeSet<[i32; 2]>,
     limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    read: impl FnMut([i32; 2]) -> Result<Option<chunk::DecodedChunk>, ReadError>,
+) -> Result<LoadedWindow, Error> {
+    load_with_ceiling(
+        requested,
+        limits,
+        [MAX_CHUNKS, MAX_STORAGE_CHARGE],
+        cancelled,
+        read,
+    )
+}
+
+fn load_with_ceiling(
+    requested: &BTreeSet<[i32; 2]>,
+    limits: Limits,
+    ceiling: [usize; 2],
     cancelled: &dyn Fn() -> bool,
     mut read: impl FnMut([i32; 2]) -> Result<Option<chunk::DecodedChunk>, ReadError>,
 ) -> Result<LoadedWindow, Error> {
     if cancelled() {
         return Err(Error::Cancelled);
     }
-    if limits.max_storage_charge == 0 || limits.max_storage_charge > MAX_STORAGE_CHARGE {
+    if limits.max_storage_charge == 0 || limits.max_storage_charge > ceiling[1] {
         return Err(Error::StorageLimit);
     }
     if limits.max_chunks == 0
-        || limits.max_chunks > MAX_CHUNKS
+        || limits.max_chunks > ceiling[0]
         || requested.len() > limits.max_chunks
     {
         return Err(Error::Limit);
@@ -237,6 +299,7 @@ pub(crate) fn load_with(
             loaded.issues.push(Issue { position, reason });
         }
     }
+    loaded.retained_storage_charge = storage_charge;
     Ok(loaded)
 }
 

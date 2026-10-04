@@ -4,6 +4,7 @@
 //! Layering: this crate owns scene math, data fetching/decoding and helper
 //! processes; the client owns the Settings UI, compositing and persistence.
 
+pub mod animation_services;
 pub mod control;
 pub mod debug;
 pub mod dither;
@@ -16,17 +17,23 @@ pub mod minecraft;
 pub mod pi_digits;
 pub mod raster;
 pub mod registry;
+pub mod resources;
 pub mod scene;
 mod scenes;
 pub mod source;
 pub mod style;
+pub mod style_filters;
 pub mod worldmap;
 
 pub use control::{Control, ControlKind, ControlValue, SceneSettings};
 pub use location::GeoLocation;
 pub use raster::{DitherMode, Raster};
 pub use registry::{AmbientKind, AmbientSettings};
-pub use scene::{Frame, MessageScene, Scene, SceneEnv};
+pub use scene::{Frame, MessageScene, OccupancyMask, Scene, SceneEnv};
+pub use scenes::spectrum::{
+    native_pipewire_audio_command, native_pulse_audio_command, AudioFft, NativeAudioCommand,
+    NativeAudioPcmDecoder, NativeAudioTarget,
+};
 
 pub use scenes::{
     atlantic_dusk::AtlanticDuskSettings, box_machine::BoxMachineSettings, clouds::CloudsSettings,
@@ -47,4 +54,28 @@ pub use scenes::galactic_empires::GalacticEmpiresSettings;
 pub use scenes::topographic_maps::TopographicMapsSettings;
 
 pub use scenes::carpet::CarpetSettings;
-pub use scenes::openstreetmap::{GeometryMap, OpenStreetMapSettings, SourceElement};
+pub use scenes::openstreetmap::address_search as openstreetmap_address_search;
+pub use scenes::openstreetmap::{
+    AddressProvider, AddressSearchSettings, GeometryMap, OpenStreetMapSettings, SourceElement,
+};
+pub use scenes::wind::WindSettings;
+
+pub use scenes::quiet::{
+    almost_touching::AlmostTouchingSettings,
+    aurora::AuroraSettings,
+    crop_circles::{CropCirclesSettings, CropPattern},
+    delayed_reflection::DelayedReflectionSettings,
+    embroidery::EmbroiderySettings,
+    fireflies::FirefliesSettings,
+    frost::{FrostMode, FrostSettings},
+    hesitating_ink::HesitatingInkSettings,
+    hidden_wheel::HiddenWheelSettings,
+    lighthouse::LighthouseSettings,
+    needle_threads::NeedleThreadsSettings,
+    paper_fold::PaperFoldSettings,
+    pollen::PollenSettings,
+    prime_constellations::PrimeConstellationsSettings,
+    unfinished_circle::UnfinishedCircleSettings,
+    wallpaper::WallpaperSettings,
+    window_sunlight::{WindowGrid, WindowSunlightSettings},
+};

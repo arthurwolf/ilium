@@ -85,6 +85,7 @@ fn excessive_video_dimensions_are_rejected_before_starting_a_decoder() {
         runner.clone(),
         ChildSlot::default(),
         stream_options(&settings),
+        crate::resources::test_resources(),
     );
     let result = source.open(&PlayRequest {
         input: MediaInput::File("synthetic.mp4".into()),
@@ -200,6 +201,15 @@ impl FrameStream for FakeStream {
 }
 
 impl FrameSource for FakeSource {
+    fn prepare(
+        &mut self,
+        _series: super::VideoSeries,
+        _input: &MediaInput,
+        _stop: &AtomicBool,
+    ) -> Result<(), OpenError> {
+        // This fixture tests selection and conversion independently of acquisition.
+        Ok(())
+    }
     fn probe_duration(&mut self, _input: &MediaInput) -> Option<f64> {
         self.duration
     }
@@ -429,6 +439,102 @@ fn resizes_are_debounced_and_restart_at_the_same_position() {
 }
 
 #[test]
+fn resize_preparation_retains_the_picture_without_claiming_playing() {
+    let (settings, directory) = base_settings(&["a.mp4"]);
+    let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+    let (release_sender, release_receiver) = std::sync::mpsc::channel();
+    let release_receiver = Arc::new(Mutex::new(release_receiver));
+    let mut fx = fixture_with(
+        settings,
+        directory,
+        move |request| {
+            if request.dots_width == 60 {
+                entered_sender.send(()).unwrap();
+                // This task-owned fixture always releases on sender Drop,
+                // including a failed assertion; no decoder thread can leak.
+                let _ = release_receiver.lock().unwrap().recv_timeout(PATIENCE);
+            }
+            Plan::Endless
+        },
+        flat_content,
+        Some(100.0),
+    );
+    assert!(draw_until(&mut fx.scene, (20, 5), secs(0.0), |scene, _| {
+        scene
+            .status()
+            .is_some_and(|status| status.starts_with("Playing:"))
+    }));
+    render_frame(&mut fx.scene, 30, 8, secs(1.0));
+    render_frame(&mut fx.scene, 30, 8, secs(1.6));
+    let entered = entered_receiver.recv_timeout(PATIENCE).is_ok();
+    let retained = render_frame(&mut fx.scene, 30, 8, secs(1.6));
+    let preparation_status = fx.scene.status();
+    release_sender.send(()).unwrap();
+    assert!(entered, "resized decoder opened in the owned fixture");
+    assert!(
+        retained.raster.dots.iter().any(|dot| *dot > 0.0),
+        "the previous picture remains visible while preparing"
+    );
+    assert!(
+        preparation_status
+            .as_deref()
+            .is_some_and(|status| { status.starts_with("Resizing:") && status.contains("a.mp4") }),
+        "resized decoder has not supplied a frame; status: {preparation_status:?}"
+    );
+    assert!(
+        draw_until(&mut fx.scene, (30, 8), secs(1.6), |scene, _| {
+            scene
+                .status()
+                .is_some_and(|status| status.starts_with("Playing:"))
+        }),
+        "Playing returns after a frame in the new geometry arrives"
+    );
+}
+
+#[test]
+fn successful_short_resize_tails_preserve_repeat_one() {
+    for tail_frames in [0, 1] {
+        let (mut settings, directory) = base_settings(&["a.mp4", "b.mp4"]);
+        settings.repeat_one = true;
+        let mut fx = fixture_with(
+            settings,
+            directory,
+            move |request| {
+                if request.start_seconds > 0.0 {
+                    Plan::Frames(tail_frames)
+                } else {
+                    Plan::Frames(100)
+                }
+            },
+            flat_content,
+            Some(10.0),
+        );
+        assert!(draw_until(&mut fx.scene, (20, 5), secs(0.0), |s, _| {
+            s.displayed_seconds().is_some()
+        }));
+        // The producer has already published at least one second of the
+        // original segment before the held resize resumes a successful tail.
+        assert!(draw_until(&mut fx.scene, (20, 5), secs(1.2), |s, _| {
+            s.displayed_seconds().is_some_and(|seconds| seconds >= 1.0)
+        }));
+        render_frame(&mut fx.scene, 30, 8, secs(1.3));
+        render_frame(&mut fx.scene, 30, 8, secs(1.9));
+        let log = Arc::clone(&fx.log);
+        assert!(draw_until(&mut fx.scene, (30, 8), secs(1.9), |_, _| {
+            log.lock().unwrap().len() >= 3
+        }));
+        let requests = fx.requests();
+        assert!(requests[1].start_seconds > 0.0);
+        assert_eq!(requests[1].input, requests[0].input);
+        assert_eq!(requests[2].start_seconds, 0.0);
+        assert_eq!(
+            requests[2].input, requests[0].input,
+            "tail of {tail_frames} frames released repeat-one"
+        );
+    }
+}
+
+#[test]
 fn unplayable_files_back_off_instead_of_spinning() {
     let mut fx = fixture(&["a.mp4"], |_| {}, Plan::Empty);
     let started = Instant::now();
@@ -575,14 +681,16 @@ fn random_scenes_are_reproducible_with_a_seed() {
 // ------------------------------------------------------------ fake processes
 
 struct FakeChild {
+    completed_successfully: bool,
     killed: AtomicBool,
     kills: AtomicUsize,
     reaps: AtomicUsize,
 }
 
 impl FakeChild {
-    fn new() -> Arc<Self> {
+    fn new(completed_successfully: bool) -> Arc<Self> {
         Arc::new(Self {
+            completed_successfully,
             killed: AtomicBool::new(false),
             kills: AtomicUsize::new(0),
             reaps: AtomicUsize::new(0),
@@ -591,6 +699,14 @@ impl FakeChild {
 }
 
 impl ChildControl for FakeChild {
+    fn successful_exit(&self) -> Option<bool> {
+        if self.completed_successfully {
+            Some(true)
+        } else {
+            self.killed.load(Ordering::SeqCst).then_some(false)
+        }
+    }
+
     fn kill(&self) {
         self.killed.store(true, Ordering::SeqCst);
         self.kills.fetch_add(1, Ordering::SeqCst);
@@ -659,17 +775,19 @@ impl CommandRunner for FakeRunner {
         if self.mode == FakeMode::MissingTools {
             return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
         }
-        let child = FakeChild::new();
+        // The finite probe stdout represents a naturally exited successful
+        // process; blocked pipes remain live until cancellation kills them.
+        let completed_probe = spec.program == "ffprobe" && self.mode != FakeMode::ProbeBlocked;
+        let child = FakeChild::new(completed_probe);
         self.spawned
             .lock()
             .unwrap()
             .push((spec.clone(), Arc::clone(&child)));
-        let stdout: Box<dyn Read + Send> =
-            if spec.program == "ffprobe" && self.mode != FakeMode::ProbeBlocked {
-                Box::new(std::io::Cursor::new(b"100.000000\n".to_vec()))
-            } else {
-                Box::new(BlockedPipe(Arc::clone(&child)))
-            };
+        let stdout: Box<dyn Read + Send> = if completed_probe {
+            Box::new(std::io::Cursor::new(b"100.000000\n".to_vec()))
+        } else {
+            Box::new(BlockedPipe(Arc::clone(&child)))
+        };
         Ok(SpawnedChild {
             stdout,
             control: child,
@@ -739,10 +857,14 @@ fn dropping_the_scene_kills_and_reaps_a_blocked_child_promptly() {
     let children = runner.children();
     assert!(!children.is_empty());
     for child in children {
-        assert!(
-            child.kills.load(Ordering::SeqCst) >= 1,
-            "every child killed"
-        );
+        if child.completed_successfully {
+            assert_eq!(child.successful_exit(), Some(true), "probe completed");
+        } else {
+            assert!(
+                child.kills.load(Ordering::SeqCst) >= 1,
+                "every blocked child killed"
+            );
+        }
         assert!(
             wait_until(|| child.reaps.load(Ordering::SeqCst) >= 1),
             "every child reaped"
@@ -766,8 +888,15 @@ fn each_mode_reaches_ffmpeg_with_the_expected_arguments() {
         settings.style = RenderStyle::Colored;
         let runner = FakeRunner::new(FakeMode::Blocked);
         let mut scene = VideoScene::with_runner(&settings, runner.clone());
-        render_frame(&mut scene, 30, 6, secs(0.0));
-        assert!(wait_for_ffmpeg(&runner));
+        // The real UI keeps rendering while previously owned workers retire.
+        // Drive those frames so an initial admission rejection can be retried.
+        assert!(
+            draw_until(&mut scene, (30, 6), secs(0.0), |_, _| {
+                !runner.specs("ffmpeg").is_empty()
+            }),
+            "{mode:?}: {:?}",
+            scene.status()
+        );
         let spec = runner.specs("ffmpeg").remove(0);
         let args: Vec<String> = spec
             .args
@@ -781,7 +910,11 @@ fn each_mode_reaches_ffmpeg_with_the_expected_arguments() {
         assert_eq!(position("-t").is_some(), expect_seek);
         assert!(args.contains(&"rgb24".to_owned()));
         let filter = &args[position("-vf").unwrap() + 1];
-        assert!(filter.contains("scale=60:24"), "{filter}");
+        assert!(
+            filter.contains("scale=w='max(1,min(60,trunc(24*dar)))':h='max(1,min(24,trunc(60/dar)))':flags=area"),
+            "{filter}"
+        );
+        assert!(filter.contains("pad=60:24:"), "{filter}");
         assert_eq!(
             filter.contains("setpts=PTS/0.5"),
             mode == PlaybackMode::Slowed,
@@ -832,7 +965,7 @@ impl CommandRunner for SleepRunner {
         if spec.program == "ffprobe" {
             return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
         }
-        let child = SystemRunner.spawn(&CommandSpec {
+        let child = SystemRunner::new(crate::resources::test_resources()).spawn(&CommandSpec {
             program: "sleep".into(),
             args: vec!["31.415".into()],
         })?;
@@ -875,16 +1008,23 @@ fn a_real_stalled_decoder_is_timed_out_and_reaped() {
         controls: Mutex::new(Vec::new()),
     });
     let mut scene = VideoScene::with_runner(&settings, runner.clone());
-    assert!(draw_until(
-        &mut scene,
-        (20, 5),
-        Duration::ZERO,
-        |scene, _| {
-            scene
-                .status()
-                .is_some_and(|notice| notice.contains("video decoder stalled"))
+    let mut notices = std::collections::VecDeque::new();
+    let observed_stall = draw_until(&mut scene, (20, 5), Duration::ZERO, |scene, _| {
+        let notice = scene.status();
+        if notices.back() != Some(&notice) {
+            if notices.len() == 16 {
+                notices.pop_front();
+            }
+            notices.push_back(notice.clone());
         }
-    ));
+        notice.is_some_and(|notice| notice.contains("video decoder stalled"))
+    });
+    assert!(
+        observed_stall,
+        "decoder-stall status not observed; last notices: {notices:?}; spawned controls: {}; fixture quota: {:?}",
+        runner.controls.lock().unwrap().len(),
+        crate::resources::test_resources().finite().quota_group().snapshot(),
+    );
     let controls = runner.controls.lock().unwrap().clone();
     assert!(!controls.is_empty());
     for control in controls {
@@ -1062,7 +1202,10 @@ fn real_ffmpeg_test_pattern_plays_end_to_end() {
             frame_rate: 12,
             ..VideoSettings::default()
         };
-        let env = crate::scene::SceneEnv::for_test(directory.path().to_path_buf());
+        let env = crate::scene::SceneEnv::for_test(
+            directory.path().to_path_buf(),
+            crate::resources::test_resources(),
+        );
         let mut scene = VideoScene::new(&settings, &env);
         let mut lit_frames = Vec::new();
         let mut previous = -1.0;
@@ -1148,7 +1291,10 @@ fn real_ffmpeg_gallery_prints_frames() {
                 fit: super::settings::FitMode::Fill,
                 ..VideoSettings::default()
             };
-            let env = crate::scene::SceneEnv::for_test(directory.path().to_path_buf());
+            let env = crate::scene::SceneEnv::for_test(
+                directory.path().to_path_buf(),
+                crate::resources::test_resources(),
+            );
             let mut scene = VideoScene::new(&settings, &env);
             assert!(draw_until(&mut scene, (72, 20), secs(0.0), |s, _| s
                 .displayed_seconds()
@@ -1163,4 +1309,49 @@ fn real_ffmpeg_gallery_prints_frames() {
                 .for_each(|line| println!("{line}"));
         }
     }
+}
+
+#[test]
+fn germination_playlist_uses_remote_sources_and_ignores_retained_local_media() {
+    let mut fx = fixture(
+        &["must-not-play-local.mp4"],
+        |settings| {
+            settings.series = super::settings::VideoSeries::Germination;
+        },
+        Plan::Endless,
+    );
+    assert!(draw_until(&mut fx.scene, (20, 5), secs(0.0), |scene, _| {
+        scene.displayed_seconds().is_some()
+    }));
+    let requests = fx.requests();
+    assert!(!requests.is_empty());
+    assert!(requests
+        .iter()
+        .all(|request| matches!(&request.input, MediaInput::Url(url)
+        if url.starts_with("https://upload.wikimedia.org/"))));
+}
+
+#[test]
+fn palette_recolours_video_cells_and_none_leaves_them() {
+    let mut fx = fixture(
+        &["a.mp4"],
+        |s| s.style = RenderStyle::Colored,
+        Plan::Endless,
+    );
+    assert!(fx.scene.follows_palette());
+    assert!(draw_until(&mut fx.scene, (12, 4), secs(0.0), |s, _| s
+        .displayed_seconds()
+        .is_some()));
+    let plain = render_frame(&mut fx.scene, 12, 4, secs(0.0));
+    fx.scene.set_palette(&crate::style::ScenePalette {
+        stops: vec![[0, 0, 255], [0, 0, 255]],
+        reverse: false,
+        shift_percent: 0,
+    });
+    let tinted = render_frame(&mut fx.scene, 12, 4, secs(0.0));
+    assert_ne!(plain.cell_colors, tinted.cell_colors);
+    assert!(tinted.cell_colors.iter().all(|c| *c == [0, 0, 255]));
+    fx.scene.set_palette(&crate::style::ScenePalette::default());
+    let restored = render_frame(&mut fx.scene, 12, 4, secs(0.0));
+    assert_eq!(plain.cell_colors, restored.cell_colors);
 }

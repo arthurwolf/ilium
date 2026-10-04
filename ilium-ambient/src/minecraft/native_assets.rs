@@ -82,6 +82,7 @@ pub struct NativeSources {
     native_index: usize,
     provenance: Provenance,
     selected_duplicates: Vec<DuplicateMember>,
+    immutable_definition_sources: bool,
     _duplicates_reservation: Reservation,
     limits: Limits,
     budget: ByteBudget,
@@ -171,6 +172,10 @@ impl NativeSources {
             .try_reserve_exact(2)
             .map_err(|_| AssetError::Allocation)?;
         let mut selected_archive_sha256 = None;
+        // The pinned native JAR is a verified in-memory ZIP. A selected
+        // directory, including an add-on directory beneath an archive base,
+        // prevents route-wide definition caching.
+        let mut immutable_definition_sources = true;
         let mut selected_duplicates = Vec::new();
         let mut duplicates_reservation = budget.reserve(0, cancel)?;
         if let Some(settings) = selected {
@@ -193,6 +198,7 @@ impl NativeSources {
                 ));
             }
             selected_archive_sha256 = mounted.source_sha256;
+            immutable_definition_sources = mounted.immutable_definition_sources;
             duplicates_reservation =
                 budget.reserve(4096 + mounted.duplicate_members.len() as u64 * 4096, cancel)?;
             selected_duplicates = mounted.duplicate_members;
@@ -229,6 +235,7 @@ impl NativeSources {
                 selected_override: native_index != 0,
             },
             selected_duplicates,
+            immutable_definition_sources,
             _duplicates_reservation: duplicates_reservation,
             limits,
             budget,
@@ -241,6 +248,9 @@ impl NativeSources {
     }
     pub fn selected_duplicate_members(&self) -> &[DuplicateMember] {
         &self.selected_duplicates
+    }
+    pub fn immutable_definition_sources(&self) -> bool {
+        self.immutable_definition_sources
     }
     pub fn budget(&self) -> &ByteBudget {
         &self.budget
@@ -360,4 +370,4 @@ impl NativeSources {
 
 #[cfg(test)]
 #[path = "native_assets_tests.rs"]
-mod tests;
+pub(super) mod tests;

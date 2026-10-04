@@ -87,6 +87,61 @@ pub fn creaking_candidate(seed: u64, heart: [i32; 3]) -> Option<[i32; 2]> {
     let [dx, dy] = [[8, 0], [0, 8], [-8, 0], [0, -8]][(entropy & 3) as usize];
     Some([heart[0].checked_add(dx)?, heart[1].checked_add(dy)?])
 }
+/// One static riverbank figure per eligible signed owner cell at night.
+/// This depicts a walker beside the river; underwater spawning is not generated.
+pub const RIVERBANK_GRID: i32 = 16;
+pub fn riverbank_candidate(
+    seed: u64,
+    grid: [i32; 2],
+    atmosphere: SceneAtmosphere,
+    rivers: bool,
+) -> Option<[i32; 2]> {
+    if !atmosphere.is_night() || !rivers {
+        return None;
+    }
+    let xy = [
+        grid[0].checked_mul(RIVERBANK_GRID)?.checked_add(8)?,
+        grid[1].checked_mul(RIVERBANK_GRID)?.checked_add(8)?,
+    ];
+    let fields = super::terrain_fields::TerrainFields::new(seed);
+    let bank = fields.sample(xy[0], xy[1], true);
+    if bank.water_level.is_some_and(|level| level > bank.height) {
+        return None;
+    }
+    for distance in 1..=8 {
+        for [dx, dy] in [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+            [1, 1],
+            [-1, 1],
+            [1, -1],
+            [-1, -1],
+        ] {
+            let Some(x) = xy[0].checked_add(dx * distance) else {
+                continue;
+            };
+            let Some(y) = xy[1].checked_add(dy * distance) else {
+                continue;
+            };
+            let sample = fields.sample(x, y, true);
+            if !matches!(
+                super::surface_biome_selector::select(seed, [x, y], sample),
+                SurfaceBiome::River | SurfaceBiome::FrozenRiver
+            ) {
+                continue;
+            }
+            if sample.water_level.is_some_and(|level| {
+                sample.height < level && bank.height >= level && bank.height <= level + 4
+            }) {
+                return Some(xy);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +220,28 @@ mod tests {
             let xy = creaking_candidate(71839, heart).unwrap();
             assert_eq!((xy[0] - heart[0]).abs() + (xy[1] - heart[1]).abs(), 8);
             assert_eq!(creaking_candidate(71839, heart), Some(xy));
+        }
+    }
+
+    #[test]
+    fn riverbank_owners_require_night_water_and_checked_signed_coordinates() {
+        let grid = [-950, -1021];
+        assert_eq!(
+            riverbank_candidate(71839, grid, SceneAtmosphere::Night, true),
+            Some([-15192, -16328])
+        );
+        for phase in [SceneAtmosphere::Day, SceneAtmosphere::Thunderstorm] {
+            assert_eq!(riverbank_candidate(71839, grid, phase, true), None);
+        }
+        assert_eq!(
+            riverbank_candidate(71839, grid, SceneAtmosphere::Night, false),
+            None
+        );
+        for grid in [[i32::MAX, 0], [i32::MIN, 0], [0, i32::MAX], [0, i32::MIN]] {
+            assert_eq!(
+                riverbank_candidate(71839, grid, SceneAtmosphere::Night, true),
+                None
+            );
         }
     }
 }

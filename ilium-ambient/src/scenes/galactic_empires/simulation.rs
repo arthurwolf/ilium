@@ -43,6 +43,29 @@ pub(super) struct Statistics {
     pub eliminations: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GenerationConfig {
+    pub star_count: usize,
+    pub empire_count: usize,
+    pub spiral_arms: usize,
+    pub arm_spread: i32,
+    pub arm_twist: i32,
+    pub lane_links: usize,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            star_count: 480,
+            empire_count: 8,
+            spiral_arms: 4,
+            arm_spread: 100,
+            arm_twist: 100,
+            lane_links: 2,
+        }
+    }
+}
+
 pub(super) struct Galaxy {
     pub stars: Vec<Star>,
     pub lanes: Vec<(usize, usize)>,
@@ -81,9 +104,13 @@ fn distance_squared(first: (f32, f32), second: (f32, f32)) -> f32 {
 }
 
 impl Galaxy {
-    pub fn new(seed: u64, star_count: usize, empire_count: usize) -> Self {
-        let star_count = star_count.clamp(120, 420);
-        let empire_count = empire_count.clamp(3, 12);
+    pub fn new(seed: u64, config: GenerationConfig) -> Self {
+        let star_count = config.star_count.clamp(120, 720);
+        let empire_count = config.empire_count.clamp(3, 12);
+        let spiral_arms = config.spiral_arms.clamp(2, 6);
+        let arm_spread = config.arm_spread.clamp(25, 200) as f32 / 100.0;
+        let arm_twist = config.arm_twist.clamp(0, 200) as f32 / 100.0;
+        let lane_links = config.lane_links.min(4);
         let mut random = Random(seed);
         let mut stars: Vec<Star> = Vec::with_capacity(star_count);
         let phase = random.fraction() * std::f32::consts::TAU;
@@ -92,9 +119,9 @@ impl Galaxy {
             for _ in 0..64 {
                 let radius = 0.12 + 0.85 * random.fraction().sqrt();
                 let angle = phase
-                    + (index % 4) as f32 * std::f32::consts::FRAC_PI_2
-                    + radius * 3.2
-                    + (random.fraction() - 0.5) * 0.8;
+                    + (index % spiral_arms) as f32 * (std::f32::consts::TAU / spiral_arms as f32)
+                    + radius * (3.2 * arm_twist)
+                    + (random.fraction() - 0.5) * (0.8 * arm_spread);
                 position = (radius * angle.cos(), radius * angle.sin());
                 if stars
                     .iter()
@@ -142,7 +169,7 @@ impl Galaxy {
                 distance_squared(stars[index].position, stars[*a].position)
                     .total_cmp(&distance_squared(stars[index].position, stars[*b].position))
             });
-            for other in closest.into_iter().take(2) {
+            for other in closest.into_iter().take(lane_links) {
                 if distance_squared(stars[index].position, stars[other].position) < 0.05
                     && !neighbors[index].contains(&other)
                 {

@@ -6,6 +6,7 @@ use super::stars::astro;
 use crate::{
     control::SceneSettings,
     scene::{Frame, Scene, SceneEnv},
+    style::ScenePalette,
 };
 pub use settings::SolarSystemSettings;
 
@@ -29,13 +30,21 @@ pub struct SolarSystemScene {
     settings: SolarSystemSettings,
     orbit_points: Vec<Vec<(f64, f64)>>,
     last_jd: f64,
+    palette: ScenePalette,
 }
 impl SolarSystemScene {
-    pub fn new(settings: &SolarSystemSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it, and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: the sun, planet and backdrop colours
+    // are mapped onto the palette by brightness at draw time, so `PaletteScene`
+    // skips its generic recolour (`follows_palette`).
+    pub fn new(settings: &SolarSystemSettings, env: &SceneEnv) -> Self {
         let mut scene = Self {
             settings: settings.normalized(),
             orbit_points: Vec::new(),
             last_jd: 2451545.0,
+            palette: env.palette.clone(),
         };
         scene.orbit_points = (0..8)
             .map(|index| {
@@ -106,7 +115,7 @@ impl Scene for SolarSystemScene {
         frame.cell_colors.clear();
         frame.cell_colors.resize(
             usize::from(frame.width) * usize::from(frame.height),
-            [90, 110, 150],
+            self.palette.recolor([90, 110, 150]),
         );
         let width = frame.raster.width as f64;
         let height = frame.raster.height as f64;
@@ -142,7 +151,7 @@ impl Scene for SolarSystemScene {
             frame,
             center,
             self.body_radius(SUN_RADIUS_KM, extent),
-            [255, 220, 115],
+            self.palette.recolor([255, 220, 115]),
         );
         for (index, color) in COLORS.iter().enumerate() {
             if self.settings.visible_planets[index] {
@@ -150,10 +159,16 @@ impl Scene for SolarSystemScene {
                     frame,
                     self.projected(index, jd, extent, center),
                     self.body_radius(RADII_KM[index], extent),
-                    *color,
+                    self.palette.recolor(*color),
                 );
             }
         }
+    }
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+    fn follows_palette(&self) -> bool {
+        true
     }
     fn uses_cell_colors(&self) -> bool {
         true
@@ -193,7 +208,7 @@ mod tests {
     }
     #[test]
     fn distance_realism_preserves_ratios_and_compression_spreads_inner_planets() {
-        let env = SceneEnv::for_test(PathBuf::new());
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
         let real = SolarSystemScene::new(
             &SolarSystemSettings {
                 distance_realism_percent: 100,
@@ -207,7 +222,7 @@ mod tests {
     }
     #[test]
     fn hiding_planets_removes_them_without_rescaling_sun_and_visible_planets() {
-        let env = SceneEnv::for_test(PathBuf::new());
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
         let mut all = SolarSystemScene::new(
             &SolarSystemSettings {
                 orbit_paths: false,
@@ -229,7 +244,7 @@ mod tests {
     }
     #[test]
     fn motion_uses_simulation_speed_and_small_frames_are_safe() {
-        let env = SceneEnv::for_test(PathBuf::new());
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
         let scene = SolarSystemScene::new(&SolarSystemSettings::default(), &env);
         let first = scene.projected(0, 2451545.0, 100.0, (0.0, 0.0));
         let second = scene.projected(0, 2451545.0 + 22.0, 100.0, (0.0, 0.0));
@@ -268,7 +283,10 @@ mod orbital_contract_tests {
     }
     #[test]
     fn size_realism_uses_physical_scale_with_minimum_visible_markers() {
-        let env = SceneEnv::for_test(std::path::PathBuf::new());
+        let env = SceneEnv::for_test(
+            std::path::PathBuf::new(),
+            crate::resources::test_resources(),
+        );
         let real = SolarSystemScene::new(
             &SolarSystemSettings {
                 size_realism_percent: 100,
@@ -289,7 +307,7 @@ mod speed_and_validation_tests {
     use std::{path::PathBuf, time::Duration};
     #[test]
     fn simulation_speed_changes_motion_with_the_same_frame_clock() {
-        let env = SceneEnv::for_test(PathBuf::new());
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
         let mut slow = SolarSystemScene::new(
             &SolarSystemSettings {
                 time_speed: 0,
@@ -332,5 +350,33 @@ mod speed_and_validation_tests {
         assert_eq!(normalized.distance_realism_percent, 0);
         assert_eq!(normalized.size_realism_percent, 100);
         assert_eq!(normalized.time_speed, 5);
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+    use crate::debug::render_frame;
+    use std::{path::PathBuf, time::Duration};
+    fn colors(palette: Option<ScenePalette>) -> Vec<[u8; 3]> {
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
+        let mut scene = SolarSystemScene::new(&SolarSystemSettings::default(), &env);
+        if let Some(palette) = palette {
+            scene.set_palette(&palette);
+        }
+        render_frame(&mut scene, 120, 50, Duration::ZERO).cell_colors
+    }
+    #[test]
+    fn palette_changes_colours_and_none_is_unchanged() {
+        let palette = ScenePalette {
+            stops: vec![[10, 200, 20], [250, 30, 30]],
+            ..Default::default()
+        };
+        let env = SceneEnv::for_test(PathBuf::new(), crate::resources::test_resources());
+        assert!(SolarSystemScene::new(&SolarSystemSettings::default(), &env).follows_palette());
+        let plain = colors(None);
+        assert_eq!(plain, colors(Some(ScenePalette::default())));
+        assert!(plain.contains(&[255, 220, 115]));
+        assert_ne!(plain, colors(Some(palette)));
     }
 }

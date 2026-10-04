@@ -10,7 +10,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &FbmCloudsSettings) -> FbmCloudsScene {
-    FbmCloudsScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    FbmCloudsScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_of(settings: &FbmCloudsSettings, width: u16, height: u16, seconds: f64) -> Rendered {
@@ -598,7 +601,7 @@ fn gpu_frames_replace_software_once_they_arrive() {
 
     // Until the first GPU frame arrives the software picture is drawn.
     let (runner, release) = fake_runner(0.25, 1);
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
     env.gpu = Some(runner.clone());
     let mut scene = FbmCloudsScene::new(&gpu_settings(), &env);
     let before = render_frame(&mut scene, 20, 10, Duration::from_secs(1));
@@ -634,7 +637,7 @@ fn a_gpu_frame_of_another_size_keeps_software_on_screen() {
     // Jobs from 60 dots wide (30 cells) on are held back by the gate, so the
     // only finished frame stays the 40x40 one.
     let (runner, release) = fake_runner(0.25, 60);
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
     env.gpu = Some(runner);
     let mut scene = FbmCloudsScene::new(&gpu_settings(), &env);
     let small = render_until_status(&mut scene, 20, 10, "Rendering on GPU (Fake)");
@@ -653,7 +656,7 @@ fn a_gpu_frame_of_another_size_keeps_software_on_screen() {
 #[test]
 fn failing_gpu_keeps_drawing_software_and_reports_the_error() {
     let _guard = AvailabilityGuard::ready();
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
     env.gpu = Some(scripted_runner(true));
     let mut failing = FbmCloudsScene::new(&gpu_settings(), &env);
     let wanted = "GPU error: fake kernel not ported; using software";

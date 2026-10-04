@@ -149,8 +149,18 @@ pub struct ModelCompiler<'a, P: DefinitionProvider + ?Sized> {
     provider: &'a P,
     budget: ByteBudget,
     limits: Limits,
+    state_cache: BTreeMap<ResourceId, CachedStateDefinition>,
     cache: BTreeMap<ResourceId, Arc<NormalizedModel>>,
     cache_reservations: Vec<Reservation>,
+    state_cache_enabled: bool,
+    recycle_on_full: bool,
+}
+struct CachedStateDefinition {
+    definition: StateDefinition,
+    origin: DefinitionOrigin,
+    // The source Document's 128x encoded-byte allowance transfers to the
+    // parsed selector. The original JSON tree is released after first use.
+    _reservation: Reservation,
 }
 impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
     pub fn new(provider: &'a P, limits: Limits, budget: ByteBudget) -> Result<Self> {
@@ -159,9 +169,27 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
             provider,
             budget,
             limits,
+            state_cache: BTreeMap::new(),
             cache: BTreeMap::new(),
             cache_reservations: Vec::new(),
+            state_cache_enabled: false,
+            recycle_on_full: false,
         })
+    }
+
+    /// Only call after the mounted source proves every definition layer is an
+    /// immutable in-memory archive. Default compilers re-read blockstates on
+    /// every call, retaining the existing mutable DefinitionProvider contract.
+    pub(crate) fn enable_immutable_source_cache(&mut self) {
+        self.state_cache_enabled = true;
+        self.recycle_on_full = true;
+    }
+    /// Match the old one-compiler-per-tile model-cache lifetime for a live or
+    /// otherwise unverified source. Blockstate definitions were never cached.
+    pub(crate) fn reset_for_next_tile(&mut self) {
+        self.state_cache.clear();
+        self.cache.clear();
+        self.cache_reservations.clear();
     }
     pub fn compile_state(
         &mut self,
@@ -175,16 +203,79 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
             kind: ResourceKind::Blockstate,
             id: state.id().clone(),
         };
-        let input = self.provider.definition(&key, cancel)?.ok_or_else(|| {
-            AssetError::InvalidMetadata(format!("missing blockstate definition: {}", key.id))
-        })?;
-        if !input.document.uses_budget(&self.budget) {
-            return Err(metadata::invalid(
-                "state metadata and compiler accounts differ",
-            ));
-        } // Reject a split accounting domain before selecting applications.
-        let definition = StateDefinition::parse(&input.document.value)?;
-        let choices = definition.select(state, anchor, seed)?;
+        let (choices, state_origin) = if self.state_cache_enabled {
+            if !self.state_cache.contains_key(state.id()) {
+                if self.state_cache.len() >= self.limits.textures.min(4096) {
+                    if self.recycle_on_full {
+                        self.state_cache.clear();
+                    } else {
+                        return Err(metadata::invalid("blockstate definition cache limit"));
+                    }
+                }
+                let input = self.provider.definition(&key, cancel)?.ok_or_else(|| {
+                    AssetError::InvalidMetadata(format!(
+                        "missing blockstate definition: {}",
+                        key.id
+                    ))
+                })?;
+                if !input.document.uses_budget(&self.budget) {
+                    return Err(metadata::invalid(
+                        "state metadata and compiler accounts differ",
+                    ));
+                }
+                let DefinitionInput {
+                    document,
+                    compatibility,
+                } = input;
+                let definition = StateDefinition::parse(&document.value)?;
+                cancel.check()?;
+                let origin = DefinitionOrigin {
+                    resource: key.clone(),
+                    origin: document.origin.clone(),
+                    sha256: document.sha256,
+                    compatibility,
+                };
+                let reservation = document.into_charge();
+                self.state_cache.insert(
+                    key.id.clone(),
+                    CachedStateDefinition {
+                        definition,
+                        origin,
+                        _reservation: reservation,
+                    },
+                );
+            }
+            // Only the immutable parsed document is cached. Selection still
+            // uses this exact state, position and signed seed on every call.
+            let cached = self
+                .state_cache
+                .get(state.id())
+                .ok_or_else(|| metadata::invalid("missing cached blockstate definition"))?;
+            (
+                cached.definition.select(state, anchor, seed)?,
+                cached.origin.clone(),
+            )
+        } else {
+            let input = self.provider.definition(&key, cancel)?.ok_or_else(|| {
+                AssetError::InvalidMetadata(format!("missing blockstate definition: {}", key.id))
+            })?;
+            if !input.document.uses_budget(&self.budget) {
+                return Err(metadata::invalid(
+                    "state metadata and compiler accounts differ",
+                ));
+            }
+            let definition = StateDefinition::parse(&input.document.value)?;
+            let choices = definition.select(state, anchor, seed)?;
+            (
+                choices,
+                DefinitionOrigin {
+                    resource: key,
+                    origin: input.document.origin.clone(),
+                    sha256: input.document.sha256,
+                    compatibility: input.compatibility,
+                },
+            )
+        };
         let reservation = self
             .budget
             .reserve(16_384 + choices.len() as u64 * 4096, cancel)?;
@@ -197,12 +288,7 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
         Ok(NormalizedState {
             state: state.clone(),
             applications,
-            state_origin: DefinitionOrigin {
-                resource: key,
-                origin: input.document.origin.clone(),
-                sha256: input.document.sha256,
-                compatibility: input.compatibility,
-            },
+            state_origin,
             _reservation: reservation,
         })
     }
@@ -216,7 +302,12 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
             return Ok(Arc::clone(model));
         }
         if self.cache.len() >= self.limits.textures.min(4096) {
-            return Err(metadata::invalid("normalized model cache limit"));
+            if self.recycle_on_full {
+                self.cache.clear();
+                self.cache_reservations.clear();
+            } else {
+                return Err(metadata::invalid("normalized model cache limit"));
+            }
         }
         let mut chain = Vec::new();
         let mut seen = BTreeSet::new();
@@ -255,6 +346,11 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
                     "gui_light",
                     "credit",
                     "texture_size",
+                    // The 1.19.3 BlockModel deserializer reads named fields and
+                    // ignores these exporter labels; they carry no world mesh.
+                    "format_version",
+                    "groups",
+                    "__createdwith",
                     "render_type",
                 ],
             )?;
@@ -314,6 +410,9 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
                 "credit",
                 "texture_size",
                 "ambientocclusion",
+                "format_version",
+                "groups",
+                "__createdwith",
             ] {
                 if fields.contains_key(name) {
                     ignored.insert(name);
@@ -343,19 +442,23 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
                     "shade",
                     "faces",
                     "name",
+                    // Present in native fence/wall elements; it labels the
+                    // authored part and has no geometry or rendering behavior.
+                    "__comment",
+                    // The pinned 1.19.3 BlockElement deserializer does not read
+                    // this later exporter hint; native shading still uses shade.
+                    "shade_direction_override",
                     "light_emission",
                 ],
             )?;
-            if fields
-                .get("light_emission")
-                .map(uint)
-                .transpose()?
-                .unwrap_or(0)
-                != 0
-            {
-                return Err(AssetError::Unsupported(
-                    "nonzero element light_emission needs the lighting adapter".into(),
-                ));
+            if fields.contains_key("shade_direction_override") {
+                ignored.insert("shade_direction_override");
+            }
+            if fields.contains_key("light_emission") {
+                // The pinned 1.19.3 BlockElement deserializer never reads this
+                // newer exporter hint. Preserve its source provenance; texture
+                // selection and the separately parsed shade flag remain active.
+                ignored.insert("light_emission");
             }
             let from = triple(required(fields, "from")?)?;
             let to = triple(required(fields, "to")?)?;
@@ -407,6 +510,22 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
                     })
                     .transpose()?
                     .flatten();
+                let cull_face = values
+                    .get("cullface")
+                    .map(|v| Direction::parse(text(v)?))
+                    .transpose()?;
+                // Plane elements can author all six faces. Their collapsed
+                // edges have no pixel area; retain both visible sides without
+                // inventing thickness. Validate every face field before omitting
+                // these exactly zero-area faces, including culling and UV data.
+                let zero_area = match face {
+                    Direction::North | Direction::South => from[0] == to[0] || from[1] == to[1],
+                    Direction::East | Direction::West => from[1] == to[1] || from[2] == to[2],
+                    Direction::Up | Direction::Down => from[0] == to[0] || from[2] == to[2],
+                };
+                if zero_area {
+                    continue;
+                }
                 let mut points = face_points(face, from, to);
                 if let Some(rotation) = rotation {
                     for point in &mut points {
@@ -416,10 +535,6 @@ impl<'a, P: DefinitionProvider + ?Sized> ModelCompiler<'a, P> {
                 let normal_java = geometric_normal(points)
                     .ok_or_else(|| metadata::invalid("degenerate model face"))?
                     .map(|c| -c);
-                let cull_face = values
-                    .get("cullface")
-                    .map(|v| Direction::parse(text(v)?))
-                    .transpose()?;
                 let complete_boundary = complete_boundary(points, normal_java);
                 // A rotated element's cull face must match an actual complete boundary to avoid false removals.
                 let cull_face = cull_face.filter(|face| complete_boundary == Some(*face));
@@ -665,20 +780,15 @@ pub fn oriented_quad(quad: &ModelQuad, application: &ModelApplication) -> Result
     };
     output.complete_boundary = quad.complete_boundary.and_then(rotate_face);
     output.cull_face = quad.cull_face.and_then(rotate_face);
-    if !application.uvlock {
+    if !application.uvlock || (application.x_turns == 0 && application.y_turns == 0) {
+        // Keep identity UVs exact.
         return Ok(output);
     }
-    // Lock UV tangent axes to the destination face basis, including partial-face UVs.
-    let normal = [
-        f64::from(output.normal[0]),
-        f64::from(output.normal[2]),
-        f64::from(output.normal[1]),
-    ];
-    let Some(target) = Direction::from_java_normal(normal) else {
-        return Err(AssetError::Unsupported(
-            "uvlock on a non-axis-aligned element requires explicit UV metadata".into(),
-        ));
-    };
+    // UV-lock follows the authored face chart under blockstate rotation only.
+    // Element tilt/rescale already affects points and normals, never this chart.
+    let target =
+        rotate_face(quad.face) // Rotate the nominal face, not the physical normal.
+            .ok_or_else(|| metadata::invalid("invalid UV-lock nominal face rotation"))?; // Preserve invariant errors.
     let source_basis = face_points(quad.face, [0.0; 3], [1.0; 3]);
     let target_basis = face_points(target, [0.0; 3], [1.0; 3]);
     let source_u = [

@@ -150,6 +150,42 @@ fn built(state: &BlockState) -> Built {
     Built::None
 }
 
+/// Appearance classes only within an already classified construction footprint.
+/// Identification still requires a decoded furnishing pair and connected materials.
+/// Wet solids are excluded because the block-owner contract also credits their
+/// fluid faces; water alone must not masquerade as visible constructed geometry.
+pub(super) fn appearance_material(state: &BlockState) -> u8 {
+    if state
+        .properties
+        .get("waterlogged")
+        .is_some_and(|value| value == "true")
+    {
+        return 0;
+    }
+    match built(state) {
+        Built::Material(material) => return material,
+        Built::DoorLower | Built::DoorUpper => return 64,
+        Built::BedFoot | Built::BedHead => return 128,
+        Built::None => {}
+    }
+    let Some(name) = state.name.strip_prefix("minecraft:") else {
+        return 0;
+    };
+    let name = name.strip_prefix("stripped_").unwrap_or(name);
+    let timber = ["_log", "_wood"].into_iter().any(|suffix| {
+        name.strip_suffix(suffix)
+            .is_some_and(|species| wood(species) && !["crimson", "warped"].contains(&species))
+    }) || ["_stem", "_hyphae"].into_iter().any(|suffix| {
+        name.strip_suffix(suffix)
+            .is_some_and(|species| ["crimson", "warped"].contains(&species))
+    });
+    if timber && schema(state, &[("axis", &["x", "y", "z"])]) {
+        32
+    } else {
+        0
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Cell<'a> {
     representative: Option<Observation<'a>>,
@@ -160,6 +196,9 @@ struct Cell<'a> {
     foot: Option<Observation<'a>>,
     head: Option<Observation<'a>>,
     water_y: Option<i32>,
+    top: i16,
+    constructed_levels: u32,
+    horizontal_roof_levels: u32,
 }
 impl<'a> Cell<'a> {
     fn witness(self, block: Observation<'a>) -> Witness<'a> {
@@ -262,6 +301,85 @@ fn include_bounds(bounds: &mut Support, block: Observation<'_>) {
     }
 }
 
+// Keep the classified horizontal footprint and furnishing identity. Extend only
+// to decoded horizontal timber joined to its constructed cells. Adjacent roof
+// steps may meet along an edge; floating logs and vertical tree trunks do not.
+fn roof_depth(cell: &Cell<'_>, y: i32) -> Option<usize> {
+    let depth = i32::from(cell.top) - y;
+    (0..BAND).contains(&depth).then_some(depth as usize)
+}
+
+fn attached_roof_bounds(
+    cells: &[Cell<'_>; TILE_CELLS],
+    indices: &[usize],
+    mask: &[u64; 4],
+    support: &mut Support,
+    budget: &mut Budget,
+    work: &Work<'_>,
+) -> Result<(), Error> {
+    // BAND is 24 and TILE_CELLS is 256: each observed timber node enters once.
+    let mut queue = [0_u16; TILE_CELLS * BAND as usize];
+    let mut reached = [0_u32; TILE_CELLS];
+    let (mut head, mut length) = (0, 0);
+    for &index in indices {
+        let mut remaining = cells[index].horizontal_roof_levels;
+        while remaining != 0 {
+            budget.tick(work)?;
+            let depth = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+            let y = i32::from(cells[index].top) - depth as i32;
+            let attached = std::iter::once(Some(index))
+                .chain(neighbors(index))
+                .flatten()
+                .filter(|&other| included(mask, other))
+                .any(|other| {
+                    (-1..=1).any(|dy| {
+                        roof_depth(&cells[other], y + dy).is_some_and(|level| {
+                            cells[other].constructed_levels & (1 << level) != 0
+                        })
+                    })
+                });
+            if attached {
+                reached[index] |= 1 << depth;
+                queue[length] = (index * BAND as usize + depth) as u16;
+                length += 1;
+            }
+        }
+    }
+    while head < length {
+        budget.tick(work)?;
+        let node = usize::from(queue[head]);
+        head += 1;
+        let index = node / BAND as usize;
+        let depth = node % BAND as usize;
+        let y = i32::from(cells[index].top) - depth as i32;
+        support.minimum[1] = support.minimum[1].min(y);
+        support.maximum[1] = support.maximum[1].max(y);
+        for other in std::iter::once(Some(index))
+            .chain(neighbors(index))
+            .flatten()
+        {
+            if !included(mask, other) {
+                continue;
+            }
+            for dy in -1..=1 {
+                budget.tick(work)?;
+                let Some(level) = roof_depth(&cells[other], y + dy) else {
+                    continue;
+                };
+                let bit = 1 << level;
+                if cells[other].horizontal_roof_levels & bit == 0 || reached[other] & bit != 0 {
+                    continue;
+                }
+                reached[other] |= bit;
+                queue[length] = (other * BAND as usize + level) as u16;
+                length += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn component<'a>(
     cells: &[Cell<'a>; TILE_CELLS],
     context: Context,
@@ -349,6 +467,7 @@ fn component<'a>(
     }
     include_bounds(&mut support, pair.anchor.block);
     include_bounds(&mut support, pair.corroboration.block);
+    attached_roof_bounds(cells, indices, &mask, &mut support, budget, work)?;
     support.primary_columns = material_columns;
     support.secondary_columns = pairs;
     support.secondary_sectors = sectors.count_ones() as u8;
@@ -429,6 +548,7 @@ pub(super) fn append_targets<'a>(
                 if top == i16::MIN {
                     continue;
                 }
+                cell.top = top;
                 for depth in 0..BAND {
                     let y = i32::from(top) - depth;
                     if y < MIN_Y {
@@ -438,7 +558,20 @@ pub(super) fn append_targets<'a>(
                     if role(block.state) == Role::Water && cell.water_y.is_none() {
                         cell.water_y = Some(y);
                     }
-                    match built(block.state) {
+                    let constructed = built(block.state);
+                    if !matches!(constructed, Built::None) {
+                        cell.constructed_levels |= 1 << depth;
+                    }
+                    if appearance_material(block.state) == 32
+                        && block
+                            .state
+                            .properties
+                            .get("axis")
+                            .is_some_and(|axis| axis != "y")
+                    {
+                        cell.horizontal_roof_levels |= 1 << depth;
+                    }
+                    match constructed {
                         Built::None => {}
                         Built::Material(kind) => {
                             cell.representative.get_or_insert(block);

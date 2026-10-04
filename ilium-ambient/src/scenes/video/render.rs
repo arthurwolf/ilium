@@ -9,12 +9,14 @@ use super::player::{
 use super::schedule::{format_clock, resolve_seed};
 use super::settings::{PlaybackMode, RenderStyle, VideoSettings};
 use crate::raster::Raster;
+use crate::resources::{AmbientResources, WorkerCost};
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
+use crate::style::ScenePalette;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A changed terminal size must hold this long before ffmpeg is restarted.
 const RESIZE_SETTLE: Duration = Duration::from_millis(500);
@@ -55,6 +57,12 @@ pub struct VideoScene {
     settling: Option<((u16, u16), Duration)>,
     start: Option<Box<dyn FnOnce(Arc<std::sync::atomic::AtomicBool>) + Send>>,
     worker: Option<Worker>,
+    palette: ScenePalette,
+    resources: AmbientResources,
+    // Covers the simultaneous bounded queue, producer, pending, current and
+    // conversion/resample allocation inventory through their last owner.
+    _pipeline_storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    retry_after: Option<Instant>,
 }
 
 pub(super) fn stream_options(settings: &VideoSettings) -> StreamOptions {
@@ -72,24 +80,60 @@ pub(super) fn stream_options(settings: &VideoSettings) -> StreamOptions {
 }
 
 impl VideoScene {
-    pub fn new(settings: &VideoSettings, _env: &SceneEnv) -> Self {
-        Self::with_runner(settings, Arc::new(SystemRunner))
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. This scene follows it natively: its cell colours are mapped onto the
+    // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
+    // `Scene::set_palette` delivers later changes (applied from the next render).
+    // With no palette provided the colours are untouched.
+    pub fn new(settings: &VideoSettings, env: &SceneEnv) -> Self {
+        let mut scene = Self::with_runner_resources(
+            settings,
+            Arc::new(SystemRunner::new(env.resources.clone())),
+            env.resources.clone(),
+        );
+        scene.palette = env.palette.clone();
+        scene
     }
 
-    /// Like `new`, with the process spawner replaced (tests).
+    #[cfg(test)]
     pub(super) fn with_runner(settings: &VideoSettings, runner: Arc<dyn CommandRunner>) -> Self {
+        Self::with_runner_resources(settings, runner, crate::resources::test_resources())
+    }
+
+    fn with_runner_resources(
+        settings: &VideoSettings,
+        runner: Arc<dyn CommandRunner>,
+        resources: AmbientResources,
+    ) -> Self {
         let slot = ChildSlot::default();
         let options = stream_options(settings);
-        let source = FfmpegSource::new(runner, slot.clone(), options.clone());
+        let source = FfmpegSource::new(runner, slot.clone(), options.clone(), resources.clone());
         let config = PlayerConfig::new(settings.clone(), options, resolve_seed(settings.seed));
-        Self::with_source(settings, config, Box::new(source), slot)
+        Self::with_source_resources(settings, config, Box::new(source), slot, resources)
     }
 
+    #[cfg(test)]
     pub(super) fn with_source(
         settings: &VideoSettings,
         config: PlayerConfig,
         source: Box<dyn FrameSource>,
         slot: ChildSlot,
+    ) -> Self {
+        Self::with_source_resources(
+            settings,
+            config,
+            source,
+            slot,
+            crate::resources::test_resources(),
+        )
+    }
+
+    fn with_source_resources(
+        settings: &VideoSettings,
+        config: PlayerConfig,
+        source: Box<dyn FrameSource>,
+        slot: ChildSlot,
+        resources: AmbientResources,
     ) -> Self {
         let (sender, receiver) = sync_channel(QUEUE_FRAMES);
         let shared = Arc::new(SharedState::default());
@@ -109,13 +153,17 @@ impl VideoScene {
             settling: None,
             start: Some(start),
             worker: None,
+            palette: ScenePalette::default(),
+            resources,
+            _pipeline_storage: None,
+            retry_after: None,
         };
         scene.try_start();
         scene
     }
 
     fn try_start(&mut self) {
-        if self.start.is_none() {
+        if self.start.is_none() || self.retry_after.is_some_and(|at| Instant::now() < at) {
             return;
         }
         let admitted = ACTIVE_VIDEO_WORKERS
@@ -124,18 +172,49 @@ impl VideoScene {
             })
             .is_ok();
         if !admitted {
+            self.retry_after = Some(Instant::now() + Duration::from_secs(1));
             self.shared.set_notice(Some(
                 "Waiting for previous video cleanup; other scenes remain available".into(),
             ));
             return;
         }
+        let admission = VideoAdmission;
+        // 12 queued RGB frames, producer/pending frames, two conversion planes,
+        // retained current and resize transients fit this conservative envelope.
+        let storage = match self.resources.reserve_storage(40 * 1024 * 1024) {
+            Ok(storage) => storage,
+            Err(error) => {
+                self.retry_after = Some(Instant::now() + Duration::from_secs(1));
+                self.shared.set_notice(Some(format!(
+                    "Video frame storage admission rejected: {error:?}; retry shortly"
+                )));
+                return;
+            }
+        };
+        let physical = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: 8 * 1024 * 1024,
+        }) {
+            Ok(physical) => physical,
+            Err(error) => {
+                self.retry_after = Some(Instant::now() + Duration::from_secs(1));
+                self.shared.set_notice(Some(format!(
+                    "Video worker host admission rejected: {error:?}; retry shortly"
+                )));
+                return;
+            }
+        };
         if let Some(start) = self.start.take() {
-            let admission = VideoAdmission;
-            match Worker::try_spawn("video", move |stop| {
+            let display_storage = Arc::clone(&storage);
+            match Worker::start_admitted("video", physical, move |stop| {
+                let _storage = storage;
                 let _admission = admission;
                 start(stop);
             }) {
-                Ok(worker) => self.worker = Some(worker),
+                Ok(worker) => {
+                    self._pipeline_storage = Some(display_storage);
+                    self.worker = Some(worker);
+                }
                 Err(error) => self.shared.set_notice(Some(format!(
                     "Could not start video worker: {error}; choose another scene and retry"
                 ))),
@@ -212,6 +291,7 @@ impl VideoScene {
             &self.tone,
         );
         if let Some(decoded) = decoded {
+            self.shared.diagnostics.decoded(frame.source_seconds);
             self.current = Some(Current {
                 decoded,
                 playing: frame.playing,
@@ -248,6 +328,7 @@ impl Scene for VideoScene {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
+        self.shared.diagnostics.rendered(frame.wall);
         self.try_start();
         self.track_size((frame.width.min(512), frame.height.min(128)), frame.wall);
         self.pump(frame.wall);
@@ -272,6 +353,7 @@ impl Scene for VideoScene {
                     let mut colors = current.decoded.resampled_colors(columns, rows);
                     colors.resize(columns * rows, [90, 90, 90]);
                     *frame.cell_colors = colors;
+                    self.palette.recolor_cells(frame.cell_colors);
                 }
             }
             None => {
@@ -280,9 +362,18 @@ impl Scene for VideoScene {
                     let cells = usize::from(frame.width) * usize::from(frame.height);
                     frame.cell_colors.clear();
                     frame.cell_colors.resize(cells, [90, 90, 90]);
+                    self.palette.recolor_cells(frame.cell_colors);
                 }
             }
         }
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {
@@ -300,6 +391,15 @@ impl Scene for VideoScene {
         let Some(current) = &self.current else {
             return Some("Starting video...".to_owned());
         };
+        if self.requested.is_some_and(|(columns, rows)| {
+            current.decoded.width != usize::from(columns) * 2
+                || current.decoded.height != usize::from(rows) * 4
+        }) {
+            // The retained picture is resampled while the new decoder starts
+            // or replays its prefix. Playing must describe a current-sized
+            // decoded frame, rather than the retained picture's old clock.
+            return Some(format!("Resizing: {}", current.playing.name));
+        }
         let mut text = format!(
             "Playing: {} {}",
             current.playing.name,
@@ -351,5 +451,152 @@ fn draw_placeholder(raster: &mut Raster, wall: Duration) {
             0.5,
             breath * 0.9,
         );
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::super::discover::MediaInput;
+    use super::super::player::{FrameStream, OpenError};
+    use super::*;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+    };
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    struct BlockedSource {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+    impl FrameSource for BlockedSource {
+        fn probe_duration(&mut self, _: &MediaInput) -> Option<f64> {
+            None
+        }
+        fn open(
+            &mut self,
+            _: &super::super::command::PlayRequest,
+        ) -> Result<Box<dyn FrameStream>, OpenError> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Err(OpenError::Failed("synthetic release".into()))
+        }
+    }
+
+    fn isolated(bytes: usize) -> (Execution, AmbientResources, QuotaGroup) {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: 3,
+            worker_bytes: bytes,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .unwrap();
+        (execution, AmbientResources::new(client), quota)
+    }
+
+    #[test]
+    fn host_rejection_is_recoverable_before_video_worker_start() {
+        let (mut execution, resources, _) = isolated(16 * 1024 * 1024);
+        let settings = VideoSettings {
+            source: "https://example.invalid/clip.mp4".into(),
+            ..VideoSettings::default()
+        };
+        let config = PlayerConfig::new(settings.clone(), stream_options(&settings), 1);
+        let (entered, _) = mpsc::channel();
+        let (_, release) = mpsc::channel();
+        let scene = VideoScene::with_source_resources(
+            &settings,
+            config,
+            Box::new(BlockedSource { entered, release }),
+            ChildSlot::default(),
+            resources.clone(),
+        );
+        assert!(scene.worker.is_none());
+        assert!(scene
+            .status()
+            .unwrap()
+            .contains("storage admission rejected"));
+        drop(scene);
+        drop(resources);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+
+    #[test]
+    fn blocked_video_owner_keeps_pipeline_and_thread_credit_after_scene_drop() {
+        let (mut execution, resources, quota) = isolated(128 * 1024 * 1024);
+        let baseline = quota.snapshot().worker_bytes;
+        let settings = VideoSettings {
+            source: "https://example.invalid/clip.mp4".into(),
+            ..VideoSettings::default()
+        };
+        let config = PlayerConfig::new(settings.clone(), stream_options(&settings), 1);
+        let (entered, started) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let mut scene = VideoScene::with_source_resources(
+            &settings,
+            config,
+            Box::new(BlockedSource {
+                entered,
+                release: gate,
+            }),
+            ChildSlot::default(),
+            resources.clone(),
+        );
+        crate::debug::render_frame(&mut scene, 20, 5, Duration::ZERO);
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        let ticket = scene.worker.as_ref().unwrap().join_observer().unwrap();
+        let dropped_at = Instant::now();
+        drop(scene);
+        assert!(dropped_at.elapsed() < Duration::from_millis(100));
+        assert!(quota.snapshot().worker_bytes >= baseline + 48 * 1024 * 1024);
+        release.send(()).unwrap();
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(quota.snapshot().worker_bytes >= baseline + 8 * 1024 * 1024);
+        drop(ticket);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        drop(resources);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
     }
 }

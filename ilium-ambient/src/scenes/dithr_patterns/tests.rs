@@ -28,7 +28,10 @@ const ALL_DITHERS: [DitherKind; 4] = [
 ];
 
 fn scene_with(settings: &DithrPatternsSettings) -> DithrPatternsScene {
-    DithrPatternsScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    DithrPatternsScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn seconds(value: f64) -> Duration {
@@ -649,7 +652,7 @@ fn ready_gpu_reports_the_seam_status_and_keeps_drawing_software() {
         Some("No GPU device was provided by the host; using software")
     );
 
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
     env.gpu = Some(scripted_runner(false));
     let mut scene = DithrPatternsScene::new(&settings, &env);
     let rendered = render_frame(&mut scene, 20, 10, Duration::from_secs(1));

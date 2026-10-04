@@ -64,7 +64,7 @@ impl Drop for Permit<'_> {
     }
 }
 #[derive(Debug)]
-struct OwnedResolver;
+pub(super) struct OwnedResolver;
 fn resolve_owned(
     resolver: &impl Resolver,
     uri: &ureq::http::Uri,

@@ -81,7 +81,7 @@ fn scene_with(
 ) -> NightLightsScene {
     NightLightsScene::with_parts(
         settings,
-        &SceneEnv::for_test(cache.to_path_buf()),
+        &SceneEnv::for_test(cache.to_path_buf(), crate::resources::test_resources()),
         fetcher,
         fixed_now(),
         no_land(),
@@ -304,7 +304,10 @@ fn tile_level_follows_terminal_size_zoom_and_detail() {
     let scene = |settings: NightLightsSettings| {
         NightLightsScene::with_parts(
             &settings,
-            &SceneEnv::for_test(PathBuf::from("/nonexistent")),
+            &SceneEnv::for_test(
+                PathBuf::from("/nonexistent"),
+                crate::resources::test_resources(),
+            ),
             online_fetcher(),
             fixed_now(),
             no_land(),
@@ -578,7 +581,10 @@ fn coastline_draws_only_where_the_injected_land_mask_changes() {
         };
         NightLightsScene::with_parts(
             &settings,
-            &SceneEnv::for_test(cache.path().to_path_buf()),
+            &SceneEnv::for_test(
+                cache.path().to_path_buf(),
+                crate::resources::test_resources(),
+            ),
             dark.clone(),
             fixed_now(),
             Box::new(|lon, lat| lon.abs() < 30.0 && lat.abs() < 20.0),
@@ -620,7 +626,10 @@ fn coastline_draws_only_where_the_injected_land_mask_changes() {
 #[test]
 fn the_shared_land_mask_feeds_the_coastline() {
     let cache = tempfile::tempdir().unwrap();
-    let env = SceneEnv::for_test(cache.path().to_path_buf());
+    let env = SceneEnv::for_test(
+        cache.path().to_path_buf(),
+        crate::resources::test_resources(),
+    );
     // Placeholder graticule only (no worker data needed); the coastline adds
     // dots exactly when `worldmap::is_land` knows both land and sea.
     let mut with_coast = NightLightsScene::new(
@@ -869,14 +878,31 @@ fn dropping_the_scene_stops_the_worker_and_render_never_blocks() {
         started.elapsed() < Duration::from_secs(2),
         "render never waits for the worker"
     );
+    let entry_deadline = std::time::Instant::now() + Duration::from_secs(2);
     while !entered.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < entry_deadline,
+            "fetcher started"
+        );
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(!exited.load(Ordering::SeqCst));
+    let ticket = scene.worker.as_ref().unwrap().join_observer().unwrap();
+    let drop_started = std::time::Instant::now();
     drop(scene);
     assert!(
+        drop_started.elapsed() < Duration::from_secs(2),
+        "scene drop stays responsive"
+    );
+    assert!(matches!(
+        ticket
+            .join_until(std::time::Instant::now() + Duration::from_secs(2))
+            .unwrap(),
+        ilium_platform::owned_worker::WorkerExit::Joined
+    ));
+    assert!(
         exited.load(Ordering::SeqCst),
-        "worker joined before drop returned"
+        "fetcher stopped before actual join"
     );
 }
 
@@ -893,7 +919,10 @@ fn shaping_applies_threshold_gamma_and_gain() {
     let scene = |settings: &NightLightsSettings| {
         NightLightsScene::with_parts(
             settings,
-            &SceneEnv::for_test(PathBuf::from("/nonexistent")),
+            &SceneEnv::for_test(
+                PathBuf::from("/nonexistent"),
+                crate::resources::test_resources(),
+            ),
             online_fetcher(),
             fixed_now(),
             no_land(),
@@ -997,7 +1026,10 @@ fn live_night_lights_from_nasa_gibs() {
             marker: true,
             ..Default::default()
         },
-        &SceneEnv::for_test(cache.path().to_path_buf()),
+        &SceneEnv::for_test(
+            cache.path().to_path_buf(),
+            crate::resources::test_resources(),
+        ),
     );
     let statuses = pump(&mut scene, |scene| {
         scene.mosaic.is_some() && scene.progress.is_none() || scene.problem.is_some()

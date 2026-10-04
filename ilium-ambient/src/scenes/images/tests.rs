@@ -19,7 +19,11 @@ fn write_png(path: &Path, color: [u8; 3]) {
 }
 
 fn scene_for(settings: &ImagesSettings, cache: &Path) -> ImagesScene {
-    ImagesScene::new(settings, &SceneEnv::for_test(cache.to_path_buf()))
+    ImagesScene::new(
+        settings,
+        &SceneEnv::for_test(cache.to_path_buf(), crate::resources::test_resources()),
+    )
+    .expect("explicit fixture image capture admission")
 }
 
 fn folder_settings(folder: &Path) -> ImagesSettings {
@@ -594,7 +598,9 @@ fn errors_are_reported_in_the_status_line() {
         ..ImagesSettings::default()
     };
     let mut scene = scene_for(&empty, directory.path());
-    settle(&mut scene, |scene| scene.list_error.is_some());
+    let rendered = settle(&mut scene, ImagesScene::has_list_error);
+    assert_eq!(rendered.lit_dots(), 0, "failed list has no image pixels");
+    assert_eq!(scene.frames_per_second(), 1, "failed list is settled");
     assert!(scene.status().expect("status").contains("No images found"));
 
     let blank = ImagesSettings {
@@ -602,7 +608,9 @@ fn errors_are_reported_in_the_status_line() {
         ..ImagesSettings::default()
     };
     let mut scene = scene_for(&blank, directory.path());
-    settle(&mut scene, |scene| scene.list_error.is_some());
+    let rendered = settle(&mut scene, ImagesScene::has_list_error);
+    assert_eq!(rendered.lit_dots(), 0, "failed list has no image pixels");
+    assert_eq!(scene.frames_per_second(), 1, "failed list is settled");
     assert_eq!(scene.status().as_deref(), Some("Choose an image file"));
 }
 
@@ -780,4 +788,152 @@ fn braille_preview_of_a_synthetic_sunset() {
         let lines = rendered.braille_lines(100, DitherMode::Ordered);
         assert!(lines.iter().any(|line| line.chars().any(|c| c != ' ')));
     }
+}
+
+#[test]
+fn palette_recolours_image_cells_and_none_leaves_them() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("red.png");
+    write_png(&path, [230, 40, 40]);
+    let settings = ImagesSettings {
+        source: ImageSource::Local(path),
+        motion: Motion::None,
+        ..vivid_full()
+    };
+    let mut scene = scene_for(&settings, directory.path());
+    assert!(scene.follows_palette());
+    let plain = settle(&mut scene, |scene| scene.scheduler.current().is_some());
+    scene.set_palette(&crate::style::ScenePalette {
+        stops: vec![[0, 0, 255], [0, 0, 255]],
+        reverse: false,
+        shift_percent: 0,
+    });
+    let tinted = render_frame(&mut scene, WIDTH, HEIGHT, secs(1));
+    assert_ne!(plain.cell_colors, tinted.cell_colors);
+    assert!(tinted.cell_colors.iter().all(|c| *c == [0, 0, 255]));
+    scene.set_palette(&crate::style::ScenePalette::default());
+    let restored = render_frame(&mut scene, WIDTH, HEIGHT, secs(2));
+    assert_eq!(plain.cell_colors, restored.cell_colors);
+}
+
+#[test]
+fn constructor_storage_refusal_preserves_authored_settings_before_loader_start() {
+    let (_execution, resources, quota) = isolated_cache_resources(64 * 1024);
+    let env = SceneEnv::for_test(
+        std::path::PathBuf::from("/synthetic/image-cache"),
+        resources,
+    );
+    let settings = ImagesSettings {
+        folders: "  /authored/folder/**  ".to_owned(),
+        ..ImagesSettings::default()
+    };
+    let original_pointer = settings.folders.as_ptr();
+    let original_capacity = settings.folders.capacity();
+    let baseline = quota.snapshot();
+    let _pressure = env
+        .resources
+        .reserve_storage(64 * 1024 - baseline.worker_bytes)
+        .unwrap();
+    let saturated = quota.snapshot();
+    assert!(matches!(
+        ImagesScene::new(&settings, &env),
+        Err(ImagesStartError::Admission(
+            ilium_execution::RejectReason::WorkerBytes
+        ))
+    ));
+    assert_eq!(settings.folders, "  /authored/folder/**  ");
+    assert_eq!(settings.folders.as_ptr(), original_pointer);
+    assert_eq!(settings.folders.capacity(), original_capacity);
+    assert_eq!(quota.snapshot().worker_threads, baseline.worker_threads);
+    assert_eq!(quota.snapshot().worker_bytes, saturated.worker_bytes);
+    assert_eq!(quota.snapshot().jobs, 0);
+}
+
+fn isolated_cache_resources(
+    worker_bytes: usize,
+) -> (
+    ilium_execution::Execution,
+    crate::resources::AmbientResources,
+    ilium_execution::QuotaGroup,
+) {
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+    };
+    let quota = QuotaGroup::new(QuotaLimits {
+        clients: 1,
+        jobs: 1,
+        service_jobs: 0,
+        input_bytes: 4096,
+        result_bytes: 4096,
+        worker_threads: 1,
+        worker_bytes,
+    });
+    let empty = LaneConfig {
+        threads: 0,
+        queue_slots: 0,
+        priority: None,
+        resident_bytes_per_thread: 0,
+    };
+    let execution = Execution::start(
+        quota.clone(),
+        ExecutionConfig {
+            cpu: LaneConfig {
+                threads: 1,
+                queue_slots: 1,
+                priority: None,
+                resident_bytes_per_thread: 1024,
+            },
+            io: empty,
+            service: empty,
+        },
+    )
+    .unwrap();
+    let client = execution
+        .client(ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+        })
+        .unwrap();
+    (
+        execution,
+        crate::resources::AmbientResources::new(client),
+        quota,
+    )
+}
+
+#[test]
+fn frame_cache_pressure_preserves_source_arrays_and_old_cache_until_retry() {
+    let (_execution, resources, quota) = isolated_cache_resources(64 * 1024);
+    let dots = vec![0.1f32, 0.7, 0.4];
+    let colors = vec![[12, 34, 56]];
+    let baseline = quota.snapshot().worker_bytes;
+    let old = FrameCache::capture(vec![1, 2], &dots, &colors, &resources).unwrap();
+    let old_pointer = old.dots.as_ptr();
+    let source_pointer = dots.as_ptr();
+    let held_bytes = quota.snapshot().worker_bytes;
+    let pressure = resources.reserve_storage(64 * 1024 - held_bytes).unwrap();
+    assert!(matches!(
+        FrameCache::capture(vec![3, 4], &dots, &colors, &resources),
+        Err(CacheFailure::Admission(
+            ilium_execution::RejectReason::WorkerBytes
+        ))
+    ));
+    assert_eq!(old.dots.as_ptr(), old_pointer);
+    assert_eq!(old.key, [1, 2]);
+    assert_eq!(dots.as_ptr(), source_pointer);
+    assert_eq!(dots, [0.1, 0.7, 0.4]);
+    assert_eq!(colors, [[12, 34, 56]]);
+    assert_eq!(quota.snapshot().worker_bytes, 64 * 1024);
+    drop(pressure);
+    let replacement = FrameCache::capture(vec![3, 4], &dots, &colors, &resources).unwrap();
+    assert_eq!(replacement.dots, dots);
+    assert_eq!(replacement.colors, colors);
+    assert_eq!(old.dots.as_ptr(), old_pointer);
+    assert!(quota.snapshot().worker_bytes > held_bytes);
+    drop(replacement);
+    assert_eq!(quota.snapshot().worker_bytes, held_bytes);
+    drop(old);
+    assert_eq!(quota.snapshot().worker_bytes, baseline);
 }

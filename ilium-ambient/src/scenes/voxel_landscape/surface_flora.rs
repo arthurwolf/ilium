@@ -19,6 +19,8 @@ pub enum Support {
     Solid,
     WaterEdge,
     FloatingWater,
+    /// Dry ground cover keeps soil support while also admitting arid sand.
+    SoilOrSand,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +54,7 @@ pub enum AdmissionError {
     Unknown([i32; 3]),
     Unsupported([i32; 3]),
     Obstructed([i32; 3]),
+    Cancelled,
 }
 
 impl PlantCandidate {
@@ -188,6 +191,21 @@ impl FloraPlacement {
         candidate: PlantCandidate,
         context: impl Fn([i32; 3]) -> HabitatCell,
     ) -> Result<usize, AdmissionError> {
+        self.admit_cancellable(candidate, context, || false)
+    }
+
+    /// Context belongs to one immutable terrain/occupancy generation. Cancellation
+    /// before commit leaves both cells and reserved air unchanged. The commit has
+    /// no cancellation point between its two ledger updates.
+    pub fn admit_cancellable(
+        &mut self,
+        candidate: PlantCandidate,
+        context: impl Fn([i32; 3]) -> HabitatCell,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<usize, AdmissionError> {
+        if cancelled() {
+            return Err(AdmissionError::Cancelled);
+        }
         if candidate.source_prescription.is_empty()
             || candidate.cells.is_empty()
             || candidate.cells.len() > 512
@@ -204,6 +222,9 @@ impl FloraPlacement {
         }
         let mut prepared = BTreeMap::new();
         for mut cell in candidate.cells {
+            if cancelled() {
+                return Err(AdmissionError::Cancelled);
+            }
             if cell.position.iter().any(|n| n.unsigned_abs() > 32)
                 || !valid_resource(cell.state.resource_id)
             {
@@ -240,9 +261,52 @@ impl FloraPlacement {
             }
             prepared.insert(cell.position, cell);
         }
+        // Generated cactus flowers are complete, same-owner crown candidates,
+        // not free-standing flowers or attachments borrowing another candidate.
+        // The ordinary same-candidate support shortcut alone would also accept
+        // a flower above an arbitrary plant, or a cactus above that plant.
+        let contains_flower = prepared
+            .values()
+            .any(|cell| cell.state.resource_id == "minecraft:cactus_flower");
+        if candidate.source_prescription == "minecraft:cactus_flower" || contains_flower {
+            if candidate.source_prescription != "minecraft:cactus_flower"
+                || prepared.len() != 3
+                || candidate.support != Support::Sand
+                || !candidate.cactus_clearance
+            {
+                return Err(AdmissionError::InvalidCandidate);
+            }
+            let crown = prepared.len() - 1;
+            for (level, cell) in prepared.values().enumerate() {
+                if cancelled() {
+                    return Err(AdmissionError::Cancelled);
+                }
+                let resource = if level == crown {
+                    "minecraft:cactus_flower"
+                } else {
+                    "minecraft:cactus"
+                };
+                let valid_properties = if level == crown {
+                    cell.state.properties.is_empty()
+                } else {
+                    cell.state.properties.as_slice() == [("age", "0")]
+                };
+                let height =
+                    i32::try_from(level).map_err(|_| AdmissionError::CoordinateOverflow)?;
+                if cell.position != offset(candidate.anchor, [0, 0, height])?
+                    || cell.state.resource_id != resource
+                    || !valid_properties
+                {
+                    return Err(AdmissionError::InvalidCandidate);
+                }
+            }
+        }
         let positions: BTreeSet<_> = prepared.keys().copied().collect();
         let mut clearance_to_reserve = BTreeSet::new();
         for position in &positions {
+            if cancelled() {
+                return Err(AdmissionError::Cancelled);
+            }
             let below = offset(*position, [0, 0, -1])?;
             if !positions.contains(&below) {
                 let support = context(below);
@@ -252,6 +316,7 @@ impl FloraPlacement {
                 let valid = match candidate.support {
                     Support::Soil => support == HabitatCell::Soil,
                     Support::Sand => support == HabitatCell::Sand,
+                    Support::SoilOrSand => matches!(support, HabitatCell::Soil | HabitatCell::Sand),
                     Support::Solid => matches!(
                         support,
                         HabitatCell::Soil | HabitatCell::Sand | HabitatCell::Solid
@@ -289,6 +354,9 @@ impl FloraPlacement {
                     clearance_to_reserve.insert(neighbour);
                 }
             }
+        }
+        if cancelled() {
+            return Err(AdmissionError::Cancelled);
         }
         let count = prepared.len();
         self.cells.extend(prepared);
@@ -574,5 +642,318 @@ mod tests {
             Err(AdmissionError::InvalidCandidate)
         );
         assert_eq!(placement.cells().count(), 0);
+    }
+    fn sand(position: [i32; 3]) -> HabitatCell {
+        if position[2] == 0 {
+            HabitatCell::Sand
+        } else {
+            HabitatCell::Air
+        }
+    }
+
+    fn cactus_crown(anchor: [i32; 3]) -> PlantCandidate {
+        let mut candidate = PlantCandidate::column(
+            anchor,
+            "minecraft:cactus_flower",
+            FloraState {
+                resource_id: "minecraft:cactus",
+                properties: vec![("age", "0")],
+            },
+            2,
+            Support::Sand,
+            true,
+        );
+        candidate.cells.push(FloraCell {
+            position: [0, 0, 2],
+            state: state("minecraft:cactus_flower"),
+        });
+        candidate
+    }
+
+    #[test]
+    fn both_dry_grasses_admit_one_propertyless_cell_on_soil_or_sand_only() {
+        for id in ["minecraft:short_dry_grass", "minecraft:tall_dry_grass"] {
+            for support in [HabitatCell::Soil, HabitatCell::Sand] {
+                let mut placement = FloraPlacement::new(4).unwrap();
+                let candidate =
+                    PlantCandidate::single([0, 0, 1], id, state(id), Support::SoilOrSand);
+                assert_eq!(
+                    placement.admit(candidate, |position| {
+                        if position[2] == 0 {
+                            support
+                        } else {
+                            HabitatCell::Air
+                        }
+                    }),
+                    Ok(1),
+                    "{id} on {support:?}"
+                );
+                let cell = placement.cells().next().unwrap();
+                assert_eq!(cell.position, [0, 0, 1]);
+                assert_eq!(cell.state.resource_id, id);
+                assert!(cell.state.properties.is_empty());
+            }
+            for support in [HabitatCell::Air, HabitatCell::Solid, HabitatCell::Water] {
+                let mut placement = FloraPlacement::new(4).unwrap();
+                assert_eq!(
+                    placement.admit(
+                        PlantCandidate::single([0, 0, 1], id, state(id), Support::SoilOrSand),
+                        |position| if position[2] == 0 {
+                            support
+                        } else {
+                            HabitatCell::Air
+                        }
+                    ),
+                    Err(AdmissionError::Unsupported([0, 0, 0])),
+                    "{id} on {support:?}"
+                );
+                assert_eq!(placement.cells().count(), 0);
+            }
+            let mut placement = FloraPlacement::new(4).unwrap();
+            assert_eq!(
+                placement.admit(
+                    PlantCandidate::single([0, 0, 1], id, state(id), Support::SoilOrSand),
+                    |position| if position[2] == 0 {
+                        HabitatCell::Unknown
+                    } else {
+                        HabitatCell::Air
+                    }
+                ),
+                Err(AdmissionError::Unknown([0, 0, 0]))
+            );
+            assert_eq!(placement.cells().count(), 0);
+        }
+    }
+
+    #[test]
+    fn cactus_flower_requires_the_exact_same_owner_crown_shape_and_states() {
+        let mut malformed = Vec::new();
+        malformed.push(PlantCandidate::single(
+            [0, 0, 1],
+            "minecraft:cactus_flower",
+            state("minecraft:cactus_flower"),
+            Support::Sand,
+        ));
+        let mut missing_crown = cactus_crown([0, 0, 1]);
+        missing_crown.cells.pop();
+        malformed.push(missing_crown);
+        let mut wrong_source = cactus_crown([0, 0, 1]);
+        wrong_source.source_prescription = "minecraft:cactus";
+        malformed.push(wrong_source);
+        let mut wrong_stem = cactus_crown([0, 0, 1]);
+        wrong_stem.cells[0].state.resource_id = "minecraft:dead_bush";
+        malformed.push(wrong_stem);
+        let mut wrong_age = cactus_crown([0, 0, 1]);
+        wrong_age.cells[1].state.properties = vec![("age", "1")];
+        malformed.push(wrong_age);
+        let mut decorated_flower = cactus_crown([0, 0, 1]);
+        decorated_flower.cells[2].state.properties = vec![("age", "0")];
+        malformed.push(decorated_flower);
+        let mut gap = cactus_crown([0, 0, 1]);
+        gap.cells[1].position = [0, 0, 3];
+        malformed.push(gap);
+        let mut sideways_crown = cactus_crown([0, 0, 1]);
+        sideways_crown.cells[2].position = [1, 0, 2];
+        malformed.push(sideways_crown);
+        let mut missing_clearance = cactus_crown([0, 0, 1]);
+        missing_clearance.cactus_clearance = false;
+        malformed.push(missing_clearance);
+        let mut wrong_support = cactus_crown([0, 0, 1]);
+        wrong_support.support = Support::Soil;
+        malformed.push(wrong_support);
+        let mut extra_stem = cactus_crown([0, 0, 1]);
+        extra_stem.cells.push(FloraCell {
+            position: [0, 0, 3],
+            state: state("minecraft:cactus"),
+        });
+        malformed.push(extra_stem);
+        for candidate in malformed {
+            let mut placement = FloraPlacement::new(16).unwrap();
+            assert_eq!(
+                placement.admit(candidate, sand),
+                Err(AdmissionError::InvalidCandidate)
+            );
+            assert_eq!(placement.cells().count(), 0);
+            assert!(placement.reserved_air.is_empty());
+        }
+        let mut placement = FloraPlacement::new(16).unwrap();
+        assert_eq!(placement.admit(cactus_crown([0, 0, 1]), sand), Ok(3));
+        for (height, expected) in [
+            "minecraft:cactus",
+            "minecraft:cactus",
+            "minecraft:cactus_flower",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let cell = placement.cells.get(&[0, 0, 1 + height as i32]).unwrap();
+            assert_eq!(cell.state.resource_id, expected);
+            if height == 2 {
+                assert!(cell.state.properties.is_empty());
+            } else {
+                assert_eq!(cell.state.properties, [("age", "0")]);
+            }
+        }
+        assert_eq!(placement.reserved_air.len(), 12);
+    }
+
+    #[test]
+    fn cactus_crown_rejects_missing_support_blocked_cells_and_lateral_air_atomically() {
+        for support in [
+            HabitatCell::Air,
+            HabitatCell::Soil,
+            HabitatCell::Solid,
+            HabitatCell::Water,
+        ] {
+            let mut placement = FloraPlacement::new(16).unwrap();
+            assert_eq!(
+                placement.admit(cactus_crown([0, 0, 1]), |position| {
+                    if position == [0, 0, 0] {
+                        support
+                    } else {
+                        sand(position)
+                    }
+                }),
+                Err(AdmissionError::Unsupported([0, 0, 0]))
+            );
+            assert!(placement.cells.is_empty());
+            assert!(placement.reserved_air.is_empty());
+        }
+        let mut placement = FloraPlacement::new(16).unwrap();
+        assert_eq!(
+            placement.admit(cactus_crown([0, 0, 1]), |position| {
+                if position == [0, 0, 0] {
+                    HabitatCell::Unknown
+                } else {
+                    sand(position)
+                }
+            }),
+            Err(AdmissionError::Unknown([0, 0, 0]))
+        );
+        assert!(placement.cells.is_empty());
+        assert!(placement.reserved_air.is_empty());
+
+        for blocked in [[0, 0, 1], [0, 0, 2], [0, 0, 3], [1, 0, 3]] {
+            for habitat in [HabitatCell::Solid, HabitatCell::Water, HabitatCell::Unknown] {
+                let mut placement = FloraPlacement::new(16).unwrap();
+                let expected = if habitat == HabitatCell::Unknown {
+                    AdmissionError::Unknown(blocked)
+                } else {
+                    AdmissionError::Obstructed(blocked)
+                };
+                assert_eq!(
+                    placement.admit(cactus_crown([0, 0, 1]), |position| {
+                        if position == blocked {
+                            habitat
+                        } else {
+                            sand(position)
+                        }
+                    }),
+                    Err(expected),
+                    "blocked={blocked:?} habitat={habitat:?}"
+                );
+                assert!(placement.cells.is_empty());
+                assert!(placement.reserved_air.is_empty());
+                assert_eq!(placement.admit(cactus_crown([0, 0, 1]), sand), Ok(3));
+            }
+        }
+    }
+
+    #[test]
+    fn cactus_crown_budget_collision_and_reserved_air_leave_both_ledgers_intact() {
+        let mut too_small = FloraPlacement::new(2).unwrap();
+        assert_eq!(
+            too_small.admit(cactus_crown([0, 0, 1]), sand),
+            Err(AdmissionError::Budget)
+        );
+        assert!(too_small.cells.is_empty());
+        assert!(too_small.reserved_air.is_empty());
+
+        let mut placement = FloraPlacement::new(16).unwrap();
+        assert_eq!(placement.admit(cactus_crown([0, 0, 1]), sand), Ok(3));
+        let cells = placement.cells.clone();
+        let reserved_air = placement.reserved_air.clone();
+        assert_eq!(
+            placement.admit(cactus_crown([0, 0, 1]), sand),
+            Err(AdmissionError::Collision([0, 0, 1]))
+        );
+        assert_eq!(
+            placement.admit(
+                PlantCandidate::single(
+                    [1, 0, 1],
+                    "minecraft:short_dry_grass",
+                    state("minecraft:short_dry_grass"),
+                    Support::SoilOrSand,
+                ),
+                sand,
+            ),
+            Err(AdmissionError::Obstructed([1, 0, 1]))
+        );
+        assert_eq!(placement.cells, cells);
+        assert_eq!(placement.reserved_air, reserved_air);
+    }
+
+    #[test]
+    fn cactus_crown_negative_coordinates_overflow_and_cancellation_are_atomic() {
+        let mut negative = FloraPlacement::new(16).unwrap();
+        assert_eq!(negative.admit(cactus_crown([-4, -8, 1]), sand), Ok(3));
+        assert!(negative.cells.contains_key(&[-4, -8, 1]));
+        assert!(negative.cells.contains_key(&[-4, -8, 2]));
+        assert!(negative.cells.contains_key(&[-4, -8, 3]));
+        assert!(negative.reserved_air.contains(&[-5, -8, 3]));
+
+        let mut overflow = FloraPlacement::new(16).unwrap();
+        assert_eq!(
+            overflow.admit(cactus_crown([i32::MAX, 0, 1]), sand),
+            Err(AdmissionError::CoordinateOverflow)
+        );
+        assert!(overflow.cells.is_empty());
+        assert!(overflow.reserved_air.is_empty());
+        assert_eq!(
+            overflow.admit(cactus_crown([0, 0, i32::MAX]), sand),
+            Err(AdmissionError::CoordinateOverflow)
+        );
+        assert!(overflow.cells.is_empty());
+
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let mut successful = FloraPlacement::new(16).unwrap();
+        assert_eq!(
+            successful.admit_cancellable(cactus_crown([0, 0, 1]), sand, || {
+                calls.set(calls.get() + 1);
+                false
+            }),
+            Ok(3)
+        );
+        let final_checkpoint = calls.get();
+        assert!(final_checkpoint > 3);
+        for stop_at in 1..=final_checkpoint {
+            let mut placement = FloraPlacement::new(16).unwrap();
+            assert_eq!(
+                placement.admit(
+                    PlantCandidate::single(
+                        [-8, 0, 1],
+                        "minecraft:short_dry_grass",
+                        state("minecraft:short_dry_grass"),
+                        Support::SoilOrSand,
+                    ),
+                    sand,
+                ),
+                Ok(1)
+            );
+            let previous_cells = placement.cells.clone();
+            let previous_air = placement.reserved_air.clone();
+            let attempt_calls = Cell::new(0);
+            assert_eq!(
+                placement.admit_cancellable(cactus_crown([0, 0, 1]), sand, || {
+                    attempt_calls.set(attempt_calls.get() + 1);
+                    attempt_calls.get() == stop_at
+                }),
+                Err(AdmissionError::Cancelled),
+                "stop_at={stop_at} final_checkpoint={final_checkpoint}"
+            );
+            assert_eq!(placement.cells, previous_cells);
+            assert_eq!(placement.reserved_air, previous_air);
+        }
     }
 }

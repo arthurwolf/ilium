@@ -15,7 +15,10 @@ fn fixed(seed: u32) -> PipesSettings {
 }
 
 fn scene_with(settings: &PipesSettings) -> PipesScene {
-    PipesScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    PipesScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn seconds(value: f64) -> Duration {

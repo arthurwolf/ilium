@@ -14,8 +14,18 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlphaMode {
     Opaque,
-    Cutout { threshold: u8 },
+    Cutout {
+        threshold: u8,
+    },
     Blend,
+    /// Pinned 1.19.3 solid shader: source alpha never discards the RGB/depth.
+    NativeSolid,
+    /// Pinned rendertype_cutout.fsh discards only final alpha below 0.1.
+    NativeCutout,
+    /// Pinned rendertype_cutout_mipped.fsh discards below 0.5.
+    NativeCutoutMipped,
+    /// Pinned translucent layer keeps source alpha for ordered composition.
+    NativeBlend,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceMaterial {
@@ -115,6 +125,133 @@ pub struct BoundModel {
     _reservation: Reservation,
 }
 impl BoundModel {
+    /// Bind source-native block-entity cuboid faces into the same face/owner,
+    /// bank and accounting path as ordinary native block-model quads. The
+    /// caller has already baked and sourced the 1.19.3 atlas geometry. Model
+    /// definition origins are empty because these faces do not come from JSON;
+    /// the native archive digest belongs in the caller's model epoch.
+    pub fn from_source_native_builtin(
+        state: BlockState,
+        quads: Vec<BoundQuad>,
+        bank: &TextureBank,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        if quads.is_empty() || quads.len() > 8192 {
+            return Err(metadata::invalid("native builtin quad count"));
+        }
+        for quad in &quads {
+            cancel.check()?;
+            if quad.cull_face.is_some()
+                || quad.points.iter().flatten().any(|value| !value.is_finite())
+                || quad.uv.iter().flatten().any(|value| !value.is_finite())
+                || quad.normal.iter().any(|value| !value.is_finite())
+                || quad
+                    .material
+                    .tint
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(metadata::invalid("invalid native builtin face"));
+            }
+            let texture = bank
+                .texture(quad.material.texture)
+                .ok_or_else(|| metadata::invalid("stale native builtin atlas handle"))?;
+            if !texture.uses_budget(budget) || texture.encoding() != Encoding::SrgbColor {
+                return Err(metadata::invalid(
+                    "native builtin atlas differs from scene account",
+                ));
+            }
+        }
+        let reservation = budget.reserve(32768 + quads.len() as u64 * 512, cancel)?;
+        Ok(Self {
+            state,
+            quads,
+            opaque_boundaries: [false; 6],
+            origins: Vec::new(),
+            bank: bank.identity(),
+            medium: None,
+            medium_boundaries: [false; 6],
+            _reservation: reservation,
+        })
+    }
+
+    /// BellRenderer contributes an entity-textured body in addition to the
+    /// ordinary bell JSON stand. Keep that stand's provenance, boundary flags,
+    /// selected bank, and owner namespace while charging the copied quads.
+    pub fn with_source_native_builtin(
+        &self,
+        extra: Vec<BoundQuad>,
+        bank: &TextureBank,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        let count = self
+            .quads
+            .len()
+            .checked_add(extra.len())
+            .ok_or_else(|| metadata::invalid("combined native quad count overflow"))?;
+        if self.bank != bank.identity()
+            || !self._reservation.belongs_to(budget)
+            || extra.is_empty()
+            || count > 8192
+        {
+            return Err(metadata::invalid("combined native bell bank/account/quads"));
+        }
+        for quad in &extra {
+            cancel.check()?;
+            if quad.cull_face.is_some()
+                || quad.part != u16::MAX
+                || quad.points.iter().flatten().any(|value| !value.is_finite())
+                || quad.uv.iter().flatten().any(|value| !value.is_finite())
+                || quad.normal.iter().any(|value| !value.is_finite())
+                || quad
+                    .material
+                    .tint
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(metadata::invalid("invalid additive native bell face"));
+            }
+            let texture = bank
+                .texture(quad.material.texture)
+                .ok_or_else(|| metadata::invalid("stale native bell atlas handle"))?;
+            if !texture.uses_budget(budget) || texture.encoding() != Encoding::SrgbColor {
+                return Err(metadata::invalid(
+                    "native bell atlas differs from scene account",
+                ));
+            }
+        }
+        if self.quads.iter().any(|quad| quad.part == u16::MAX) {
+            return Err(metadata::invalid(
+                "native bell owner part conflicts with JSON model",
+            ));
+        }
+        let charge = 32768_u64
+            .checked_add(count as u64 * 512)
+            .and_then(|value| value.checked_add(self.origins.len() as u64 * 4096))
+            .ok_or_else(|| metadata::invalid("combined native bell charge overflow"))?;
+        let reservation = budget.reserve(charge, cancel)?;
+        let mut quads = Vec::new();
+        quads
+            .try_reserve_exact(count)
+            .map_err(|_| AssetError::Allocation)?;
+        quads.extend(self.quads.iter().cloned());
+        quads.extend(extra);
+        Ok(Self {
+            state: self.state.clone(),
+            quads,
+            opaque_boundaries: self.opaque_boundaries,
+            origins: self.origins.clone(),
+            bank: self.bank,
+            medium: self.medium.clone(),
+            medium_boundaries: self.medium_boundaries,
+            _reservation: reservation,
+        })
+    }
+
     pub fn bind(
         state: &NormalizedState,
         bank: &TextureBank,
@@ -204,12 +341,14 @@ impl BoundModel {
                         "zero cutout threshold would make transparent holes solid",
                     ));
                 }
-                if material.alpha == AlphaMode::Opaque {
+                if matches!(material.alpha, AlphaMode::Opaque | AlphaMode::NativeSolid) {
                     if let Some(boundary) = quad.complete_boundary {
                         opaque_boundaries[boundary.index()] = true;
                     }
                 }
-                if medium.is_some() && material.alpha == AlphaMode::Blend {
+                if medium.is_some()
+                    && matches!(material.alpha, AlphaMode::Blend | AlphaMode::NativeBlend)
+                {
                     if let Some(boundary) = quad.complete_boundary {
                         medium_boundaries[boundary.index()] = true;
                     }
@@ -279,7 +418,37 @@ impl PreparedMesh {
         budget: &ByteBudget,
         cancel: Cancel<'_>,
     ) -> Result<Self> {
+        Self::build_with_admission(instances, region, bank, max_faces, budget, cancel, None)
+    }
+
+    // Restrict owners; retain their culling witnesses.
+    pub(crate) fn build_with_admission(
+        instances: &BTreeMap<[i32; 3], Arc<BoundModel>>,
+        region: MeshRegion,
+        bank: Digest256,
+        max_faces: usize,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+        published: Option<&[[i32; 3]]>,
+    ) -> Result<Self> {
         cancel.check()?;
+        if let Some(positions) = published {
+            if positions.len() > 1_000_000 {
+                return Err(AssetError::Limit {
+                    resource: "mesh publication positions",
+                    requested: positions.len() as u64,
+                    limit: 1_000_000,
+                });
+            }
+            for pair in positions.windows(2) {
+                cancel.check()?;
+                if pair[0] >= pair[1] {
+                    return Err(metadata::invalid(
+                        "mesh publication positions are not strictly sorted",
+                    ));
+                }
+            }
+        }
         if max_faces == 0 || max_faces > 1_000_000 || instances.len() > 1_000_000 {
             return Err(metadata::invalid("mesh count limit"));
         }
@@ -297,6 +466,9 @@ impl PreparedMesh {
             if (0..2).any(|axis| {
                 position[axis] < region.minimum[axis] || position[axis] >= region.maximum[axis]
             }) {
+                return Ok(false);
+            }
+            if published.is_some_and(|positions| positions.binary_search(&position).is_err()) {
                 return Ok(false);
             }
             let quad = &model.quads[index];
@@ -321,8 +493,10 @@ impl PreparedMesh {
                 return Ok(false);
             }
             let shared_medium = model.medium.is_some() && model.medium == other.medium;
-            if quad.material.alpha == AlphaMode::Blend
-                && shared_medium
+            if matches!(
+                quad.material.alpha,
+                AlphaMode::Blend | AlphaMode::NativeBlend
+            ) && shared_medium
                 && model.medium_boundaries[face.index()]
                 && other.medium_boundaries[face.opposite().index()]
             {
@@ -380,5 +554,221 @@ impl PreparedMesh {
             region,
             _reservation: reservation,
         })
+    }
+}
+
+#[cfg(test)]
+mod native_builtin_combination_tests {
+    use super::super::assets::{
+        animation::MissingAnimation,
+        bank::TextureBankBuilder,
+        budget::Limits,
+        compatibility::DefinitionSet,
+        identity::{Label, OriginKind},
+        models::ModelCompiler,
+        review::{fixture_origin, fixture_review},
+        texture::fixture_texture,
+    };
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn id(text: &str) -> ResourceId {
+        ResourceId::parse(text).unwrap()
+    }
+
+    fn fixture_bank(budget: &ByteBudget, bell_color: [u8; 4]) -> TextureBank {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let mut builder = TextureBankBuilder::new(
+            fixture_review(),
+            Vec::new(),
+            Limits::default(),
+            budget.clone(),
+            cancel,
+        )
+        .unwrap();
+        for (name, color) in [
+            ("test:stand", [80, 50, 20, 255]),
+            ("test:bell_body", bell_color),
+        ] {
+            builder
+                .insert(
+                    id(name),
+                    fixture_texture(
+                        [1, 1],
+                        &color,
+                        None,
+                        &MissingAnimation::StaticImage,
+                        Encoding::SrgbColor,
+                        fixture_origin(OriginKind::SelectedPack),
+                        budget,
+                    ),
+                    cancel,
+                )
+                .unwrap();
+        }
+        builder.finish(Vec::new(), cancel).unwrap()
+    }
+
+    fn stand(budget: &ByteBudget, bank: &TextureBank) -> BoundModel {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let mut definitions = DefinitionSet::new(
+            fixture_origin(OriginKind::DiagnosticFixture),
+            Limits::default(),
+            budget.clone(),
+        )
+        .unwrap();
+        definitions.install_geometry_templates(cancel).unwrap();
+        definitions
+            .bind_single(
+                id("test:bell"),
+                id("minecraft:block/cube_all"),
+                "all",
+                id("test:stand"),
+                Label::new("synthetic bell stand combination test").unwrap(),
+                cancel,
+            )
+            .unwrap();
+        let mut compiler =
+            ModelCompiler::new(&definitions, Limits::default(), budget.clone()).unwrap();
+        let normalized = compiler
+            .compile_state(
+                &BlockState::new(id("test:bell"), []).unwrap(),
+                [0; 3],
+                0,
+                cancel,
+            )
+            .unwrap();
+        BoundModel::bind(
+            &normalized,
+            bank,
+            &MaterialTable {
+                medium: None,
+                rules: BTreeMap::from([(
+                    id("test:stand"),
+                    TextureRenderRule {
+                        alpha: AlphaMode::NativeSolid,
+                        layer: 0,
+                        normal_map: None,
+                        specular_map: None,
+                    },
+                )]),
+                tints: BTreeMap::new(),
+            },
+            budget,
+            cancel,
+        )
+        .unwrap()
+    }
+
+    fn bell_face(bank: &TextureBank) -> BoundQuad {
+        BoundQuad {
+            points: [
+                [0.25, 0.25, 0.75],
+                [0.75, 0.25, 0.75],
+                [0.75, 0.75, 0.75],
+                [0.25, 0.75, 0.75],
+            ],
+            uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            normal: [0.0, 0.0, 1.0],
+            material: FaceMaterial {
+                texture: bank.resolve(&id("test:bell_body")).unwrap(),
+                alpha: AlphaMode::NativeSolid,
+                tint: [1.0; 3],
+                layer: 0,
+                normal_map: None,
+                specular_map: None,
+            },
+            cull_face: None,
+            shade: true,
+            part: u16::MAX,
+            face: 0,
+        }
+    }
+
+    #[test]
+    fn additive_bell_keeps_json_faces_origins_bank_and_budget_custody() {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let budget = ByteBudget::new(256 << 20).unwrap();
+        let bank = fixture_bank(&budget, [220, 170, 40, 255]);
+        let stand = stand(&budget, &bank);
+        assert_eq!(stand.quads.len(), 6);
+        assert!(!stand.origins.is_empty());
+        assert!(stand.opaque_boundaries.iter().all(|value| *value));
+        let before = budget.used();
+        let combined = stand
+            .with_source_native_builtin(vec![bell_face(&bank)], &bank, &budget, cancel)
+            .unwrap();
+        assert_eq!(combined.quads.len(), 7);
+        assert_eq!(
+            serde_json::to_vec(&combined.origins).unwrap(),
+            serde_json::to_vec(&stand.origins).unwrap()
+        );
+        assert_eq!(combined.opaque_boundaries, stand.opaque_boundaries);
+        assert_eq!(combined.quads[6].part, u16::MAX);
+        assert!(combined.quads[..6].iter().all(|quad| quad.part != u16::MAX));
+        assert_eq!(combined.bank, bank.identity());
+        assert!(budget.used() > before);
+        drop(combined);
+        assert_eq!(budget.used(), before);
+
+        let wrong_bank = fixture_bank(&budget, [40, 170, 220, 255]);
+        assert_ne!(bank.identity(), wrong_bank.identity());
+        assert!(stand
+            .with_source_native_builtin(vec![bell_face(&bank)], &wrong_bank, &budget, cancel)
+            .is_err());
+        let other_budget = ByteBudget::new(256 << 20).unwrap();
+        assert!(stand
+            .with_source_native_builtin(vec![bell_face(&bank)], &bank, &other_budget, cancel)
+            .is_err());
+        assert!(stand
+            .with_source_native_builtin(vec![bell_face(&wrong_bank)], &bank, &budget, cancel)
+            .is_err());
+    }
+
+    #[test]
+    fn additive_bell_retains_json_opaque_neighbor_boundary_and_unique_owner() {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let budget = ByteBudget::new(256 << 20).unwrap();
+        let bank = fixture_bank(&budget, [220, 170, 40, 255]);
+        let stand = Arc::new(stand(&budget, &bank));
+        let combined = Arc::new(
+            stand
+                .with_source_native_builtin(vec![bell_face(&bank)], &bank, &budget, cancel)
+                .unwrap(),
+        );
+        let instances = BTreeMap::from([([0, 0, 0], combined), ([1, 0, 0], stand)]);
+        let mesh = PreparedMesh::build(
+            &instances,
+            MeshRegion {
+                minimum: [0, 0],
+                maximum: [2, 1],
+            },
+            bank.identity(),
+            32,
+            &budget,
+            cancel,
+        )
+        .unwrap();
+        // The facing JSON cube faces cull each other. The source bell body
+        // remains a distinct, uncullable face with its own part/face key.
+        assert_eq!(mesh.faces.len(), 11);
+        assert_eq!(
+            mesh.faces
+                .iter()
+                .filter(|face| face.owner.part == u16::MAX)
+                .count(),
+            1
+        );
+        assert_eq!(
+            mesh.faces
+                .iter()
+                .filter(|face| face.owner.position == [0, 0, 0])
+                .count(),
+            6
+        );
     }
 }

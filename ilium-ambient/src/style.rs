@@ -15,6 +15,7 @@
 
 use crate::control::{self, Control, ControlValue};
 use crate::raster::DitherMode;
+use crate::style_filters::Filter;
 use serde::{Deserialize, Serialize};
 
 pub type Rgb = [u8; 3];
@@ -341,6 +342,43 @@ pub enum StylePreset {
     HighContrast,
     GhostMono,
     RetroPrint,
+    PastelDream,
+    PastelCandy,
+    FadedFilm,
+    MatteMood,
+    SepiaMemory,
+    CyanotypePrint,
+    NightShiftLook,
+    CandlelightLook,
+    MoonlitLook,
+    DuskLook,
+    DawnLook,
+    IceCave,
+    Inferno,
+    ThermalCamera,
+    NightVisionLook,
+    InfraredLook,
+    NoirLook,
+    SilverScreen,
+    GameBoyLook,
+    HologramLook,
+    TealOrangeLook,
+    SunsetDuotone,
+    SynthDuotone,
+    RoyalDuotone,
+    MintFresh,
+    RoseQuartz,
+    LavenderHaze,
+    VintagePhoto,
+    PolaroidLook,
+    BleachBypassLook,
+    CrossProcessLook,
+    RedGlow,
+    AmberGlow,
+    BlueHour,
+    FocusDim,
+    Negative,
+    PosterPop,
 }
 
 /// What a preset sets. Fields left `None` keep the user's value.
@@ -356,6 +394,8 @@ pub struct PresetDef {
     pub vignette: u16,
     pub grey_tint_hue: u16,
     pub grey_tint_strength: u16,
+    pub filter: Filter,
+    pub filter_strength: u16,
     pub dither: Option<DitherMode>,
     pub density: Option<u16>,
 }
@@ -372,12 +412,14 @@ const BASE: PresetDef = PresetDef {
     vignette: 0,
     grey_tint_hue: 40,
     grey_tint_strength: 0,
+    filter: Filter::None,
+    filter_strength: 100,
     dither: None,
     density: None,
 };
 
 impl StylePreset {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 58] = [
         Self::Custom,
         Self::Original,
         Self::Whisper,
@@ -399,6 +441,43 @@ impl StylePreset {
         Self::HighContrast,
         Self::GhostMono,
         Self::RetroPrint,
+        Self::PastelDream,
+        Self::PastelCandy,
+        Self::FadedFilm,
+        Self::MatteMood,
+        Self::SepiaMemory,
+        Self::CyanotypePrint,
+        Self::NightShiftLook,
+        Self::CandlelightLook,
+        Self::MoonlitLook,
+        Self::DuskLook,
+        Self::DawnLook,
+        Self::IceCave,
+        Self::Inferno,
+        Self::ThermalCamera,
+        Self::NightVisionLook,
+        Self::InfraredLook,
+        Self::NoirLook,
+        Self::SilverScreen,
+        Self::GameBoyLook,
+        Self::HologramLook,
+        Self::TealOrangeLook,
+        Self::SunsetDuotone,
+        Self::SynthDuotone,
+        Self::RoyalDuotone,
+        Self::MintFresh,
+        Self::RoseQuartz,
+        Self::LavenderHaze,
+        Self::VintagePhoto,
+        Self::PolaroidLook,
+        Self::BleachBypassLook,
+        Self::CrossProcessLook,
+        Self::RedGlow,
+        Self::AmberGlow,
+        Self::BlueHour,
+        Self::FocusDim,
+        Self::Negative,
+        Self::PosterPop,
     ];
 
     pub fn labels() -> Vec<&'static str> {
@@ -565,7 +644,317 @@ impl StylePreset {
                 density: Some(70),
                 ..BASE
             },
+            Self::PastelDream => PresetDef {
+                label: "Pastel dream",
+                filter: Filter::Pastel,
+                brightness: 70,
+                saturation: 90,
+                palette: "pastel_rainbow",
+                ..BASE
+            },
+            Self::PastelCandy => PresetDef {
+                label: "Pastel candy",
+                filter: Filter::Pastel,
+                brightness: 64,
+                palette: "vaporwave",
+                ..BASE
+            },
+            Self::FadedFilm => PresetDef {
+                label: "Faded film",
+                filter: Filter::Faded,
+                brightness: 62,
+                ..BASE
+            },
+            Self::MatteMood => PresetDef {
+                label: "Matte mood",
+                filter: Filter::Matte,
+                brightness: 58,
+                contrast: 90,
+                ..BASE
+            },
+            Self::SepiaMemory => PresetDef {
+                label: "Sepia memory",
+                filter: Filter::Sepia,
+                brightness: 55,
+                ..BASE
+            },
+            Self::CyanotypePrint => PresetDef {
+                label: "Cyanotype print",
+                filter: Filter::Cyanotype,
+                brightness: 62,
+                dither: Some(DitherMode::Halftone),
+                ..BASE
+            },
+            Self::NightShiftLook => PresetDef {
+                label: "Night shift",
+                filter: Filter::NightShift,
+                brightness: 45,
+                ..BASE
+            },
+            Self::CandlelightLook => PresetDef {
+                label: "Candlelight",
+                filter: Filter::Candlelight,
+                brightness: 50,
+                vignette: 30,
+                ..BASE
+            },
+            Self::MoonlitLook => PresetDef {
+                label: "Moonlit",
+                filter: Filter::Moonlight,
+                brightness: 48,
+                vignette: 25,
+                ..BASE
+            },
+            Self::DuskLook => PresetDef {
+                label: "Dusk",
+                filter: Filter::Dusk,
+                brightness: 55,
+                vignette: 20,
+                ..BASE
+            },
+            Self::DawnLook => PresetDef {
+                label: "Dawn",
+                filter: Filter::Dawn,
+                brightness: 60,
+                ..BASE
+            },
+            Self::IceCave => PresetDef {
+                label: "Ice cave",
+                filter: Filter::Ice,
+                brightness: 56,
+                vignette: 15,
+                ..BASE
+            },
+            Self::Inferno => PresetDef {
+                label: "Inferno",
+                filter: Filter::Fire,
+                brightness: 62,
+                contrast: 115,
+                ..BASE
+            },
+            Self::ThermalCamera => PresetDef {
+                label: "Thermal camera",
+                filter: Filter::Thermal,
+                brightness: 70,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::NightVisionLook => PresetDef {
+                label: "Night vision",
+                filter: Filter::NightVision,
+                brightness: 60,
+                mode: ColorMode::Greyscale,
+                dither: Some(DitherMode::Lines),
+                ..BASE
+            },
+            Self::InfraredLook => PresetDef {
+                label: "Infrared",
+                filter: Filter::Infrared,
+                brightness: 62,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::NoirLook => PresetDef {
+                label: "Noir",
+                filter: Filter::Noir,
+                brightness: 70,
+                mode: ColorMode::Greyscale,
+                dither: Some(DitherMode::Crosshatch),
+                ..BASE
+            },
+            Self::SilverScreen => PresetDef {
+                label: "Silver screen",
+                filter: Filter::Silver,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::GameBoyLook => PresetDef {
+                label: "Game Boy",
+                filter: Filter::GameBoy,
+                brightness: 75,
+                mode: ColorMode::Greyscale,
+                dither: Some(DitherMode::Ordered),
+                ..BASE
+            },
+            Self::HologramLook => PresetDef {
+                label: "Hologram",
+                filter: Filter::Hologram,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                dither: Some(DitherMode::Lines),
+                ..BASE
+            },
+            Self::TealOrangeLook => PresetDef {
+                label: "Teal and orange",
+                filter: Filter::TealOrange,
+                brightness: 62,
+                ..BASE
+            },
+            Self::SunsetDuotone => PresetDef {
+                label: "Sunset duotone",
+                filter: Filter::DuotoneBlueOrange,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::SynthDuotone => PresetDef {
+                label: "Synth duotone",
+                filter: Filter::DuotonePinkTeal,
+                brightness: 62,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::RoyalDuotone => PresetDef {
+                label: "Royal duotone",
+                filter: Filter::DuotonePurpleGold,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::MintFresh => PresetDef {
+                label: "Mint fresh",
+                filter: Filter::Mint,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::RoseQuartz => PresetDef {
+                label: "Rose quartz",
+                filter: Filter::Rose,
+                brightness: 60,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::LavenderHaze => PresetDef {
+                label: "Lavender haze",
+                filter: Filter::Lavender,
+                brightness: 58,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::VintagePhoto => PresetDef {
+                label: "Vintage photo",
+                filter: Filter::Vintage,
+                brightness: 58,
+                dither: Some(DitherMode::Halftone),
+                ..BASE
+            },
+            Self::PolaroidLook => PresetDef {
+                label: "Polaroid",
+                filter: Filter::Polaroid,
+                brightness: 64,
+                ..BASE
+            },
+            Self::BleachBypassLook => PresetDef {
+                label: "Bleach bypass",
+                filter: Filter::BleachBypass,
+                brightness: 62,
+                contrast: 115,
+                ..BASE
+            },
+            Self::CrossProcessLook => PresetDef {
+                label: "Cross process",
+                filter: Filter::CrossProcess,
+                brightness: 64,
+                ..BASE
+            },
+            Self::RedGlow => PresetDef {
+                label: "Red glow (dim)",
+                filter: Filter::Red,
+                brightness: 30,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::AmberGlow => PresetDef {
+                label: "Amber glow (dim)",
+                filter: Filter::Amber,
+                brightness: 34,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::BlueHour => PresetDef {
+                label: "Blue hour (dim)",
+                filter: Filter::Blue,
+                brightness: 32,
+                mode: ColorMode::Greyscale,
+                ..BASE
+            },
+            Self::FocusDim => PresetDef {
+                label: "Focus dim (cool grey)",
+                filter: Filter::Cool,
+                brightness: 26,
+                mode: ColorMode::Greyscale,
+                saturation: 60,
+                ..BASE
+            },
+            Self::Negative => PresetDef {
+                label: "Negative",
+                filter: Filter::Invert,
+                brightness: 60,
+                ..BASE
+            },
+            Self::PosterPop => PresetDef {
+                label: "Poster pop",
+                filter: Filter::Vivid,
+                brightness: 72,
+                contrast: 115,
+                ..BASE
+            },
         })
+    }
+}
+
+/// The palette a scene is asked to follow: the stops of the shared look's
+/// palette when it is in Color mode with a real palette, otherwise empty
+/// (keep your own colours).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScenePalette {
+    pub stops: Vec<Rgb>,
+    pub reverse: bool,
+    pub shift_percent: u16,
+}
+
+impl ScenePalette {
+    /// True when a palette was supplied and scenes should follow it.
+    pub fn is_provided(&self) -> bool {
+        !self.stops.is_empty()
+    }
+
+    /// Colour at `position` (0..=1) along the palette, with the shared look's
+    /// reverse and shift applied. `None` when no palette is provided.
+    pub fn at(&self, position: f32) -> Option<Rgb> {
+        if self.stops.is_empty() {
+            return None;
+        }
+        let shifted =
+            (position.clamp(0.0, 1.0) + f32::from(self.shift_percent) / 100.0).rem_euclid(1.0);
+        let shifted = if self.shift_percent == 0 {
+            position.clamp(0.0, 1.0)
+        } else {
+            shifted
+        };
+        Some(ramp(
+            &self.stops,
+            if self.reverse { 1.0 - shifted } else { shifted },
+        ))
+    }
+
+    /// Shift one of the scene's own colours onto the palette: the palette
+    /// colour at the same brightness. Returns `color` unchanged when no
+    /// palette is provided.
+    pub fn recolor(&self, color: Rgb) -> Rgb {
+        self.at(luma(color)).unwrap_or(color)
+    }
+
+    /// `recolor` for every cell colour of a frame.
+    pub fn recolor_cells(&self, colors: &mut [Rgb]) {
+        if !self.is_provided() {
+            return;
+        }
+        for color in colors {
+            *color = self.recolor(*color);
+        }
     }
 }
 
@@ -604,6 +993,10 @@ pub struct Appearance {
     /// Hue rotation, -180..=180 degrees.
     pub hue_shift_degrees: i16,
     pub invert: bool,
+    /// Colour filter applied after the tone adjustments.
+    pub filter: Filter,
+    /// How strongly the filter replaces the original colours, 0..=100.
+    pub filter_strength_percent: u16,
     /// Darkening towards the screen edges, 0..=100.
     pub vignette_percent: u16,
     pub grey_tint_hue: u16,
@@ -630,6 +1023,8 @@ impl Default for Appearance {
             saturation_percent: 100,
             hue_shift_degrees: 0,
             invert: false,
+            filter: Filter::None,
+            filter_strength_percent: 100,
             vignette_percent: 0,
             grey_tint_hue: 40,
             grey_tint_strength: 0,
@@ -712,6 +1107,7 @@ impl Appearance {
             gamma_percent: self.gamma_percent.clamp(30, 300),
             saturation_percent: self.saturation_percent.min(200),
             hue_shift_degrees: self.hue_shift_degrees.clamp(-180, 180),
+            filter_strength_percent: self.filter_strength_percent.min(100),
             vignette_percent: self.vignette_percent.min(100),
             grey_tint_hue: self.grey_tint_hue.min(359),
             grey_tint_strength: self.grey_tint_strength.min(100),
@@ -732,7 +1128,22 @@ impl Appearance {
             && self.saturation_percent == 100
             && self.hue_shift_degrees == 0
             && !self.invert
+            && (self.filter == Filter::None || self.filter_strength_percent == 0)
             && self.vignette_percent == 0
+    }
+
+    /// The palette to hand to scenes: empty unless Color mode uses a real palette.
+    pub fn scene_palette(&self) -> ScenePalette {
+        if self.mode != ColorMode::Color {
+            return ScenePalette::default();
+        }
+        ScenePalette {
+            stops: PALETTES[self.palette.min(PALETTES.len() - 1)]
+                .stops
+                .to_vec(),
+            reverse: self.reverse,
+            shift_percent: self.shift_percent,
+        }
     }
 
     /// Position of a cell on the palette, 0..=1, before spread and shift.
@@ -832,6 +1243,7 @@ impl Appearance {
                 lightness,
             );
         }
+        color = self.filter.apply(color, self.filter_strength_percent);
         let mut scale = f32::from(self.brightness_percent) / 100.0;
         if self.vignette_percent > 0 {
             let edge = ((context.x - 0.5).hypot(context.y - 0.5) * std::f32::consts::SQRT_2)
@@ -882,6 +1294,8 @@ impl Appearance {
         self.saturation_percent = definition.saturation;
         self.hue_shift_degrees = 0;
         self.invert = false;
+        self.filter = definition.filter;
+        self.filter_strength_percent = definition.filter_strength;
         self.vignette_percent = definition.vignette;
         self.grey_tint_hue = definition.grey_tint_hue;
         self.grey_tint_strength = definition.grey_tint_strength;
@@ -941,6 +1355,8 @@ impl Appearance {
             Control::slider("look_saturation", "Color intensity", i32::from(self.saturation_percent), (0, 200, 5), "%", "Multiplier on color saturation; 0% is grey, 100% unchanged."),
             Control::slider("look_hue_shift", "Hue shift", i32::from(self.hue_shift_degrees), (-180, 180, 5), "\u{b0}", "Rotate every color around the color wheel."),
             Control::toggle("look_invert", "Invert colors", self.invert, "Replace every color by its opposite tone."),
+            Control::choice("look_filter", "Color filter", self.filter.index(), &Filter::labels(), "A color transform applied on top of the palette and tone settings: tinted gels (red, amber...), film looks (sepia, faded, cross process), duotones, thermal and night vision, channel swaps and more."),
+            Control::slider("look_filter_strength", "Filter strength", i32::from(self.filter_strength_percent), (0, 100, 5), "%", "How much of the filter shows: 0% leaves the colors untouched, 100% is the full filter."),
             Control::slider("look_vignette", "Edge fade", i32::from(self.vignette_percent), (0, 100, 5), "%", "Darken the animation toward the edges of the screen."),
         ]);
         rows
@@ -1004,6 +1420,12 @@ impl Appearance {
             "look_saturation" => self.saturation_percent = number(&value, 0, 200)? as u16,
             "look_hue_shift" => self.hue_shift_degrees = number(&value, -180, 180)? as i16,
             "look_invert" => self.invert = control::boolean(&value).ok_or("Expected on or off")?,
+            "look_filter" => {
+                self.filter = control::index(&value)
+                    .and_then(Filter::from_index)
+                    .ok_or("Unknown filter")?
+            }
+            "look_filter_strength" => self.filter_strength_percent = number(&value, 0, 100)? as u16,
             "look_vignette" => self.vignette_percent = number(&value, 0, 100)? as u16,
             "look_pattern_contrast" => {
                 self.pattern_contrast_percent = number(&value, 50, 200)? as u16
@@ -1335,5 +1757,61 @@ mod tests {
         assert_eq!(look.mode, ColorMode::Color);
         let json = serde_json::to_string(&look).unwrap();
         assert_eq!(serde_json::from_str::<Appearance>(&json).unwrap(), look);
+    }
+
+    #[test]
+    fn filter_applies_in_every_mode_and_resets_with_presets() {
+        let mut look = Appearance::default();
+        assert!(look
+            .set_control("look_filter", ControlValue::Index(Filter::Invert.index()))
+            .unwrap());
+        assert!(!look.is_neutral());
+        let inverted = look.shade([0; 3], Some([10, 20, 30]), &context());
+        assert_eq!(inverted, [245, 235, 225]);
+        look.set_control("look_filter_strength", ControlValue::Number(0))
+            .unwrap();
+        assert!(look.is_neutral());
+        look.apply_preset(StylePreset::SepiaMemory);
+        assert_eq!(look.filter, Filter::Sepia);
+        look.apply_preset(StylePreset::Original);
+        assert_eq!(look.filter, Filter::None);
+    }
+
+    #[test]
+    fn every_preset_has_a_unique_label_and_a_known_palette() {
+        let mut labels = StylePreset::labels();
+        let count = labels.len();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), count);
+        for preset in StylePreset::ALL.iter().skip(1) {
+            let definition = preset.definition().unwrap();
+            assert!(
+                PALETTES.iter().any(|p| p.id == definition.palette),
+                "{}",
+                definition.label
+            );
+        }
+    }
+
+    #[test]
+    fn scene_palette_is_provided_only_for_a_real_color_palette() {
+        assert!(!Appearance::default().scene_palette().is_provided());
+        let look = Appearance {
+            palette: 1,
+            ..Appearance::default()
+        };
+        let palette = look.scene_palette();
+        assert!(palette.is_provided());
+        assert_ne!(
+            palette.recolor([10, 10, 10]),
+            palette.recolor([240, 240, 240])
+        );
+        let grey = Appearance {
+            mode: ColorMode::Greyscale,
+            palette: 1,
+            ..Appearance::default()
+        };
+        assert_eq!(grey.scene_palette().recolor([1, 2, 3]), [1, 2, 3]);
     }
 }

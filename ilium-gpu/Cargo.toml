@@ -17,4 +17,5 @@ tracing = "0.1.44"
 wgpu = { version = "30.0.1", optional = true, default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan", "metal", "dx12"] }
 
 [dev-dependencies]
+ilium-execution = { path = "../ilium-execution" }
 tempfile = "3.27.0"

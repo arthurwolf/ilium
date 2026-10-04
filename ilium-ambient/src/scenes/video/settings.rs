@@ -77,9 +77,24 @@ pub const CONTRAST: (i32, i32, i32) = (-100, 100, 5);
 pub const GAMMA_PERCENT: (i32, i32, i32) = (50, 300, 10);
 pub const DETAIL: (i32, i32, i32) = (0, 100, 5);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSeries {
+    #[default]
+    Custom,
+    Germination,
+}
+
+impl Choice for VideoSeries {
+    const ALL: &'static [Self] = &[Self::Custom, Self::Germination];
+    const LABELS: &'static [&'static str] = &["Custom", "Germination"];
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VideoSettings {
+    /// Curated remote playlist or the user's retained custom sources.
+    pub series: VideoSeries,
     /// One or more entries separated by `;`: a video file, a folder, a glob
     /// such as `~/Videos/**/*.mkv`, or an http(s) URL. Empty: nothing plays.
     pub source: String,
@@ -116,6 +131,7 @@ pub struct VideoSettings {
 impl Default for VideoSettings {
     fn default() -> Self {
         Self {
+            series: VideoSeries::Custom,
             source: String::new(),
             recursive: true,
             mode: PlaybackMode::Live,
@@ -153,6 +169,9 @@ impl VideoSettings {
 
     /// True when the source contains an unencrypted URL worth a warning.
     pub fn uses_plain_http(&self) -> bool {
+        if self.series != VideoSeries::Custom {
+            return false;
+        }
         discover::split_entries(&self.source).iter().any(|entry| {
             entry
                 .get(..7)
@@ -168,7 +187,9 @@ fn number_of(value: &ControlValue) -> Option<i32> {
 impl SceneSettings for VideoSettings {
     fn normalized(&self) -> Self {
         Self {
-            source: self.source.trim().to_owned(),
+            // Saving a series choice must retain dormant Custom text. Explicit
+            // Source edits and discovery trim entries at their own boundary.
+            source: self.source.clone(),
             slowed_percent: clamp_u32(self.slowed_percent, SLOWED_PERCENT),
             scene_seconds: clamp_u32(self.scene_seconds, SCENE_SECONDS),
             brightness: clamp_i32(self.brightness, BRIGHTNESS),
@@ -182,14 +203,23 @@ impl SceneSettings for VideoSettings {
     }
 
     fn controls(&self) -> Vec<Control> {
-        let mut rows = vec![Control::text(
+        let mut rows = vec![Control::choice(
+            "series",
+            "Series",
+            self.series.index(),
+            VideoSeries::LABELS,
+            "Custom uses your sources. Germination plays a remote plant-growth playlist, holding the current clip in RAM only.",
+        )];
+        if self.series == VideoSeries::Custom {
+            rows.push(Control::text(
             "source",
             "Source",
             &self.source,
             "file, folder, glob or URL",
             "A video file, a folder, a glob like ~/Videos/**/*.mkv, an http(s) URL, or several of these separated by semicolons.",
-        )];
-        if !self.is_url_only() {
+            ));
+        }
+        if self.series == VideoSeries::Custom && !self.is_url_only() {
             rows.push(Control::toggle(
                 "recursive",
                 "Include sub-folders",
@@ -312,6 +342,10 @@ impl SceneSettings for VideoSettings {
 
     fn set_control(&mut self, id: &str, value: ControlValue) -> Result<bool, String> {
         let before = self.clone();
+        if id == "series" {
+            set_choice(&value, &mut self.series);
+            return Ok(*self != before);
+        }
         match id {
             "source" => {
                 let Some(text) = control::text(&value) else {
@@ -384,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn normalization_clamps_every_field() {
+    fn normalization_clamps_numeric_fields_and_preserves_source() {
         let wild = VideoSettings {
             slowed_percent: 0,
             scene_seconds: 9999,
@@ -406,7 +440,7 @@ mod tests {
         assert_eq!(clean.detail, 100);
         assert_eq!(clean.frame_rate, 24);
         assert_eq!(clean.seed, 9999);
-        assert_eq!(clean.source, "x");
+        assert_eq!(clean.source, "  x  ");
     }
 
     #[test]
@@ -525,5 +559,75 @@ mod tests {
         assert!(!settings.uses_plain_http());
         settings.source = "https://a/x; HTTP://b/y".to_owned();
         assert!(settings.uses_plain_http());
+    }
+    #[test]
+    fn germination_series_is_selectable_persisted_and_preserves_custom_source() {
+        let mut settings = VideoSettings {
+            source: "/synthetic/retained.mp4".into(),
+            ..VideoSettings::default()
+        };
+        assert_eq!(
+            settings.set_control("series", ControlValue::Index(1)),
+            Ok(true)
+        );
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["series"], "germination");
+        assert!(row(&settings.controls(), "source").is_none());
+        assert!(row(&settings.controls(), "recursive").is_none());
+        assert_eq!(
+            settings.set_control("series", ControlValue::Index(0)),
+            Ok(true)
+        );
+        assert_eq!(settings.source, "/synthetic/retained.mp4");
+        assert!(row(&settings.controls(), "source").is_some());
+        let old: VideoSettings = serde_json::from_str(r#"{"source":"x"}"#).unwrap();
+        assert_eq!(serde_json::to_value(old).unwrap()["series"], "custom");
+    }
+    #[test]
+    fn series_choice_preserves_every_other_saved_setting_exactly() {
+        let original = VideoSettings {
+            source: "  /synthetic/retained.mp4  ".into(),
+            brightness: 1000,
+            ..VideoSettings::default()
+        };
+        let mut settings = original.clone();
+        assert_eq!(
+            settings.set_control("series", ControlValue::Index(99)),
+            Ok(false)
+        );
+        assert_eq!(settings, original);
+        assert_eq!(
+            settings.set_control("series", ControlValue::Index(1)),
+            Ok(true)
+        );
+        let mut expected = original.clone();
+        expected.series = VideoSeries::Germination;
+        assert_eq!(settings, expected);
+        assert_eq!(
+            settings.set_control("series", ControlValue::Index(0)),
+            Ok(true)
+        );
+        assert_eq!(settings, original);
+    }
+    #[test]
+    fn series_source_survives_save_normalization_and_serde_reload() {
+        let original = VideoSettings {
+            source: "  /synthetic/retained.mp4  ".into(),
+            ..VideoSettings::default()
+        };
+        let mut settings = original.clone();
+        for selection in [1, 0] {
+            assert_eq!(
+                settings.set_control("series", ControlValue::Index(selection)),
+                Ok(true)
+            );
+            settings = settings.normalized();
+            let saved = serde_json::to_string(&settings).unwrap();
+            settings = serde_json::from_str::<VideoSettings>(&saved)
+                .unwrap()
+                .normalized();
+            assert_eq!(settings.source, original.source);
+        }
+        assert_eq!(settings, original);
     }
 }

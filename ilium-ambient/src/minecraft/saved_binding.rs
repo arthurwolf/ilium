@@ -1,7 +1,11 @@
 //! Worker-only exact saved-cell conversion and prepared geometry measurement.
-use super::{projection, render_cells::RenderCells, tours::PreparedMap};
+use super::{native_fluid, projection, render_cells::RenderCells, tours::PreparedMap};
 use crate::voxel_landscape::{
-    assets::{block_state::BlockState, identity::ResourceId},
+    assets::{
+        block_state::BlockState,
+        budget::{ByteBudget, Cancel, Reservation},
+        identity::ResourceId,
+    },
     surface_binding::PreparedSurface,
     surface_fluid::FluidMesh,
     surface_generation::{Region, SourceOwner, SurfaceBlock, SurfaceWorld},
@@ -33,12 +37,6 @@ impl Default for Limits {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Prerequisite {
-    FluidGeometryAndBiomeTint,
-    WaterloggingGeometry,
-    ExactSavedModelTint,
-}
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid saved binding: {0}")]
@@ -47,11 +45,8 @@ pub enum Error {
     Limit(&'static str),
     #[error("saved binding cancelled")]
     Cancelled,
-    #[error("saved cell {java_position:?} requires {prerequisite:?}")]
-    Unsupported {
-        java_position: [i32; 3],
-        prerequisite: Prerequisite,
-    },
+    #[error("saved native fluid classification: {0}")]
+    Fluid(#[from] native_fluid::Error),
     #[error("prepared saved geometry is empty")]
     EmptyGeometry,
     #[error("unsupported prepared geometry: {0}")]
@@ -62,9 +57,14 @@ pub enum Error {
 pub struct SavedBinding {
     pub world: SurfaceWorld,
     pub map: Arc<PreparedMap>,
+    /// Exact Java positions. Waterlogged states occur in both this map and
+    /// `world.blocks`; liquid-only states retain their raw block state there.
+    /// This is separate from the generated world's fluid vocabulary.
+    pub liquid_cells: BTreeMap<[i32; 3], native_fluid::Cell>,
     pub heights: [i32; 2],
     pub storage_charge: usize,
     pub work_used: usize,
+    pub(crate) state_copy_charge: Option<Reservation>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geometry {
@@ -111,10 +111,13 @@ fn add_bytes(total: &mut usize, bytes: usize, limit: usize) -> Result<(), Error>
     Ok(())
 }
 fn raw_state(cells: &RenderCells, position: [i32; 3]) -> Result<&super::chunk::BlockState, Error> {
-    if position[0] < cells.core.minimum[0]
-        || position[0] > cells.core.maximum[0]
-        || position[2] < cells.core.minimum[1]
-        || position[2] > cells.core.maximum[1]
+    // A sparse tile supplies exact non-air one-cell neighbors for selected
+    // model face occlusion. SurfaceWorld.region remains the core, so only core
+    // faces emit. This is the same halo accepted by validate_supplied.
+    if i64::from(position[0]) < i64::from(cells.core.minimum[0]) - 1
+        || i64::from(position[0]) > i64::from(cells.core.maximum[0]) + 1
+        || i64::from(position[2]) < i64::from(cells.core.minimum[1]) - 1
+        || i64::from(position[2]) > i64::from(cells.core.maximum[1]) + 1
         || position[1] < cells.heights[0]
         || position[1] > cells.heights[1]
     {
@@ -127,23 +130,6 @@ fn raw_state(cells: &RenderCells, position: [i32; 3]) -> Result<&super::chunk::B
     if state.is_air() {
         return Err(Error::Invalid("position refers to exact air"));
     }
-    let prerequisite = if matches!(state.name.as_str(), "minecraft:water" | "minecraft:lava") {
-        Some(Prerequisite::FluidGeometryAndBiomeTint)
-    } else if state
-        .properties
-        .get("waterlogged")
-        .is_some_and(|value| value == "true")
-    {
-        Some(Prerequisite::WaterloggingGeometry)
-    } else {
-        None
-    };
-    if let Some(prerequisite) = prerequisite {
-        return Err(Error::Unsupported {
-            java_position: position,
-            prerequisite,
-        });
-    }
     Ok(state)
 }
 /// Copies only admitted exact states. The caller retains raw palettes on every
@@ -154,6 +140,28 @@ fn raw_state(cells: &RenderCells, position: [i32; 3]) -> Result<&super::chunk::B
 pub fn prepare(
     cells: &RenderCells,
     limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SavedBinding, Error> {
+    prepare_internal(cells, limits, None, cancelled)
+}
+
+/// Reserve the preflighted state-copy charge before allocating native cloned
+/// states. The reservation moves with the binding and then its PreparedNative;
+/// this is the sparse projected path's shared-scene account boundary.
+pub fn prepare_accounted(
+    cells: &RenderCells,
+    limits: Limits,
+    budget: &ByteBudget,
+    cancel: Cancel<'_>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SavedBinding, Error> {
+    prepare_internal(cells, limits, Some((budget, cancel)), cancelled)
+}
+
+fn prepare_internal(
+    cells: &RenderCells,
+    limits: Limits,
+    account: Option<(&ByteBudget, Cancel<'_>)>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<SavedBinding, Error> {
     let mut work = Work {
@@ -196,6 +204,13 @@ pub fn prepare(
     for position in &cells.positions {
         work.charge(1)?;
         let state = raw_state(cells, *position)?;
+        if native_fluid::classify_state(state, *position)?.is_some() {
+            add_bytes(
+                &mut storage_charge,
+                size_of::<[i32; 3]>() + size_of::<native_fluid::Cell>() + TREE_ENTRY_BYTES,
+                limits.owned_bytes,
+            )?;
+        }
         if state.name.len() > 512 || state.properties.len() > 32 {
             return Err(Error::Invalid("native state vocabulary limits"));
         }
@@ -230,10 +245,19 @@ pub fn prepare(
             )?;
         }
     }
+    let state_copy_charge = account
+        .map(|(budget, cancel)| budget.reserve(storage_charge as u64, cancel))
+        .transpose()?;
     let mut blocks = BTreeMap::new();
+    let mut liquid_cells = BTreeMap::new();
     for position in &cells.positions {
         work.charge(1)?;
         let raw = raw_state(cells, *position)?;
+        if let Some(liquid) = native_fluid::classify_state(raw, *position)? {
+            if liquid_cells.insert(*position, liquid).is_some() {
+                return Err(Error::Invalid("duplicate saved liquid position"));
+            }
+        }
         let renderer_position = [position[0], position[2], position[1]];
         if blocks.contains_key(&renderer_position) {
             return Err(Error::Invalid("duplicate saved position"));
@@ -277,6 +301,14 @@ pub fn prepare(
         );
     }
     work.charge(0)?;
+    if state_copy_charge
+        .as_ref()
+        .is_some_and(|charge| storage_charge as u64 > charge.bytes())
+    {
+        // A surprising destination String capacity must never escape the
+        // preflight reservation. Drop this unpublished copy and retry no work.
+        return Err(Error::Limit("state copy allocation exceeded reservation"));
+    }
     Ok(SavedBinding {
         world: SurfaceWorld {
             region: Region {
@@ -296,9 +328,11 @@ pub fn prepare(
             source_limitations: Vec::new(),
         },
         map: Arc::clone(&cells.map),
+        liquid_cells,
         heights: cells.heights,
         storage_charge,
         work_used: work.used,
+        state_copy_charge,
     })
 }
 
@@ -491,4 +525,4 @@ impl Geometry {
 }
 #[cfg(test)]
 #[path = "saved_binding_tests.rs"]
-mod tests;
+pub(super) mod tests;

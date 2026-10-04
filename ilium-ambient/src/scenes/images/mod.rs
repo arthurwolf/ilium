@@ -17,7 +17,14 @@
 mod adjust;
 mod decode;
 mod discover;
+mod encoded;
+mod failure;
+mod list;
+mod mailbox;
 mod motion;
+mod png_layout;
+mod png_prepared;
+mod prepared;
 mod render;
 mod settings;
 mod slideshow;
@@ -33,6 +40,7 @@ pub use settings::{
 
 use crate::control::SceneSettings;
 use crate::scene::{Frame, Scene, SceneEnv};
+use crate::style::ScenePalette;
 use adjust::Adjustment;
 use decode::{DecodeLimits, DecodedImage, Lru};
 use motion::{hash64, ping_pong, pose_at, view_rect};
@@ -54,10 +62,81 @@ const PREFETCH_AHEAD: usize = 2;
 const ACTIVE_FPS: u32 = 12;
 const IDLE_FPS: u32 = 1;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ImagesStartError {
+    #[error("image capture admission refused: {0:?}")]
+    Admission(ilium_execution::RejectReason),
+    #[error("image loader could not start: {0}")]
+    Loader(#[from] std::io::Error),
+}
+
+impl From<ilium_execution::RejectReason> for ImagesStartError {
+    fn from(reason: ilium_execution::RejectReason) -> Self {
+        Self::Admission(reason)
+    }
+}
+
+#[derive(Debug)]
+enum CacheFailure {
+    Admission(ilium_execution::RejectReason),
+    Allocation,
+}
+impl From<ilium_execution::RejectReason> for CacheFailure {
+    fn from(reason: ilium_execution::RejectReason) -> Self {
+        Self::Admission(reason)
+    }
+}
+
 struct FrameCache {
     key: Vec<u64>,
     dots: Vec<f32>,
     colors: Vec<[u8; 3]>,
+    // Last: copied render arrays retain their independent storage charge.
+    _storage: Arc<ilium_execution::StorageAdmission>,
+}
+
+impl FrameCache {
+    fn capture(
+        key: Vec<u64>,
+        dots: &[f32],
+        colors: &[[u8; 3]],
+        resources: &crate::resources::AmbientResources,
+    ) -> Result<Self, CacheFailure> {
+        use ilium_execution::RejectReason;
+        let bytes = [
+            key.capacity().checked_mul(std::mem::size_of::<u64>()),
+            dots.len().checked_mul(std::mem::size_of::<f32>()),
+            colors.len().checked_mul(std::mem::size_of::<[u8; 3]>()),
+            Some(std::mem::size_of::<Self>()),
+            Some(
+                std::mem::size_of::<ilium_execution::StorageAdmission>()
+                    + 2 * std::mem::size_of::<usize>(),
+            ),
+        ]
+        .into_iter()
+        .try_fold(0usize, |sum, bytes| {
+            sum.checked_add(bytes.ok_or(RejectReason::InvalidCost)?)
+                .ok_or(RejectReason::InvalidCost)
+        })?;
+        // Existing frame and old cache remain alive during this separate copy.
+        let storage = resources.reserve_storage(bytes)?;
+        let mut cached_dots = Vec::new();
+        cached_dots
+            .try_reserve_exact(dots.len())
+            .map_err(|_| CacheFailure::Allocation)?;
+        cached_dots.extend_from_slice(dots);
+        let mut cached_colors = Vec::new();
+        cached_colors
+            .try_reserve_exact(colors.len())
+            .map_err(|_| CacheFailure::Allocation)?;
+        cached_colors.extend_from_slice(colors);
+        Ok(Self {
+            key,
+            dots: cached_dots,
+            colors: cached_colors,
+            _storage: storage,
+        })
+    }
 }
 
 pub struct ImagesScene {
@@ -66,30 +145,108 @@ pub struct ImagesScene {
     timing: Timing,
     strength: f32,
     loader: ImageLoader,
-    entries: Option<Vec<Entry>>,
+    entries: Option<list::SharedList>,
     list_error: Option<String>,
-    notes: Vec<String>,
+    prepared_list_error: Option<Arc<crate::resources::Stored<String>>>,
     order: Vec<usize>,
     images: Lru<Arc<DecodedImage>>,
     pending: HashSet<usize>,
-    failed: HashMap<usize, String>,
-    last_error: Option<String>,
+    failed: HashMap<usize, Arc<crate::resources::Stored<String>>>,
+    last_error: Option<Arc<crate::resources::Stored<String>>>,
     scheduler: Scheduler,
     generation: u32,
     decode_target: Option<(u32, u32)>,
     frame_cache: Option<FrameCache>,
     status: Option<String>,
     animating: bool,
+    palette: ScenePalette,
+    resources: crate::resources::AmbientResources,
+    // Last: normalized settings/palette and loader capture share this admission.
+    _capture_storage: Arc<ilium_execution::StorageAdmission>,
+}
+
+/// Requested heap capacity for the original constructor captures. This does
+/// not account discovery, encoded bytes, decoding, or future palette changes;
+/// those have separate owners and cannot borrow this reservation.
+fn constructor_storage_bytes(
+    settings: &ImagesSettings,
+    env: &SceneEnv,
+) -> Result<usize, ilium_execution::RejectReason> {
+    use ilium_execution::RejectReason;
+    let source = match &settings.source {
+        ImageSource::Builtin(_) => 0,
+        ImageSource::Local(path) => path.capacity(),
+        ImageSource::Url(url) => url.capacity(),
+    };
+    let selected = match settings.mode {
+        ImagesMode::Single => source,
+        ImagesMode::Folders => settings.folders.len(),
+        ImagesMode::UrlList => settings.urls.len(),
+    };
+    let palette = env
+        .palette
+        .stops
+        .len()
+        .checked_mul(std::mem::size_of::<crate::style::Rgb>())
+        .ok_or(RejectReason::InvalidCost)?;
+    [
+        std::mem::size_of::<ImagesScene>(),
+        std::mem::size_of::<LoaderConfig>(),
+        worker::mailbox_storage_bytes(),
+        failure::fallback_bytes(),
+        std::mem::size_of::<ilium_execution::StorageAdmission>() + 2 * std::mem::size_of::<usize>(),
+        source,
+        settings.folders.len(),
+        settings.urls.len(),
+        selected,
+        palette,
+        env.cache_dir.as_os_str().len(),
+        7,  // path separator and literal images component
+        64, // fixed initial status text
+        std::mem::size_of::<std::sync::atomic::AtomicBool>() + 2 * std::mem::size_of::<usize>(), // existing loader stop allocation
+        // Closed render graph: at most outgoing + current. Explicit capacity2
+        // images, exact-length Layer collect2, complete capacity14 key.
+        2 * std::mem::size_of::<(Slide, Arc<DecodedImage>, f32)>(),
+        2 * std::mem::size_of::<Layer<'_>>(),
+        14 * std::mem::size_of::<u64>(),
+    ]
+    .into_iter()
+    .try_fold(0usize, |sum, bytes| {
+        sum.checked_add(bytes).ok_or(RejectReason::InvalidCost)
+    })
 }
 
 impl ImagesScene {
-    pub fn new(settings: &ImagesSettings, env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. This scene follows it natively: its cell colours are mapped onto the
+    // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
+    // `Scene::set_palette` delivers later changes (applied from the next render).
+    // With no palette provided the colours are untouched.
+    pub fn new(settings: &ImagesSettings, env: &SceneEnv) -> Result<Self, ImagesStartError> {
+        // Admit both distinct captures before normalization, path construction,
+        // palette cloning, or starting the loader. Guard clones share only the
+        // allocations declared by this one constructor, never future copies.
+        let capture_storage = env
+            .resources
+            .reserve_storage(constructor_storage_bytes(settings, env)?)?;
         let settings = settings.normalized();
+        let cache_capacity = env
+            .cache_dir
+            .as_os_str()
+            .len()
+            .checked_add(7)
+            .ok_or(ilium_execution::RejectReason::InvalidCost)?;
+        let mut cache_dir = std::path::PathBuf::with_capacity(cache_capacity);
+        cache_dir.push(&env.cache_dir);
+        cache_dir.push("images");
         let loader = ImageLoader::start(LoaderConfig {
             list: ListSpec::from_settings(&settings),
-            cache_dir: env.cache_dir.join("images"),
+            cache_dir,
             limits: DecodeLimits::default(),
-        });
+            resources: env.resources.clone(),
+            failure_fallback: failure::fallback(capture_storage.clone()),
+            capture_storage: capture_storage.clone(),
+        })?;
         let status = Some(
             match settings.mode {
                 ImagesMode::Single => "Loading image...",
@@ -98,7 +255,7 @@ impl ImagesScene {
             }
             .to_owned(),
         );
-        Self {
+        Ok(Self {
             adjustment: Adjustment::from_settings(&settings),
             timing: Timing::new(
                 settings.display_seconds,
@@ -113,7 +270,7 @@ impl ImagesScene {
             loader,
             entries: None,
             list_error: None,
-            notes: Vec::new(),
+            prepared_list_error: None,
             order: Vec::new(),
             images: Lru::new(LRU_CAPACITY),
             pending: HashSet::new(),
@@ -125,14 +282,16 @@ impl ImagesScene {
             frame_cache: None,
             status,
             animating: true,
-        }
+            palette: env.palette.clone(),
+            resources: env.resources.clone(),
+            _capture_storage: capture_storage,
+        })
     }
 
     fn pump_events(&mut self, seed_time: std::time::SystemTime) {
         while let Some(event) = self.loader.try_recv() {
             match event {
-                WorkerEvent::List { entries, notes } => {
-                    self.notes = notes;
+                WorkerEvent::List { list } => {
                     let seed = if self.settings.shuffle_seed == 0 {
                         seed_time
                             .duration_since(UNIX_EPOCH)
@@ -141,10 +300,10 @@ impl ImagesScene {
                     } else {
                         u64::from(self.settings.shuffle_seed)
                     };
-                    self.order = build_order(entries.len(), self.settings.order, seed);
-                    self.entries = Some(entries);
+                    self.order = build_order(list.view().entries.len(), self.settings.order, seed);
+                    self.entries = Some(list);
                 }
-                WorkerEvent::ListFailed(message) => self.list_error = Some(message),
+                WorkerEvent::ListFailed(message) => self.prepared_list_error = Some(message),
                 WorkerEvent::Loaded {
                     index,
                     generation,
@@ -192,7 +351,7 @@ impl ImagesScene {
 
     fn entry_at(&self, position: usize) -> Option<(usize, &Entry)> {
         let index = *self.order.get(position)?;
-        Some((index, self.entries.as_ref()?.get(index)?))
+        Some((index, self.entries.as_ref()?.view().entries.get(index)?))
     }
 
     fn availability(&self, position: usize) -> Availability {
@@ -214,18 +373,29 @@ impl ImagesScene {
         let Some((max_width, max_height)) = self.decode_target else {
             return;
         };
-        let mut positions = Vec::new();
+        // Closed current + prefetch demand: inline metadata, no render-time
+        // Vec allocation before outbound request admission.
+        let mut positions = [None; PREFETCH_AHEAD + 1];
         match self.scheduler.current() {
             Some(current) => {
-                positions.push(current.position);
+                positions[0] = Some(current.position);
                 if len > 1 {
-                    positions
-                        .extend((1..=PREFETCH_AHEAD).map(|step| (current.position + step) % len));
+                    for (step, position) in positions.iter_mut().enumerate().skip(1) {
+                        *position = Some((current.position + step) % len);
+                    }
                 }
             }
-            None => positions.extend(0..len.min(PREFETCH_AHEAD)),
+            None => {
+                for (index, position) in positions
+                    .iter_mut()
+                    .take(len.min(PREFETCH_AHEAD))
+                    .enumerate()
+                {
+                    *position = Some(index);
+                }
+            }
         }
-        for position in positions {
+        for position in positions.into_iter().flatten() {
             let Some(index) = self.order.get(position).copied() else {
                 continue;
             };
@@ -235,13 +405,31 @@ impl ImagesScene {
             {
                 continue;
             }
-            self.pending.insert(index);
-            self.loader.request(LoadRequest {
+            let admission = self.loader.request(LoadRequest {
                 index,
                 generation: self.generation,
                 max_width,
                 max_height,
             });
+            match admission {
+                Ok(()) => {
+                    self.pending.insert(index);
+                }
+                Err(rejected)
+                    if matches!(
+                        rejected.reason,
+                        mailbox::Refusal::Busy | mailbox::Refusal::Full
+                    ) =>
+                {
+                    // Nothing was accepted: retain the same scheduler demand and
+                    // retry on the next frame without a false pending-cache entry.
+                    break;
+                }
+                Err(rejected) => {
+                    self.list_error = Some(format!("Image loader retired: {:?}", rejected.reason));
+                    break;
+                }
+            }
         }
     }
 
@@ -281,6 +469,10 @@ impl ImagesScene {
         view_rect(self.settings.fit, image.aspect(), screen_aspect, pose)
     }
 
+    fn has_list_error(&self) -> bool {
+        self.list_error.is_some() || self.prepared_list_error.is_some()
+    }
+
     fn refresh_status(&mut self) {
         self.status = self.compute_status();
     }
@@ -289,14 +481,19 @@ impl ImagesScene {
         if let Some(error) = &self.list_error {
             return Some(error.clone());
         }
-        let Some(entries) = &self.entries else {
+        if let Some(error) = &self.prepared_list_error {
+            return Some(error.view().clone());
+        }
+        let Some(list) = &self.entries else {
             return self.status.clone();
         };
+        let entries = &list.view().entries;
         let Some(current) = self.scheduler.current() else {
             if !entries.is_empty() && self.failed.len() >= entries.len() {
                 return Some(
                     self.last_error
-                        .clone()
+                        .as_ref()
+                        .map(|message| message.view().clone())
                         .unwrap_or_else(|| "No readable images".to_owned()),
                 );
             }
@@ -307,7 +504,7 @@ impl ImagesScene {
         } else {
             format!(" ({} unreadable)", self.failed.len())
         };
-        if let Some(note) = self.notes.first() {
+        if let Some(note) = list.view().notes.first() {
             unreadable.push_str(&format!(" [{note}]"));
         }
         let (_, entry) = self.entry_at(current.position)?;
@@ -342,7 +539,7 @@ impl Scene for ImagesScene {
         self.request_needed();
 
         let snapshot = self.scheduler.snapshot(now, &self.timing);
-        let mut images: Vec<(Slide, Arc<DecodedImage>, f32)> = Vec::new();
+        let mut images: Vec<(Slide, Arc<DecodedImage>, f32)> = Vec::with_capacity(2);
         if let Some(snapshot) = snapshot {
             let mut take = |slide: Slide, weight: f32, images: &mut Vec<_>| {
                 let index = self.order.get(slide.position).copied();
@@ -357,10 +554,11 @@ impl Scene for ImagesScene {
         }
 
         if images.is_empty() {
-            self.animating = self.entries.is_none()
-                || (self.list_error.is_none() && self.failed.len() < self.order.len());
+            self.animating = !self.has_list_error()
+                && (self.entries.is_none() || self.failed.len() < self.order.len());
             if self.animating {
                 render_placeholder(frame);
+                self.palette.recolor_cells(frame.cell_colors);
             }
             self.refresh_status();
             return;
@@ -387,19 +585,43 @@ impl Scene for ImagesScene {
             }
             _ => {
                 render_layers(frame, &layers, &self.adjustment);
-                self.frame_cache = Some(FrameCache {
+                // Cache is an optional optimization. On pressure render the
+                // exact new frame and skip the copy; no stale pixels are used.
+                self.frame_cache = match FrameCache::capture(
                     key,
-                    dots: frame.raster.dots.clone(),
-                    colors: frame.cell_colors.clone(),
-                });
+                    &frame.raster.dots,
+                    frame.cell_colors,
+                    &self.resources,
+                ) {
+                    Ok(cache) => Some(cache),
+                    Err(CacheFailure::Admission(reason)) => {
+                        tracing::debug!(?reason, "optional image frame cache admission refused");
+                        None
+                    }
+                    Err(CacheFailure::Allocation) => {
+                        tracing::debug!("optional image frame cache allocation failed");
+                        None
+                    }
+                };
             }
         }
         drop(layers);
+        // The frame cache keeps the image's own colours; the palette is applied
+        // after it so a palette change needs no cache invalidation.
+        self.palette.recolor_cells(frame.cell_colors);
 
         self.animating = self.settings.motion != Motion::None
             || self.scheduler.is_fading()
             || self.order.len().saturating_sub(self.failed.len()) > 1;
         self.refresh_status();
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {

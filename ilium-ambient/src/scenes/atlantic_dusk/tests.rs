@@ -6,7 +6,10 @@ use crate::raster::DitherMode;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &AtlanticDuskSettings) -> AtlanticDuskScene {
-    AtlanticDuskScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    AtlanticDuskScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn pinned(time_of_day: TimeOfDay) -> AtlanticDuskSettings {

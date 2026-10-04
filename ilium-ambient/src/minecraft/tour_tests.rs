@@ -7,6 +7,181 @@ use super::super::{
 use super::*;
 use std::{cell::Cell, collections::BTreeSet};
 
+#[test]
+fn failed_route_corridor_skips_jitter_but_keeps_other_maps_directions_and_lengths() {
+    let failed = RouteKey {
+        map: MapId([1; 16]),
+        endpoints: [[-400, 0], [400, 0]],
+    };
+    let excluded = BTreeSet::from([failed]);
+    let near = RouteKey {
+        endpoints: [[-350, 20], [450, 20]],
+        ..failed
+    };
+    assert!(near_failed_route(near, &excluded));
+    assert!(!near_failed_route(
+        RouteKey {
+            map: MapId([2; 16]),
+            ..near
+        },
+        &excluded
+    ));
+    assert!(!near_failed_route(
+        RouteKey {
+            endpoints: [[-400, 0], [0, 400]],
+            ..failed
+        },
+        &excluded
+    ));
+    assert!(!near_failed_route(
+        RouteKey {
+            endpoints: [[-320, 0], [320, 0]],
+            ..failed
+        },
+        &excluded
+    ));
+}
+
+#[test]
+fn projected_receipt_uses_qualified_state_and_current_view_without_losing_planner_targets() {
+    use super::super::source_footprint;
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+
+    let base = basic(&[([0, 0], Category::OpenGrassland)]);
+    assert!(!base.targets().is_empty());
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, std::slice::from_ref(&base), policy(8.0));
+    let account = ByteBudget::new(256 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let size = [1, 1];
+    let scale = 1024.0;
+    let request = Arc::new(
+        source_footprint::request(plan.line(), plan.focus_y(), size, scale, &account, cancel)
+            .unwrap(),
+    );
+    let mut decoded_source = loaded(request.support_chunks());
+    for (&position, chunk) in &base.loaded().chunks {
+        if decoded_source.chunks.contains_key(&position) {
+            decoded_source
+                .chunks
+                .insert(position, Arc::new((**chunk).clone()));
+        }
+    }
+    let map = Arc::new(
+        base.projected_source(
+            Arc::new(decoded_source),
+            account.reserve(1, cancel).unwrap(),
+            &mut budget(),
+        )
+        .unwrap(),
+    );
+    assert!(map.targets().is_empty());
+    let display = Arc::new(
+        ProjectedDisplay::bind(
+            &plan,
+            Arc::clone(&map),
+            Arc::clone(&request),
+            size,
+            scale,
+            &mut budget(),
+        )
+        .unwrap(),
+    );
+    let view = controller
+        .start_projected(&plan, display, clock(0), &budget())
+        .unwrap()
+        .unwrap();
+    let issued = controller.issued_view().unwrap();
+    assert_eq!(
+        controller.active.as_ref().unwrap().plan.map.targets(),
+        base.targets()
+    );
+    let position = request
+        .render_chunks()
+        .iter()
+        .filter(|chunk| !base.loaded().chunks.contains_key(*chunk))
+        .flat_map(|chunk| {
+            let x = chunk[0] * 16 + 8;
+            let z = chunk[1] * 16 + 8;
+            request
+                .column_band([x, z])
+                .into_iter()
+                .flat_map(move |band| (band[0]..=band[1].min(63)).map(move |y| [x, y, z]))
+        })
+        .find(|&position| {
+            request.may_project_cell(position, [view.look_at[0], view.look_at[2]])
+                && map.state(position).is_some_and(|state| !state.is_air())
+                && (f64::from(position[0]) - view.look_at[0]).abs() > view.data_radius
+        })
+        .expect("a qualified saved cell beyond the small planner radius must be visible");
+    let owner = DisplayedBlock {
+        position,
+        state: map.state(position).unwrap(),
+        pixels: 2,
+        resolved: true,
+    };
+    assert_eq!(
+        controller
+            .presented_issued(&issued, &[owner], &mut budget())
+            .unwrap()
+            .credited_categories,
+        0
+    );
+    assert!(controller.active.as_ref().unwrap().any_saved_pixels);
+    let mut distant = owner;
+    distant.position[0] += 1024;
+    assert!(matches!(
+        controller.presented_issued(&issued, &[distant], &mut budget()),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn projected_display_rejects_changed_overlap_before_start() {
+    use super::super::source_footprint;
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+
+    let base = basic(&[]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, std::slice::from_ref(&base), policy(8.0));
+    let account = ByteBudget::new(256 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let size = [1, 1];
+    let scale = 1024.0;
+    let request = Arc::new(
+        source_footprint::request(plan.line(), plan.focus_y(), size, scale, &account, cancel)
+            .unwrap(),
+    );
+    let mut loaded = loaded(request.support_chunks());
+    let changed = *request
+        .support_chunks()
+        .iter()
+        .find(|chunk| base.loaded().chunks.contains_key(*chunk))
+        .unwrap();
+    loaded.chunks.insert(
+        changed,
+        Arc::new(decoded(changed, Some(Category::DrySandySurface), 2835)),
+    );
+    let map = Arc::new(
+        base.projected_source(
+            Arc::new(loaded),
+            account.reserve(1, cancel).unwrap(),
+            &mut budget(),
+        )
+        .unwrap(),
+    );
+    assert!(matches!(
+        ProjectedDisplay::bind(&plan, map, request, size, scale, &mut budget()),
+        Err(Error::Stale)
+    ));
+    assert!(controller.view().is_none());
+    assert_eq!(controller.history(), History::default());
+}
+
 fn budget() -> Budget<'static> {
     Budget::new(u64::MAX, &|| false)
 }
@@ -31,6 +206,45 @@ fn policy(radius: f64) -> Policy {
         minimum_confidence: Confidence::Supported,
         minimum_pixels: 2,
     }
+}
+
+#[test]
+fn tour_core_retains_exact_identity_and_only_inset_support() {
+    let full = basic(&[
+        ([-2, -2], Category::OpenGrassland),
+        ([0, 0], Category::DrySandySurface),
+    ]);
+    let render_core = surface::Bounds {
+        minimum: [-32, -32],
+        maximum: [47, 47],
+    };
+    let tour = full.tour_core(render_core, &mut budget()).unwrap();
+    assert_eq!(tour.source(), full.source());
+    assert_eq!(tour.loaded().chunks.len(), 9);
+    assert!(tour
+        .loaded()
+        .chunks
+        .keys()
+        .all(|chunk| (-1..=1).contains(&chunk[0]) && (-1..=1).contains(&chunk[1])));
+    assert!(tour.targets().iter().all(|target| {
+        target.support.minimum[0] >= -16
+            && target.support.maximum[0] <= 31
+            && target.support.minimum[2] >= -16
+            && target.support.maximum[2] <= 31
+    }));
+    assert!(tour
+        .targets()
+        .iter()
+        .any(|target| target.key.category == Category::DrySandySurface));
+    assert!(tour
+        .targets()
+        .iter()
+        .all(|target| target.key.tile != [-2, -2]));
+    assert_eq!(full.loaded().chunks.len(), 49);
+    assert!(full
+        .targets()
+        .iter()
+        .any(|target| target.key.tile == [-2, -2]));
 }
 
 #[test]
@@ -78,6 +292,156 @@ fn presentation_rejects_saved_owners_outside_the_admitted_cell_band() {
     ));
     assert_eq!(controller.history(), before);
 }
+
+#[test]
+fn sealed_older_emitted_view_uses_its_own_footprint_after_newer_render() {
+    let map = basic(&[]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, std::slice::from_ref(&map), policy(8.0));
+    let first = controller
+        .start(&plan, clock(0), &budget())
+        .unwrap()
+        .unwrap();
+    let issued = controller.issued_view().unwrap();
+    assert_eq!(issued.view(), first);
+    let position = [
+        first.look_at[0].floor() as i32,
+        63,
+        first.look_at[2].floor() as i32,
+    ];
+    let owner = DisplayedBlock {
+        position,
+        state: map.state(position).unwrap(),
+        pixels: 2,
+        resolved: true,
+    };
+    let mut later = first;
+    for step in 1..=20 {
+        later = controller
+            .advance(plan.ticket(), clock(step * 250), &budget())
+            .unwrap();
+        if (later.look_at[0] - first.look_at[0]).hypot(later.look_at[2] - first.look_at[2])
+            > 2.0 * first.data_radius + 2.0
+        {
+            break;
+        }
+    }
+    assert_ne!(later.tag, first.tag);
+    assert!(
+        (later.look_at[0] - first.look_at[0]).hypot(later.look_at[2] - first.look_at[2])
+            > 2.0 * first.data_radius + 2.0
+    );
+    assert_eq!(
+        controller.presented(first.tag, &[owner], &mut budget()),
+        Err(Error::Stale)
+    );
+    assert_eq!(
+        controller
+            .presented_issued(&issued, &[owner], &mut budget())
+            .unwrap()
+            .credited_categories,
+        0
+    );
+    assert_eq!(
+        controller.active.as_ref().unwrap().acknowledged,
+        first.tag.sequence
+    );
+    let newer = controller.issued_view().unwrap();
+    controller
+        .presented_issued(&newer, &[], &mut budget())
+        .unwrap();
+    assert_eq!(
+        controller.active.as_ref().unwrap().acknowledged,
+        later.tag.sequence
+    );
+    // Re-emitting the same raster can reveal more surviving pixels, but a
+    // repeated category/run never earns another History credit.
+    controller
+        .presented_issued(&issued, &[owner], &mut budget())
+        .unwrap();
+    assert_eq!(
+        controller.active.as_ref().unwrap().acknowledged,
+        later.tag.sequence
+    );
+    controller.cancel_viewport(&budget()).unwrap();
+    assert_eq!(
+        controller.presented_issued(&issued, &[owner], &mut budget()),
+        Err(Error::Stale)
+    );
+}
+
+#[test]
+fn issued_view_cannot_cross_controller_even_with_matching_ticket_and_source() {
+    let map = basic(&[]);
+    let mut first = Controller::new(1, History::default()).unwrap();
+    let mut second = Controller::new(1, History::default()).unwrap();
+    let first_plan = choose(&mut first, std::slice::from_ref(&map), policy(8.0));
+    let second_plan = choose(&mut second, &[map], policy(8.0));
+    first.start(&first_plan, clock(0), &budget()).unwrap();
+    second.start(&second_plan, clock(0), &budget()).unwrap();
+    let foreign = first.issued_view().unwrap();
+    assert_eq!(
+        second.presented_issued(&foreign, &[], &mut budget()),
+        Err(Error::Stale)
+    );
+}
+
+#[test]
+fn endpoint_tag_stays_sealed_until_its_async_receipt_can_finish() {
+    let map = basic(&[]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, &[map], policy(8.0));
+    controller.start(&plan, clock(0), &budget()).unwrap();
+    let mut endpoint = None;
+    for step in 1..=80 {
+        let ms = step * 250;
+        let view = controller
+            .advance(plan.ticket(), clock(ms), &budget())
+            .unwrap();
+        if view.motion == Motion::Endpoint {
+            endpoint = Some((controller.issued_view().unwrap(), ms));
+            break;
+        }
+    }
+    let (issued, ms) = endpoint.expect("fixture reaches admitted endpoint");
+    for step in 1..=3 {
+        let later = controller
+            .advance(plan.ticket(), clock(ms + step * 50), &budget())
+            .unwrap();
+        assert_eq!(later.motion, Motion::Endpoint);
+        assert_eq!(later.tag, issued.view().tag);
+    }
+    controller
+        .presented_issued(&issued, &[], &mut budget())
+        .unwrap();
+    assert_eq!(
+        controller.active.as_ref().unwrap().acknowledged,
+        issued.view().tag.sequence
+    );
+    assert_eq!(
+        controller
+            .finish(plan.ticket(), clock(ms + 150), &budget())
+            .unwrap()
+            .completion
+            .run,
+        plan.ticket().run()
+    );
+    // Scene branches on view presence before starting the next prepared route.
+    assert!(controller.view().is_none());
+    assert!(controller.issued_view().is_none());
+    let successor = choose(&mut controller, &[basic(&[])], policy(8.0));
+    let view = if controller.view().is_some() {
+        controller
+            .advance(successor.ticket(), clock(ms + 200), &budget())
+            .map(Some)
+    } else {
+        controller.start(&successor, clock(ms + 200), &budget())
+    }
+    .unwrap()
+    .unwrap();
+    assert_eq!(view.motion, Motion::Started);
+    assert_eq!(successor.ticket().run(), 2);
+}
 fn clock(ms: u64) -> Clock {
     Clock {
         time: Duration::from_millis(ms),
@@ -107,6 +471,7 @@ fn palette() -> Vec<Tag> {
         ("mod:machine", vec![("zeta", "雪😀"), ("axis", "z")]),
         ("minecraft:sand", vec![]),
         ("minecraft:dead_bush", vec![]),
+        ("minecraft:oak_planks", vec![]),
     ]
     .into_iter()
     .map(|(name, properties)| {
@@ -127,6 +492,9 @@ fn palette() -> Vec<Tag> {
 }
 fn paint(category: Option<Category>, x: usize, y: i32, z: usize) -> usize {
     match category {
+        Some(Category::DwellingLikeConstruction) if y == 63 => {
+            return if x.is_multiple_of(2) { 9 } else { 4 };
+        }
         Some(Category::OpenGrassland) => {
             if y == 65 && x.is_multiple_of(4) && z.is_multiple_of(4) {
                 return 3;
@@ -678,6 +1046,82 @@ fn other_sites_and_maps_of_a_seen_category_are_not_new_appearances() {
 }
 
 #[test]
+fn attempted_map_diversity_never_promotes_repeated_over_global_novelty() {
+    let positions = rectangle([-3, -3], [3, 3]);
+    let repeated = prepared(1, 1, 999, &positions, &[([0, 0], Category::OpenGrassland)]);
+    let novel = prepared(2, 1, 0, &positions, &[([0, 0], Category::DrySandySurface)]);
+    let mut history = History::default();
+    assert!(history.see(&repeated.targets[0], 1));
+    history.changed().unwrap();
+    let mut controller = Controller::new(1, history).unwrap();
+    let ticket = controller.request(&budget()).unwrap();
+    let maps = [Arc::clone(&repeated), Arc::clone(&novel)];
+    let attempts = BTreeMap::from([(repeated.source.map, 0), (novel.source.map, 9)]);
+    let first = select_diverse_excluding(
+        ticket,
+        &maps,
+        &controller.history(),
+        policy(16.0),
+        CandidateSurvey {
+            excluded: &BTreeSet::new(),
+            attempted_maps: &attempts,
+            required_choice: None,
+        },
+        &mut budget(),
+    )
+    .unwrap()
+    .plan
+    .unwrap();
+    assert_eq!(first.choice(), Choice::NovelAppearance);
+    assert_eq!(first.source().map, novel.source.map);
+    let repeated_only = select_diverse_excluding(
+        ticket,
+        &maps,
+        &controller.history(),
+        policy(16.0),
+        CandidateSurvey {
+            excluded: &BTreeSet::new(),
+            attempted_maps: &attempts,
+            required_choice: Some(Choice::RepeatedAppearance),
+        },
+        &mut budget(),
+    )
+    .unwrap()
+    .plan
+    .unwrap();
+    assert_eq!(repeated_only.source().map, repeated.source.map);
+    assert_eq!(repeated_only.choice(), Choice::RepeatedAppearance);
+}
+
+#[test]
+fn attempted_map_diversity_only_breaks_ties_within_the_requested_phase() {
+    let positions = rectangle([-3, -3], [3, 3]);
+    let older = prepared(1, 1, 0, &positions, &[]);
+    let newer = prepared(2, 1, 999, &positions, &[]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let ticket = controller.request(&budget()).unwrap();
+    let attempts = BTreeMap::from([(older.source.map, 0), (newer.source.map, 1)]);
+    let selected = select_diverse_excluding(
+        ticket,
+        &[newer, Arc::clone(&older)],
+        &controller.history(),
+        policy(8.0),
+        CandidateSurvey {
+            excluded: &BTreeSet::new(),
+            attempted_maps: &attempts,
+            required_choice: Some(Choice::SavedSurface),
+        },
+        &mut budget(),
+    )
+    .unwrap()
+    .plan
+    .unwrap();
+    assert_eq!(selected.source().map, older.source.map);
+    assert_eq!(selected.choice(), Choice::SavedSurface);
+    assert_eq!(controller.history(), History::default());
+}
+
+#[test]
 fn relative_recency_and_displayed_map_route_diversity_are_deterministic() {
     let positions = rectangle([-3, -3], [3, 3]);
     let old = prepared(1, 1, 0, &positions, &[]);
@@ -835,6 +1279,77 @@ fn rejected_regions_outside_qualified_coverage_do_not_discard_safe_islands() {
         Arc::new(PreparedMap::new(source(1, 1), 0, Arc::new(data), vec![], &mut budget()).unwrap());
     let mut controller = Controller::new(1, History::default()).unwrap();
     assert_sweep(&choose(&mut controller, &[map], policy(16.0)));
+}
+
+#[test]
+fn only_projected_source_accepts_129_chunks_and_clones_retain_its_charge() {
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+
+    let original = PreparedMap::new(
+        source(4, 7),
+        0,
+        Arc::new(loaded(&rectangle([0, 0], [0, 0]))),
+        vec![],
+        &mut budget(),
+    )
+    .unwrap();
+    let expanded = Arc::new(loaded(&rectangle([0, 0], [128, 0])));
+    assert!(matches!(
+        PreparedMap::new(
+            source(4, 7),
+            0,
+            Arc::clone(&expanded),
+            vec![],
+            &mut budget()
+        ),
+        Err(Error::Limit("prepared snapshot"))
+    ));
+    let account = ByteBudget::new(1 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let charge = account.reserve(4096, Cancel::new(&stop)).unwrap();
+    let projected = Arc::new(
+        original
+            .projected_source(expanded, charge, &mut budget())
+            .unwrap(),
+    );
+    assert_eq!(projected.source(), original.source());
+    assert!(projected.targets().is_empty());
+    assert_eq!(projected.loaded().chunks.len(), 129);
+    let owner_receipt = Arc::clone(&projected);
+    drop(projected);
+    assert_eq!(account.used(), 4096);
+    drop(owner_receipt);
+    assert_eq!(account.used(), 0);
+}
+
+#[test]
+fn unqualified_route_exclusion_reselects_without_writing_history() {
+    let map = basic(&[([0, 0], Category::OpenGrassland)]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let ticket = controller.request(&budget()).unwrap();
+    let initial = select(
+        ticket,
+        std::slice::from_ref(&map),
+        &controller.history(),
+        policy(8.0),
+        &mut budget(),
+    )
+    .unwrap()
+    .plan
+    .unwrap();
+    let excluded = BTreeSet::from([initial.route()]);
+    let retry = select_excluding(
+        ticket,
+        &[map],
+        &controller.history(),
+        policy(8.0),
+        &excluded,
+        &mut budget(),
+    )
+    .unwrap();
+    assert_ne!(retry.plan.unwrap().route(), initial.route());
+    assert_eq!(controller.history(), History::default());
 }
 
 #[test]
@@ -1421,7 +1936,16 @@ fn confidence_floor_applies_to_selection_and_to_displayed_evidence() {
 
 #[test]
 fn shifted_support_requires_final_owners_on_both_sides_of_chunk_seams() {
-    let loaded = Arc::new(loaded(&rectangle([0, 0], [1, 1])));
+    let positions = rectangle([0, 0], [1, 1]);
+    let mut data = loaded(&positions);
+    for (&position, chunk) in &mut data.chunks {
+        *chunk = Arc::new(decoded(
+            position,
+            Some(Category::DwellingLikeConstruction),
+            3218,
+        ));
+    }
+    let loaded = Arc::new(data);
     let mut footprint = [0_u64; 4];
     for z in 14..=17 {
         for x in 14..=17 {
@@ -1474,7 +1998,317 @@ fn shifted_support_requires_final_owners_on_both_sides_of_chunk_seams() {
     owners.sort_unstable_by_key(display_order);
     assert!(visible(target, &owners, 2, &mut budget()).unwrap());
     owners.retain(|owner| owner.position != target.corroboration);
-    assert!(!visible(target, &owners, 2, &mut budget()).unwrap());
+    // A hidden identification cell does not erase sufficient visible exterior.
+    assert!(visible(target, &owners, 2, &mut budget()).unwrap());
     owners.retain(|owner| owner.position[0] < 16);
     assert!(!visible(target, &owners, 2, &mut budget()).unwrap());
+}
+
+#[test]
+fn viewport_cancellation_keeps_display_credit_but_never_finishes_partial_route() {
+    let map = basic(&[([0, 0], Category::OpenGrassland)]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, std::slice::from_ref(&map), policy(24.0));
+    let (view, _) = closest_view(&mut controller, &plan);
+    let owners = pixels_for(&map, view, true);
+    assert_eq!(
+        controller
+            .presented(view.tag, &owners, &mut budget())
+            .unwrap()
+            .credited_categories,
+        1
+    );
+    let credited = controller.history();
+    assert_eq!(credited.appearances().count(), 1);
+    assert_eq!(credited.completed(), 0);
+    let retired = controller.cancel_viewport(&budget()).unwrap().unwrap();
+    assert_eq!(retired.ticket(), plan.ticket());
+    assert_eq!(controller.history(), credited);
+    assert!(controller.view().is_none());
+    assert!(matches!(
+        controller.presented(view.tag, &[], &mut budget()),
+        Err(Error::Stale)
+    ));
+    let next = controller.request(&budget()).unwrap();
+    assert_eq!(next.generation(), view.tag.ticket.generation());
+    assert_eq!(next.run(), plan.ticket().run());
+    assert!(next.serial > plan.ticket().serial);
+}
+
+#[test]
+fn pending_only_viewport_cancellation_preserves_history_and_increases_serial() {
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let previous = controller.request(&budget()).unwrap();
+    assert!(controller.cancel_viewport(&budget()).unwrap().is_none());
+    assert_eq!(controller.history(), History::default());
+    let next = controller.request(&budget()).unwrap();
+    assert_eq!(next.generation(), previous.generation());
+    assert_eq!(next.run(), previous.run());
+    assert!(next.serial > previous.serial);
+}
+
+#[test]
+fn projected_pixels_credit_original_target_using_redecoded_palette_owners() {
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+    let base = basic(&[([0, 0], Category::OpenGrassland)]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let plan = choose(&mut controller, std::slice::from_ref(&base), policy(24.0));
+    let account = ByteBudget::new(256 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let size = [64, 64];
+    let scale = 4.0;
+    let request = Arc::new(
+        super::super::source_footprint::request(
+            plan.line(),
+            plan.focus_y(),
+            size,
+            scale,
+            &account,
+            cancel,
+        )
+        .unwrap(),
+    );
+    let mut decoded_source = loaded(request.support_chunks());
+    for (&position, chunk) in &base.loaded().chunks {
+        if decoded_source.chunks.contains_key(&position) {
+            decoded_source
+                .chunks
+                .insert(position, Arc::new((**chunk).clone()));
+        }
+    }
+    let map = Arc::new(
+        base.projected_source(
+            Arc::new(decoded_source),
+            account.reserve(1, cancel).unwrap(),
+            &mut budget(),
+        )
+        .unwrap(),
+    );
+    assert!(map.targets().is_empty());
+    let display = Arc::new(
+        ProjectedDisplay::bind(
+            &plan,
+            Arc::clone(&map),
+            Arc::clone(&request),
+            size,
+            scale,
+            &mut budget(),
+        )
+        .unwrap(),
+    );
+    let mut view = controller
+        .start_projected(&plan, display, clock(0), &budget())
+        .unwrap()
+        .unwrap();
+    let anchor = plan.target.unwrap().key.anchor;
+    for step in 1..=512 {
+        if (view.look_at[0] - (f64::from(anchor[0]) + 0.5))
+            .hypot(view.look_at[2] - (f64::from(anchor[2]) + 0.5))
+            < 1.7
+        {
+            break;
+        }
+        view = controller
+            .advance(plan.ticket(), clock(step * 50), &budget())
+            .unwrap();
+    }
+    let original_owners = pixels_for(&base, view, true);
+    let owners: Vec<_> = original_owners
+        .iter()
+        .filter(|owner| {
+            request.may_project_cell(owner.position, [view.look_at[0], view.look_at[2]])
+        })
+        .map(|owner| {
+            let state = map.state(owner.position).unwrap();
+            assert_eq!(state, owner.state);
+            assert!(
+                !std::ptr::eq(state, owner.state),
+                "fixture must use redecoded palette storage"
+            );
+            DisplayedBlock {
+                position: owner.position,
+                state,
+                pixels: owner.pixels,
+                resolved: true,
+            }
+        })
+        .collect();
+    assert!(!owners.is_empty());
+    let issued = controller.issued_view().unwrap();
+    let presentation = controller
+        .presented_issued(&issued, &owners, &mut budget())
+        .unwrap();
+    assert!(presentation.chosen_visible);
+    assert_eq!(presentation.credited_categories, 1);
+    assert_eq!(controller.history().appearances().count(), 1);
+    assert_eq!(controller.history().completed(), 0);
+    assert_eq!(
+        controller
+            .presented_issued(&issued, &owners, &mut budget())
+            .unwrap()
+            .credited_categories,
+        0
+    );
+}
+
+// Synthetic exterior owner samples shaped like the captured216 dwelling.
+// The eight-column positive adds one visible column; captured seven stays negative.
+fn roofed_dwelling_samples() -> (TargetSummary, [BlockState; 3], Vec<[i32; 3]>) {
+    let mut footprint = [0_u64; 4];
+    for z in -18..=-14 {
+        for x in 222..=226 {
+            let index = ((z + 24) * 16 + x - 216) as usize;
+            footprint[index / 64] |= 1_u64 << (index % 64);
+        }
+    }
+    let target = TargetSummary {
+        source: source(1, 1),
+        key: TargetKey {
+            map: source(1, 1).map,
+            revision: evidence::RULE_REVISION,
+            category: Category::DwellingLikeConstruction,
+            tile: [13, -1],
+            anchor: [223, 81, -16],
+        },
+        confidence: Confidence::Corroborated,
+        support: evidence::Support {
+            columns: 25,
+            primary_columns: 25,
+            secondary_columns: 2,
+            secondary_sectors: 4,
+            links: 2,
+            minimum: [222, 80, -18],
+            maximum: [226, 85, -14],
+            origin: [216, -24],
+            footprint,
+        },
+        corroboration: [223, 81, -17],
+        landmarks: [
+            Some([222, 83, -18]),
+            Some([226, 83, -18]),
+            Some([222, 83, -14]),
+            Some([226, 83, -14]),
+        ],
+        anchor_only_air_above: false,
+        anchor_water_above: false,
+    };
+    let states = [
+        BlockState {
+            name: "minecraft:spruce_log".into(),
+            properties: BTreeMap::from([("axis".into(), "z".into())]),
+        },
+        BlockState {
+            name: "minecraft:cobblestone".into(),
+            properties: BTreeMap::new(),
+        },
+        BlockState {
+            name: "minecraft:grass_block".into(),
+            properties: BTreeMap::from([("snowy".into(), "false".into())]),
+        },
+    ];
+    let positions = vec![
+        [223, 81, -14],
+        [225, 85, -18],
+        [225, 85, -17],
+        [226, 84, -18],
+        [225, 85, -16],
+        [225, 85, -15],
+        [225, 85, -14],
+        [224, 85, -18],
+    ];
+    (target, states, positions)
+}
+
+#[test]
+fn roofed_dwelling_credits_sufficient_actual_exterior_without_hidden_bed_or_corners() {
+    let (target, states, positions) = roofed_dwelling_samples();
+    let mut owners: Vec<_> = positions
+        .into_iter()
+        .enumerate()
+        .map(|(i, position)| DisplayedBlock {
+            position,
+            state: &states[usize::from(i == 0)],
+            pixels: 2,
+            resolved: true,
+        })
+        .collect();
+    owners.sort_unstable_by_key(display_order);
+    assert!(visible(&target, &owners, 1, &mut budget()).unwrap());
+    assert!(visible(&target, &owners, 2, &mut budget()).unwrap());
+}
+
+#[test]
+fn roofed_dwelling_rejects_captured_seven_columns_roof_alone_and_unrelated_terrain() {
+    let (target, states, positions) = roofed_dwelling_samples();
+    let mut owners: Vec<_> = positions
+        .into_iter()
+        .enumerate()
+        .map(|(i, position)| DisplayedBlock {
+            position,
+            state: &states[usize::from(i == 0)],
+            pixels: 2,
+            resolved: true,
+        })
+        .collect();
+    owners.sort_unstable_by_key(display_order);
+    let mut seven = owners.clone();
+    seven.retain(|owner| owner.position != [224, 85, -18]);
+    assert!(!visible(&target, &seven, 1, &mut budget()).unwrap());
+    let mut roof = owners.clone();
+    for owner in &mut roof {
+        owner.state = &states[0];
+    }
+    assert!(!visible(&target, &roof, 1, &mut budget()).unwrap());
+    let mut natural = owners.clone();
+    for owner in &mut natural {
+        owner.state = &states[2];
+    }
+    assert!(!visible(&target, &natural, 1, &mut budget()).unwrap());
+    let mut unresolved = owners.clone();
+    unresolved[0].resolved = false;
+    assert!(!visible(&target, &unresolved, 1, &mut budget()).unwrap());
+    let mut below_minimum = owners;
+    below_minimum[0].pixels = 1;
+    assert!(!visible(&target, &below_minimum, 2, &mut budget()).unwrap());
+}
+
+#[test]
+fn roofed_dwelling_rejects_fluid_only_wet_fence_and_malformed_timber_owners() {
+    let (target, states, positions) = roofed_dwelling_samples();
+    let wet_fence = BlockState {
+        name: "minecraft:oak_fence".into(),
+        properties: BTreeMap::from([
+            ("east".into(), "false".into()),
+            ("north".into(), "false".into()),
+            ("south".into(), "false".into()),
+            ("west".into(), "false".into()),
+            ("waterlogged".into(), "true".into()),
+        ]),
+    };
+    let invalid_timber = BlockState {
+        name: "minecraft:spruce_log".into(),
+        properties: BTreeMap::from([("axis".into(), "invalid".into())]),
+    };
+    let mut owners: Vec<_> = positions
+        .into_iter()
+        .enumerate()
+        .map(|(i, position)| DisplayedBlock {
+            position,
+            state: if i == 0 { &wet_fence } else { &states[0] },
+            pixels: 2,
+            resolved: true,
+        })
+        .collect();
+    owners.sort_unstable_by_key(display_order);
+    assert!(!visible(&target, &owners, 1, &mut budget()).unwrap());
+    for owner in &mut owners {
+        owner.state = if owner.position == [223, 81, -14] {
+            &states[1]
+        } else {
+            &invalid_timber
+        };
+    }
+    assert!(!visible(&target, &owners, 1, &mut budget()).unwrap());
 }

@@ -22,7 +22,10 @@ fn supersample_count(source_pixels_per_dot: f32) -> usize {
 /// Identity of what `render_layers` would draw; equal keys mean an identical
 /// frame, so the scene can reuse the previous one.
 pub fn layers_key(layers: &[Layer<'_>], width: u16, height: u16) -> Vec<u64> {
-    let mut key = vec![u64::from(width), u64::from(height)];
+    // The scene supplies at most current + outgoing; reserve the complete
+    // known key before pushes so no old/new growth buffers coexist.
+    let mut key = Vec::with_capacity(2 + 6 * layers.len());
+    key.extend_from_slice(&[u64::from(width), u64::from(height)]);
     for layer in layers {
         key.push(layer.image as *const DecodedImage as usize as u64);
         key.push(u64::from(layer.view.x0.to_bits()));

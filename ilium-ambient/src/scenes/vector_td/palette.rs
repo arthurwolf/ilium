@@ -7,6 +7,7 @@
 use super::model::{MonsterKind, TowerKind};
 use super::settings::{Palette as PaletteMode, Scheme, VectorTdSettings};
 use super::sim::Tint;
+use crate::style::ScenePalette;
 
 /// What a stroke is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,7 +195,9 @@ pub struct Colors {
 }
 
 impl Colors {
-    pub fn new(settings: &VectorTdSettings) -> Self {
+    /// `palette`, when provided, maps every role colour onto it by lightness
+    /// after the scheme and adjustments.
+    pub fn new(settings: &VectorTdSettings, palette: &ScenePalette) -> Self {
         let brightness = settings.brightness as f32 / 100.0;
         let contrast = settings.contrast as f32 / 100.0;
         let saturation = settings.saturation as f32 / 100.0;
@@ -212,7 +215,7 @@ impl Colors {
                 (((f32::from(channel) / 255.0 - 0.5) * contrast + 0.5).clamp(0.0, 1.0) * 255.0)
                     .round() as u8
             });
-            colors[role_index(role)] = contrasted;
+            colors[role_index(role)] = palette.recolor(contrasted);
         }
         Self {
             colors,

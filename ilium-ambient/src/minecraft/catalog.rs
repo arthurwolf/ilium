@@ -312,7 +312,10 @@ mod tests {
         let result = discover_metadata(directory.path(), &|| false).unwrap();
         assert!(result.maps.is_empty());
         assert_eq!(result.rejected_maps, 1);
-        assert_eq!(result.issues[0].directory, bad);
+        assert_eq!(
+            result.issues[0].directory,
+            ilium_platform::paths::canonicalize(&bad).unwrap()
+        );
         assert!(!result.issues[0].message.is_empty());
         assert!(matches!(
             discover_metadata(directory.path(), &|| true),

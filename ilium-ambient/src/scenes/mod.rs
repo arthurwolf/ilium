@@ -18,8 +18,11 @@ pub mod stars;
 pub mod vector_td;
 pub mod video;
 pub mod voxel_landscape;
+pub mod wind;
 
 pub mod galactic_empires;
 pub mod topographic_maps;
 
 pub mod openstreetmap;
+
+pub mod quiet;

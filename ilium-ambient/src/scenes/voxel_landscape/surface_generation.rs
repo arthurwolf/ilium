@@ -15,7 +15,9 @@ use super::{
     surface_context::{self, ContextEvent, SceneAtmosphere},
     surface_entities::{self, AtlasLayout, ClimateSkin, Model, Species},
     surface_events,
-    surface_flora::{FloraPlacement, FloraState, HabitatCell, PlantCandidate, Support},
+    surface_flora::{
+        AdmissionError, FloraCell, FloraPlacement, FloraState, HabitatCell, PlantCandidate, Support,
+    },
     surface_flora_vocabulary::ENTRIES,
     surface_fluid::FluidCell,
     surface_geology, surface_landmark_assembly, surface_ruin_assembly, surface_village_assembly,
@@ -23,7 +25,9 @@ use super::{
     tree_decoration_profiles,
     tree_decorations::{DecorationOperation, DecorationPlanner, SurroundingCell},
     tree_forms::{self, Growth},
-    tree_profiles, village_kit,
+    tree_geometry::{LogAxis, TreeCell, TreeGeometry},
+    tree_profiles::{self, TreeShape},
+    village_kit,
 };
 use crate::control::SceneSettings;
 use std::collections::{BTreeMap, BTreeSet};
@@ -103,6 +107,11 @@ pub struct SurfaceEntity {
     pub model: Model,
     pub atlas_status: &'static str,
 }
+/// A generated viewport may contain only selected tile cores. `region` is its
+/// bounding rectangle for mesh culling and identity, never a density promise.
+/// `columns`/`biomes` keys are the exact prepared XY coverage; outside them is
+/// unknown, not authored air. Saved worlds intentionally have no generated
+/// column map, and their separate adapter uses the supplied block positions.
 pub struct SurfaceWorld {
     pub region: Region,
     pub seed: u64,
@@ -116,30 +125,67 @@ pub struct SurfaceWorld {
     pub entities: Vec<SurfaceEntity>,
     pub source_limitations: Vec<&'static str>,
 }
+impl SurfaceWorld {
+    /// True only when generated terrain for this XY column was prepared.
+    pub fn generated_column_covered(&self, xy: [i32; 2]) -> bool {
+        self.columns.contains_key(&xy) && self.biomes.contains_key(&xy)
+    }
+}
+
+/// Guard the projection invariant on actual emitted source. Future authored
+/// variants fail visibly here instead of disappearing beyond the camera sweep.
+fn validate_generated_height(world: &SurfaceWorld) -> Result<()> {
+    let inside = |z: f64| {
+        (super::surface_viewport::SOURCE_Z_MIN..super::surface_viewport::SOURCE_Z_MAX).contains(&z)
+    };
+    for position in world.blocks.keys().chain(world.fluids.keys()) {
+        if !inside(f64::from(position[2])) {
+            return Err(AssetError::InvalidMetadata(
+                "generated source exceeds viewport height envelope".into(),
+            ));
+        }
+    }
+    for entity in &world.entities {
+        let (minimum, maximum) = entity.model.bounds().ok_or_else(|| {
+            AssetError::InvalidMetadata("generated entity has no finite silhouette bounds".into())
+        })?;
+        let low = f64::from(entity.anchor[2]) + f64::from(minimum[2]);
+        let high = f64::from(entity.anchor[2]) + f64::from(maximum[2]);
+        if !inside(low) || high > super::surface_viewport::SOURCE_Z_MAX {
+            return Err(AssetError::InvalidMetadata(
+                "generated entity exceeds viewport height envelope".into(),
+            ));
+        }
+    }
+    Ok(())
+}
 fn state(id: &str, properties: impl IntoIterator<Item = (String, String)>) -> Result<BlockState> {
-    BlockState::new(ResourceId::parse(id)?, properties)
+    // Validate supplied properties before expanding compact generated-provider
+    // defaults, preserving duplicate-property errors and explicit variants.
+    let state = BlockState::new(ResourceId::parse(id)?, properties)?;
+    if id != "minecraft:leaf_litter" {
+        return Ok(state);
+    }
+    // The compact leaf-litter provider entry is the north/one-segment member
+    // omitted from its otherwise explicit facing/amount inventory. This is
+    // generated-world normalization; saved source states remain untouched.
+    let mut properties = state.properties().clone();
+    properties
+        .entry("facing".to_owned())
+        .or_insert_with(|| "north".to_owned());
+    properties
+        .entry("segment_amount".to_owned())
+        .or_insert_with(|| "1".to_owned());
+    BlockState::new(state.id().clone(), properties)
 }
 fn plain(id: &str) -> Result<BlockState> {
     state(id, Vec::<(String, String)>::new())
 }
-fn terrain_surface(biome: SurfaceBiome) -> (&'static str, &'static str) {
-    use SurfaceBiome::*;
-    match biome {
-        Badlands | ErodedBadlands | WoodedBadlands => {
-            ("minecraft:red_sand", "minecraft:terracotta")
-        }
-        Desert | Beach => ("minecraft:sand", "minecraft:sandstone"),
-        SnowyBeach => ("minecraft:snow_block", "minecraft:sand"),
-        StonyShore | StonyPeaks | WindsweptGravellyHills => ("minecraft:stone", "minecraft:stone"),
-        FrozenPeaks => ("minecraft:snow_block", "minecraft:packed_ice"),
-        JaggedPeaks => ("minecraft:snow_block", "minecraft:stone"),
-        MushroomFields => ("minecraft:mycelium", "minecraft:dirt"),
-        Swamp | MangroveSwamp => ("minecraft:mud", "minecraft:mud"),
-        SnowyPlains | SnowySlopes | IceSpikes | SnowyTaiga | Grove => {
-            ("minecraft:snow_block", "minecraft:dirt")
-        }
-        _ => ("minecraft:grass_block", "minecraft:dirt"),
+fn terrain_state(id: &str) -> Result<BlockState> {
+    if matches!(id, "minecraft:grass_block" | "minecraft:podzol") {
+        return state(id, [("snowy".to_owned(), "false".to_owned())]);
     }
+    plain(id)
 }
 fn sample_ground(
     fields: &TerrainFields,
@@ -175,17 +221,8 @@ fn habitat(
         };
     }
     if z == ground {
-        let surface = terrain_surface(biome).0;
-        if surface.contains("sand") {
-            HabitatCell::Sand
-        } else if matches!(
-            surface,
-            "minecraft:grass_block" | "minecraft:mycelium" | "minecraft:mud"
-        ) {
-            HabitatCell::Soil
-        } else {
-            HabitatCell::Solid
-        }
+        surface_geology::terrain_materials(u64::from(settings.seed), biome, [x, y], ground)
+            .top_habitat()
     } else {
         HabitatCell::Solid
     }
@@ -204,6 +241,126 @@ fn add_global(anchor: [i32; 3], offset: [i16; 3]) -> Result<[i32; 3]> {
     ])
 }
 
+#[derive(Clone, Copy)]
+struct TreeTerrainColumn {
+    /// The first air cell above authored solid terrain.
+    solid_top: i32,
+    /// The first air cell above authored water, when present.
+    water_top: Option<i32>,
+}
+
+/// Decide admission from the entire global candidate, before any region writes.
+/// Sampling is cached by column: a wide crown does not resample climate for
+/// every leaf. A rejected tree contributes neither cells nor decorators/halo.
+fn tree_terrain_admits(
+    anchor: [i32; 3],
+    shape: TreeShape,
+    geometry: &TreeGeometry,
+    mut sample_column: impl FnMut([i32; 2]) -> TreeTerrainColumn,
+    cancelled: impl Fn() -> bool,
+) -> Result<bool> {
+    let mut columns = BTreeMap::<[i32; 2], TreeTerrainColumn>::new();
+    let mut fallen_logs = Vec::<(i32, i32)>::new(); // (along trunk, air gap below)
+    let mut root_tips = 0;
+    let mut grounded_root_tips = 0;
+    for (offset, cell) in geometry.cells() {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        let position = add_global(anchor, offset)?;
+        let xy = [position[0], position[1]];
+        let column = *columns.entry(xy).or_insert_with(|| sample_column(xy));
+        let clearance_top = column
+            .water_top
+            .unwrap_or(column.solid_top)
+            .max(column.solid_top);
+        match cell {
+            TreeCell::Root if shape == TreeShape::Mangrove => {
+                // Mangrove props may occupy shallow substrate or water. Their
+                // endpoints must still reach a bank or the water surface.
+                if position[2] < column.solid_top - 3 {
+                    return Ok(false);
+                }
+                if offset[2] == 0 {
+                    root_tips += 1;
+                    if position[2] > clearance_top + 2 {
+                        return Ok(false);
+                    }
+                    if position[2] <= clearance_top {
+                        grounded_root_tips += 1;
+                    }
+                }
+            }
+            TreeCell::Root => return Ok(false),
+            TreeCell::Log(axis) => {
+                if position[2] < clearance_top {
+                    return Ok(false);
+                }
+                // Broad upright stems may straddle an ordinary one-cell
+                // downslope, but no basal column may hang above a deeper drop.
+                // Mangroves instead use the explicit prop-root rule above.
+                if shape != TreeShape::Mangrove
+                    && axis == LogAxis::Vertical
+                    && offset[2] == 0
+                    && position[2] - column.solid_top > 1
+                {
+                    return Ok(false);
+                }
+                if shape == TreeShape::Fallen {
+                    let along = match axis {
+                        LogAxis::X => Some(position[0]),
+                        LogAxis::GroundY => Some(position[1]),
+                        LogAxis::Vertical => None, // the separate rooted stump
+                    };
+                    if let Some(along) = along {
+                        fallen_logs.push((along, position[2] - column.solid_top));
+                    }
+                }
+            }
+            TreeCell::Leaf => {
+                if position[2] < clearance_top {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    if shape == TreeShape::Mangrove {
+        return Ok(root_tips > 0 && grounded_root_tips > 0);
+    }
+    if shape != TreeShape::Fallen {
+        return Ok(true);
+    }
+    // An intact fallen beam may bridge two one-cell dips, or overhang a
+    // one-cell dip at either end. Long, high or mostly unsupported beams are
+    // refused as a whole; the stump alone is never published.
+    fallen_logs.sort_unstable_by_key(|(along, _)| *along);
+    let supported = fallen_logs.iter().filter(|(_, gap)| *gap == 0).count();
+    if supported == 0 || supported * 2 < fallen_logs.len() {
+        return Ok(false);
+    }
+    let front_gap = fallen_logs.iter().take_while(|(_, gap)| *gap > 0).count();
+    let back_gap = fallen_logs
+        .iter()
+        .rev()
+        .take_while(|(_, gap)| *gap > 0)
+        .count();
+    if front_gap > 1 || back_gap > 1 {
+        return Ok(false);
+    }
+    let mut consecutive_gaps = 0;
+    for (_, gap) in fallen_logs {
+        if gap == 0 {
+            consecutive_gaps = 0;
+        } else {
+            consecutive_gaps += 1;
+            if gap > 1 || consecutive_gaps > 2 {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 // Authored bounded cover, informed by the differing pinned Java placement
 // prescriptions. These percentages are not native chunk-attempt counts.
 fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
@@ -212,11 +369,10 @@ fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
         BambooJungle | DarkForest | Jungle | PaleGarden => 85,
         BirchForest | DappledForest | Forest | SnowyTaiga | Taiga => 80,
         OldGrowthBirchForest | OldGrowthPineTaiga | OldGrowthSpruceTaiga => 75,
-        MangroveSwamp => 70,
+        MangroveSwamp | WoodedBadlands => 70,
         CherryGrove | FlowerForest => 60,
-        Grove => 55,
+        Grove | Swamp => 55,
         WindsweptForest | MushroomFields => 45,
-        Swamp | WoodedBadlands => 35,
         SparseJungle => 30,
         Savanna | SavannaPlateau | WindsweptSavanna => 20,
         WindsweptGravellyHills | WindsweptHills | IceSpikes => 12,
@@ -226,6 +382,61 @@ fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
         Badlands | Beach | Desert | ErodedBadlands | FrozenPeaks | JaggedPeaks | SnowyBeach
         | SnowySlopes | StonyPeaks | StonyShore => 0,
     }
+}
+
+// These are authored ecological weights, not extracted native feature frequencies.
+fn tree_configuration_weight(biome: SurfaceBiome, source: &str) -> u64 {
+    let Some(profile) = tree_profiles::profile(source) else {
+        return 0;
+    };
+    if profile.shape == TreeShape::Fallen {
+        return 1;
+    }
+    if matches!(
+        profile.shape,
+        TreeShape::Bush | TreeShape::RedMushroom | TreeShape::BrownMushroom
+    ) && biome != SurfaceBiome::MushroomFields
+    {
+        return 4;
+    }
+    match (biome, profile.shape, source) {
+        (SurfaceBiome::DarkForest, TreeShape::Dense, _)
+        | (SurfaceBiome::OldGrowthBirchForest, _, "minecraft:super_birch_bees_0002")
+        | (SurfaceBiome::OldGrowthPineTaiga, TreeShape::GiantPine, _)
+        | (SurfaceBiome::OldGrowthSpruceTaiga, TreeShape::GiantSpruce, _) => 48,
+        (
+            SurfaceBiome::OldGrowthPineTaiga | SurfaceBiome::OldGrowthSpruceTaiga,
+            TreeShape::Pine | TreeShape::Spruce,
+            _,
+        ) => 8,
+        _ => 16,
+    }
+}
+// One interstitial candidate per existing tile supplies canopy between retained primary anchors.
+fn tree_infill_enabled(biome: SurfaceBiome) -> bool {
+    use SurfaceBiome::*;
+    matches!(
+        biome,
+        BambooJungle
+            | BirchForest
+            | CherryGrove
+            | DappledForest
+            | DarkForest
+            | FlowerForest
+            | Forest
+            | Grove
+            | Jungle
+            | MangroveSwamp
+            | OldGrowthBirchForest
+            | OldGrowthPineTaiga
+            | OldGrowthSpruceTaiga
+            | PaleGarden
+            | SnowyTaiga
+            | Swamp
+            | Taiga
+            | WindsweptForest
+            | WoodedBadlands
+    )
 }
 
 fn tree_configuration(biome: SurfaceBiome, entropy: u64) -> Option<&'static str> {
@@ -250,9 +461,22 @@ fn tree_configuration(biome: SurfaceBiome, entropy: u64) -> Option<&'static str>
     if configs.is_empty() {
         return None;
     }
-    configs
-        .get((entropy.rotate_left(11) as usize) % configs.len())
-        .copied()
+    let total_weight: u64 = configs
+        .iter()
+        .map(|source| tree_configuration_weight(biome, source))
+        .sum();
+    if total_weight == 0 {
+        return None;
+    }
+    let mut choice = hash2(entropy ^ 0x7472_6565_5f63_6667, 0, 0) % total_weight;
+    for &source in configs {
+        let weight = tree_configuration_weight(biome, source);
+        if choice < weight {
+            return Some(source);
+        }
+        choice -= weight;
+    }
+    None
 }
 
 fn pumpkin_patch_contains(seed: u64, x: i32, y: i32) -> bool {
@@ -279,6 +503,10 @@ fn tree_growth(entropy: u64) -> Growth {
         _ => Growth::Old,
     }
 }
+// Keep the existing authored bare-cactus height; a flowering candidate adds one
+// crown cell without changing the stem's states or the natural selection table.
+const CACTUS_HEIGHT: u8 = 2;
+
 fn flower_candidate(anchor: [i32; 3], id: &'static str) -> PlantCandidate {
     let entropy = hash2(0x0063_6f76_6572, i64::from(anchor[0]), i64::from(anchor[1]));
     let facing = ["north", "east", "south", "west"][(entropy % 4) as usize];
@@ -339,6 +567,8 @@ fn flower_candidate(anchor: [i32; 3], id: &'static str) -> PlantCandidate {
         Support::WaterEdge
     } else if id == "minecraft:lily_pad" {
         Support::FloatingWater
+    } else if matches!(id, "minecraft:short_dry_grass" | "minecraft:tall_dry_grass") {
+        Support::SoilOrSand
     } else {
         Support::Soil
     };
@@ -350,7 +580,25 @@ fn flower_candidate(anchor: [i32; 3], id: &'static str) -> PlantCandidate {
         | "minecraft:rose_bush"
         | "minecraft:peony"
         | "minecraft:pitcher_plant" => PlantCandidate::tall(anchor, id, state, support),
-        "minecraft:cactus" => PlantCandidate::column(anchor, id, state, 2, support, true),
+        "minecraft:cactus" => {
+            PlantCandidate::column(anchor, id, state, CACTUS_HEIGHT, support, true)
+        }
+        "minecraft:cactus_flower" => {
+            // Retain this existing vocabulary slot and its entropy selection.
+            // Its prescription owns both real age=0 cactus cells and the flower.
+            // Rejection never falls back to a bare stem or a stand-alone flower.
+            let mut candidate = flower_candidate(anchor, "minecraft:cactus");
+            candidate.source_prescription = id;
+            candidate.cells.push(FloraCell {
+                position: [0, 0, i32::from(CACTUS_HEIGHT)],
+                state,
+            });
+            candidate
+        }
+        // Both dry-grass resources occupy one cell. Neither uses a half property.
+        "minecraft:short_dry_grass" | "minecraft:tall_dry_grass" => {
+            PlantCandidate::single(anchor, id, state, support)
+        }
         "minecraft:sugar_cane" => PlantCandidate::column(anchor, id, state, 3, support, false),
         "minecraft:bamboo" => {
             let mut candidate = PlantCandidate::column(anchor, id, state, 5, support, false);
@@ -365,6 +613,48 @@ fn flower_candidate(anchor: [i32; 3], id: &'static str) -> PlantCandidate {
         _ => PlantCandidate::single(anchor, id, state, support),
     }
 }
+/// Only lateral cactus probes outside the visible region need retained tree
+/// occupancy. Every current flora candidate writes one XY column on the same
+/// four-cell grid, so an outside anchor cannot write into, or reserve air in,
+/// an inside anchor's column. Body cells and sand support remain local.
+///
+/// For a validated region there are at most 32 anchors along each of four edges
+/// and three queried heights: at most 384 booleans, never a second tree mesh.
+fn cactus_tree_halo(
+    world: &SurfaceWorld,
+    cancelled: impl Fn() -> bool,
+) -> Result<BTreeMap<[i32; 3], bool>> {
+    let mut probes = BTreeMap::new();
+    for (&[x, y], sample) in &world.columns {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        if x.rem_euclid(4) != 2 || y.rem_euclid(4) != 2 || !world.region.contains([x, y, 0]) {
+            continue;
+        }
+        let biome = world.biomes.get(&[x, y]).ok_or_else(|| {
+            AssetError::InvalidMetadata("cactus clearance probe lost its biome".into())
+        })?;
+        if !ENTRIES.iter().any(|entry| {
+            matches!(entry.id, "minecraft:cactus" | "minecraft:cactus_flower")
+                && entry.generation_biomes.contains(&biome.id())
+        }) {
+            continue;
+        }
+        let anchor = [x, y, i32::from(sample.height)];
+        for [dx, dy] in [[1_i16, 0], [-1, 0], [0, 1], [0, -1]] {
+            let side = add_global(anchor, [dx, dy, 0])?;
+            if world.region.contains(side) {
+                continue;
+            }
+            for height in 0..=CACTUS_HEIGHT {
+                probes.insert(add_global(side, [0, 0, i16::from(height)])?, false);
+            }
+        }
+    }
+    Ok(probes)
+}
+
 fn water_tint(biome: SurfaceBiome) -> [f32; 3] {
     let source = biome.descriptor().java_surface_water_rgb;
     source.map(super::assets::texture::srgb_byte_to_linear)
@@ -411,19 +701,26 @@ fn dry_surface_support(world: &SurfaceWorld, anchor: [i32; 3]) -> bool {
     let Some(biome) = world.biomes.get(&[x, y]).copied() else {
         return false;
     };
+    let Some(sample) = world.columns.get(&[x, y]) else {
+        return false;
+    };
+    if feet != i32::from(sample.height) {
+        return false;
+    }
     let Some(floor_z) = feet.checked_sub(1) else {
         return false;
     };
     let Some(support) = world.blocks.get(&[x, y, floor_z]) else {
         return false;
     };
-    if !matches!(support.owner, SourceOwner::Terrain { .. })
-        || support.state.id().as_str() != terrain_surface(biome).0
-        || world.columns.get(&[x, y]).is_some_and(|sample| {
-            sample
-                .water_level
-                .is_some_and(|level| i32::from(level) > feet)
-        })
+    let expected = surface_geology::terrain_materials(world.seed, biome, [x, y], floor_z);
+    if support.owner != (SourceOwner::Terrain { biome })
+        || support.state.id().as_str() != expected.top
+        || sample
+            .water_level
+            .is_some_and(|level| i32::from(level) > feet)
+        || world.fluids.contains_key(&[x, y, floor_z])
+        || world.fluids.contains_key(&anchor)
     {
         return false;
     }
@@ -473,6 +770,13 @@ fn entity_clearance(world: &SurfaceWorld, anchor: [i32; 3], model: &Model) -> bo
 fn dry_surface_entity_site(world: &SurfaceWorld, anchor: [i32; 3], model: &Model) -> bool {
     dry_surface_support(world, anchor) && entity_clearance(world, anchor, model)
 }
+/// Generic biome monster tables also describe underground Slimes. The surface-only
+/// scene admits their authored silhouettes only in the pinned surface habitat tag.
+/// This is a biome filter, not native light, moon-phase or spawn-rate simulation.
+fn surface_biome_allows_species(biome: SurfaceBiome, species: Species) -> bool {
+    species != Species::Slime || matches!(biome, SurfaceBiome::Swamp | SurfaceBiome::MangroveSwamp)
+}
+
 fn natural_entity_site(
     world: &SurfaceWorld,
     anchor: [i32; 3],
@@ -684,6 +988,57 @@ fn populate_village_raids(world: &mut SurfaceWorld, cancelled: impl Fn() -> bool
     Ok(())
 }
 
+/// Apply final-world support and complete model clearance to global bank owners.
+fn populate_riverbank_drowned(
+    world: &mut SurfaceWorld,
+    rivers: bool,
+    atmosphere: SceneAtmosphere,
+    cancelled: impl Fn() -> bool,
+) -> Result<()> {
+    if !atmosphere.is_night() || !rivers {
+        return Ok(());
+    }
+    let first = world
+        .region
+        .minimum
+        .map(|v| v.div_euclid(surface_context::RIVERBANK_GRID));
+    let last = world
+        .region
+        .maximum
+        .map(|v| (v - 1).div_euclid(surface_context::RIVERBANK_GRID));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            let Some(xy) =
+                surface_context::riverbank_candidate(world.seed, [gx, gy], atmosphere, rivers)
+            else {
+                continue;
+            };
+            let Some(sample) = world.columns.get(&xy) else {
+                continue;
+            };
+            let Some(biome) = world.biomes.get(&xy).copied() else {
+                continue;
+            };
+            let anchor = [xy[0], xy[1], i32::from(sample.height)];
+            let model = surface_entities::model(
+                Species::Drowned,
+                AtlasLayout::Bedrock,
+                fauna_climate(biome),
+            );
+            if !dry_surface_entity_site(world, anchor, &model)
+                || world.entities.iter().any(|e| e.anchor == anchor)
+            {
+                continue;
+            }
+            world.entities.push(SurfaceEntity { species: Species::Drowned, anchor, model, atlas_status: "Static night riverbank walker on actual dry terrain; underwater spawning and gameplay not simulated; selected/fallback atlas checked during binding" });
+        }
+    }
+    Ok(())
+}
+
 /// Phase-specific surface figures are generated only after every block writer.
 /// All display episodes are static and deterministic, never native gameplay.
 fn populate_contextual_fauna(
@@ -832,9 +1187,301 @@ fn populate_contextual_fauna(
     Ok(())
 }
 
+// Denser crowns must not erase physical wood already supplied by an earlier global owner.
+fn tree_block_is_wood(block: &SurfaceBlock) -> bool {
+    let resource = block.state.id().as_str();
+    let configuration = match &block.owner {
+        SourceOwner::Tree { configuration, .. } => *configuration,
+        SourceOwner::TreeDecoration { .. } => return resource == "minecraft:creaking_heart",
+        _ => return false,
+    };
+    let Some(profile) = tree_profiles::profile(configuration) else {
+        return false;
+    };
+    resource == profile.stem.id
+        || (profile.shape == TreeShape::Mangrove && resource == "minecraft:mangrove_roots")
+}
+
+// Radius-64 village candidates keep all writes in their 256-cell owner tile.
+// Load those owners for each complete lower-priority structure before testing
+// overlap; a conflict outside the camera window must reject the whole piece.
+fn reserve_village_footprint_owners(
+    positions: impl Iterator<Item = [i32; 3]>,
+    evaluated_grids: &mut BTreeSet<[i32; 2]>,
+    structure_positions: &mut BTreeSet<[i32; 3]>,
+    fields: &TerrainFields,
+    settings: &VoxelLandscapeSettings,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    let mut minimum = [i32::MAX; 2];
+    let mut maximum = [i32::MIN; 2];
+    let mut owner_grids = BTreeSet::new();
+    let mut count = 0_usize;
+    for position in positions {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        count += 1;
+        if count > super::surface_structures::MAX_CELLS {
+            return Err(AssetError::InvalidMetadata(
+                "structure footprint exceeds prepared cell budget".into(),
+            ));
+        }
+        for axis in 0..2 {
+            minimum[axis] = minimum[axis].min(position[axis]);
+            maximum[axis] = maximum[axis].max(position[axis]);
+        }
+        owner_grids.insert([position[0].div_euclid(256), position[1].div_euclid(256)]);
+        // Prepared offsets are bounded to +/-256. The inclusive 513-cell span
+        // touches at most three owner tiles per axis, including negative edges.
+        if owner_grids.len() > 9
+            || (0..2).any(|axis| {
+                i64::from(maximum[axis]) - i64::from(minimum[axis])
+                    > i64::from(super::surface_structures::MAX_OFFSET) * 2
+            })
+        {
+            return Err(AssetError::InvalidMetadata(
+                "structure footprint exceeds prepared horizontal bounds".into(),
+            ));
+        }
+    }
+    if count == 0 {
+        return Err(AssetError::InvalidMetadata(
+            "structure footprint is empty".into(),
+        ));
+    }
+    for grid in owner_grids {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        if !evaluated_grids.insert(grid) {
+            continue;
+        }
+        let Some(village) = surface_village_assembly::candidate(grid, fields, settings, cancelled)?
+        else {
+            continue;
+        };
+        // The initial village loop already visits every owner tile intersecting
+        // the region. Newly loaded owners are off-window reservations only.
+        for position in village.writes.keys() {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            structure_positions.insert(*position);
+        }
+    }
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    Ok(())
+}
+
+fn fossil_overlaps(
+    fossil: &surface_geology::ExposedFossil,
+    positions: impl Iterator<Item = [i32; 3]>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<bool> {
+    for position in positions {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        if fossil.covers(position) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Conservatively reserve every terrain-admitted structure footprint, even a
+/// candidate later suppressed by structure priority. The decision uses the
+/// fossil's entire footprint, never the requesting window's reservation set.
+fn fossil_clear_of_structures(
+    fossil: &surface_geology::ExposedFossil,
+    fields: &TerrainFields,
+    settings: &VoxelLandscapeSettings,
+    cancelled: &impl Fn() -> bool,
+) -> Result<bool> {
+    let first = fossil.minimum.map(|value| (value - 224).div_euclid(256));
+    let last = fossil.maximum.map(|value| (value + 224).div_euclid(256));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            if let Some(village) =
+                surface_village_assembly::candidate([gx, gy], fields, settings, cancelled)?
+            {
+                if fossil_overlaps(fossil, village.writes.keys().copied(), cancelled)? {
+                    return Ok(false);
+                }
+            }
+            if let Some(landmark) =
+                surface_landmark_assembly::candidate([gx, gy], fields, settings, cancelled)?
+            {
+                if fossil_overlaps(fossil, landmark.writes.keys().copied(), cancelled)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    let first = fossil.minimum.map(|value| (value - 64).div_euclid(128));
+    let last = fossil.maximum.map(|value| (value + 64).div_euclid(128));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            if let Some(ruin) =
+                surface_ruin_assembly::candidate([gx, gy], fields, settings, cancelled)?
+            {
+                if fossil_overlaps(fossil, ruin.prepared.cells().map(|(p, _)| p), cancelled)? {
+                    return Ok(false);
+                }
+            }
+            if let Some(camp) =
+                surface_camp_assembly::candidate([gx, gy], fields, settings, cancelled)?
+            {
+                if fossil_overlaps(fossil, camp.prepared.cells().map(|(p, _)| p), cancelled)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    let first = fossil.minimum.map(|value| (value - 8).div_euclid(16));
+    let last = fossil.maximum.map(|value| (value + 8).div_euclid(16));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            if let Some(well) = surface_landmark_assembly::desert_well_candidate(
+                [gx, gy],
+                fields,
+                settings,
+                cancelled,
+            )? {
+                if fossil_overlaps(fossil, well.writes.keys().copied(), cancelled)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Stage every state and check every reservation before either ledger changes.
+/// The bounded commit has no fallible operation or cancellation checkpoint.
+fn project_fossil(
+    world: &mut SurfaceWorld,
+    reserved: &mut BTreeSet<[i32; 3]>,
+    fossil: surface_geology::ExposedFossil,
+    cancelled: &impl Fn() -> bool,
+) -> Result<bool> {
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    if fossil.cells.is_empty() || fossil.cells.len() > surface_geology::FOSSIL_MAX_CELLS {
+        return Err(AssetError::InvalidMetadata(
+            "invalid fossil cell count".into(),
+        ));
+    }
+    if fossil_overlaps(&fossil, reserved.iter().copied(), cancelled)? {
+        return Ok(false);
+    }
+    let mut prepared = Vec::with_capacity(fossil.cells.len());
+    for &(offset, axis) in &fossil.cells {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        let position = add_global(fossil.anchor, offset)?;
+        if world.blocks.contains_key(&position) || world.fluids.contains_key(&position) {
+            return Ok(false);
+        }
+        prepared.push((
+            position,
+            SurfaceBlock {
+                state: state(
+                    "minecraft:bone_block",
+                    [("axis".into(), axis.java_value().into())],
+                )?,
+                owner: SourceOwner::Geology {
+                    anchor: fossil.anchor,
+                    source: surface_geology::FOSSIL_SOURCE,
+                },
+            },
+        ));
+    }
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    for (position, block) in prepared {
+        reserved.insert(position);
+        if world.region.contains(position) {
+            world.blocks.insert(position, block);
+        }
+    }
+    Ok(true)
+}
+
+fn populate_fossils(
+    world: &mut SurfaceWorld,
+    reserved: &mut BTreeSet<[i32; 3]>,
+    fields: &TerrainFields,
+    settings: &VoxelLandscapeSettings,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
+    // Cover complete existing tree queries too: anchor halo + one tree grid
+    // step + geometry reach + attachment + fossil reach and anchor jitter.
+    // Off-window bones reserve occupancy only; source columns are not expanded.
+    let halo = 48
+        + 13
+        + i32::from(TreeGeometry::COORDINATE_LIMIT)
+        + 1
+        + surface_geology::FOSSIL_REACH
+        + surface_geology::FOSSIL_JITTER;
+    let first = world
+        .region
+        .minimum
+        .map(|v| (v - halo).div_euclid(surface_geology::FOSSIL_GRID));
+    let last = world
+        .region
+        .maximum
+        .map(|v| (v + halo).div_euclid(surface_geology::FOSSIL_GRID));
+    for gy in first[1]..=last[1] {
+        for gx in first[0]..=last[0] {
+            let Some(fossil) = surface_geology::desert_fossil(
+                world.seed,
+                [gx, gy],
+                |xy| sample_ground(fields, settings, xy[0], xy[1]),
+                cancelled,
+            )?
+            else {
+                continue;
+            };
+            if !fossil_clear_of_structures(&fossil, fields, settings, cancelled)? {
+                continue;
+            }
+            project_fossil(world, reserved, fossil, cancelled)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn prepare(
     region: Region,
     settings: &VoxelLandscapeSettings,
+    cancelled: impl Fn() -> bool,
+) -> Result<SurfaceWorld> {
+    prepare_with_tree_configuration(region, settings, tree_configuration, cancelled)
+}
+// The private selector seam lets support regressions pin a source without fabricating terrain or geometry.
+fn prepare_with_tree_configuration(
+    region: Region,
+    settings: &VoxelLandscapeSettings,
+    choose_configuration: impl Fn(SurfaceBiome, u64) -> Option<&'static str>,
     cancelled: impl Fn() -> bool,
 ) -> Result<SurfaceWorld> {
     region.validate()?;
@@ -846,8 +1493,11 @@ pub fn prepare(
         structures:Vec::new(),entities:Vec::new(), source_limitations:vec![
             "Terrain/biome selector is authored Ilium homage, not native multi-noise bands",
             "Flora attempts use authored sparse density; exact Java count/noise algorithms remain pending",
+            "Dry grass uses one-cell soil-or-sand admission; the unchanged cactus-flower selection slot constructs a whole two-cell age0 cactus plus crown with side clearance; native substrate tags, flower frequency and growth timing are not reproduced",
             "Surface azalea indicators use rare authored woodland selection; no underground cave/root network is generated",
             "Ice spire silhouettes and cold surface openings are authored; native feature processors are not reproduced",
+            "Surface strata, calcite seams and soil mosaics use authored global material rules; native noise and surface-rule parity are not claimed",
+            "Exposed desert rib/spine fossils are original Ilium geometry, fitted above dry sand with at most one cell of relief; no buried native fossil, excavation or ore processing is reproduced; all terrain-admitted structure footprints conservatively exclude fossils",
             "Village graph uses authored kit and terrain fit; native jigsaw/templates/processors and other structure families remain pending",
             "Seven surface landmark exteriors, nine ruin kits and eighteen camp presets use original geometry and sparse placement; native salts, templates and processors remain unverified",
             "Desert wells use independent authored16-block rare-feature admission and whole dry-sand footprint checks; native RNG, buried support and exact placement parity remain unverified",
@@ -875,8 +1525,8 @@ pub fn prepare(
         for x in region.minimum[0]..region.maximum[0] {
             let sample = world.columns[&[x, y]];
             let biome = world.biomes[&[x, y]];
-            let (top, substrate) = terrain_surface(biome);
             let ground = i32::from(sample.height) - 1;
+            let materials = surface_geology::terrain_materials(seed, biome, [x, y], ground);
             let min_neighbor = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
                 .into_iter()
                 .filter_map(|p| world.columns.get(&p))
@@ -885,21 +1535,11 @@ pub fn prepare(
                 .unwrap_or(ground);
             let bottom = (min_neighbor - 1).min(ground - 3).max(ground - 64).max(0);
             for z in bottom..=ground {
-                let id = if z == ground {
-                    top
-                } else if z >= ground - 3 {
-                    substrate
-                } else {
-                    "minecraft:stone"
-                };
+                let id = materials.at(z);
                 let block = if let Some(state) = terrain_states.get(id) {
                     state.clone()
                 } else {
-                    let state = if id == "minecraft:grass_block" {
-                        state(id, [("snowy".to_owned(), "false".to_owned())])?
-                    } else {
-                        plain(id)?
-                    };
+                    let state = terrain_state(id)?;
                     terrain_states.insert(id, state.clone());
                     state
                 };
@@ -934,6 +1574,7 @@ pub fn prepare(
     // Evaluate a whole globally owned village candidate before region projection.
     // One stable TerrainFields snapshot serves every piece habitat callback.
     let mut structure_positions = BTreeSet::new();
+    let mut evaluated_village_grids = BTreeSet::new();
     let village_min = region.minimum.map(|value| (value - 192).div_euclid(256));
     let village_max = region.maximum.map(|value| (value + 192).div_euclid(256));
     for gy in village_min[1]..=village_max[1] {
@@ -941,6 +1582,7 @@ pub fn prepare(
             if cancelled() {
                 return Err(AssetError::Cancelled);
             }
+            evaluated_village_grids.insert([gx, gy]);
             let Some(village) =
                 surface_village_assembly::candidate([gx, gy], &fields, &settings, &cancelled)?
             else {
@@ -1046,6 +1688,14 @@ pub fn prepare(
         }
     }
     for landmark in landmark_candidates {
+        reserve_village_footprint_owners(
+            landmark.writes.keys().copied(),
+            &mut evaluated_village_grids,
+            &mut structure_positions,
+            &fields,
+            &settings,
+            &cancelled,
+        )?;
         // A full preprojected overlap rejects the candidate. Rejected
         // fragments cannot reappear when a neighboring region is loaded.
         if landmark
@@ -1123,6 +1773,14 @@ pub fn prepare(
             else {
                 continue;
             };
+            reserve_village_footprint_owners(
+                ruin.prepared.cells().map(|(position, _)| position),
+                &mut evaluated_village_grids,
+                &mut structure_positions,
+                &fields,
+                &settings,
+                &cancelled,
+            )?;
             if ruin
                 .prepared
                 .cells()
@@ -1177,6 +1835,14 @@ pub fn prepare(
             else {
                 continue;
             };
+            reserve_village_footprint_owners(
+                camp.prepared.cells().map(|(position, _)| position),
+                &mut evaluated_village_grids,
+                &mut structure_positions,
+                &fields,
+                &settings,
+                &cancelled,
+            )?;
             if camp
                 .prepared
                 .cells()
@@ -1223,6 +1889,13 @@ pub fn prepare(
             }
         }
     }
+    populate_fossils(
+        &mut world,
+        &mut structure_positions,
+        &fields,
+        &settings,
+        &cancelled,
+    )?;
     // Ice spires have globally owned whole candidates, independently of flora
     // density. Keep their exact feature/material provenance and aboveground scope.
     let geology_min = region.minimum.map(|value| (value - 32).div_euclid(21));
@@ -1289,19 +1962,40 @@ pub fn prepare(
             }
         }
     }
+    // Capture only off-window cactus side probes. The existing tree halo covers
+    // them: current forms reach at most41 cells horizontally (fallen length40
+    // plus the stump gap), and an attached block adds at most one more cell.
+    let mut cactus_halo = cactus_tree_halo(&world, &cancelled)?;
     // Evaluate whole trees by global grid anchor, then project. This keeps the
     // same configuration and owner when a camera/region boundary moves.
     let anchor_min = region.minimum.map(|v| (v - 48).div_euclid(13));
     let anchor_max = region.maximum.map(|v| (v + 48).div_euclid(13));
-    for gy in anchor_min[1]..=anchor_max[1] {
+    for (gy, infill) in (anchor_min[1]..=anchor_max[1]).flat_map(|gy| [(gy, false), (gy, true)]) {
         if cancelled() {
             return Err(AssetError::Cancelled);
         }
         for gx in anchor_min[0]..=anchor_max[0] {
-            let hash = hash2(seed ^ 0x7472_6565, i64::from(gx), i64::from(gy));
-            let x = gx * 13 + 6 + (hash.rotate_left(29) % 9) as i32 - 4;
-            let y = gy * 13 + 6 + (hash.rotate_left(43) % 9) as i32 - 4;
+            let salt = if infill {
+                0x7472_6565_5f66_696c
+            } else {
+                0x7472_6565
+            };
+            let hash = hash2(seed ^ salt, i64::from(gx), i64::from(gy));
+            let (x, y) = if infill {
+                (
+                    gx * 13 + (hash.rotate_left(29) % 3) as i32 - 1,
+                    gy * 13 + (hash.rotate_left(43) % 3) as i32 - 1,
+                )
+            } else {
+                (
+                    gx * 13 + 6 + (hash.rotate_left(29) % 9) as i32 - 4,
+                    gy * 13 + 6 + (hash.rotate_left(43) % 9) as i32 - 4,
+                )
+            };
             let (sample, biome) = sample_ground(&fields, &settings, x, y);
+            if infill && !tree_infill_enabled(biome) {
+                continue;
+            }
             let cover = tree_cover_percent(biome)
                 * (settings.vegetation_percent.clamp(0, 100) as u64)
                 / 100;
@@ -1315,7 +2009,7 @@ pub fn prepare(
             {
                 continue;
             }
-            let Some(source) = tree_configuration(biome, hash) else {
+            let Some(source) = choose_configuration(biome, hash) else {
                 continue;
             };
             let Some(profile) = tree_profiles::profile(source) else {
@@ -1324,6 +2018,21 @@ pub fn prepare(
             let anchor = [x, y, i32::from(sample.height)];
             let geometry = tree_forms::build(profile, tree_growth(hash), hash)
                 .map_err(|_| AssetError::InvalidMetadata("tree geometry failed".into()))?;
+            if !tree_terrain_admits(
+                anchor,
+                profile.shape,
+                &geometry,
+                |xy| {
+                    let sample = fields.sample(xy[0], xy[1], settings.rivers);
+                    TreeTerrainColumn {
+                        solid_top: i32::from(sample.height),
+                        water_top: sample.water_level.map(i32::from),
+                    }
+                },
+                &cancelled,
+            )? {
+                continue;
+            }
             let states = tree_forms::bind_states(profile, &geometry, hash)
                 .map_err(|_| AssetError::InvalidMetadata("tree state binding failed".into()))?;
             if states.iter().any(|cell| {
@@ -1335,7 +2044,18 @@ pub fn prepare(
             let mut projected = 0;
             for cell in states {
                 let position = add_global(anchor, cell.position)?;
+                if let Some(occupied) = cactus_halo.get_mut(&position) {
+                    *occupied = true;
+                }
                 if !region.contains(position) {
+                    continue;
+                }
+                if profile
+                    .crowns
+                    .iter()
+                    .any(|resource| resource.id == cell.resource_id)
+                    && world.blocks.get(&position).is_some_and(tree_block_is_wood)
+                {
                     continue;
                 }
                 let block = state(
@@ -1370,7 +2090,9 @@ pub fn prepare(
                         return SurroundingCell::Unknown;
                     };
                     match habitat(&fields, &settings, position) {
-                        HabitatCell::Air | HabitatCell::Water => SurroundingCell::Air,
+                        // Air-only decorations such as litter and vines cannot occupy water.
+                        HabitatCell::Air => SurroundingCell::Air,
+                        HabitatCell::Water => SurroundingCell::Solid,
                         HabitatCell::Soil => SurroundingCell::ReplaceableSoil,
                         HabitatCell::Sand | HabitatCell::Solid => SurroundingCell::Solid,
                         HabitatCell::Unknown => SurroundingCell::Unknown,
@@ -1381,13 +2103,20 @@ pub fn prepare(
                     let xx = x.checked_add(i32::from(offset[0]))?;
                     let yy = y.checked_add(i32::from(offset[1]))?;
                     i16::try_from(
-                        i32::from(fields.sample(xx, yy, settings.rivers).height) - anchor[2],
+                        i32::from(fields.sample(xx, yy, settings.rivers).height) - 1 - anchor[2],
                     )
                     .ok()
                 };
                 let _applications = planner.apply_profile(decorations, hash, ground_height);
                 for decoration in planner.finish() {
                     let position = add_global(anchor, decoration.state.position)?;
+                    if let Some(occupied) = cactus_halo.get_mut(&position) {
+                        // Planner output either writes this cell or is refused
+                        // because terrain/structure/earlier wood already blocks
+                        // it. No tree/decorator operation removes occupancy.
+                        // This is an obstruction union, not a placement receipt.
+                        *occupied = true;
+                    }
                     if !region.contains(position) {
                         continue;
                     }
@@ -1491,18 +2220,27 @@ pub fn prepare(
             let Some(positions) = positions else {
                 continue;
             };
-            let admitted = flora.admit(candidate, |position| {
-                if structure_positions.contains(&position)
-                    || world.blocks.get(&position).is_some_and(|b| {
-                        b.state.id().as_str() == "minecraft:ice"
-                            || !matches!(b.owner, SourceOwner::Terrain { .. })
-                    })
-                {
-                    HabitatCell::Solid
-                } else {
-                    habitat(&fields, &settings, position)
-                }
-            });
+            let cactus_clearance = candidate.cactus_clearance;
+            let admitted = flora.admit_cancellable(
+                candidate,
+                |position| {
+                    if structure_positions.contains(&position)
+                        || (cactus_clearance && cactus_halo.get(&position) == Some(&true))
+                        || world.blocks.get(&position).is_some_and(|b| {
+                            b.state.id().as_str() == "minecraft:ice"
+                                || !matches!(b.owner, SourceOwner::Terrain { .. })
+                        })
+                    {
+                        HabitatCell::Solid
+                    } else {
+                        habitat(&fields, &settings, position)
+                    }
+                },
+                &cancelled,
+            );
+            if matches!(admitted, Err(AdmissionError::Cancelled)) {
+                return Err(AssetError::Cancelled);
+            }
             if admitted.is_ok() {
                 let mut projected = 0;
                 for position in positions {
@@ -1521,6 +2259,9 @@ pub fn prepare(
         }
     }
     for cell in flora.cells() {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
         if !region.contains(cell.position) {
             continue;
         }
@@ -1528,8 +2269,16 @@ pub fn prepare(
             flora_owners.get(&cell.position).copied().ok_or_else(|| {
                 AssetError::InvalidMetadata("accepted flora lost its owner ledger".into())
             })?;
+        // Choose the counterpart after admission; preserve the closed source prescription.
+        let resource_id = if cell.state.resource_id == "minecraft:closed_eyeblossom"
+            && SceneAtmosphere::from_index(settings.atmosphere).is_night()
+        {
+            "minecraft:open_eyeblossom"
+        } else {
+            cell.state.resource_id
+        };
         let block = state(
-            cell.state.resource_id,
+            resource_id,
             cell.state
                 .properties
                 .iter()
@@ -1576,6 +2325,9 @@ pub fn prepare(
             let Some(species) = Species::from_id(id) else {
                 continue;
             };
+            if !surface_biome_allows_species(*biome, species) {
+                continue;
+            }
             let model =
                 surface_entities::model(species, AtlasLayout::Bedrock, fauna_climate(*biome));
             let anchor = [gx, gy, i32::from(sample.height)];
@@ -1602,12 +2354,493 @@ pub fn prepare(
         SceneAtmosphere::from_index(settings.atmosphere),
         &cancelled,
     )?;
+    populate_riverbank_drowned(
+        &mut world,
+        settings.rivers,
+        SceneAtmosphere::from_index(settings.atmosphere),
+        &cancelled,
+    )?;
+    validate_generated_height(&world)?;
     Ok(world)
+}
+
+/// Assemble individually bounded source windows into one region before model
+/// binding. The halo is evaluated by the existing whole-owner generator; only
+/// each core contributes cells. This keeps tree/structure ownership tied to
+/// global anchors and gives the mesher its adjacent-core neighbors.
+pub fn prepare_viewport(
+    region: Region,
+    scale: f32,
+    size: [usize; 2],
+    settings: &VoxelLandscapeSettings,
+    cancelled: impl Fn() -> bool,
+) -> Result<SurfaceWorld> {
+    const MAX_BLOCKS: usize = 1_000_000;
+    const MAX_FLUIDS: usize = 1_000_000;
+    const MAX_COLUMNS: usize = 1_000_000;
+    const MAX_ENTITIES: usize = 65_536;
+
+    let cores = super::surface_viewport::visible_tiles(region, scale, size)?;
+    let mut combined = SurfaceWorld {
+        region,
+        seed: u64::from(settings.seed),
+        columns: BTreeMap::new(),
+        biomes: BTreeMap::new(),
+        blocks: BTreeMap::new(),
+        fluids: BTreeMap::new(),
+        trees: Vec::new(),
+        flora: Vec::new(),
+        structures: Vec::new(),
+        entities: Vec::new(),
+        source_limitations: Vec::new(),
+    };
+    let mut trees = BTreeMap::<([i32; 3], &'static str), FeatureRecord>::new();
+    let mut flora = BTreeMap::<([i32; 3], &'static str), FeatureRecord>::new();
+    let mut structures = BTreeMap::<([i32; 3], &'static str), FeatureRecord>::new();
+    for (core, expanded) in cores {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        let tile = prepare(expanded, settings, &cancelled)?;
+        if combined.source_limitations.is_empty() {
+            combined.source_limitations = tile.source_limitations;
+        }
+        for (position, sample) in tile.columns {
+            if core.contains([position[0], position[1], 0]) {
+                combined.columns.insert(position, sample);
+            }
+        }
+        for (position, biome) in tile.biomes {
+            if core.contains([position[0], position[1], 0]) {
+                combined.biomes.insert(position, biome);
+            }
+        }
+        for (position, block) in tile.blocks {
+            if core.contains(position) {
+                combined.blocks.insert(position, block);
+            }
+        }
+        for (position, fluid) in tile.fluids {
+            if core.contains(position) {
+                combined.fluids.insert(position, fluid);
+            }
+        }
+        for entity in tile.entities {
+            if core.contains(entity.anchor) {
+                combined.entities.push(entity);
+            }
+        }
+        for record in tile.trees {
+            trees
+                .entry((record.anchor, record.source))
+                .or_insert(record);
+        }
+        for record in tile.flora {
+            flora
+                .entry((record.anchor, record.source))
+                .or_insert(record);
+        }
+        for record in tile.structures {
+            structures
+                .entry((record.anchor, record.source))
+                .or_insert(record);
+        }
+        for (resource, count, limit) in [
+            (
+                "generated viewport blocks",
+                combined.blocks.len(),
+                MAX_BLOCKS,
+            ),
+            (
+                "generated viewport fluids",
+                combined.fluids.len(),
+                MAX_FLUIDS,
+            ),
+            (
+                "generated viewport columns",
+                combined.columns.len(),
+                MAX_COLUMNS,
+            ),
+            (
+                "generated viewport entities",
+                combined.entities.len(),
+                MAX_ENTITIES,
+            ),
+        ] {
+            if count > limit {
+                return Err(AssetError::Limit {
+                    resource,
+                    requested: count as u64,
+                    limit: limit as u64,
+                });
+            }
+        }
+    }
+    // The records are diagnostic metadata. Recount visible owner cells after
+    // stitching rather than summing overlapping halo projections.
+    let mut tree_counts = BTreeMap::<[i32; 3], usize>::new();
+    let mut flora_counts = BTreeMap::<[i32; 3], usize>::new();
+    let mut structure_counts = BTreeMap::<[i32; 3], usize>::new();
+    for block in combined.blocks.values() {
+        match &block.owner {
+            SourceOwner::Tree { anchor, .. } | SourceOwner::TreeDecoration { anchor, .. } => {
+                *tree_counts.entry(*anchor).or_default() += 1;
+            }
+            SourceOwner::Flora { anchor, .. } => {
+                *flora_counts.entry(*anchor).or_default() += 1;
+            }
+            SourceOwner::Structure { anchor, .. } => {
+                *structure_counts.entry(*anchor).or_default() += 1;
+            }
+            _ => {}
+        }
+    }
+    combined.trees = trees
+        .into_values()
+        .filter_map(|mut record| {
+            record.projected_cells = tree_counts.get(&record.anchor).copied().unwrap_or(0);
+            (record.projected_cells > 0).then_some(record)
+        })
+        .collect();
+    combined.flora = flora
+        .into_values()
+        .filter_map(|mut record| {
+            record.projected_cells = flora_counts.get(&record.anchor).copied().unwrap_or(0);
+            (record.projected_cells > 0).then_some(record)
+        })
+        .collect();
+    combined.structures = structures
+        .into_values()
+        .filter_map(|mut record| {
+            record.projected_cells = structure_counts.get(&record.anchor).copied().unwrap_or(0);
+            (record.projected_cells > 0).then_some(record)
+        })
+        .collect();
+    validate_generated_height(&combined)?;
+    Ok(combined)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn natural_riverbank_litter_stays_above_water_and_keeps_dry_patches() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let world = prepare(
+            Region {
+                minimum: [-15216, -16504],
+                maximum: [-15168, -16456],
+            },
+            &settings,
+            || false,
+        )
+        .unwrap();
+        assert!(
+            world.fluids.contains_key(&[-15202, -16479, 62]),
+            "original collision water must remain present"
+        );
+        let mut dry_litter = 0;
+        for (position, block) in &world.blocks {
+            if !matches!(block.owner, SourceOwner::TreeDecoration { .. }) {
+                continue;
+            }
+            if block.state.id().as_str() == "minecraft:leaf_litter"
+                && !world.fluids.contains_key(position)
+            {
+                dry_litter += 1;
+            }
+            assert!(
+                !world.fluids.contains_key(position),
+                "tree decoration {} overlaps retained water at {position:?}: {:?}",
+                block.state.id().as_str(),
+                block.owner
+            );
+        }
+        assert!(dry_litter > 0, "dry leaf litter must remain nonvacuous");
+    }
+
+    #[test]
+    fn natural_riverbank_litter_keeps_water_and_split_projection() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let region = Region {
+            minimum: [-15216, -16504],
+            maximum: [-15168, -16456],
+        };
+        let whole = prepare(region, &settings, || false).unwrap();
+        let projection = |world: &SurfaceWorld| -> BTreeMap<_, _> {
+            world
+                .blocks
+                .iter()
+                .filter(|(_, b)| matches!(b.owner, SourceOwner::TreeDecoration { .. }))
+                .map(|(p, b)| (*p, (b.state.clone(), b.owner.clone())))
+                .collect()
+        };
+        let expected = projection(&whole);
+        assert!(expected
+            .values()
+            .any(|(s, _)| s.id().as_str() == "minecraft:leaf_litter"));
+        assert!(whole.fluids.contains_key(&[-15202, -16479, 62]));
+        let mut assembled = BTreeMap::new();
+        let mut fluids = BTreeMap::new();
+        for piece in [
+            Region {
+                minimum: region.minimum,
+                maximum: [-15192, region.maximum[1]],
+            },
+            Region {
+                minimum: [-15192, region.minimum[1]],
+                maximum: region.maximum,
+            },
+        ] {
+            let world = prepare(piece, &settings, || false).unwrap();
+            for (p, b) in &world.blocks {
+                if matches!(b.owner, SourceOwner::TreeDecoration { .. }) {
+                    assert!(
+                        !world.fluids.contains_key(p),
+                        "tree decoration overlaps water at {p:?}"
+                    );
+                }
+            }
+            assembled.extend(projection(&world));
+            fluids.extend(world.fluids);
+        }
+        assert_eq!(
+            assembled, expected,
+            "signed split changed dry decoration state/owner"
+        );
+        assert_eq!(
+            fluids, whole.fluids,
+            "water was removed or shifted by decoration admission"
+        );
+    }
+
+    #[test]
+    fn surface_slime_habitat_filters_underground_table_entries() {
+        for biome in SurfaceBiome::all() {
+            assert_eq!(
+                biome
+                    .descriptor()
+                    .biome_table_fauna_ids
+                    .contains(&"minecraft:slime"),
+                *biome != SurfaceBiome::MushroomFields,
+                "{}",
+                biome.id()
+            );
+            let expected = matches!(biome, SurfaceBiome::Swamp | SurfaceBiome::MangroveSwamp);
+            assert_eq!(
+                surface_biome_allows_species(*biome, Species::Slime),
+                expected,
+                "{}",
+                biome.id()
+            );
+            for species in surface_entities::ALL_SPECIES {
+                if *species != Species::Slime {
+                    assert!(
+                        surface_biome_allows_species(*biome, *species),
+                        "{} {}",
+                        biome.id(),
+                        species.id()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn night_does_not_admit_slime_at_natural_non_swamp_owner() {
+        let center = [-13808, -16384];
+        for atmosphere in 0..=2 {
+            let settings = VoxelLandscapeSettings {
+                seed: 71839,
+                rivers: false,
+                vegetation_percent: 0,
+                atmosphere,
+                ..Default::default()
+            };
+            let world = prepare(
+                Region {
+                    minimum: center.map(|v| v - 16),
+                    maximum: center.map(|v| v + 16),
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            assert_eq!(world.biomes[&center], SurfaceBiome::OldGrowthBirchForest);
+            assert_eq!(world.columns[&center].height, 112);
+            assert!(
+                !world
+                    .entities
+                    .iter()
+                    .any(|entity| entity.species == Species::Slime && entity.anchor[..2] == center),
+                "atmosphere {atmosphere}"
+            );
+        }
+    }
+
+    #[test]
+    fn night_preserves_natural_slime_in_both_surface_swamp_habitats() {
+        for (biome, anchor) in [
+            (SurfaceBiome::Swamp, [9344, -16384, 63]),
+            (SurfaceBiome::MangroveSwamp, [7728, -16384, 65]),
+        ] {
+            let center = [anchor[0], anchor[1]];
+            let settings = VoxelLandscapeSettings {
+                seed: 71839,
+                rivers: false,
+                vegetation_percent: 0,
+                atmosphere: 1,
+                ..Default::default()
+            };
+            let world = prepare(
+                Region {
+                    minimum: center.map(|v| v - 16),
+                    maximum: center.map(|v| v + 16),
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            assert_eq!(world.biomes[&center], biome);
+            assert_eq!(i32::from(world.columns[&center].height), anchor[2]);
+            assert!(
+                world
+                    .entities
+                    .iter()
+                    .any(|entity| entity.species == Species::Slime && entity.anchor == anchor),
+                "{} natural habitat lost",
+                biome.id()
+            );
+        }
+    }
+
+    #[test]
+    fn generated_height_guard_rejects_outside_and_accepts_edge_cell() {
+        let mut world = SurfaceWorld {
+            region: Region {
+                minimum: [0, 0],
+                maximum: [1, 1],
+            },
+            seed: 0,
+            columns: BTreeMap::new(),
+            biomes: BTreeMap::new(),
+            blocks: BTreeMap::new(),
+            fluids: BTreeMap::new(),
+            trees: Vec::new(),
+            flora: Vec::new(),
+            structures: Vec::new(),
+            entities: Vec::new(),
+            source_limitations: Vec::new(),
+        };
+        let fluid = FluidCell::new(0, [0.0, 0.0, 1.0]).unwrap();
+        world.fluids.insert([0, 0, 320], fluid);
+        assert!(validate_generated_height(&world).is_err());
+        let fluid = world.fluids.remove(&[0, 0, 320]).unwrap();
+        world.fluids.insert([0, 0, 319], fluid);
+        assert!(validate_generated_height(&world).is_ok());
+        let fluid = world.fluids.remove(&[0, 0, 319]).unwrap();
+        world.fluids.insert([0, 0, -1], fluid);
+        assert!(validate_generated_height(&world).is_err());
+    }
+    #[test]
+    fn tiled_viewport_reproduces_whole_window_states_and_global_owners() {
+        let region = Region {
+            minimum: [15584, -16416],
+            maximum: [15680, -16320],
+        };
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let whole = prepare(region, &settings, || false).unwrap();
+        let stitched = prepare_viewport(region, 2.8, [4096, 4096], &settings, || false).unwrap();
+        assert!(!whole.trees.is_empty());
+        assert_eq!(stitched.blocks.len(), whole.blocks.len());
+        for (position, expected) in &whole.blocks {
+            let actual = stitched
+                .blocks
+                .get(position)
+                .unwrap_or_else(|| panic!("stitched viewport lost block at {position:?}"));
+            assert_eq!(actual.state, expected.state, "state at {position:?}");
+            assert_eq!(actual.owner, expected.owner, "owner at {position:?}");
+        }
+        assert_eq!(stitched.fluids, whole.fluids);
+        let identities = |world: &SurfaceWorld| {
+            world
+                .entities
+                .iter()
+                .map(|entity| (entity.anchor, entity.species.id()))
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(identities(&stitched), identities(&whole));
+    }
+
+    #[test]
+    fn tiled_viewport_keeps_whole_well_and_water_across_both_core_seams() {
+        let anchor = [-2374, -12665, 94];
+        let region = Region {
+            minimum: [anchor[0] - 95, anchor[1] - 95],
+            maximum: [anchor[0] + 33, anchor[1] + 33],
+        };
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            ..Default::default()
+        };
+        let whole = prepare(region, &settings, || false).unwrap();
+        let stitched = prepare_viewport(region, 2.8, [4096, 4096], &settings, || false).unwrap();
+        assert!(whole
+            .structures
+            .iter()
+            .any(|record| { record.anchor == anchor && record.source == "minecraft:desert_well" }));
+        assert_eq!(stitched.blocks.len(), whole.blocks.len());
+        for (position, expected) in &whole.blocks {
+            let actual = stitched
+                .blocks
+                .get(position)
+                .unwrap_or_else(|| panic!("stitched viewport lost block at {position:?}"));
+            assert_eq!(actual.state, expected.state, "state at {position:?}");
+            assert_eq!(actual.owner, expected.owner, "owner at {position:?}");
+        }
+        assert_eq!(stitched.fluids, whole.fluids);
+        assert!(stitched
+            .structures
+            .iter()
+            .any(|record| { record.anchor == anchor && record.source == "minecraft:desert_well" }));
+    }
+
+    #[test]
+    #[ignore = "explicit resource gate: generated native 360x240 source window"]
+    fn witnessed_360_by_240_viewport_fits_source_limits() {
+        let region =
+            super::super::surface_viewport::region([-15011.0, -16246.0, 91.0], 2.8, [360, 240])
+                .unwrap();
+        let world = prepare_viewport(
+            region,
+            2.8,
+            [360, 240],
+            &VoxelLandscapeSettings::default(),
+            || false,
+        )
+        .unwrap();
+        println!(
+            "{{\"type\":\"result\",\"blocks\":{},\"fluids\":{},\"columns\":{},\"trees\":{}}}",
+            world.blocks.len(),
+            world.fluids.len(),
+            world.columns.len(),
+            world.trees.len()
+        );
+        assert!(!world.trees.is_empty());
+    }
+
     fn context_fixture(xy: [i32; 2], biome: SurfaceBiome) -> SurfaceWorld {
         let mut world = nest_fixture_world(SourceOwner::Terrain { biome });
         world.blocks.clear();
@@ -1626,7 +2859,10 @@ mod tests {
                 world.blocks.insert(
                     [x, y, 79],
                     SurfaceBlock {
-                        state: plain(terrain_surface(biome).0).unwrap(),
+                        state: terrain_state(
+                            surface_geology::terrain_materials(world.seed, biome, [x, y], 79).top,
+                        )
+                        .unwrap(),
                         owner: SourceOwner::Terrain { biome },
                     },
                 );
@@ -2364,5 +3600,1308 @@ mod tests {
             || false
         )
         .is_err());
+    }
+    #[test]
+    fn dry_grass_and_cactus_crown_factories_keep_exact_semantic_states() {
+        for id in ["minecraft:short_dry_grass", "minecraft:tall_dry_grass"] {
+            let candidate = flower_candidate([-4, -8, 80], id);
+            assert_eq!(candidate.source_prescription, id);
+            assert_eq!(candidate.support, Support::SoilOrSand);
+            assert!(!candidate.cactus_clearance);
+            assert_eq!(candidate.cells.len(), 1);
+            assert_eq!(candidate.cells[0].position, [0, 0, 0]);
+            assert_eq!(candidate.cells[0].state.resource_id, id);
+            assert!(candidate.cells[0].state.properties.is_empty());
+        }
+        let bare = flower_candidate([-4, -8, 80], "minecraft:cactus");
+        let flowering = flower_candidate([-4, -8, 80], "minecraft:cactus_flower");
+        assert_eq!(bare.cells.len(), 2);
+        assert_eq!(bare.source_prescription, "minecraft:cactus");
+        assert_eq!(flowering.source_prescription, "minecraft:cactus_flower");
+        assert_eq!(flowering.support, Support::Sand);
+        assert!(flowering.cactus_clearance);
+        assert_eq!(flowering.cells.len(), 3);
+        for height in 0..2 {
+            assert_eq!(bare.cells[height], flowering.cells[height]);
+            assert_eq!(flowering.cells[height].position, [0, 0, height as i32]);
+            assert_eq!(
+                flowering.cells[height].state.resource_id,
+                "minecraft:cactus"
+            );
+            assert_eq!(flowering.cells[height].state.properties, [("age", "0")]);
+        }
+        assert_eq!(flowering.cells[2].position, [0, 0, 2]);
+        assert_eq!(
+            flowering.cells[2].state.resource_id,
+            "minecraft:cactus_flower"
+        );
+        assert!(flowering.cells[2].state.properties.is_empty());
+    }
+
+    #[test]
+    fn natural_arid_world_contains_both_dry_grasses_and_owned_supported_cactus_crowns() {
+        // Original source007 RED fixture: this region already contains real cacti.
+        // No feature is inserted, selected by hand, or given a new density.
+        let region = Region {
+            minimum: [3296, -16416],
+            maximum: [3360, -16352],
+        };
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let world = prepare(region, &settings, || false).unwrap();
+        let mut dry_grass_counts = [0_usize; 2];
+        let mut flowering_cacti = 0_usize;
+        assert!(world.blocks.values().any(|block| {
+            block.state.id().as_str() == "minecraft:cactus"
+                && matches!(block.owner, SourceOwner::Flora { .. })
+        }));
+        for (&position, block) in &world.blocks {
+            let id = block.state.id().as_str();
+            if let Some(index) = ["minecraft:short_dry_grass", "minecraft:tall_dry_grass"]
+                .iter()
+                .position(|dry_id| *dry_id == id)
+            {
+                dry_grass_counts[index] += 1;
+                assert!(block.state.property("half").is_none());
+                assert!(matches!(
+                    &block.owner,
+                    SourceOwner::Flora { anchor, prescription }
+                        if *anchor == position && *prescription == id
+                ));
+                let below = [position[0], position[1], position[2] - 1];
+                let support = world
+                    .blocks
+                    .get(&below)
+                    .expect("dry grass has terrain below");
+                assert!(matches!(
+                    support.state.id().as_str(),
+                    "minecraft:sand" | "minecraft:red_sand"
+                ));
+                continue;
+            }
+            if id != "minecraft:cactus_flower" {
+                continue;
+            }
+            flowering_cacti += 1;
+            let SourceOwner::Flora {
+                anchor,
+                prescription,
+            } = &block.owner
+            else {
+                panic!("natural cactus flower has no flora owner at {position:?}");
+            };
+            assert_eq!(*prescription, "minecraft:cactus_flower");
+            assert_eq!([position[0], position[1]], [anchor[0], anchor[1]]);
+            assert_eq!(position[2], anchor[2] + 2);
+            assert!(block.state.property("age").is_none());
+            for height in 0..2 {
+                let stem_position = [anchor[0], anchor[1], anchor[2] + height];
+                let stem = world
+                    .blocks
+                    .get(&stem_position)
+                    .expect("whole owned cactus stem");
+                assert_eq!(stem.state.id().as_str(), "minecraft:cactus");
+                assert_eq!(stem.state.property("age"), Some("0"));
+                assert_eq!(stem.owner, block.owner);
+            }
+            let sand_position = [anchor[0], anchor[1], anchor[2] - 1];
+            assert!(matches!(
+                world
+                    .blocks
+                    .get(&sand_position)
+                    .map(|support| support.state.id().as_str()),
+                Some("minecraft:sand" | "minecraft:red_sand")
+            ));
+            assert!(world.flora.iter().any(|record| {
+                record.anchor == *anchor
+                    && record.source == "minecraft:cactus_flower"
+                    && record.projected_cells == 3
+            }));
+        }
+        assert!(
+            dry_grass_counts.into_iter().all(|count| count > 0),
+            "natural sandy witness must contain both dry-grass resources"
+        );
+        assert!(
+            flowering_cacti > 0,
+            "natural cactus witness must contain an actual supported flower"
+        );
+    }
+
+    fn relevant_flora_projection(
+        world: &SurfaceWorld,
+    ) -> BTreeMap<[i32; 3], (BlockState, SourceOwner)> {
+        world
+            .blocks
+            .iter()
+            .filter_map(|(&position, block)| {
+                let id = block.state.id().as_str();
+                if matches!(
+                    id,
+                    "minecraft:cactus"
+                        | "minecraft:cactus_flower"
+                        | "minecraft:short_dry_grass"
+                        | "minecraft:tall_dry_grass"
+                ) && matches!(block.owner, SourceOwner::Flora { .. })
+                {
+                    Some((position, (block.state.clone(), block.owner.clone())))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn relevant_tree_projection(
+        world: &SurfaceWorld,
+    ) -> BTreeMap<[i32; 3], (BlockState, SourceOwner)> {
+        world
+            .blocks
+            .iter()
+            .filter(|(_, block)| {
+                matches!(
+                    block.owner,
+                    SourceOwner::Tree { .. } | SourceOwner::TreeDecoration { .. }
+                )
+            })
+            .map(|(&position, block)| (position, (block.state.clone(), block.owner.clone())))
+            .collect()
+    }
+
+    #[derive(Debug, Default)]
+    struct WoodedFloraCoverage {
+        prescriptions: [usize; 4],
+        dry_supports: [usize; 2],
+    }
+
+    fn assert_owned_arid_flora(
+        world: &SurfaceWorld,
+        settings: &VoxelLandscapeSettings,
+        counted_region: Region,
+    ) -> WoodedFloraCoverage {
+        let fields = TerrainFields::new(u64::from(settings.seed));
+        let mut groups =
+            BTreeMap::<([i32; 3], &'static str), BTreeMap<[i32; 3], BlockState>>::new();
+        let resources = [
+            "minecraft:cactus",
+            "minecraft:cactus_flower",
+            "minecraft:short_dry_grass",
+            "minecraft:tall_dry_grass",
+        ];
+        for (&position, block) in &world.blocks {
+            let SourceOwner::Flora {
+                anchor,
+                prescription,
+            } = &block.owner
+            else {
+                continue;
+            };
+            if !resources.contains(prescription) && !resources.contains(&block.state.id().as_str())
+            {
+                continue;
+            }
+            assert!(groups
+                .entry((*anchor, *prescription))
+                .or_default()
+                .insert(position, block.state.clone())
+                .is_none());
+        }
+        for record in &world.flora {
+            if record.projected_cells > 0 && resources.contains(&record.source) {
+                assert!(
+                    groups.contains_key(&(record.anchor, record.source)),
+                    "projected arid flora record lost its owned cells"
+                );
+            }
+        }
+        let mut coverage = WoodedFloraCoverage::default();
+        for ((anchor, prescription), cells) in groups {
+            let (index, height) = match prescription {
+                "minecraft:cactus" => (0, 2),
+                "minecraft:cactus_flower" => (1, 3),
+                "minecraft:short_dry_grass" => (2, 1),
+                "minecraft:tall_dry_grass" => (3, 1),
+                other => panic!("arid flora has an unrelated prescription: {other}"),
+            };
+            let expected: BTreeMap<_, _> = (0..height)
+                .map(|level| {
+                    let block_state = if index < 2 && level < 2 {
+                        state("minecraft:cactus", [("age".into(), "0".into())]).unwrap()
+                    } else {
+                        plain(prescription).unwrap()
+                    };
+                    ([anchor[0], anchor[1], anchor[2] + level], block_state)
+                })
+                .collect();
+            assert_eq!(
+                cells, expected,
+                "incomplete or altered natural plant at {anchor:?}: {prescription}"
+            );
+            let records: Vec<_> = world
+                .flora
+                .iter()
+                .filter(|record| record.anchor == anchor && record.source == prescription)
+                .collect();
+            assert_eq!(records.len(), 1, "plant must have one source record");
+            assert_eq!(records[0].projected_cells, cells.len());
+            assert!(records[0].authored_placement);
+
+            let xy = [anchor[0], anchor[1]];
+            let column = world.columns.get(&xy).expect("natural plant column");
+            let biome = *world.biomes.get(&xy).expect("natural plant biome");
+            assert_eq!(*column, fields.sample(xy[0], xy[1], settings.rivers));
+            assert_eq!(anchor[2], i32::from(column.height));
+            let below = [anchor[0], anchor[1], anchor[2] - 1];
+            let support = world.blocks.get(&below).expect("emitted plant support");
+            assert_eq!(support.owner, SourceOwner::Terrain { biome });
+            let support_habitat = match support.state.id().as_str() {
+                "minecraft:sand" | "minecraft:red_sand" => HabitatCell::Sand,
+                "minecraft:grass_block" | "minecraft:coarse_dirt" => HabitatCell::Soil,
+                id => panic!("unexpected arid plant support at {below:?}: {id}"),
+            };
+            assert_eq!(habitat(&fields, settings, below), support_habitat);
+            assert!(dry_surface_support(world, anchor));
+            assert!(!world.fluids.contains_key(&below));
+            for &position in cells.keys() {
+                assert!(world.region.contains(position));
+                assert!(!world.fluids.contains_key(&position));
+                if index < 2 {
+                    for [dx, dy] in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
+                        let side = [position[0] + dx, position[1] + dy, position[2]];
+                        if world.region.contains(side) {
+                            assert!(!world.blocks.contains_key(&side), "blocked cactus side");
+                            assert!(!world.fluids.contains_key(&side), "wet cactus side");
+                        }
+                    }
+                }
+            }
+            if index < 2 {
+                assert_eq!(support_habitat, HabitatCell::Sand);
+            }
+            if biome == SurfaceBiome::WoodedBadlands
+                && below[2] >= 100
+                && counted_region.contains(anchor)
+            {
+                coverage.prescriptions[index] += 1;
+                if index >= 2 {
+                    let support_index = usize::from(support_habitat == HabitatCell::Soil);
+                    coverage.dry_supports[support_index] += 1;
+                }
+            }
+        }
+        coverage
+    }
+
+    fn discover_wooded_flora_seam(settings: &VoxelLandscapeSettings) -> (SurfaceWorld, [i32; 3]) {
+        // This is a bounded search of generated output, not a recorded witness.
+        // Sampling chooses wooded plateaus; only prepare can supply the plants.
+        const MAX_PREPARES: usize = 32;
+        let fields = TerrainFields::new(u64::from(settings.seed));
+        let mut prepared = 0;
+        for gy in -128..=128 {
+            for gx in -128..=128 {
+                let center = [gx * 128, gy * 128];
+                let (sample, biome) = sample_ground(&fields, settings, center[0], center[1]);
+                if biome != SurfaceBiome::WoodedBadlands
+                    || sample.height < 101
+                    || sample.water_level.is_some()
+                {
+                    continue;
+                }
+                assert!(
+                    prepared < MAX_PREPARES,
+                    "wooded flora discovery exhausted {MAX_PREPARES} public prepares"
+                );
+                prepared += 1;
+                let region = Region {
+                    minimum: center.map(|v| v - 64),
+                    maximum: center.map(|v| v + 64),
+                };
+                let interior = Region {
+                    minimum: region.minimum.map(|v| v + 8),
+                    maximum: region.maximum.map(|v| v - 8),
+                };
+                let world = prepare(region, settings, || false).unwrap();
+                let coverage = assert_owned_arid_flora(&world, settings, interior);
+                let mut materials = [0_usize; 3];
+                for (&xy, column) in &world.columns {
+                    if world.biomes.get(&xy) != Some(&SurfaceBiome::WoodedBadlands)
+                        || column.height < 101
+                    {
+                        continue;
+                    }
+                    let position = [xy[0], xy[1], i32::from(column.height) - 1];
+                    let Some(block) = world.blocks.get(&position) else {
+                        continue;
+                    };
+                    if block.owner
+                        != (SourceOwner::Terrain {
+                            biome: SurfaceBiome::WoodedBadlands,
+                        })
+                    {
+                        continue;
+                    }
+                    let index = match block.state.id().as_str() {
+                        "minecraft:red_sand" => 0,
+                        "minecraft:coarse_dirt" => 1,
+                        "minecraft:grass_block" => 2,
+                        id => panic!("wooded plateau lost its material mosaic: {id}"),
+                    };
+                    materials[index] += 1;
+                }
+                let interior_trees = world
+                    .blocks
+                    .iter()
+                    .filter(|(position, block)| {
+                        interior.contains(**position)
+                            && matches!(block.owner, SourceOwner::Tree { .. })
+                    })
+                    .count();
+                eprintln!(
+                    "wooded_flora_discovery seed={} attempt={prepared} region={region:?} \
+                     coverage={coverage:?} materials={materials:?} interior_trees={interior_trees}",
+                    settings.seed
+                );
+                if coverage.prescriptions.contains(&0)
+                    || coverage.dry_supports.contains(&0)
+                    || materials.contains(&0)
+                    || world.trees.is_empty()
+                    || interior_trees == 0
+                {
+                    continue;
+                }
+                let anchor = world.blocks.iter().find_map(|(&position, block)| {
+                    let SourceOwner::Flora {
+                        anchor,
+                        prescription: "minecraft:cactus_flower",
+                    } = &block.owner
+                    else {
+                        return None;
+                    };
+                    (block.state.id().as_str() == "minecraft:cactus_flower"
+                        && position == [anchor[0], anchor[1], anchor[2] + 2]
+                        && interior.contains(*anchor)
+                        && anchor[2] >= 101
+                        && world.biomes.get(&[anchor[0], anchor[1]])
+                            == Some(&SurfaceBiome::WoodedBadlands))
+                    .then_some(*anchor)
+                });
+                let anchor = anchor.expect("positive flowering coverage needs a real crown");
+                eprintln!(
+                    "wooded_flora_witness seed={} region={region:?} anchor={anchor:?} split_x={}",
+                    settings.seed,
+                    anchor[0] + 1
+                );
+                return (world, anchor);
+            }
+        }
+        panic!(
+            "no complete natural wooded flora/tree/mosaic witness in 66049 coarse sites \
+             and {prepared} public prepares"
+        );
+    }
+
+    #[test]
+    fn wooded_badlands_soil_changes_historical_cactus_support_without_changing_height() {
+        let region = Region {
+            minimum: [15584, -16416],
+            maximum: [15648, -16352],
+        };
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let world = prepare(region, &settings, || false).unwrap();
+        let fields = TerrainFields::new(u64::from(settings.seed));
+        assert!(
+            !world.trees.is_empty(),
+            "historical wooded region still needs trees"
+        );
+        assert!(
+            !relevant_tree_projection(&world).is_empty(),
+            "historical wooded region still needs projected trees"
+        );
+        for (&xy, column) in &world.columns {
+            assert_eq!(*column, fields.sample(xy[0], xy[1], settings.rivers));
+        }
+        // Primary's original public readback had red sand and cactus at these
+        // roots. The new soil mosaic intentionally changes their eligibility.
+        for (anchor, expected_state) in [
+            (
+                [15634, -16374, 119],
+                plain("minecraft:coarse_dirt").unwrap(),
+            ),
+            (
+                [15634, -16358, 119],
+                state("minecraft:grass_block", [("snowy".into(), "false".into())]).unwrap(),
+            ),
+        ] {
+            let xy = [anchor[0], anchor[1]];
+            assert_eq!(world.columns[&xy].height, 119);
+            assert_eq!(world.biomes[&xy], SurfaceBiome::WoodedBadlands);
+            let below = [anchor[0], anchor[1], 118];
+            let support = world
+                .blocks
+                .get(&below)
+                .expect("historical terrain surface");
+            assert_eq!(support.state, expected_state);
+            assert_eq!(
+                support.owner,
+                SourceOwner::Terrain {
+                    biome: SurfaceBiome::WoodedBadlands,
+                }
+            );
+            assert_eq!(habitat(&fields, &settings, below), HabitatCell::Soil);
+            assert!(dry_surface_support(&world, anchor));
+            assert!(!world.fluids.contains_key(&below));
+            assert!(world.flora.iter().all(|record| {
+                record.anchor != anchor
+                    || !matches!(
+                        record.source,
+                        "minecraft:cactus" | "minecraft:cactus_flower"
+                    )
+            }));
+            for level in 0..3 {
+                let position = [anchor[0], anchor[1], anchor[2] + level];
+                assert!(!world.fluids.contains_key(&position));
+                assert!(!world.blocks.get(&position).is_some_and(|block| {
+                    matches!(
+                        block.state.id().as_str(),
+                        "minecraft:cactus" | "minecraft:cactus_flower"
+                    )
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn natural_wooded_badlands_flora_keep_global_owners_across_split_and_shifted_windows() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            vegetation_percent: 100,
+            ..Default::default()
+        };
+        let (whole, cactus_anchor) = discover_wooded_flora_seam(&settings);
+        let region = whole.region;
+        assert!(!whole.trees.is_empty(), "wooded seam needs actual trees");
+        let expected_trees = relevant_tree_projection(&whole);
+        assert!(
+            !expected_trees.is_empty(),
+            "wooded seam needs projected trees"
+        );
+        let cactus = whole
+            .blocks
+            .get(&cactus_anchor)
+            .expect("natural boundary cactus");
+        assert_eq!(cactus.state.id().as_str(), "minecraft:cactus");
+        assert_eq!(
+            cactus.owner,
+            SourceOwner::Flora {
+                anchor: cactus_anchor,
+                prescription: "minecraft:cactus_flower",
+            }
+        );
+        let expected = relevant_flora_projection(&whole);
+        // The first excluded left-column is the witnessed cactus's east side.
+        let split_x = cactus_anchor[0] + 1;
+        let left_region = Region {
+            minimum: region.minimum,
+            maximum: [split_x, region.maximum[1]],
+        };
+        let right_region = Region {
+            minimum: [split_x, region.minimum[1]],
+            maximum: region.maximum,
+        };
+        assert!(left_region.contains(cactus_anchor));
+        for level in 0..3 {
+            let side = [split_x, cactus_anchor[1], cactus_anchor[2] + level];
+            assert!(!left_region.contains(side));
+            assert!(right_region.contains(side));
+            assert!(!whole.blocks.contains_key(&side));
+            assert!(!whole.fluids.contains_key(&side));
+        }
+        for reverse in [false, true] {
+            let parts = if reverse {
+                [right_region, left_region]
+            } else {
+                [left_region, right_region]
+            };
+            let mut joined = BTreeMap::new();
+            let mut joined_trees = BTreeMap::new();
+            for part_region in parts {
+                let part = prepare(part_region, &settings, || false).unwrap();
+                assert_owned_arid_flora(&part, &settings, part_region);
+                assert!(part.blocks.keys().all(|p| part_region.contains(*p)));
+                for (position, owned_block) in relevant_flora_projection(&part) {
+                    assert!(joined.insert(position, owned_block).is_none());
+                }
+                for (position, owned_block) in relevant_tree_projection(&part) {
+                    assert!(joined_trees.insert(position, owned_block).is_none());
+                }
+            }
+            assert_eq!(
+                joined, expected,
+                "split projection changed cactus/dry-grass states or global owners; reverse={reverse}"
+            );
+            assert_eq!(
+                joined_trees, expected_trees,
+                "split projection changed tree/decorator states or global owners; reverse={reverse}"
+            );
+        }
+
+        for [dx, dy] in [[8, 8], [-8, -8]] {
+            let shifted_region = Region {
+                minimum: [region.minimum[0] + dx, region.minimum[1] + dy],
+                maximum: [region.maximum[0] + dx, region.maximum[1] + dy],
+            };
+            let shifted = prepare(shifted_region, &settings, || false).unwrap();
+            let overlap = Region {
+                minimum: std::array::from_fn(|axis| {
+                    region.minimum[axis].max(shifted_region.minimum[axis])
+                }),
+                maximum: std::array::from_fn(|axis| {
+                    region.maximum[axis].min(shifted_region.maximum[axis])
+                }),
+            };
+            assert!(overlap.contains(cactus_anchor));
+            let coverage = assert_owned_arid_flora(&shifted, &settings, overlap);
+            assert!(
+                !coverage.prescriptions.contains(&0),
+                "shifted flora must be nonvacuous"
+            );
+            assert!(
+                !coverage.dry_supports.contains(&0),
+                "shifted soil/sand flora must remain"
+            );
+            let expected_overlap: BTreeMap<_, _> = expected
+                .iter()
+                .filter(|(position, _)| shifted_region.contains(**position))
+                .map(|(&position, owned_block)| (position, owned_block.clone()))
+                .collect();
+            let shifted_overlap: BTreeMap<_, _> = relevant_flora_projection(&shifted)
+                .into_iter()
+                .filter(|(position, _)| region.contains(*position))
+                .collect();
+            assert_eq!(
+                shifted_overlap, expected_overlap,
+                "shifted projection changed overlapping flora state or ownership"
+            );
+            let expected_tree_overlap: BTreeMap<_, _> = expected_trees
+                .iter()
+                .filter(|(position, _)| shifted_region.contains(**position))
+                .map(|(&position, owned_block)| (position, owned_block.clone()))
+                .collect();
+            let shifted_tree_overlap: BTreeMap<_, _> = relevant_tree_projection(&shifted)
+                .into_iter()
+                .filter(|(position, _)| region.contains(*position))
+                .collect();
+            assert!(
+                !expected_tree_overlap.is_empty(),
+                "shifted tree overlap must be real"
+            );
+            assert_eq!(
+                shifted_tree_overlap, expected_tree_overlap,
+                "shifted projection changed overlapping tree/decorator states or owners"
+            );
+            // Whole then shifted, followed by shifted then whole, must agree.
+            let after_shift = prepare(region, &settings, || false).unwrap();
+            assert_eq!(relevant_flora_projection(&after_shift), expected);
+            assert_eq!(relevant_tree_projection(&after_shift), expected_trees);
+        }
+        assert!(Region {
+            minimum: [i32::MIN + 255, 0],
+            maximum: [i32::MIN + 271, 16],
+        }
+        .validate()
+        .is_err());
+        assert!(Region {
+            minimum: [i32::MAX - 271, 0],
+            maximum: [i32::MAX - 255, 16],
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn off_window_tree_probe_at_crown_height_blocks_the_whole_flowering_cactus() {
+        let mut world = context_fixture([6, 6], SurfaceBiome::Desert);
+        world.region = Region {
+            minimum: [2, 2],
+            maximum: [7, 10],
+        };
+        let mut halo = cactus_tree_halo(&world, || false).unwrap();
+        let off_window_tree_position = [7, 6, 82];
+        assert_eq!(halo.get(&off_window_tree_position), Some(&false));
+        // The tree projection loop marks a produced off-window tree cell in
+        // this retained probe. Admission must see it at the flower's height.
+        *halo.get_mut(&off_window_tree_position).unwrap() = true;
+        let mut flora = FloraPlacement::new(16).unwrap();
+        assert_eq!(
+            flora.admit_cancellable(
+                flower_candidate([6, 6, 80], "minecraft:cactus_flower"),
+                |position| {
+                    if halo.get(&position) == Some(&true) {
+                        HabitatCell::Solid
+                    } else if position[2] == 79 {
+                        HabitatCell::Sand
+                    } else {
+                        HabitatCell::Air
+                    }
+                },
+                || false,
+            ),
+            Err(AdmissionError::Obstructed(off_window_tree_position))
+        );
+        assert_eq!(flora.cells().count(), 0);
+    }
+
+    #[test]
+    fn whole_fallen_beam_needs_ground_contact_but_can_bridge_two_shallow_cells() {
+        let mut geometry = TreeGeometry::default();
+        geometry.branch([0, 0, 0], [0, 0, 1]).unwrap();
+        geometry.branch([2, 0, 0], [6, 0, 0]).unwrap();
+        let column = |xy: [i32; 2]| TreeTerrainColumn {
+            solid_top: if (3..=4).contains(&xy[0]) { 79 } else { 80 },
+            water_top: None,
+        };
+        assert!(
+            tree_terrain_admits([0, 0, 80], TreeShape::Fallen, &geometry, column, || false)
+                .unwrap()
+        );
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Fallen,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] >= 2 { 79 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Fallen,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] >= 5 { 79 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        let rotated = geometry.rotated(1);
+        assert!(tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Fallen,
+            &rotated,
+            |xy| TreeTerrainColumn {
+                solid_top: if (3..=4).contains(&xy[1]) { 79 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn standing_wood_and_leaves_require_clear_air_above_each_terrain_column() {
+        let mut geometry = TreeGeometry::default();
+        geometry.branch([0, 0, 0], [0, 0, 3]).unwrap();
+        geometry.canopy([1, 0, 1], [0, 0, 0]).unwrap();
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Rounded,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 1 { 82 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        let mut wood = TreeGeometry::default();
+        wood.branch([0, 0, 0], [0, 0, 3]).unwrap();
+        wood.branch([1, 0, 0], [1, 0, 3]).unwrap();
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Dense,
+            &wood,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 1 { 81 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Dense,
+            &wood,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 1 { 79 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        for lowered_top in [78, 60] {
+            assert!(!tree_terrain_admits(
+                [0, 0, 80],
+                TreeShape::Dense,
+                &wood,
+                |xy| TreeTerrainColumn {
+                    solid_top: if xy[0] == 1 { lowered_top } else { 80 },
+                    water_top: None,
+                },
+                || false,
+            )
+            .unwrap());
+        }
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Rounded,
+            &geometry,
+            |_| TreeTerrainColumn {
+                solid_top: 80,
+                water_top: Some(82),
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(matches!(
+            tree_terrain_admits(
+                [0, 0, 80],
+                TreeShape::Rounded,
+                &geometry,
+                |_| TreeTerrainColumn {
+                    solid_top: 80,
+                    water_top: None,
+                },
+                || true,
+            ),
+            Err(AssetError::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn mangrove_props_can_enter_shallow_mud_and_water_but_must_reach_support() {
+        let mut geometry = TreeGeometry::default();
+        geometry.branch([0, 0, 3], [0, 0, 6]).unwrap();
+        geometry.root_branch([0, 0, 3], [4, 0, 0]).unwrap();
+        assert!(tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Mangrove,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 4 { 82 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Mangrove,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 0 { 80 } else { 76 },
+                water_top: Some(83),
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Mangrove,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 4 { 84 } else { 80 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+        assert!(!tree_terrain_admits(
+            [0, 0, 80],
+            TreeShape::Mangrove,
+            &geometry,
+            |xy| TreeTerrainColumn {
+                solid_top: if xy[0] == 0 { 80 } else { 76 },
+                water_top: None,
+            },
+            || false,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn terrain_rule_keeps_every_profile_and_growth_form_reachable_on_suitable_ground() {
+        let growths = [Growth::Young, Growth::Mature, Growth::Old];
+        for (index, profile) in tree_profiles::TREE_PROFILES.iter().enumerate() {
+            for (age, growth) in growths.into_iter().enumerate() {
+                let entropy = hash2(71839, index as i64, age as i64);
+                let geometry = tree_forms::build(profile, growth, entropy).unwrap();
+                assert!(
+                    tree_terrain_admits(
+                        [0, 0, 80],
+                        profile.shape,
+                        &geometry,
+                        |_| TreeTerrainColumn {
+                            solid_top: 80,
+                            water_top: None,
+                        },
+                        || false,
+                    )
+                    .unwrap(),
+                    "{} {growth:?} lost on flat suitable ground",
+                    profile.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn forced_unsupported_fallen_oak_is_absent_in_whole_partial_and_shifted_regions() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            ..Default::default()
+        };
+        let unsupported: [i32; 3] = [-3963, -16372, 151];
+        let supported: [i32; 3] = [2774, -16482, 86];
+        let unsupported_entropy = hash2(
+            u64::from(settings.seed) ^ 0x7472_6565,
+            i64::from(unsupported[0].div_euclid(13)),
+            i64::from(unsupported[1].div_euclid(13)),
+        );
+        for region in [
+            Region {
+                minimum: [unsupported[0] - 24, unsupported[1] - 24],
+                maximum: [unsupported[0] + 24, unsupported[1] + 24],
+            },
+            Region {
+                minimum: [unsupported[0], unsupported[1]],
+                maximum: [unsupported[0] + 6, unsupported[1] + 6],
+            },
+            Region {
+                minimum: [unsupported[0] - 4, unsupported[1] - 4],
+                maximum: [unsupported[0] + 16, unsupported[1] + 16],
+            },
+        ] {
+            let selected_unsupported = std::cell::Cell::new(false);
+            let world = prepare_with_tree_configuration(
+                region,
+                &settings,
+                |biome, entropy| {
+                    if entropy != unsupported_entropy {
+                        return tree_configuration(biome, entropy);
+                    }
+                    selected_unsupported.set(true);
+                    Some("minecraft:fallen_oak_tree")
+                },
+                || false,
+            )
+            .unwrap();
+            assert!(
+                selected_unsupported.get(),
+                "Unsupported candidate never reached selection"
+            );
+            assert!(!world.blocks.values().any(|block| {
+                matches!(
+                    &block.owner,
+                    SourceOwner::Tree { anchor, .. } | SourceOwner::TreeDecoration { anchor, .. }
+                        if *anchor == unsupported
+                )
+            }));
+            assert!(!world.trees.iter().any(|tree| tree.anchor == unsupported));
+        }
+        let supported_entropy = hash2(
+            u64::from(settings.seed) ^ 0x7472_6565,
+            i64::from(supported[0].div_euclid(13)),
+            i64::from(supported[1].div_euclid(13)),
+        );
+        let selected_supported = std::cell::Cell::new(false);
+        let world = prepare_with_tree_configuration(
+            Region {
+                minimum: [supported[0] - 16, supported[1] - 16],
+                maximum: [supported[0] + 16, supported[1] + 16],
+            },
+            &settings,
+            |biome, entropy| {
+                if entropy != supported_entropy {
+                    return tree_configuration(biome, entropy);
+                }
+                selected_supported.set(true);
+                Some("minecraft:fallen_oak_tree")
+            },
+            || false,
+        )
+        .unwrap();
+        assert!(
+            selected_supported.get(),
+            "Supported candidate never reached selection"
+        );
+        assert!(world.trees.iter().any(|tree| tree.anchor == supported
+            && tree.source == "minecraft:fallen_oak_tree"
+            && tree.projected_cells > 0));
+        assert!(world.blocks.values().any(|block| {
+            matches!(
+                &block.owner,
+                SourceOwner::Tree { anchor, configuration: "minecraft:fallen_oak_tree" }
+                    if *anchor == supported
+            )
+        }));
+    }
+}
+
+#[cfg(test)]
+#[path = "surface_ecology_preservation_tests.rs"]
+mod ecology_preservation_tests;
+#[cfg(test)]
+#[path = "surface_ecology_tests.rs"]
+mod ecology_regression_tests;
+
+#[cfg(test)]
+#[path = "surface_village_generation_tests.rs"]
+mod village_layout_tests;
+
+#[cfg(test)]
+#[path = "surface_geology_public_tests.rs"]
+mod geology_public_tests;
+
+#[cfg(test)]
+#[path = "surface_geology_tests.rs"]
+mod geology_tests;
+
+#[cfg(test)]
+mod riverbank_drowned_regressions {
+    use super::*;
+    #[test]
+    fn night_river_surface_has_drowned_on_clear_dry_bank() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            atmosphere: 1,
+            vegetation_percent: 0,
+            ..Default::default()
+        };
+        let region = Region {
+            minimum: [-15296, -16448],
+            maximum: [-15168, -16320],
+        };
+        let world = prepare(region, &settings, || false).unwrap();
+        let model = surface_entities::model(
+            Species::Drowned,
+            AtlasLayout::Bedrock,
+            ClimateSkin::Temperate,
+        );
+        let (lo, hi) = model.bounds().unwrap();
+        let mut bank_sites = Vec::new();
+        let mut wet_river_columns = 0;
+        for (&xy, sample) in &world.columns {
+            if matches!(
+                world.biomes.get(&xy),
+                Some(SurfaceBiome::River | SurfaceBiome::FrozenRiver)
+            ) && sample.water_level.is_some_and(|w| w > sample.height)
+            {
+                wet_river_columns += 1;
+            }
+            let feet = i32::from(sample.height);
+            if sample.water_level.is_some_and(|w| i32::from(w) > feet) {
+                continue;
+            }
+            let Some(floor) = world.blocks.get(&[xy[0], xy[1], feet - 1]) else {
+                continue;
+            };
+            if !matches!(floor.owner, SourceOwner::Terrain { .. })
+                || floor.state.id().as_str() != "minecraft:grass_block"
+            {
+                continue;
+            }
+            let nearby = (-8..=8).any(|dx| {
+                (-8..=8).any(|dy| {
+                    let river = [xy[0] + dx, xy[1] + dy];
+                    world.columns.get(&river).is_some_and(|water| {
+                        matches!(
+                            world.biomes.get(&river),
+                            Some(SurfaceBiome::River | SurfaceBiome::FrozenRiver)
+                        ) && water.water_level.is_some_and(|level| {
+                            level > water.height
+                                && feet >= i32::from(level)
+                                && feet <= i32::from(level) + 4
+                        })
+                    })
+                })
+            });
+            if !nearby {
+                continue;
+            }
+            let first = [
+                (f64::from(xy[0]) + 0.5 + f64::from(lo[0])).floor() as i32,
+                (f64::from(xy[1]) + 0.5 + f64::from(lo[1])).floor() as i32,
+            ];
+            let last = [
+                (f64::from(xy[0]) + 0.5 + f64::from(hi[0])).ceil() as i32,
+                (f64::from(xy[1]) + 0.5 + f64::from(hi[1])).ceil() as i32,
+            ];
+            if first[0] < region.minimum[0]
+                || first[1] < region.minimum[1]
+                || last[0] > region.maximum[0]
+                || last[1] > region.maximum[1]
+            {
+                continue;
+            }
+            let mut clear = true;
+            for y in first[1]..last[1] {
+                for x in first[0]..last[0] {
+                    for z in feet..feet + (hi[2].ceil() as i32) {
+                        if world.blocks.contains_key(&[x, y, z])
+                            || world.fluids.contains_key(&[x, y, z])
+                        {
+                            clear = false
+                        }
+                    }
+                }
+            }
+            if clear {
+                bank_sites.push([xy[0], xy[1], feet]);
+            }
+        }
+        let drowned: Vec<_> = world
+            .entities
+            .iter()
+            .filter(|e| e.species == Species::Drowned)
+            .map(|e| e.anchor)
+            .collect();
+        assert!(
+            wet_river_columns > 0,
+            "fixture must contain actual river water"
+        );
+        assert!(
+            !bank_sites.is_empty(),
+            "fixture must contain collision-free original terrain bank"
+        );
+        assert!(
+            drowned.iter().any(|a| bank_sites.contains(a)),
+            "missing surface-only night riverbank drowned despite actual clear dry bank"
+        );
+    }
+
+    #[test]
+    fn riverbank_drowned_are_absent_in_day_storm_and_disabled_rivers() {
+        for (atmosphere, rivers) in [(0, true), (2, true), (1, false)] {
+            let world = prepare(
+                Region {
+                    minimum: [-15296, -16448],
+                    maximum: [-15168, -16320],
+                },
+                &VoxelLandscapeSettings {
+                    seed: 71839,
+                    atmosphere,
+                    rivers,
+                    vegetation_percent: 0,
+                    ..Default::default()
+                },
+                || false,
+            )
+            .unwrap();
+            assert!(
+                !world.entities.iter().any(|e| e.species == Species::Drowned),
+                "phase={atmosphere} rivers={rivers}"
+            );
+        }
+    }
+    #[test]
+    fn riverbank_drowned_reject_final_solid_obstructions() {
+        let mut world = prepare(
+            Region {
+                minimum: [-15296, -16448],
+                maximum: [-15168, -16320],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                atmosphere: 1,
+                vegetation_percent: 0,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let anchor = world
+            .entities
+            .iter()
+            .find(|e| e.species == Species::Drowned)
+            .expect("natural bank witness")
+            .anchor;
+        world.entities.retain(|e| e.anchor != anchor);
+        // Synthetic obstruction in an owned test world; no production world data is changed.
+        let obstruction = world.blocks[&[anchor[0], anchor[1], anchor[2] - 1]].clone();
+        world.blocks.insert(anchor, obstruction);
+        populate_riverbank_drowned(&mut world, true, SceneAtmosphere::Night, || false).unwrap();
+        assert!(!world.entities.iter().any(|e| e.anchor == anchor));
+    }
+    #[test]
+    fn riverbank_drowned_cancellation_keeps_existing_entities() {
+        let mut world = prepare(
+            Region {
+                minimum: [-15296, -16448],
+                maximum: [-15168, -16320],
+            },
+            &VoxelLandscapeSettings {
+                seed: 71839,
+                atmosphere: 1,
+                vegetation_percent: 0,
+                ..Default::default()
+            },
+            || false,
+        )
+        .unwrap();
+        let before: Vec<_> = world
+            .entities
+            .iter()
+            .map(|e| (e.species, e.anchor))
+            .collect();
+        assert!(matches!(
+            populate_riverbank_drowned(&mut world, true, SceneAtmosphere::Night, || true),
+            Err(AssetError::Cancelled)
+        ));
+        assert_eq!(
+            before,
+            world
+                .entities
+                .iter()
+                .map(|e| (e.species, e.anchor))
+                .collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn riverbank_drowned_keep_signed_owners_across_split_and_shifted_windows() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            atmosphere: 1,
+            vegetation_percent: 0,
+            ..Default::default()
+        };
+        let anchors = |region: Region| -> BTreeSet<[i32; 3]> {
+            prepare(region, &settings, || false)
+                .unwrap()
+                .entities
+                .iter()
+                .filter(|e| e.species == Species::Drowned)
+                .map(|e| e.anchor)
+                .collect()
+        };
+        let whole = anchors(Region {
+            minimum: [-15296, -16448],
+            maximum: [-15168, -16320],
+        });
+        assert!(!whole.is_empty());
+        let mut split = anchors(Region {
+            minimum: [-15296, -16448],
+            maximum: [-15232, -16320],
+        });
+        split.extend(anchors(Region {
+            minimum: [-15232, -16448],
+            maximum: [-15168, -16320],
+        }));
+        assert_eq!(whole, split);
+        let shifted = anchors(Region {
+            minimum: [-15295, -16447],
+            maximum: [-15167, -16319],
+        });
+        let interior =
+            |p: &&[i32; 3]| p[0] >= -15293 && p[0] < -15171 && p[1] >= -16445 && p[1] < -16323;
+        assert_eq!(
+            whole
+                .iter()
+                .filter(interior)
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            shifted.iter().filter(interior).copied().collect()
+        );
+    }
+}
+
+#[cfg(test)]
+mod leaf_litter_default_regressions {
+    use super::*;
+    use crate::voxel_landscape::{assets::block_state::StateDefinition, surface_state_geometry};
+
+    #[test]
+    fn compact_generated_litter_selects_one_complete_variant() {
+        let litter = plain("minecraft:leaf_litter").unwrap();
+        assert_eq!(litter.property("facing"), Some("north"));
+        assert_eq!(litter.property("segment_amount"), Some("1"));
+        let geometry = surface_state_geometry::definitions(litter.id().as_str()).unwrap();
+        assert_eq!(
+            StateDefinition::parse(&geometry.blockstate)
+                .unwrap()
+                .select(&litter, [0; 3], 71839)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn generated_litter_preserves_explicit_variants_and_rejects_duplicates() {
+        let supplied = [
+            ("facing".to_owned(), "south".to_owned()),
+            ("segment_amount".to_owned(), "3".to_owned()),
+        ];
+        let litter = state("minecraft:leaf_litter", supplied.clone()).unwrap();
+        assert_eq!(litter.properties(), &supplied.into_iter().collect());
+        assert!(state(
+            "minecraft:leaf_litter",
+            [
+                ("facing".to_owned(), "north".to_owned()),
+                ("facing".to_owned(), "south".to_owned())
+            ]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn both_natural_forest_witnesses_keep_renderable_litter() {
+        let geometry = surface_state_geometry::definitions("minecraft:leaf_litter").unwrap();
+        let definition = StateDefinition::parse(&geometry.blockstate).unwrap();
+        for (xy, rivers) in [([6606, -2562], true), ([-15104, -16384], false)] {
+            let settings = VoxelLandscapeSettings {
+                seed: 71839,
+                vegetation_percent: 100,
+                rivers,
+                ..Default::default()
+            };
+            let world = prepare(
+                Region {
+                    minimum: xy.map(|v| v - 16),
+                    maximum: xy.map(|v| v + 16),
+                },
+                &settings,
+                || false,
+            )
+            .unwrap();
+            let litter: Vec<_> = world
+                .blocks
+                .iter()
+                .filter(|(_, block)| block.state.id().as_str() == "minecraft:leaf_litter")
+                .collect();
+            assert!(
+                !litter.is_empty(),
+                "natural litter witness must not disappear"
+            );
+            for (position, block) in litter {
+                assert_eq!(
+                    definition
+                        .select(&block.state, *position, world.seed)
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            }
+        }
     }
 }

@@ -1,0 +1,425 @@
+{
+  "schema": 1,
+  "description": "Static approximate viewing anchors, not OSM geometry. Groups are author-curated. DMS conversion rounded to seven decimal degrees does not increase source accuracy. City anchors need not put a harbour or historic building in the narrow viewport; inspect actual OSM geometry locally.",
+  "coordinate_data_license": "CC0-1.0",
+  "license_source": "https://www.wikidata.org/wiki/Wikidata:Licensing",
+  "bundles": "Existing catalogue.rs and assets unchanged.",
+  "records": [
+    {
+      "id": "bruges",
+      "label": "Bruges, Belgium",
+      "list_id": "historic-towns",
+      "source": "https://www.wikidata.org/wiki/Q12994#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        51,
+        12,
+        32,
+        1
+      ],
+      "longitude_dms": [
+        3,
+        13,
+        27,
+        1
+      ],
+      "center": [
+        51.2088889,
+        3.2241667
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "dubrovnik",
+      "label": "Dubrovnik, Croatia",
+      "list_id": "historic-towns",
+      "source": "https://www.wikidata.org/wiki/Q1722#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        42,
+        38,
+        25,
+        1
+      ],
+      "longitude_dms": [
+        18,
+        6,
+        30,
+        1
+      ],
+      "center": [
+        42.6402778,
+        18.1083333
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "tallinn",
+      "label": "Tallinn, Estonia",
+      "list_id": "historic-towns",
+      "source": "https://www.wikidata.org/wiki/Q1770#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        59,
+        26,
+        14,
+        1
+      ],
+      "longitude_dms": [
+        24,
+        44,
+        42,
+        1
+      ],
+      "center": [
+        59.4372222,
+        24.745
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "quebec-city",
+      "label": "Quebec City, Canada",
+      "list_id": "historic-towns",
+      "source": "https://www.wikidata.org/wiki/Q2145#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        46,
+        48,
+        58,
+        1
+      ],
+      "longitude_dms": [
+        71,
+        13,
+        27.01,
+        -1
+      ],
+      "center": [
+        46.8161111,
+        -71.2241694
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "taj-mahal",
+      "label": "Taj Mahal, Agra",
+      "list_id": "landmarks",
+      "source": "https://www.wikidata.org/wiki/Q9141#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        27,
+        10,
+        30,
+        1
+      ],
+      "longitude_dms": [
+        78,
+        2,
+        31,
+        1
+      ],
+      "center": [
+        27.175,
+        78.0419444
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "athens-acropolis",
+      "label": "Acropolis, Athens",
+      "list_id": "landmarks",
+      "source": "https://www.wikidata.org/wiki/Q131013#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        37,
+        58,
+        18,
+        1
+      ],
+      "longitude_dms": [
+        23,
+        43,
+        34,
+        1
+      ],
+      "center": [
+        37.9716667,
+        23.7261111
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "cologne-cathedral",
+      "label": "Cologne Cathedral",
+      "list_id": "landmarks",
+      "source": "https://www.wikidata.org/wiki/Q4176#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        50,
+        56,
+        29,
+        1
+      ],
+      "longitude_dms": [
+        6,
+        57,
+        30,
+        1
+      ],
+      "center": [
+        50.9413889,
+        6.9583333
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "mont-saint-michel",
+      "label": "Mont-Saint-Michel",
+      "list_id": "landmarks",
+      "source": "https://www.wikidata.org/wiki/Q20892#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        48,
+        38,
+        9,
+        1
+      ],
+      "longitude_dms": [
+        1,
+        30,
+        37,
+        -1
+      ],
+      "center": [
+        48.6358333,
+        -1.5102778
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "porto",
+      "label": "Porto, Portugal",
+      "list_id": "harbours",
+      "source": "https://www.wikidata.org/wiki/Q36433#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        41,
+        9,
+        0,
+        1
+      ],
+      "longitude_dms": [
+        8,
+        36,
+        39,
+        -1
+      ],
+      "center": [
+        41.15,
+        -8.6108333
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "willemstad",
+      "label": "Willemstad, Curacao",
+      "list_id": "harbours",
+      "source": "https://www.wikidata.org/wiki/Q132679#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        12,
+        6,
+        29,
+        1
+      ],
+      "longitude_dms": [
+        68,
+        56,
+        6,
+        -1
+      ],
+      "center": [
+        12.1080556,
+        -68.935
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "valparaiso",
+      "label": "Valparaiso, Chile",
+      "list_id": "harbours",
+      "source": "https://www.wikidata.org/wiki/Q33986#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        33,
+        2,
+        46,
+        -1
+      ],
+      "longitude_dms": [
+        71,
+        37,
+        11,
+        -1
+      ],
+      "center": [
+        -33.0461111,
+        -71.6197222
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "central-park",
+      "label": "Central Park, New York",
+      "list_id": "parks",
+      "source": "https://www.wikidata.org/wiki/Q160409#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        40,
+        46,
+        57,
+        1
+      ],
+      "longitude_dms": [
+        73,
+        57,
+        58,
+        -1
+      ],
+      "center": [
+        40.7825,
+        -73.9661111
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "golden-gate-park",
+      "label": "Golden Gate Park, San Francisco",
+      "list_id": "parks",
+      "source": "https://www.wikidata.org/wiki/Q635559#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        37,
+        46,
+        11,
+        1
+      ],
+      "longitude_dms": [
+        122,
+        28,
+        37,
+        -1
+      ],
+      "center": [
+        37.7697222,
+        -122.4769444
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "philadelphia",
+      "label": "Philadelphia street grid",
+      "list_id": "street-grids",
+      "source": "https://www.wikidata.org/wiki/Q1345#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        39,
+        57,
+        10,
+        1
+      ],
+      "longitude_dms": [
+        75,
+        9,
+        49,
+        -1
+      ],
+      "center": [
+        39.9527778,
+        -75.1636111
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "chicago",
+      "label": "Chicago street grid",
+      "list_id": "street-grids",
+      "source": "https://www.wikidata.org/wiki/Q1297#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        41,
+        52,
+        55,
+        1
+      ],
+      "longitude_dms": [
+        87,
+        37,
+        40,
+        -1
+      ],
+      "center": [
+        41.8819444,
+        -87.6277778
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    },
+    {
+      "id": "la-plata",
+      "label": "La Plata grid and diagonals",
+      "list_id": "street-grids",
+      "source": "https://www.wikidata.org/wiki/Q44059#P625",
+      "property": "P625",
+      "observed_date": "2026-10-03",
+      "latitude_dms": [
+        34,
+        56,
+        0,
+        -1
+      ],
+      "longitude_dms": [
+        57,
+        57,
+        0,
+        -1
+      ],
+      "center": [
+        -34.9333333,
+        -57.95
+      ],
+      "license": "CC0-1.0",
+      "geometry_bundled": false
+    }
+  ]
+}

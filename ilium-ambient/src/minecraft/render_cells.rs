@@ -88,23 +88,63 @@ pub fn prepare(
             return Err(Error::Limit("render width"));
         }
     }
+    prepare_region(map, core, 0, limits, &mut work)
+}
+
+/// Render only an explicit exact saved core. Eight decoded support blocks on
+/// each side cover the native blend-radius-two quart lookup (up to seven blocks)
+/// and immediate face-neighbor queries; missing support rejects the core.
+/// A planner must independently keep every viewport inside a one-chunk inset
+/// from this core so boundary mesh faces cannot enter the painted image.
+pub fn prepare_core(
+    map: Arc<PreparedMap>,
+    core: surface::Bounds,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<RenderCells, Error> {
+    let mut work = surface::Work::new(limits.work_units, cancelled);
+    work.checkpoint()?;
+    if limits.depth > 64
+        || !(1..=MAX_CELLS).contains(&limits.cells)
+        || !(std::mem::size_of::<RenderCells>()..=MAX_BYTES).contains(&limits.owned_bytes)
+        || !(1..=MAX_WORK).contains(&limits.work_units)
+    {
+        return Err(Error::Invalid);
+    }
+    if map.loaded().chunks.is_empty() || map.loaded().chunks.len() > 128 {
+        return Err(Error::Invalid);
+    }
+    prepare_region(map, core, 8, limits, &mut work)
+}
+
+fn prepare_region(
+    map: Arc<PreparedMap>,
+    core: surface::Bounds,
+    halo: u16,
+    limits: Limits,
+    work: &mut surface::Work<'_>,
+) -> Result<RenderCells, Error> {
+    for axis in 0..2 {
+        if i64::from(core.maximum[axis]) - i64::from(core.minimum[axis]) + 1 > 256 {
+            return Err(Error::Limit("render width"));
+        }
+    }
+    let chunks = &map.loaded().chunks;
     let (heights, positions, storage_charge) = {
         let view = surface::SurfaceWindow::overworld_refs(
             core,
-            0,
+            halo,
             chunks.values().map(Arc::as_ref),
             surface::Limits {
                 max_chunks: 128,
                 max_columns: 32768,
                 max_owned_bytes: 16384,
             },
-            &mut work,
+            work,
         )?;
-        let heights = view
-            .surface_band(limits.depth, &mut work)?
-            .ok_or(Error::Empty)?;
+        let heights = view.surface_band(limits.depth, work)?.ok_or(Error::Empty)?;
         let mut positions = Vec::new();
-        view.visit_band(heights, &mut work, |cell| {
+        view.visit_band(heights, work, |cell| {
             if positions.len() >= limits.cells {
                 return Err(surface::Error::Limit("render cell positions"));
             }
@@ -252,6 +292,41 @@ mod tests {
         }
         assert!(input.storage_charge >= input.positions.capacity() * 12);
         assert!(input.storage_charge <= Limits::default().owned_bytes);
+    }
+
+    #[test]
+    fn explicit_core_uses_real_saved_halo_without_rendering_halo_cells() {
+        let positions = (-1..=1)
+            .flat_map(|z| (-1..=1).map(move |x| [x, z]))
+            .collect::<Vec<_>>();
+        let map = map(&positions);
+        let core = surface::Bounds {
+            minimum: [0, 0],
+            maximum: [15, 15],
+        };
+        let cells = prepare_core(Arc::clone(&map), core, Limits::default(), &|| false).unwrap();
+        assert_eq!(cells.core, core);
+        assert_eq!(cells.positions.len(), 6400);
+        assert!(cells
+            .positions
+            .iter()
+            .all(|position| core.contains([position[0], position[2]])));
+        assert!(Arc::ptr_eq(&cells.map, &map));
+        assert!(matches!(
+            prepare_core(
+                map,
+                surface::Bounds {
+                    minimum: [16, 0],
+                    maximum: [31, 15]
+                },
+                Limits::default(),
+                &|| false
+            ),
+            Err(Error::Surface(surface::Error::Unqualified {
+                reason: surface::Rejection::MissingChunk,
+                ..
+            }))
+        ));
     }
 
     #[test]

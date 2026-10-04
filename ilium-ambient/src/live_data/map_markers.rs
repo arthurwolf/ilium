@@ -23,6 +23,7 @@ pub(super) struct MarkerKey {
     pub cell_width: usize,
     pub cell_height: usize,
     pub marker_brightness: u8,
+    pub show_heading: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -348,12 +349,20 @@ pub(super) fn prepare_positions(
             prepared.occupied_centers[cell] = true;
             prepared.unique_center_cells += 1;
         }
-        draw_vehicle(
-            &mut prepared.raster,
-            (x, y),
-            position.heading_degrees,
-            f32::from(key.marker_brightness) / 100.0,
-        );
+        let intensity = f32::from(key.marker_brightness) / 100.0;
+        if key.show_heading {
+            draw_vehicle(
+                &mut prepared.raster,
+                (x, y),
+                position.heading_degrees,
+                intensity,
+            );
+        } else {
+            // Exactly one raster dot per vehicle, never a soft multi-dot blob.
+            let column = ((x * key.dot_width as f32) as usize).min(key.dot_width - 1);
+            let row = ((y * key.dot_height as f32) as usize).min(key.dot_height - 1);
+            prepared.raster.dots[row * key.dot_width + column] = intensity;
+        }
     }
     (!cancelled()).then_some(prepared)
 }
@@ -440,6 +449,7 @@ mod tests {
                 cell_width: 80,
                 cell_height: 24,
                 marker_brightness: 90,
+                show_heading: true,
             },
             positions: Arc::new(vec![
                 Position::new("fixture".into(), 0.0, 0.0, Some(0)).unwrap()
@@ -553,6 +563,7 @@ mod tests {
             },
             MarkerKey {
                 marker_brightness: 20,
+                show_heading: true,
                 ..original.key
             },
             MarkerKey {

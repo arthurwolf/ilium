@@ -952,6 +952,12 @@ pub fn analyze<'a>(
     })
 }
 
+/// Distinct authentic construction appearances for a classified dwelling's
+/// displayed exterior. Zero excludes natural ground and fluid-only wet solids.
+pub(super) fn construction_appearance_material(state: &BlockState) -> u8 {
+    construction::appearance_material(state)
+}
+
 #[path = "construction.rs"]
 mod construction;
 

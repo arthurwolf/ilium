@@ -5,7 +5,7 @@ mod camera;
 mod simulation;
 mod territory;
 
-use crate::{control::SceneSettings, Frame, Scene, SceneEnv};
+use crate::{control::SceneSettings, style::ScenePalette, AmbientSettings, Frame, Scene, SceneEnv};
 use camera::Camera;
 use simulation::{Galaxy, TICK_SECONDS};
 use std::time::Duration;
@@ -50,18 +50,25 @@ pub struct GalacticEmpiresScene {
     last_wall: Duration,
     accumulator: f64,
     camera_time: f64,
+    palette: ScenePalette,
 }
 
 impl GalacticEmpiresScene {
-    pub fn new(settings: &GalacticEmpiresSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it, and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: empire, star and backdrop colours are
+    // mapped onto the palette by brightness where they are drawn, so `PaletteScene`
+    // skips its generic recolour (`follows_palette`).
+    pub fn new(settings: &GalacticEmpiresSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let seed = settings.seed.max(1) as u64;
-        let galaxy = Galaxy::new(
-            seed,
-            settings.star_count as usize,
-            settings.empire_count as usize,
+        let galaxy = Galaxy::new(seed, settings.generation());
+        let territory = Territory::new(
+            &galaxy.stars,
+            settings.territory_radius,
+            settings.territory_softness,
         );
-        let territory = Territory::new(&galaxy.stars);
         let seed_initialized = settings.seed != 0;
         Self {
             settings,
@@ -75,16 +82,17 @@ impl GalacticEmpiresScene {
             last_wall: Duration::ZERO,
             accumulator: 0.0,
             camera_time: 0.0,
+            palette: env.palette.clone(),
         }
     }
 
     fn renew(&mut self, seed: u64) {
-        self.galaxy = Galaxy::new(
-            seed,
-            self.settings.star_count as usize,
-            self.settings.empire_count as usize,
+        self.galaxy = Galaxy::new(seed, self.settings.generation());
+        self.territory = Territory::new(
+            &self.galaxy.stars,
+            self.settings.territory_radius,
+            self.settings.territory_softness,
         );
-        self.territory = Territory::new(&self.galaxy.stars);
     }
 
     fn advance(&mut self, frame: &Frame<'_>) {
@@ -115,12 +123,14 @@ impl GalacticEmpiresScene {
         let ticks = (self.accumulator / TICK_SECONDS).floor().min(80.0) as usize;
         self.accumulator -= ticks as f64 * TICK_SECONDS;
         self.accumulator = self.accumulator.min(TICK_SECONDS);
+        let victory_hold_ticks =
+            (f64::from(self.settings.victory_hold_seconds) / TICK_SECONDS) as u64;
         for _ in 0..ticks {
             self.galaxy.step();
             if self
                 .galaxy
                 .victory_tick
-                .is_some_and(|tick| self.galaxy.tick - tick >= 60)
+                .is_some_and(|tick| self.galaxy.tick - tick >= victory_hold_ticks)
             {
                 self.cycle += 1;
                 self.renew(
@@ -134,6 +144,8 @@ impl GalacticEmpiresScene {
     fn draw_field(&self, frame: &mut Frame<'_>, camera: &Camera) {
         let (width, height) = (frame.raster.width, frame.raster.height);
         let shading = self.settings.territory_strength as f32 / 100.0;
+        let border = self.settings.territory_border as f32 / 100.0;
+        let contact_strength = self.settings.territory_contact as f32 / 100.0;
         let pulse = (self.camera_time as f32 * 2.0).sin().abs();
         for cy in 0..usize::from(frame.height) {
             for cx in 0..usize::from(frame.width) {
@@ -145,7 +157,7 @@ impl GalacticEmpiresScene {
                     continue;
                 };
                 frame.cell_colors[cy * usize::from(frame.width) + cx] =
-                    self.galaxy.empires[cell.owner].color;
+                    self.palette.recolor(self.galaxy.empires[cell.owner].color);
                 if shading == 0.0 {
                     continue;
                 }
@@ -169,8 +181,10 @@ impl GalacticEmpiresScene {
                                 0.20
                             }
                         });
-                        frame.raster.dots[y * width + x] =
-                            shading * sample.coverage * (0.22 + 0.35 * sample.contour + contact);
+                        frame.raster.dots[y * width + x] = (shading
+                            * sample.coverage
+                            * (0.22 + 0.35 * sample.contour * border + contact * contact_strength))
+                            .clamp(0.0, 1.0);
                     }
                 }
             }
@@ -275,7 +289,7 @@ impl Scene for GalacticEmpiresScene {
             usize::from(frame.width) * usize::from(frame.height),
             [96, 119, 148],
         );
-        frame.cell_colors.fill([96, 119, 148]);
+        frame.cell_colors.fill(self.palette.recolor([96, 119, 148]));
         if frame.width == 0
             || frame.height == 0
             || frame.raster.width == 0
@@ -287,31 +301,40 @@ impl Scene for GalacticEmpiresScene {
             frame.raster.aspect(),
             self.camera_time,
             self.settings.camera_speed,
+            self.settings.camera_zoom,
+            self.settings.orbit_period_seconds,
         );
         self.draw_field(frame, &camera);
-        for &(first, second) in &self.galaxy.lanes {
-            let a = &self.galaxy.stars[first];
-            let b = &self.galaxy.stars[second];
-            let intensity = match (a.owner, b.owner) {
-                (Some(first), Some(second))
-                    if first != second && self.galaxy.relations[first][second].war =>
-                {
-                    0.72
-                }
-                (Some(first), Some(second)) if first == second => 0.60,
-                _ => 0.52,
-            };
-            frame.raster.line(
-                camera.project(a.position),
-                camera.project(b.position),
-                0.35,
-                intensity,
-            );
+        if self.settings.show_lanes && self.settings.lane_brightness > 0 {
+            let lane_width = 0.35 * self.settings.lane_width as f32 / 100.0;
+            let lane_brightness = self.settings.lane_brightness as f32 / 100.0;
+            for &(first, second) in &self.galaxy.lanes {
+                let a = &self.galaxy.stars[first];
+                let b = &self.galaxy.stars[second];
+                let intensity: f32 = match (a.owner, b.owner) {
+                    (Some(first), Some(second))
+                        if first != second && self.galaxy.relations[first][second].war =>
+                    {
+                        0.72
+                    }
+                    (Some(first), Some(second)) if first == second => 0.60,
+                    _ => 0.52,
+                };
+                frame.raster.line(
+                    camera.project(a.position),
+                    camera.project(b.position),
+                    lane_width,
+                    (intensity * lane_brightness).min(1.0),
+                );
+            }
         }
         self.marker_cells.resize(frame.cell_colors.len(), None);
         self.marker_cells.fill(None);
         self.marker_primitives.clear();
-        if self.settings.show_fleets {
+        if self.settings.show_fleets && self.settings.fleet_brightness > 0 {
+            let fleet_size = self.settings.fleet_size as f32 / 100.0;
+            let fleet_brightness = self.settings.fleet_brightness as f32 / 100.0;
+            let trail_length = 0.08 * self.settings.fleet_trail_length as f32 / 100.0;
             for fleet in &self.galaxy.fleets {
                 let from = self.galaxy.stars[fleet.from].position;
                 let to = self.galaxy.stars[fleet.to].position;
@@ -320,24 +343,26 @@ impl Scene for GalacticEmpiresScene {
                     from.1 + (to.1 - from.1) * fleet.progress,
                 );
                 let projected = camera.project(position);
-                let tail = camera.project((
-                    from.0 + (to.0 - from.0) * (fleet.progress - 0.08).max(0.0),
-                    from.1 + (to.1 - from.1) * (fleet.progress - 0.08).max(0.0),
-                ));
-                let color = self.galaxy.empires[fleet.owner].color;
-                Self::queue_marker(
-                    frame,
-                    &mut self.marker_cells,
-                    &mut self.marker_primitives,
-                    Marker {
-                        from: tail,
-                        to: projected,
-                        radius: 0.35,
-                        intensity: 0.65,
-                        color,
-                        rank: 1,
-                    },
-                );
+                let color = self.palette.recolor(self.galaxy.empires[fleet.owner].color);
+                if trail_length > 0.0 {
+                    let tail = camera.project((
+                        from.0 + (to.0 - from.0) * (fleet.progress - trail_length).max(0.0),
+                        from.1 + (to.1 - from.1) * (fleet.progress - trail_length).max(0.0),
+                    ));
+                    Self::queue_marker(
+                        frame,
+                        &mut self.marker_cells,
+                        &mut self.marker_primitives,
+                        Marker {
+                            from: tail,
+                            to: projected,
+                            radius: 0.35 * fleet_size,
+                            intensity: 0.65 * fleet_brightness,
+                            color,
+                            rank: 1,
+                        },
+                    );
+                }
                 Self::queue_marker(
                     frame,
                     &mut self.marker_cells,
@@ -345,42 +370,75 @@ impl Scene for GalacticEmpiresScene {
                     Marker {
                         from: projected,
                         to: projected,
-                        radius: if fleet.campaign { 1.1 } else { 0.8 },
-                        intensity: 1.0,
+                        radius: (if fleet.campaign { 1.1 } else { 0.8 }) * fleet_size,
+                        intensity: fleet_brightness,
                         color,
                         rank: 2,
                     },
                 );
             }
         }
-        for (index, star) in self.galaxy.stars.iter().enumerate() {
-            let color = star
-                .owner
-                .map_or([184, 186, 178], |owner| self.galaxy.empires[owner].color);
-            let light = color.map(|channel| (u16::from(channel) + 255).div_ceil(2) as u8);
-            let point = camera.project(star.position);
-            let captured = self
-                .galaxy
-                .last_captures
-                .iter()
-                .any(|&(_, to, _)| to == index);
-            Self::queue_marker(
-                frame,
-                &mut self.marker_cells,
-                &mut self.marker_primitives,
-                Marker {
-                    from: point,
-                    to: point,
-                    radius: if captured { 1.5 } else { 1.2 },
-                    intensity: 1.0,
-                    color: light,
-                    rank: 3,
-                },
-            );
+        if self.settings.star_brightness > 0 {
+            let star_size = self.settings.star_size as f32 / 100.0;
+            let star_brightness = self.settings.star_brightness as f32 / 100.0;
+            for (index, star) in self.galaxy.stars.iter().enumerate() {
+                let color = self.palette.recolor(
+                    star.owner
+                        .map_or([184, 186, 178], |owner| self.galaxy.empires[owner].color),
+                );
+                let light = color.map(|channel| (u16::from(channel) + 255).div_ceil(2) as u8);
+                let point = camera.project(star.position);
+                let captured = self
+                    .galaxy
+                    .last_captures
+                    .iter()
+                    .any(|&(_, to, _)| to == index);
+                Self::queue_marker(
+                    frame,
+                    &mut self.marker_cells,
+                    &mut self.marker_primitives,
+                    Marker {
+                        from: point,
+                        to: point,
+                        radius: (if captured && self.settings.capture_flashes {
+                            1.5
+                        } else {
+                            1.2
+                        }) * star_size,
+                        intensity: star_brightness,
+                        color: light,
+                        rank: 3,
+                    },
+                );
+            }
         }
         Self::paint_markers(frame, &self.marker_cells, &self.marker_primitives);
     }
 
+    fn reconfigure(&mut self, settings: &AmbientSettings) -> bool {
+        let next = settings.galactic_empires.normalized();
+        if self.settings.seed != next.seed || self.settings.generation() != next.generation() {
+            return false;
+        }
+        if self.settings.territory_radius != next.territory_radius {
+            self.territory = Territory::new(
+                &self.galaxy.stars,
+                next.territory_radius,
+                next.territory_softness,
+            );
+        } else {
+            self.territory.set_softness(next.territory_softness);
+        }
+        self.settings = next;
+        true
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+    fn follows_palette(&self) -> bool {
+        true
+    }
     fn uses_cell_colors(&self) -> bool {
         true
     }

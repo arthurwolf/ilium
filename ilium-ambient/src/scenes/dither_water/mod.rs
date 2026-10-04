@@ -17,6 +17,7 @@ pub use settings::DitherWaterSettings;
 
 use crate::control::SceneSettings;
 use crate::scene::{Frame, Scene, SceneEnv};
+use crate::style::ScenePalette;
 use std::f64::consts::TAU;
 
 pub const INSPIRED_BY: &[&str] =
@@ -52,6 +53,8 @@ pub struct DitherWaterScene {
     /// Sum of field intensity per cell, reused between frames (tint only).
     cell_sums: Vec<f32>,
     cell_counts: Vec<f32>,
+    /// The shared look's palette; tint colours are sampled from it when provided.
+    palette: ScenePalette,
 }
 
 /// Recursive Bayer matrix of side `side` (power of two), values 0..side^2.
@@ -140,7 +143,13 @@ struct Ring {
 }
 
 impl DitherWaterScene {
-    pub fn new(settings: &DitherWaterSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: the tint ramp is sampled from the
+    // palette (`follows_palette`), so `PaletteScene` skips its generic recolour.
+    pub fn new(settings: &DitherWaterSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let matrix_side = settings.dither.side();
         let levels = (matrix_side * matrix_side) as f32;
@@ -165,6 +174,7 @@ impl DitherWaterScene {
             seed_phases,
             cell_sums: Vec::new(),
             cell_counts: Vec::new(),
+            palette: env.palette.clone(),
         }
     }
 
@@ -347,12 +357,28 @@ impl Scene for DitherWaterScene {
                     0.0
                 };
                 let amount = (average * 1.5).clamp(0.0, 1.0);
+                if let Some(rgb) = self.palette.at(amount) {
+                    for channel in 0..3 {
+                        color[channel] = (f32::from(rgb[channel]) * color_gain)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                    }
+                    continue;
+                }
                 for channel in 0..3 {
                     let base = mix(DEEP_WATER[channel], PALE_WATER[channel], amount);
                     color[channel] = (base * color_gain * 255.0).round().clamp(0.0, 255.0) as u8;
                 }
             }
         }
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {

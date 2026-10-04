@@ -30,6 +30,7 @@ pub use settings::HexExpeditionSettings;
 use crate::control::SceneSettings;
 use crate::raster::smoothstep;
 use crate::scene::{Frame, Scene, SceneEnv};
+use crate::style::ScenePalette;
 use canvas::{Canvas, Rgb};
 use settings::{MapChoice, PanStyle};
 use sprites::{Smoke, TileView};
@@ -61,6 +62,8 @@ pub struct HexExpeditionScene {
     smoke: Vec<Smoke>,
     current_kind: MapKind,
     atlas: Atlas,
+    /// The shared look's palette; biome colours are mapped onto it when provided.
+    palette: ScenePalette,
 }
 
 /// Which maps are on screen this frame and how far the reveal has got.
@@ -96,7 +99,14 @@ impl TileWindow {
 }
 
 impl HexExpeditionScene {
-    pub fn new(settings: &HexExpeditionSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: every dot's biome colour is mapped
+    // onto the palette by lightness before the cell reduction (`follows_palette`),
+    // so `PaletteScene` skips its generic recolour.
+    pub fn new(settings: &HexExpeditionSettings, env: &SceneEnv) -> Self {
         Self {
             settings: settings.normalized(),
             dot_colors: Vec::new(),
@@ -104,6 +114,7 @@ impl HexExpeditionScene {
             smoke: Vec::new(),
             current_kind: MapKind::Jungle,
             atlas: Atlas::default(),
+            palette: env.palette.clone(),
         }
     }
 
@@ -363,8 +374,19 @@ impl Scene for HexExpeditionScene {
             }
         }
         if self.settings.tint {
+            if self.palette.is_provided() {
+                canvas.map_colors(|color| self.palette.recolor(color));
+            }
             canvas.reduce_to_cells(cell_columns, cell_rows, frame.cell_colors);
         }
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {

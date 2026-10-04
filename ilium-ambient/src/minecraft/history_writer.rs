@@ -8,7 +8,14 @@ use super::{
     history_store::{self, Repository, Snapshot},
     tours::History,
 };
-use crate::source::Worker;
+use crate::{
+    resources::{AmbientResources, WorkerCost},
+    source::Worker,
+};
+
+// One native thread; bounded 2 MiB repository documents plus decoded snapshots,
+// serialization/read buffers and stack headroom. Declaration, not an RSS limit.
+const HISTORY_WORKER_BYTES: usize = 64 * 1024 * 1024;
 use std::{
     io,
     sync::{
@@ -77,19 +84,32 @@ struct Shared {
 impl Writer {
     /// Spawns only; initial_revision must come from an authoritative load.
     /// The caller supplies complete Controller histories after presentation.
-    pub fn start(repository: Repository, initial_revision: u64) -> io::Result<Self> {
-        Self::start_inner(repository, initial_revision, commit)
+    pub fn start(
+        repository: Repository,
+        initial_revision: u64,
+        resources: &AmbientResources,
+    ) -> io::Result<Self> {
+        Self::start_inner(repository, initial_revision, resources, commit)
     }
     fn start_inner(
         repository: Repository,
         initial_revision: u64,
+        resources: &AmbientResources,
         commit: impl Fn(&Repository, u64, History) -> Result<Snapshot, history_store::Error>
             + Send
             + 'static,
     ) -> io::Result<Self> {
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HISTORY_WORKER_BYTES,
+            })
+            .map_err(|error| {
+                io::Error::other(format!("Saved history admission rejected: {error:?}"))
+            })?;
         let shared = Arc::new(Shared::default());
         let worker_shared = Arc::clone(&shared);
-        let worker = Worker::try_spawn("minecraft-history", move |stop| {
+        let worker = Worker::start_admitted("minecraft-history", admission, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             );

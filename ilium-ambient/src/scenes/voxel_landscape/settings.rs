@@ -168,14 +168,24 @@ impl SceneSettings for VoxelLandscapeSettings {
     fn controls(&self) -> Vec<Control> {
         let value = self.normalized();
         let mut rows = value.saved_maps.controls();
+        let is_saved_source = value.saved_maps.source == WorldSource::SavedMaps;
         let renderer_rows = vec![
-            Control::choice("pack_profile", "Full texture pack", value.pack_profile,
+            Control::choice("pack_profile", if is_saved_source { "Custom pack profile" } else { "Full texture pack" }, value.pack_profile,
                 &["Jicklus", "F8thful", "Whimscape", "GoodVibes / Acaitart",
                   "deathcap ProgrammerArt", "Textureless", "Plasticator",
                   "PixelPerfectionCE", "Faithful32", "Faithful64", "Antumbra"],
-                "Private full-world test source; missing texture/model coverage is reported explicitly."),
+                if is_saved_source {
+                    "Choose the profile whose custom override you want to configure. A blank custom path uses installed Java 1.19.3 assets."
+                } else {
+                    "Private full-world test source; missing texture/model coverage is reported explicitly."
+                }),
             Control::text("pack_path", "Custom pack file or folder", &value.pack_path,
-                "Blank uses the selected installed pack", "Optional absolute local ZIP archive or extracted directory for this pack. Each pack retains its own override."),
+                if is_saved_source { "Blank uses installed Java 1.19.3 assets" } else { "Blank uses the selected installed pack" },
+                if is_saved_source {
+                    "Optional absolute local Java ZIP archive or extracted directory. Its models and textures override installed Java 1.19.3 assets. Each profile retains its own custom override."
+                } else {
+                    "Optional absolute local ZIP archive or extracted directory for this pack. Each pack retains its own override."
+                }),
             Control::text("pack_root", "Root inside pack", &value.pack_root,
                 "Optional relative folder", "Use only when the archive nests its pack files under a folder."),
             Control::choice("pack_mount", "Pack source type", value.pack_mount,

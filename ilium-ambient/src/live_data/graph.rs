@@ -305,6 +305,13 @@ impl Drop for GraphScene {
 }
 
 impl GraphScene {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
+    // which `create_scene` wraps around every scene, shifts this scene's cell
+    // colours onto the palette by brightness.
     pub fn new(settings: &GraphSettings, _env: &SceneEnv) -> Self {
         let mut scene = Self::without_worker(settings.normalized());
         // Only clone a bounded Arc under a nonblocking UI-path lock. Existing

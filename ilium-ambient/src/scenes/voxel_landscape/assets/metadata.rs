@@ -95,6 +95,11 @@ impl Document {
     pub(crate) fn uses_budget(&self, budget: &ByteBudget) -> bool {
         self._reservation.belongs_to(budget)
     } // Keep model/animation metadata on the same scene-wide account. // Implement the associated contract without hidden runtime I/O.
+    /// Transfer this document's conservative parsed-metadata reservation to
+    /// an equivalent derived selector, releasing the original JSON tree.
+    pub(crate) fn into_charge(self) -> Reservation {
+        self._reservation
+    }
     pub fn parse(
         blob: &SourceBlob,
         limits: &Limits,

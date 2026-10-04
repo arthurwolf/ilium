@@ -244,6 +244,13 @@ impl<'a> Canvas<'a> {
         );
     }
 
+    /// Replaces every dot colour with `map(colour)`.
+    pub fn map_colors(&mut self, map: impl Fn(Rgb) -> Rgb) {
+        for color in self.color.iter_mut() {
+            *color = map(*color);
+        }
+    }
+
     /// Reduces dot colours to one colour per terminal cell, weighted by tone.
     /// Cells with no lit dot take the plain mean so dim cells keep their hue.
     pub fn reduce_to_cells(&self, cell_columns: usize, cell_rows: usize, out: &mut [[u8; 3]]) {

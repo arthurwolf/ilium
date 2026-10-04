@@ -2,8 +2,10 @@
 
 use crate::gpu::GpuRunner;
 use crate::location::GeoLocation;
+use crate::minecraft::saved_runtime::SavedRuntime;
 use crate::raster::{PaintedOwner, Raster};
 use crate::registry::AmbientSettings;
+use crate::style::ScenePalette;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -11,6 +13,8 @@ use std::time::{Duration, SystemTime};
 /// Everything a scene may need besides its own settings.
 #[derive(Clone)]
 pub struct SceneEnv {
+    /// Host-supplied shared finite and physical allocation admission.
+    pub resources: crate::resources::AmbientResources,
     /// The shared observer position (stars, clouds, night lights).
     pub location: GeoLocation,
     /// Root for downloaded tiles, catalogs and thumbnails. Scenes create their
@@ -19,6 +23,13 @@ pub struct SceneEnv {
     /// The shared GPU device, when the host found a usable one. Scenes with a
     /// GPU renderer use it only when their setting asks for it.
     pub gpu: Option<Arc<dyn GpuRunner>>,
+    /// One history drain fence shared by all scene generations of this host.
+    pub saved_runtime: Arc<SavedRuntime>,
+    /// The shared look's current palette. Every scene is built with it and
+    /// receives later changes through `Scene::set_palette`. Scenes that draw
+    /// natural colours should shift them with `ScenePalette::recolor`;
+    /// monochrome scenes may ignore it (the host still recolours their ink).
+    pub palette: ScenePalette,
 }
 
 impl std::fmt::Debug for SceneEnv {
@@ -27,6 +38,7 @@ impl std::fmt::Debug for SceneEnv {
             .debug_struct("SceneEnv")
             .field("location", &self.location)
             .field("cache_dir", &self.cache_dir)
+            .field("saved_runtime", &"host-owned")
             .field(
                 "gpu",
                 &self.gpu.as_ref().map(|runner| runner.adapter_name()),
@@ -37,12 +49,222 @@ impl std::fmt::Debug for SceneEnv {
 
 impl SceneEnv {
     /// Test/probe environment with a throw-away cache directory.
-    pub fn for_test(cache_dir: PathBuf) -> Self {
+    pub fn for_test(cache_dir: PathBuf, resources: crate::resources::AmbientResources) -> Self {
         Self {
+            resources,
             location: GeoLocation::default(),
             cache_dir,
             gpu: None,
+            saved_runtime: Arc::new(SavedRuntime::new()),
+            palette: ScenePalette::default(),
         }
+    }
+}
+
+/// Which terminal cells of the host screen show something other than empty
+/// space, rebuilt by the host from the live workspace for every frame request.
+/// Scenes that interact with the screen (`Scene::wants_occupancy`) receive it
+/// through `Scene::occupancy`; it never contains animation ink itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OccupancyMask {
+    width: u16,
+    height: u16,
+    occupied: Vec<bool>,
+    /// Content-free foreground anchors; forbidden cells are not necessarily text.
+    characters: Vec<bool>,
+}
+
+impl OccupancyMask {
+    /// An all-empty mask of the given size.
+    pub fn empty(width: u16, height: u16) -> Self {
+        Self {
+            width,
+            height,
+            occupied: vec![false; usize::from(width) * usize::from(height)],
+            characters: vec![false; usize::from(width) * usize::from(height)],
+        }
+    }
+
+    /// Builds a mask by asking `is_occupied(column, row)` for every cell.
+    pub fn from_fn(width: u16, height: u16, mut is_occupied: impl FnMut(u16, u16) -> bool) -> Self {
+        let mut mask = Self::empty(width, height);
+        for row in 0..height {
+            for column in 0..width {
+                if is_occupied(column, row) {
+                    mask.set(column, row, true);
+                }
+            }
+        }
+        mask
+    }
+
+    pub fn width(&self) -> u16 {
+        self.width
+    }
+
+    pub fn height(&self) -> u16 {
+        self.height
+    }
+
+    pub fn set(&mut self, column: u16, row: u16, is_occupied: bool) {
+        if column < self.width && row < self.height {
+            let index = usize::from(row) * usize::from(self.width) + usize::from(column);
+            self.occupied[index] = is_occupied;
+            if !is_occupied {
+                self.characters[index] = false;
+            }
+        }
+    }
+
+    /// Mark visible foreground without exposing its text. Anchors are always
+    /// excluded from animation ink; removing an anchor does not relax exclusion.
+    pub fn set_character(&mut self, column: u16, row: u16, is_character: bool) {
+        if column < self.width && row < self.height {
+            let index = usize::from(row) * usize::from(self.width) + usize::from(column);
+            self.characters[index] = is_character;
+            if is_character {
+                self.occupied[index] = true;
+            }
+        }
+    }
+
+    /// Outside-screen walls never act as character-growth sources.
+    pub fn is_character(&self, column: i32, row: i32) -> bool {
+        if column < 0 || row < 0 || column >= i32::from(self.width) || row >= i32::from(self.height)
+        {
+            return false;
+        }
+        self.characters[row as usize * usize::from(self.width) + column as usize]
+    }
+
+    /// Cells outside the screen count as occupied: they are walls.
+    pub fn is_occupied(&self, column: i32, row: i32) -> bool {
+        if column < 0 || row < 0 || column >= i32::from(self.width) || row >= i32::from(self.height)
+        {
+            return true;
+        }
+        self.occupied[row as usize * usize::from(self.width) + column as usize]
+    }
+
+    /// Bytes retained, for admission accounting.
+    pub fn retained_bytes(&self) -> usize {
+        self.occupied.len().saturating_add(self.characters.len())
+    }
+}
+
+#[cfg(test)]
+mod character_occupancy_tests {
+    use super::OccupancyMask;
+
+    #[test]
+    fn character_anchors_preserve_exclusion_and_distinguish_forbidden_cells() {
+        let mut mask = OccupancyMask::from_fn(4, 2, |column, _| column == 0);
+        assert!(mask.is_occupied(0, 0));
+        assert!(!mask.is_character(0, 0));
+        assert!(mask.is_occupied(-1, 0));
+        assert!(!mask.is_character(-1, 0));
+        mask.set_character(2, 1, true);
+        assert!(mask.is_occupied(2, 1));
+        assert!(mask.is_character(2, 1));
+        let cloned = mask.clone();
+        assert_eq!(cloned, mask);
+        mask.set_character(2, 1, false);
+        assert!(mask.is_occupied(2, 1));
+        assert!(!mask.is_character(2, 1));
+        assert_ne!(cloned, mask);
+        mask.set_character(2, 1, true);
+        mask.set(2, 1, false);
+        assert!(!mask.is_occupied(2, 1));
+        assert!(!mask.is_character(2, 1));
+        assert_eq!(mask.retained_bytes(), 16);
+    }
+}
+
+/// Applies the shared palette to a scene on its behalf: after each render the
+/// scene's natural cell colours are shifted onto the palette by brightness.
+/// `create_scene` wraps every scene in it, so every animation follows the
+/// palette it was constructed with (`SceneEnv::palette`) and later changes
+/// (`Scene::set_palette`). A scene that wants finer control (palette-aware
+/// colour choices instead of a brightness remap) reads `SceneEnv::palette`
+/// itself and may override `set_palette`; plugins will do exactly that.
+pub struct PaletteScene {
+    inner: Box<dyn Scene>,
+    palette: ScenePalette,
+}
+
+impl PaletteScene {
+    pub fn new(mut inner: Box<dyn Scene>, palette: ScenePalette) -> Self {
+        inner.set_palette(&palette);
+        Self { inner, palette }
+    }
+}
+
+impl Scene for PaletteScene {
+    fn pointer(&mut self, position: Option<[f32; 2]>) {
+        self.inner.pointer(position);
+    }
+
+    fn render(&mut self, frame: &mut Frame<'_>) {
+        self.inner.render(frame);
+        if self.palette.is_provided()
+            && self.inner.uses_cell_colors()
+            && !self.inner.follows_palette()
+        {
+            self.palette.recolor_cells(frame.cell_colors);
+        }
+    }
+
+    fn presented(&mut self, owners: &[PaintedOwner]) {
+        self.inner.presented(owners);
+    }
+
+    fn receipt_bytes(&self) -> usize {
+        self.inner.receipt_bytes()
+    }
+
+    fn seal_frame(&mut self, id: FrameReceiptId) {
+        self.inner.seal_frame(id);
+    }
+
+    fn presented_frame(&mut self, id: FrameReceiptId, owners: &[PaintedOwner]) {
+        self.inner.presented_frame(id, owners);
+    }
+
+    fn native_glyph(&self, x: u16, y: u16) -> Option<char> {
+        self.inner.native_glyph(x, y)
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+        self.inner.set_palette(palette);
+    }
+
+    fn wants_occupancy(&self) -> bool {
+        self.inner.wants_occupancy()
+    }
+
+    fn occupancy(&mut self, mask: &OccupancyMask) {
+        self.inner.occupancy(mask);
+    }
+
+    fn follows_palette(&self) -> bool {
+        self.inner.follows_palette()
+    }
+
+    fn uses_cell_colors(&self) -> bool {
+        self.inner.uses_cell_colors()
+    }
+
+    fn frames_per_second(&self) -> u32 {
+        self.inner.frames_per_second()
+    }
+
+    fn reconfigure(&mut self, settings: &AmbientSettings) -> bool {
+        self.inner.reconfigure(settings)
+    }
+
+    fn status(&self) -> Option<String> {
+        self.inner.status()
     }
 }
 
@@ -64,6 +286,32 @@ pub struct Frame<'a> {
     pub wall: Duration,
     /// Current civil time, for scenes that show the real sky/weather "now".
     pub now: SystemTime,
+}
+
+/// The worker admits at most three snapshots. A slot cannot be reused while
+/// its snapshot or presentation lease exists; the sequence prevents ABA after
+/// reuse. Only this small identity crosses the terminal/UI boundary. Heavy
+/// palette and owner tables remain in the hosted scene on the worker.
+pub const MAX_SCENE_RECEIPT_SLOTS: u8 = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameReceiptId {
+    slot: u8,
+    sequence: u64,
+}
+
+impl FrameReceiptId {
+    pub fn new(slot: u8, sequence: u64) -> Option<Self> {
+        (slot < MAX_SCENE_RECEIPT_SLOTS && sequence != 0).then_some(Self { slot, sequence })
+    }
+
+    pub fn slot(self) -> usize {
+        usize::from(self.slot)
+    }
+
+    pub fn sequence(self) -> u64 {
+        self.sequence
+    }
 }
 
 impl Frame<'_> {
@@ -103,11 +351,52 @@ pub trait Scene: Send {
     /// The default keeps ordinary scenes free of receipt bookkeeping.
     fn presented(&mut self, _owners: &[PaintedOwner]) {}
 
+    /// Conservative bytes retained by the current raster's presentation
+    /// receipt. The worker adds this to MAX_FRAME_BYTES before publication;
+    /// the scene also reserves its allocations in its own ByteBudget.
+    fn receipt_bytes(&self) -> usize {
+        0
+    }
+
+    /// Called only after snapshot admission and before publication. The
+    /// worker owns all slot tables and drops replaced heavy receipts itself.
+    fn seal_frame(&mut self, _id: FrameReceiptId) {}
+
+    /// Called after an actual terminal emission, with exactly the slot and
+    /// sequence retained by that emitted snapshot. Ordinary scenes preserve
+    /// their existing presentation callback without receipt bookkeeping.
+    fn presented_frame(&mut self, _id: FrameReceiptId, owners: &[PaintedOwner]) {
+        self.presented(owners);
+    }
+
     /// Optional single-cell text above Braille ink (Pi text mode and live
     /// map labels). Hosts call this after rendering; it must be bounded,
     /// nonblocking, and return only characters of one terminal cell width.
     fn native_glyph(&self, _x: u16, _y: u16) -> Option<char> {
         None
+    }
+
+    /// The shared palette changed while the scene runs. Scenes with natural
+    /// colours store it and use `ScenePalette::recolor` from the next frame;
+    /// the default ignores it. Never rebuild the scene for this.
+    fn set_palette(&mut self, _palette: &ScenePalette) {}
+
+    /// True when the scene reacts to what the workspace draws. The host then
+    /// builds an `OccupancyMask` of the screen before every frame request and
+    /// delivers it through `occupancy`; other scenes cost nothing.
+    fn wants_occupancy(&self) -> bool {
+        false
+    }
+
+    /// The latest screen occupancy, delivered before `render`. The mask is the
+    /// whole field (`width * height` cells); it changes when the workspace does.
+    fn occupancy(&mut self, _mask: &OccupancyMask) {}
+
+    /// True when the scene applies `SceneEnv::palette` / `set_palette` to its
+    /// own colours (palette-aware choices at the source). `PaletteScene` then
+    /// skips its generic brightness remap for this scene.
+    fn follows_palette(&self) -> bool {
+        false
     }
 
     /// True when the scene supplies `Frame::cell_colors`; otherwise the
@@ -144,5 +433,48 @@ impl Scene for MessageScene {
 
     fn status(&self) -> Option<String> {
         Some(self.0.clone())
+    }
+}
+
+#[cfg(test)]
+mod palette_scene_tests {
+    use super::*;
+
+    struct Flat;
+    impl Scene for Flat {
+        fn render(&mut self, frame: &mut Frame<'_>) {
+            frame.cell_colors.clear();
+            frame.cell_colors.resize(4, [200, 40, 40]);
+        }
+        fn uses_cell_colors(&self) -> bool {
+            true
+        }
+    }
+
+    fn render(scene: &mut dyn Scene) -> Vec<[u8; 3]> {
+        let mut raster = Raster::default();
+        raster.resize(4, 4);
+        let mut colors = Vec::new();
+        scene.render(&mut Frame {
+            raster: &mut raster,
+            cell_colors: &mut colors,
+            width: 2,
+            height: 2,
+            time: Duration::ZERO,
+            wall: Duration::ZERO,
+            now: SystemTime::UNIX_EPOCH,
+        });
+        colors
+    }
+
+    #[test]
+    fn palette_scene_recolors_only_when_a_palette_is_provided() {
+        let mut scene = PaletteScene::new(Box::new(Flat), ScenePalette::default());
+        assert_eq!(render(&mut scene)[0], [200, 40, 40]);
+        scene.set_palette(&ScenePalette {
+            stops: vec![[0, 0, 40], [0, 200, 255]],
+            ..Default::default()
+        });
+        assert_ne!(render(&mut scene)[0], [200, 40, 40]);
     }
 }

@@ -24,6 +24,9 @@ pub struct MountedPack {
     pub pack: LayeredPack,
     pub source_sha256: Option<Digest256>,
     pub duplicate_members: Vec<DuplicateMember>,
+    /// True only when every selected base/add-on layer was mounted from an
+    /// in-memory ZIP snapshot. A directory layer remains a live source.
+    pub immutable_definition_sources: bool,
 }
 fn source(
     path: &Path,
@@ -160,6 +163,7 @@ fn mount_with_origin(
         cancel,
     )?;
     let source_sha256 = selected_source.source_sha256;
+    let mut immutable_definition_sources = source_sha256.is_some();
     let duplicate_members = selected_source.duplicate_members;
     let target = PackFormat::new(settings.pack_format_major, settings.pack_format_minor)?;
     let limits = Limits::default();
@@ -193,6 +197,7 @@ fn mount_with_origin(
             &budget,
             cancel,
         )?;
+        immutable_definition_sources &= addon.source_sha256.is_some();
         pack = pack.with_internal_pack(
             addon.source,
             None,
@@ -207,5 +212,38 @@ fn mount_with_origin(
         pack,
         source_sha256,
         duplicate_members,
+        immutable_definition_sources,
     })
+}
+
+#[cfg(test)]
+mod immutable_source_tests {
+    use super::*;
+    use crate::voxel_landscape::assets::archive::synthetic_zip;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn mounted_directory_is_live_while_loaded_zip_is_an_immutable_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("selected-directory");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("stone.json"), b"{}").unwrap();
+        let archive = root.path().join("selected.zip");
+        std::fs::write(
+            &archive,
+            synthetic_zip(&[("stone.json", b"{}")], false, false),
+        )
+        .unwrap();
+        let budget = ByteBudget::new(64 << 20).unwrap();
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let live = source(&directory, true, DuplicatePolicy::Reject, &budget, cancel).unwrap();
+        let frozen = source(&archive, false, DuplicatePolicy::Reject, &budget, cancel).unwrap();
+        assert!(live.source_sha256.is_none());
+        assert!(frozen.source_sha256.is_some());
+        assert!(!(frozen.source_sha256.is_some() && live.source_sha256.is_some())); // A directory add-on disqualifies an otherwise immutable ZIP base.
+        drop(live);
+        drop(frozen);
+        assert_eq!(budget.used(), 0);
+    }
 }

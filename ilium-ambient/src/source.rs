@@ -4,12 +4,12 @@
 //! size and time, and a process-wide minimum spacing per host so a scene can
 //! never hammer a public service (keep the user's IP reputation clean).
 
+use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const USER_AGENT: &str = concat!(
@@ -25,96 +25,97 @@ pub fn default_cache_dir() -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("ilium-ambient"))
 }
 
-/// An owned background thread. The closure receives a stop flag it must poll
-/// between units of work. Dropping the worker raises the flag and joins the
-/// thread, so a scene that owns a `Worker` cannot leak it.
+/// A cancellable background owner. The platform supervisor retains each real
+/// join handle through thread exit; dropping a scene never waits on native I/O.
 pub struct Worker {
     stop: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+    owner: Option<OwnedWorker>,
 }
 
 impl Worker {
-    /// Transfer cleanup ownership away from the presentation thread. The
-    /// caller must bound admission of tasks that can block indefinitely.
-    pub fn stop_in_background(mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        let Some(handle) = self.handle.take() else {
-            return;
-        };
-        static REAPER: OnceLock<std::sync::mpsc::Sender<JoinHandle<()>>> = OnceLock::new();
-        let sender = REAPER.get_or_init(|| {
-            let (sender, receiver) = std::sync::mpsc::channel::<JoinHandle<()>>();
-            let result = std::thread::Builder::new()
-                .name("ilium-ambient-reaper".into())
-                .spawn(move || {
-                    let mut pending: Vec<JoinHandle<()>> = Vec::new();
-                    loop {
-                        match receiver.recv_timeout(Duration::from_millis(25)) {
-                            Ok(handle) => pending.push(handle),
-                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                        }
-                        let mut index = 0;
-                        while index < pending.len() {
-                            if pending[index].is_finished() {
-                                let _ = pending.swap_remove(index).join();
-                            } else {
-                                index += 1;
-                            }
-                        }
-                    }
-                });
-            if let Err(error) = result {
-                tracing::warn!(%error, "ambient reaper could not start");
-            }
-            sender
-        });
-        if sender.send(handle).is_err() {
-            tracing::warn!("ambient cleanup owner unavailable");
-        }
+    /// Start only with an already admitted host resource reservation. The wake
+    /// closure is kept by platform supervision through real join and the last
+    /// ticket; callback return and logical scene Drop cannot release it early.
+    pub fn start_admitted(
+        name: &str,
+        reservation: crate::resources::WorkerReservation,
+        task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
+    ) -> std::io::Result<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let wake_stop = Arc::clone(&stop);
+        let owner = spawn_owned(
+            &format!("ilium-ambient-{name}"),
+            WorkerKind::Cooperative,
+            StopToken::default(),
+            move || {
+                let _physical = &reservation.physical;
+                wake_stop.store(true, Ordering::Release);
+            },
+            move |_| task(thread_stop),
+        )?;
+        Ok(Self {
+            stop,
+            owner: Some(owner),
+        })
+    }
+    /// Request cancellation and leave actual joining to the bounded platform
+    /// supervisor. Live and retiring owners share its admission limit.
+    pub fn stop_in_background(self) {
+        drop(self);
     }
 
     pub fn spawn(name: &str, task: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Self {
-        Self::try_spawn(name, task).unwrap_or_else(|_| Self {
-            stop: Arc::new(AtomicBool::new(false)),
-            handle: None,
+        Self::try_spawn(name, task).unwrap_or_else(|error| {
+            tracing::warn!(%error, "ambient worker could not start");
+            Self {
+                stop: Arc::new(AtomicBool::new(true)),
+                owner: None,
+            }
         })
     }
 
-    /// Start an owned worker while preserving a spawn failure for callers
-    /// that expose readiness or recovery status.
+    /// Preserve spawn/admission failure for callers exposing readiness.
     pub fn try_spawn(
         name: &str,
         task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let handle = std::thread::Builder::new()
-            .name(format!("ilium-ambient-{name}"))
-            .spawn(move || task(thread_stop))?;
+        let wake_stop = Arc::clone(&stop);
+        let owner = spawn_owned(
+            &format!("ilium-ambient-{name}"),
+            WorkerKind::Cooperative,
+            StopToken::default(),
+            move || wake_stop.store(true, Ordering::Release),
+            move |_| task(thread_stop),
+        )?;
         Ok(Self {
             stop,
-            handle: Some(handle),
+            owner: Some(owner),
         })
     }
 
     pub fn is_stopping(&self) -> bool {
-        self.stop.load(Ordering::Relaxed)
+        self.stop.load(Ordering::Acquire)
     }
 
     pub fn stop_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.stop)
     }
+
+    #[cfg(test)]
+    pub(crate) fn join_observer(&self) -> Option<ilium_platform::owned_worker::WorkerTicket> {
+        self.owner.as_ref().map(OwnedWorker::ticket)
+    }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            // Tasks poll the flag between short operations; a blocked HTTP
-            // call is bounded by its timeout, so this join is bounded too.
-            let _ = handle.join();
-        }
+        self.stop.store(true, Ordering::Release);
+        // Dropping OwnedWorker requests cancellation. Its actual JoinHandle
+        // remains in the bounded supervisor, including blocked callbacks.
+        drop(self.owner.take());
     }
 }
 
@@ -241,21 +242,127 @@ fn request_error(error: ureq::Error) -> FetchError {
 } // End typed conversion.
 fn read_bounded_body(
     // Worker-only collection; this does not make blocked socket reads instantly cancellable.
-    mut reader: impl Read,     // ureq supplies the decoded response reader.
+    reader: impl Read,         // ureq supplies the decoded response reader.
     max_bytes: usize,          // Provider-specific decoded-byte limit.
     deadline: Instant,         // Includes the time spent waiting for host admission.
     stop: Option<&AtomicBool>, // Non-live callers retain their existing non-stoppable API.
 ) -> Result<Vec<u8>, FetchError> {
+    read_bounded_stream(reader, max_bytes, Some(deadline), stop)
+}
+
+/// Read a complete local file using the same byte guard as cached/HTTP bodies.
+/// A metadata length is not authoritative: growing files are checked on every
+/// read and an extra byte is detected, never returned as truncated success.
+pub fn read_bounded_file(path: &Path, max_bytes: usize) -> Result<Vec<u8>, FetchError> {
+    let file = std::fs::File::open(path).map_err(|error| FetchError::Request(error.to_string()))?;
+    read_bounded_stream(file, max_bytes, None, None)
+}
+
+/// Read an original file for a finite job, checking its owner/bank cancellation
+/// before opening and before/after each read. A blocked OS read still retires
+/// only when the OS returns; the existing IO bank retains its physical custody.
+pub fn read_bounded_file_with_cancel(
+    path: &Path,
+    max_bytes: usize,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<Vec<u8>, FetchError> {
+    if cancelled() {
+        return Err(FetchError::Cancelled);
+    }
+    let file = std::fs::File::open(path).map_err(|error| FetchError::Request(error.to_string()))?;
+    read_bounded_stream_with_cancel(file, max_bytes, None, cancelled)
+}
+
+fn read_bounded_stream(
+    reader: impl Read,
+    max_bytes: usize,
+    deadline: Option<Instant>,
+    stop: Option<&AtomicBool>,
+) -> Result<Vec<u8>, FetchError> {
+    read_bounded_stream_with_cancel(reader, max_bytes, deadline, || {
+        stop.is_some_and(|flag| flag.load(Ordering::Relaxed))
+    })
+}
+
+/// Scalar failures for the concrete File producer. No diagnostic String is
+/// constructed inside a finite file-read callback. Generic/custom readers are
+/// not covered: their io::Error may itself own arbitrary data.
+#[derive(Debug)]
+pub(crate) enum FileReadFailure {
+    Io {
+        kind: std::io::ErrorKind,
+        raw_os_error: Option<i32>,
+    },
+    Cancelled,
+    Timeout,
+    TooLarge(usize),
+    Allocation,
+}
+
+pub(crate) fn read_bounded_file_scalar(
+    path: &Path,
+    max_bytes: usize,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<Vec<u8>, FileReadFailure> {
+    let scalar_io = |error: std::io::Error| FileReadFailure::Io {
+        kind: error.kind(),
+        raw_os_error: error.raw_os_error(),
+    };
+    if cancelled() {
+        return Err(FileReadFailure::Cancelled);
+    }
+    let file = std::fs::File::open(path).map_err(scalar_io)?;
+    read_bounded_stream_result(file, max_bytes, None, cancelled).map_err(|error| match error {
+        ReadFailure::Io(error) => scalar_io(error),
+        ReadFailure::Cancelled => FileReadFailure::Cancelled,
+        ReadFailure::Timeout => FileReadFailure::Timeout,
+        ReadFailure::TooLarge(limit) => FileReadFailure::TooLarge(limit),
+        ReadFailure::Allocation => FileReadFailure::Allocation,
+    })
+}
+
+enum ReadFailure {
+    Io(std::io::Error),
+    Cancelled,
+    Timeout,
+    TooLarge(usize),
+    Allocation,
+}
+
+fn read_bounded_stream_with_cancel(
+    reader: impl Read,
+    max_bytes: usize,
+    deadline: Option<Instant>,
+    cancelled: impl FnMut() -> bool,
+) -> Result<Vec<u8>, FetchError> {
+    // Preserve the legacy HTTP/provider/custom-reader diagnostic boundary.
+    read_bounded_stream_result(reader, max_bytes, deadline, cancelled).map_err(
+        |error| match error {
+            ReadFailure::Io(error) => FetchError::Request(error.to_string()),
+            ReadFailure::Cancelled => FetchError::Cancelled,
+            ReadFailure::Timeout => FetchError::Timeout,
+            ReadFailure::TooLarge(limit) => FetchError::TooLarge(limit),
+            ReadFailure::Allocation => FetchError::Request("response allocation failed".into()),
+        },
+    )
+}
+
+fn read_bounded_stream_result(
+    mut reader: impl Read,
+    max_bytes: usize,
+    deadline: Option<Instant>,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<Vec<u8>, ReadFailure> {
     // Oversize/cancelled data is never returned as a truncated success.
     let mut bytes = Vec::new(); // Do not preallocate an attacker-selected size.
     let mut chunk = [0_u8; 8192]; // Fixed-size collection scratch space.
     loop {
         // The socket's ureq global timeout still bounds a blocked individual read.
-        if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            return Err(FetchError::Cancelled);
+        if cancelled() {
+            return Err(ReadFailure::Cancelled);
         } // Check before reading.
-        if Instant::now() >= deadline {
-            return Err(FetchError::Timeout);
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(ReadFailure::Timeout);
         } // Include body processing in the deadline.
         let remaining = max_bytes.saturating_sub(bytes.len()); // No subtraction underflow.
         let wanted = chunk.len().min(remaining.saturating_add(1)); // Read at most one byte beyond the hard bound.
@@ -263,26 +370,39 @@ fn read_bounded_body(
             // Read decoded bytes without changing interrupted-read semantics.
             Ok(read) => read, // Continue with the actual byte count.
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue, // Retry only after rechecking stop/deadline.
-            Err(error) => return Err(FetchError::Request(error.to_string())), // Other read failures retain last-good caller state.
+            Err(error) => return Err(ReadFailure::Io(error)), // Other read failures retain last-good caller state.
         }; // End the bounded read attempt.
-        if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            return Err(FetchError::Cancelled);
+        if cancelled() {
+            return Err(ReadFailure::Cancelled);
         } // Do not publish a just-cancelled EOF.
-        if Instant::now() >= deadline {
-            return Err(FetchError::Timeout);
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(ReadFailure::Timeout);
         } // An over-deadline body is not a success.
         if read > remaining {
-            return Err(FetchError::TooLarge(max_bytes));
+            return Err(ReadFailure::TooLarge(max_bytes));
         } // Reject instead of keeping the first max_bytes.
         if read == 0 {
             return Ok(bytes);
         } // Successful complete body receipt.
-        bytes
-            .try_reserve(read)
-            .map_err(|_| FetchError::Request("response allocation failed".into()))?; // Fallible growth.
+        let required = bytes.len() + read; // read <= remaining, so this cannot overflow.
+        if required > bytes.capacity() {
+            // Explicit requested capacity: short reads need not start with a
+            // power of two. Clamp geometric growth BEFORE allocation instead
+            // of assuming RawVec's amortized growth stays below next_power_of_two.
+            let target = bytes
+                .capacity()
+                .max(8)
+                .checked_mul(2)
+                .unwrap_or(max_bytes)
+                .max(required)
+                .min(max_bytes);
+            bytes
+                .try_reserve_exact(target - bytes.len())
+                .map_err(|_| ReadFailure::Allocation)?;
+        }
         bytes.extend_from_slice(&chunk[..read]); // Logical body length never exceeds max_bytes.
     } // End finite collection.
-} // End bounded HTTP body reader.
+} // End bounded complete stream reader.
 
 /// Read an HTTPS NDJSON connection on an owned worker. The callback receives
 /// complete bounded lines and returns false to stop. A finite connection
@@ -358,8 +478,10 @@ pub fn fetch_cached(
         .and_then(|modified| modified.elapsed().ok());
     if let Some(age) = cached_age {
         if age <= max_age {
-            if let Ok(bytes) = std::fs::read(&path) {
-                return Ok(bytes);
+            match read_bounded_file(&path, max_bytes) {
+                Ok(bytes) => return Ok(bytes),
+                Err(FetchError::TooLarge(limit)) => return Err(FetchError::TooLarge(limit)),
+                Err(_) => {}
             }
         }
     }
@@ -373,8 +495,9 @@ pub fn fetch_cached(
             }
             Ok(bytes)
         }
-        Err(error) => match std::fs::read(&path) {
+        Err(error) => match read_bounded_file(&path, max_bytes) {
             Ok(bytes) => Ok(bytes),
+            Err(FetchError::TooLarge(limit)) => Err(FetchError::TooLarge(limit)),
             Err(_) => Err(error),
         },
     }
@@ -383,6 +506,68 @@ pub fn fetch_cached(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_collector_clamps_non_power_of_two_short_read_growth_before_allocation() {
+        struct ShortFirstRead {
+            inner: std::io::Cursor<Vec<u8>>,
+            first: bool,
+        }
+        impl std::io::Read for ShortFirstRead {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let count = if self.first {
+                    self.first = false;
+                    output.len().min(3)
+                } else {
+                    output.len()
+                };
+                std::io::Read::read(&mut self.inner, &mut output[..count])
+            }
+        }
+        let original = vec![42; 32768];
+        let mut reader = ShortFirstRead {
+            inner: std::io::Cursor::new(original.clone()),
+            first: true,
+        };
+        let bytes = match read_bounded_stream_result(&mut reader, original.len(), None, || false) {
+            Ok(bytes) => bytes,
+            Err(_) => panic!("bounded complete fixture rejected"),
+        };
+        assert_eq!(bytes, original);
+        assert!(
+            bytes.capacity() <= original.len(),
+            "actual collector capacity escaped its admitted ceiling"
+        );
+    }
+
+    #[test]
+    fn scalar_file_failure_preserves_os_identity_and_legacy_diagnostic() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("missing-original");
+        let original = std::fs::File::open(&path).unwrap_err();
+        let legacy = read_bounded_file(&path, 8).unwrap_err();
+        assert_eq!(legacy.to_string(), format!("request failed: {original}"));
+        match read_bounded_file_scalar(&path, 8, || false) {
+            Err(FileReadFailure::Io { kind, raw_os_error }) => {
+                assert_eq!(kind, original.kind());
+                assert_eq!(raw_os_error, original.raw_os_error());
+            }
+            other => panic!("wrong actual file failure: {other:?}"),
+        }
+        assert!(matches!(
+            read_bounded_file_scalar(&path, 8, || true),
+            Err(FileReadFailure::Cancelled)
+        ));
+        std::fs::write(&path, b"original").unwrap();
+        assert!(matches!(
+            read_bounded_file_scalar(&path, 7, || false),
+            Err(FileReadFailure::TooLarge(7))
+        ));
+        assert_eq!(
+            read_bounded_file_scalar(&path, 8, || false).unwrap(),
+            b"original"
+        );
+    }
 
     #[test]
     fn stopped_worker_never_admits_a_request_or_reserves_a_future_slot() {
@@ -423,18 +608,61 @@ mod tests {
     }
 
     #[test]
-    fn worker_drop_stops_and_joins_the_thread() {
+    fn worker_drop_requests_stop_and_supervisor_joins_the_thread() {
         let (sender, receiver) = std::sync::mpsc::channel();
-        let worker = Worker::spawn("test", move |stop| {
-            while !stop.load(Ordering::Relaxed) {
+        let worker = Worker::try_spawn("test", move |stop| {
+            while !stop.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let _ = sender.send(());
-        });
+        })
+        .unwrap();
+        let ticket = worker.owner.as_ref().unwrap().ticket();
         drop(worker);
+        assert_eq!(
+            ticket
+                .join_until(Instant::now() + Duration::from_secs(2))
+                .unwrap(),
+            ilium_platform::owned_worker::WorkerExit::Joined,
+        );
         assert!(
             receiver.try_recv().is_ok(),
-            "thread finished before drop returned"
+            "actual join follows callback completion"
+        );
+    }
+
+    #[test]
+    fn blocked_callback_cannot_block_scene_drop_and_remains_owned() {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = Worker::try_spawn("blocked-drop-test", move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        })
+        .unwrap();
+        let stop = worker.stop_flag();
+        let ticket = worker.owner.as_ref().unwrap().ticket();
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (dropped_tx, dropped_rx) = std::sync::mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            drop(worker);
+            dropped_tx.send(()).unwrap();
+        });
+        // Always release the blocked callback, even if the nonblocking-drop
+        // assertion fails, so the fixture cannot leave a hung owned worker.
+        let dropped = dropped_rx.recv_timeout(Duration::from_secs(2));
+        let was_stopped = stop.load(Ordering::Acquire);
+        let was_still_owned = ticket.exit().is_none();
+        release_tx.send(()).unwrap();
+        dropper.join().unwrap();
+        assert!(dropped.is_ok(), "scene Drop waited for a blocked callback");
+        assert!(was_stopped);
+        assert!(was_still_owned, "blocked callback was reported joined");
+        assert_eq!(
+            ticket
+                .join_until(Instant::now() + Duration::from_secs(2))
+                .unwrap(),
+            ilium_platform::owned_worker::WorkerExit::Joined
         );
     }
 
@@ -456,6 +684,154 @@ mod tests {
             cache_file_name("https://a/x", "png"),
             cache_file_name("https://a/y", "png")
         );
+    }
+
+    #[test]
+    fn fresh_and_stale_cache_reads_enforce_the_same_complete_file_bound() {
+        let directory = tempfile::tempdir().unwrap();
+        // A network path is deterministically rejected, without DNS/HTTP.
+        let url = "http://bounded-cache.invalid/image";
+        let path = directory.path().join(cache_file_name(url, "img"));
+        std::fs::write(&path, b"abcd").unwrap();
+        assert_eq!(
+            fetch_cached(
+                directory.path(),
+                url,
+                "img",
+                Duration::from_secs(60),
+                4,
+                Duration::from_secs(1)
+            )
+            .unwrap(),
+            b"abcd"
+        );
+        std::fs::write(&path, b"abcde").unwrap();
+        assert!(matches!(
+            fetch_cached(
+                directory.path(),
+                url,
+                "img",
+                Duration::from_secs(60),
+                4,
+                Duration::from_secs(1)
+            ),
+            Err(FetchError::TooLarge(4))
+        ));
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        assert!(matches!(
+            fetch_cached(
+                directory.path(),
+                url,
+                "img",
+                Duration::ZERO,
+                4,
+                Duration::from_secs(1)
+            ),
+            Err(FetchError::TooLarge(4))
+        ));
+        std::fs::write(&path, b"abcd").unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        assert_eq!(
+            fetch_cached(
+                directory.path(),
+                url,
+                "img",
+                Duration::ZERO,
+                4,
+                Duration::from_secs(1)
+            )
+            .unwrap(),
+            b"abcd"
+        );
+    }
+
+    #[test]
+    fn file_growth_after_the_first_read_is_refused_without_truncated_success() {
+        use std::io::Write;
+        struct GrowingFile {
+            reader: std::fs::File,
+            path: PathBuf,
+            appended: bool,
+        }
+        impl Read for GrowingFile {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let read = self.reader.read(output)?;
+                if read != 0 && !self.appended {
+                    std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&self.path)?
+                        .write_all(b"e")?;
+                    self.appended = true;
+                }
+                Ok(read)
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("growing.img");
+        std::fs::write(&path, b"abcd").unwrap();
+        let reader = GrowingFile {
+            reader: std::fs::File::open(&path).unwrap(),
+            path: path.clone(),
+            appended: false,
+        };
+        assert!(matches!(
+            read_bounded_stream(reader, 4, None, None),
+            Err(FetchError::TooLarge(4))
+        ));
+        assert_eq!(std::fs::read(path).unwrap(), b"abcde");
+    }
+
+    #[test]
+    fn finite_file_cancellation_prevents_open_and_post_read_publication() {
+        struct CancellingReader<'a>(&'a AtomicBool);
+        impl Read for CancellingReader<'_> {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                self.0.store(true, Ordering::Relaxed);
+                if output.is_empty() {
+                    return Ok(0);
+                }
+                output[0] = b'x';
+                Ok(1)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("never-opened");
+        assert!(matches!(
+            read_bounded_file_with_cancel(&missing, 4, || true),
+            Err(FetchError::Cancelled)
+        ));
+        let stop = AtomicBool::new(false);
+        assert!(matches!(
+            read_bounded_stream_with_cancel(CancellingReader(&stop), 4, None, || stop
+                .load(Ordering::Relaxed)),
+            Err(FetchError::Cancelled)
+        ));
+        let path = root.path().join("complete");
+        std::fs::write(&path, b"abcd").unwrap();
+        assert_eq!(
+            read_bounded_file_with_cancel(&path, 4, || false).unwrap(),
+            b"abcd"
+        );
+    }
+
+    #[test]
+    fn bounded_file_handles_exact_zero_and_missing_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bounded.img");
+        assert!(matches!(
+            read_bounded_file(&path, 4),
+            Err(FetchError::Request(_))
+        ));
+        std::fs::write(&path, b"").unwrap();
+        assert!(read_bounded_file(&path, 0).unwrap().is_empty());
+        std::fs::write(&path, b"x").unwrap();
+        assert!(matches!(
+            read_bounded_file(&path, 0),
+            Err(FetchError::TooLarge(0))
+        ));
     }
 
     #[test]

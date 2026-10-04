@@ -66,6 +66,23 @@ pub fn parse(state: &BlockState) -> Result<State, Error> {
         "minecraft:lava" => Some(Kind::Lava),
         _ => None,
     };
+    // Native Java1.19.3 BubbleColumnBlock.getFluidState returns source water
+    // for either drag direction. Its empty JSON model is not an empty fluid.
+    if state.name == "minecraft:bubble_column" {
+        if state.properties.len() != 1
+            || !matches!(
+                state.properties.get("drag").map(String::as_str),
+                Some("true" | "false")
+            )
+        {
+            return Err(Error::Properties);
+        }
+        return Ok(State::Liquid(Liquid {
+            kind: Kind::Water,
+            amount: 8,
+            falling: false,
+        }));
+    }
     if let Some(kind) = kind {
         let text = state.properties.get("level").ok_or(Error::Level)?;
         if state.properties.len() != 1 {
@@ -141,6 +158,31 @@ mod tests {
                 assert_eq!(liquid.height(true), 1.0);
                 assert_eq!(raw, original);
             }
+        }
+    }
+    #[test]
+    fn bubble_column_is_native_source_water_for_both_drag_directions() {
+        for drag in ["true", "false"] {
+            let raw = state("minecraft:bubble_column", &[("drag", drag)]);
+            let original = raw.clone();
+            let State::Liquid(liquid) = parse(&raw).unwrap() else {
+                panic!("native bubble column has a source water FluidState");
+            };
+            assert_eq!(liquid.kind(), Kind::Water);
+            assert_eq!(liquid.amount(), 8);
+            assert!(!liquid.falling());
+            assert!(liquid.is_source());
+            assert_eq!(raw, original);
+        }
+        for properties in [
+            vec![],
+            vec![("drag", "up")],
+            vec![("drag", "true"), ("level", "0")],
+        ] {
+            assert_eq!(
+                parse(&state("minecraft:bubble_column", &properties)),
+                Err(Error::Properties)
+            );
         }
     }
     #[test]

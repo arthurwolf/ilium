@@ -60,6 +60,87 @@ impl FluidMesh {
     pub(crate) fn uses_budget(&self, budget: &ByteBudget) -> bool {
         self._reservation.belongs_to(budget)
     }
+    /// Publish source-native water/lava faces built from exact saved states.
+    /// This path deliberately permits a waterlogged solid at the same anchor.
+    /// It is separate from `build` because generated `FluidCell` levels and
+    /// corner averaging do not implement the pinned 1.19.3 renderer.
+    pub fn from_native_faces(
+        faces: Vec<FluidFace>,
+        region: MeshRegion,
+        bank: &TextureBank,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        if faces.is_empty()
+            || faces.len() > 1_000_000
+            || (0..2).any(|axis| {
+                region.minimum[axis] >= region.maximum[axis]
+                    || i64::from(region.maximum[axis]) - i64::from(region.minimum[axis]) > 2048
+            })
+        {
+            return Err(metadata::invalid("native fluid face count or region"));
+        }
+        for face in &faces {
+            cancel.check()?;
+            if face.position != face.owner.position
+                || face.owner.part != face.quad.part
+                || face.owner.face != face.quad.face
+                || face.owner.layer != face.quad.material.layer
+                || face.position[0] < region.minimum[0]
+                || face.position[0] >= region.maximum[0]
+                || face.position[1] < region.minimum[1]
+                || face.position[1] >= region.maximum[1]
+                || !matches!(
+                    face.quad.material.alpha,
+                    AlphaMode::NativeBlend | AlphaMode::NativeSolid
+                )
+                || face
+                    .quad
+                    .points
+                    .iter()
+                    .flatten()
+                    .any(|value| !value.is_finite())
+                || face
+                    .quad
+                    .uv
+                    .iter()
+                    .flatten()
+                    .any(|value| !value.is_finite())
+                || face.quad.normal.iter().any(|value| !value.is_finite())
+                || face
+                    .quad
+                    .material
+                    .tint
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(metadata::invalid("invalid native fluid face"));
+            }
+            let texture = bank
+                .texture(face.quad.material.texture)
+                .ok_or_else(|| metadata::invalid("stale native fluid texture"))?;
+            if !texture.uses_budget(budget) || texture.encoding() != Encoding::SrgbColor {
+                return Err(metadata::invalid(
+                    "native fluid texture differs from scene account",
+                ));
+            }
+        }
+        // The assembler reserves up to six slots per liquid cell, then culls
+        // most of them in dense water. Vec keeps that allocation when moved
+        // here, so charge its retained capacity rather than its visible len.
+        let face_storage = (faces.capacity() as u64)
+            .checked_mul(std::mem::size_of::<FluidFace>() as u64)
+            .and_then(|bytes| bytes.checked_add(4096))
+            .ok_or(AssetError::Allocation)?;
+        let reservation = budget.reserve(face_storage, cancel)?;
+        Ok(Self {
+            faces,
+            bank: bank.identity(),
+            region,
+            _reservation: reservation,
+        })
+    }
     /// Water and solid samples outside the region form a halo; unknown is never
     /// silently declared solid. The caller must supply all visible bed and bank
     /// models separately to the opaque model mesh.
@@ -339,6 +420,99 @@ fn corner_height(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxel_landscape::assets::{
+        animation::MissingAnimation,
+        bank::{TextureBankBuilder, TextureRequirement},
+        budget::Limits,
+        identity::{OriginKind, ResourceId},
+        review::{fixture_origin, fixture_review},
+        texture::fixture_texture,
+    };
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn mostly_culled_native_faces_keep_their_full_capacity_charged() {
+        let budget = ByteBudget::new(256 << 20).unwrap();
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let id = ResourceId::parse("test:block/water").unwrap();
+        let mut builder = TextureBankBuilder::new(
+            fixture_review(),
+            vec![],
+            Limits::default(),
+            budget.clone(),
+            cancel,
+        )
+        .unwrap();
+        let texture = fixture_texture(
+            [1, 1],
+            &[30, 80, 200, 153],
+            None,
+            &MissingAnimation::StaticImage,
+            Encoding::SrgbColor,
+            fixture_origin(OriginKind::DiagnosticFixture),
+            &budget,
+        );
+        builder.insert(id.clone(), texture, cancel).unwrap();
+        let bank = builder
+            .finish(vec![TextureRequirement::selected_color(id.clone())], cancel)
+            .unwrap();
+        let handle = bank.resolve(&id).unwrap();
+        let position = [0, 0, 0];
+        let mut faces = Vec::with_capacity(64);
+        faces.push(FluidFace {
+            position,
+            owner: FaceOwner {
+                position,
+                part: 0,
+                face: 0,
+                layer: 3,
+            },
+            quad: BoundQuad {
+                points: [
+                    [0.0, 0.0, 0.5],
+                    [1.0, 0.0, 0.5],
+                    [1.0, 1.0, 0.5],
+                    [0.0, 1.0, 0.5],
+                ],
+                uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                normal: [0.0, 0.0, 1.0],
+                material: FaceMaterial {
+                    texture: handle,
+                    alpha: AlphaMode::NativeBlend,
+                    tint: [1.0; 3],
+                    layer: 3,
+                    normal_map: None,
+                    specular_map: None,
+                },
+                cull_face: None,
+                shade: true,
+                part: 0,
+                face: 0,
+            },
+        });
+        let before = budget.used();
+        let mesh = FluidMesh::from_native_faces(
+            faces,
+            MeshRegion {
+                minimum: [-1, -1],
+                maximum: [2, 2],
+            },
+            &bank,
+            &budget,
+            cancel,
+        )
+        .unwrap();
+        assert_eq!(mesh.faces.len(), 1);
+        assert!(mesh.faces.capacity() >= 64);
+        assert_eq!(
+            budget.used() - before,
+            4096 + mesh.faces.capacity() as u64 * std::mem::size_of::<FluidFace>() as u64
+        );
+        drop(mesh);
+        assert_eq!(budget.used(), before);
+    }
+
     #[test]
     fn shared_corners_are_global_and_partial_levels_keep_exposed_lips() {
         let cells = BTreeMap::from([

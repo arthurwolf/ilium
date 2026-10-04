@@ -218,6 +218,12 @@ pub struct LayeredPack {
     budget: ByteBudget,
     limits: Limits,
     reservations: Vec<Reservation>,
+    #[cfg(test)]
+    fixture_members: Option<std::collections::BTreeMap<AssetPath, Vec<u8>>>,
+    #[cfg(test)]
+    fixture_member_reads: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    fixture_stop_after_reads: Option<(Arc<std::sync::atomic::AtomicBool>, usize)>,
 }
 pub fn join_root(root: Option<&AssetPath>, path: &AssetPath) -> Result<AssetPath> {
     match root {
@@ -226,6 +232,60 @@ pub fn join_root(root: Option<&AssetPath>, path: &AssetPath) -> Result<AssetPath
     }
 }
 impl LayeredPack {
+    #[cfg(test)]
+    pub(crate) fn fixture_ground_members(
+        members: std::collections::BTreeMap<AssetPath, Vec<u8>>,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        if members.is_empty() || members.len() > 4096 {
+            return Err(metadata::invalid("synthetic ground member count"));
+        }
+        let limits = Limits::default();
+        let mut bytes = 256 * 1024_u64;
+        for (path, member) in &members {
+            cancel.check()?;
+            check_limit(
+                "synthetic ground member bytes",
+                member.len() as u64,
+                limits.encoded_bytes,
+            )?;
+            bytes = bytes
+                .checked_add(member.capacity() as u64 + path.as_str().len() as u64 + 512)
+                .ok_or(AssetError::Allocation)?;
+        }
+        let reservation = budget.reserve(bytes, cancel)?;
+        let review = super::review::fixture_review();
+        review.validate()?;
+        let review_digest = review.digest()?;
+        Ok(Self {
+            review,
+            review_digest,
+            layers: Vec::new(),
+            layout: MountLayout::Java,
+            target: None,
+            compatibility: None,
+            internal_compatibility: Vec::new(),
+            metadata: Vec::new(),
+            skipped_empty_overlays: Vec::new(),
+            budget,
+            limits,
+            reservations: vec![reservation],
+            fixture_members: Some(members),
+            fixture_member_reads: std::sync::atomic::AtomicUsize::new(0),
+            fixture_stop_after_reads: None,
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_cancel_on_read(
+        &mut self,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        read: usize,
+    ) {
+        assert!(self.fixture_members.is_some() && read > 0);
+        self.fixture_stop_after_reads = Some((stop, read));
+    }
     #[expect(
         clippy::too_many_arguments,
         reason = "mount provenance, capability, limits and cancellation are separate admission inputs"
@@ -266,6 +326,12 @@ impl LayeredPack {
             budget,
             limits,
             reservations: vec![reservation],
+            #[cfg(test)]
+            fixture_members: None,
+            #[cfg(test)]
+            fixture_member_reads: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            fixture_stop_after_reads: None,
         };
         value.add_layer(source, root, Label::new("root")?, role, cancel)?;
         Ok(value)
@@ -530,6 +596,63 @@ impl LayeredPack {
     }
     pub fn read_path(&self, path: &AssetPath, cap: u64, cancel: Cancel<'_>) -> Result<Resolution> {
         cancel.check()?;
+        #[cfg(test)]
+        if let Some(members) = &self.fixture_members {
+            let read = self
+                .fixture_member_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
+            if let Some((stop, target)) = &self.fixture_stop_after_reads {
+                if read >= *target {
+                    stop.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }
+            cancel.check()?;
+            let layer = Label::new("Synthetic selected ground boundary fixture")?;
+            let member = members.get(path);
+            let charge = self
+                .budget
+                .reserve(4096 + member.map_or(0, |bytes| bytes.len() as u64), cancel)?;
+            let blob = match member {
+                None => None,
+                Some(bytes) => {
+                    check_limit("synthetic ground read bytes", bytes.len() as u64, cap)?;
+                    let mut copied = Vec::new();
+                    copied
+                        .try_reserve_exact(bytes.len())
+                        .map_err(|_| AssetError::Allocation)?;
+                    copied.extend_from_slice(bytes);
+                    let origin = BlobOrigin {
+                        pack: self.review.pack.clone(),
+                        release: self.review.release.clone(),
+                        layer: layer.clone(),
+                        path: path.clone(),
+                        review_digest: self.review_digest,
+                        kind: OriginKind::SelectedPack,
+                    };
+                    Some(SourceBlob::new(
+                        copied,
+                        origin,
+                        None,
+                        &self.limits,
+                        &self.budget,
+                        cancel,
+                    )?)
+                }
+            };
+            return Ok(Resolution {
+                blob,
+                requested: path.clone(),
+                target: self.target,
+                attempts: vec![ResolutionAttempt {
+                    layer,
+                    path: path.clone(),
+                    found: member.is_some(),
+                    source_sha256: None,
+                }],
+                reservations: vec![charge],
+            });
+        }
         let mut attempts = Vec::new();
         let mut reservations = vec![self.budget.reserve(
             4096 + self.layers.len() as u64 * std::mem::size_of::<ResolutionAttempt>() as u64,

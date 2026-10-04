@@ -6,7 +6,10 @@ use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &MachineScreenSettings) -> MachineScreenScene {
-    MachineScreenScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    MachineScreenScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_at(settings: &MachineScreenSettings, width: u16, height: u16, time: f64) -> Rendered {

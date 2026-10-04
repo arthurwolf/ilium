@@ -5,7 +5,10 @@ use crate::debug::{render_frame, Rendered};
 use std::time::Duration;
 
 fn scene_with(settings: &DitherWaterSettings) -> DitherWaterScene {
-    DitherWaterScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    DitherWaterScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_at(settings: &DitherWaterSettings, cols: u16, rows: u16, time: f64) -> Rendered {
@@ -423,4 +426,23 @@ fn print_picture() {
         }
         println!("----");
     }
+}
+
+#[test]
+fn provided_palette_changes_tint_colors_and_none_keeps_them() {
+    let settings = DitherWaterSettings::default();
+    let plain = frame_at(&settings, 30, 10, 2.0);
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
+    env.palette = ScenePalette {
+        stops: vec![[200, 20, 20], [250, 200, 40]],
+        reverse: false,
+        shift_percent: 0,
+    };
+    let mut scene = DitherWaterScene::new(&settings, &env);
+    let tinted = render_frame(&mut scene, 30, 10, Duration::from_secs_f64(2.0));
+    assert_ne!(plain.cell_colors, tinted.cell_colors);
+    scene.set_palette(&ScenePalette::default());
+    let reset = render_frame(&mut scene, 30, 10, Duration::from_secs_f64(2.0));
+    assert_eq!(plain.cell_colors, reset.cell_colors);
+    assert!(scene.follows_palette());
 }

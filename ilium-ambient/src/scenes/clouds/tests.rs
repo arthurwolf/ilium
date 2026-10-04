@@ -135,7 +135,7 @@ fn scene_with(
 ) -> CloudsScene {
     CloudsScene::with_parts(
         settings,
-        &SceneEnv::for_test(cache.to_path_buf()),
+        &SceneEnv::for_test(cache.to_path_buf(), crate::resources::test_resources()),
         fetcher,
         fixed_now(),
         no_land(),
@@ -434,7 +434,7 @@ fn transfer_maps_clouds_bright_and_supports_invert_contrast_and_dimming() {
     let scene = |settings: CloudsSettings| {
         CloudsScene::with_parts(
             &settings,
-            &SceneEnv::for_test(PathBuf::from("/x")),
+            &SceneEnv::for_test(PathBuf::from("/x"), crate::resources::test_resources()),
             weather_fetcher(),
             fixed_now(),
             no_land(),
@@ -624,7 +624,10 @@ fn inverted_picture_is_the_complement_and_underlay_and_marker_draw() {
     let render = |settings: &CloudsSettings, land: LandFn, time_ms: u64| {
         let mut scene = CloudsScene::with_parts(
             settings,
-            &SceneEnv::for_test(cache.path().to_path_buf()),
+            &SceneEnv::for_test(
+                cache.path().to_path_buf(),
+                crate::resources::test_resources(),
+            ),
             weather_fetcher(),
             fixed_now(),
             land,
@@ -1100,10 +1103,19 @@ fn dropping_the_scene_stops_the_worker_and_render_never_blocks() {
     while !entered.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(2));
     }
+    let ticket = scene.worker.as_ref().unwrap().join_observer().unwrap();
+    let dropping = std::time::Instant::now();
     drop(scene);
+    assert!(dropping.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        ticket
+            .join_until(std::time::Instant::now() + Duration::from_secs(2))
+            .unwrap(),
+        ilium_platform::owned_worker::WorkerExit::Joined
+    );
     assert!(
         exited.load(Ordering::SeqCst),
-        "worker joined before drop returned"
+        "supervisor joined the stopped worker"
     );
 }
 
@@ -1170,9 +1182,12 @@ fn print_real_clouds() {
     ] {
         let cache = tempfile::tempdir().unwrap();
         let env = SceneEnv {
+            resources: crate::resources::test_resources(),
             location: location.clone(),
             cache_dir: cache.path().to_path_buf(),
             gpu: None,
+            saved_runtime: std::sync::Arc::new(crate::minecraft::saved_runtime::SavedRuntime::new()),
+            palette: Default::default(),
         };
         let mut scene =
             CloudsScene::with_parts(&settings, &env, fetcher.clone(), fixed_now(), no_land());
@@ -1214,9 +1229,12 @@ fn live_clouds_from_eumetsat_and_gibs() {
     ] {
         let cache = tempfile::tempdir().unwrap();
         let env = SceneEnv {
+            resources: crate::resources::test_resources(),
             location,
             cache_dir: cache.path().to_path_buf(),
             gpu: None,
+            saved_runtime: std::sync::Arc::new(crate::minecraft::saved_runtime::SavedRuntime::new()),
+            palette: Default::default(),
         };
         let mut scene = CloudsScene::new(&settings, &env);
         let want = if settings.history_hours > 0 { 6 } else { 1 };
@@ -1230,4 +1248,34 @@ fn live_clouds_from_eumetsat_and_gibs() {
         }
         assert!(scene.set.is_some(), "{name}: {:?}", scene.status());
     }
+}
+
+#[test]
+fn scene_follows_the_provided_palette_natively() {
+    let cache = tempfile::tempdir().expect("tempdir");
+    let settings = CloudsSettings {
+        source: CloudSource::GoesEast,
+        cell_colors: true,
+        ..Default::default()
+    };
+    let mut plain = scene_with(&settings, weather_fetcher(), cache.path());
+    pump(&mut plain, settled);
+    let plain_colors = render_frame(&mut plain, 60, 20, Duration::ZERO).cell_colors;
+    let mut env = SceneEnv::for_test(
+        cache.path().to_path_buf(),
+        crate::resources::test_resources(),
+    );
+    env.palette = crate::style::ScenePalette {
+        stops: vec![[0, 40, 0], [0, 255, 120]],
+        ..Default::default()
+    };
+    let mut themed =
+        CloudsScene::with_parts(&settings, &env, weather_fetcher(), fixed_now(), no_land());
+    assert!(themed.follows_palette());
+    pump(&mut themed, settled);
+    let themed_colors = render_frame(&mut themed, 60, 20, Duration::ZERO).cell_colors;
+    assert_ne!(plain_colors, themed_colors);
+    themed.set_palette(&crate::style::ScenePalette::default());
+    let restored = render_frame(&mut themed, 60, 20, Duration::ZERO).cell_colors;
+    assert_eq!(plain_colors, restored);
 }

@@ -58,6 +58,8 @@ pub struct PlayItem {
     pub duration_seconds: Option<f64>,
 }
 
+type PrepareClip<'a> = dyn FnMut(&MediaInput, bool) -> Result<Option<f64>, String> + 'a;
+
 pub struct Scheduler {
     mode: PlaybackMode,
     scene_seconds: f64,
@@ -68,6 +70,7 @@ pub struct Scheduler {
     order: Vec<usize>,
     cursor: usize,
     last: Option<MediaInput>,
+    last_repeatable: bool,
 }
 
 impl Scheduler {
@@ -82,6 +85,7 @@ impl Scheduler {
             order: Vec::new(),
             cursor: 0,
             last: None,
+            last_repeatable: false,
         }
     }
 
@@ -122,21 +126,43 @@ impl Scheduler {
 
     /// Pick the next clip. `probe` returns a file's duration in seconds; it is
     /// called for local files always and for URLs only in random-scene mode.
+    #[cfg(test)]
     pub fn next(&mut self, probe: &mut dyn FnMut(&MediaInput) -> Option<f64>) -> Option<PlayItem> {
+        self.next_prepared(
+            &mut |input, should_probe| Ok(should_probe.then(|| probe(input)).flatten()),
+            false,
+        )
+        .ok()
+        .flatten()
+    }
+
+    /// Preparation runs before probing, including remote random-scene seeks.
+    pub fn next_prepared(
+        &mut self,
+        prepare: &mut PrepareClip<'_>,
+        probe_remote: bool,
+    ) -> Result<Option<PlayItem>, String> {
         if self.entries.is_empty() {
-            return None;
+            return Ok(None);
         }
         let input = match self.mode {
             PlaybackMode::RandomScenes => self.pick_random(),
             PlaybackMode::Live | PlaybackMode::Slowed => self.pick_sequential(),
         };
         self.last = Some(input.clone());
-        let duration = if !input.is_url() || self.mode == PlaybackMode::RandomScenes {
-            probe(&input)
-        } else {
-            None
+        let should_probe =
+            probe_remote || !input.is_url() || self.mode == PlaybackMode::RandomScenes;
+        let duration = match prepare(&input, should_probe) {
+            Ok(duration) => {
+                self.last_repeatable = true;
+                duration
+            }
+            Err(error) => {
+                self.mark_failed();
+                return Err(error);
+            }
         };
-        Some(match self.mode {
+        Ok(Some(match self.mode {
             PlaybackMode::RandomScenes => self.random_scene(input, duration),
             PlaybackMode::Live | PlaybackMode::Slowed => PlayItem {
                 input,
@@ -144,11 +170,11 @@ impl Scheduler {
                 limit_seconds: None,
                 duration_seconds: duration,
             },
-        })
+        }))
     }
 
     fn pick_sequential(&mut self) -> MediaInput {
-        if self.repeat_one {
+        if self.repeat_one && self.last_repeatable {
             if let Some(last) = self
                 .last
                 .as_ref()
@@ -171,6 +197,11 @@ impl Scheduler {
             index = (index + 1 + self.rng.below(self.entries.len() - 1)) % self.entries.len();
         }
         self.entries[index].clone()
+    }
+
+    /// Preserve the last identity for shuffle avoidance, but release repeat-one.
+    pub fn mark_failed(&mut self) {
+        self.last_repeatable = false;
     }
 
     fn random_scene(&mut self, input: MediaInput, duration: Option<f64>) -> PlayItem {
@@ -307,6 +338,26 @@ mod tests {
         assert_eq!(played, ["a", "a", "a", "a"]);
         scheduler.set_entries(files(&["z", "y"]));
         assert_eq!(name(&scheduler.next(&mut |_| None).unwrap()), "z");
+    }
+
+    #[test]
+    fn failed_preparation_advances_even_when_repeat_one_is_enabled() {
+        let mut config = settings(PlaybackMode::Live);
+        config.repeat_one = true;
+        let mut scheduler = Scheduler::new(&config, 1);
+        scheduler.set_entries(files(&["a", "b"]));
+        assert!(scheduler
+            .next_prepared(&mut |_, _| Err("source refused".into()), true)
+            .is_err());
+        let item = scheduler
+            .next_prepared(&mut |_, _| Ok(Some(20.0)), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            name(&item),
+            "b",
+            "a failed source cannot trap repeat-one forever"
+        );
     }
 
     #[test]

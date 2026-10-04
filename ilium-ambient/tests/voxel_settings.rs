@@ -18,9 +18,13 @@ fn all_editable_controls_round_trip_and_reject_wrong_types() {
     let mut settings = VoxelLandscapeSettings::default();
     for row in settings.controls() {
         if let Some(value) = row.stepped(1) {
-            settings.set_control(row.id, value.clone()).unwrap();
+            // A world-source edit changes which later controls are visible.
+            // Test each original control against its own unchanged baseline.
+            let mut edited = VoxelLandscapeSettings::default();
+            edited.set_control(row.id, value.clone()).unwrap();
             let loaded: VoxelLandscapeSettings =
-                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+                serde_json::from_str(&serde_json::to_string(&edited).unwrap()).unwrap();
+            assert_eq!(loaded, edited, "{}", row.id);
             let loaded_row = loaded
                 .controls()
                 .into_iter()

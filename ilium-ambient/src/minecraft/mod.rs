@@ -11,10 +11,15 @@ pub mod index;
 mod io;
 pub mod loader;
 pub mod native_assets;
+pub mod native_binding;
 pub mod native_biome;
 pub mod native_block_colors;
+pub mod native_builtin;
 pub mod native_colormap;
+pub mod native_fluid;
+pub mod native_fluid_assembly;
 pub mod native_render_layer;
+pub mod native_shape;
 pub mod native_swamp_noise;
 pub mod native_tint;
 pub mod nbt;
@@ -38,3 +43,12 @@ mod decoder_tests;
 
 #[cfg(test)]
 mod surface_tests;
+
+pub mod source_footprint;
+
+pub mod sparse_cells;
+
+pub mod projected_source;
+
+pub mod projected_route;
+pub mod saved_scene;

@@ -143,6 +143,9 @@ struct Counter {
     limit: u64,
     used: AtomicU64,
     peak: AtomicU64,
+    // Last: every logical reservation keeps physical storage admitted through
+    // the last retained model, texture, source map or emitted-frame owner.
+    _storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 
 /// Clone this same budget into workers and retained snapshots. Creating a new
@@ -152,6 +155,20 @@ struct Counter {
 pub struct ByteBudget(Arc<Counter>);
 impl ByteBudget {
     pub fn new(limit: u64) -> Result<Self> {
+        Self::new_with_storage(limit, None)
+    }
+    /// The caller must reserve this complete limit before creating payloads.
+    /// Clones cover the same allocations; they never invent a second quota.
+    pub(crate) fn with_storage(
+        limit: u64,
+        storage: Arc<ilium_execution::StorageAdmission>,
+    ) -> Result<Self> {
+        Self::new_with_storage(limit, Some(storage))
+    }
+    fn new_with_storage(
+        limit: u64,
+        storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    ) -> Result<Self> {
         if limit == 0 || limit > 1024 * MIB {
             return Err(AssetError::Limit {
                 resource: "working bytes",
@@ -163,6 +180,7 @@ impl ByteBudget {
             limit,
             used: AtomicU64::new(0),
             peak: AtomicU64::new(0),
+            _storage: storage,
         })))
     }
     pub fn used(&self) -> u64 {
@@ -216,6 +234,18 @@ pub(crate) struct Reservation {
     bytes: u64,
 }
 impl Reservation {
+    /// Release unused admission headroom after the retained payload is measured.
+    /// The existing owner keeps the same account; growth requires fresh admission.
+    pub(crate) fn shrink_to(&mut self, bytes: u64) -> Result<()> {
+        let released = self.bytes.checked_sub(bytes).ok_or(AssetError::Limit {
+            resource: "reservation shrink",
+            requested: bytes,
+            limit: self.bytes,
+        })?;
+        self.counter.used.fetch_sub(released, Ordering::AcqRel);
+        self.bytes = bytes;
+        Ok(())
+    }
     pub(crate) fn bytes(&self) -> u64 {
         self.bytes
     }
@@ -250,6 +280,59 @@ mod tests {
         assert!(limits.rgba_bytes(u32::MAX, u32::MAX).is_err());
         assert!(limits.rgba_bytes(0, 1).is_err());
     }
+    #[test]
+    fn physical_storage_survives_budget_handle_until_last_retained_reservation() {
+        use ilium_execution::{QuotaGroup, QuotaLimits};
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 16,
+        });
+        let physical = Arc::new(quota.reserve_external_storage(16).unwrap());
+        let budget = ByteBudget::with_storage(16, physical).unwrap();
+        let stop = AtomicBool::new(false);
+        let owner = budget.reserve(6, Cancel::new(&stop)).unwrap();
+        let second_owner = budget.clone().reserve(4, Cancel::new(&stop)).unwrap();
+        drop(budget);
+        assert_eq!(quota.snapshot().worker_bytes, 16);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert!(quota.reserve_external_storage(1).is_err());
+        drop(owner);
+        assert_eq!(quota.snapshot().worker_bytes, 16);
+        drop(second_owner);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        let replacement = quota.reserve_external_storage(16).unwrap();
+        drop(replacement);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn shrink_releases_only_unused_headroom_and_rejects_growth_without_mutation() {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let budget = ByteBudget::new(16).unwrap();
+        let mut original = budget.reserve(16, cancel).unwrap();
+        original.shrink_to(6).unwrap();
+        assert_eq!(budget.used(), 6);
+        assert_eq!(original.bytes(), 6);
+        assert!(original.shrink_to(7).is_err());
+        assert_eq!(budget.used(), 6);
+        let concurrent = budget.clone().reserve(10, cancel).unwrap();
+        original.shrink_to(6).unwrap();
+        assert_eq!(budget.used(), 16);
+        original.shrink_to(0).unwrap();
+        assert_eq!(budget.used(), 10);
+        drop(original);
+        assert_eq!(budget.used(), 10);
+        drop(concurrent);
+        assert_eq!(budget.used(), 0);
+        assert_eq!(budget.peak(), 16);
+    }
+
     #[test]
     fn reservations_account_for_live_snapshots_and_release_on_error() {
         let stop = AtomicBool::new(false);

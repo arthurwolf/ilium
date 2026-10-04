@@ -174,7 +174,11 @@ impl Control {
         let direction = direction.signum();
         match (&self.kind, &self.value) {
             (ControlKind::Slider { min, max, step, .. }, ControlValue::Number(number)) => Some(
-                ControlValue::Number((number + direction * step).clamp(*min, *max)),
+                // Clamp in widened storage so a button at the i32 limit cannot overflow.
+                ControlValue::Number(
+                    (i64::from(*number) + i64::from(direction) * i64::from(*step))
+                        .clamp(i64::from(*min), i64::from(*max)) as i32,
+                ),
             ),
             (ControlKind::Choice { options }, ControlValue::Index(index)) => {
                 let count = options.len().max(1) as i32;
@@ -241,6 +245,24 @@ pub fn text(value: &ControlValue) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_steps_saturate_without_integer_overflow() {
+        let high = Control::slider("n", "N", i32::MAX, (i32::MIN, i32::MAX, 1), "", "");
+        assert_eq!(high.stepped(1), Some(ControlValue::Number(i32::MAX)));
+        let low = Control::slider("n", "N", i32::MIN, (i32::MIN, i32::MAX, 1), "", "");
+        assert_eq!(low.stepped(-1), Some(ControlValue::Number(i32::MIN)));
+        let wide = Control::slider(
+            "n",
+            "N",
+            i32::MAX - 1,
+            (i32::MIN, i32::MAX, i32::MAX),
+            "",
+            "",
+        );
+        assert_eq!(wide.stepped(1), Some(ControlValue::Number(i32::MAX)));
+        assert_eq!(wide.stepped(-1), Some(ControlValue::Number(-1)));
+    }
 
     fn backend_row(index: usize) -> Control {
         Control::choice("backend", "Backend", index, &["Software", "GPU"], "help")

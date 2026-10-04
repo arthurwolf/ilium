@@ -34,7 +34,7 @@ fn mount(
     )
     .unwrap()
 }
-fn fixture(
+pub(crate) fn fixture(
     selected: &[(&str, &[u8])],
     native: &[(&str, &[u8])],
     budget: &ByteBudget,
@@ -65,6 +65,7 @@ fn fixture(
             selected_override: true,
         },
         selected_duplicates: Vec::new(),
+        immutable_definition_sources: true,
         _duplicates_reservation: budget.reserve(0, cancel).unwrap(),
         limits: Limits::default(),
         budget: budget.clone(),
@@ -85,6 +86,7 @@ fn source_route_preserves_winner_and_never_aliases_missing_resources() {
         &budget,
         cancel,
     );
+    assert!(sources.immutable_definition_sources());
     let key = |name| ResourceKey {
         kind: ResourceKind::Texture,
         id: ResourceId::parse(name).unwrap(),

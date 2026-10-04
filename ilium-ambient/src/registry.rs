@@ -10,6 +10,25 @@ use crate::live_data::{
 use crate::location::GeoLocation;
 use crate::pi_digits::presentation::{PiScene, PiSettings};
 use crate::scene::{Scene, SceneEnv};
+use crate::scenes::quiet::{
+    almost_touching::{AlmostTouchingScene, AlmostTouchingSettings},
+    aurora::{AuroraScene, AuroraSettings},
+    crop_circles::{CropCirclesScene, CropCirclesSettings},
+    delayed_reflection::{DelayedReflectionScene, DelayedReflectionSettings},
+    embroidery::{EmbroideryScene, EmbroiderySettings},
+    fireflies::{FirefliesScene, FirefliesSettings},
+    frost::{FrostScene, FrostSettings},
+    hesitating_ink::{HesitatingInkScene, HesitatingInkSettings},
+    hidden_wheel::{HiddenWheelScene, HiddenWheelSettings},
+    lighthouse::{LighthouseScene, LighthouseSettings},
+    needle_threads::{NeedleThreadsScene, NeedleThreadsSettings},
+    paper_fold::{PaperFoldScene, PaperFoldSettings},
+    pollen::{PollenScene, PollenSettings},
+    prime_constellations::{PrimeConstellationsScene, PrimeConstellationsSettings},
+    unfinished_circle::{UnfinishedCircleScene, UnfinishedCircleSettings},
+    wallpaper::{WallpaperScene, WallpaperSettings},
+    window_sunlight::{WindowSunlightScene, WindowSunlightSettings},
+};
 use crate::scenes::{
     atlantic_dusk::{AtlanticDuskScene, AtlanticDuskSettings},
     box_machine::{BoxMachineScene, BoxMachineSettings},
@@ -34,6 +53,7 @@ use crate::scenes::{
     vector_td::{VectorTdScene, VectorTdSettings},
     video::{VideoScene, VideoSettings},
     voxel_landscape::{VoxelLandscapeScene, VoxelLandscapeSettings},
+    wind::{WindScene, WindSettings},
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,10 +89,28 @@ pub enum AmbientKind {
     Chess,
     OpenStreetMap,
     Carpet,
+    Wind,
+    Aurora,
+    Pollen,
+    Fireflies,
+    WindowSunlight,
+    Frost,
+    Lighthouse,
+    PaperFold,
+    Embroidery,
+    PrimeConstellations,
+    Wallpaper,
+    UnfinishedCircle,
+    NeedleThreads,
+    HesitatingInk,
+    CropCircles,
+    DelayedReflection,
+    AlmostTouching,
+    HiddenWheel,
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 47] = [
         Self::Pipes,
         Self::Stars,
         Self::NightLights,
@@ -102,12 +140,48 @@ impl AmbientKind {
         Self::Chess,
         Self::OpenStreetMap,
         Self::Carpet,
+        Self::Wind,
+        Self::Aurora,
+        Self::Pollen,
+        Self::Fireflies,
+        Self::WindowSunlight,
+        Self::Frost,
+        Self::Lighthouse,
+        Self::PaperFold,
+        Self::Embroidery,
+        Self::PrimeConstellations,
+        Self::Wallpaper,
+        Self::UnfinishedCircle,
+        Self::NeedleThreads,
+        Self::HesitatingInk,
+        Self::CropCircles,
+        Self::DelayedReflection,
+        Self::AlmostTouching,
+        Self::HiddenWheel,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Aurora => "Northern lights",
+            Self::Pollen => "Pollen in a sunbeam",
+            Self::Fireflies => "Fireflies finding a rhythm",
+            Self::WindowSunlight => "Window sunlight",
+            Self::Frost => "Frost",
+            Self::Lighthouse => "Distant lighthouse",
+            Self::PaperFold => "Paper-fold trace",
+            Self::Embroidery => "Embroidery orbit",
+            Self::PrimeConstellations => "Prime constellations",
+            Self::Wallpaper => "Turning wallpaper",
+            Self::UnfinishedCircle => "Unfinished circle",
+            Self::NeedleThreads => "Threads through a needle",
+            Self::HesitatingInk => "Ink that hesitates",
+            Self::CropCircles => "Crop circles",
+            Self::DelayedReflection => "Delayed reflection",
+            Self::AlmostTouching => "Almost touching",
+            Self::HiddenWheel => "Hidden wheel",
             Self::OpenStreetMap => "OpenStreetMap",
             Self::Carpet => "Carpet",
+            Self::Wind => "Wind",
             Self::Pipes => "3D pipes",
             Self::Stars => "Stars overhead",
             Self::SolarSystem => "Solar system",
@@ -140,7 +214,27 @@ impl AmbientKind {
 
     pub fn description(self) -> &'static str {
         match self {
+            Self::Aurora => "Luminous curtains sway above a dark horizon with adjustable hills and optional seeded trees.",
+            Self::Pollen => "Small drifting specks brighten only inside a slowly swaying shaft of sunlight.",
+            Self::Fireflies => "Seeded wandering lights gradually gather into a common pulse and drift out of agreement.",
+            Self::WindowSunlight => "One or several sheared window projections move across the field, with separate 2 x 2 or 2 x 3 panes and optional pollen.",
+            Self::Frost => "Fine branching ice grows and retreats around the screen edges or around the foreground character mask.",
+            Self::Lighthouse => "A small dark lighthouse sweeps its light over short shimmering marks on the sea.",
+            Self::PaperFold => "An angular dragon-curve trace gradually folds and opens, pausing between movements.",
+            Self::Embroidery => "A moving stitch progressively reveals a delicate geometric flower.",
+            Self::PrimeConstellations => "A slow illumination sweep reveals prime-number alignments on an Ulam spiral.",
+            Self::Wallpaper => "Repeated geometric motifs rotate into temporary larger shapes.",
+            Self::UnfinishedCircle => "Imperfect concentric arcs slowly turn and occasionally align their wandering gaps.",
+            Self::NeedleThreads => "Drifting curved threads gather through one narrow opening before fanning apart.",
+            Self::HesitatingInk => "A gently curling stroke pauses, resumes, fades and begins again.",
+            Self::CropCircles => "Several visible drawers progressively trace bounded geometric formations across a textured field.",
+            Self::DelayedReflection => "A swaying curve has a reflected partner that follows slightly behind, with gentle distortion.",
+            Self::AlmostTouching => "Two arcs approach, linger near one another and retreat without meeting.",
+            Self::HiddenWheel => "Orbiting dashes briefly light up to imply a wheel whose rim is never drawn.",
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways around ten world places, drawn as Braille dots with fixed or panning cameras.",
+            Self::Wind => {
+                "Dots blown by a fixed or rotating wind through the empty parts of your screen; scrolling and new text push them around."
+            }
             Self::Carpet => {
                 "Isometric hatch lines lift over hidden moving spheres and tubes: mouse hunters, Snake, Life, legal chess, Lichess TV, a DVD ball, planets and civil clocks."
             }
@@ -207,6 +301,11 @@ impl AmbientKind {
     /// Where the design of this scene came from; shown only in the demo.
     pub fn inspired_by(self) -> &'static [&'static str] {
         match self {
+            Self::PaperFold => &["https://thecodingtrain.com/challenges"],
+            Self::Embroidery => &["https://thecodingtrain.com/challenges"],
+            Self::PrimeConstellations => &["https://thecodingtrain.com/challenges"],
+            Self::Wallpaper => &["https://genuary.art/prompts"],
+            Self::CropCircles => &["https://en.wikipedia.org/wiki/Crop_circle"],
             Self::DitherWater => crate::scenes::dither_water::INSPIRED_BY,
             Self::AtlanticDusk => crate::scenes::atlantic_dusk::INSPIRED_BY,
             Self::CubeClock => crate::scenes::cube_clock::INSPIRED_BY,
@@ -218,6 +317,15 @@ impl AmbientKind {
             Self::HexExpedition => crate::scenes::hex_expedition::INSPIRED_BY,
             Self::VectorTd => crate::scenes::vector_td::INSPIRED_BY,
             Self::VoxelLandscape => crate::scenes::voxel_landscape::INSPIRED_BY,
+            // Classic screensaver look and the public sources each scene draws on.
+            Self::Pipes => &["https://en.wikipedia.org/wiki/3D_Pipes"],
+            Self::Chess => &["https://lichess.org/tv"],
+            Self::OpenStreetMap => &["https://www.openstreetmap.org/copyright"],
+            Self::Clouds | Self::NightLights => &["https://earthdata.nasa.gov/gibs"],
+            Self::SolarSystem => &["https://ssd.jpl.nasa.gov/planets/approx_pos.html"],
+            Self::TopographicMaps => {
+                &["https://www.ncei.noaa.gov/products/etopo-global-relief-model"]
+            }
             _ => &[],
         }
     }
@@ -275,6 +383,24 @@ pub struct AmbientSettings {
     pub hex_expedition: HexExpeditionSettings,
     pub vector_td: VectorTdSettings,
     pub voxel_landscape: VoxelLandscapeSettings,
+    pub wind: WindSettings,
+    pub aurora: AuroraSettings,
+    pub pollen: PollenSettings,
+    pub fireflies: FirefliesSettings,
+    pub window_sunlight: WindowSunlightSettings,
+    pub frost: FrostSettings,
+    pub lighthouse: LighthouseSettings,
+    pub paper_fold: PaperFoldSettings,
+    pub embroidery: EmbroiderySettings,
+    pub prime_constellations: PrimeConstellationsSettings,
+    pub wallpaper: WallpaperSettings,
+    pub unfinished_circle: UnfinishedCircleSettings,
+    pub needle_threads: NeedleThreadsSettings,
+    pub hesitating_ink: HesitatingInkSettings,
+    pub crop_circles: CropCirclesSettings,
+    pub delayed_reflection: DelayedReflectionSettings,
+    pub almost_touching: AlmostTouchingSettings,
+    pub hidden_wheel: HiddenWheelSettings,
 }
 
 impl AmbientSettings {
@@ -310,6 +436,24 @@ impl AmbientSettings {
             hex_expedition: self.hex_expedition.normalized(),
             vector_td: self.vector_td.normalized(),
             voxel_landscape: self.voxel_landscape.normalized(),
+            wind: self.wind.normalized(),
+            aurora: self.aurora.normalized(),
+            pollen: self.pollen.normalized(),
+            fireflies: self.fireflies.normalized(),
+            window_sunlight: self.window_sunlight.normalized(),
+            frost: self.frost.normalized(),
+            lighthouse: self.lighthouse.normalized(),
+            paper_fold: self.paper_fold.normalized(),
+            embroidery: self.embroidery.normalized(),
+            prime_constellations: self.prime_constellations.normalized(),
+            wallpaper: self.wallpaper.normalized(),
+            unfinished_circle: self.unfinished_circle.normalized(),
+            needle_threads: self.needle_threads.normalized(),
+            hesitating_ink: self.hesitating_ink.normalized(),
+            crop_circles: self.crop_circles.normalized(),
+            delayed_reflection: self.delayed_reflection.normalized(),
+            almost_touching: self.almost_touching.normalized(),
+            hidden_wheel: self.hidden_wheel.normalized(),
         }
     }
 
@@ -344,6 +488,24 @@ impl AmbientSettings {
             AmbientKind::HexExpedition => self.hex_expedition.controls(),
             AmbientKind::VectorTd => self.vector_td.controls(),
             AmbientKind::VoxelLandscape => self.voxel_landscape.controls(),
+            AmbientKind::Wind => self.wind.controls(),
+            AmbientKind::Aurora => self.aurora.controls(),
+            AmbientKind::Pollen => self.pollen.controls(),
+            AmbientKind::Fireflies => self.fireflies.controls(),
+            AmbientKind::WindowSunlight => self.window_sunlight.controls(),
+            AmbientKind::Frost => self.frost.controls(),
+            AmbientKind::Lighthouse => self.lighthouse.controls(),
+            AmbientKind::PaperFold => self.paper_fold.controls(),
+            AmbientKind::Embroidery => self.embroidery.controls(),
+            AmbientKind::PrimeConstellations => self.prime_constellations.controls(),
+            AmbientKind::Wallpaper => self.wallpaper.controls(),
+            AmbientKind::UnfinishedCircle => self.unfinished_circle.controls(),
+            AmbientKind::NeedleThreads => self.needle_threads.controls(),
+            AmbientKind::HesitatingInk => self.hesitating_ink.controls(),
+            AmbientKind::CropCircles => self.crop_circles.controls(),
+            AmbientKind::DelayedReflection => self.delayed_reflection.controls(),
+            AmbientKind::AlmostTouching => self.almost_touching.controls(),
+            AmbientKind::HiddenWheel => self.hidden_wheel.controls(),
         }
     }
 
@@ -383,6 +545,24 @@ impl AmbientSettings {
             AmbientKind::HexExpedition => self.hex_expedition.set_control(id, value),
             AmbientKind::VectorTd => self.vector_td.set_control(id, value),
             AmbientKind::VoxelLandscape => self.voxel_landscape.set_control(id, value),
+            AmbientKind::Wind => self.wind.set_control(id, value),
+            AmbientKind::Aurora => self.aurora.set_control(id, value),
+            AmbientKind::Pollen => self.pollen.set_control(id, value),
+            AmbientKind::Fireflies => self.fireflies.set_control(id, value),
+            AmbientKind::WindowSunlight => self.window_sunlight.set_control(id, value),
+            AmbientKind::Frost => self.frost.set_control(id, value),
+            AmbientKind::Lighthouse => self.lighthouse.set_control(id, value),
+            AmbientKind::PaperFold => self.paper_fold.set_control(id, value),
+            AmbientKind::Embroidery => self.embroidery.set_control(id, value),
+            AmbientKind::PrimeConstellations => self.prime_constellations.set_control(id, value),
+            AmbientKind::Wallpaper => self.wallpaper.set_control(id, value),
+            AmbientKind::UnfinishedCircle => self.unfinished_circle.set_control(id, value),
+            AmbientKind::NeedleThreads => self.needle_threads.set_control(id, value),
+            AmbientKind::HesitatingInk => self.hesitating_ink.set_control(id, value),
+            AmbientKind::CropCircles => self.crop_circles.set_control(id, value),
+            AmbientKind::DelayedReflection => self.delayed_reflection.set_control(id, value),
+            AmbientKind::AlmostTouching => self.almost_touching.set_control(id, value),
+            AmbientKind::HiddenWheel => self.hidden_wheel.set_control(id, value),
         }
     }
 
@@ -404,6 +584,26 @@ impl AmbientSettings {
             AmbientKind::TopographicMaps => serde_json::to_string(&normalized.topographic_maps),
             AmbientKind::OpenStreetMap => serde_json::to_string(&normalized.openstreetmap),
             AmbientKind::Carpet => serde_json::to_string(&normalized.carpet),
+            AmbientKind::Wind => serde_json::to_string(&normalized.wind),
+            AmbientKind::Aurora => serde_json::to_string(&normalized.aurora),
+            AmbientKind::Pollen => serde_json::to_string(&normalized.pollen),
+            AmbientKind::Fireflies => serde_json::to_string(&normalized.fireflies),
+            AmbientKind::WindowSunlight => serde_json::to_string(&normalized.window_sunlight),
+            AmbientKind::Frost => serde_json::to_string(&normalized.frost),
+            AmbientKind::Lighthouse => serde_json::to_string(&normalized.lighthouse),
+            AmbientKind::PaperFold => serde_json::to_string(&normalized.paper_fold),
+            AmbientKind::Embroidery => serde_json::to_string(&normalized.embroidery),
+            AmbientKind::PrimeConstellations => {
+                serde_json::to_string(&normalized.prime_constellations)
+            }
+            AmbientKind::Wallpaper => serde_json::to_string(&normalized.wallpaper),
+            AmbientKind::UnfinishedCircle => serde_json::to_string(&normalized.unfinished_circle),
+            AmbientKind::NeedleThreads => serde_json::to_string(&normalized.needle_threads),
+            AmbientKind::HesitatingInk => serde_json::to_string(&normalized.hesitating_ink),
+            AmbientKind::CropCircles => serde_json::to_string(&normalized.crop_circles),
+            AmbientKind::DelayedReflection => serde_json::to_string(&normalized.delayed_reflection),
+            AmbientKind::AlmostTouching => serde_json::to_string(&normalized.almost_touching),
+            AmbientKind::HiddenWheel => serde_json::to_string(&normalized.hidden_wheel),
             AmbientKind::NightLights => serde_json::to_string(&normalized.night_lights),
             AmbientKind::Clouds => serde_json::to_string(&normalized.clouds),
             AmbientKind::Video => serde_json::to_string(&normalized.video),
@@ -442,6 +642,13 @@ impl AmbientSettings {
     }
 
     pub fn create_scene(&self, kind: AmbientKind, env: &SceneEnv) -> Box<dyn Scene> {
+        Box::new(crate::scene::PaletteScene::new(
+            self.create_raw_scene(kind, env),
+            env.palette.clone(),
+        ))
+    }
+
+    fn create_raw_scene(&self, kind: AmbientKind, env: &SceneEnv) -> Box<dyn Scene> {
         let settings = self.normalized();
         match kind {
             AmbientKind::Graph => Box::new(GraphScene::new(&settings.graph, env)),
@@ -459,6 +666,44 @@ impl AmbientSettings {
             AmbientKind::Boats => Box::new(LiveMapScene::new(MapKind::Boats, &settings.boats, env)),
             AmbientKind::Chess => Box::new(ChessScene::new(&settings.chess, env)),
             AmbientKind::Carpet => Box::new(CarpetScene::new(&settings.carpet, env)),
+            AmbientKind::Wind => Box::new(WindScene::new(&settings.wind, env)),
+            AmbientKind::Aurora => Box::new(AuroraScene::new(&settings.aurora, env)),
+            AmbientKind::Pollen => Box::new(PollenScene::new(&settings.pollen, env)),
+            AmbientKind::Fireflies => Box::new(FirefliesScene::new(&settings.fireflies, env)),
+            AmbientKind::WindowSunlight => {
+                Box::new(WindowSunlightScene::new(&settings.window_sunlight, env))
+            }
+            AmbientKind::Frost => Box::new(FrostScene::new(&settings.frost, env)),
+            AmbientKind::Lighthouse => Box::new(LighthouseScene::new(&settings.lighthouse, env)),
+            AmbientKind::PaperFold => Box::new(PaperFoldScene::new(&settings.paper_fold, env)),
+            AmbientKind::Embroidery => Box::new(EmbroideryScene::new(&settings.embroidery, env)),
+            AmbientKind::PrimeConstellations => Box::new(PrimeConstellationsScene::new(
+                &settings.prime_constellations,
+                env,
+            )),
+            AmbientKind::Wallpaper => Box::new(WallpaperScene::new(&settings.wallpaper, env)),
+            AmbientKind::UnfinishedCircle => {
+                Box::new(UnfinishedCircleScene::new(&settings.unfinished_circle, env))
+            }
+            AmbientKind::NeedleThreads => {
+                Box::new(NeedleThreadsScene::new(&settings.needle_threads, env))
+            }
+            AmbientKind::HesitatingInk => {
+                Box::new(HesitatingInkScene::new(&settings.hesitating_ink, env))
+            }
+            AmbientKind::CropCircles => {
+                Box::new(CropCirclesScene::new(&settings.crop_circles, env))
+            }
+            AmbientKind::DelayedReflection => Box::new(DelayedReflectionScene::new(
+                &settings.delayed_reflection,
+                env,
+            )),
+            AmbientKind::AlmostTouching => {
+                Box::new(AlmostTouchingScene::new(&settings.almost_touching, env))
+            }
+            AmbientKind::HiddenWheel => {
+                Box::new(HiddenWheelScene::new(&settings.hidden_wheel, env))
+            }
             AmbientKind::GalacticEmpires => {
                 Box::new(GalacticEmpiresScene::new(&settings.galactic_empires, env))
             }
@@ -479,7 +724,20 @@ impl AmbientSettings {
             AmbientKind::Clouds => Box::new(CloudsScene::new(&settings.clouds, env)),
             AmbientKind::Video => Box::new(VideoScene::new(&settings.video, env)),
             AmbientKind::Spectrum => Box::new(SpectrumScene::new(&settings.spectrum, env)),
-            AmbientKind::Images => Box::new(ImagesScene::new(&settings.images, env)),
+            AmbientKind::Images => match ImagesScene::new(&settings.images, env) {
+                Ok(scene) => Box::new(scene),
+                Err(crate::scenes::images::ImagesStartError::Admission(_)) => {
+                    Box::new(crate::scene::MessageScene(
+                        "Images: resource capacity unavailable; retry after pending work completes"
+                            .to_owned(),
+                    ))
+                }
+                Err(crate::scenes::images::ImagesStartError::Loader(_)) => {
+                    Box::new(crate::scene::MessageScene(
+                        "Images: background loader could not start".to_owned(),
+                    ))
+                }
+            },
             AmbientKind::DitherWater => {
                 Box::new(DitherWaterScene::new(&settings.dither_water, env))
             }
@@ -503,7 +761,109 @@ impl AmbientSettings {
             }
             AmbientKind::VectorTd => Box::new(VectorTdScene::new(&settings.vector_td, env)),
             AmbientKind::VoxelLandscape => {
-                Box::new(VoxelLandscapeScene::new(&settings.voxel_landscape, env))
+                if settings.voxel_landscape.saved_maps.source
+                    == crate::minecraft::settings::WorldSource::SavedMaps
+                {
+                    Box::new(crate::minecraft::saved_scene::SavedScene::new(
+                        &settings.voxel_landscape.saved_maps,
+                        &settings.voxel_landscape,
+                        env,
+                    ))
+                } else {
+                    Box::new(VoxelLandscapeScene::new(&settings.voxel_landscape, env))
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod quiet_catalog_tests {
+    use super::*;
+    use crate::control::ControlKind;
+    use std::collections::HashSet;
+
+    const QUIET_KINDS: [AmbientKind; 17] = [
+        AmbientKind::Aurora,
+        AmbientKind::Pollen,
+        AmbientKind::Fireflies,
+        AmbientKind::WindowSunlight,
+        AmbientKind::Frost,
+        AmbientKind::Lighthouse,
+        AmbientKind::PaperFold,
+        AmbientKind::Embroidery,
+        AmbientKind::PrimeConstellations,
+        AmbientKind::Wallpaper,
+        AmbientKind::UnfinishedCircle,
+        AmbientKind::NeedleThreads,
+        AmbientKind::HesitatingInk,
+        AmbientKind::CropCircles,
+        AmbientKind::DelayedReflection,
+        AmbientKind::AlmostTouching,
+        AmbientKind::HiddenWheel,
+    ];
+
+    #[test]
+    fn seventeen_distinct_entries_append_without_reordering_existing_kinds() {
+        assert_eq!(&AmbientKind::ALL[30..], &QUIET_KINDS);
+        let unique: HashSet<_> = AmbientKind::ALL.into_iter().collect();
+        assert_eq!(unique.len(), AmbientKind::ALL.len());
+        for kind in QUIET_KINDS {
+            assert!(!kind.label().is_empty());
+            assert!(!kind.description().is_empty());
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(serde_json::from_str::<AmbientKind>(&json).unwrap(), kind);
+        }
+    }
+
+    #[test]
+    fn every_quiet_control_roundtrips_and_one_scene_edit_is_isolated() {
+        let original = AmbientSettings::default().normalized();
+        for kind in QUIET_KINDS {
+            let controls = original.controls(kind);
+            assert!(!controls.is_empty(), "{kind:?}");
+            let mut ids = HashSet::new();
+            for row in &controls {
+                assert!(ids.insert(row.id), "duplicate {kind:?}: {}", row.id);
+                assert!(!row.help.is_empty(), "{kind:?}: {}", row.id);
+                let mut unchanged = original.clone();
+                assert_eq!(
+                    unchanged.set_control(kind, row.id, row.value.clone()),
+                    Ok(false)
+                );
+                assert_eq!(unchanged, original);
+            }
+            // Change a concrete numeric control through the production dispatch,
+            // then reload the complete settings and check every other scene key.
+            let row = controls
+                .iter()
+                .find(|row| matches!(row.kind, ControlKind::Slider { .. }))
+                .unwrap();
+            let ControlKind::Slider { min, max, .. } = row.kind else {
+                unreachable!()
+            };
+            let ControlValue::Number(current) = row.value else {
+                unreachable!()
+            };
+            let next = if current == min { max } else { min };
+            let mut changed = original.clone();
+            assert_eq!(
+                changed.set_control(kind, row.id, ControlValue::Number(next)),
+                Ok(true)
+            );
+            assert_ne!(changed.scene_key(kind), original.scene_key(kind));
+            let saved = serde_json::to_string(&changed).unwrap();
+            let restored: AmbientSettings = serde_json::from_str(&saved).unwrap();
+            assert_eq!(restored, changed);
+            assert_eq!(restored.controls(kind), changed.controls(kind));
+            for other in AmbientKind::ALL {
+                if other != kind {
+                    assert_eq!(
+                        restored.scene_key(other),
+                        original.scene_key(other),
+                        "{kind:?} changed {other:?}"
+                    );
+                }
             }
         }
     }

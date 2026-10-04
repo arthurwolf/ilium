@@ -410,6 +410,14 @@ impl Texture {
             alpha: sample[3],
         })
     }
+    /// Native shader input keeps RGB independent of alpha until the exact
+    /// render-layer discard/blend decision. The generated sampler continues to
+    /// use premultiplied interpolation through sample_color.
+    pub(crate) fn sample_native_color(&self, uv: [f32; 2], time: Duration) -> Option<[f32; 4]> {
+        (self.encoding == Encoding::SrgbColor)
+            .then(|| self.sample_with_alpha(uv, time, false))
+            .flatten()
+    }
     /// Preserve material-channel values independently; do not gamma-decode or
     /// premultiply a normal/specular/height map by its fourth data channel.
     pub fn sample_data(&self, uv: [f32; 2], time: Duration) -> Option<[f32; 4]> {
@@ -445,18 +453,26 @@ impl Texture {
         )
     }
     fn sample(&self, uv: [f32; 2], time: Duration) -> Option<[f32; 4]> {
+        self.sample_with_alpha(uv, time, true)
+    }
+    fn sample_with_alpha(
+        &self,
+        uv: [f32; 2],
+        time: Duration,
+        premultiply_color: bool,
+    ) -> Option<[f32; 4]> {
         if uv.iter().any(|v| !v.is_finite()) {
             return None;
         }
         let phase = self.animation.at(time);
-        let a = self.frame(phase.current, uv)?;
+        let a = self.frame(phase.current, uv, premultiply_color)?;
         if phase.blend == 0.0 || phase.current == phase.next {
             return Some(a);
         }
-        let b = self.frame(phase.next, uv)?;
+        let b = self.frame(phase.next, uv, premultiply_color)?;
         Some(std::array::from_fn(|i| a[i] + (b[i] - a[i]) * phase.blend))
     }
-    fn frame(&self, rect: PixelRect, uv: [f32; 2]) -> Option<[f32; 4]> {
+    fn frame(&self, rect: PixelRect, uv: [f32; 2], premultiply_color: bool) -> Option<[f32; 4]> {
         let sampler = self.animation.sampler();
         let normalized = uv.map(|value| {
             let value = f64::from(value);
@@ -481,10 +497,11 @@ impl Texture {
             Some(match self.encoding {
                 Encoding::SrgbColor => {
                     let alpha = f32::from(pixel[3]) / 255.0;
+                    let multiplier = if premultiply_color { alpha } else { 1.0 };
                     [
-                        srgb_byte_to_linear(pixel[0]) * alpha,
-                        srgb_byte_to_linear(pixel[1]) * alpha,
-                        srgb_byte_to_linear(pixel[2]) * alpha,
+                        srgb_byte_to_linear(pixel[0]) * multiplier,
+                        srgb_byte_to_linear(pixel[1]) * multiplier,
+                        srgb_byte_to_linear(pixel[2]) * multiplier,
                         alpha,
                     ]
                 }
@@ -637,6 +654,10 @@ mod tests {
         let sample = t.sample_color([0.5, 0.5], Duration::ZERO).unwrap();
         assert_eq!(sample.alpha(), 0.5);
         assert_eq!(sample.straight(), [1.0, 0.0, 0.0]);
+        let native = t.sample_native_color([0.5, 0.5], Duration::ZERO).unwrap();
+        assert_eq!(native, [0.5, 0.0, 0.5, 0.5]);
+        let invisible_blue = t.sample_native_color([0.8, 0.5], Duration::ZERO).unwrap();
+        assert_eq!(invisible_blue, [0.0, 0.0, 1.0, 0.0]);
     }
     #[test]
     fn bilinear_sampling_never_leaks_into_adjacent_animation_frame() {

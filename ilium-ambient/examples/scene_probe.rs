@@ -3,11 +3,15 @@
 //!        [--width N] [--height N] [--times SECONDS_CSV] [--wait-ms N] [--density PCT] [--settings-json JSON]
 //! Each output line is {"type":"frame","kind":..,"time":..,"status":..,"lines":[..]}.
 
+#[path = "../tests/support/mod.rs"]
+mod ambient_fixture;
+
 use ilium_ambient::debug::render_frame;
 use ilium_ambient::{AmbientKind, AmbientSettings, DitherMode, SceneEnv};
 use std::time::Duration;
 
 fn run() -> Result<(), String> {
+    let resources_fixture = ambient_fixture::ResourcesFixture::new()?;
     let mut kind = None;
     let (mut width, mut height, mut wait_ms) = (100_u16, 30_u16, 0_u64);
     let mut times = vec![0.0_f64, 5.0];
@@ -38,7 +42,7 @@ fn run() -> Result<(), String> {
     }
     let kind = kind.ok_or("--kind is required")?;
     let cache = std::env::temp_dir().join("ilium-scene-probe");
-    let env = SceneEnv::for_test(cache);
+    let env = SceneEnv::for_test(cache, resources_fixture.resources.clone());
     let settings: AmbientSettings = match settings_json {
         Some(text) => serde_json::from_str(&text).map_err(|error| error.to_string())?,
         None => AmbientSettings::default(),

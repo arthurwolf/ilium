@@ -57,62 +57,146 @@ struct SearchResult {
     key: engine::PositionKey,
     chosen: Option<engine::Move>,
 }
+#[derive(Debug)]
+enum SearchFailure {
+    Cancelled,
+}
+struct SearchJob {
+    request: SearchRequest,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    // Same owner allocation; remains charged if the frontend retires mid-search.
+    _owner_storage: std::sync::Arc<ilium_execution::StorageAdmission>,
+}
+impl ilium_execution::Job for SearchJob {
+    type Output = SearchResult;
+    type Error = SearchFailure;
+    fn run(self, context: ilium_execution::JobContext) -> Result<SearchResult, Self::Error> {
+        let cancelled =
+            || context.stop_requested() || self.stop.load(std::sync::atomic::Ordering::Acquire);
+        if cancelled() {
+            return Err(SearchFailure::Cancelled);
+        }
+        let chosen = self.request.position.choose_move_with_stop(
+            self.request.depth,
+            self.request.budget,
+            self.request.seed,
+            &cancelled,
+        );
+        if cancelled() {
+            return Err(SearchFailure::Cancelled);
+        }
+        Ok(SearchResult {
+            id: self.request.id,
+            key: self.request.key,
+            chosen,
+        })
+    }
+}
+// Per square: at most8 sliding rays×7 destinations, or12 promotion moves;
+// king8+2 castling is smaller. Thus64×56 moves. Vec starts96 and doubles to
+// at most6144;4 live frontiers (root + depth2/1/0) plus one old3072 buffer
+// during growth. Positions/requests contain only fixed arrays, no heap.
+fn search_cost() -> ilium_execution::JobCost {
+    ilium_execution::JobCost {
+        input_bytes: (4 * 6144 + 3072) * std::mem::size_of::<engine::Move>()
+            + 8 * (std::mem::size_of::<Position>() + std::mem::size_of::<SearchRequest>())
+            + 4096,
+        result_bytes: 4096,
+    }
+}
+enum SearchPoll {
+    Pending,
+    Ready(Box<ilium_execution::Retained<SearchResult>>),
+    Failed(&'static str),
+}
 struct AiWorker {
-    request: std::sync::mpsc::SyncSender<SearchRequest>,
-    results: std::sync::mpsc::Receiver<SearchResult>,
-    worker: Option<crate::source::Worker>,
+    client: ilium_execution::Client,
+    receipt: Option<ilium_execution::Receipt<SearchJob>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    // Last: the shared stop allocation is destroyed before its storage credit.
+    storage: std::sync::Arc<ilium_execution::StorageAdmission>,
 }
 impl AiWorker {
-    fn start() -> Result<Self, String> {
-        let (request, requests) = std::sync::mpsc::sync_channel::<SearchRequest>(1);
-        let (result_sender, results) = std::sync::mpsc::sync_channel(1);
-        let worker = crate::source::Worker::try_spawn("carpet-chess", move |stop| {
-            ilium_platform::thread_priority::lower_current_thread(
-                ilium_platform::thread_priority::WorkerPriority::Lowest,
-            );
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                let request = match requests.recv_timeout(std::time::Duration::from_millis(50)) {
-                    Ok(request) => request,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                };
-                let chosen = request.position.choose_move_cancellable(
-                    request.depth,
-                    request.budget,
-                    request.seed,
-                    Some(&stop),
-                );
-                if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-                if result_sender
-                    .try_send(SearchResult {
-                        id: request.id,
-                        key: request.key,
-                        chosen,
-                    })
-                    .is_err()
-                {
-                    break;
+    fn start(
+        resources: &crate::resources::AmbientResources,
+    ) -> Result<Self, ilium_execution::RejectReason> {
+        // Owner metadata plus AtomicBool and both Arc allocation headers.
+        let storage = resources.reserve_storage(
+            std::mem::size_of::<Self>()
+                + std::mem::size_of::<std::sync::atomic::AtomicBool>()
+                + std::mem::size_of::<ilium_execution::StorageAdmission>()
+                + 8 * std::mem::size_of::<usize>(),
+        )?;
+        Ok(Self {
+            client: resources.finite().clone(),
+            receipt: None,
+            stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            storage,
+        })
+    }
+    fn submit(&mut self, request: SearchRequest) -> Result<(), ilium_execution::RejectReason> {
+        if self.receipt.is_some() {
+            return Err(ilium_execution::RejectReason::QueueFull);
+        }
+        // Admission precedes captured Arc cloning and every search allocation.
+        let reservation = self
+            .client
+            .try_reserve(ilium_execution::Lane::Cpu, search_cost())?;
+        let job = SearchJob {
+            request,
+            stop: std::sync::Arc::clone(&self.stop),
+            _owner_storage: std::sync::Arc::clone(&self.storage),
+        };
+        self.receipt = Some(
+            reservation
+                .submit(job)
+                .map_err(|rejected| rejected.reason)?,
+        );
+        Ok(())
+    }
+    fn poll(&mut self) -> SearchPoll {
+        let Some(receipt) = self.receipt.as_mut() else {
+            return SearchPoll::Pending;
+        };
+        match receipt.try_take() {
+            ilium_execution::JobPoll::Pending => SearchPoll::Pending,
+            ilium_execution::JobPoll::Ready(outcome) => {
+                self.receipt = None;
+                let (outcome, retention) = outcome.into_parts();
+                match outcome {
+                    ilium_execution::JobOutcome::Finished(Ok(result)) => {
+                        SearchPoll::Ready(Box::new(retention.retain(result)))
+                    }
+                    ilium_execution::JobOutcome::NotStarted { .. } => SearchPoll::Failed(
+                        "Automatic chess search canceled before execution; retrying",
+                    ),
+                    ilium_execution::JobOutcome::Panicked => {
+                        SearchPoll::Failed("Automatic chess search panicked; retrying")
+                    }
+                    ilium_execution::JobOutcome::Finished(Err(SearchFailure::Cancelled)) => {
+                        SearchPoll::Failed(
+                            "Automatic chess search canceled during execution; retrying",
+                        )
+                    }
                 }
             }
-        })
-        .map_err(|error| format!("Automatic chess worker: {error}"))?;
-        Ok(Self {
-            request,
-            results,
-            worker: Some(worker),
-        })
+            ilium_execution::JobPoll::Lost | ilium_execution::JobPoll::Taken => {
+                self.receipt = None;
+                SearchPoll::Failed("Automatic chess search receipt lost; retrying")
+            }
+        }
     }
 }
 impl Drop for AiWorker {
     fn drop(&mut self) {
-        if let Some(worker) = self.worker.take() {
-            worker.stop_in_background();
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(receipt) = &self.receipt {
+            receipt.cancel();
         }
     }
 }
 pub struct CarpetChess {
+    resources: crate::resources::AmbientResources,
     auto: Position,
     ai: Option<AiWorker>,
     request_id: u64,
@@ -132,8 +216,9 @@ pub struct CarpetChess {
     status_text: Option<String>,
 }
 impl CarpetChess {
-    pub fn new(seed: u64) -> Self {
+    pub fn new(seed: u64, resources: crate::resources::AmbientResources) -> Self {
         Self {
+            resources,
             auto: Position::new(),
             ai: None,
             request_id: 0,
@@ -238,13 +323,17 @@ impl CarpetChess {
         }
         // A single pending request bounds both channels and render-frame work.
         if self.pending.is_some() {
-            let result = self.ai.as_ref().map(|ai| ai.results.try_recv());
+            let result = self.ai.as_mut().map(AiWorker::poll);
             match result {
-                Some(Ok(result)) => self.apply_result(result, options, time),
-                Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                Some(SearchPoll::Ready(result)) => {
+                    let (result, retention) = (*result).into_parts();
+                    self.apply_result(result, options, time);
+                    drop(retention);
+                }
+                Some(SearchPoll::Failed(error)) => {
                     self.pending = None;
                     self.ai = None;
-                    self.status_text = Some("Automatic chess worker disconnected; retrying".into());
+                    self.status_text = Some(error.into());
                     self.next_move = Some(time + 1.0);
                 }
                 _ => {}
@@ -270,11 +359,13 @@ impl CarpetChess {
             return;
         }
         if self.ai.is_none() {
-            match AiWorker::start() {
+            match AiWorker::start(&self.resources) {
                 Ok(ai) => self.ai = Some(ai),
-                Err(error) => {
-                    self.status_text = Some(error);
-                    self.next_move = Some(time + 1.0);
+                Err(reason) => {
+                    self.status_text = Some(format!(
+                        "Automatic chess owner admission: {reason:?}; retrying"
+                    ));
+                    self.next_move = Some(time + 0.05);
                     return;
                 }
             }
@@ -288,23 +379,21 @@ impl CarpetChess {
             budget: options.node_budget,
             seed: self.seed.wrapping_add(u64::from(self.plies)),
         };
-        if let Some(ai) = &self.ai {
-            match ai.request.try_send(request) {
+        if let Some(ai) = &mut self.ai {
+            match ai.submit(request) {
                 Ok(()) => {
                     self.pending = Some(self.request_id);
                     self.status_text = Some("Automatic chess: thinking".into());
                 }
-                Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                Err(reason) => {
+                    self.status_text =
+                        Some(format!("Automatic chess admission: {reason:?}; retrying"));
                     self.next_move = Some(time + 0.05);
-                }
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
-                    self.ai = None;
-                    self.status_text = Some("Automatic chess worker disconnected; retrying".into());
-                    self.next_move = Some(time + 1.0);
                 }
             }
         }
     }
+
     fn apply_result(&mut self, result: SearchResult, options: &ChessOptions, time: f64) {
         if self.pending != Some(result.id) || result.key != self.auto.signature() {
             return;
@@ -351,15 +440,27 @@ impl CarpetChess {
         if self.pending.is_none() {
             return;
         }
-        let result = self
-            .ai
-            .as_ref()
-            .unwrap()
-            .results
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("real AI worker must complete bounded search");
-        self.apply_result(result, options, time);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match self.ai.as_mut().unwrap().poll() {
+                SearchPoll::Ready(result) => {
+                    let (result, retention) = (*result).into_parts();
+                    self.apply_result(result, options, time);
+                    drop(retention);
+                    return;
+                }
+                SearchPoll::Failed(error) => panic!("real AI worker failed: {error}"),
+                SearchPoll::Pending => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "real AI worker must complete bounded search"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+        }
     }
+
     fn accept_snapshot(
         &mut self,
         snapshot: &TvSnapshot,
@@ -631,7 +732,7 @@ mod tests {
     #[test]
     fn castle_en_passant_and_promotion_have_bounded_eased_tracks() {
         let o = ChessOptions::default();
-        let mut c = CarpetChess::new(1);
+        let mut c = CarpetChess::new(1, crate::resources::test_resources());
         c.set_position(&position("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1"), &o, 0.0, true);
         c.set_position(&position("4k3/8/8/8/8/8/8/R4RK1 b - - 1 1"), &o, 1.0, false);
         let king = c.transitions.iter().find(|t| t.piece == 'K').unwrap();
@@ -672,7 +773,7 @@ mod tests {
         use crate::live_chess::feed::Game;
         use std::sync::Arc;
         let o = ChessOptions::default();
-        let mut c = CarpetChess::new(1);
+        let mut c = CarpetChess::new(1, crate::resources::test_resources());
         let p = position("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
         let mut snapshot = TvSnapshot {
             game: Some(Arc::new(Game {
@@ -704,7 +805,7 @@ mod tests {
     }
     #[test]
     fn automatic_updates_do_not_start_feed_and_suspend_is_one_move() {
-        let mut c = CarpetChess::new(42);
+        let mut c = CarpetChess::new(42, crate::resources::test_resources());
         let o = ChessOptions::default();
         let mut b = Vec::new();
         c.update(false, &o, 0.0, 0.0, &mut b);
@@ -744,7 +845,7 @@ mod captured_feed_test {
             r#"{"t":"fen","d":{"fen":"r3k2r/pp2ppbp/2n3p1/qB1pP3/3P4/1QP2b2/P4PPP/R1B1R1K1 w kq - 0 13","lm":"g4f3","wc":162,"bc":148}}"#,
         ];
         let mut game = None;
-        let mut carpet = CarpetChess::new(0);
+        let mut carpet = CarpetChess::new(0, crate::resources::test_resources());
         let options = ChessOptions::default();
         for (i, line) in lines.iter().enumerate() {
             assert!(crate::live_chess::feed::apply_line(&mut game, line.as_bytes()).unwrap());
@@ -789,7 +890,7 @@ mod freshness_tests {
             game: Some(std::sync::Arc::new(game)),
             state,
         };
-        let mut c = CarpetChess::new(1);
+        let mut c = CarpetChess::new(1, crate::resources::test_resources());
         let o = ChessOptions::default();
         c.accept_snapshot(&snapshot, &o, 0.0, 1121.0);
         assert!(c.status().unwrap().contains("stale"));
@@ -806,7 +907,7 @@ mod async_tests {
     use super::*;
     #[test]
     fn actual_worker_completes_and_stale_result_cannot_mutate_board() {
-        let mut c = CarpetChess::new(77);
+        let mut c = CarpetChess::new(77, crate::resources::test_resources());
         let options = ChessOptions {
             ai_depth: 3,
             node_budget: 5000,
@@ -834,10 +935,192 @@ mod async_tests {
         assert_ne!(c.auto.signature(), before);
         assert_eq!(c.plies, 1);
         assert!(c.pending.is_none());
-        let mut worker = c.ai.take().unwrap();
-        let stop = worker.worker.as_ref().unwrap().stop_flag();
-        worker.worker.take().unwrap().stop_in_background();
+        let worker = c.ai.take().unwrap();
+        let stop = std::sync::Arc::clone(&worker.stop);
+        let storage = std::sync::Arc::clone(&worker.storage);
+        drop(worker);
         assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
+        drop(stop);
+        drop(storage);
+    }
+    fn isolated_search() -> (
+        ilium_execution::Execution,
+        crate::resources::AmbientResources,
+        ilium_execution::QuotaGroup,
+    ) {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+        };
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 3,
+            service_jobs: 0,
+            input_bytes: search_cost().input_bytes * 3,
+            result_bytes: 32 * 1024,
+            worker_threads: 1,
+            worker_bytes: 64 * 1024,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 2,
+                    priority: None,
+                    resident_bytes_per_thread: 1024,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 3,
+                service_jobs: 0,
+                input_bytes: search_cost().input_bytes * 3,
+                result_bytes: 32 * 1024,
+            })
+            .unwrap();
+        (
+            execution,
+            crate::resources::AmbientResources::new(client),
+            quota,
+        )
+    }
+    fn request(id: u64) -> SearchRequest {
+        let position = Position::new();
+        SearchRequest {
+            id,
+            key: position.signature(),
+            position,
+            depth: 3,
+            budget: 8192,
+            seed: 77,
+        }
+    }
+    struct BlockCpu {
+        started: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl ilium_execution::Job for BlockCpu {
+        type Output = ();
+        type Error = ();
+        fn run(self, _: ilium_execution::JobContext) -> Result<(), ()> {
+            self.started.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(())
+        }
+    }
+    #[test]
+    fn owner_metadata_refusal_precedes_stop_allocation_or_search_submission() {
+        use ilium_execution::{RejectReason, ShutdownMode};
+        use std::time::{Duration, Instant};
+        let (mut execution, resources, quota) = isolated_search();
+        let remaining = quota.snapshot().limits.worker_bytes - quota.snapshot().worker_bytes;
+        let saturated = resources.reserve_storage(remaining).unwrap();
+        assert!(matches!(
+            AiWorker::start(&resources),
+            Err(RejectReason::WorkerBytes)
+        ));
+        assert_eq!(quota.snapshot().jobs, 0);
+        assert_eq!(quota.snapshot().input_bytes, 0);
+        drop(saturated);
+        let ai = AiWorker::start(&resources).unwrap();
+        assert!(ai.receipt.is_none());
+        drop(ai);
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+    #[test]
+    fn queued_search_retirement_keeps_original_job_credit_until_actual_cpu_release() {
+        use ilium_execution::{JobCost, Lane, ShutdownMode};
+        use std::time::{Duration, Instant};
+        let (mut execution, resources, quota) = isolated_search();
+        let (started, start) = std::sync::mpsc::sync_channel(1);
+        let (release, gate) = std::sync::mpsc::sync_channel(1);
+        let blocker = resources
+            .finite()
+            .try_reserve(
+                Lane::Cpu,
+                JobCost {
+                    input_bytes: 4096,
+                    result_bytes: 4096,
+                },
+            )
+            .unwrap()
+            .submit(BlockCpu {
+                started,
+                release: gate,
+            })
+            .unwrap();
+        start.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut ai = AiWorker::start(&resources).unwrap();
+        ai.submit(request(1)).unwrap();
+        assert_eq!(
+            ai.submit(request(2)),
+            Err(ilium_execution::RejectReason::QueueFull)
+        );
+        assert_eq!(quota.snapshot().jobs, 2);
+        drop(ai);
+        // Frontend retirement cancels but cannot free the queued original job.
+        assert_eq!(quota.snapshot().jobs, 2);
+        assert!(quota.snapshot().input_bytes >= search_cost().input_bytes);
+        drop(blocker);
+        release.send(()).unwrap();
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(quota.snapshot().jobs, 0);
+        assert_eq!(quota.snapshot().input_bytes, 0);
+    }
+    #[test]
+    fn finished_search_original_result_keeps_credit_through_bank_shutdown_and_last_consumer() {
+        use ilium_execution::ShutdownMode;
+        use std::time::{Duration, Instant};
+        let (mut execution, resources, quota) = isolated_search();
+        let mut ai = AiWorker::start(&resources).unwrap();
+        ai.submit(request(19)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = loop {
+            match ai.poll() {
+                SearchPoll::Ready(result) => break result,
+                SearchPoll::Failed(error) => panic!("real search failed: {error}"),
+                SearchPoll::Pending => {
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        };
+        assert!(ai.receipt.is_none());
+        drop(ai);
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution.join_until_background(deadline).unwrap();
+        assert_eq!(quota.snapshot().jobs, 1);
+        assert_eq!(quota.snapshot().input_bytes, search_cost().input_bytes);
+        let retention = {
+            let (result, retention) = (*result).into_parts();
+            assert_eq!(result.id, 19);
+            assert!(result.chosen.is_some());
+            assert_eq!(quota.snapshot().jobs, 1);
+            retention
+        };
+        drop(retention);
+        assert_eq!(quota.snapshot().jobs, 0);
+        assert_eq!(quota.snapshot().input_bytes, 0);
     }
     #[test]
     fn cancelled_engine_does_not_search() {
@@ -857,7 +1140,7 @@ mod interrupted_fade_tests {
             easing_duration: 2.0,
             ..Default::default()
         };
-        let mut c = CarpetChess::new(0);
+        let mut c = CarpetChess::new(0, crate::resources::test_resources());
         let before = ChessPosition::from_fen("4k3/8/8/4p3/3P4/8/8/4K3 w - - 0 1").unwrap();
         let captured = ChessPosition::from_fen("4k3/8/8/4P3/8/8/8/4K3 b - - 0 1").unwrap();
         let moved = ChessPosition::from_fen("3k4/8/8/4P3/8/8/8/4K3 w - - 1 2").unwrap();
@@ -891,7 +1174,7 @@ mod bound_tests {
             easing_duration: 10.0,
             ..Default::default()
         };
-        let mut c = CarpetChess::new(0);
+        let mut c = CarpetChess::new(0, crate::resources::test_resources());
         let mut full = [None; 64];
         full[0] = Some('k');
         full[63] = Some('K');

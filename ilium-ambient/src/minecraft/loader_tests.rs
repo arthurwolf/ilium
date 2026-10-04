@@ -342,3 +342,80 @@ fn storage_charge_accounts_string_capacity_without_changing_states_and_cancels()
         assert_eq!(current as *const chunk::BlockState, original_pointer);
     }
 }
+
+#[test]
+fn projected_ceiling_admits_a_larger_request_but_never_invents_missing_chunks() {
+    let requested = (0..=128).map(|x| [x, 0]).collect::<BTreeSet<_>>();
+    let calls = Cell::new(0);
+    assert!(matches!(
+        load_with(&requested, Limits::default(), &|| false, |_| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        }),
+        Err(Error::Limit)
+    ));
+    assert_eq!(calls.get(), 0);
+    let result = load_with_ceiling(
+        &requested,
+        Limits {
+            max_chunks: MAX_PROJECTED_CHUNKS,
+            max_storage_charge: MAX_PROJECTED_STORAGE_CHARGE,
+            ..Limits::default()
+        },
+        [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
+        &|| false,
+        |_| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        },
+    )
+    .unwrap();
+    assert_eq!(calls.get(), 129);
+    assert_eq!(result.rejected_chunks, 129);
+    assert!(result.coverage.chunks.is_empty());
+    assert_eq!(result.issues.len(), 64);
+}
+
+#[test]
+fn projected_ceiling_rejects_overflow_before_any_read() {
+    let requested = (0..=512).map(|x| [x, 0]).collect::<BTreeSet<_>>();
+    let calls = Cell::new(0);
+    let result = load_with_ceiling(
+        &requested,
+        Limits {
+            max_chunks: MAX_PROJECTED_CHUNKS,
+            max_storage_charge: MAX_PROJECTED_STORAGE_CHARGE,
+            ..Limits::default()
+        },
+        [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
+        &|| false,
+        |_| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        },
+    );
+    assert!(matches!(result, Err(Error::Limit)));
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn published_storage_charge_covers_exact_retained_chunk_and_diagnostic_allowance() {
+    let requested = BTreeSet::from([[0, 0]]);
+    let chunk = decoded([0, 0], "minecraft:full", &(-4..=19).collect::<Vec<_>>());
+    let chunk_charge = chunk.storage_charge(&|| false).unwrap();
+    let loaded = load_with(&requested, Limits::default(), &|| false, |_| {
+        Ok(Some(chunk.clone()))
+    })
+    .unwrap();
+    let overhead = 16
+        * (std::mem::size_of::<[i32; 2]>()
+            + std::mem::size_of::<Arc<chunk::DecodedChunk>>()
+            + 2 * std::mem::size_of::<usize>());
+    let expected = std::mem::size_of::<LoadedWindow>()
+        + 64 * (std::mem::size_of::<Issue>() + 4 * 256)
+        + chunk_charge
+        + overhead;
+    assert_eq!(loaded.retained_storage_charge, expected);
+    assert_eq!(loaded.coverage.chunks, requested);
+    assert!(loaded.retained_storage_charge <= Limits::default().max_storage_charge);
+}

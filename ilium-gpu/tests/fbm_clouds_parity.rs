@@ -11,6 +11,9 @@
 //! that threshold is the host-like 0.5 split of the normalised intensity.
 #![cfg(feature = "gpu")]
 
+#[path = "../../ilium-ambient/tests/support/mod.rs"]
+mod ambient_fixture;
+
 use ilium_ambient::debug::{render_frame, Rendered};
 use ilium_ambient::gpu::{gpu_availability, GpuAvailability};
 use ilium_ambient::{AmbientKind, AmbientSettings, ControlValue, SceneEnv};
@@ -93,7 +96,8 @@ fn render_pair(
     runner: &std::sync::Arc<dyn ilium_ambient::gpu::GpuRunner>,
     case: &Case,
 ) -> Result<(Rendered, Rendered), String> {
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let resources_fixture = ambient_fixture::ResourcesFixture::new().unwrap();
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), resources_fixture.resources.clone());
     let software_settings = settings_for(&case.changes, false)?;
     let mut software_scene = software_settings.create_scene(AmbientKind::FbmClouds, &env);
     let software = render_frame(

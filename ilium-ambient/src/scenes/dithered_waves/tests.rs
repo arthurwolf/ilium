@@ -7,7 +7,10 @@ use crate::gpu::GpuUnavailable;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &DitheredWavesSettings) -> DitheredWavesScene {
-    DitheredWavesScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    DitheredWavesScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn render_at(settings: &DitheredWavesSettings, width: u16, height: u16, time: f64) -> Rendered {
@@ -510,7 +513,7 @@ fn ready_gpu_reports_the_seam_status_and_keeps_drawing_software() {
         Some("No GPU device was provided by the host; using software")
     );
 
-    let mut env = SceneEnv::for_test(std::env::temp_dir());
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
     env.gpu = Some(scripted_runner(false));
     let mut scene = DitheredWavesScene::new(&settings, &env);
     let rendered = render_frame(&mut scene, 20, 10, Duration::from_secs(1));

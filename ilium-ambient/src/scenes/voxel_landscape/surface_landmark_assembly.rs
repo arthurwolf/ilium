@@ -79,8 +79,200 @@ fn admissible_ground(
     true
 }
 
+// Original bounded adaptation for this fixed 21x21 exterior only. Heights here
+// are exclusive; the returned anchor Z is the actual authored floor block.
+const PYRAMID_SIDE: i32 = 21;
+const PYRAMID_WORK: usize = 21 * 21 * 3;
+
+fn pyramid_dry(sample: &super::terrain_fields::TerrainSample) -> bool {
+    (1..=257).contains(&sample.height)
+        && sample
+            .water_level
+            .is_none_or(|water| water <= sample.height)
+}
+
+fn assemble_pyramid(
+    anchor: [i32; 3],
+    seed: u64,
+    sample: impl Fn([i32; 2]) -> Option<super::terrain_fields::TerrainSample>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Option<LandmarkPlacement>> {
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    if !(0..=256).contains(&anchor[2])
+        || anchor[..2]
+            .iter()
+            .any(|v| v.unsigned_abs() > (i32::MAX - 512) as u32)
+    {
+        return Ok(None);
+    }
+    let mut columns = BTreeMap::new();
+    let mut heights = Vec::with_capacity(441);
+    let (mut lower, mut upper): (i32, i32) = (1, 246);
+    for y in 0..PYRAMID_SIDE {
+        for x in 0..PYRAMID_SIDE {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            let xy = [anchor[0] + x, anchor[1] + y];
+            let Some(ground) = sample(xy).filter(pyramid_dry) else {
+                return Ok(None);
+            };
+            let height = i32::from(ground.height);
+            // At most two removed solids ABOVE the floor, six fill blocks BELOW
+            // it. The template's existing floor is not counted as earthwork.
+            lower = lower.max(height - 3);
+            upper = upper.min(height + 6);
+            if let Some(water) = ground.water_level {
+                lower = lower.max(i32::from(water) - 1);
+            }
+            heights.push(height);
+            columns.insert(xy, ground);
+        }
+    }
+    heights.sort_unstable();
+    if heights[440] - heights[0] > 8 {
+        return Ok(None);
+    }
+    for (&[x, y], ground) in &columns {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        for neighbor in [[x - 1, y], [x, y - 1]] {
+            if columns
+                .get(&neighbor)
+                .is_some_and(|other| (i32::from(ground.height) - i32::from(other.height)).abs() > 2)
+            {
+                return Ok(None);
+            }
+        }
+    }
+    // The actual three-wide north doorway must meet unchanged dry ground with
+    // at most a one-block step. These read-only approach columns add no writes.
+    for x in 9..=11 {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        let Some(ground) = sample([anchor[0] + x, anchor[1] - 1]).filter(pyramid_dry) else {
+            return Ok(None);
+        };
+        let height = i32::from(ground.height);
+        lower = lower.max(height - 2);
+        upper = upper.min(height);
+    }
+    if lower > upper {
+        return Ok(None);
+    }
+    // The approach interval contains at most three integer floors. Minimize
+    // actual cut/fill work; ties prefer the nominal anchor, then the lower floor.
+    let Some((work, _, floor)) = (lower..=upper)
+        .map(|floor| {
+            let work: usize = heights
+                .iter()
+                .map(|height| ((floor - height).max(0) + (height - floor - 1).max(0)) as usize)
+                .sum();
+            (work, floor.abs_diff(anchor[2]), floor)
+        })
+        .min()
+    else {
+        return Ok(None);
+    };
+    if work > PYRAMID_WORK {
+        return Ok(None);
+    }
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    let mut kit =
+        surface_landmarks::build(LandmarkKind::DesertPyramid, seed, state).map_err(place_error)?;
+    let foundation = state("minecraft:sandstone", &[]).map_err(place_error)?;
+    let mut cells = BTreeMap::new();
+    for cell in kit.template.cells {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        if !(0..21).contains(&cell.position[0])
+            || !(0..21).contains(&cell.position[1])
+            || !(0..=10).contains(&cell.position[2])
+        {
+            return Err(place_error(PlacementError::Bounds));
+        }
+        if cells.insert(cell.position, cell.state).is_some() {
+            return Err(place_error(PlacementError::Duplicate(cell.position)));
+        }
+    }
+    for y in 0..PYRAMID_SIDE {
+        for x in 0..PYRAMID_SIDE {
+            if cancelled() {
+                return Err(AssetError::Cancelled);
+            }
+            if !cells.get(&[x, y, 0]).is_some_and(Option::is_some) {
+                return Err(place_error(PlacementError::Bounds));
+            }
+            let height = i32::from(columns[&[anchor[0] + x, anchor[1] + y]].height);
+            for z in height..floor {
+                cells.insert([x, y, z - floor], Some(foundation.clone()));
+            }
+            // Preserve every authored solid AND air cell. Fill only absent air
+            // in the bounding prism, preventing dunes outside the inset shell
+            // from surviving the cut or later plants from occupying that space.
+            for z in 1..=10 {
+                cells.entry([x, y, z]).or_insert(None);
+            }
+        }
+    }
+    kit.template.cells = cells
+        .into_iter()
+        .map(|(position, state)| surface_structures::TemplateCell { position, state })
+        .collect();
+    let anchor = [anchor[0], anchor[1], floor];
+    let prepared = match Prepared::prepare(
+        &kit.template,
+        anchor,
+        0,
+        rotated_state,
+        |p| {
+            if !(0..=256).contains(&p[2]) || !columns.contains_key(&[p[0], p[1]]) {
+                Habitat::Unknown
+            } else {
+                Habitat::Replaceable
+            }
+        },
+        cancelled,
+    ) {
+        Ok(prepared) => prepared,
+        Err(PlacementError::Cancelled) => return Err(AssetError::Cancelled),
+        Err(
+            e @ (PlacementError::InvalidState
+            | PlacementError::InvalidSource
+            | PlacementError::Budget),
+        ) => {
+            return Err(place_error(e));
+        }
+        Err(_) => return Ok(None),
+    };
+    let mut writes = BTreeMap::new();
+    for (position, value) in prepared.cells() {
+        if cancelled() {
+            return Err(AssetError::Cancelled);
+        }
+        writes.insert(position, value.cloned());
+    }
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
+    Ok(Some(LandmarkPlacement {
+        kind: LandmarkKind::DesertPyramid,
+        anchor,
+        source: prepared.source().to_owned(),
+        writes,
+        occupants: Vec::new(),
+    }))
+}
+
 /// Prepare all source cells before any camera-window projection. `anchor` is
-/// the kit's local [0,0,0] at the sampled ground elevation.
+/// the nominal sampled elevation; a desert pyramid returns its fitted floor Z.
 pub fn assemble(
     kind: LandmarkKind,
     anchor: [i32; 3],
@@ -89,6 +281,9 @@ pub fn assemble(
     settings: &VoxelLandscapeSettings,
     cancelled: impl Fn() -> bool,
 ) -> Result<Option<LandmarkPlacement>> {
+    if cancelled() {
+        return Err(AssetError::Cancelled);
+    }
     if !(0..=256).contains(&anchor[2]) {
         return Ok(None);
     }
@@ -96,6 +291,14 @@ pub fn assemble(
         || anchor[1].unsigned_abs() > (i32::MAX - 512) as u32
     {
         return Ok(None);
+    }
+    if kind == LandmarkKind::DesertPyramid {
+        return assemble_pyramid(
+            anchor,
+            seed,
+            |[x, y]| Some(fields.sample(x, y, settings.rivers)),
+            &cancelled,
+        );
     }
     let mut kit = surface_landmarks::build(kind, seed, state).map_err(place_error)?;
     for local in &kit.entrances {
@@ -462,5 +665,339 @@ mod tests {
                 })
             }));
         }
+    }
+}
+
+#[cfg(test)]
+mod foundation_tests {
+    use super::super::{
+        surface_generation::{self, Region, SourceOwner, SurfaceWorld},
+        terrain_fields::TerrainSample,
+    };
+    use super::*;
+    use std::cell::Cell;
+
+    fn dry(height: i16) -> TerrainSample {
+        let mut ground = TerrainFields::new(71839).sample(0, 0, false);
+        ground.height = height;
+        ground.water_level = None;
+        ground
+    }
+
+    #[test]
+    fn pyramid_cut_fill_keeps_every_authored_state_and_air_cell() {
+        let ground = dry(80);
+        let placement = assemble_pyramid(
+            [-16, -16, 80],
+            19,
+            |[x, _]| {
+                Some(TerrainSample {
+                    height: 80 + ((x + 16) / 4) as i16,
+                    ..ground
+                })
+            },
+            &|| false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(placement.anchor, [-16, -16, 82]);
+        let kit = surface_landmarks::build(LandmarkKind::DesertPyramid, 19, state).unwrap();
+        assert_eq!(placement.source, kit.template.source);
+        for cell in kit.template.cells {
+            let p = std::array::from_fn(|axis| placement.anchor[axis] + cell.position[axis]);
+            assert_eq!(placement.writes.get(&p), Some(&cell.state));
+        }
+        for y in -16..5 {
+            for x in -16..5 {
+                let height = 80 + (x + 16) / 4;
+                for z in height..82 {
+                    assert_eq!(
+                        placement.writes[&[x, y, z]].as_ref().unwrap().id().as_str(),
+                        "minecraft:sandstone"
+                    );
+                }
+                assert!(placement.writes[&[x, y, 82]].is_some());
+                for z in 83..=92 {
+                    assert!(placement.writes.contains_key(&[x, y, z]));
+                }
+            }
+        }
+        assert_eq!(placement.writes[&[4, 4, 83]], None);
+        assert_eq!(placement.writes[&[4, 4, 84]], None);
+        assert!(placement
+            .writes
+            .iter()
+            .all(|(p, value)| p[2] >= 82 || value.is_some()));
+        assert!(placement
+            .writes
+            .keys()
+            .all(|p| (-16..5).contains(&p[0]) && (-16..5).contains(&p[1])));
+        assert!(placement.writes.len() <= 21 * 21 * 11 + PYRAMID_WORK);
+    }
+
+    #[test]
+    fn pyramid_rejects_unknown_wet_cliffs_relief_access_and_earthwork_overruns() {
+        let ground = dry(80);
+        for (case, label) in [
+            (0, "unknown last column"),
+            (1, "wet last column"),
+            (2, "four-block local cliff"),
+            (3, "ten-block relief"),
+            (4, "approach requires excessive cut"),
+            (5, "approach requires excessive fill"),
+            (6, "volume exceeds budget"),
+            (7, "unknown approach"),
+            (8, "no supporting ground"),
+            (9, "roof exceeds height budget"),
+        ] {
+            let value = assemble_pyramid(
+                [0, 0, 80],
+                19,
+                |xy| {
+                    let mut t = ground;
+                    match case {
+                        0 if xy == [20, 20] => return None,
+                        1 if xy == [20, 20] => t.water_level = Some(81),
+                        2 if xy == [20, 20] => t.height = 84,
+                        3 => t.height = 80 + (xy[0] / 2) as i16,
+                        4 if xy[1] == -1 => t.height = 70,
+                        5 if xy[1] == -1 => t.height = 89,
+                        6 if xy[1] == -1 => t.height = 86,
+                        7 if xy[1] == -1 => return None,
+                        8 => t.height = 0,
+                        9 => t.height = 249,
+                        _ => {}
+                    }
+                    Some(t)
+                },
+                &|| false,
+            )
+            .unwrap();
+            assert!(value.is_none(), "{label}");
+        }
+        let mut at_water = ground;
+        at_water.water_level = Some(at_water.height);
+        assert!(
+            assemble_pyramid([0, 0, 80], 19, |_| Some(at_water), &|| false)
+                .unwrap()
+                .is_some()
+        );
+        let high = dry(246);
+        let p = assemble_pyramid([0, 0, 246], 19, |_| Some(high), &|| false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(p.writes.keys().map(|p| p[2]).max(), Some(256));
+    }
+
+    #[test]
+    fn pyramid_cancellation_and_signed_bounds_never_publish_partial_placements() {
+        let ground = dry(80);
+        let calls = Cell::new(0usize);
+        assert!(assemble_pyramid([0, 0, 80], 19, |_| Some(ground), &|| {
+            calls.set(calls.get() + 1);
+            false
+        })
+        .unwrap()
+        .is_some());
+        let total = calls.get();
+        for stop in [1, 100, total / 2, total - 1] {
+            calls.set(0);
+            assert!(matches!(
+                assemble_pyramid([0, 0, 80], 19, |_| Some(ground), &|| {
+                    calls.set(calls.get() + 1);
+                    calls.get() >= stop
+                }),
+                Err(AssetError::Cancelled)
+            ));
+        }
+        let fields = TerrainFields::new(71839);
+        let settings = VoxelLandscapeSettings::default();
+        for anchor in [
+            [i32::MAX, 0, 80],
+            [i32::MIN, 0, 80],
+            [0, i32::MAX, 80],
+            [0, i32::MIN, 80],
+            [0, 0, -1],
+            [0, 0, 257],
+        ] {
+            assert!(assemble(
+                LandmarkKind::DesertPyramid,
+                anchor,
+                19,
+                &fields,
+                &settings,
+                || false
+            )
+            .unwrap()
+            .is_none());
+        }
+    }
+
+    fn assert_projection(world: &SurfaceWorld, placement: &LandmarkPlacement) {
+        let owner = SourceOwner::Structure {
+            anchor: placement.anchor,
+            source: placement.source.clone(),
+        };
+        let mut cells = 0;
+        let mut solids = 0;
+        for (position, expected) in &placement.writes {
+            if !world.region.contains(*position) {
+                continue;
+            }
+            cells += 1;
+            assert!(!world.fluids.contains_key(position));
+            match expected {
+                Some(state) => {
+                    solids += 1;
+                    let actual = world.blocks.get(position).expect("missing pyramid block");
+                    assert_eq!(&actual.state, state);
+                    assert_eq!(actual.owner, owner);
+                }
+                None => assert!(
+                    !world.blocks.contains_key(position),
+                    "air lost at {position:?}"
+                ),
+            }
+        }
+        assert!(cells > 0);
+        assert_eq!(
+            world
+                .blocks
+                .values()
+                .filter(|block| block.owner == owner)
+                .count(),
+            solids
+        );
+        let records: Vec<_> = world
+            .structures
+            .iter()
+            .filter(|record| {
+                record.source == "minecraft:desert_pyramid" && record.anchor == placement.anchor
+            })
+            .collect();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].projected_cells, cells);
+    }
+
+    #[test]
+    fn natural_pyramid_foundation_survives_whole_split_and_shifted_worlds() {
+        let settings = VoxelLandscapeSettings {
+            seed: 71839,
+            structures_percent: 100,
+            ..Default::default()
+        };
+        let fields = TerrainFields::new(u64::from(settings.seed));
+        let mut eligible = 0;
+        let mut assembled = 0;
+        // Provisional bounded witness discovery, not fabricated fixed coordinates.
+        // The prefilter avoids constructing unrelated mansions/outposts; BOTH
+        // production candidate() and the ordinary whole generator must succeed.
+        for gy in -256..=256 {
+            for gx in -256..=256 {
+                let grid = [gx, gy];
+                let hash = hash2(71839 ^ 0x6c61_6e64_6d61_726b, i64::from(gx), i64::from(gy));
+                if hash % 100 >= 10 {
+                    continue;
+                }
+                let x = gx * 256 + 128 + (((hash >> 8) & 7) as i32 - 4) * 16;
+                let y = gy * 256 + 128 + (((hash >> 11) & 7) as i32 - 4) * 16;
+                let origin = fields.sample(x, y, settings.rivers);
+                let biome = surface_biome_selector::select(71839, [x, y], origin);
+                if biome != SurfaceBiome::Desert
+                    || kind_for(biome, hash.rotate_left(17)) != Some(LandmarkKind::DesertPyramid)
+                {
+                    continue;
+                }
+                eligible += 1;
+                let Some(p) = candidate(grid, &fields, &settings, || false).unwrap() else {
+                    continue;
+                };
+                assembled += 1;
+                if x >= 0 && y >= 0 {
+                    continue;
+                }
+                let region = Region {
+                    minimum: [x, y],
+                    maximum: [x + 21, y + 21],
+                };
+                let world = surface_generation::prepare(region, &settings, || false).unwrap();
+                if !world.structures.iter().any(|record| {
+                    record.source == "minecraft:desert_pyramid" && record.anchor == p.anchor
+                }) {
+                    continue;
+                }
+                assert_eq!(&p.anchor[..2], &[x, y]);
+                assert_projection(&world, &p);
+                let mut old_delta = 0;
+                let mut work = 0;
+                let mut minimum = i32::MAX;
+                let mut maximum = i32::MIN;
+                for yy in y..y + 21 {
+                    for xx in x..x + 21 {
+                        let t = fields.sample(xx, yy, settings.rivers);
+                        let height = i32::from(t.height);
+                        assert!(pyramid_dry(&t));
+                        minimum = minimum.min(height);
+                        maximum = maximum.max(height);
+                        old_delta = old_delta.max((height - i32::from(origin.height)).abs());
+                        let fill = (p.anchor[2] - height).max(0);
+                        let cut = (height - p.anchor[2] - 1).max(0);
+                        assert!(fill <= 6 && cut <= 2);
+                        work += (fill + cut) as usize;
+                        for z in (height - 1).min(p.anchor[2] - 1)..=p.anchor[2] {
+                            assert!(
+                                world.blocks.contains_key(&[xx, yy, z]),
+                                "unsupported floor {xx},{yy},{z}"
+                            );
+                        }
+                    }
+                }
+                assert!(
+                    old_delta > 2,
+                    "witness does not exercise the former rejection"
+                );
+                assert!(maximum - minimum <= 8 && work <= PYRAMID_WORK);
+                let seam = (x.div_euclid(16) + 1) * 16;
+                for window in [
+                    Region {
+                        minimum: region.minimum,
+                        maximum: [seam, y + 21],
+                    },
+                    Region {
+                        minimum: [seam, y],
+                        maximum: region.maximum,
+                    },
+                    Region {
+                        minimum: [x + 4, y + 3],
+                        maximum: [x + 25, y + 24],
+                    },
+                ] {
+                    assert_projection(
+                        &surface_generation::prepare(window, &settings, || false).unwrap(),
+                        &p,
+                    );
+                }
+                let again = candidate(grid, &fields, &settings, || false)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(again.anchor, p.anchor);
+                assert_eq!(again.source, p.source);
+                assert_eq!(again.writes, p.writes);
+                assert!(matches!(
+                    candidate(grid, &fields, &settings, || true),
+                    Err(AssetError::Cancelled)
+                ));
+                let disabled = VoxelLandscapeSettings {
+                    structures_percent: 0,
+                    ..settings.clone()
+                };
+                assert!(candidate(grid, &fields, &disabled, || false)
+                    .unwrap()
+                    .is_none());
+                eprintln!("D4.PYRAMID seed=71839 grid={grid:?} anchor={:?} old_delta={old_delta} relief={} work={work} writes={}", p.anchor, maximum - minimum, p.writes.len());
+                return;
+            }
+        }
+        panic!("no whole-generator negative-coordinate pyramid witness within radius256: eligible={eligible}, assembled={assembled}");
     }
 }

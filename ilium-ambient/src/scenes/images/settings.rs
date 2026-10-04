@@ -380,7 +380,13 @@ impl SceneSettings for ImagesSettings {
             shuffle_seed: self.shuffle_seed.min(9999),
             transition_seconds: self.transition_seconds.min(30),
             motion_strength_percent: self.motion_strength_percent.min(50),
-            ..self.clone()
+            preset: self.preset,
+            mode: self.mode,
+            recursive: self.recursive,
+            order: self.order,
+            motion: self.motion,
+            easing: self.easing,
+            fit: self.fit,
         }
     }
 

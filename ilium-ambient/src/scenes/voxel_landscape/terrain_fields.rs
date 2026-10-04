@@ -3,7 +3,7 @@
 //! These are authored terrain prescriptions, not Minecraft's climate selector
 //! bands. Weather temperature in the canonical biome registry is separate.
 //! Absolute integer coordinates and stateless sampling preserve chunk seams.
-use super::noise::{fbm2, value2};
+use super::noise::{fbm2, hash2, value2};
 
 pub const SURFACE_SEA_LEVEL: i16 = 63;
 pub const SURFACE_MAX_HEIGHT: i16 = 240;
@@ -60,6 +60,50 @@ impl TerrainFields {
         Self { seed }
     }
 
+    // Authored surface hoodoos: jittered global owners, narrow flat caps and
+    // steep sides. Subtype and climate fades vanish at ecology boundaries.
+    // Prospective river corridors fade the relief even when rivers are off,
+    // preserving the contract that uncarved height is setting-independent.
+    fn eroded_spire_relief(
+        &self,
+        x: i32,
+        z: i32,
+        climate: TerrainClimate,
+        mountain_height: f64,
+    ) -> f64 {
+        let subtype = super::surface_biome_selector::variant(self.seed, [x, z]);
+        let prospective_valley = 1.0 - smoothstep(0.015, 0.075, climate.river_distance);
+        let weight = (1.0 - smoothstep(0.18, 0.20, subtype))
+            * smoothstep(0.68, 0.69, climate.temperature)
+            * (1.0 - smoothstep(0.34, 0.35, climate.humidity))
+            * (1.0 - smoothstep(-0.08, -0.05, climate.erosion))
+            * smoothstep(-0.02, 0.02, climate.continentalness)
+            * (1.0 - smoothstep(24.0, 32.0, mountain_height))
+            * (1.0 - smoothstep(0.0, 0.20, prospective_valley));
+        if weight <= 0.0 {
+            return 0.0;
+        }
+        let (x, z) = (i64::from(x), i64::from(z));
+        let (grid_x, grid_z) = (x.div_euclid(24), z.div_euclid(24));
+        let roughness = 0.10 * value2(self.seed ^ 0x7370_6972_6573, x, z, 7);
+        let mut relief = 0.0_f64;
+        for cell_x in grid_x - 1..=grid_x + 1 {
+            for cell_z in grid_z - 1..=grid_z + 1 {
+                let key = hash2(self.seed ^ 0x686f_6f64_6f6f, cell_x, cell_z);
+                let center_x = cell_x * 24 + 8 + (key % 9) as i64;
+                let center_z = cell_z * 24 + 8 + ((key >> 8) % 9) as i64;
+                let radius_x = 6.0 + ((key >> 16) % 4) as f64;
+                let radius_z = 6.0 + ((key >> 24) % 4) as f64;
+                let dx = (x - center_x) as f64 / radius_x;
+                let dz = (z - center_z) as f64 / radius_z;
+                let distance = (dx * dx + dz * dz).sqrt() + roughness;
+                let height = 18.0 + ((key >> 32) % 21) as f64;
+                relief = relief.max(height * (1.0 - smoothstep(0.32, 1.0, distance)));
+            }
+        }
+        relief * weight
+    }
+
     pub fn climate(&self, x: i32, z: i32) -> TerrainClimate {
         let (x, z) = (i64::from(x), i64::from(z));
         // The warp is smaller than its lattice period. Quantized offsets stay
@@ -103,30 +147,14 @@ impl TerrainFields {
         let arid = climate.temperature > 0.68 && climate.humidity < 0.35;
         let wet = climate.humidity > 0.70 && climate.continentalness < 0.18;
         let island = climate.continentalness < -0.25 && climate.island > 0.38;
-        let landform = if island {
-            Landform::Island
-        } else if climate.continentalness < -0.02 {
-            Landform::Coast
-        } else if mountain_height > 32.0 {
-            Landform::Mountain
-        } else if arid && climate.erosion < -0.05 {
-            Landform::Mesa
-        } else if arid {
-            Landform::Dunes
-        } else if wet {
-            Landform::Wetland
-        } else if climate.erosion < 0.15 {
-            Landform::RollingHills
-        } else {
-            Landform::Lowland
-        };
         // Categories select ecology; continuous weights select geometry. A
         // threshold crossing must not replace a whole height prescription.
         let arid_weight = smoothstep(0.60, 0.76, climate.temperature)
             * (1.0 - smoothstep(0.27, 0.43, climate.humidity));
-        let wet_weight = smoothstep(0.60, 0.72, climate.humidity)
-            * (1.0 - smoothstep(0.12, 0.22, climate.continentalness))
-            * (1.0 - smoothstep(18.0, 34.0, mountain_height));
+        // Each original wetland core reaches its full shelf before the outer transition begins.
+        let wet_weight = smoothstep(0.60, 0.70, climate.humidity)
+            * (1.0 - smoothstep(0.18, 0.30, climate.continentalness))
+            * (1.0 - smoothstep(32.0, 60.0, mountain_height));
         let island_weight = (1.0 - smoothstep(-0.33, -0.17, climate.continentalness))
             * smoothstep(0.30, 0.46, climate.island);
         let dune_height = {
@@ -155,10 +183,18 @@ impl TerrainFields {
         );
         let uncarved = blend(
             uncarved,
-            // Wetland cores straddle the shared water plane instead of sitting
-            // several blocks above it. Coherent detail produces shallow pools
-            // and hummocks; continuous climate weights preserve dry fringes.
-            sea - 0.8 + 2.0 * climate.detail + 0.4 * inland,
+            // A second coherent scale supplies banks inside the broad, sometimes entirely wet detail field.
+            (sea - 0.4
+                + 2.0 * climate.detail
+                + 0.4 * inland
+                + 1.8
+                    * value2(
+                        self.seed ^ 0x7765_745f_706f_6f6c,
+                        i64::from(x),
+                        i64::from(z),
+                        24,
+                    ))
+            .clamp(sea - 3.0, sea + 2.0),
             wet_weight,
         );
         let uncarved = blend(
@@ -167,6 +203,32 @@ impl TerrainFields {
             island_weight,
         );
         let uncarved_height = uncarved.round().clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
+        // Classify the completed shelf: partially blended high slopes cannot retain wetland ecology.
+        let landform = if island {
+            Landform::Island
+        } else if climate.continentalness < -0.02 {
+            Landform::Coast
+        } else if wet && uncarved_height <= SURFACE_SEA_LEVEL + 3 {
+            Landform::Wetland
+        } else if mountain_height * (1.0 - wet_weight) > 32.0 {
+            Landform::Mountain
+        } else if arid && climate.erosion < -0.05 {
+            Landform::Mesa
+        } else if arid {
+            Landform::Dunes
+        } else if climate.erosion < 0.15 {
+            Landform::RollingHills
+        } else {
+            Landform::Lowland
+        };
+        let relief = if landform == Landform::Mesa {
+            self.eroded_spire_relief(x, z, climate, mountain_height * (1.0 - wet_weight))
+        } else {
+            0.0
+        };
+        let uncarved_height = (f64::from(uncarved_height) + relief)
+            .round()
+            .clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
         let valley_strength = if rivers && !island {
             1.0 - smoothstep(0.015, 0.075, climate.river_distance)
         } else {
@@ -212,10 +274,13 @@ mod tests {
         let terrain = TerrainFields::new(71839);
         let mut wet = 0;
         let mut dry = 0;
-        for detail in [-0.4, -0.1, 0.3, 0.7] {
+        for probe in 0..256 {
+            let x = (probe % 8) as i32 * 8;
+            let z = ((probe / 8) % 8) as i32 * 8;
+            let detail = [-0.4, -0.1, 0.3, 0.7][probe / 64];
             let sample = terrain.shape(
-                0,
-                0,
+                x,
+                z,
                 TerrainClimate {
                     continentalness: 0.0,
                     temperature: 0.65,
@@ -367,5 +432,81 @@ mod tests {
             TerrainFields::new(1).climate(100, 200),
             TerrainFields::new(2).climate(100, 200)
         );
+    }
+}
+
+#[cfg(test)]
+#[path = "terrain_ecology_tests.rs"]
+mod ecology_regression_tests;
+
+#[cfg(test)]
+mod eroded_morphology_regressions {
+    use super::super::{surface_biome_selector, surface_biomes::SurfaceBiome};
+    use super::*;
+
+    #[test]
+    fn natural_eroded_fixture_contains_a_tall_isolated_spire() {
+        let fields = TerrainFields::new(71839);
+        let center = [-16256, -16384];
+        let mut eroded = 0;
+        let mut peaks = 0;
+        for dx in (-64..64).step_by(2) {
+            for dz in (-64..64).step_by(2) {
+                let xy = [center[0] + dx, center[1] + dz];
+                let sample = fields.sample(xy[0], xy[1], false);
+                if surface_biome_selector::select(71839, xy, sample) != SurfaceBiome::ErodedBadlands
+                {
+                    continue;
+                }
+                eroded += 1;
+                let ring = [
+                    [12, 0],
+                    [12, 12],
+                    [0, 12],
+                    [-12, 12],
+                    [-12, 0],
+                    [-12, -12],
+                    [0, -12],
+                    [12, -12],
+                ];
+                let rim = ring
+                    .into_iter()
+                    .map(|d| fields.sample(xy[0] + d[0], xy[1] + d[1], false).height)
+                    .max()
+                    .unwrap();
+                peaks += usize::from(i32::from(sample.height) - i32::from(rim) >= 12);
+            }
+        }
+        assert!(
+            eroded > 100,
+            "fixture must actually contain eroded badlands"
+        );
+        assert!(peaks > 0, "missing tall isolated terracotta-spire terrain");
+    }
+    #[test]
+    fn spire_uncarved_height_is_independent_of_river_setting() {
+        let fields = TerrainFields::new(71839);
+        for x in -16320..-16192 {
+            for z in (-16448..-16320).step_by(4) {
+                let dry = fields.sample(x, z, false);
+                let river = fields.sample(x, z, true);
+                assert_eq!(dry.uncarved_height, river.uncarved_height);
+                assert!(river.height <= dry.height);
+            }
+        }
+    }
+
+    #[test]
+    fn spire_fields_remain_bounded_at_signed_coordinate_extremes() {
+        for seed in [0, 71839, u64::from(u32::MAX)] {
+            let fields = TerrainFields::new(seed);
+            for x in [i32::MIN, i32::MIN + 24, -24, 0, 24, i32::MAX - 24, i32::MAX] {
+                for z in [i32::MIN, i32::MAX, 0] {
+                    let sample = fields.sample(x, z, true);
+                    assert!((4..=SURFACE_MAX_HEIGHT).contains(&sample.height));
+                    assert!(sample.climate.detail.is_finite());
+                }
+            }
+        }
     }
 }

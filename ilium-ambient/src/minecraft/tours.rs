@@ -7,13 +7,21 @@ use super::{
     evidence::{self, Category, Confidence, Kind, MapId, Source, TargetKey, TargetSummary},
     loader::LoadedWindow,
     region,
-    surface::{MAX_Y, MIN_Y},
+    source_footprint::Request,
+    surface::{self, MAX_Y, MIN_Y},
 };
+use crate::voxel_landscape::assets::budget::Reservation;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Reverse, sync::Arc, time::Duration};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 const MAX_MAPS: usize = 16;
 const MAX_CHUNKS: usize = 128;
+const MAX_PROJECTED_CHUNKS: usize = 512;
 const MAX_TARGETS: usize = 2304;
 const MAX_OWNERS: usize = 8192;
 const RECENT_RUNS: u64 = 8;
@@ -95,20 +103,44 @@ pub struct PreparedMap {
     last_played: i64,
     loaded: Arc<LoadedWindow>,
     targets: Vec<TargetSummary>,
+    // An enlarged renderer-only map must never outlive its decoded-storage
+    // account. Arc clones, owner receipts and tile maps all retain this charge.
+    _projected_charge: Option<Arc<Reservation>>,
+    _catalog_charge: Option<Arc<Reservation>>,
 }
 impl PreparedMap {
     pub fn new(
         source: Source,
         last_played: i64,
         loaded: Arc<LoadedWindow>,
+        targets: Vec<TargetSummary>,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self, Error> {
+        Self::new_admitted(
+            source,
+            last_played,
+            loaded,
+            targets,
+            MAX_CHUNKS,
+            None,
+            budget,
+        )
+    }
+
+    fn new_admitted(
+        source: Source,
+        last_played: i64,
+        loaded: Arc<LoadedWindow>,
         mut targets: Vec<TargetSummary>,
+        max_chunks: usize,
+        projected_charge: Option<Arc<Reservation>>,
         budget: &mut Budget<'_>,
     ) -> Result<Self, Error> {
         budget.check()?;
         if source.generation == 0 || last_played < 0 {
             return Err(Error::Invalid("source/LastPlayed"));
         }
-        if loaded.chunks.len() > MAX_CHUNKS
+        if loaded.chunks.len() > max_chunks
             || targets.len() > MAX_TARGETS
             || targets.capacity() > MAX_TARGETS
         {
@@ -148,12 +180,32 @@ impl PreparedMap {
             last_played,
             loaded,
             targets,
+            _projected_charge: projected_charge,
+            _catalog_charge: None,
         };
         for target in &result.targets {
             result.validate_target(target, budget)?;
         }
         budget.check()?;
         Ok(result)
+    }
+    /// Decoder-owned capacities and diagnostic allowance, wrapper and summaries.
+    pub(crate) fn retained_catalog_charge(&self) -> Option<usize> {
+        if self.loaded.retained_storage_charge < std::mem::size_of::<LoadedWindow>() {
+            return None;
+        }
+        self.targets
+            .capacity()
+            .checked_mul(std::mem::size_of::<TargetSummary>())?
+            .checked_add(self.loaded.retained_storage_charge)?
+            .checked_add(std::mem::size_of::<Self>() + 64)
+    }
+    pub(crate) fn retain_catalog_charge(&mut self, charge: Arc<Reservation>) -> Result<(), Error> {
+        if self._catalog_charge.is_some() || self._projected_charge.is_some() {
+            return Err(Error::Invalid("source storage already admitted"));
+        }
+        self._catalog_charge = Some(charge);
+        Ok(())
     }
     pub fn source(&self) -> Source {
         self.source
@@ -163,6 +215,105 @@ impl PreparedMap {
     }
     pub fn loaded(&self) -> &LoadedWindow {
         &self.loaded
+    }
+    /// A renderer-only source snapshot for a selected route. The initial
+    /// evidence targets and their stable identities remain on the original
+    /// planner map; this snapshot is independently qualified from every
+    /// requested source chunk and keeps the same map/generation identity.
+    pub(crate) fn projected_source(
+        &self,
+        loaded: Arc<LoadedWindow>,
+        decoded_charge: Reservation,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self, Error> {
+        Self::new_admitted(
+            self.source,
+            self.last_played,
+            loaded,
+            Vec::new(),
+            MAX_PROJECTED_CHUNKS,
+            Some(Arc::new(decoded_charge)),
+            budget,
+        )
+    }
+    /// A route-only snapshot inside a separately rendered core. The original
+    /// map remains the native tint/face-neighbor support source. The one-chunk
+    /// inset keeps every coverage-certified viewport off the render boundary;
+    /// source identity and authored target keys are never reclassified.
+    pub fn tour_core(
+        &self,
+        render_core: surface::Bounds,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self, Error> {
+        budget.check()?;
+        let mut lower = [0_i32; 2];
+        let mut upper = [0_i32; 2];
+        for axis in 0..2 {
+            if render_core.minimum[axis].rem_euclid(16) != 0
+                || render_core.maximum[axis].rem_euclid(16) != 15
+            {
+                return Err(Error::Invalid("unaligned render core"));
+            }
+            lower[axis] = render_core.minimum[axis]
+                .div_euclid(16)
+                .checked_add(1)
+                .ok_or(Error::Invalid("tour inset overflow"))?;
+            upper[axis] = render_core.maximum[axis]
+                .div_euclid(16)
+                .checked_sub(1)
+                .ok_or(Error::Invalid("tour inset overflow"))?;
+            if lower[axis] > upper[axis] {
+                return Err(Error::Invalid("tour inset empty"));
+            }
+        }
+        let mut minimum = [0_i32; 2];
+        let mut maximum = [0_i32; 2];
+        for axis in 0..2 {
+            minimum[axis] = lower[axis]
+                .checked_mul(16)
+                .ok_or(Error::Invalid("tour bounds overflow"))?;
+            maximum[axis] = upper[axis]
+                .checked_mul(16)
+                .and_then(|origin| origin.checked_add(15))
+                .ok_or(Error::Invalid("tour bounds overflow"))?;
+        }
+        let mut loaded = LoadedWindow::default();
+        for (&position, chunk) in &self.loaded.chunks {
+            budget.charge(1)?;
+            if (0..2).all(|axis| (lower[axis]..=upper[axis]).contains(&position[axis])) {
+                loaded.chunks.insert(position, Arc::clone(chunk));
+                loaded.coverage.chunks.insert(position);
+            }
+        }
+        if loaded.chunks.is_empty() {
+            return Err(Error::Invalid("no qualified tour-core chunks"));
+        }
+        let targets = self
+            .targets
+            .iter()
+            .copied()
+            .filter(|target| {
+                [(0, 0), (1, 2)].into_iter().all(|(axis, ground_axis)| {
+                    target.support.minimum[ground_axis] >= minimum[axis]
+                        && target.support.maximum[ground_axis] <= maximum[axis]
+                })
+            })
+            .collect();
+        let mut result = Self::new_admitted(
+            self.source,
+            self.last_played,
+            Arc::new(loaded),
+            targets,
+            if self._projected_charge.is_some() {
+                MAX_PROJECTED_CHUNKS
+            } else {
+                MAX_CHUNKS
+            },
+            self._projected_charge.as_ref().map(Arc::clone),
+            budget,
+        )?;
+        result._catalog_charge = self._catalog_charge.as_ref().map(Arc::clone);
+        Ok(result)
     }
     pub fn state(&self, position: [i32; 3]) -> Option<&BlockState> {
         if !(MIN_Y..=MAX_Y).contains(&position[1]) {
@@ -386,6 +537,19 @@ fn route_key(map: MapId, line: Line) -> RouteKey {
     endpoints.sort_unstable();
     RouteKey { map, endpoints }
 }
+/// Attempt-local rejection of the same failed corridor with a few blocks of
+/// endpoint jitter. RouteKey is in quarter blocks, so 64 is 16 blocks. A
+/// different map, direction, or shorter length tier remains eligible.
+fn near_failed_route(route: RouteKey, failed: &BTreeSet<RouteKey>) -> bool {
+    failed.iter().any(|old| {
+        old.map == route.map
+            && old
+                .endpoints
+                .iter()
+                .zip(route.endpoints)
+                .all(|(left, right)| left.iter().zip(right).all(|(&a, b)| a.abs_diff(b) <= 64))
+    })
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seen {
     pub key: TargetKey,
@@ -542,6 +706,9 @@ impl Plan {
     pub fn route(&self) -> RouteKey {
         self.route
     }
+    pub fn focus_y(&self) -> f64 {
+        self.focus_y
+    }
     pub fn target(&self) -> Option<TargetSummary> {
         self.target
     }
@@ -579,7 +746,16 @@ fn variety(route: RouteKey, run: u64) -> u64 {
     }
     hash ^ (hash >> 31)
 }
-type Score = (usize, bool, bool, Reverse<i64>, Reverse<u64>, u64, RouteKey);
+type Score = (
+    usize,
+    usize,
+    bool,
+    bool,
+    Reverse<i64>,
+    Reverse<u64>,
+    u64,
+    RouteKey,
+);
 struct Candidate {
     map: usize,
     line: Line,
@@ -593,6 +769,8 @@ struct Search<'a, 'b> {
     history: &'a History,
     policy: Policy,
     maps: &'a [Arc<PreparedMap>],
+    excluded: &'a BTreeSet<RouteKey>,
+    attempted_maps: &'a BTreeMap<MapId, usize>,
     budget: &'a mut Budget<'b>,
     audit: SearchAudit,
     best: Option<Candidate>,
@@ -632,6 +810,10 @@ impl Search<'_, '_> {
                 continue;
             }
             let route = route_key(prepared.source.map, line);
+            self.budget.charge(self.excluded.len() as u64)?;
+            if near_failed_route(route, self.excluded) {
+                continue;
+            }
             if self.history.routes[0].is_some_and(|last| last.route == route) {
                 self.audit.immediate_repeats += 1;
                 continue;
@@ -647,6 +829,7 @@ impl Search<'_, '_> {
                 .position(|old| old.is_some_and(|old| old.route.map == route.map))
                 .map_or(0, |index| self.history.routes.len() - index);
             let score = (
+                self.attempted_maps.get(&route.map).copied().unwrap_or(0),
                 map_penalty,
                 self.history.traversals().any(|old| old.route == route),
                 target.is_some_and(|target| {
@@ -696,6 +879,65 @@ pub fn select(
     policy: Policy,
     budget: &mut Budget<'_>,
 ) -> Result<Selection, Error> {
+    select_excluding(ticket, maps, history, policy, &BTreeSet::new(), budget)
+}
+
+/// Retry a bounded finite search after an exact route could not qualify its
+/// complete projected source. Exclusions are attempt-local and never enter
+/// persisted traversal/history or alter source/target identity.
+pub fn select_excluding(
+    ticket: Ticket,
+    maps: &[Arc<PreparedMap>],
+    history: &History,
+    policy: Policy,
+    excluded: &BTreeSet<RouteKey>,
+    budget: &mut Budget<'_>,
+) -> Result<Selection, Error> {
+    let attempted_maps = BTreeMap::new();
+    select_diverse_excluding(
+        ticket,
+        maps,
+        history,
+        policy,
+        CandidateSurvey {
+            excluded,
+            attempted_maps: &attempted_maps,
+            required_choice: None,
+        },
+        budget,
+    )
+}
+
+/// Worker-local candidate constraints. These never become persisted history
+/// and must be paired with the same catalog and ticket for every survey pass.
+pub struct CandidateSurvey<'a> {
+    pub excluded: &'a BTreeSet<RouteKey>,
+    pub attempted_maps: &'a BTreeMap<MapId, usize>,
+    pub required_choice: Option<Choice>,
+}
+
+/// Enumerate a bounded candidate for one appearance phase while penalizing
+/// maps already attempted by this worker. Phase ordering is external only for
+/// finite route qualification: an ordinary `select` still searches all phases.
+pub fn select_diverse_excluding(
+    ticket: Ticket,
+    maps: &[Arc<PreparedMap>],
+    history: &History,
+    policy: Policy,
+    survey: CandidateSurvey<'_>,
+    budget: &mut Budget<'_>,
+) -> Result<Selection, Error> {
+    if survey.excluded.len() > 32 {
+        return Err(Error::Limit("route qualification attempts"));
+    }
+    if survey.attempted_maps.len() > maps.len()
+        || survey
+            .attempted_maps
+            .keys()
+            .any(|id| !maps.iter().any(|map| map.source.map == *id))
+    {
+        return Err(Error::Invalid("attempted map outside route catalog"));
+    }
     budget.check()?;
     policy.validate()?;
     history.validate()?;
@@ -748,6 +990,8 @@ pub fn select(
         history,
         policy,
         maps,
+        excluded: survey.excluded,
+        attempted_maps: survey.attempted_maps,
         budget,
         audit,
         best: None,
@@ -762,6 +1006,12 @@ pub fn select(
     .into_iter()
     .enumerate()
     {
+        if survey
+            .required_choice
+            .is_some_and(|required| required != phase_choice)
+        {
+            continue;
+        }
         choice = phase_choice;
         let slots = maps
             .iter()
@@ -931,8 +1181,69 @@ pub struct View {
     pub data_radius: f64,
     pub motion: Motion,
 }
+/// A controller-issued, immutable pose. The private controller seal prevents
+/// callers from presenting a forged radius, pose or endpoint with a real tag.
+/// It is cheap to retain in the exact raster receipt until terminal emission.
+#[derive(Clone, Debug)]
+pub struct IssuedView {
+    view: View,
+    seal: Arc<()>,
+}
+impl IssuedView {
+    pub fn view(&self) -> View {
+        self.view
+    }
+}
+/// A worker-certified renderer source for one already-selected Plan. The
+/// planner's map and original target inventory remain authoritative for tour
+/// ranking and history; this separate snapshot owns the exact painted states.
+/// The request covers all source positions that could project during the run.
+pub struct ProjectedDisplay {
+    planner_map: Arc<PreparedMap>,
+    rendered_map: Arc<PreparedMap>,
+    request: Arc<Request>,
+    ticket: Ticket,
+}
+impl ProjectedDisplay {
+    pub(crate) fn bind(
+        plan: &Plan,
+        rendered_map: Arc<PreparedMap>,
+        request: Arc<Request>,
+        size: [usize; 2],
+        scale: f64,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self, Error> {
+        budget.check()?;
+        if rendered_map.source != plan.source()
+            || rendered_map._projected_charge.is_none()
+            || &rendered_map.loaded.coverage.chunks != request.support_chunks()
+            || !request.matches_view(plan.line, plan.focus_y, size, scale)
+        {
+            return Err(Error::Invalid("projected display source"));
+        }
+        // If a save changed between catalog and route decoding, the original
+        // evidence cannot be credited against a different snapshot. Exact
+        // decoded content comparison is conservative about palette changes.
+        for (position, original) in &plan.map.loaded.chunks {
+            budget.charge(100_000)?;
+            if let Some(rendered) = rendered_map.loaded.chunks.get(position) {
+                if original.as_ref() != rendered.as_ref() {
+                    return Err(Error::Stale);
+                }
+            }
+        }
+        budget.check()?;
+        Ok(Self {
+            planner_map: Arc::clone(&plan.map),
+            rendered_map,
+            request,
+            ticket: plan.ticket,
+        })
+    }
+}
 struct Active {
     plan: Plan,
+    projected: Option<Arc<ProjectedDisplay>>,
     distance: f64,
     last_time: Duration,
     last_speed: f64,
@@ -989,24 +1300,32 @@ fn visible(
     budget: &mut Budget<'_>,
 ) -> Result<bool, Error> {
     budget.charge(1)?;
-    for position in [Some(target.key.anchor), Some(target.corroboration)]
-        .into_iter()
-        .chain(target.landmarks)
-        .flatten()
-    {
-        budget.charge(1)?;
-        let key = (
-            [position[0].div_euclid(16), position[2].div_euclid(16)],
-            position,
-        );
-        let Ok(index) = owners.binary_search_by_key(&key, display_order) else {
-            return Ok(false);
-        };
-        if !owners[index].resolved || owners[index].pixels < minimum_pixels {
-            return Ok(false);
+    let dwelling = target.key.category == Category::DwellingLikeConstruction;
+    // Furnishings identify a dwelling in decoded source, but a faithful opaque
+    // roof may hide them and its corner witnesses. Credit only a sufficiently
+    // broad, mixed constructed exterior from this exact classified footprint.
+    // Biome and masonry witnesses keep their existing visibility requirements.
+    if !dwelling {
+        for position in [Some(target.key.anchor), Some(target.corroboration)]
+            .into_iter()
+            .chain(target.landmarks)
+            .flatten()
+        {
+            budget.charge(1)?;
+            let key = (
+                [position[0].div_euclid(16), position[2].div_euclid(16)],
+                position,
+            );
+            let Ok(index) = owners.binary_search_by_key(&key, display_order) else {
+                return Ok(false);
+            };
+            if !owners[index].resolved || owners[index].pixels < minimum_pixels {
+                return Ok(false);
+            }
         }
     }
     let mut columns = [0_u64; 4];
+    let mut materials = 0_u8;
     let mut sectors = 0_u16;
     let (mut low, mut high) = ([16; 2], [0; 2]);
     let first = target
@@ -1031,6 +1350,13 @@ fn visible(
                 {
                     continue;
                 }
+                if dwelling {
+                    let material = evidence::construction_appearance_material(owner.state);
+                    if material == 0 {
+                        continue;
+                    }
+                    materials |= material;
+                }
                 let x =
                     (i64::from(owner.position[0]) - i64::from(target.support.origin[0])) as usize;
                 let z =
@@ -1046,11 +1372,10 @@ fn visible(
         }
     }
     let count: u32 = columns.iter().map(|word| word.count_ones()).sum();
-    Ok(
-        count >= u32::from(target.support.columns).div_ceil(4).max(8)
-            && sectors.count_ones() >= 2
-            && (0..2).all(|axis| high[axis] >= low[axis] + 3),
-    )
+    Ok((!dwelling || materials.count_ones() >= 2)
+        && count >= u32::from(target.support.columns).div_ceil(4).max(8)
+        && sectors.count_ones() >= 2
+        && (0..2).all(|axis| high[axis] >= low[axis] + 3))
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Presentation {
@@ -1074,12 +1399,14 @@ pub struct Finished {
 /// pending/active work immediately; the owner must also supersede its worker.
 /// Keep a copied History in the worker request; never hold a UI lock while select runs.
 pub struct Controller {
+    seal: Arc<()>,
     generation: u64,
     serial: u64,
     history: History,
     pending: Option<Ticket>,
     active: Option<Active>,
     last_view: Option<View>,
+    cancelled_tag: Option<FrameTag>,
 }
 impl Controller {
     pub fn new(generation: u64, history: History) -> Result<Self, Error> {
@@ -1088,12 +1415,14 @@ impl Controller {
         }
         history.validate()?;
         Ok(Self {
+            seal: Arc::new(()),
             generation,
             serial: 0,
             history,
             pending: None,
             active: None,
             last_view: None,
+            cancelled_tag: None,
         })
     }
     pub fn history(&self) -> History {
@@ -1101,6 +1430,16 @@ impl Controller {
     }
     pub fn view(&self) -> Option<View> {
         self.last_view
+    }
+    /// Capture only a pose that this controller actually issued. A renderer
+    /// seals this beside its exact frame-local owner table, never reconstructs
+    /// it later from the controller's mutable latest pose.
+    pub fn issued_view(&self) -> Option<IssuedView> {
+        let view = self.last_view?;
+        (self.active.as_ref()?.view(Motion::Frozen).tag == view.tag).then(|| IssuedView {
+            view,
+            seal: Arc::clone(&self.seal),
+        })
     }
     /// Returns the old plan instead of dropping the last snapshot Arc on the UI.
     pub fn invalidate(&mut self, generation: u64) -> Result<Option<Plan>, Error> {
@@ -1111,6 +1450,19 @@ impl Controller {
         self.pending = None;
         self.last_view = None;
         Ok(self.active.take().map(|active| active.plan))
+    }
+    /// Replan this SAME decoded generation after viewport growth. A partial
+    /// route is not completed; any already credited History remains intact.
+    /// Return its plan so the owner can retire the last Arc off the UI thread.
+    pub fn cancel_viewport(&mut self, budget: &Budget<'_>) -> Result<Option<Plan>, Error> {
+        budget.check()?;
+        self.pending = None;
+        self.last_view = None;
+        let active = self.active.take();
+        self.cancelled_tag = active
+            .as_ref()
+            .map(|active| active.view(Motion::Frozen).tag);
+        Ok(active.map(|active| active.plan))
     }
     pub fn request(&mut self, budget: &Budget<'_>) -> Result<Ticket, Error> {
         budget.check()?;
@@ -1141,6 +1493,39 @@ impl Controller {
         clock: Clock,
         budget: &Budget<'_>,
     ) -> Result<Option<View>, Error> {
+        self.start_inner(plan, None, clock, budget)
+    }
+    /// The route worker sealed this display against the exact selected plan.
+    /// Keeping the proof in Active binds every later emitted receipt to the
+    /// same decoded map and source request, including older issued poses.
+    pub fn start_projected(
+        &mut self,
+        plan: &Plan,
+        projected: Arc<ProjectedDisplay>,
+        clock: Clock,
+        budget: &Budget<'_>,
+    ) -> Result<Option<View>, Error> {
+        if projected.ticket != plan.ticket
+            || !Arc::ptr_eq(&projected.planner_map, &plan.map)
+            || projected.rendered_map.source != plan.source()
+            || !projected.request.matches_view(
+                plan.line,
+                plan.focus_y,
+                projected.request.size(),
+                projected.request.scale(),
+            )
+        {
+            return Err(Error::Stale);
+        }
+        self.start_inner(plan, Some(projected), clock, budget)
+    }
+    fn start_inner(
+        &mut self,
+        plan: &Plan,
+        projected: Option<Arc<ProjectedDisplay>>,
+        clock: Clock,
+        budget: &Budget<'_>,
+    ) -> Result<Option<View>, Error> {
         budget.check()?;
         clock.validate()?;
         if self.active.is_some() {
@@ -1158,6 +1543,7 @@ impl Controller {
         }
         let active = Active {
             plan: plan.clone(),
+            projected,
             distance: 0.0,
             last_time: clock.time,
             last_speed: clock.local_speed,
@@ -1192,6 +1578,26 @@ impl Controller {
             .time
             .checked_sub(active.last_time)
             .ok_or(Error::ClockReversed)?;
+        // At the endpoint, keep one sequence until its exact emitted raster
+        // is acknowledged. Minting a new sequence on every render request can
+        // make a successful asynchronous receipt perpetually one frame late.
+        if active.distance >= active.plan.line.length() {
+            budget.check()?;
+            let active = self.active.as_mut().ok_or(Error::Idle)?;
+            active.last_time = clock.time;
+            active.last_speed = if clock.frozen() {
+                0.0
+            } else {
+                clock.local_speed
+            };
+            let view = active.view(if clock.frozen() {
+                Motion::Frozen
+            } else {
+                Motion::Endpoint
+            });
+            self.last_view = Some(view);
+            return Ok(view);
+        }
         let sequence = active
             .sequence
             .checked_add(1)
@@ -1237,15 +1643,59 @@ impl Controller {
         budget: &mut Budget<'_>,
     ) -> Result<Presentation, Error> {
         budget.check()?;
-        let active = self.active.as_ref().ok_or(Error::Idle)?;
+        let active = self.active.as_ref().ok_or_else(|| {
+            if self.cancelled_tag == Some(tag) {
+                Error::Stale
+            } else {
+                Error::Idle
+            }
+        })?;
         let view = active.view(Motion::Frozen);
         if tag != view.tag || active.acknowledged >= tag.sequence {
             return Err(Error::Stale);
         }
+        self.presented_view(view, owners, budget)
+    }
+    /// Credit an exact emitted raster, including an older issued pose that
+    /// survived a newer same-run render. Repeated presentations of one raster
+    /// may expose additional final pixels after overlays; History::see itself
+    /// prevents a second category/run credit. The highest acknowledged pose
+    /// remains monotonic, and the held endpoint tag can therefore finish.
+    pub fn presented_issued(
+        &mut self,
+        issued: &IssuedView,
+        owners: &[DisplayedBlock<'_>],
+        budget: &mut Budget<'_>,
+    ) -> Result<Presentation, Error> {
+        budget.check()?;
+        let active = self.active.as_ref().ok_or(Error::Stale)?;
+        let tag = issued.view.tag;
+        if !Arc::ptr_eq(&self.seal, &issued.seal)
+            || tag.ticket != active.plan.ticket
+            || tag.source != active.plan.source()
+            || tag.sequence == 0
+            || tag.sequence > active.sequence
+        {
+            return Err(Error::Stale);
+        }
+        self.presented_view(issued.view, owners, budget)
+    }
+    fn presented_view(
+        &mut self,
+        view: View,
+        owners: &[DisplayedBlock<'_>],
+        budget: &mut Budget<'_>,
+    ) -> Result<Presentation, Error> {
+        budget.check()?;
+        let active = self.active.as_ref().ok_or(Error::Idle)?;
+        let tag = view.tag;
         if owners.len() > MAX_OWNERS {
             return Err(Error::Limit("display owners"));
         }
-        let map = &active.plan.map;
+        let map = active
+            .projected
+            .as_ref()
+            .map_or(&active.plan.map, |source| &source.rendered_map);
         let mut any_pixels = false;
         for (index, owner) in owners.iter().enumerate() {
             budget.charge(1)?;
@@ -1255,6 +1705,32 @@ impl Controller {
             let Some(state) = map.state(owner.position) else {
                 return Err(Error::Invalid("display owner not saved"));
             };
+            let outside_footprint = if let Some(source) = &active.projected {
+                let chunk = [
+                    owner.position[0].div_euclid(16),
+                    owner.position[2].div_euclid(16),
+                ];
+                !source.request.render_chunks().contains(&chunk)
+                    || !source
+                        .request
+                        .may_project_cell(owner.position, [view.look_at[0], view.look_at[2]])
+                    || source
+                        .request
+                        .column_band([owner.position[0], owner.position[2]])
+                        .is_none_or(|band| !(band[0]..=band[1]).contains(&owner.position[1]))
+                    || active
+                        .plan
+                        .map
+                        .state(owner.position)
+                        .is_some_and(|original| original != state)
+            } else {
+                [(0, 0), (2, 2)].into_iter().any(|(axis, look_axis)| {
+                    f64::from(owner.position[axis])
+                        < (view.look_at[look_axis] - view.data_radius).floor()
+                        || f64::from(owner.position[axis])
+                            > (view.look_at[look_axis] + view.data_radius).floor()
+                })
+            };
             if !active
                 .plan
                 .policy
@@ -1262,12 +1738,7 @@ impl Controller {
                 .contains_height(owner.position[1])
                 || !std::ptr::eq(state, owner.state)
                 || state.is_air()
-                || [(0, 0), (2, 2)].into_iter().any(|(axis, look_axis)| {
-                    f64::from(owner.position[axis])
-                        < (view.look_at[look_axis] - view.data_radius).floor()
-                        || f64::from(owner.position[axis])
-                            > (view.look_at[look_axis] + view.data_radius).floor()
-                })
+                || outside_footprint
             {
                 return Err(Error::Invalid("display owner snapshot/footprint"));
             }
@@ -1280,7 +1751,10 @@ impl Controller {
         // observations of that category occur in the same presented frame.
         let chosen = active.plan.target;
         for target in chosen.iter().chain(
-            map.targets
+            active
+                .plan
+                .map
+                .targets
                 .iter()
                 .filter(|target| chosen.is_none_or(|chosen| chosen.key != target.key)),
         ) {
@@ -1299,7 +1773,7 @@ impl Controller {
         }
         budget.check()?;
         let active = self.active.as_mut().ok_or(Error::Idle)?;
-        active.acknowledged = tag.sequence;
+        active.acknowledged = active.acknowledged.max(tag.sequence);
         active.any_saved_pixels |= any_pixels;
         active.chosen_visible |= chosen_visible;
         self.history = history;
@@ -1349,6 +1823,8 @@ impl Controller {
         budget.check()?;
         let retired = self.active.take().ok_or(Error::Idle)?.plan;
         self.history = history;
+        // A finished pose is no longer active. Scene uses this to start its successor.
+        self.last_view = None;
         Ok(Finished {
             completion,
             retired,

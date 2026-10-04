@@ -12,7 +12,7 @@ fn fields(values: Vec<(&str, Tag)>) -> Compound {
         .map(|(name, tag)| (Text::from(name), tag))
         .collect()
 }
-fn cells(name: &str, properties: &[(&str, &str)]) -> RenderCells {
+pub(crate) fn cells(name: &str, properties: &[(&str, &str)]) -> RenderCells {
     let mut state = fields(vec![("Name", Tag::String(name.into()))]);
     if !properties.is_empty() {
         state.insert(
@@ -127,34 +127,61 @@ fn exact_states_axis_owner_map_and_exclusive_region_survive_without_generated_me
     assert_eq!(input.positions.len(), 2);
 }
 #[test]
-fn unsupported_fluid_raw_levels_and_waterlogging_fail_whole_binding_without_consuming_raw_cells() {
-    for (name, properties, prerequisite) in [
+fn exact_liquid_and_waterlogged_states_retain_raw_block_and_separate_fluid_cell() {
+    for (name, properties, amount, falling, waterlogged) in [
+        ("minecraft:water", vec![("level", "0")], 8, false, false),
+        ("minecraft:water", vec![("level", "15")], 8, true, false),
+        ("minecraft:lava", vec![("level", "8")], 8, true, false),
         (
-            "minecraft:water",
-            vec![("level", "0")],
-            Prerequisite::FluidGeometryAndBiomeTint,
+            "minecraft:bubble_column",
+            vec![("drag", "true")],
+            8,
+            false,
+            false,
         ),
         (
-            "minecraft:water",
-            vec![("level", "15")],
-            Prerequisite::FluidGeometryAndBiomeTint,
-        ),
-        (
-            "minecraft:lava",
-            vec![("level", "8")],
-            Prerequisite::FluidGeometryAndBiomeTint,
-        ),
-        (
-            "minecraft:oak_slab",
-            vec![("type", "bottom"), ("waterlogged", "true")],
-            Prerequisite::WaterloggingGeometry,
+            "minecraft:glow_lichen",
+            vec![("north", "true"), ("waterlogged", "true")],
+            8,
+            false,
+            true,
         ),
     ] {
         let input = cells(name, &properties);
-        assert!(
-            matches!(prepare(&input,Limits::default(),&||false),Err(Error::Unsupported{java_position,prerequisite:actual}) if java_position==input.positions[0]&&actual==prerequisite)
-        );
+        let result = prepare(&input, Limits::default(), &|| false).unwrap();
+        assert_eq!(result.world.blocks.len(), input.positions.len());
+        assert_eq!(result.liquid_cells.len(), input.positions.len());
+        for java_position in &input.positions {
+            let renderer = [java_position[0], java_position[2], java_position[1]];
+            let raw = input.map.state(*java_position).unwrap();
+            let retained = &result.world.blocks[&renderer].state;
+            assert_eq!(retained.id().as_str(), name);
+            assert_eq!(retained.properties(), &raw.properties);
+            let liquid = &result.liquid_cells[java_position];
+            assert_eq!(liquid.java_position, *java_position);
+            assert_eq!(liquid.amount, amount);
+            assert_eq!(liquid.falling, falling);
+            assert_eq!(liquid.waterlogged, waterlogged);
+        }
         assert_eq!(input.map.state(input.positions[0]).unwrap().name, name);
+        assert!(Arc::ptr_eq(&result.map, &input.map));
+    }
+}
+
+#[test]
+fn uncaptured_waterlogged_behavior_and_invalid_levels_fail_before_publication() {
+    for (name, properties) in [
+        (
+            "minecraft:oak_slab",
+            vec![("type", "bottom"), ("waterlogged", "true")],
+        ),
+        ("minecraft:water", vec![("level", "16")]),
+    ] {
+        let input = cells(name, &properties);
+        assert!(matches!(
+            prepare(&input, Limits::default(), &|| false),
+            Err(Error::Fluid(_))
+        ));
         assert_eq!(Arc::strong_count(&input.map), 1);
     }
 }

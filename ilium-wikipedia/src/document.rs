@@ -212,6 +212,8 @@ struct Parser {
     blocks: Vec<Block>,
     text_bytes: usize,
     image_nodes: HashSet<ego_tree::NodeId>,
+    table_cells: usize,
+    table_cell_limit: Option<usize>,
 }
 
 impl Parser {
@@ -496,6 +498,20 @@ impl Parser {
                 if rows.len().saturating_mul(width) > 100_000 || covered.len() > 100_000 {
                     return Err("Wikipedia table exceeds cell safety limit".into());
                 }
+                let normalized_cells = rows
+                    .len()
+                    .checked_mul(width)
+                    .ok_or("Wikipedia normalized table size overflow")?;
+                self.table_cells = self
+                    .table_cells
+                    .checked_add(normalized_cells)
+                    .ok_or("Wikipedia document table size overflow")?;
+                if self
+                    .table_cell_limit
+                    .is_some_and(|limit| self.table_cells > limit)
+                {
+                    return Err("Wikipedia document exceeds normalized table cell limit".into());
+                }
                 for row in &mut rows {
                     row.resize_with(width, Vec::new);
                 }
@@ -579,6 +595,75 @@ pub fn parse_article(title: &str, url: &str, date: &str, html: &str) -> Result<D
         return Err("Wikipedia HTML exceeds 16 MiB; article was not truncated".into());
     }
     let html = Html::parse_document(html);
+    article_from_dom(title, url, date, &html, None)
+}
+
+/// Native source entrypoint. Caller reserves ARTICLE_PARSE_PEAK_BYTES before
+/// entry and retains source/result admissions separately. The installed
+/// tokenizer's fixed atom-cache baseline is admitted for process lifetime.
+pub fn parse_article_bounded(
+    title: &str,
+    url: &str,
+    date: &str,
+    html: &str,
+    limits: crate::ArticleLimits,
+) -> Result<Document, String> {
+    if title.len() > 512 || url.len() > 4096 || date.len() > 64 {
+        return Err("Wikipedia article metadata exceeds source limits".into());
+    }
+    let dom = crate::bounded_html::parse(html, limits)?;
+    preflight_caption_copies(&dom)?;
+    article_from_dom(title, url, date, &dom, Some(limits.table_cells))
+}
+// A figure caption may be copied for each of its image references. Bound
+// this amplification before images() constructs any caption Vec/String.
+// Count every descendant, including ignored nodes, as a conservative bound
+// on inline spans; admitted documents use the unchanged native extractor.
+fn preflight_caption_copies(html: &Html) -> Result<(), String> {
+    let image_selector = selector("img")?;
+    let caption_selector = selector("figcaption, .thumbcaption")?;
+    let mut copied_bytes = 0usize;
+    let mut copied_nodes = 0usize;
+    for image in html.select(&image_selector) {
+        let figure = image
+            .ancestors()
+            .filter_map(ElementRef::wrap)
+            .find(|ancestor| {
+                ancestor.value().name() == "figure"
+                    || ancestor.value().classes().any(|class| class == "thumb")
+            });
+        if let Some(caption) = figure.and_then(|figure| figure.select(&caption_selector).next()) {
+            for node in caption.descendants() {
+                copied_nodes += 1;
+                if let Node::Text(text) = node.value() {
+                    copied_bytes = copied_bytes
+                        .checked_add(text.len())
+                        .ok_or("Wikipedia caption size overflow")?;
+                }
+                if copied_nodes > 131_072 || copied_bytes > MAX_TEXT_BYTES {
+                    return Err(
+                        "Wikipedia repeated caption allocation exceeds source limits".into(),
+                    );
+                }
+            }
+        } else {
+            copied_bytes = copied_bytes
+                .checked_add(image.value().attr("alt").map_or(0, str::len))
+                .ok_or("Wikipedia caption size overflow")?;
+            if copied_bytes > MAX_TEXT_BYTES {
+                return Err("Wikipedia repeated caption allocation exceeds source limits".into());
+            }
+        }
+    }
+    Ok(())
+}
+fn article_from_dom(
+    title: &str,
+    url: &str,
+    date: &str,
+    html: &Html,
+    table_cell_limit: Option<usize>,
+) -> Result<Document, String> {
     let root = html
         .select(&selector(".mw-parser-output")?)
         .next()
@@ -602,6 +687,8 @@ pub fn parse_article(title: &str, url: &str, date: &str, html: &str) -> Result<D
         blocks: Vec::new(),
         text_bytes: 0,
         image_nodes: HashSet::new(),
+        table_cells: 0,
+        table_cell_limit,
     };
     parser.walk(root, 0)?;
     if parser.blocks.is_empty() {

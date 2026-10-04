@@ -65,7 +65,10 @@ fn lit(raster: &Raster) -> usize {
 }
 
 fn scene(settings: &TopographicMapsSettings) -> TopographicMapsScene {
-    TopographicMapsScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    TopographicMapsScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 #[test]
@@ -425,4 +428,27 @@ fn reconfigure_keeps_the_loaded_world_unless_the_world_changes() {
         ..base
     };
     assert!(!scene.reconfigure(&ambient));
+}
+
+#[test]
+fn scene_follows_the_provided_palette_natively() {
+    let settings = TopographicMapsSettings {
+        palette: PaletteChoice::Hypsometric,
+        ..settings_for(WorldId::Earth)
+    };
+    let mut plain = scene(&settings);
+    let (_, plain_colors) = render_loaded(&mut plain, 0.0, 40, 12);
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
+    env.palette = crate::style::ScenePalette {
+        stops: vec![[0, 0, 40], [255, 80, 0]],
+        ..Default::default()
+    };
+    let mut themed = TopographicMapsScene::new(&settings, &env);
+    assert!(themed.follows_palette());
+    let (_, themed_colors) = render_loaded(&mut themed, 0.0, 40, 12);
+    assert_ne!(plain_colors, themed_colors);
+    // Clearing the palette restores the original colours.
+    themed.set_palette(&crate::style::ScenePalette::default());
+    let (_, restored) = render_loaded(&mut themed, 0.0, 40, 12);
+    assert_eq!(plain_colors, restored);
 }

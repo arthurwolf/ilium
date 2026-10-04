@@ -33,6 +33,7 @@ pub use settings::VectorTdSettings;
 use crate::control::SceneSettings;
 use crate::registry::AmbientSettings;
 use crate::scene::{Frame, Scene, SceneEnv};
+use crate::style::ScenePalette;
 use director::Director;
 use draw::Canvas;
 use palette::Colors;
@@ -43,6 +44,8 @@ pub const INSPIRED_BY: &[&str] = &["https://www.crazygames.com/game/vector-td"];
 pub struct VectorTdScene {
     settings: VectorTdSettings,
     colors: Colors,
+    /// The shared look's palette; role colours are mapped onto it when provided.
+    palette: ScenePalette,
     /// Built on the first frame, when the screen shape is known.
     director: Option<Director>,
     /// Scratch: the strongest tone drawn into each cell.
@@ -54,10 +57,19 @@ pub struct VectorTdScene {
 }
 
 impl VectorTdScene {
-    pub fn new(settings: &VectorTdSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: every role colour (towers,
+    // monsters, path, text) is mapped onto the palette by lightness when the
+    // colour table is built (`follows_palette`), so `PaletteScene` skips its
+    // generic recolour.
+    pub fn new(settings: &VectorTdSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         Self {
-            colors: Colors::new(&settings),
+            colors: Colors::new(&settings, &env.palette),
+            palette: env.palette.clone(),
             settings,
             director: None,
             strongest: Vec::new(),
@@ -114,6 +126,15 @@ impl Scene for VectorTdScene {
         painter.paint(&director.game);
     }
 
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+        self.colors = Colors::new(&self.settings, palette);
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
+    }
+
     fn uses_cell_colors(&self) -> bool {
         self.colors.is_color
     }
@@ -129,7 +150,7 @@ impl Scene for VectorTdScene {
         if next.gameplay() != self.settings.gameplay() {
             return false;
         }
-        self.colors = Colors::new(&next);
+        self.colors = Colors::new(&next, &self.palette);
         self.settings = next;
         true
     }

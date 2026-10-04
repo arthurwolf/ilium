@@ -5,7 +5,10 @@ use crate::debug::render_frame;
 use std::time::{Duration, Instant};
 
 fn scene_with(settings: &CubeClockSettings) -> CubeClockScene {
-    CubeClockScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    CubeClockScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn dots(settings: &CubeClockSettings, width: u16, height: u16, time: f64) -> Vec<f32> {

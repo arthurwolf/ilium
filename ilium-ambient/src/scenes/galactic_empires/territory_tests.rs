@@ -1,5 +1,9 @@
 use super::*;
 
+fn territory(stars: &[Star]) -> Territory {
+    Territory::new(stars, 100, 100)
+}
+
 fn star(x: f32, y: f32, owner: Option<usize>) -> Star {
     Star {
         position: (x, y),
@@ -17,7 +21,7 @@ fn coverage(field: &Territory, point: (f32, f32)) -> f32 {
 #[test]
 fn off_grid_colony_has_a_round_monotone_soft_edge() {
     let center = (0.123, -0.087);
-    let field = Territory::new(&[star(center.0, center.1, Some(2))]);
+    let field = territory(&[star(center.0, center.1, Some(2))]);
     let mut smallest = f32::INFINITY;
     let mut largest = 0.0_f32;
     for angle in 0..64 {
@@ -54,10 +58,10 @@ fn off_grid_colony_has_a_round_monotone_soft_edge() {
 
 #[test]
 fn nearby_colonies_merge_but_distant_colonies_do_not_claim_the_gap() {
-    let nearby = Territory::new(&[star(-0.05, 0.0, Some(0)), star(0.05, 0.0, Some(0))]);
+    let nearby = territory(&[star(-0.05, 0.0, Some(0)), star(0.05, 0.0, Some(0))]);
     assert!(coverage(&nearby, (0.0, 0.0)) > 0.5);
     assert!(nearby.sample((0.0, 0.25)).is_none());
-    let detached = Territory::new(&[star(-0.4, 0.0, Some(0)), star(0.4, 0.0, Some(0))]);
+    let detached = territory(&[star(-0.4, 0.0, Some(0)), star(0.4, 0.0, Some(0))]);
     assert_eq!(detached.sample((-0.4, 0.0)).unwrap().owner, 0);
     assert_eq!(detached.sample((0.4, 0.0)).unwrap().owner, 0);
     assert!(detached.sample((0.0, 0.0)).is_none());
@@ -75,7 +79,7 @@ fn surrounded_colony_neutral_hole_and_capture_retain_local_identity() {
             Some(1),
         ));
     }
-    let mut field = Territory::new(&stars);
+    let mut field = territory(&stars);
     assert_eq!(field.sample(center).unwrap().owner, 0);
     stars[0].owner = None;
     assert!(field.sync(&stars));
@@ -94,7 +98,7 @@ fn dirty_updates_match_fresh_final_ownership_without_rebuilding_geometry() {
         star(0.0, 0.0, None),
         star(0.25, 0.0, Some(1)),
     ];
-    let mut field = Territory::new(&stars);
+    let mut field = territory(&stars);
     let geometry = field.stencils.as_ptr();
     let storage = field.fields.as_ptr();
     for tick in 0..12 {
@@ -103,7 +107,7 @@ fn dirty_updates_match_fresh_final_ownership_without_rebuilding_geometry() {
         stars[1].owner = if tick % 2 == 0 { Some(1) } else { None };
         stars[2].owner = Some((tick + 2) % 3);
         assert!(field.sync(&stars));
-        let fresh = Territory::new(&stars);
+        let fresh = territory(&stars);
         for (a, b) in field
             .fields
             .iter()
@@ -126,12 +130,12 @@ fn dirty_updates_match_fresh_final_ownership_without_rebuilding_geometry() {
     }
     stars[0].position = (-0.3, 0.1);
     assert!(field.sync(&stars));
-    assert_eq!(field.fields, Territory::new(&stars).fields);
+    assert_eq!(field.fields, territory(&stars).fields);
 }
 
 #[test]
 fn interpolation_crosses_grid_lines_continuously_and_rejects_invalid_points() {
-    let field = Territory::new(&[star(0.123, -0.087, Some(0))]);
+    let field = territory(&[star(0.123, -0.087, Some(0))]);
     let x = -1.0 + 113.0 * STEP;
     let left = coverage(&field, (x - 0.00001, -0.087));
     let right = coverage(&field, (x + 0.00001, -0.087));
@@ -145,13 +149,13 @@ fn interpolation_crosses_grid_lines_continuously_and_rejects_invalid_points() {
     ] {
         assert!(field.sample(point).is_none());
     }
-    assert!(Territory::new(&[]).sample((0.0, 0.0)).is_none());
+    assert!(territory(&[]).sample((0.0, 0.0)).is_none());
 }
 
 #[test]
 fn hostile_contact_is_two_sided_and_neutral_contact_fades_to_black() {
     let mut stars = [star(-0.04, 0.0, Some(0)), star(0.04, 0.0, Some(1))];
-    let mut field = Territory::new(&stars);
+    let mut field = territory(&stars);
     let left = field.sample((-0.00025, 0.0)).unwrap();
     let right = field.sample((0.00025, 0.0)).unwrap();
     assert_eq!((left.owner, right.owner), (0, 1));
@@ -164,4 +168,21 @@ fn hostile_contact_is_two_sided_and_neutral_contact_fades_to_black() {
     assert!(coverage(&field, (0.0, 0.0)) < 0.001);
     assert!(coverage(&field, (-0.02, 0.0)) > 0.5);
     assert!(field.sample((0.02, 0.0)).is_none());
+}
+
+#[test]
+fn territory_size_and_edge_softness_are_effective_without_owner_changes() {
+    let stars = [star(0.0, 0.0, Some(0))];
+    let small = Territory::new(&stars, 50, 100);
+    let large = Territory::new(&stars, 150, 100);
+    assert!(small.sample((0.08, 0.0)).is_none());
+    assert!(large.sample((0.08, 0.0)).is_some());
+
+    let mut field = territory(&stars);
+    let firm = field.sample((0.05, 0.0)).unwrap();
+    field.set_softness(200);
+    let soft = field.sample((0.05, 0.0)).unwrap();
+    assert_eq!(firm.owner, soft.owner);
+    assert!(firm.coverage > soft.coverage);
+    assert_eq!(field.radius_percent, 100);
 }

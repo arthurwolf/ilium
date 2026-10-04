@@ -31,7 +31,9 @@ pub fn save_folders(saves_root: &Path) -> io::Result<Vec<PathBuf>> {
         if level.is_some_and(|metadata| metadata.is_file())
             && region.is_some_and(|metadata| metadata.is_dir())
         {
-            folders.insert(fs::canonicalize(path)?);
+            // Match the canonical spelling used by session admission and history.
+            // On Windows std canonicalization may retain a removable \\?\ prefix.
+            folders.insert(ilium_platform::paths::canonicalize(&path)?);
         }
         if folders.len() > 512 {
             return Err(io::Error::new(
@@ -71,8 +73,8 @@ mod tests {
         assert_eq!(
             maps,
             [
-                directory.path().join("new world"),
-                directory.path().join("older")
+                ilium_platform::paths::canonicalize(&directory.path().join("new world")).unwrap(),
+                ilium_platform::paths::canonicalize(&directory.path().join("older")).unwrap()
             ]
         );
         for map in maps {

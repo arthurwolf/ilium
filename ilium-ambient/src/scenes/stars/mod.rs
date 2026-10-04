@@ -10,12 +10,13 @@
 
 pub(crate) mod astro;
 mod canvas;
-mod catalog;
+pub(crate) mod catalog;
 mod settings;
 mod view;
 
 pub use settings::StarsSettings;
 
+use crate::style::ScenePalette;
 use astro::{
     galactic_axes, horizon_matrix, julian_date, local_sidereal_degrees, mat_mul, mat_vec,
     moon_sight, normalize, planet_sight, precession_matrix, sun_direction, Mat3, Planet, Vec3,
@@ -65,6 +66,7 @@ pub struct StarsScene {
     fixed_start_unix: Option<f64>,
     catalog: &'static Catalog,
     star_colors: Vec<Rgb>,
+    palette: ScenePalette,
     /// Panel position of each catalogue star this frame (None: not visible).
     projected: Vec<Option<(f64, f64)>>,
     strongest: Vec<f32>,
@@ -75,17 +77,21 @@ pub struct StarsScene {
 }
 
 impl StarsScene {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it, and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: the catalogue star colours (cached,
+    // rebuilt on `set_palette`) and every tint are mapped onto the palette by
+    // brightness where they are drawn, so `PaletteScene` skips its generic recolour
+    // (`follows_palette`).
     pub fn new(settings: &StarsSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let location = env.location.normalized();
         let catalog = catalog();
         Self {
             fixed_start_unix: settings.fixed_start_unix(),
-            star_colors: catalog
-                .stars
-                .iter()
-                .map(|star| color_of_index(star.color_index))
-                .collect(),
+            star_colors: star_colors(catalog, &env.palette),
+            palette: env.palette.clone(),
             projected: vec![None; catalog.stars.len()],
             strongest: Vec::new(),
             latitude: location.latitude,
@@ -172,7 +178,12 @@ impl StarsScene {
             self.milky_way.key = Some(key);
         }
         for (x, y, intensity) in &self.milky_way.dots {
-            canvas.plot(i64::from(*x), i64::from(*y), *intensity, MILKY_WAY_TINT);
+            canvas.plot(
+                i64::from(*x),
+                i64::from(*y),
+                *intensity,
+                self.palette.recolor(MILKY_WAY_TINT),
+            );
         }
     }
 
@@ -186,7 +197,7 @@ impl StarsScene {
             let point = view.project(&astro::altitude_azimuth_vector(0.0, azimuth));
             if let (Some(a), Some(b)) = (previous, point) {
                 if (a.0 - b.0).abs() < max_jump {
-                    canvas.line(a, b, HORIZON_INTENSITY, HORIZON_TINT);
+                    canvas.line(a, b, HORIZON_INTENSITY, self.palette.recolor(HORIZON_TINT));
                 }
             }
             previous = point;
@@ -202,7 +213,7 @@ impl StarsScene {
                 continue;
             };
             let tip = (base.0 + dx * length, base.1 + dy * length);
-            canvas.line(base, tip, 0.95, COMPASS_TINT);
+            canvas.line(base, tip, 0.95, self.palette.recolor(COMPASS_TINT));
             if azimuth == 0.0 {
                 // North marker: a small blob just beyond the horizon.
                 canvas.cluster(
@@ -210,7 +221,7 @@ impl StarsScene {
                     base.1 - dy * 3.0,
                     PLUS,
                     1.0,
-                    COMPASS_TINT,
+                    self.palette.recolor(COMPASS_TINT),
                 );
             }
         }
@@ -256,7 +267,12 @@ impl StarsScene {
                     continue;
                 };
                 if (from.0 - to.0).abs() < max_jump {
-                    canvas.line(from, to, STAR_LINE_INTENSITY, LINE_TINT);
+                    canvas.line(
+                        from,
+                        to,
+                        STAR_LINE_INTENSITY,
+                        self.palette.recolor(LINE_TINT),
+                    );
                 }
             }
         }
@@ -273,7 +289,7 @@ impl StarsScene {
             let color = if colored {
                 self.star_colors[index]
             } else {
-                NEUTRAL_TINT
+                self.palette.recolor(NEUTRAL_TINT)
             };
             if !realistic {
                 canvas.cluster(x, y, SINGLE, intensity, color);
@@ -322,7 +338,7 @@ impl StarsScene {
                 continue;
             }
             if let Some((x, y)) = view.project(&direction) {
-                canvas.cluster(x, y, PLUS, 1.0, [210, 235, 215]);
+                canvas.cluster(x, y, PLUS, 1.0, self.palette.recolor([210, 235, 215]));
             }
         }
     }
@@ -344,7 +360,7 @@ impl StarsScene {
                 m if m < 1.5 => PLUS,
                 _ => SINGLE,
             };
-            canvas.cluster(x, y, shape, 1.0, planet_color(planet));
+            canvas.cluster(x, y, shape, 1.0, self.palette.recolor(planet_color(planet)));
         }
     }
 
@@ -408,7 +424,12 @@ impl StarsScene {
                 let depth = (1.0 - distance * distance).max(0.0).sqrt();
                 let lit = smoothstep(-0.08, 0.08, (toward_sun * sin_psi - depth * cos_psi) as f32);
                 let intensity = coverage * (0.16 + 0.84 * lit);
-                canvas.plot(center_x + dx, center_y + dy, intensity, MOON_TINT);
+                canvas.plot(
+                    center_x + dx,
+                    center_y + dy,
+                    intensity,
+                    self.palette.recolor(MOON_TINT),
+                );
             }
         }
     }
@@ -442,6 +463,14 @@ fn build_milky_way(
         }
     }
     dots
+}
+
+fn star_colors(catalog: &Catalog, palette: &ScenePalette) -> Vec<Rgb> {
+    catalog
+        .stars
+        .iter()
+        .map(|star| palette.recolor(color_of_index(star.color_index)))
+        .collect()
 }
 
 fn planet_color(planet: Planet) -> Rgb {
@@ -528,7 +557,7 @@ impl Scene for StarsScene {
                 usize::from(frame.width),
                 usize::from(frame.height),
                 use_colors,
-                NEUTRAL_TINT,
+                self.palette.recolor(NEUTRAL_TINT),
             );
             if self.settings.milky_way {
                 self.draw_milky_way(&mut canvas, &view, &to_horizon_j2000, unix);
@@ -551,6 +580,16 @@ impl Scene for StarsScene {
             }
         }
         self.strongest = strongest;
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        self.palette = palette.clone();
+        self.star_colors = star_colors(self.catalog, palette);
+        // The cached Milky Way stores intensities only; its tint is applied on replay.
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn uses_cell_colors(&self) -> bool {

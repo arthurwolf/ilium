@@ -9,18 +9,20 @@ use super::{
     generation::{PreparedWorld, Region as LegacyRegion},
     render::{self, Canvas},
     settings::VoxelLandscapeSettings,
-    surface_binding::{self, PreparedSurface},
+    surface_binding::{self, GeneratedViewportSession, PreparedSurface, StreamedViewport},
     surface_context::SceneAtmosphere,
     surface_entity_raster,
     surface_generation::Region,
     surface_raster::{self, RasterFrame, RasterLimits},
     surface_retirement::Retirement,
+    surface_viewport,
     terrain_fields::TerrainFields,
 };
 use crate::{
     control::SceneSettings,
     scene::{Frame, Scene, SceneEnv},
     source::Worker,
+    style::ScenePalette,
 };
 use std::{
     sync::{
@@ -34,10 +36,20 @@ use std::{
 struct Request {
     revision: u64,
     region: Region,
+    size: [usize; 2],
+    camera: [f64; 3],
+    time: Duration,
+    stream: bool,
+}
+enum PreparedResult {
+    Retained(Box<PreparedSurface>),
+    Streamed(Box<StreamedViewport>),
 }
 struct Response {
     revision: u64,
-    result: Result<PreparedSurface>,
+    region: Region,
+    size: [usize; 2],
+    result: Result<PreparedResult>,
 }
 
 pub struct VoxelLandscapeScene {
@@ -46,12 +58,24 @@ pub struct VoxelLandscapeScene {
     revision: Arc<AtomicU64>,
     results: Arc<Mutex<Option<Response>>>,
     worker: Option<Worker>,
-    requested: Option<Region>,
+    requested: Option<(Region, [usize; 2])>,
     prepared: Option<PreparedSurface>,
+    prepared_request: Option<(Region, [usize; 2])>,
+    streamed: Option<StreamedViewport>,
+    streamed_request: Option<(Region, [usize; 2])>,
+    stream_pending: bool,
     retired: Arc<Retirement<PreparedSurface>>,
     error: Option<String>,
+    palette: ScenePalette,
 }
 impl VoxelLandscapeScene {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: `color::composite_selected`
+    // moves every pixel onto the palette colour of equal brightness before
+    // cell averaging, so `PaletteScene` skips its generic remap.
     pub fn new(settings: &VoxelLandscapeSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let requests = Arc::new(Mutex::new(None::<Request>));
@@ -68,6 +92,10 @@ impl VoxelLandscapeScene {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::BelowNormal,
             );
+            // The fixed one-GiB value is exactly ByteBudget's validated maximum.
+            let budget = surface_binding::scene_budget()
+                .expect("fixed generated-scene account must satisfy ByteBudget ceiling");
+            let mut stream_session: Option<GeneratedViewportSession> = None;
             while !stop.load(Ordering::Relaxed) {
                 drop(worker_retired.drain());
                 let request = match worker_requests.lock() {
@@ -104,18 +132,58 @@ impl VoxelLandscapeScene {
                                     }
                                 }
                             };
-                            surface_binding::prepare_with_fallback(
-                                request.region,
-                                &resolved,
-                                fallback.as_ref(),
-                                cancel,
-                            )
+                            if request.stream {
+                                let scale = Self::scale(&worker_settings);
+                                if !stream_session.as_ref().is_some_and(|session| {
+                                    session.matches(
+                                        request.region,
+                                        scale,
+                                        request.size,
+                                        &resolved,
+                                        fallback.as_ref(),
+                                    )
+                                }) {
+                                    stream_session = None;
+                                    stream_session = Some(GeneratedViewportSession::open(
+                                        request.region,
+                                        scale,
+                                        request.size,
+                                        &resolved,
+                                        fallback.as_ref(),
+                                        budget.clone(),
+                                        cancel,
+                                    )?);
+                                }
+                                stream_session
+                                    .as_mut()
+                                    .ok_or_else(|| {
+                                        AssetError::InvalidMetadata(
+                                            "generated viewport session absent".into(),
+                                        )
+                                    })?
+                                    .render(request.camera, request.time, cancel)
+                                    .map(|streamed| PreparedResult::Streamed(Box::new(streamed)))
+                            } else {
+                                stream_session = None;
+                                surface_binding::prepare_viewport_with_fallback_in_budget(
+                                    request.region,
+                                    Self::scale(&worker_settings),
+                                    request.size,
+                                    &resolved,
+                                    fallback.as_ref(),
+                                    budget.clone(),
+                                    cancel,
+                                )
+                                .map(|prepared| PreparedResult::Retained(Box::new(prepared)))
+                            }
                         });
                 if cancel.is_cancelled() {
                     continue;
                 }
                 let response = Response {
                     revision: request.revision,
+                    region: request.region,
+                    size: request.size,
                     result,
                 };
                 let replaced = match worker_results.lock() {
@@ -148,8 +216,13 @@ impl VoxelLandscapeScene {
             worker,
             requested: None,
             prepared: None,
+            prepared_request: None,
+            streamed: None,
+            streamed_request: None,
+            stream_pending: false,
             retired,
             error,
+            palette: env.palette.clone(),
         }
     }
     pub fn camera(settings: &VoxelLandscapeSettings, time: Duration) -> [f64; 3] {
@@ -192,19 +265,8 @@ impl VoxelLandscapeScene {
             maximum: center.map(|coordinate| coordinate + radius + 16),
         }
     }
-    pub fn surface_region(camera: [f64; 3], scale: f32, size: [usize; 2]) -> Region {
-        let center = [camera[0].floor() as i32, camera[1].floor() as i32]
-            .map(|coordinate| coordinate.div_euclid(16) * 16);
-        let wanted = (size[0] as f32 / (1.7320508 * scale))
-            .max(size[1] as f32 / scale)
-            .ceil() as i32
-            + 32;
-        let width = ((wanted + 15) / 16 * 16).clamp(32, 96);
-        let start = center.map(|coordinate| coordinate - width / 2);
-        Region {
-            minimum: start,
-            maximum: start.map(|coordinate| coordinate + width),
-        }
+    pub fn surface_region(camera: [f64; 3], scale: f32, size: [usize; 2]) -> Result<Region> {
+        surface_viewport::region(camera, scale, size)
     }
     pub fn prepared(&self) -> Option<&PreparedSurface> {
         self.prepared.as_ref()
@@ -214,61 +276,140 @@ impl VoxelLandscapeScene {
             if let Some(response) = slot.take() {
                 if response.revision == self.revision.load(Ordering::Acquire) {
                     match response.result {
-                        Ok(prepared) => {
+                        Ok(result) => {
                             if let Some(previous) = self.prepared.take() {
                                 if let Err(previous) = self.retired.try_retire(previous) {
                                     self.prepared = Some(previous);
                                     *slot = Some(Response {
                                         revision: response.revision,
-                                        result: Ok(prepared),
+                                        region: response.region,
+                                        size: response.size,
+                                        result: Ok(result),
                                     });
                                     return;
                                 }
                             }
                             self.error = None;
-                            self.prepared = Some(prepared);
+                            match result {
+                                PreparedResult::Retained(prepared) => {
+                                    self.streamed = None;
+                                    self.streamed_request = None;
+                                    self.prepared = Some(*prepared);
+                                    self.prepared_request = Some((response.region, response.size));
+                                }
+                                PreparedResult::Streamed(streamed) => {
+                                    self.prepared_request = None;
+                                    self.streamed = Some(*streamed);
+                                    self.streamed_request = Some((response.region, response.size));
+                                    self.stream_pending = false;
+                                }
+                            }
                         }
                         Err(AssetError::Cancelled) => {}
                         Err(error) => {
                             self.error = Some(format!("Surface preparation: {error}"));
                         }
                     }
-                } else if let Ok(prepared) = response.result {
-                    if let Err(prepared) = self.retired.try_retire(prepared) {
+                } else if let Ok(PreparedResult::Retained(prepared)) = response.result {
+                    if let Err(prepared) = self.retired.try_retire(*prepared) {
                         *slot = Some(Response {
                             revision: response.revision,
-                            result: Ok(prepared),
+                            region: response.region,
+                            size: response.size,
+                            result: Ok(PreparedResult::Retained(Box::new(prepared))),
                         });
                     }
                 }
             }
         }
     }
-    fn request(&mut self, region: Region) {
-        if self.requested == Some(region) || self.worker.is_none() {
+    fn request(&mut self, region: Region, size: [usize; 2], camera: [f64; 3], time: Duration) {
+        let scale = Self::scale(&self.settings);
+        let stream = requires_streamed_viewport(region, scale, size);
+        if self.worker.is_none()
+            || (self.requested == Some((region, size))
+                && (!stream
+                    || self.stream_pending
+                    || self.streamed.as_ref().is_some_and(|snapshot| {
+                        snapshot.camera == camera && snapshot.time == time
+                    })))
+        {
             return;
+        }
+        if self.prepared_request != Some((region, size)) {
+            if let Some(previous) = self.prepared.take() {
+                if let Err(previous) = self.retired.try_retire(previous) {
+                    self.prepared = Some(previous);
+                    return;
+                }
+            }
+            self.prepared_request = None;
+        }
+        if self.streamed_request != Some((region, size)) {
+            self.streamed = None;
+            self.streamed_request = None;
         }
         let Ok(mut slot) = self.requests.try_lock() else {
             return;
         };
         let revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
-        *slot = Some(Request { revision, region });
-        self.requested = Some(region);
+        *slot = Some(Request {
+            revision,
+            region,
+            size,
+            camera,
+            time,
+            stream,
+        });
+        self.requested = Some((region, size));
+        self.stream_pending = stream;
     }
+}
+
+fn requires_streamed_viewport(region: Region, scale: f32, size: [usize; 2]) -> bool {
+    scale < 1.4
+        || surface_viewport::visible_tiles(region, scale, size)
+            .map_or(true, |tiles| tiles.len() > 1)
 }
 impl Scene for VoxelLandscapeScene {
     fn render(&mut self, frame: &mut Frame<'_>) {
         self.receive_prepared();
         let camera = Self::camera(&self.settings, frame.time);
         let scale = Self::scale(&self.settings);
-        let region = Self::surface_region(camera, scale, [frame.raster.width, frame.raster.height]);
-        self.request(region);
+        let size = [frame.raster.width, frame.raster.height];
+        let region = match Self::surface_region(camera, scale, size) {
+            Ok(region) => region,
+            Err(error) => {
+                self.error = Some(format!("Surface coverage: {error}"));
+                frame.cell_colors.fill([0; 3]);
+                frame.raster.dots.fill(0.);
+                return;
+            }
+        };
+        self.request(region, size, camera, frame.time);
+        if self.streamed_request == Some((region, size)) {
+            if let Some(streamed) = &self.streamed {
+                color::composite_selected(
+                    &streamed.colors,
+                    &streamed.covered,
+                    frame,
+                    &self.settings,
+                    &self.palette,
+                );
+                return;
+            }
+        }
         let Some(prepared) = self.prepared.as_ref() else {
             frame.cell_colors.fill([0; 3]);
             frame.raster.dots.fill(0.);
             return;
         };
-        if let Err(error) = render_surface(prepared, frame, &self.settings, camera) {
+        if self.prepared_request != Some((region, size)) {
+            frame.cell_colors.fill([0; 3]);
+            frame.raster.dots.fill(0.);
+            return;
+        }
+        if let Err(error) = render_surface(prepared, frame, &self.settings, camera, &self.palette) {
             self.error = Some(format!("Surface raster: {error}"));
             frame.cell_colors.fill([0; 3]);
             frame.raster.dots.fill(0.);
@@ -277,12 +418,28 @@ impl Scene for VoxelLandscapeScene {
     fn uses_cell_colors(&self) -> bool {
         true
     }
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        // Colours are composited every frame; nothing is cached.
+        self.palette = palette.clone();
+    }
+    fn follows_palette(&self) -> bool {
+        true
+    }
     fn frames_per_second(&self) -> u32 {
         12
     }
     fn status(&self) -> Option<String> {
         if let Some(error) = &self.error {
             return Some(error.clone());
+        }
+        if self.streamed_request == self.requested {
+            return self
+                .streamed
+                .as_ref()
+                .and_then(|snapshot| snapshot.status.clone());
+        }
+        if self.prepared_request != self.requested {
+            return Some("Preparing selected full pack and surface…".into());
         }
         let Some(prepared) = self.prepared.as_ref() else {
             return Some("Preparing selected full pack and surface…".into());
@@ -329,6 +486,7 @@ fn render_surface(
     frame: &mut Frame<'_>,
     settings: &VoxelLandscapeSettings,
     camera: [f64; 3],
+    palette: &ScenePalette,
 ) -> Result<()> {
     if prepared.mesh.bank != prepared.bank_epoch
         || prepared.bank().identity() != prepared.bank_epoch
@@ -391,7 +549,7 @@ fn render_surface(
             covered.push(pixel.color.alpha() > 0.);
         }
     }
-    color::composite_selected(&colors, &covered, frame, settings);
+    color::composite_selected(&colors, &covered, frame, settings, palette);
     Ok(())
 }
 
@@ -418,6 +576,82 @@ pub fn render_prepared(
 mod tests {
     use super::*;
     #[test]
+    fn follows_palette_natively_and_stores_updates() {
+        let mut env = SceneEnv::for_test(
+            std::env::temp_dir().join("voxel-palette-test"),
+            crate::resources::test_resources(),
+        );
+        let none = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
+        assert!(none.follows_palette() && !none.palette.is_provided());
+        env.palette = ScenePalette {
+            stops: vec![[0, 0, 0], [255, 0, 0]],
+            reverse: false,
+            shift_percent: 0,
+        };
+        let mut scene = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
+        assert!(scene.palette.is_provided());
+        scene.set_palette(&ScenePalette::default());
+        assert!(!scene.palette.is_provided());
+    }
+    #[test]
+    fn all_supported_zoom_witnesses_use_finite_tile_streaming() {
+        let camera = [64.0, 64.0, 80.0];
+        for (zoom, size) in [(25, [720, 480]), (100, [360, 240]), (400, [160, 96])] {
+            let settings = VoxelLandscapeSettings {
+                zoom_percent: zoom,
+                ..Default::default()
+            };
+            let scale = VoxelLandscapeScene::scale(&settings);
+            let region = VoxelLandscapeScene::surface_region(camera, scale, size).unwrap();
+            let tiles = surface_viewport::visible_tiles(region, scale, size).unwrap();
+            assert!(
+                tiles.len() > 1,
+                "zoom {zoom} selected {} tiles",
+                tiles.len()
+            );
+            assert!(
+                requires_streamed_viewport(region, scale, size),
+                "zoom {zoom} must use the finite-bank tile renderer"
+            );
+            if zoom == 400 {
+                assert!(tiles.len() <= 16, "the legacy >16 gate must be caught");
+            }
+        }
+    }
+    #[test]
+    fn streamed_frame_request_waits_for_its_owned_revision() {
+        let settings = VoxelLandscapeSettings {
+            zoom_percent: 25,
+            ..Default::default()
+        };
+        let env = SceneEnv::for_test(
+            std::env::temp_dir().join("ilium-viewport-request-test"),
+            crate::resources::test_resources(),
+        );
+        let mut scene = VoxelLandscapeScene::new(&settings, &env);
+        let region = Region {
+            minimum: [0, 0],
+            maximum: [96, 96],
+        };
+        scene.request(region, [160, 96], [64.0, 64.0, 80.0], Duration::ZERO);
+        let first = scene.revision.load(Ordering::Acquire);
+        scene.request(
+            region,
+            [160, 96],
+            [65.0, 64.0, 80.0],
+            Duration::from_millis(83),
+        );
+        assert_eq!(scene.revision.load(Ordering::Acquire), first);
+        scene.stream_pending = false;
+        scene.request(
+            region,
+            [160, 96],
+            [65.0, 64.0, 80.0],
+            Duration::from_millis(83),
+        );
+        assert_eq!(scene.revision.load(Ordering::Acquire), first + 1);
+    }
+    #[test]
     fn freeze_stops_pan_but_surface_frame_time_remains_external() {
         let settings = VoxelLandscapeSettings {
             pan_speed_percent: 0,
@@ -437,7 +671,8 @@ mod tests {
             camera,
             VoxelLandscapeScene::scale(&settings),
             [160, 96],
-        );
-        region.validate().unwrap();
+        )
+        .unwrap();
+        assert!(region.maximum[0] - region.minimum[0] > 128);
     }
 }

@@ -21,6 +21,7 @@ use std::time::UNIX_EPOCH;
 const MAX_BODY_HEIGHT: f32 = 0.075 * 2.5;
 
 pub struct CarpetScene {
+    resources: crate::resources::AmbientResources,
     settings: CarpetSettings,
     simulation: Simulations,
     chess: Option<CarpetChess>,
@@ -33,9 +34,17 @@ pub struct CarpetScene {
 }
 
 impl CarpetScene {
-    pub fn new(settings: &CarpetSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
+    // which `create_scene` wraps around every scene, shifts this scene's cell
+    // colours onto the palette by brightness.
+    pub fn new(settings: &CarpetSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         Self {
+            resources: env.resources.clone(),
             simulation: Simulations::new(settings.seed as u64),
             settings,
             chess: None,
@@ -185,9 +194,9 @@ impl Scene for CarpetScene {
         let mode = self.settings.mode();
         if matches!(mode, Mode::AutoChess | Mode::LiveChess) {
             let options = self.chess_options();
-            let chess = self
-                .chess
-                .get_or_insert_with(|| CarpetChess::new(self.settings.seed as u64));
+            let chess = self.chess.get_or_insert_with(|| {
+                CarpetChess::new(self.settings.seed as u64, self.resources.clone())
+            });
             chess.update(
                 mode == Mode::LiveChess,
                 &options,
@@ -241,7 +250,10 @@ mod tests {
                 mode,
                 ..Default::default()
             },
-            &SceneEnv::for_test(std::path::PathBuf::new()),
+            &SceneEnv::for_test(
+                std::path::PathBuf::new(),
+                crate::resources::test_resources(),
+            ),
         )
     }
 
@@ -347,8 +359,13 @@ mod tests {
                 hunters_count: 1,
                 ..Default::default()
             };
-            let mut scene =
-                CarpetScene::new(&settings, &SceneEnv::for_test(std::path::PathBuf::new()));
+            let mut scene = CarpetScene::new(
+                &settings,
+                &SceneEnv::for_test(
+                    std::path::PathBuf::new(),
+                    crate::resources::test_resources(),
+                ),
+            );
             let camera = Camera::new(160, 96, &scene.render_options()).unwrap();
             scene.pointer(Some(camera.project(target, 0.0).unwrap().map(|v| v as f32)));
             sample(&mut scene, 0.0, 1.0, 0.0);
@@ -377,8 +394,13 @@ mod tests {
                 height: 250,
                 ..Default::default()
             };
-            let mut scene =
-                CarpetScene::new(&settings, &SceneEnv::for_test(std::path::PathBuf::new()));
+            let mut scene = CarpetScene::new(
+                &settings,
+                &SceneEnv::for_test(
+                    std::path::PathBuf::new(),
+                    crate::resources::test_resources(),
+                ),
+            );
             sample(&mut scene, 0.0, 1.0, 0.0);
             let body = scene.bodies[0];
             assert!((body.radius - 0.12 * multiplier).abs() < 1e-6);
@@ -397,7 +419,13 @@ mod tests {
             ..Default::default()
         };
         settings.utc_offset_minutes = -30;
-        let scene = CarpetScene::new(&settings, &SceneEnv::for_test(std::path::PathBuf::new()));
+        let scene = CarpetScene::new(
+            &settings,
+            &SceneEnv::for_test(
+                std::path::PathBuf::new(),
+                crate::resources::test_resources(),
+            ),
+        );
         assert!(scene.status().unwrap().contains("UTC-00:30"));
     }
 }

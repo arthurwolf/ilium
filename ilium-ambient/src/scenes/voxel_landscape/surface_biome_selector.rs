@@ -7,17 +7,21 @@ use super::{
 };
 use SurfaceBiome::*;
 
+/// Shared subtype field keeps terrain relief and ecology on the same global boundary.
+pub fn variant(seed: u64, position: [i32; 2]) -> f64 {
+    (0.5 + 0.5
+        * value2(
+            seed ^ 0x0062_696f_6d65_3433,
+            i64::from(position[0]),
+            i64::from(position[1]),
+            256,
+        ))
+    .clamp(0.0, 1.0)
+}
+
 pub fn select(seed: u64, position: [i32; 2], sample: TerrainSample) -> SurfaceBiome {
     let climate = sample.climate;
-    let variant = (0.5
-        + 0.5
-            * value2(
-                seed ^ 0x0062_696f_6d65_3433,
-                i64::from(position[0]),
-                i64::from(position[1]),
-                256,
-            ))
-    .clamp(0.0, 1.0);
+    let variant = variant(seed, position);
     let t = climate.temperature;
     let h = climate.humidity;
     if sample.river {

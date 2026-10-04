@@ -9,9 +9,12 @@ use std::time::Duration;
 
 fn env(latitude: f64, longitude: f64) -> SceneEnv {
     SceneEnv {
+        resources: crate::resources::test_resources(),
         location: GeoLocation::new("test", latitude, longitude),
         cache_dir: PathBuf::from("/nonexistent/stars-never-used"),
         gpu: None,
+        saved_runtime: std::sync::Arc::new(crate::minecraft::saved_runtime::SavedRuntime::new()),
+        palette: Default::default(),
     }
 }
 
@@ -801,7 +804,10 @@ fn registry_builds_the_scene_and_it_is_deterministic_for_a_fixed_clock() {
     };
     let mut scene = settings.create_scene(
         AmbientKind::Stars,
-        &SceneEnv::for_test(PathBuf::from("/nonexistent")),
+        &SceneEnv::for_test(
+            PathBuf::from("/nonexistent"),
+            crate::resources::test_resources(),
+        ),
     );
     let a = render_frame(scene.as_mut(), 80, 30, Duration::ZERO);
     assert!(a.lit_dots() > 100);
@@ -1126,4 +1132,29 @@ fn below_horizon_moon_and_planets_can_be_seen_in_fullscreen_panorama() {
         }
     }
     assert!(checked_moon && checked_planet);
+}
+
+#[test]
+fn palette_changes_cell_colours_and_none_is_unchanged() {
+    let settings = StarsSettings {
+        star_style: StarStyle::Realistic,
+        star_colors: true,
+        ..fixed("2024-03-01T22:00:00Z")
+    };
+    let colors = |palette: Option<crate::style::ScenePalette>| {
+        let mut scene = StarsScene::new(&settings, &env(48.0, 2.0));
+        if let Some(palette) = palette {
+            scene.set_palette(&palette);
+        }
+        assert!(scene.follows_palette());
+        render_frame(&mut scene, 100, 40, Duration::from_secs(1)).cell_colors
+    };
+    let plain = colors(None);
+    assert!(!plain.is_empty());
+    assert_eq!(plain, colors(Some(Default::default())));
+    let palette = crate::style::ScenePalette {
+        stops: vec![[10, 200, 20], [250, 30, 30]],
+        ..Default::default()
+    };
+    assert_ne!(plain, colors(Some(palette)));
 }

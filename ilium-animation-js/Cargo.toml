@@ -1,0 +1,32 @@
+[package]
+name = "ilium-animation-js"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["v8-runtime", "native-host", "native-network"]
+v8-runtime = ["dep:v8"]
+native-host = ["dep:ilium-ambient", "dep:chrono", "dep:ilium-wikipedia", "dep:image", "dep:cosmic-text", "dep:unicode-width", "dep:unicode-segmentation"]
+native-network = ["dep:ureq"]
+
+[dependencies]
+ilium-ambient = { version = "0.1.0", path = "../ilium-ambient", optional = true }
+ilium-wikipedia = { version = "0.1.0", path = "../ilium-wikipedia", optional = true }
+ilium-execution = { version = "0.1.0", path = "../ilium-execution" }
+ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.10.9"
+thiserror = "2.0.18"
+url = "2.5"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+v8 = { version = "=152.2.0", optional = true }
+ureq = { version = "3.2.0", optional = true, features = ["json"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tga"], optional = true }
+cosmic-text = { version = "0.14", optional = true }
+unicode-width = { version = "0.2.2", optional = true }
+unicode-segmentation = { version = "1.12", optional = true }

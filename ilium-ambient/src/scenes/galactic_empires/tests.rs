@@ -7,7 +7,10 @@ fn scene() -> GalacticEmpiresScene {
             seed: 42,
             ..Default::default()
         },
-        &SceneEnv::for_test(std::env::temp_dir().join("galaxy-unused-cache")),
+        &SceneEnv::for_test(
+            std::env::temp_dir().join("galaxy-unused-cache"),
+            crate::resources::test_resources(),
+        ),
     )
 }
 
@@ -46,9 +49,15 @@ fn simulation_and_camera_speeds_are_independent() {
     assert_eq!(slow.galaxy.stars, orbiting.galaxy.stars);
     assert_eq!(slow.galaxy.fleets, orbiting.galaxy.fleets);
     assert_eq!(slow.camera_time, fast.camera_time);
-    let held = Camera::new(2.0, slow.camera_time, slow.settings.camera_speed);
-    let moving = Camera::new(2.0, orbiting.camera_time, orbiting.settings.camera_speed);
-    assert_eq!(held.center, Camera::new(2.0, 0.0, 0).center);
+    let held = Camera::new(2.0, slow.camera_time, slow.settings.camera_speed, 100, 900);
+    let moving = Camera::new(
+        2.0,
+        orbiting.camera_time,
+        orbiting.settings.camera_speed,
+        100,
+        900,
+    );
+    assert_eq!(held.center, Camera::new(2.0, 0.0, 0, 100, 900).center);
     assert_ne!(held.center, moving.center);
 }
 
@@ -148,15 +157,19 @@ fn actual_render_has_stars_lanes_territories_colors_and_moving_fleets() {
 #[test]
 fn rounded_defaults_preserve_explicit_saved_density_and_bounds() {
     let defaults: GalacticEmpiresSettings = serde_json::from_str("{}").unwrap();
-    assert_eq!(defaults.star_count, 320);
+    assert_eq!(defaults.star_count, 480);
+    assert_eq!(scene().galaxy.stars.len(), 480);
     let saved: GalacticEmpiresSettings = serde_json::from_str(r#"{"star_count":240}"#).unwrap();
     assert_eq!(saved.normalized().star_count, 240);
+    let saved_previous: GalacticEmpiresSettings =
+        serde_json::from_str(r#"{"star_count":320}"#).unwrap();
+    assert_eq!(saved_previous.normalized().star_count, 320);
     assert_eq!(
         serde_json::from_str::<GalacticEmpiresSettings>(&serde_json::to_string(&saved).unwrap())
             .unwrap(),
         saved
     );
-    for (input, expected) in [(i32::MIN, 120), (i32::MAX, 420)] {
+    for (input, expected) in [(i32::MIN, 120), (i32::MAX, 720)] {
         assert_eq!(
             GalacticEmpiresSettings {
                 star_count: input,
@@ -247,7 +260,7 @@ fn render_refreshes_captures_without_a_log_and_flash_keeps_the_current_owner() {
     let mut scene = scene();
     scene.settings.camera_speed = 0;
     scene.settings.show_fleets = false;
-    let camera = Camera::new(1.5, 0.0, 0);
+    let camera = Camera::new(1.5, 0.0, 0, 100, 900);
     scene.galaxy.stars.truncate(1);
     scene.galaxy.stars[0].position = camera.center;
     scene.galaxy.stars[0].owner = Some(0);
@@ -293,7 +306,7 @@ fn zero_shading_disables_fill_and_contours_but_not_markers() {
         wall: Duration::ZERO,
         now: std::time::SystemTime::UNIX_EPOCH,
     };
-    let camera = Camera::new(1.5, 0.0, 0);
+    let camera = Camera::new(1.5, 0.0, 0, 100, 900);
     scene.galaxy.stars.truncate(1);
     scene.galaxy.stars[0].position = camera.center;
     scene.galaxy.stars[0].owner = Some(0);
@@ -323,7 +336,7 @@ fn a_fleet_in_a_star_cell_does_not_recolor_the_owned_system() {
         scene.galaxy.step();
     }
     let mut fleet = scene.galaxy.fleets[0].clone();
-    let camera = Camera::new(1.25, 0.0, 0);
+    let camera = Camera::new(1.25, 0.0, 0, 100, 900);
     for star in &mut scene.galaxy.stars {
         star.position = (-0.8, -0.4);
     }
@@ -335,11 +348,138 @@ fn a_fleet_in_a_star_cell_does_not_recolor_the_owned_system() {
     fleet.progress = 0.0;
     scene.galaxy.fleets = vec![fleet];
     scene.galaxy.last_captures.clear();
-    scene.territory = Territory::new(&scene.galaxy.stars);
+    scene.territory = Territory::new(&scene.galaxy.stars, 100, 100);
     scene.settings.camera_speed = 0;
     let frame = render_frame(&mut scene, 100, 40, Duration::ZERO);
     let system_color = scene.galaxy.empires[0]
         .color
         .map(|channel| (u16::from(channel) + 255).div_ceil(2) as u8);
     assert_eq!(frame.cell_colors[20 * 100 + 50], system_color);
+}
+
+#[test]
+fn visual_and_timing_reconfiguration_keeps_the_running_galaxy() {
+    let mut scene = scene();
+    for seconds in 0..=5 {
+        render_frame(&mut scene, 1, 1, Duration::from_secs(seconds));
+    }
+    let stars = scene.galaxy.stars.clone();
+    let fleets = scene.galaxy.fleets.clone();
+    let tick = scene.galaxy.tick;
+    let base_seed = scene.base_seed;
+    let mut settings = AmbientSettings::default();
+    settings.galactic_empires = scene.settings.clone();
+    settings.galactic_empires.simulation_speed = 150;
+    settings.galactic_empires.camera_zoom = 140;
+    settings.galactic_empires.orbit_period_seconds = 600;
+    settings.galactic_empires.territory_radius = 150;
+    settings.galactic_empires.territory_softness = 180;
+    settings.galactic_empires.star_brightness = 0;
+    settings.galactic_empires.show_lanes = false;
+    settings.galactic_empires.fleet_trail_length = 0;
+    settings.galactic_empires.victory_hold_seconds = 45;
+    assert!(scene.reconfigure(&settings));
+    assert_eq!(scene.galaxy.stars, stars);
+    assert_eq!(scene.galaxy.fleets, fleets);
+    assert_eq!(scene.galaxy.tick, tick);
+    assert_eq!(scene.base_seed, base_seed);
+    let expected_territory = Territory::new(&scene.galaxy.stars, 150, 180);
+    let point = (
+        scene.galaxy.stars[0].position.0 + 0.08,
+        scene.galaxy.stars[0].position.1,
+    );
+    assert_eq!(
+        scene.territory.sample(point),
+        expected_territory.sample(point)
+    );
+    settings.galactic_empires.spiral_arms = 5;
+    assert!(!scene.reconfigure(&settings));
+    assert_eq!(scene.galaxy.tick, tick);
+    assert_eq!(scene.settings.spiral_arms, 4);
+    settings.galactic_empires.spiral_arms = 4;
+    settings.galactic_empires.seed = 43;
+    assert!(!scene.reconfigure(&settings));
+}
+
+#[test]
+fn hidden_visual_layers_have_no_ink_and_each_can_be_restored() {
+    fn has_ink(scene: &mut GalacticEmpiresScene) -> bool {
+        render_frame(scene, 120, 40, Duration::ZERO)
+            .raster
+            .dots
+            .iter()
+            .any(|&dot| dot > 0.0)
+    }
+    let mut scene = scene();
+    scene.settings.camera_speed = 0;
+    scene.settings.territory_strength = 0;
+    scene.settings.star_brightness = 0;
+    scene.settings.lane_brightness = 0;
+    scene.settings.fleet_brightness = 0;
+    let camera = Camera::new(1.5, 0.0, 0, 100, 900);
+    for _ in 0..60 {
+        scene.galaxy.step();
+    }
+    let mut fleet = scene.galaxy.fleets[0].clone();
+    fleet.from = 0;
+    fleet.to = 1;
+    fleet.progress = 0.5;
+    scene.galaxy.stars.truncate(2);
+    scene.galaxy.stars[0].position = (camera.center.0 - 0.04, camera.center.1);
+    scene.galaxy.stars[1].position = (camera.center.0 + 0.04, camera.center.1);
+    scene.galaxy.lanes = vec![(0, 1)];
+    scene.galaxy.fleets = vec![fleet];
+    assert!(!has_ink(&mut scene));
+    scene.settings.lane_brightness = 100;
+    assert!(has_ink(&mut scene));
+    scene.settings.show_lanes = false;
+    assert!(!has_ink(&mut scene));
+    scene.settings.star_brightness = 100;
+    assert!(has_ink(&mut scene));
+    scene.settings.star_brightness = 0;
+    scene.settings.fleet_brightness = 100;
+    scene.settings.fleet_trail_length = 0;
+    assert!(has_ink(&mut scene));
+    assert_eq!(scene.marker_primitives.len(), 1);
+    scene.settings.fleet_trail_length = 100;
+    render_frame(&mut scene, 120, 40, Duration::ZERO);
+    assert_eq!(scene.marker_primitives.len(), 2);
+}
+
+#[test]
+fn victory_pause_uses_simulation_seconds() {
+    let mut scene = scene();
+    scene.settings.victory_hold_seconds = 10;
+    scene.galaxy.winner = Some(0);
+    scene.galaxy.victory_tick = Some(0);
+    render_frame(&mut scene, 1, 1, Duration::ZERO);
+    for seconds in 1..10 {
+        render_frame(&mut scene, 1, 1, Duration::from_secs(seconds));
+        assert_eq!(scene.cycle, 0);
+    }
+    render_frame(&mut scene, 1, 1, Duration::from_secs(10));
+    assert_eq!(scene.cycle, 1);
+    assert_eq!(scene.galaxy.tick, 0);
+}
+
+#[test]
+fn palette_changes_cell_colours_and_none_is_unchanged() {
+    let colors = |palette: Option<ScenePalette>| {
+        let mut scene = scene();
+        if let Some(palette) = palette {
+            scene.set_palette(&palette);
+        }
+        assert!(scene.follows_palette());
+        for seconds in 0..10 {
+            render_frame(&mut scene, 1, 1, Duration::from_secs(seconds));
+        }
+        render_frame(&mut scene, 100, 40, Duration::from_secs(10)).cell_colors
+    };
+    let plain = colors(None);
+    assert_eq!(plain, colors(Some(ScenePalette::default())));
+    let palette = ScenePalette {
+        stops: vec![[10, 200, 20], [250, 30, 30]],
+        ..Default::default()
+    };
+    assert_ne!(plain, colors(Some(palette)));
 }

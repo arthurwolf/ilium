@@ -623,3 +623,49 @@ fn canonical_seed_remains_bound_to_prepared_map_identity_without_world_writes() 
         assert_eq!(std::fs::read(path.join("level.dat")).unwrap(), before);
     }
 }
+
+#[test]
+fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spelling() {
+    use super::super::{coverage::Line, projected_source, source_footprint};
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+
+    let (_temporary, root, storage) = fixture();
+    let path = save(&root, "projected source root", 100, true);
+    let metadata = std::fs::read(path.join("level.dat")).unwrap();
+    let terrain = std::fs::read(path.join("region/r.0.0.mca")).unwrap();
+    let prepared = prepare(&root, &storage, 7, limits(), &|| false).unwrap();
+    assert_eq!(prepared.maps.len(), 1);
+    let base = &prepared.maps[0];
+    let bound = &prepared.bindings[0];
+    bound.verify(&root).unwrap();
+    let account = ByteBudget::new(1 << 30).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let request = source_footprint::request(
+        Line {
+            start: [8.0, 8.0],
+            end: [9.0, 8.0],
+        },
+        63.0,
+        [1, 1],
+        1024.0,
+        &account,
+        cancel,
+    )
+    .unwrap();
+    assert!(request.support_chunks().contains(&[0, 0]));
+    assert!(request.support_chunks().len() > 1);
+    // The fixture intentionally has only one chunk. A matching bound root
+    // must reach the ordinary missing-chunk refusal, not fail path identity.
+    assert!(matches!(
+        projected_source::qualify(base, bound, &root, &request, &account, cancel, &|| false),
+        Err(projected_source::Error::Unqualified { missing, .. }) if missing > 0
+    ));
+    assert_eq!(std::fs::read(path.join("level.dat")).unwrap(), metadata);
+    assert_eq!(
+        std::fs::read(path.join("region/r.0.0.mca")).unwrap(),
+        terrain
+    );
+    assert_eq!(prepared.snapshot.history(), History::default());
+}

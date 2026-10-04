@@ -5,7 +5,7 @@
 //! `clouds/providers.rs`. All network work happens on an owned worker thread
 //! (`clouds/worker.rs`); `render` only resamples the frames it already holds.
 
-mod providers;
+pub(crate) mod providers;
 mod worker;
 
 pub use self::providers::CloudSource;
@@ -19,6 +19,7 @@ use crate::scene::{Frame, Scene, SceneEnv};
 use crate::scenes::night_lights::projection::{self, DotTable, Projection, View};
 use crate::scenes::night_lights::tiles::{system_clock, GeoBox, HttpFetcher, NowFn, TileFetcher};
 use crate::source::Worker;
+use crate::style::ScenePalette;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -444,6 +445,7 @@ pub struct CloudsScene {
     problem: Option<String>,
     shown_label: Option<String>,
     located: Option<(View, Arc<DotTable>)>,
+    palette: ScenePalette,
 }
 
 /// Where a dot sits on the map: `None` when it is off the picture.
@@ -468,6 +470,13 @@ impl DotMap<'_> {
 }
 
 impl CloudsScene {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: every per-cell colour it produces
+    // is recoloured by brightness (`follows_palette`), so `PaletteScene` skips its
+    // generic remap.
     pub fn new(settings: &CloudsSettings, env: &SceneEnv) -> Self {
         Self::with_parts(
             settings,
@@ -502,6 +511,7 @@ impl CloudsScene {
             problem: None,
             shown_label: None,
             located: None,
+            palette: env.palette.clone(),
         }
     }
 
@@ -786,7 +796,7 @@ impl CloudsScene {
                     }
                 };
                 if let Some(slot) = frame.cell_color_mut(cell_x as u16, cell_y as u16) {
-                    *slot = color;
+                    *slot = self.palette.recolor(color);
                 }
             }
         }
@@ -829,12 +839,21 @@ impl Scene for CloudsScene {
             }
         }
         if self.settings.cell_colors && self.set.is_none() {
-            frame.cell_colors.fill([70, 70, 80]);
+            frame.cell_colors.fill(self.palette.recolor([70, 70, 80]));
         }
     }
 
     fn uses_cell_colors(&self) -> bool {
         self.settings.cell_colors
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        // Colours are computed per frame, so nothing is cached.
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn frames_per_second(&self) -> u32 {

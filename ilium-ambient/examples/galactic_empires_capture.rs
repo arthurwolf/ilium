@@ -1,12 +1,16 @@
 //! Capture actual dithered galaxy dot output as PNG and Braille JSONL.
 //! --output-dir PATH [--width N] [--height N] [--times SECONDS_CSV]
 //! [--settings-json JSON] [--step-seconds N]
+#[path = "../tests/support/mod.rs"]
+mod ambient_fixture;
+
 use ilium_ambient::{
     debug::render_frame, raster::threshold, AmbientKind, AmbientSettings, DitherMode, SceneEnv,
 };
 use std::{path::PathBuf, time::Duration};
 
 fn run() -> Result<(), String> {
+    let resources_fixture = ambient_fixture::ResourcesFixture::new()?;
     let mut output = None;
     let (mut width, mut height) = (120_u16, 40_u16);
     let mut times = vec![0.0_f64, 30.0, 120.0, 300.0];
@@ -47,7 +51,10 @@ fn run() -> Result<(), String> {
     times.sort_by(f64::total_cmp);
     let mut scene = settings.create_scene(
         AmbientKind::GalacticEmpires,
-        &SceneEnv::for_test(output.join("unused-cache")),
+        &SceneEnv::for_test(
+            output.join("unused-cache"),
+            resources_fixture.resources.clone(),
+        ),
     );
     let mut clock = 0.0;
     for (index, time) in times.into_iter().enumerate() {

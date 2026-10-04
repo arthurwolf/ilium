@@ -56,7 +56,7 @@ impl BlockState {
             )
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// Eagerly validated palette storage. Private words and widths keep every
 /// in-range lookup valid without allocating or normalizing block states.
 pub struct Paletted<T> {
@@ -82,12 +82,12 @@ impl<T> Paletted<T> {
         self.palette.get(value)
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Section {
     pub block_states: Option<Paletted<BlockState>>,
     pub biomes: Option<Paletted<String>>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedChunk {
     pub identity: region::Identity,
     pub status: Option<String>,

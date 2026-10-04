@@ -262,11 +262,26 @@ pub struct ModelApplication {
 impl ModelApplication {
     fn parse(value: &Value) -> Result<Self> {
         let fields = object(value)?;
-        allowed(fields, &["model", "x", "y", "uvlock", "weight"])?;
+        // The pinned 1.19.3 Variant deserializer reads x and y only. Some
+        // authored packs carry a z exporter hint; native ignores that key.
+        allowed(fields, &["model", "x", "y", "z", "uvlock", "weight"])?;
         let mut turns = [0_u8; 2];
         for (axis, key) in ["x", "y"].iter().enumerate() {
-            let degrees = fields.get(*key).map(uint).transpose()?.unwrap_or(0);
-            if degrees > 270 || degrees % 90 != 0 {
+            let degrees = fields
+                .get(*key)
+                .map(|value| {
+                    value
+                        .as_i64()
+                        .and_then(|degrees| i32::try_from(degrees).ok())
+                        .ok_or_else(|| {
+                            metadata::invalid("model rotation requires signed 32-bit integer")
+                        })
+                })
+                .transpose()?
+                .unwrap_or(0);
+            // BlockModelRotation.by uses Mth.positiveModulo(angle, 360).
+            let degrees = degrees.rem_euclid(360);
+            if degrees % 90 != 0 {
                 return Err(metadata::invalid("model rotation must be 0/90/180/270"));
             }
             turns[axis] = (degrees / 90) as u8;
@@ -481,5 +496,44 @@ mod tests {
             .collect();
         assert_eq!(first, second);
         assert!(first.windows(2).any(|pair| pair[0] != pair[1]));
+    }
+
+    #[test]
+    fn native_variant_ignores_exporter_z_and_normalizes_signed_xy() {
+        let input = state(&[]);
+        let plain =
+            StateDefinition::parse(&serde_json::json!({"variants":{"":{"model":"block/dirt"}}}))
+                .unwrap();
+        let with_z = StateDefinition::parse(
+            &serde_json::json!({"variants":{"":{"model":"block/dirt","z":90}}}),
+        )
+        .unwrap();
+        assert_eq!(
+            plain.select(&input, [4, 5, 6], 17).unwrap(),
+            with_z.select(&input, [4, 5, 6], 17).unwrap()
+        );
+        let signed = StateDefinition::parse(&serde_json::json!({
+            "variants":{"":{"model":"block/amethyst_cluster","x":-90,"y":270}}
+        }))
+        .unwrap();
+        let selected = signed.select(&input, [4, 5, 6], 17).unwrap();
+        assert_eq!(selected[0].x_turns, 3);
+        assert_eq!(selected[0].y_turns, 3);
+        let wrapped = StateDefinition::parse(&serde_json::json!({
+            "variants":{"":{"model":"block/stone","x":450,"y":-90}}
+        }))
+        .unwrap();
+        let selected = wrapped.select(&input, [4, 5, 6], 17).unwrap();
+        assert_eq!([selected[0].x_turns, selected[0].y_turns], [1, 3]);
+        for application in [
+            serde_json::json!({"model":"block/stone","x":45}),
+            serde_json::json!({"model":"block/stone","x":2147483648_i64}),
+            serde_json::json!({"model":"block/stone","unreviewed_custom_loader":true}),
+        ] {
+            assert!(StateDefinition::parse(&serde_json::json!({
+                "variants":{"":application}
+            }))
+            .is_err());
+        }
     }
 }

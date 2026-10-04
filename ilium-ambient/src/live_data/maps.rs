@@ -96,6 +96,7 @@ pub struct MapSettings {
     pub marker_brightness_percent: i32,
     pub poll_seconds: i32,
     pub magnitude_labels: bool,
+    pub show_heading: bool, // Aircraft/boat markers: one dot per vehicle unless this adds a heading arrow.
 }
 impl Default for MapSettings {
     fn default() -> Self {
@@ -103,10 +104,11 @@ impl Default for MapSettings {
             boat_source: BoatSource::default(), // Missing legacy field selects OpenSeaFeed.
             map_hue: 210,
             marker_hue: 35,
-            map_brightness_percent: 25,
+            map_brightness_percent: 45, // Markers default to twice this.
             marker_brightness_percent: 90,
             poll_seconds: 60,
             magnitude_labels: true,
+            show_heading: false,
         }
     }
 }
@@ -134,6 +136,8 @@ impl MapSettings {
         let mut controls = self.controls();
         if kind != MapKind::Earthquakes {
             controls.retain(|row| row.id != "labels");
+        } else {
+            controls.retain(|row| row.id != "heading");
         }
         for row in &mut controls {
             if row.id == "poll" {
@@ -164,6 +168,7 @@ impl SceneSettings for MapSettings {
             marker_brightness_percent: self.marker_brightness_percent.clamp(0, 100),
             poll_seconds: self.poll_seconds.clamp(5, 3600),
             magnitude_labels: self.magnitude_labels,
+            show_heading: self.show_heading,
         }
     }
     fn controls(&self) -> Vec<Control> {
@@ -176,6 +181,7 @@ impl SceneSettings for MapSettings {
             Control::slider("map_brightness","Map brightness",settings.map_brightness_percent,(0,100,5),"%","Coastline brightness, independent of reported-object markers."),
             Control::slider("marker_hue","Marker hue",settings.marker_hue,(0,360,10),"°","Color of markers and earthquake magnitude labels."),
             Control::slider("marker_brightness","Marker brightness",settings.marker_brightness_percent,(0,100,5),"%","Brightness of reported-object markers."),
+            Control::toggle("heading","Heading arrows",settings.show_heading,"Aircraft and boats: draw a heading arrow around each dot. Off draws exactly one dot per reported vehicle."),
             Control::toggle("labels","Magnitude labels",settings.magnitude_labels,"Show reported magnitudes, including zero and negative values; '?' means unknown. Colliding labels are omitted, never event markers."),
         ]
     }
@@ -205,6 +211,10 @@ impl SceneSettings for MapSettings {
                 return Err("Source information is read-only; cancel to return.".into());
                 // A user cannot rewrite provenance by editing the prompt.
             } // End block.
+            "heading" => {
+                next.show_heading = control::boolean(&value)
+                    .ok_or_else(|| "This setting requires on or off.".to_owned())?
+            }
             "labels" => {
                 next.magnitude_labels = control::boolean(&value)
                     .ok_or_else(|| "This setting requires on or off.".to_owned())?
@@ -248,7 +258,6 @@ pub struct LiveMapScene {
     state: FeedState,
     startup_error: Option<String>,
     coastline: Raster,
-    coast_brightness: i32,
     markers: Raster,
     labels: Vec<Option<char>>,
     marker_cells: Vec<usize>,
@@ -263,6 +272,13 @@ pub struct LiveMapScene {
 }
 
 impl LiveMapScene {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
+    // which `create_scene` wraps around every scene, shifts this scene's cell
+    // colours onto the palette by brightness.
     pub fn new(kind: MapKind, settings: &MapSettings, _env: &SceneEnv) -> Self {
         let mut scene = Self::offline(kind, settings.normalized());
         scene.network_enabled = true; // Only the live constructor enables network subscriptions.
@@ -278,7 +294,6 @@ impl LiveMapScene {
             state: FeedState::default(),
             startup_error: None,
             coastline: Raster::default(),
-            coast_brightness: -1,
             markers: Raster::default(),
             labels: Vec::new(),
             marker_cells: Vec::new(),
@@ -586,16 +601,14 @@ impl Scene for LiveMapScene {
         }
         let dimensions_changed = self.coastline.width != frame.raster.width
             || self.coastline.height != frame.raster.height;
-        if dimensions_changed || self.coast_brightness != self.settings.map_brightness_percent {
+        if dimensions_changed {
             self.coastline
                 .resize(frame.raster.width, frame.raster.height);
             if self.coastline.width > 0 && self.coastline.height > 0 {
-                map::coastline(
-                    &mut self.coastline,
-                    self.settings.map_brightness_percent as f32 / 100.0,
-                );
+                // Full tone: brightness is applied to the cell colour so a
+                // dimmer map is not thinned out by the shared dither.
+                map::coastline(&mut self.coastline, 1.0);
             }
-            self.coast_brightness = self.settings.map_brightness_percent;
         }
         if self.kind == MapKind::Earthquakes {
             // Pulses remain scene-time dependent and retain every event marker.
@@ -618,6 +631,7 @@ impl Scene for LiveMapScene {
                     cell_width: usize::from(frame.width),
                     cell_height: usize::from(frame.height),
                     marker_brightness: self.settings.marker_brightness_percent as u8,
+                    show_heading: self.settings.show_heading,
                 },
                 frame.wall,
             ); // The layer assigns both monotonic generations.
@@ -628,6 +642,30 @@ impl Scene for LiveMapScene {
             self.labels.fill(None); // Fleet labels are not invented.
             self.marker_cells.clear(); // Occupancy is deduplicated bookkeeping, not source sampling.
             if let Some(prepared) = self.fleet.prepared() {
+                // Markers bypass the shared dither: each lit dot becomes a
+                // native Braille glyph, so a lone aircraft over open ocean
+                // is as visible as one inside a dense cluster.
+                let lit = 0.3 * self.settings.marker_brightness_percent as f32 / 100.0;
+                let raster = &prepared.raster;
+                let columns = usize::from(frame.width);
+                if raster.width == columns * 2 && raster.height == usize::from(frame.height) * 4 {
+                    const BITS: [[u32; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
+                    for (index, label) in self.labels.iter_mut().enumerate() {
+                        let (row, column) = (index / columns, index % columns);
+                        let mut bits = 0u32;
+                        for (dy, bit_row) in BITS.iter().enumerate() {
+                            for (dx, bit) in bit_row.iter().enumerate() {
+                                let dot = (row * 4 + dy) * raster.width + column * 2 + dx;
+                                if raster.dots[dot] > 0.0 && raster.dots[dot] >= lit {
+                                    bits |= bit;
+                                }
+                            }
+                        }
+                        if bits != 0 {
+                            *label = char::from_u32(0x2800 + bits);
+                        }
+                    }
+                }
                 self.marker_cells.extend(
                     prepared
                         .occupied_centers
@@ -637,17 +675,15 @@ impl Scene for LiveMapScene {
                 );
             } // At most one index per viewport cell.
         }
-        let markers = self
-            .fleet
-            .prepared()
-            .filter(|_| self.kind != MapKind::Earthquakes)
-            .map_or(&self.markers, |prepared| &prepared.raster); // Borrow the reviewed worker's raster without copying the fleet.
+        let markers = &self.markers; // Fleet markers are native glyphs above; only quake pulses use the dithered raster.
         frame.raster.dots.copy_from_slice(&self.coastline.dots);
         for (dot, marker) in frame.raster.dots.iter_mut().zip(&markers.dots) {
             // Preserve the typed operation.
             *dot = dot.max(*marker);
         }
-        let map_color = hue_rgb(self.settings.map_hue);
+        let map_color = hue_rgb(self.settings.map_hue).map(|channel| {
+            (f32::from(channel) * self.settings.map_brightness_percent as f32 / 100.0) as u8
+        }); // Brightness lives in the colour, not in thinned-out dots.
         let marker_color = hue_rgb(self.settings.marker_hue);
         frame.cell_colors.resize(
             usize::from(frame.width) * usize::from(frame.height),
@@ -1080,7 +1116,7 @@ mod tests {
             state: FeedState::default(),
         }));
         let (raster, colors) = paint(&mut scene, 80, 24, 0);
-        assert!(colors.contains(&hue_rgb(240)));
+        assert!(colors.contains(&hue_rgb(240).map(|c| (f32::from(c) * 0.4) as u8)));
         assert!(colors.contains(&hue_rgb(0)));
         assert_eq!(colors.len(), 1920);
         assert!(colors.iter().all(|c| *c != [1, 2, 3]));
@@ -1118,7 +1154,11 @@ mod tests {
     }
     #[test]
     fn heading_changes_orientation_but_time_never_moves_observed_positions() {
-        let mut scene = LiveMapScene::offline(MapKind::Aircraft, MapSettings::default());
+        let settings = MapSettings {
+            show_heading: true,
+            ..Default::default()
+        };
+        let mut scene = LiveMapScene::offline(MapKind::Aircraft, settings);
         let mut position = Position::new("a".into(), 15.0, 20.0, Some(1000)).unwrap(); // Existing fixture supplies a known coordinate time.
         position.heading_degrees = Some(0.0);
         let snapshot = Arc::new(Snapshot {
@@ -1126,16 +1166,41 @@ mod tests {
             state: FeedState::default(),
         });
         scene.accept_positions(snapshot);
-        let (north, _) = paint(&mut scene, 80, 24, 0);
-        let (later, _) = paint(&mut scene, 80, 24, 1000);
-        assert_eq!(north.dots, later.dots);
+        paint(&mut scene, 80, 24, 0);
+        let north = scene.labels.clone();
+        paint(&mut scene, 80, 24, 1000);
+        assert_eq!(north, scene.labels);
         position.heading_degrees = Some(90.0);
         scene.accept_positions(Arc::new(Snapshot {
             data: Some(Arc::new(vec![position])),
             state: FeedState::default(),
         }));
-        let (east, _) = paint(&mut scene, 80, 24, 0);
-        assert_ne!(north.dots, east.dots);
+        paint(&mut scene, 80, 24, 0);
+        assert_ne!(north, scene.labels);
+    }
+    #[test]
+    fn default_aircraft_are_single_undithered_dots_twice_as_bright_as_the_map() {
+        let mut scene = LiveMapScene::offline(MapKind::Aircraft, MapSettings::default());
+        let mut position = Position::new("ocean".into(), -35.0, 40.0, Some(1000)).unwrap(); // Mid-Atlantic, far from any land.
+        position.heading_degrees = Some(45.0);
+        scene.accept_positions(Arc::new(Snapshot {
+            data: Some(Arc::new(vec![position])),
+            state: FeedState::default(),
+        }));
+        let (_, colors) = paint(&mut scene, 80, 24, 0);
+        let glyphs = scene.labels.iter().flatten().collect::<Vec<_>>();
+        assert_eq!(glyphs.len(), 1);
+        assert!(
+            (u32::from(*glyphs[0]) - 0x2800).count_ones() == 1,
+            "one dot per plane"
+        );
+        let index = scene.labels.iter().position(Option::is_some).unwrap();
+        let map = hue_rgb(scene.settings.map_hue);
+        let plane = colors[index];
+        let map_color = colors.iter().find(|c| **c != plane).unwrap();
+        let luma = |c: [u8; 3]| f32::from(*c.iter().max().unwrap());
+        assert!(luma(plane) / luma(*map_color).max(1.0) >= 1.9);
+        assert_ne!(*map_color, map); // Map colour is scaled by its brightness.
     }
     #[test]
     fn failed_and_malformed_fetch_keeps_last_good_and_freshness_separate() {

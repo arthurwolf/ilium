@@ -10,7 +10,10 @@ use crate::scene::{Scene, SceneEnv};
 use std::time::Duration;
 
 fn scene_with(settings: &VectorTdSettings) -> VectorTdScene {
-    VectorTdScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    VectorTdScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_at(settings: &VectorTdSettings, cols: u16, rows: u16, time: f64) -> Rendered {
@@ -776,7 +779,10 @@ fn dump_frames() {
         },
         ..VectorTdSettings::default()
     };
-    let mut scene = VectorTdScene::new(&settings, &SceneEnv::for_test(std::env::temp_dir()));
+    let mut scene = VectorTdScene::new(
+        &settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    );
     let (cols, rows) = (200u16, 56u16);
     for time in times {
         // advance in small increments so the sim is stepped smoothly
@@ -831,7 +837,10 @@ fn bench_frames() {
         game_speed: 400,
         ..VectorTdSettings::default()
     };
-    let mut scene = VectorTdScene::new(&settings, &SceneEnv::for_test(std::env::temp_dir()));
+    let mut scene = VectorTdScene::new(
+        &settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    );
     let mut worst = 0.0f64;
     let mut total = 0.0f64;
     let frames = 20 * 60 * 20;
@@ -964,4 +973,23 @@ fn time_moving_backwards_pauses_instead_of_restarting() {
     let played = scene.director.as_ref().unwrap().game.time;
     let _ = render_frame(&mut scene, 100, 30, Duration::from_secs(5));
     assert!(scene.director.as_ref().unwrap().game.time >= played);
+}
+
+#[test]
+fn provided_palette_changes_cell_colors_and_none_keeps_them() {
+    let settings = VectorTdSettings::default();
+    let plain = frame_at(&settings, 50, 15, 20.0);
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
+    env.palette = crate::style::ScenePalette {
+        stops: vec![[10, 40, 200], [240, 230, 60]],
+        reverse: false,
+        shift_percent: 0,
+    };
+    let mut scene = VectorTdScene::new(&settings, &env);
+    let tinted = render_frame(&mut scene, 50, 15, Duration::from_secs_f64(20.0));
+    assert_ne!(plain.cell_colors, tinted.cell_colors);
+    scene.set_palette(&crate::style::ScenePalette::default());
+    let reset = render_frame(&mut scene, 50, 15, Duration::from_secs_f64(20.0));
+    assert_eq!(plain.cell_colors, reset.cell_colors);
+    assert!(scene.follows_palette());
 }

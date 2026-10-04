@@ -380,12 +380,14 @@ fn house<S>(
         )?;
     }
     stair(w, [door, -1, 0], pal, "south")?;
+    w.air([door, -1, 1]);
+    w.air([door, -1, 2]);
     w.ports.push(Port {
         position: [door, -1, 0],
         front: [0, -1],
         role: PortRole::Entrance,
     });
-    for y in 1..length - 1 {
+    for y in -1..length - 1 {
         w.walkable.push([door, y, 0]);
     }
     for x in -1..=width {
@@ -1191,3 +1193,7 @@ mod guardian_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "village_kit_layout_tests.rs"]
+mod village_layout_tests;

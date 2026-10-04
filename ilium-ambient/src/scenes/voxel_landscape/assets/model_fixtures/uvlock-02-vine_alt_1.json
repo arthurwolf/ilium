@@ -1,0 +1,45 @@
+{
+	"credit": "Made with Blockbench",
+	"ambientocclusion": false,
+	"textures": {
+		"particle": "block/vine",
+		"vine": "block/vine",
+		"leaves": "block/vine_leaves"
+	},
+	"elements": [
+		{
+			"from": [0, 0, 0.8],
+			"to": [16, 16, 0.8],
+			"shade": false,
+			"shade_direction_override": "up",
+			"faces": {
+				"north": {"uv": [16, 0, 0, 16], "texture": "#vine", "tintindex": 0},
+				"south": {"uv": [0, 0, 16, 16], "texture": "#vine", "tintindex": 0}
+			}
+		},
+		{
+			"name": "leaf2",
+			"from": [0, 5, 0.8],
+			"to": [3, 10, 0.8],
+			"shade": false,
+			"shade_direction_override": "up",
+			"rotation": {"angle": -22.5, "axis": "x", "origin": [2, 10, 0.8]},
+			"faces": {
+				"north": {"uv": [3, 5, 0, 10], "texture": "#leaves", "tintindex": 0},
+				"south": {"uv": [0, 5, 3, 10], "texture": "#leaves", "tintindex": 0}
+			}
+		},
+		{
+			"name": "leaf3",
+			"from": [13, 9, 0.8],
+			"to": [16, 14, 0.8],
+			"shade": false,
+			"shade_direction_override": "up",
+			"rotation": {"angle": -22.5, "axis": "x", "origin": [15, 14, 0.8]},
+			"faces": {
+				"north": {"uv": [16, 2, 13, 7], "texture": "#leaves", "tintindex": 0},
+				"south": {"uv": [13, 2, 16, 7], "texture": "#leaves", "tintindex": 0}
+			}
+		}
+	]
+}

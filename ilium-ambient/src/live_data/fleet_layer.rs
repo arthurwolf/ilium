@@ -211,6 +211,7 @@ fn compatible(old: MarkerKey, new: MarkerKey) -> bool {
         && old.dot_height == new.dot_height
         && old.cell_width == new.cell_width
         && old.cell_height == new.cell_height
+        && old.show_heading == new.show_heading
         && old.marker_brightness == new.marker_brightness // Data generations may differ while preparation is pending.
 } // End block.
 #[cfg(test)] // Pure generation tests plus the real worker tests in maps/map_markers.
@@ -233,6 +234,7 @@ mod tests {
             cell_width: 80,
             cell_height: 24,
             marker_brightness: 90,
+            show_heading: true,
         }
     } // Normal viewport contract.
     #[test] // New receipt/data must not relabel old geometry as already drawn.
@@ -291,6 +293,7 @@ mod tests {
             },
             MarkerKey {
                 marker_brightness: 0,
+                show_heading: true,
                 ..original
             },
             MarkerKey {
@@ -305,6 +308,7 @@ mod tests {
         layer.update(
             MarkerKey {
                 marker_brightness: 0,
+                show_heading: true,
                 ..original
             },
             Duration::ZERO,

@@ -10,10 +10,10 @@
 //! `render` keeps drawing the previous world until the next one is ready, then
 //! dissolves to it.
 
-mod data;
+pub(crate) mod data;
 mod palette;
 mod projection;
-mod settings;
+pub(crate) mod settings;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +23,7 @@ use crate::control::SceneSettings;
 use crate::registry::AmbientSettings;
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
+use crate::style::ScenePalette;
 use data::Heightfield;
 use projection::Camera;
 use settings::{BelowStyle, PaletteChoice, PanStyle, Projection, WorldId};
@@ -59,6 +60,7 @@ pub struct TopographicMapsScene {
     levels: Vec<i32>,
     from_previous: Vec<bool>,
     last_zero_m: f32,
+    palette: ScenePalette,
 }
 
 /// 1, 2, 2.5 and 5 times a power of ten: the steps of a survey map.
@@ -92,7 +94,14 @@ fn dot_hash(x: usize, y: usize) -> f32 {
 }
 
 impl TopographicMapsScene {
-    pub fn new(settings: &TopographicMapsSettings, _env: &SceneEnv) -> Self {
+    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // palette. When animations become plugins, the plugin constructor receives the
+    // current palette and MUST follow it: scenes with natural colours shift them
+    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // changes. This scene follows it natively: its elevation tints are
+    // recoloured by brightness (`follows_palette`), so `PaletteScene` skips its
+    // generic remap.
+    pub fn new(settings: &TopographicMapsSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         Self {
             worlds: settings.body.worlds(),
@@ -105,6 +114,7 @@ impl TopographicMapsScene {
             levels: Vec::new(),
             from_previous: Vec::new(),
             last_zero_m: 0.0,
+            palette: env.palette.clone(),
         }
     }
 
@@ -368,7 +378,9 @@ impl TopographicMapsScene {
     fn paint_cells(&self, frame: &mut Frame<'_>) {
         let (columns, rows) = (usize::from(frame.width), usize::from(frame.height));
         frame.cell_colors.clear();
-        frame.cell_colors.resize(columns * rows, [70, 76, 90]);
+        frame
+            .cell_colors
+            .resize(columns * rows, self.palette.recolor([70, 76, 90]));
         let (Some(current), width) = (&self.current, frame.raster.width) else {
             return;
         };
@@ -385,13 +397,13 @@ impl TopographicMapsScene {
                     (Some((old, _)), Some(true)) => old,
                     _ => current,
                 };
-                frame.cell_colors[row * columns + column] = palette::tint(
+                frame.cell_colors[row * columns + column] = self.palette.recolor(palette::tint(
                     self.settings.palette,
                     loaded.id,
                     elevation - self.last_zero_m,
                     loaded.field.min_m,
                     loaded.field.max_m,
-                );
+                ));
             }
         }
     }
@@ -420,6 +432,15 @@ impl Scene for TopographicMapsScene {
 
     fn uses_cell_colors(&self) -> bool {
         self.settings.palette != PaletteChoice::Global
+    }
+
+    fn set_palette(&mut self, palette: &ScenePalette) {
+        // Tints are computed per frame, so nothing is cached.
+        self.palette = palette.clone();
+    }
+
+    fn follows_palette(&self) -> bool {
+        true
     }
 
     fn frames_per_second(&self) -> u32 {

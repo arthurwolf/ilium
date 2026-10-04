@@ -1006,3 +1006,87 @@ fn constructed_scan_is_bounded_and_transactional() {
         Err(Error::Surface(surface::Error::Cancelled))
     ));
 }
+
+fn roof_fixture_with_axis(detached: bool, axis: &str) -> Vec<chunk::DecodedChunk> {
+    let mut states = palette();
+    states.push(state("minecraft:spruce_log", &[("axis", axis)]));
+    let roof_state = states.len() - 1;
+    vec![decoded(3218, [0, 0], &states, |x, y, z| {
+        if !(3..=7).contains(&x) || !(3..=7).contains(&z) {
+            return 0;
+        }
+        let roof_y = if detached { 90 } else { 86 - (x - 5).abs() };
+        if y == roof_y {
+            return roof_state;
+        }
+        if y == 80 {
+            return 32;
+        }
+        if y == 81 && (x, z) == (4, 5) {
+            return 37;
+        }
+        if y == 81 && (x, z) == (5, 5) {
+            return 38;
+        }
+        let original_roof_y = 86 - (x - 5).abs();
+        if (x == 3 || x == 7 || z == 3 || z == 7) && (81..original_roof_y).contains(&y) {
+            return 14;
+        }
+        0
+    })]
+}
+fn roof_fixture(detached: bool) -> Vec<chunk::DecodedChunk> {
+    roof_fixture_with_axis(detached, "z")
+}
+#[test]
+fn attached_horizontal_roof_ridge_is_inside_classified_dwelling_bounds() {
+    let chunks = roof_fixture(false);
+    let report = survey(&chunks, bounds([0, 0]));
+    let target = report
+        .targets
+        .iter()
+        .find(|t| t.key.category == Category::DwellingLikeConstruction)
+        .unwrap();
+    assert_eq!(target.key.anchor, [4, 81, 5]);
+    assert_eq!(target.support.columns, 25);
+    assert_eq!(
+        target.support.maximum[1], 86,
+        "Connected native timber ridge must belong to the displayed construction bounds"
+    );
+}
+#[test]
+fn disconnected_horizontal_logs_do_not_expand_dwelling_bounds() {
+    let chunks = roof_fixture(true);
+    let report = survey(&chunks, bounds([0, 0]));
+    let target = report
+        .targets
+        .iter()
+        .find(|t| t.key.category == Category::DwellingLikeConstruction)
+        .unwrap();
+    assert_eq!(target.key.anchor, [4, 81, 5]);
+    assert_eq!(target.support.columns, 25);
+    assert_eq!(target.support.maximum[1], 85);
+}
+
+#[test]
+fn vertical_timber_does_not_expand_dwelling_bounds() {
+    let chunks = roof_fixture_with_axis(false, "y");
+    let report = survey(&chunks, bounds([0, 0]));
+    let target = report
+        .targets
+        .iter()
+        .find(|target| target.key.category == Category::DwellingLikeConstruction)
+        .unwrap();
+    assert_eq!(target.support.maximum[1], 85);
+}
+#[test]
+fn malformed_timber_does_not_expand_dwelling_bounds() {
+    let chunks = roof_fixture_with_axis(false, "diagonal");
+    let report = survey(&chunks, bounds([0, 0]));
+    let target = report
+        .targets
+        .iter()
+        .find(|target| target.key.category == Category::DwellingLikeConstruction)
+        .unwrap();
+    assert_eq!(target.support.maximum[1], 85);
+}

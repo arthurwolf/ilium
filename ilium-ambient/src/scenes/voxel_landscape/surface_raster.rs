@@ -86,6 +86,8 @@ pub struct RasterFrame {
     opaque: Vec<Option<Fragment>>,
     blends: Vec<Option<Fragment>>,
     counts: Vec<u8>,
+    submitted_quads: usize,
+    projected_attempts: usize,
     triangles: usize,
     sample_tests: u64,
     valid: bool,
@@ -131,6 +133,8 @@ impl RasterFrame {
             opaque: empty(pixels, None)?,
             blends: empty(blend_count, None)?,
             counts: empty(pixels, 0)?,
+            submitted_quads: 0,
+            projected_attempts: 0,
             triangles: 0,
             sample_tests: 0,
             valid: true,
@@ -150,10 +154,21 @@ impl RasterFrame {
     pub fn sample_tests(&self) -> u64 {
         self.sample_tests
     }
+    pub fn projected_attempts(&self) -> usize {
+        self.projected_attempts
+    }
+    pub fn submitted_quads(&self) -> usize {
+        self.submitted_quads
+    }
+    pub fn visible_triangles(&self) -> usize {
+        self.triangles
+    }
     pub fn clear(&mut self) {
         self.opaque.fill(None);
         self.blends.fill(None);
         self.counts.fill(0);
+        self.submitted_quads = 0;
+        self.projected_attempts = 0;
         self.triangles = 0;
         self.sample_tests = 0;
         self.valid = true;
@@ -166,6 +181,62 @@ impl RasterFrame {
         shader: &impl FragmentShader,
         cancel: Cancel<'_>,
     ) -> Result<()> {
+        if !self.valid {
+            return Err(metadata::invalid(
+                "candidate raster is invalid; clear before reuse",
+            ));
+        }
+        let result = self.quad_inner(vertices, owner, mode, shader, cancel);
+        if result.is_err() {
+            self.valid = false;
+        }
+        result
+    }
+    fn quad_inner(
+        &mut self,
+        vertices: [Vertex; 4],
+        owner: FaceOwner,
+        mode: AlphaMode,
+        shader: &impl FragmentShader,
+        cancel: Cancel<'_>,
+    ) -> Result<()> {
+        cancel.check()?;
+        // Every submitted face is finite work, even if its projected extent is
+        // wholly outside this frame. Culling before the two raster triangles
+        // prevents distant source-height sweeps from exhausting the smaller
+        // on-screen projection budget without losing any covered sample.
+        const MAX_SUBMITTED_QUADS: usize = 16_000_000;
+        self.submitted_quads = self
+            .submitted_quads
+            .checked_add(1)
+            .ok_or(AssetError::Allocation)?;
+        if self.submitted_quads > MAX_SUBMITTED_QUADS {
+            return Err(AssetError::Limit {
+                resource: "raster submitted quads",
+                requested: self.submitted_quads as u64,
+                limit: MAX_SUBMITTED_QUADS as u64,
+            });
+        }
+        if vertices.iter().any(|v| {
+            !v.x.is_finite()
+                || !v.y.is_finite()
+                || !v.depth.is_finite()
+                || v.x.abs() > 1e9
+                || v.y.abs() > 1e9
+                || v.depth.abs() > 1e10
+                || v.uv.iter().any(|c| !c.is_finite())
+        }) {
+            return Err(metadata::invalid("nonfinite/out-of-budget raster vertex"));
+        }
+        let width = self.width as f64;
+        let height = self.height as f64;
+        if vertices.iter().all(|v| v.x <= 0.0)
+            || vertices.iter().all(|v| v.x >= width)
+            || vertices.iter().all(|v| v.y <= 0.0)
+            || vertices.iter().all(|v| v.y >= height)
+        {
+            return Ok(());
+        }
         self.triangle(
             [vertices[0], vertices[1], vertices[2]],
             owner,
@@ -209,12 +280,15 @@ impl RasterFrame {
         cancel: Cancel<'_>,
     ) -> Result<()> {
         cancel.check()?;
-        self.triangles += 1;
-        if self.triangles > self.limits.triangles {
+        // Off-screen faces still consume bounded projection work, but cannot
+        // consume the on-screen triangle/sample admission budget.
+        self.projected_attempts += 1;
+        const MAX_PROJECTED_ATTEMPTS: usize = 16_000_000;
+        if self.projected_attempts > MAX_PROJECTED_ATTEMPTS {
             return Err(AssetError::Limit {
-                resource: "raster triangles",
-                requested: self.triangles as u64,
-                limit: self.limits.triangles as u64,
+                resource: "raster projected attempts",
+                requested: self.projected_attempts as u64,
+                limit: MAX_PROJECTED_ATTEMPTS as u64,
             });
         }
         if vertices.iter().any(|v| {
@@ -262,6 +336,9 @@ impl RasterFrame {
         let bottom = (points.iter().map(|p| p[1]).max().unwrap_or(0) + 255)
             .div_euclid(256)
             .clamp(0, self.height as i64) as usize;
+        if left == right || top == bottom {
+            return Ok(());
+        }
         let tests = right.saturating_sub(left) as u64 * bottom.saturating_sub(top) as u64;
         self.sample_tests = self
             .sample_tests
@@ -279,6 +356,7 @@ impl RasterFrame {
             top_left(points[2], points[0]),
             top_left(points[0], points[1]),
         ];
+        let mut counted_visible_triangle = false;
         for y in top..bottom {
             cancel.check()?;
             for x in left..right {
@@ -303,7 +381,7 @@ impl RasterFrame {
                     continue;
                 }
                 match mode {
-                    AlphaMode::Opaque => {
+                    AlphaMode::Opaque | AlphaMode::NativeSolid => {
                         if color.alpha() != 1.0 {
                             return Err(metadata::invalid(
                                 "opaque shader produced translucent color",
@@ -320,7 +398,33 @@ impl RasterFrame {
                         color = LinearRgba::from_straight(color.straight(), 1.0)
                             .ok_or_else(|| metadata::invalid("invalid cutout sample"))?;
                     }
-                    AlphaMode::Blend => {}
+                    AlphaMode::NativeCutout | AlphaMode::NativeCutoutMipped => {
+                        let threshold = if mode == AlphaMode::NativeCutout {
+                            0.1
+                        } else {
+                            0.5
+                        };
+                        if color.alpha() < threshold {
+                            continue;
+                        }
+                        color = LinearRgba::from_straight(color.straight(), 1.0)
+                            .ok_or_else(|| metadata::invalid("invalid native cutout sample"))?;
+                    }
+                    AlphaMode::Blend | AlphaMode::NativeBlend => {}
+                }
+                // A clipped integer bounding box is only a work estimate.
+                // Charge the visible-triangle budget when a real pixel sample
+                // survives geometric coverage, alpha and cutout admission.
+                if !counted_visible_triangle {
+                    self.triangles += 1;
+                    if self.triangles > self.limits.triangles {
+                        return Err(AssetError::Limit {
+                            resource: "raster triangles",
+                            requested: self.triangles as u64,
+                            limit: self.limits.triangles as u64,
+                        });
+                    }
+                    counted_visible_triangle = true;
                 }
                 let fragment = Fragment {
                     rank: FragmentRank {
@@ -336,7 +440,7 @@ impl RasterFrame {
         Ok(())
     }
     fn insert(&mut self, index: usize, fragment: Fragment, mode: AlphaMode) -> Result<()> {
-        if mode != AlphaMode::Blend {
+        if !matches!(mode, AlphaMode::Blend | AlphaMode::NativeBlend) {
             if let Some(previous) = self.opaque[index] {
                 if previous.rank == fragment.rank && previous.color != fragment.color {
                     return Err(metadata::invalid(
@@ -362,6 +466,14 @@ impl RasterFrame {
                     "conflicting samples share one translucent owner/rank",
                 ));
             }
+            return Ok(());
+        }
+        // Native fluids follow the opaque pass. A known opaque rank only moves
+        // closer until clear(), so a hidden native sample cannot contribute now
+        // or later. Preserve generic Blend's order-independent admission policy.
+        if mode == AlphaMode::NativeBlend
+            && self.opaque[index].is_some_and(|opaque| fragment.rank <= opaque.rank)
+        {
             return Ok(());
         }
         if count >= usize::from(self.limits.layers) {
@@ -486,15 +598,18 @@ struct TextureShader<'a> {
     light: DirectionalLight,
     position: [i32; 3],
     flow: bool,
+    water_time_seconds: f64,
 }
 impl FragmentShader for TextureShader<'_> {
     fn sample(&self, uv: [f32; 2]) -> Result<LinearRgba> {
         // All motion is keyed by frame time and absolute world coordinates.
         // Camera motion has no effect on material phase.
+        let surface_uv = uv;
         let uv = if self.flow {
             let t = self.time.as_secs_f64();
-            let phase = f64::from(self.position[0]) * 0.017 + f64::from(self.position[1]) * 0.031;
-            let ripple = (t * 1.7 + phase).sin() * 0.008;
+            // One translation for all generated cells keeps repeated authored
+            // pixels aligned where adjacent UVs wrap from 1 back to 0.
+            let ripple = (t * 1.7).sin() * 0.008;
             [
                 uv[0] + (t * 0.035 + ripple) as f32,
                 uv[1] + (t * 0.019 - ripple) as f32,
@@ -502,11 +617,25 @@ impl FragmentShader for TextureShader<'_> {
         } else {
             uv
         };
-        let color = self
-            .texture
-            .sample_color(uv, self.time)
-            .ok_or_else(|| metadata::invalid("invalid diffuse sample"))?;
-        let base = color.straight();
+        let (base, alpha) = if matches!(
+            self.quad.material.alpha,
+            AlphaMode::NativeSolid
+                | AlphaMode::NativeCutout
+                | AlphaMode::NativeCutoutMipped
+                | AlphaMode::NativeBlend
+        ) {
+            let raw = self
+                .texture
+                .sample_native_color(uv, self.time)
+                .ok_or_else(|| metadata::invalid("invalid native diffuse sample"))?;
+            ([raw[0], raw[1], raw[2]], raw[3])
+        } else {
+            let color = self
+                .texture
+                .sample_color(uv, self.time)
+                .ok_or_else(|| metadata::invalid("invalid diffuse sample"))?;
+            (color.straight(), color.alpha())
+        };
         let mapped_normal = if let Some(map) = self.normal_map {
             let texel = map
                 .sample_data_nearest(uv, self.time)
@@ -527,6 +656,21 @@ impl FragmentShader for TextureShader<'_> {
             ])?
         } else {
             self.quad.normal
+        };
+        // Generated top-face UVs are local XY in FluidMesh::build. Evaluate
+        // the lighting normal from absolute XY before shifting diffuse UVs:
+        // two adjacent cells then agree at their shared world coordinate.
+        // Native fluid never enters this branch, and source pixels, timeline,
+        // biome tint, PBR channels and diffuse alpha remain the inputs above.
+        let mapped_normal = if self.flow && self.quad.face == 0 && self.quad.shade {
+            let slopes = generated_water_slopes(self.position, surface_uv, self.water_time_seconds);
+            normalize3([
+                mapped_normal[0] - slopes[0],
+                mapped_normal[1] - slopes[1],
+                mapped_normal[2],
+            ])?
+        } else {
+            mapped_normal
         };
         let ao = if let Some(map) = self.normal_map {
             let texel = map
@@ -569,9 +713,29 @@ impl FragmentShader for TextureShader<'_> {
                 }
             }
         }
-        LinearRgba::from_straight(rgb, color.alpha())
+        let output_alpha = if self.quad.material.alpha == AlphaMode::NativeSolid {
+            1.0
+        } else {
+            alpha
+        };
+        LinearRgba::from_straight(rgb, output_alpha)
             .ok_or_else(|| metadata::invalid("invalid material result"))
     }
+}
+/// Original generated-water lighting only. The phase repeats exactly after
+/// 20 seconds (nine and six cycles), so Duration precision cannot freeze it
+/// after long-running sessions. No texture bytes or geometry are synthesized.
+fn generated_water_slopes(position: [i32; 3], uv: [f32; 2], time_seconds: f64) -> [f32; 2] {
+    let x = f64::from(position[0]) + f64::from(uv[0]);
+    let y = f64::from(position[1]) + f64::from(uv[1]);
+    let first = std::f64::consts::TAU * (0.31 * x + 0.17 * y - 0.45 * time_seconds);
+    let second = std::f64::consts::TAU * (-0.13 * x + 0.29 * y - 0.30 * time_seconds);
+    let first_slope = 0.12 * std::f64::consts::TAU * first.cos();
+    let second_slope = 0.065 * std::f64::consts::TAU * second.cos();
+    [
+        (0.31 * first_slope - 0.13 * second_slope) as f32,
+        (0.17 * first_slope + 0.29 * second_slope) as f32,
+    ]
 }
 fn delta(a: [f64; 3], b: [f64; 3]) -> [f32; 3] {
     std::array::from_fn(|i| (a[i] - b[i]) as f32)
@@ -623,6 +787,11 @@ fn resolve_shader<'a>(
         light,
         position,
         flow,
+        water_time_seconds: if flow && quad.face == 0 && quad.shade {
+            (time.as_nanos() % 20_000_000_000) as f64 * 1e-9
+        } else {
+            0.0
+        },
     })
 }
 fn project_quad(
@@ -670,11 +839,41 @@ pub fn draw_mesh(
     }
     result
 }
+/// Append one solid tile to a shared frame without resetting earlier depth,
+/// color, or face-owner contributions. Callers clear once before the first
+/// tile and append all solid tiles before appending their fluid geometry.
+/// Any failed tile invalidates the complete frame; only an explicit clear
+/// starts a new frame after failure.
 #[expect(
     clippy::too_many_arguments,
     reason = "render inputs keep bank, camera, frame time, light and cancellation explicit"
 )]
-fn draw_mesh_inner(
+pub fn draw_mesh_layer(
+    mesh: &PreparedMesh,
+    bank: &TextureBank,
+    camera: [f64; 3],
+    scale: f64,
+    time: Duration,
+    light: DirectionalLight,
+    output: &mut RasterFrame,
+    cancel: Cancel<'_>,
+) -> Result<()> {
+    if !output.is_valid() {
+        return Err(metadata::invalid(
+            "cannot append mesh to an invalid raster frame",
+        ));
+    }
+    let result = draw_mesh_inner(mesh, bank, camera, scale, time, light, output, cancel);
+    if result.is_err() {
+        output.valid = false;
+    }
+    result
+}
+#[expect(
+    clippy::too_many_arguments,
+    reason = "render inputs keep bank, camera, frame time, light and cancellation explicit"
+)]
+pub(super) fn draw_mesh_inner(
     mesh: &PreparedMesh,
     bank: &TextureBank,
     camera: [f64; 3],
@@ -751,9 +950,22 @@ pub fn draw_fluid_mesh(
         }
         for face in &mesh.faces {
             cancel.check()?;
-            let shader = resolve_shader(bank, &face.quad, time, light, face.position, true)?;
+            let native = matches!(
+                face.quad.material.alpha,
+                AlphaMode::NativeSolid
+                    | AlphaMode::NativeCutout
+                    | AlphaMode::NativeCutoutMipped
+                    | AlphaMode::NativeBlend
+            );
+            let shader = resolve_shader(bank, &face.quad, time, light, face.position, !native)?;
             let vertices = project_quad(face.position, &face.quad, camera, scale, output.size());
-            output.quad(vertices, face.owner, AlphaMode::Blend, &shader, cancel)?;
+            output.quad(
+                vertices,
+                face.owner,
+                face.quad.material.alpha,
+                &shader,
+                cancel,
+            )?;
         }
         Ok(())
     })();
@@ -770,4 +982,27 @@ pub fn linear_to_srgb_byte(value: f32) -> u8 {
         1.055 * value.powf(1.0 / 2.4) - 0.055
     };
     (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+#[cfg(test)]
+mod generated_water_tests {
+    use super::generated_water_slopes;
+
+    #[test]
+    fn generated_water_phase_joins_signed_world_cells_without_a_tile_origin() {
+        for x in [-1_000_000_000, -3, 0, 1_000_000_000] {
+            for time in [0.0, 0.4, 7.25, 19.9] {
+                let east = generated_water_slopes([x, -17, 2], [1.0, 0.375], time);
+                let west = generated_water_slopes([x + 1, -17, 2], [0.0, 0.375], time);
+                assert_eq!(east, west);
+                let north = generated_water_slopes([x, -17, 2], [0.625, 1.0], time);
+                let south = generated_water_slopes([x, -16, 2], [0.625, 0.0], time);
+                assert_eq!(north, south);
+            }
+        }
+        assert_ne!(
+            generated_water_slopes([-3, -17, 2], [0.375, 0.625], 0.0),
+            generated_water_slopes([-3, -17, 2], [0.375, 0.625], 0.4)
+        );
+    }
 }

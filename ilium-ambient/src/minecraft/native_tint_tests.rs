@@ -397,3 +397,112 @@ fn native_chunk_access_clamps_selected_vertical_quart_before_palette_lookup() {
     assert_eq!(lookup_quart([3, 79, -2]), [3, 79, -2]);
     assert_eq!(lookup_quart([3, 80, -2]), [3, 79, -2]);
 }
+
+#[test]
+fn officially_renamed_snapshot_biomes_keep_stored_identity_and_native_climate() {
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let account = ByteBudget::new(8 << 20).unwrap();
+    let provider = tint(&account, cancel);
+    for (stored, destination) in [
+        (
+            "minecraft:tall_birch_forest",
+            "minecraft:old_growth_birch_forest",
+        ),
+        ("minecraft:snowy_tundra", "minecraft:snowy_plains"),
+        (
+            "minecraft:giant_tree_taiga",
+            "minecraft:old_growth_pine_taiga",
+        ),
+        (
+            "minecraft:giant_spruce_taiga",
+            "minecraft:old_growth_spruce_taiga",
+        ),
+    ] {
+        for version in [2834, 2836] {
+            let original = map(version, Some(stored), false);
+            let modern = map(3218, Some(destination), false);
+            for kind in [ColorKind::Grass, ColorKind::Foliage, ColorKind::Water] {
+                let expected = provider
+                    .sample_kind(&modern, request(&modern, kind), cancel)
+                    .unwrap();
+                let mut older = request(&original, kind);
+                assert!(
+                    matches!(provider.sample_kind(&original, older, cancel), Err(Error::EarlierClimateNotVerified(v)) if v==version)
+                );
+                older.climate_policy = ClimatePolicy::RenderEarlierWith1193;
+                let actual = provider.sample_kind(&original, older, cancel).expect("officially renamed snapshot biome must resolve under the explicit modern rendering policy");
+                assert_eq!(actual.biome, stored);
+                assert_eq!(actual.rgb, expected.rgb);
+                assert_eq!(actual.climate_source, expected.climate_source);
+                assert_eq!(actual.climate_sha256, expected.climate_sha256);
+                assert_eq!(
+                    actual.version_relation,
+                    VersionRelation::EarlierSaveWith1193Climate {
+                        saved_data_version: version
+                    }
+                );
+                let native = |source| NativeRequest {
+                    source,
+                    java_position: [-8, 64, -24],
+                    kind,
+                    climate_policy: ClimatePolicy::RenderEarlierWith1193,
+                    world_seed: Some(0),
+                    blend_radius: 2,
+                };
+                let expected_blend = provider
+                    .sample_native(&modern, native(modern.source()), cancel)
+                    .unwrap();
+                let actual_blend = provider
+                    .sample_native(&original, native(original.source()), cancel)
+                    .unwrap();
+                assert_eq!(actual_blend.rgb, expected_blend.rgb);
+                assert_eq!(actual_blend.contributions.len(), 25);
+                assert!(actual_blend
+                    .contributions
+                    .iter()
+                    .all(|part| part.sample.biome == stored
+                        && part.sample.climate_source == expected.climate_source
+                        && part.sample.climate_sha256 == expected.climate_sha256));
+            }
+        }
+        let invalid_modern = map(3218, Some(stored), false);
+        assert!(matches!(
+            provider.sample_kind(
+                &invalid_modern,
+                request(&invalid_modern, ColorKind::Water),
+                cancel
+            ),
+            Err(Error::UnknownBiome)
+        ));
+    }
+}
+
+#[test]
+fn official_biome_render_conversion_is_version_qualified_and_leaves_unknown_names_exact() {
+    for version in [2834, 2836, 2837] {
+        let relation = ClimatePolicy::RenderEarlierWith1193
+            .relation(version)
+            .unwrap();
+        assert_eq!(
+            render_climate_identity("minecraft:tall_birch_forest", relation),
+            "minecraft:old_growth_birch_forest"
+        );
+        for name in [
+            "mod:tall_birch_forest",
+            "minecraft:unknown",
+            "minecraft:plains",
+        ] {
+            assert_eq!(render_climate_identity(name, relation), name);
+        }
+    }
+    for version in [2838, 2839, 3218] {
+        let relation = ClimatePolicy::RenderEarlierWith1193
+            .relation(version)
+            .unwrap();
+        assert_eq!(
+            render_climate_identity("minecraft:tall_birch_forest", relation),
+            "minecraft:tall_birch_forest"
+        );
+    }
+}

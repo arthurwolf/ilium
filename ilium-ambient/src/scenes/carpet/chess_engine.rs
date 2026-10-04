@@ -381,9 +381,9 @@ impl Position {
         budget: &mut usize,
         mut alpha: i32,
         beta: i32,
-        stop: Option<&std::sync::atomic::AtomicBool>,
+        stop: &dyn Fn() -> bool,
     ) -> i32 {
-        if *budget == 0 || stop.is_some_and(|s| s.load(std::sync::atomic::Ordering::Relaxed)) {
+        if *budget == 0 || stop() {
             return self.value();
         }
         *budget -= 1;
@@ -409,7 +409,7 @@ impl Position {
             let score = -self.play(m).search(depth - 1, budget, -beta, -alpha, stop);
             best = best.max(score);
             alpha = alpha.max(score);
-            if alpha >= beta || *budget == 0 {
+            if alpha >= beta || *budget == 0 || stop() {
                 break;
             }
         }
@@ -419,6 +419,7 @@ impl Position {
     pub fn choose_move(&self, depth: u8, node_budget: usize, seed: u64) -> Option<Move> {
         self.choose_move_cancellable(depth, node_budget, seed, None)
     }
+    #[cfg(test)]
     pub fn choose_move_cancellable(
         &self,
         depth: u8,
@@ -426,7 +427,18 @@ impl Position {
         seed: u64,
         stop: Option<&std::sync::atomic::AtomicBool>,
     ) -> Option<Move> {
-        if stop.is_some_and(|s| s.load(std::sync::atomic::Ordering::Relaxed)) {
+        self.choose_move_with_stop(depth, node_budget, seed, &|| {
+            stop.is_some_and(|s| s.load(std::sync::atomic::Ordering::Relaxed))
+        })
+    }
+    pub fn choose_move_with_stop(
+        &self,
+        depth: u8,
+        node_budget: usize,
+        seed: u64,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<Move> {
+        if stop() {
             return None;
         }
         let mut moves = self.legal_moves();
@@ -447,7 +459,7 @@ impl Position {
                 best_score = score;
                 best = Some(m);
             }
-            if budget == 0 || stop.is_some_and(|s| s.load(std::sync::atomic::Ordering::Relaxed)) {
+            if budget == 0 || stop() {
                 break;
             }
         }
@@ -515,5 +527,28 @@ mod additional_tests {
             promotion: None,
         });
         assert_eq!(captured.rights & 8, 0);
+    }
+}
+
+#[cfg(test)]
+mod callback_cancellation_tests {
+    use super::*;
+    #[test]
+    fn callback_cancellation_is_observed_inside_recursive_search_nodes() {
+        let calls = std::cell::Cell::new(0usize);
+        let stop = || {
+            let next = calls.get() + 1;
+            calls.set(next);
+            next >= 8
+        };
+        let _ = Position::new().choose_move_with_stop(3, 8192, 7, &stop);
+        assert!(
+            calls.get() >= 8,
+            "cancellation must be checked within search, not just at submission"
+        );
+        assert!(
+            calls.get() < 32,
+            "search must stop promptly after its finite internal cancellation check"
+        );
     }
 }

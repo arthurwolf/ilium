@@ -8,10 +8,10 @@ const OWNERS: usize = 12; // The existing settings/simulation limit.
 const NEUTRAL: usize = OWNERS;
 const CHANNELS: usize = OWNERS + 1;
 const STEP: f32 = 2.0 / (SIDE - 1) as f32;
-const RADIUS: f32 = 0.18;
+const BASE_RADIUS: f32 = 0.18;
 const CORE: f32 = 0.025;
 const LOW: f32 = 0.025;
-const HIGH: f32 = 0.16;
+const BASE_HIGH: f32 = 0.16;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Sample {
@@ -26,6 +26,8 @@ pub(super) struct Territory {
     owners: Vec<Option<usize>>,
     stencils: Vec<Vec<(u32, f32)>>,
     fields: Vec<[f32; CHANNELS]>,
+    radius_percent: i32,
+    softness_percent: i32,
 }
 
 fn channel(owner: Option<usize>) -> usize {
@@ -36,7 +38,10 @@ fn channel(owner: Option<usize>) -> usize {
 }
 
 impl Territory {
-    pub fn new(stars: &[Star]) -> Self {
+    pub fn new(stars: &[Star], radius_percent: i32, softness_percent: i32) -> Self {
+        let radius_percent = radius_percent.clamp(50, 150);
+        let softness_percent = softness_percent.clamp(50, 200);
+        let radius = BASE_RADIUS * radius_percent as f32 / 100.0;
         let stencils = stars
             .iter()
             .map(|star| {
@@ -44,18 +49,18 @@ impl Territory {
                 // Galaxy's bounded seeded generator always emits finite points.
                 assert!(sx.is_finite() && sy.is_finite());
                 let bound = |value: f32| value.clamp(0.0, (SIDE - 1) as f32) as usize;
-                let left = bound(((sx - RADIUS + 1.0) / STEP).floor());
-                let right = bound(((sx + RADIUS + 1.0) / STEP).ceil());
-                let top = bound(((sy - RADIUS + 1.0) / STEP).floor());
-                let bottom = bound(((sy + RADIUS + 1.0) / STEP).ceil());
+                let left = bound(((sx - radius + 1.0) / STEP).floor());
+                let right = bound(((sx + radius + 1.0) / STEP).ceil());
+                let top = bound(((sy - radius + 1.0) / STEP).floor());
+                let bottom = bound(((sy + radius + 1.0) / STEP).ceil());
                 let mut stencil = Vec::new();
                 for y in top..=bottom {
                     for x in left..=right {
                         let dx = -1.0 + x as f32 * STEP - sx;
                         let dy = -1.0 + y as f32 * STEP - sy;
                         let d2 = dx * dx + dy * dy;
-                        if d2 < RADIUS * RADIUS {
-                            let q = 1.0 - d2 / (RADIUS * RADIUS);
+                        if d2 < radius * radius {
+                            let q = 1.0 - d2 / (radius * radius);
                             // C2 at support; a strong core protects small colonies.
                             let weight = q * q * q * CORE * CORE / (d2 + CORE * CORE);
                             stencil.push(((y * SIDE + x) as u32, weight));
@@ -70,9 +75,15 @@ impl Territory {
             owners: stars.iter().map(|star| star.owner).collect(),
             stencils,
             fields: vec![[0.0; CHANNELS]; SIDE * SIDE],
+            radius_percent,
+            softness_percent,
         };
         result.rebuild(&[true; CHANNELS]);
         result
+    }
+
+    pub fn set_softness(&mut self, softness_percent: i32) {
+        self.softness_percent = softness_percent.clamp(50, 200);
     }
 
     fn rebuild(&mut self, dirty: &[bool; CHANNELS]) {
@@ -103,7 +114,7 @@ impl Territory {
                 .zip(&self.positions)
                 .any(|(star, &p)| star.position != p)
         {
-            *self = Self::new(stars);
+            *self = Self::new(stars, self.radius_percent, self.softness_percent);
             return true;
         }
         let mut dirty = [false; CHANNELS];
@@ -152,10 +163,11 @@ impl Territory {
             }
         }
         let best = values[owner];
+        let high = LOW + (BASE_HIGH - LOW) * self.softness_percent as f32 / 100.0;
         if owner == NEUTRAL || best <= LOW {
             return None;
         }
-        let coverage = smoothstep(LOW, HIGH, best)
+        let coverage = smoothstep(LOW, high, best)
             * smoothstep(0.0, 0.2, (best - values[NEUTRAL]) / best)
             * smoothstep(0.0, 0.03, 1.0 - r2.sqrt());
         let mut rival = None;
@@ -173,7 +185,7 @@ impl Territory {
             contact: rival.map(|other| {
                 (
                     other,
-                    smoothstep(LOW, HIGH, second)
+                    smoothstep(LOW, high, second)
                         * (1.0 - smoothstep(0.0, 0.24, (best - second) / best)),
                 )
             }),

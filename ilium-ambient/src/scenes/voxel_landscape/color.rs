@@ -2,7 +2,7 @@
 //! Coverage controls Braille shape; adjust() controls foreground RGB.
 //! Neither stage reads or compensates for the host's density/dither settings.
 use super::settings::VoxelLandscapeSettings;
-use crate::scene::Frame;
+use crate::{scene::Frame, style::ScenePalette};
 
 fn luminance(raw: [f32; 3]) -> f32 {
     raw[0] * 0.2126 + raw[1] * 0.7152 + raw[2] * 0.0722
@@ -33,18 +33,27 @@ fn dot_coverage(value: f32) -> f32 {
 }
 
 pub fn composite(colors: &[[u8; 3]], frame: &mut Frame<'_>, settings: &VoxelLandscapeSettings) {
-    composite_pixels(colors, None, frame, settings, true);
+    composite_pixels(
+        colors,
+        None,
+        frame,
+        settings,
+        true,
+        &ScenePalette::default(),
+    );
 }
 
-/// Selected artwork retains its original RGB. Coverage comes from raster
+/// Selected artwork retains its original RGB (unless `palette` is provided,
+/// which recolours it by brightness). Coverage comes from raster
 /// alpha rather than treating an opaque black texel as an uncovered pixel.
 pub fn composite_selected(
     colors: &[[u8; 3]],
     covered: &[bool],
     frame: &mut Frame<'_>,
     settings: &VoxelLandscapeSettings,
+    palette: &ScenePalette,
 ) {
-    composite_pixels(colors, Some(covered), frame, settings, false);
+    composite_pixels(colors, Some(covered), frame, settings, false, palette);
 }
 
 fn composite_pixels(
@@ -53,6 +62,7 @@ fn composite_pixels(
     frame: &mut Frame<'_>,
     settings: &VoxelLandscapeSettings,
     pastel: bool,
+    palette: &ScenePalette,
 ) {
     let width = usize::from(frame.width);
     let height = usize::from(frame.height);
@@ -87,6 +97,14 @@ fn composite_pixels(
             adjust(raw, settings)
         } else {
             adjust_channels(raw, settings, false)
+        };
+        // Follow the shared palette at the source: each pixel's adjusted colour
+        // moves to the palette colour of equal brightness before cell averaging.
+        let adjusted = if palette.is_provided() {
+            let bytes = adjusted.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+            palette.recolor(bytes).map(|value| f32::from(value) / 255.0)
+        } else {
+            adjusted
         };
         // Keep expected-coverage weighting within the existing 2x4 cell.
         // Darker surfaces now contribute in proportion to their new coverage.
@@ -170,6 +188,42 @@ mod tests {
     }
 
     #[test]
+    fn selected_palette_recolours_cells_and_none_is_unchanged() {
+        let compose_with = |palette: &ScenePalette| {
+            let mut raster = Raster::default();
+            raster.resize(2, 4);
+            let mut cell_colors = vec![[255; 3]];
+            let mut frame = Frame {
+                raster: &mut raster,
+                cell_colors: &mut cell_colors,
+                width: 1,
+                height: 1,
+                time: Duration::ZERO,
+                wall: Duration::ZERO,
+                now: SystemTime::UNIX_EPOCH,
+            };
+            composite_selected(
+                &[[200, 40, 20]; 8],
+                &[true; 8],
+                &mut frame,
+                &VoxelLandscapeSettings::default(),
+                palette,
+            );
+            cell_colors[0]
+        };
+        let none = compose_with(&ScenePalette::default());
+        assert!((199..=200).contains(&none[0]));
+        let provided = ScenePalette {
+            stops: vec![[0, 0, 40], [0, 255, 255]],
+            reverse: false,
+            shift_percent: 0,
+        };
+        let changed = compose_with(&provided);
+        assert_ne!(changed, none);
+        assert!(changed[0] < 20 && changed[2] > 40);
+    }
+
+    #[test]
     fn selected_alpha_mask_prevents_stale_or_transparent_texel_colors() {
         let mut raster = Raster::default();
         raster.resize(2, 4);
@@ -188,6 +242,7 @@ mod tests {
             &[false; 8],
             &mut frame,
             &VoxelLandscapeSettings::default(),
+            &ScenePalette::default(),
         );
         assert_eq!(frame.cell_colors.as_slice(), &[[0; 3]]);
         assert!(frame.raster.dots.iter().all(|&value| value == 0.));
@@ -196,6 +251,7 @@ mod tests {
             &[true; 8],
             &mut frame,
             &VoxelLandscapeSettings::default(),
+            &ScenePalette::default(),
         );
         assert!((199..=200).contains(&frame.cell_colors[0][0]));
         assert!((39..=40).contains(&frame.cell_colors[0][1]));

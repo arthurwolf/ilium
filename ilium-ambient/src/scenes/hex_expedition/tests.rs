@@ -13,7 +13,10 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 fn scene_with(settings: &HexExpeditionSettings) -> HexExpeditionScene {
-    HexExpeditionScene::new(settings, &SceneEnv::for_test(std::env::temp_dir()))
+    HexExpeditionScene::new(
+        settings,
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
+    )
 }
 
 fn frame_at(settings: &HexExpeditionSettings, cols: u16, rows: u16, seconds: f64) -> Rendered {
@@ -1323,7 +1326,7 @@ fn the_scene_is_registered_with_the_client_facing_catalog() {
     );
     let mut scene = edited.create_scene(
         AmbientKind::HexExpedition,
-        &SceneEnv::for_test(std::env::temp_dir()),
+        &SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources()),
     );
     let rendered = render_frame(scene.as_mut(), 40, 12, Duration::from_secs(1));
     assert!(lit(&rendered) > 0);
@@ -1586,4 +1589,26 @@ fn the_demo_credits_curious_expedition_with_its_steam_page() {
         ["https://store.steampowered.com/app/358130/The_Curious_Expedition/"]
     );
     assert_eq!(AmbientKind::HexExpedition.inspired_by(), INSPIRED_BY);
+}
+
+#[test]
+fn provided_palette_changes_cell_colors_and_none_keeps_them() {
+    let settings = HexExpeditionSettings::default();
+    let render = |scene: &mut HexExpeditionScene| {
+        crate::debug::render_frame(scene, 40, 16, std::time::Duration::from_secs(3))
+    };
+    let mut plain_scene = scene_with(&settings);
+    let plain = render(&mut plain_scene);
+    let mut env = SceneEnv::for_test(std::env::temp_dir(), crate::resources::test_resources());
+    env.palette = crate::style::ScenePalette {
+        stops: vec![[10, 40, 200], [240, 230, 60]],
+        reverse: false,
+        shift_percent: 0,
+    };
+    let mut scene = HexExpeditionScene::new(&settings, &env);
+    let tinted = render(&mut scene);
+    assert_ne!(plain.cell_colors, tinted.cell_colors);
+    scene.set_palette(&crate::style::ScenePalette::default());
+    assert_eq!(plain.cell_colors, render(&mut scene).cell_colors);
+    assert!(scene.follows_palette());
 }
