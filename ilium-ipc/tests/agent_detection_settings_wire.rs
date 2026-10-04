@@ -4,6 +4,7 @@ use ilium_ipc::{AgentDetectionSettings, ClientRequest, CustomAgentSignature, Ser
 #[test]
 fn agent_detection_update_request_round_trips_over_bincode() {
     let request = ClientRequest::UpdateAgentDetectionSettings {
+        request_id: Some(73),
         settings: AgentDetectionSettings {
             working_poll_seconds: 0,
             idle_poll_seconds: 45,
@@ -31,11 +32,23 @@ fn agent_detection_settings_event_round_trips_both_success_and_rejection() {
     };
     let events = [
         ServerEvent::AgentDetectionSettingsChanged {
+            request_id: None,
             result: Ok(settings.clone()),
         },
         ServerEvent::AgentDetectionSettingsChanged {
+            request_id: None,
             result: Err(ilium_ipc::AgentDetectionSettingsError {
                 message: "working poll interval must be at least 500 ms".to_string(),
+            }),
+        },
+        ServerEvent::AgentDetectionSettingsChanged {
+            request_id: Some(73),
+            result: Ok(settings),
+        },
+        ServerEvent::AgentDetectionSettingsChanged {
+            request_id: Some(74),
+            result: Err(ilium_ipc::AgentDetectionSettingsError {
+                message: "synthetic rejection".into(),
             }),
         },
     ];

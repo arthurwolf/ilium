@@ -606,6 +606,7 @@ mod tests {
                 status,
                 50.0,
                 "message".to_string(),
+                String::new(),
                 error,
             )
             .expect("valid report"),

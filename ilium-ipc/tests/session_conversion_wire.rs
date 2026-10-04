@@ -38,6 +38,7 @@ fn new_variants_do_not_shift_the_previous_last_variant() {
     // `UpdateAgentDetectionSettings` was the final request before these
     // variants; appending must leave its encoding (variant index) unchanged.
     let previous = ClientRequest::UpdateAgentDetectionSettings {
+        request_id: None,
         settings: ilium_ipc::AgentDetectionSettings {
             working_poll_seconds: 0,
             idle_poll_seconds: 45,

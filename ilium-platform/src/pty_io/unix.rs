@@ -60,7 +60,8 @@ impl Reader {
     }
 }
 
-pub(super) struct ShellProbe(File);
+#[derive(Clone)]
+pub(super) struct ShellProbe(Arc<File>);
 impl ShellProbe {
     pub(super) fn shell_owns_terminal(&self, process_id: u32) -> Option<bool> {
         // SAFETY: this independently owned descriptor remains live for the call.
@@ -83,7 +84,9 @@ pub(super) fn open(
         )
     })?;
     let (reader, interrupt) = InterruptibleReader::duplicate(fd)?;
-    let probe = ShellProbe(duplicate(fd)?);
+    // The duplicate belongs to the session, while cheap Arc clones let
+    // observational callbacks retain it after a pane registry guard drops.
+    let probe = ShellProbe(Arc::new(duplicate(fd)?));
     let writer = NonblockingWriter::duplicate(fd)?;
     Ok((Reader { reader, interrupt }, Box::new(writer), probe))
 }

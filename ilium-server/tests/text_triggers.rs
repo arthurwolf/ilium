@@ -26,18 +26,32 @@ fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
 
 #[tokio::test]
 async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
+    matched_output_round_trip("text-trigger-terminal", 0).await;
+}
+
+#[tokio::test]
+async fn the_reply_waits_for_the_rules_delay_after_detection() {
+    let waited = matched_output_round_trip("text-trigger-delayed", 3).await;
+    assert!(
+        waited >= Duration::from_millis(2900),
+        "delay of 3 s elapsed only {waited:?} between detection and send"
+    );
+}
+
+/// Returns detection (match visible on screen) to submission time.
+async fn matched_output_round_trip(session: &str, delay_seconds: u32) -> Duration {
     let fixture_dir = tempfile::tempdir().expect("create text-trigger fixture directory");
     let fixture = install(
         fixture_dir.path(),
         "text-trigger-emitter",
         &FixtureBehavior::DelayedComposerThenEcho { delay_seconds: 1 },
     );
-    let mut server = TestServer::start("text-trigger-terminal").await;
+    let mut server = TestServer::start(session).await;
     let mut client = server.connect().await;
     write_frame(
         &mut client,
         &ClientRequest::Attach {
-            session: "text-trigger-terminal".to_owned(),
+            session: session.to_owned(),
         },
     )
     .await
@@ -52,6 +66,7 @@ async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
             message: "continue exactly once".to_owned(),
             target: TextTriggerTarget::Terminals,
             sample_text: "› Explain this codebase".to_owned(),
+            delay_seconds,
         }],
     };
     write_frame(
@@ -89,7 +104,8 @@ async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
     };
     let pane_id = first_launch_project_pane(&tree);
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5 + u64::from(delay_seconds));
+    let mut waited = Duration::ZERO;
     let mut saw_submission = false;
     let mut screen_bytes = Vec::new();
     let mut trigger_displayed_at: Option<tokio::time::Instant> = None;
@@ -112,6 +128,7 @@ async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
                     displayed_at.elapsed() >= Duration::from_millis(200),
                     "Enter must follow the text in a separate, processed input burst"
                 );
+                waited = displayed_at.elapsed();
                 saw_submission = true;
             }
             ServerEvent::ScreenUpdate {
@@ -134,6 +151,7 @@ async fn matched_terminal_output_submits_the_literal_reply_with_enter() {
         .await
         .expect("kill isolated test session");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+    waited
 }
 
 #[tokio::test]
@@ -254,6 +272,7 @@ async fn repainting_one_matching_screen_line_submits_only_once() {
                     message: "reply once".to_owned(),
                     target: TextTriggerTarget::Terminals,
                     sample_text: "Pursuing goal".to_owned(),
+                    delay_seconds: 0,
                 }],
             },
         },
@@ -350,6 +369,7 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
                     message: "reply to each appearance".to_owned(),
                     target: TextTriggerTarget::Terminals,
                     sample_text: "trigger-ready".to_owned(),
+                    delay_seconds: 0,
                 }],
             },
         },

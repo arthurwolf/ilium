@@ -21,6 +21,35 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// The first `max_chars` characters of the platform's lossy path display,
+/// without allocating or decoding its unrequested suffix. This is display
+/// text only; callers must retain the original path for file operations.
+///
+/// Windows decodes UTF-16 directly so each lone surrogate becomes exactly
+/// one replacement character, matching `OsStr::to_string_lossy`. On Unix,
+/// at most four original bytes can contribute to each decoded character;
+/// a borrowed prefix suffices even for invalid UTF-8 and a split final code
+/// point, because that split cannot affect the requested leading characters.
+pub fn bounded_path_display(path: &Path, max_chars: usize) -> String {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        char::decode_utf16(path.as_os_str().encode_wide())
+            .map(|decoded| decoded.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .take(max_chars)
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        let bytes = path.as_os_str().as_encoded_bytes();
+        let end = bytes.len().min(max_chars.saturating_mul(4));
+        String::from_utf8_lossy(&bytes[..end])
+            .chars()
+            .take(max_chars)
+            .collect()
+    }
+}
+
 /// Environment override for the configuration directory.
 ///
 /// Exists because there is no portable way to redirect the platform default.
@@ -288,6 +317,63 @@ mod tests {
         let device = PathBuf::from(r"\\?\C:\project\nul.txt");
 
         assert_eq!(simplify(device.clone()), device);
+    }
+
+    #[test]
+    fn bounded_path_display_matches_unicode_prefix_and_empty_limits() {
+        for value in ["", "plain/path", "/é/日本/🚀/e\u{301}", "🚀🚀🚀🚀🚀🚀"] {
+            let path = Path::new(value);
+            for limit in 0..=32 {
+                let expected: String = path.to_string_lossy().chars().take(limit).collect();
+                let actual = bounded_path_display(path, limit);
+                assert_eq!(actual, expected, "{value:?}, limit {limit}");
+                assert!(actual.chars().count() <= limit);
+                assert!(actual.len() <= limit * 4);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_path_display_preserves_invalid_utf8_replacement_boundaries() {
+        use std::os::unix::ffi::OsStrExt;
+        let samples: &[&[u8]] = &[
+            b"/a/\xff\xfe/b",
+            b"\xf0\x9f\x9a\x80\xf0\x9f\x9a\x80\xff",
+            b"\xe0\xa0\x80\xe0\xa0\xff\xc2\xff",
+            b"\xed\xa0\x80\xed\xb0\x80",
+        ];
+        for bytes in samples {
+            let path = Path::new(std::ffi::OsStr::from_bytes(bytes));
+            for limit in 0..=bytes.len() + 1 {
+                assert_eq!(
+                    bounded_path_display(path, limit),
+                    path.to_string_lossy()
+                        .chars()
+                        .take(limit)
+                        .collect::<String>()
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bounded_path_display_preserves_lone_surrogates_and_surrogate_pairs() {
+        use std::os::windows::ffi::OsStringExt;
+        let spelling = std::ffi::OsString::from_wide(&[
+            0x0043, 0x003a, 0x005c, 0xd800, 0x0061, 0xdc00, 0xd83d, 0xde80, 0xd800, 0xd801, 0xdc00,
+        ]);
+        let path = Path::new(&spelling);
+        for limit in 0..=16 {
+            assert_eq!(
+                bounded_path_display(path, limit),
+                path.to_string_lossy()
+                    .chars()
+                    .take(limit)
+                    .collect::<String>()
+            );
+        }
     }
 
     #[test]

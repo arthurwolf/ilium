@@ -11,16 +11,77 @@ async fn collect_forwarded_until_closed(
     pane_id: NodeId,
     input: PtyInput,
     status: OwnerStatus,
-) -> Vec<ServerEvent> {
+) -> (Vec<ServerEvent>, Vec<u8>) {
     let (status_sender, status_receiver) = tokio::sync::watch::channel(status);
     let (output_sender, output_receiver) = tokio::sync::broadcast::channel(4);
-    let mut events = state.events.subscribe();
-    output_sender
-        .send(ilium_pty::PtyOutputChunk {
+    let native_fixture = {
+        let mut panes = state.panes.write().await;
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if input.same_session(&runtime.session.input_handle()) =>
+            {
+                // This fixture owns its sole diagnostic forwarder. Capture real
+                // journal bytes before announcing the injected terminal status.
+                runtime.abort_background_tasks();
+                Some(runtime.session.subscribe_screen_changed())
+            }
+            _ => None,
+        }
+    };
+    let chunk = if let Some(mut changed) = native_fixture {
+        input
+            .write(b"FINAL-OWNER-BYTES\r")
+            .expect("fixture input accepted")
+            .wait()
+            .await
+            .expect("fixture input delivered");
+        let replay = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let replay = {
+                    let panes = state.panes.read().await;
+                    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                        panic!("fixture terminal removed");
+                    };
+                    runtime.session.output_replay()
+                };
+                if replay
+                    .bytes
+                    .windows(b"FINAL-OWNER-BYTES".len())
+                    .any(|bytes| bytes == b"FINAL-OWNER-BYTES")
+                {
+                    // Keep exact-byte comparison meaningful: both terminal echo
+                    // and the fixture command must settle inside the same 2 s
+                    // setup deadline before the injected fatal status is read.
+                    match tokio::time::timeout(Duration::from_millis(20), changed.changed()).await {
+                        Ok(change) => change.expect("fixture PTY remains live"),
+                        Err(_) => break replay,
+                    }
+                } else {
+                    changed.changed().await.expect("fixture PTY remains live");
+                }
+            }
+        })
+        .await
+        .expect("real fixture output did not reach the journal");
+        assert!(
+            replay.is_complete,
+            "tiny fixture must not evict its journal"
+        );
+        ilium_pty::PtyOutputChunk {
+            sequence: replay.through_sequence,
+            bytes: Arc::from(replay.bytes),
+        }
+    } else {
+        // Only the replaced-runtime rejection case supplies deliberately stale
+        // evidence. It must be rejected before consulting the new PTY journal.
+        ilium_pty::PtyOutputChunk {
             sequence: 987,
             bytes: Arc::from(b"FINAL-OWNER-BYTES".as_slice()),
-        })
-        .unwrap();
+        }
+    };
+    let mut events = state.events.subscribe();
+    let expected_bytes = chunk.bytes.to_vec();
+    output_sender.send(chunk).unwrap();
     drop(output_sender);
     tokio::time::timeout(
         Duration::from_secs(2),
@@ -33,7 +94,7 @@ async fn collect_forwarded_until_closed(
     while let Ok(event) = events.try_recv() {
         captured.push(event);
     }
-    captured
+    (captured, expected_bytes)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -46,7 +107,7 @@ async fn fatal_owner_status_is_reported_once_without_input_and_final_bytes_are_f
         &std::collections::HashSet::from([pane_id]),
     );
     let input = input_for(&state, pane_id).await;
-    let events = collect_forwarded_until_closed(
+    let (events, expected_bytes) = collect_forwarded_until_closed(
         Arc::clone(&state),
         pane_id,
         input,
@@ -65,7 +126,7 @@ async fn fatal_owner_status_is_reported_once_without_input_and_final_bytes_are_f
         .count();
     let final_bytes = events.iter().any(|event| {
         matches!(event,
-        ServerEvent::ScreenUpdate { sequence: 987, bytes, .. } if bytes == b"FINAL-OWNER-BYTES")
+        ServerEvent::ScreenUpdate { bytes, .. } if bytes == &expected_bytes)
     });
     let still_current = input_for(&state, pane_id).await.status();
     teardown_state_panes(&state);
@@ -135,7 +196,7 @@ async fn eof_requested_close_and_stale_runtime_do_not_report_owner_failure() {
     let (state, pane_id, _directory) = state_with_one_terminal_pane("owner-status-normal").await;
     let input = input_for(&state, pane_id).await;
     for reason in [ShutdownReason::Eof, ShutdownReason::Requested] {
-        let events = collect_forwarded_until_closed(
+        let (events, _) = collect_forwarded_until_closed(
             Arc::clone(&state),
             pane_id,
             input.clone(),
@@ -160,7 +221,7 @@ async fn eof_requested_close_and_stale_runtime_do_not_report_owner_failure() {
         .await
         .insert(pane_id, replacement)
         .unwrap();
-    let events = collect_forwarded_until_closed(
+    let (events, _) = collect_forwarded_until_closed(
         Arc::clone(&state),
         pane_id,
         input,

@@ -339,6 +339,60 @@ pub fn executable_path(process_id: u32) -> Option<PathBuf> {
     None
 }
 
+/// Per-attempt descriptor and retained-path admission. Overflow is an error,
+/// never a partial set that could incorrectly prove exclusive ownership.
+#[derive(Clone, Copy)]
+pub struct OpenFilePathLimits {
+    pub descriptors: usize,
+    pub retained_bytes: usize,
+}
+fn descriptor_limit_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::OutOfMemory,
+        "open-file evidence resource limit reached",
+    )
+}
+#[cfg(target_os = "linux")]
+pub fn open_file_paths_bounded(
+    process_id: u32,
+    limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
+    let entries = std::fs::read_dir(format!("/proc/{process_id}/fd"))?;
+    let mut paths = Vec::new();
+    let mut bytes = 0usize;
+    for (index, entry) in entries.enumerate() {
+        if index >= limits.descriptors {
+            return Err(descriptor_limit_error());
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(path) = std::fs::read_link(entry.path()) else {
+            continue;
+        };
+        // procfs link results are kernel pathname-sized. Charge before storing
+        // them; a single temporary read_link result is not accumulated.
+        bytes = bytes
+            .saturating_add(path.capacity().saturating_mul(2))
+            .saturating_add(std::mem::size_of::<PathBuf>() * 2);
+        if bytes > limits.retained_bytes {
+            return Err(descriptor_limit_error());
+        }
+        paths.push(path);
+    }
+    Ok(paths)
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub fn open_file_paths_bounded(
+    _process_id: u32,
+    _limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "open-file observation unavailable",
+    ))
+}
+
 /// Every path the process currently holds open.
 ///
 /// Descriptors with no filesystem path (sockets, pipes, the terminal itself)
@@ -364,16 +418,33 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
 /// disagrees -- a mismatch yields no path instead of a fabricated one.
 #[cfg(target_os = "macos")]
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
+    open_file_paths_bounded(
+        process_id,
+        OpenFilePathLimits {
+            descriptors: 16_384,
+            retained_bytes: usize::MAX,
+        },
+    )
+    .unwrap_or_default()
+}
+#[cfg(target_os = "macos")]
+pub fn open_file_paths_bounded(
+    process_id: u32,
+    limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
     use std::ffi::c_void;
 
     /// Where the descriptor table is assumed to start when the kernel will not
     /// say, and how far it is allowed to grow. A process holding more open
     /// files than this is not one of the agent CLIs being looked for.
     const INITIAL_DESCRIPTOR_CAPACITY: usize = 256;
-    const MAXIMUM_DESCRIPTOR_CAPACITY: usize = 16_384;
+    let maximum_descriptor_capacity = limits.descriptors.min(16_384);
+    if maximum_descriptor_capacity == 0 {
+        return Err(descriptor_limit_error());
+    }
 
     let Ok(process_id) = i32::try_from(process_id) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let descriptor_size = std::mem::size_of::<libc::proc_fdinfo>();
 
@@ -402,15 +473,15 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
     let mut count = if hinted > 0 {
         (hinted as usize)
             .div_ceil(descriptor_size)
-            .clamp(1, MAXIMUM_DESCRIPTOR_CAPACITY)
+            .clamp(1, maximum_descriptor_capacity)
     } else {
-        INITIAL_DESCRIPTOR_CAPACITY
+        INITIAL_DESCRIPTOR_CAPACITY.min(maximum_descriptor_capacity)
     };
 
     loop {
         let mut descriptors: Vec<libc::proc_fdinfo> = vec![unsafe { std::mem::zeroed() }; count];
         let Ok(capacity) = i32::try_from(count * descriptor_size) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         // SAFETY: `descriptors` owns `capacity` bytes and is written at most
         // that far; the kernel reports how much it actually used.
@@ -424,23 +495,39 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
             )
         };
         if written <= 0 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let used = written as usize;
         // A completely filled buffer is indistinguishable from a truncated
         // one -- the call reports bytes written, not bytes needed -- so grow
         // and ask again rather than searching a table that may be cut short of
         // the descriptor being looked for.
-        if used >= count * descriptor_size && count * 2 <= MAXIMUM_DESCRIPTOR_CAPACITY {
+        if used >= count * descriptor_size && count * 2 <= maximum_descriptor_capacity {
             count *= 2;
             continue;
         }
+        if used >= count * descriptor_size {
+            return Err(descriptor_limit_error());
+        }
         descriptors.truncate(used / descriptor_size);
-        return descriptors
+        let mut paths = Vec::new();
+        let mut bytes = 0usize;
+        for descriptor in descriptors
             .iter()
             .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
-            .filter_map(|descriptor| darwin_vnode_path(process_id, descriptor.proc_fd))
-            .collect();
+        {
+            let Some(path) = darwin_vnode_path(process_id, descriptor.proc_fd) else {
+                continue;
+            };
+            bytes = bytes
+                .saturating_add(path.capacity().saturating_mul(2))
+                .saturating_add(std::mem::size_of::<PathBuf>() * 2);
+            if bytes > limits.retained_bytes {
+                return Err(descriptor_limit_error());
+            }
+            paths.push(path);
+        }
+        return Ok(paths);
     }
 }
 
@@ -529,58 +616,101 @@ mod darwin {
 ///   agent CLIs it spawned itself.
 #[cfg(windows)]
 pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
+    open_file_paths_with_limits(
+        process_id,
+        OpenFilePathLimits {
+            descriptors: usize::MAX,
+            retained_bytes: usize::MAX,
+        },
+        256 << 20,
+    )
+    .unwrap_or_default()
+}
+#[cfg(windows)]
+pub fn open_file_paths_bounded(
+    process_id: u32,
+    limits: OpenFilePathLimits,
+) -> std::io::Result<Vec<PathBuf>> {
+    open_file_paths_with_limits(process_id, limits, 64 << 20)
+}
+#[cfg(windows)]
+fn open_file_paths_with_limits(
+    process_id: u32,
+    limits: OpenFilePathLimits,
+    native_bytes: usize,
+) -> std::io::Result<Vec<PathBuf>> {
     use windows_sys::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS};
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE,
     };
 
-    let Some(snapshot) = system_handle_table() else {
-        return Vec::new();
+    let Some(snapshot) = system_handle_table_with_limit(native_bytes) else {
+        return Err(descriptor_limit_error());
     };
     // SAFETY: a plain FFI call with no pointer arguments; a failure is
     // reported as a null handle, which is checked immediately.
     let target = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, process_id) };
     if target.is_null() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    let mut paths = Vec::new();
-    for entry in snapshot.entries() {
-        if entry.unique_process_id as u32 != process_id {
-            continue;
-        }
-        let mut duplicated = std::ptr::null_mut();
-        // SAFETY: `target` is a live handle opened above with
-        // `PROCESS_DUP_HANDLE`; `entry.handle_value` is a handle value the
-        // kernel just reported for that process. A stale value (the process
-        // closed it in between) fails the call rather than doing anything
-        // unsafe, which is why the result is checked instead of assumed.
-        let duplicated_ok = unsafe {
-            DuplicateHandle(
-                target,
-                entry.handle_value as _,
-                GetCurrentProcess(),
-                &mut duplicated,
-                0,
-                0,
-                DUPLICATE_SAME_ACCESS,
-            )
-        };
-        if duplicated_ok == 0 {
-            continue;
-        }
-        if let Some(path) = path_of_disk_handle(duplicated) {
-            paths.push(path);
-        }
-        // SAFETY: `duplicated` was produced by the successful `DuplicateHandle`
-        // above and is not used again after this point.
-        unsafe { CloseHandle(duplicated) };
-    }
+    let result = (|| -> std::io::Result<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        let mut descriptors = 0usize;
+        let mut bytes = 0usize;
+        for entry in snapshot.entries() {
+            if entry.unique_process_id as u32 != process_id {
+                continue;
+            }
+            descriptors += 1;
+            if descriptors > limits.descriptors {
+                return Err(descriptor_limit_error());
+            }
+            let mut duplicated = std::ptr::null_mut();
+            // SAFETY: `target` is a live handle opened above with
+            // `PROCESS_DUP_HANDLE`; `entry.handle_value` is a handle value the
+            // kernel just reported for that process. A stale value (the process
+            // closed it in between) fails the call rather than doing anything
+            // unsafe, which is why the result is checked instead of assumed.
+            let duplicated_ok = unsafe {
+                DuplicateHandle(
+                    target,
+                    entry.handle_value as _,
+                    GetCurrentProcess(),
+                    &mut duplicated,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            };
+            if duplicated_ok == 0 {
+                continue;
+            }
+            let path = path_of_disk_handle_with_limit(
+                duplicated,
+                limits.retained_bytes.saturating_sub(bytes) / 2,
+            );
 
+            // SAFETY: `duplicated` was produced by the successful `DuplicateHandle`
+            // above and is not used again after this point.
+            unsafe { CloseHandle(duplicated) };
+            if let Some(path) = path? {
+                bytes = bytes
+                    .saturating_add(path.capacity().saturating_mul(2))
+                    .saturating_add(std::mem::size_of::<PathBuf>() * 2);
+                if bytes > limits.retained_bytes {
+                    return Err(descriptor_limit_error());
+                }
+                paths.push(path);
+            }
+        }
+
+        Ok(paths)
+    })();
     // SAFETY: `target` came from a successful `OpenProcess` and is dead after
     // this call; nothing above retains it.
     unsafe { CloseHandle(target) };
-    paths
+    result
 }
 
 /// The final path of `handle`, but only when it names something on disk.
@@ -589,7 +719,10 @@ pub fn open_file_paths(process_id: u32) -> Vec<PathBuf> {
 /// cannot be resolved -- see [`open_file_paths`] for why the type check has to
 /// come first.
 #[cfg(windows)]
-fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option<PathBuf> {
+fn path_of_disk_handle_with_limit(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    max_units: usize,
+) -> std::io::Result<Option<PathBuf>> {
     use std::os::windows::ffi::OsStringExt;
 
     use windows_sys::Win32::Storage::FileSystem::{
@@ -600,7 +733,7 @@ fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option
     // SAFETY: `handle` is a live handle owned by the caller for the duration
     // of this function.
     if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
-        return None;
+        return Ok(None);
     }
 
     // Sized by asking: the first call with a zero-length buffer returns the
@@ -617,7 +750,10 @@ fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option
         )
     };
     if required == 0 {
-        return None;
+        return Ok(None);
+    }
+    if required as usize > max_units {
+        return Err(descriptor_limit_error());
     }
     let mut buffer = vec![0u16; required as usize];
     // SAFETY: `buffer` is a live allocation of exactly `buffer.len()` UTF-16
@@ -635,7 +771,7 @@ fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option
     // reports the units written *excluding* the terminator, so a count that
     // reaches the buffer's own length is already one too many.
     if written == 0 || written as usize >= buffer.len() {
-        return None;
+        return Ok(None);
     }
     let path = std::ffi::OsString::from_wide(&buffer[..written as usize]);
     let path = PathBuf::from(path);
@@ -643,7 +779,7 @@ fn path_of_disk_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> Option
     // `GetFinalPathNameByHandleW` returns the `\\?\` extended-length form.
     // Callers compare these against paths they built themselves, which never
     // carry the prefix, so it is stripped here rather than at every comparison.
-    Some(strip_extended_length_prefix(path))
+    Ok(Some(strip_extended_length_prefix(path)))
 }
 
 /// Removes the `\\?\` (or `\\?\UNC\`) prefix Windows adds to a resolved path.
@@ -709,7 +845,7 @@ struct SystemHandleTableEntry {
 
 /// Queries the whole handle table, growing the buffer until it fits.
 #[cfg(windows)]
-fn system_handle_table() -> Option<SystemHandleTable> {
+fn system_handle_table_with_limit(maximum_bytes: usize) -> Option<SystemHandleTable> {
     use windows_sys::Wdk::System::SystemInformation::NtQuerySystemInformation;
     use windows_sys::Win32::Foundation::STATUS_INFO_LENGTH_MISMATCH;
 
@@ -720,10 +856,10 @@ fn system_handle_table() -> Option<SystemHandleTable> {
     const INITIAL_BYTES: usize = 1 << 20;
     /// A machine with a genuinely enormous handle table is not worth an
     /// unbounded allocation; the caller degrades to "no answer".
-    const MAXIMUM_BYTES: usize = 256 << 20;
+    let maximum_bytes = maximum_bytes.min(256 << 20);
 
     let mut bytes = INITIAL_BYTES;
-    while bytes <= MAXIMUM_BYTES {
+    while bytes <= maximum_bytes {
         let mut buffer = vec![0u64; bytes / std::mem::size_of::<u64>()];
         let mut written = 0u32;
         // SAFETY: `buffer` is a live allocation of `bytes` bytes and is
@@ -839,6 +975,38 @@ pub fn has_live_child(process_id: u32) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bounded_open_files_reports_overflow_and_preserves_complete_fixture_path() {
+        let file = tempfile::NamedTempFile::new().expect("fixture");
+        let paths = open_file_paths_bounded(
+            std::process::id(),
+            OpenFilePathLimits {
+                descriptors: 4096,
+                retained_bytes: 4 * 1024 * 1024,
+            },
+        )
+        .expect("complete observation");
+        assert!(paths.iter().any(|path| path == file.path()));
+        let error = open_file_paths_bounded(
+            std::process::id(),
+            OpenFilePathLimits {
+                descriptors: 0,
+                retained_bytes: 4096,
+            },
+        )
+        .expect_err("descriptor overflow");
+        assert_eq!(error.kind(), std::io::ErrorKind::OutOfMemory);
+        assert!(open_file_paths_bounded(
+            std::process::id(),
+            OpenFilePathLimits {
+                descriptors: 4096,
+                retained_bytes: 0
+            }
+        )
+        .is_err());
+    }
 
     /// Platforms that can answer must answer correctly for the test process
     /// itself, which is the one process whose truth the test already knows.

@@ -167,7 +167,7 @@ pub(crate) fn copy_worktree_includes(
             return Err(failure(
                 format!("{}: {error}", include_path.display()),
                 report,
-            ))
+            ));
         }
     };
     if include_file

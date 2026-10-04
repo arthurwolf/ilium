@@ -42,7 +42,7 @@ use ilium_core::{
     AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, PaneProgress, Tree,
 };
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
+use std::io::{Read, Write};
 use tokio::task::JoinHandle;
 
 use crate::agent_debug::PaneDebugLogSnapshot;
@@ -218,12 +218,12 @@ impl PersistedProgressMonitor {
 /// Loads the native project-local snapshot if present, otherwise imports the
 /// preceding project-local YAML workspace. The YAML source is deliberately
 /// retained: it is a user-owned recovery artifact, not disposable seed data.
-pub async fn load_snapshot_or_migrate(
+pub(crate) fn load_snapshot_or_migrate_blocking(
     snapshot_path: &Path,
     session_cwd: &Path,
     home: &Path,
 ) -> Result<Option<SessionSnapshot>, ServerError> {
-    if let Some(mut snapshot) = load_snapshot(snapshot_path).await? {
+    if let Some(mut snapshot) = load_snapshot_blocking(snapshot_path)? {
         let original_tree = snapshot.tree.clone();
         snapshot
             .tree
@@ -236,28 +236,40 @@ pub async fn load_snapshot_or_migrate(
         // duplicate resume binding in the snapshot this function returns.
         let resume_bindings_changed = normalize_agent_resumes(&mut snapshot, home, session_cwd);
         if tree_changed_by_launch_project || resume_bindings_changed {
-            write_snapshot_to(snapshot_path, &snapshot).await?;
+            write_snapshot_blocking(snapshot_path, &snapshot)?;
         }
         return Ok(Some(snapshot));
     }
 
     let legacy_path = session_cwd.join(".ilium").join("sessions.yml");
-    let legacy_exists = tokio::fs::try_exists(&legacy_path).await.map_err(|error| {
-        ServerError::LegacyWorkspace {
+    let legacy_exists =
+        std::fs::exists(&legacy_path).map_err(|error| ServerError::LegacyWorkspace {
             path: legacy_path.clone(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     if !legacy_exists {
         return Ok(None);
     }
 
-    let legacy_contents = tokio::fs::read_to_string(&legacy_path)
-        .await
+    let legacy_file =
+        std::fs::File::open(&legacy_path).map_err(|error| ServerError::LegacyWorkspace {
+            path: legacy_path.clone(),
+            message: error.to_string(),
+        })?;
+    let mut legacy_contents = String::new();
+    legacy_file
+        .take(MAX_ENCODED_SNAPSHOT_BYTES + 1)
+        .read_to_string(&mut legacy_contents)
         .map_err(|error| ServerError::LegacyWorkspace {
             path: legacy_path.clone(),
             message: error.to_string(),
         })?;
+    if legacy_contents.len() as u64 > MAX_ENCODED_SNAPSHOT_BYTES {
+        return Err(ServerError::LegacyWorkspace {
+            path: legacy_path,
+            message: "legacy workspace exceeds encoded byte limit".into(),
+        });
+    }
     let legacy_workspace: LegacyWorkspace =
         serde_norway::from_str(&legacy_contents).map_err(|error| ServerError::LegacyWorkspace {
             path: legacy_path.clone(),
@@ -270,7 +282,7 @@ pub async fn load_snapshot_or_migrate(
     // reloaded native snapshot already does above.
     normalize_agent_resumes(&mut snapshot, home, session_cwd);
 
-    write_snapshot_to(snapshot_path, &snapshot).await?;
+    write_snapshot_blocking(snapshot_path, &snapshot)?;
     tracing::info!("imported legacy workspace into {}", snapshot_path.display());
     Ok(Some(snapshot))
 }
@@ -454,27 +466,60 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// Builds a snapshot of `state`'s current tree and pane registry. Takes
-/// the `tree` read lock before `panes`, per `ServerState`'s documented
-/// lock ordering.
-async fn build_snapshot(state: &ServerState) -> SessionSnapshot {
-    build_snapshot_with_progress_override(state, None).await
+/// Cheap owned handles; no source locks survive queue admission.
+pub(crate) struct SnapshotSources {
+    tree: Arc<tokio::sync::RwLock<Tree>>,
+    panes: Arc<tokio::sync::RwLock<crate::state::PaneRegistry>>,
+    workspace_close_preferences: Arc<
+        tokio::sync::RwLock<
+            std::collections::HashMap<NodeId, crate::state::WorkspaceClosePreference>,
+        >,
+    >,
+    agent_debug: Arc<crate::agent_debug::AgentDebugRecorder>,
+}
+impl SnapshotSources {
+    pub(crate) fn new(state: &ServerState) -> Self {
+        Self {
+            tree: Arc::clone(&state.tree),
+            panes: Arc::clone(&state.panes),
+            workspace_close_preferences: Arc::clone(&state.workspace_close_preferences),
+            agent_debug: Arc::clone(&state.agent_debug),
+        }
+    }
 }
 
-/// Builds the current snapshot while substituting one already-validated
-/// progress registration for the live runtime state of the same pane.
-///
-/// This is used by `SetPaneProgressMonitor` while holding that pane's effect
-/// gate: the previous live monitor remains untouched until the complete
-/// replacement snapshot is durable. A failed write can therefore reject the
-/// replacement without cancelling the previously accepted monitor.
-async fn build_snapshot_with_progress_override(
-    state: &ServerState,
+/// Called by the snapshot OS owner, never by an async coordination task.
+pub(crate) async fn capture_snapshot(
+    sources: &SnapshotSources,
+    path: &Path,
     progress_override: Option<&PersistedProgressMonitor>,
-) -> SessionSnapshot {
-    let (tree, pane_snapshots, progress_monitors, workspace_close_preferences) = {
-        let tree = state.tree.read().await;
-        let panes = state.panes.read().await;
+) -> Result<SessionSnapshot, ServerError> {
+    let (tree, pane_snapshots, progress_monitors, workspace_close_preferences, agent_debug_logs) = {
+        let tree = sources.tree.read().await;
+        let panes = sources.panes.read().await;
+        let preferences = sources.workspace_close_preferences.read().await;
+        let retained = capture_estimated_bytes(&tree, &panes, &preferences, progress_override);
+        let limit = crate::snapshot_io::MAX_SNAPSHOT_RETAINED_BYTES;
+        if retained > limit {
+            return Err(crate::snapshot_io::error(
+                path,
+                "capture admission",
+                "live snapshot exceeds retained-memory limit",
+            ));
+        }
+        // Journal preflight and deep copy run on the same OS owner. Source
+        // tree/pane/preference locks prevent a check/clone growth race.
+        let agent_debug_logs = sources
+            .agent_debug
+            .snapshot_with_limit(limit - retained)
+            .await
+            .map_err(|_| {
+                crate::snapshot_io::error(
+                    path,
+                    "capture admission",
+                    "journal exceeds retained-memory limit",
+                )
+            })?;
         let mut pane_snapshots = Vec::with_capacity(panes.len());
         let mut progress_monitors = Vec::new();
         for (node_id, resource) in panes.iter() {
@@ -497,10 +542,7 @@ async fn build_snapshot_with_progress_override(
                 kind,
             });
         }
-        let mut workspace_close_preferences = state
-            .workspace_close_preferences
-            .read()
-            .await
+        let mut workspace_close_preferences = preferences
             .values()
             .filter(|preference| {
                 tree.pane_workspace(preference.pane_id)
@@ -519,17 +561,84 @@ async fn build_snapshot_with_progress_override(
             pane_snapshots,
             progress_monitors,
             workspace_close_preferences,
+            agent_debug_logs,
         )
     };
-    let agent_debug_logs = state.agent_debug.snapshot().await;
-    SessionSnapshot {
+    Ok(SessionSnapshot {
         version: CURRENT_SNAPSHOT_VERSION,
         tree,
         panes: pane_snapshots,
         agent_debug_logs,
         progress_monitors,
         workspace_close_preferences,
+    })
+}
+
+/// Conservative source walk before any deep clone. Command reconstruction
+/// can quote session IDs; eight bytes per source byte covers quoting and the
+/// temporary command parser/resume strings. This is admission accounting,
+/// not an allocator RSS assertion.
+fn capture_estimated_bytes(
+    tree: &Tree,
+    panes: &crate::state::PaneRegistry,
+    preferences: &std::collections::HashMap<NodeId, crate::state::WorkspaceClosePreference>,
+    progress_override: Option<&PersistedProgressMonitor>,
+) -> usize {
+    let mut bytes = crate::snapshot_io::estimated_tree_bytes(tree)
+        .saturating_add(std::mem::size_of::<SessionSnapshot>())
+        .saturating_add(panes.len().saturating_mul(
+            std::mem::size_of::<PaneSnapshot>()
+                + 4 * std::mem::size_of::<PersistedProgressMonitor>(),
+        ));
+    for resource in panes.values() {
+        let additional = match resource {
+            PaneResource::Editor { path } => path
+                .as_ref()
+                .map_or(0, |path| path.capacity().saturating_mul(2)),
+            PaneResource::Terminal(runtime) => {
+                let origin = runtime
+                    .deferred_workspace_origin
+                    .as_ref()
+                    .unwrap_or(&runtime.origin);
+                let command = match origin {
+                    TerminalOrigin::Command(command) => command.capacity(),
+                    TerminalOrigin::PlainShell => 0,
+                };
+                let mut amount = command
+                    .saturating_add(runtime.session_id.as_ref().map_or(0, String::capacity))
+                    .saturating_mul(8)
+                    .saturating_add(1024);
+                if let Some(monitor) = &runtime.progress_monitor {
+                    amount = amount
+                        .saturating_add(monitor.command.capacity())
+                        .saturating_add(crate::snapshot_io::estimated_progress_bytes(
+                            &monitor.latest_progress,
+                        ));
+                }
+                if let Some(monitor) = &runtime.deferred_progress_monitor {
+                    amount = amount.saturating_add(estimated_monitor_bytes(monitor));
+                }
+                amount
+            }
+        };
+        bytes = bytes.saturating_add(additional);
     }
+    for preference in preferences.values() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of::<PersistedWorkspaceClosePreference>() * 4)
+            .saturating_add(preference.workspace_id.as_ref().map_or(0, String::capacity))
+            .saturating_add(preference.worktree_root.capacity().saturating_mul(2));
+    }
+    bytes.saturating_add(progress_override.map_or(0, |monitor| {
+        estimated_monitor_bytes(monitor).saturating_mul(2)
+    }))
+}
+pub(crate) fn estimated_monitor_bytes(monitor: &PersistedProgressMonitor) -> usize {
+    std::mem::size_of::<PersistedProgressMonitor>()
+        .saturating_add(monitor.command.capacity())
+        .saturating_add(crate::snapshot_io::estimated_progress_bytes(
+            &monitor.latest_progress,
+        ))
 }
 
 /// Turns a freshly-launched agent command into its resume form once the
@@ -578,9 +687,61 @@ fn snapshot_origin_from_identity(
 /// uses [`spawn_snapshot_writer`]/[`flush_pending_snapshot`] through
 /// `ServerState::request_snapshot_save`.
 pub async fn save_snapshot(state: &ServerState) -> Result<(), ServerError> {
-    let _write_guard = state.snapshot_write_lock.lock().await;
-    let snapshot = build_snapshot(state).await;
-    write_snapshot_to(&state.snapshot_path, &snapshot).await
+    let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+    if state.is_session_killed() {
+        return Err(crate::snapshot_io::error(
+            &state.snapshot_path,
+            "write fence",
+            "session was killed",
+        ));
+    }
+    let _write_guard = snapshot_service(state)
+        .await?
+        .capture_write(SnapshotSources::new(state), None, write_guard)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn snapshot_service(
+    state: &ServerState,
+) -> Result<&crate::snapshot_io::SnapshotIo, ServerError> {
+    state
+        .snapshot_io
+        .get_or_try_init(|| async {
+            crate::snapshot_io::SnapshotIo::new(state.snapshot_path.clone()).map_err(|source| {
+                ServerError::Snapshot {
+                    operation: "start worker",
+                    path: state.snapshot_path.clone(),
+                    source: SnapshotError::Io(source),
+                }
+            })
+        })
+        .await
+}
+
+pub(crate) async fn load_snapshot_for_state(
+    state: &ServerState,
+) -> Result<Option<SessionSnapshot>, ServerError> {
+    snapshot_service(state)
+        .await?
+        .read(Some((state.session_cwd.clone(), state.home_dir.clone())))
+        .await
+}
+
+pub(crate) async fn shutdown_snapshot_service(state: &ServerState) -> Result<(), ServerError> {
+    if let Some(service) = state.snapshot_io.get() {
+        service.shutdown().await?;
+    }
+    Ok(())
+}
+
+/// Parent integrates this into kill/discard while holding the existing lock.
+/// The returned guard must survive the accompanying live-state commit.
+pub(crate) async fn remove_snapshot_ordered(
+    state: &ServerState,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, ServerError> {
+    snapshot_service(state).await?.remove(guard).await
 }
 
 /// Durability barrier for an irreversible server-owned effect.
@@ -610,9 +771,21 @@ pub(crate) async fn await_progress_monitor_durability_barrier(
     let write_guard = std::sync::Arc::clone(&state.snapshot_write_lock)
         .lock_owned()
         .await;
-    let snapshot = build_snapshot_with_progress_override(state, Some(progress_monitor)).await;
-    write_snapshot_to(&state.snapshot_path, &snapshot).await?;
-    Ok(write_guard)
+    if state.is_session_killed() {
+        return Err(crate::snapshot_io::error(
+            &state.snapshot_path,
+            "write fence",
+            "session was killed",
+        ));
+    }
+    snapshot_service(state)
+        .await?
+        .capture_write(
+            SnapshotSources::new(state),
+            Some(progress_monitor),
+            write_guard,
+        )
+        .await
 }
 
 /// Spawns the background task that owns every crash-recovery snapshot
@@ -670,73 +843,125 @@ pub async fn flush_pending_snapshot(state: &ServerState) {
 /// unparseable snapshot behind (the rename is atomic: the file on disk is
 /// always either the previous complete snapshot or the new one, mirroring
 /// `workspace_file::save`'s identical reasoning).
-async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<(), ServerError> {
-    let json = serde_json::to_vec(snapshot).map_err(|source| ServerError::Snapshot {
-        operation: "serialize",
-        path: path.to_path_buf(),
-        source: SnapshotError::Json(source),
-    })?;
+pub(crate) const MAX_ENCODED_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
 
-    let path_buf = path.to_path_buf();
-    let to_snapshot_io_error =
-        |operation: &'static str, source: std::io::Error| ServerError::Snapshot {
-            operation,
-            path: path_buf.clone(),
-            source: SnapshotError::Io(source),
-        };
+struct LimitedWriter<W> {
+    writer: W,
+    remaining: u64,
+}
+impl<W: Write> Write for LimitedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other("encoded snapshot exceeds byte limit"));
+        }
+        let written = self.writer.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
 
+struct TemporarySnapshotFile(PathBuf);
+impl Drop for TemporarySnapshotFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Blocking worker-only atomic writer. No large intermediate JSON Vec.
+pub(crate) fn write_snapshot_blocking(
+    path: &Path,
+    snapshot: &SessionSnapshot,
+) -> Result<(), ServerError> {
+    write_snapshot_with_limit(path, snapshot, MAX_ENCODED_SNAPSHOT_BYTES)
+}
+fn write_snapshot_with_limit(
+    path: &Path,
+    snapshot: &SessionSnapshot,
+    limit: u64,
+) -> Result<(), ServerError> {
+    let io_error = |operation, source| ServerError::Snapshot {
+        operation,
+        path: path.to_owned(),
+        source: SnapshotError::Io(source),
+    };
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    // Create and restrict the directory through the platform adapter in one
-    // operation. This avoids briefly creating session data with ambient
-    // permissions and refuses pre-planted symlink components.
     ilium_platform::secure_fs::create_private_directory(parent)
-        .map_err(|source| to_snapshot_io_error("create private directory for", source))?;
+        .map_err(|source| io_error("create private directory for", source))?;
     let temp_path = parent.join(format!(
         ".{}.tmp-{}",
         path.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "snapshot".to_string()),
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| "snapshot".into()),
         std::process::id()
     ));
-    let _ = tokio::fs::remove_file(&temp_path).await;
-    // `private_open_options()` also refuses a pre-planted symlink at
-    // `temp_path` (`O_NOFOLLOW`) and keeps the descriptor out of any spawned
-    // agent CLI (`O_CLOEXEC`) on Unix -- guarantees the old ad hoc
-    // `.mode(0o600)` open here didn't have. The temp path already carries
-    // this process's pid, so `create_new` still can't collide with a
-    // concurrent writer.
-    let open_result = ilium_platform::secure_fs::private_open_options()
-        .write(true)
-        .create_new(true)
-        .open(&temp_path);
-    let mut temp_file = match open_result {
-        Ok(file) => tokio::fs::File::from_std(file),
-        Err(error) => return Err(to_snapshot_io_error("create", error)),
-    };
-    if let Err(error) = temp_file.write_all(&json).await {
-        // A write that fails partway (e.g. disk full, permission change
-        // mid-write) can still have created the temp file. This writer
-        // loops for the server's entire lifetime (`spawn_snapshot_writer`),
-        // so leaving a stray temp file behind on every failed write would
-        // accumulate unbounded cruft on disk across a long-running server;
-        // clean it up (best-effort) before surfacing the original error.
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(to_snapshot_io_error("write", error));
-    }
-    if let Err(error) = temp_file.sync_all().await {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(to_snapshot_io_error("sync", error));
-    }
-    drop(temp_file);
-    if let Err(error) = tokio::fs::rename(&temp_path, path).await {
-        // Same reasoning: don't leave the temp file behind if the rename
-        // itself fails.
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(to_snapshot_io_error("rename", error));
-    }
-    ilium_platform::secure_fs::restrict_file_to_owner(path)
-        .map_err(|source| to_snapshot_io_error("secure", source))?;
-    Ok(())
+    let _ = std::fs::remove_file(&temp_path);
+    let _temporary_cleanup = TemporarySnapshotFile(temp_path.clone());
+    (|| {
+        let file = ilium_platform::secure_fs::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|source| io_error("create", source))?;
+        ilium_platform::secure_fs::restrict_open_file_to_owner(&file)
+            .map_err(|source| io_error("secure temporary file", source))?;
+        let mut writer = LimitedWriter {
+            writer: std::io::BufWriter::with_capacity(64 * 1024, file),
+            remaining: limit,
+        };
+        serde_json::to_writer(&mut writer, snapshot).map_err(|source| ServerError::Snapshot {
+            operation: "serialize",
+            path: path.to_owned(),
+            source: SnapshotError::Json(source),
+        })?;
+        writer.flush().map_err(|source| io_error("write", source))?;
+        writer
+            .writer
+            .get_ref()
+            .sync_all()
+            .map_err(|source| io_error("sync", source))?;
+        drop(writer);
+        ilium_platform::secure_fs::replace_file_durably(&temp_path, path)
+            .map_err(|source| io_error("publish durable snapshot", source))?;
+
+        Ok(())
+    })()
+}
+
+#[cfg(test)]
+async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<(), ServerError> {
+    let service = crate::snapshot_io::SnapshotIo::new(path.to_owned()).map_err(|source| {
+        ServerError::Snapshot {
+            operation: "start test worker",
+            path: path.to_owned(),
+            source: SnapshotError::Io(source),
+        }
+    })?;
+    service.write_boot(snapshot.clone()).await?;
+    service.shutdown().await
+}
+
+#[cfg(test)]
+async fn load_snapshot_or_migrate(
+    snapshot_path: &Path,
+    session_cwd: &Path,
+    home: &Path,
+) -> Result<Option<SessionSnapshot>, ServerError> {
+    let service =
+        crate::snapshot_io::SnapshotIo::new(snapshot_path.to_owned()).map_err(|source| {
+            ServerError::Snapshot {
+                operation: "start test worker",
+                path: snapshot_path.to_owned(),
+                source: SnapshotError::Io(source),
+            }
+        })?;
+    let result = service
+        .read(Some((session_cwd.to_owned(), home.to_owned())))
+        .await;
+    service.shutdown().await?;
+    result
 }
 
 /// Reads and parses the snapshot at `path`. `Ok(None)` means no snapshot
@@ -744,7 +969,7 @@ async fn write_snapshot_to(path: &Path, snapshot: &SessionSnapshot) -> Result<()
 /// one exists but couldn't be read or parsed (e.g. hand-edited into
 /// invalid JSON), so the caller can log "nothing to recover" separately
 /// from "something to warn about."
-pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, ServerError> {
+pub(crate) fn load_snapshot_blocking(path: &Path) -> Result<Option<SessionSnapshot>, ServerError> {
     let path_buf = path.to_path_buf();
     // One read, with `NotFound` mapped to "no snapshot yet", instead of a
     // separate existence probe followed by the read: the probe-then-read
@@ -752,8 +977,8 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
     // calls surfaced as a spurious read `Err` rather than the documented
     // `Ok(None)`, and the read itself already answers the existence
     // question.
-    let contents = match tokio::fs::read(path).await {
-        Ok(contents) => contents,
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
             return Err(ServerError::Snapshot {
@@ -763,8 +988,23 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
             });
         }
     };
-    let snapshot: SessionSnapshot =
-        serde_json::from_slice(&contents).map_err(|source| ServerError::Snapshot {
+    let metadata = file.metadata().map_err(|source| ServerError::Snapshot {
+        operation: "read metadata",
+        path: path_buf.clone(),
+        source: SnapshotError::Io(source),
+    })?;
+    if metadata.len() > MAX_ENCODED_SNAPSHOT_BYTES {
+        return Err(crate::snapshot_io::error(
+            path,
+            "read admission",
+            "encoded snapshot exceeds byte limit",
+        ));
+    }
+    // take() also bounds a file that grows after metadata was captured.
+    let reader =
+        std::io::BufReader::with_capacity(64 * 1024, file.take(MAX_ENCODED_SNAPSHOT_BYTES + 1));
+    let mut snapshot: SessionSnapshot =
+        serde_json::from_reader(reader).map_err(|source| ServerError::Snapshot {
             operation: "parse",
             path: path_buf.clone(),
             source: SnapshotError::Json(source),
@@ -780,10 +1020,36 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
         .validate()
         .map_err(|source| ServerError::Snapshot {
             operation: "validate",
-            path: path_buf,
+            path: path_buf.clone(),
             source: SnapshotError::InvalidTree(source),
         })?;
+    // Old restructuring recorded AI presentation as user-owned without fixing
+    // it. Repair only that explicit provenance; retain every authored bundle.
+    for pane_id in snapshot.tree.pane_ids_in_tree_order() {
+        snapshot
+            .tree
+            .repair_legacy_restructure_title_source(pane_id)
+            .map_err(|source| ServerError::Snapshot {
+                operation: "repair title provenance",
+                path: path_buf.clone(),
+                source: SnapshotError::InvalidTree(source),
+            })?;
+    }
     Ok(Some(snapshot))
+}
+
+#[cfg(test)]
+pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, ServerError> {
+    let service = crate::snapshot_io::SnapshotIo::new(path.to_owned()).map_err(|source| {
+        ServerError::Snapshot {
+            operation: "start test worker",
+            path: path.to_owned(),
+            source: SnapshotError::Io(source),
+        }
+    })?;
+    let result = service.read(None).await;
+    service.shutdown().await?;
+    result
 }
 
 #[cfg(test)]
@@ -800,6 +1066,24 @@ mod tests {
         PaneContentKind, PaneProgress, PaneWorkspace, ProgressTaskReport, ProgressTaskStatus,
         ROOT_ID,
     };
+
+    #[test]
+    fn snapshot_encoding_limit_preserves_previous_file_and_removes_temporary_file() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("snapshot.json");
+        std::fs::write(&path, b"previous complete snapshot").expect("fixture");
+        assert!(write_snapshot_with_limit(&path, &sample_snapshot(), 16).is_err());
+        assert_eq!(
+            std::fs::read(&path).expect("readback"),
+            b"previous complete snapshot"
+        );
+        assert_eq!(
+            std::fs::read_dir(directory.path())
+                .expect("directory")
+                .count(),
+            1
+        );
+    }
 
     fn scratch_snapshot_path() -> PathBuf {
         let dir = std::env::temp_dir()
@@ -860,6 +1144,7 @@ mod tests {
                     ProgressTaskStatus::Running,
                     72.5,
                     "frame 725/1000".to_string(),
+                    String::new(),
                     None,
                 )
                 .unwrap(),
@@ -1150,6 +1435,7 @@ mod tests {
                 ProgressTaskStatus::Running,
                 73.0,
                 "frame 730/1000".to_string(),
+                String::new(),
                 None,
             )
             .unwrap(),
@@ -1161,6 +1447,7 @@ mod tests {
                 ProgressTaskStatus::Running,
                 1.0,
                 "different task".to_string(),
+                String::new(),
                 None,
             )
             .unwrap(),
@@ -1391,6 +1678,54 @@ mod tests {
 
         let result = load_snapshot(&path).await;
         assert!(matches!(result, Err(ServerError::Snapshot { .. })));
+    }
+
+    #[test]
+    fn loaded_snapshot_repairs_only_nonfixed_ai_title_provenance_and_persists_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("title-provenance.json");
+        let original = sample_snapshot();
+        let ids = original.tree.pane_ids_in_tree_order();
+        let (fixed_id, ai_id, manual_id) = (ids[0], ids[1], ids[2]);
+        let mut legacy = serde_json::to_value(&original).unwrap();
+        let nodes = legacy["tree"]["nodes"].as_object_mut().unwrap();
+        for id in [fixed_id, ai_id, manual_id] {
+            let node = nodes.get_mut(&id.0.to_string()).unwrap();
+            node["short_name"] = serde_json::json!(format!("Short {}", id.0));
+            node["inferred_icon"] = serde_json::json!("📜");
+            node["kind"]["Pane"]["title_source"] =
+                serde_json::json!(ilium_core::PaneTitleSource::UserSpecified);
+        }
+        nodes.get_mut(&fixed_id.0.to_string()).unwrap()["is_name_fixed"] = serde_json::json!(true);
+        for id in [fixed_id, ai_id] {
+            nodes.get_mut(&id.0.to_string()).unwrap()["structure_source"] =
+                serde_json::json!(ilium_core::StructureSource::LlmRestructure);
+        }
+        // Raw serialized legacy state is the input, before loader normalization.
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let loaded = load_snapshot_blocking(&path).unwrap().unwrap();
+        let mut expected = legacy;
+        let repaired = &mut expected["tree"]["nodes"][ai_id.0.to_string()];
+        repaired["kind"]["Pane"]["title_source"] =
+            serde_json::json!(ilium_core::PaneTitleSource::Automatic);
+        repaired["presentation_revision"] = serde_json::json!(original
+            .tree
+            .get(ai_id)
+            .unwrap()
+            .presentation_revision
+            .checked_add(1)
+            .unwrap());
+        let expected: SessionSnapshot = serde_json::from_value(expected).unwrap();
+        assert_eq!(
+            loaded, expected,
+            "only AI provenance and its revision may change"
+        );
+        write_snapshot_blocking(&path, &loaded).unwrap();
+        assert_eq!(
+            load_snapshot_blocking(&path).unwrap().unwrap(),
+            expected,
+            "persisted repair must be idempotent while retaining authored bundles"
+        );
     }
 
     /// A snapshot can be syntactically valid JSON that still deserializes

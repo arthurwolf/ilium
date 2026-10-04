@@ -834,7 +834,8 @@ fn write_verified_claude_transcript(server: &TestServer, session_id: &str) -> st
             "cwd": server.project_cwd,
             "message": {"content": "integration test prompt"}
         })
-        .to_string(),
+        .to_string()
+            + "\n",
     )
     .unwrap();
     path
@@ -966,10 +967,12 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             pane_id,
             expected_session_id: resumed_session_id.to_string(),
             expected_title_generation: 0,
+            expected_presentation_revision: tree.get(pane_id).unwrap().presentation_revision,
+            expected_process_id: process_id,
             title: "Title From The Old Session".to_string(),
             short_title: Some("Old Session".to_string()),
             inferred_icon: Some("📜".to_string()),
-            title_source: ilium_core::PaneTitleSource::UserSpecified,
+            title_source: ilium_core::PaneTitleSource::Automatic,
         },
     )
     .await
@@ -1046,6 +1049,8 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             pane_id,
             expected_session_id: resumed_session_id.to_string(),
             expected_title_generation: 0,
+            expected_presentation_revision: tree.get(pane_id).unwrap().presentation_revision,
+            expected_process_id: process_id,
             title: "Stale Clear Result Must Not Return".to_string(),
             short_title: Some("Stale Clear".to_string()),
             inferred_icon: Some("📜".to_string()),
@@ -1123,6 +1128,8 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
             pane_id,
             expected_session_id: resumed_session_id.to_string(),
             expected_title_generation: 0,
+            expected_presentation_revision: tree.get(pane_id).unwrap().presentation_revision,
+            expected_process_id: process_id,
             title: "Stale Result Must Not Return".to_string(),
             short_title: Some("Stale Result".to_string()),
             inferred_icon: Some("📜".to_string()),
@@ -1266,13 +1273,21 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         auto_answer_interstitial_prompts: true,
     };
     let sound_calls = Arc::new(Mutex::new(Vec::new()));
-    let mut server = TestServer::start_with_sound_player(
+    // This fixture verifies success playback, which is opt-in by default.
+    let mut sound_settings = ilium_sound::SoundSettings::default();
+    sound_settings.events.task_succeeded = true;
+    let mut server = TestServer::start_with_sound_player_and_notifications(
         "live-progress-goal-test",
         detection_config,
-        ilium_sound::SoundSettings::default(),
+        sound_settings,
         Arc::new(RecordingSoundPlayer {
             calls: Arc::clone(&sound_calls),
         }),
+        ilium_server::config::NotificationsConfig {
+            enabled: false,
+            suppress_redundant_task_outcomes: false,
+            ..ilium_server::config::NotificationsConfig::default()
+        },
     )
     .await;
     write_verified_codex_transcript(&server, session_id);

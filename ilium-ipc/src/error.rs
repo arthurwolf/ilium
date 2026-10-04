@@ -57,6 +57,14 @@ pub enum IpcError {
     /// protocol versions.
     #[error("failed to (de)serialize frame payload: {0}")]
     Bincode(#[from] bincode::Error),
+
+    /// Cooperative typed allocation/depth/operation admission refused before decoding ownership.
+    #[error("IPC decode {dimension} request {requested} exceeds resource limit {limit}")]
+    DecodeResourceLimit {
+        dimension: &'static str,
+        requested: usize,
+        limit: usize,
+    },
 }
 
 impl IpcError {

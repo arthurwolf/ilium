@@ -252,7 +252,7 @@ impl RawCustomSignature {
             other => {
                 return Err(ConfigLoadError::InvalidCustomSignature(format!(
                     "unknown agent_class {other:?} (expected \"claude\", \"codex\", \"antigravity\", or \"other\")"
-                )))
+                )));
             }
         };
 

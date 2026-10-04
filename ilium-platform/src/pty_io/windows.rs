@@ -44,6 +44,7 @@ impl Reader {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct ShellProbe;
 impl ShellProbe {
     pub(super) fn shell_owns_terminal(&self, process_id: u32) -> Option<bool> {

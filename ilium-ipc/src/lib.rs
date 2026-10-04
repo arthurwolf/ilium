@@ -11,14 +11,21 @@
 //! generic over, keeping it reusable over any stream type (including an
 //! in-memory buffer in tests).
 
+mod allocation;
+mod bounded_decode;
 mod error;
 mod framing;
 mod protocol;
+mod terminal_bytes;
 mod text_trigger;
 mod voice_text;
 
+pub use bounded_decode::BoundedMessage;
 pub use error::IpcError;
-pub use framing::{read_frame, write_frame, FrameReader, FrameWriter, MAX_FRAME_LEN};
+pub use framing::{
+    decode_bounded_frame, decode_frame, encode_frame, encoded_capacity_bound, read_frame,
+    write_frame, EncodedFrame, FrameReader, FrameWriter, MAX_FRAME_LEN,
+};
 pub use ilium_agent_debug::{
     AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
@@ -27,7 +34,7 @@ pub use ilium_agent_debug::{
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, ClientRequest, CustomAgentSignature,
     DetectionReason, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, PaneDetectionEvidence, ProgressMonitorAccepted,
+    NewPaneWorkingDirectory, PaneDetectionEvidence, PaneTitleObservation, ProgressMonitorAccepted,
     ProgressMonitorPreflight, ProgressMonitorRejection, ProgressMonitorRejectionCode,
     ProgressMonitorStatus, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
     WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
@@ -35,7 +42,10 @@ pub use protocol::{
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
     WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };
-pub use text_trigger::{TextTrigger, TextTriggerSettings, TextTriggerTarget};
+pub use text_trigger::{
+    TextTrigger, TextTriggerSettings, TextTriggerTarget, DEFAULT_TEXT_TRIGGER_DELAY_SECONDS,
+    MAX_TEXT_TRIGGER_DELAY_SECONDS,
+};
 pub use voice_text::{
     normalize_voice_sentences, VoiceTextAccepted, VoiceTextPhase, VoiceTextRejection,
     VoiceTextRejectionCode, VoiceTextResult, MAX_VOICE_TEXT_SENTENCES,
@@ -341,6 +351,8 @@ mod tests {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 expected_title_generation: 0,
+                expected_presentation_revision: 0,
+                expected_process_id: Some(123),
                 title: "Fix Auth Bug In Login Flow".to_string(),
                 short_title: Some("Fix Auth".to_string()),
                 inferred_icon: Some("🔐".to_string()),
@@ -350,46 +362,52 @@ mod tests {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 expected_title_generation: 0,
+                expected_presentation_revision: 0,
+                expected_process_id: Some(123),
                 title: "My Agent Name".to_string(),
                 short_title: None,
                 inferred_icon: None,
                 title_source: ilium_core::PaneTitleSource::UserSpecified,
             },
-            ClientRequest::ApplyRestructurePlan(ilium_core::RestructurePlan {
-                children: vec![
-                    ilium_core::RestructureNode::Group {
-                        title: "Auth refactor".to_string(),
-                        short_title: Some("Auth".to_string()),
-                        icon: Some("🔐".to_string()),
-                        children: vec![
-                            ilium_core::RestructureNode::Pane {
-                                id: NodeId(2),
-                                title: "Backend agent".to_string(),
-                                short_title: None,
-                                icon: Some("🔧".to_string()),
-                            },
-                            ilium_core::RestructureNode::ExistingSplitView {
-                                id: NodeId(5),
-                                children: vec![ilium_core::RestructureNode::Pane {
-                                    id: NodeId(3),
-                                    title: "Frontend shell".to_string(),
+            ClientRequest::ApplyRestructurePlan {
+                plan: ilium_core::RestructurePlan {
+                    children: vec![
+                        ilium_core::RestructureNode::Group {
+                            title: "Auth refactor".to_string(),
+                            short_title: Some("Auth".to_string()),
+                            icon: Some("🔐".to_string()),
+                            children: vec![
+                                ilium_core::RestructureNode::Pane {
+                                    id: NodeId(2),
+                                    title: "Backend agent".to_string(),
                                     short_title: None,
-                                    icon: Some("🖥️".to_string()),
-                                }],
-                            },
-                        ],
-                    },
-                    ilium_core::RestructureNode::Folder {
-                        id: NodeId(4),
-                        title: "Project root".to_string(),
-                        short_title: None,
-                        icon: Some("📁".to_string()),
-                    },
-                ],
-            }),
+                                    icon: Some("🔧".to_string()),
+                                },
+                                ilium_core::RestructureNode::ExistingSplitView {
+                                    id: NodeId(5),
+                                    children: vec![ilium_core::RestructureNode::Pane {
+                                        id: NodeId(3),
+                                        title: "Frontend shell".to_string(),
+                                        short_title: None,
+                                        icon: Some("🖥️".to_string()),
+                                    }],
+                                },
+                            ],
+                        },
+                        ilium_core::RestructureNode::Folder {
+                            id: NodeId(4),
+                            title: "Project root".to_string(),
+                            short_title: None,
+                            icon: Some("📁".to_string()),
+                        },
+                    ],
+                },
+                title_observations: Vec::new(),
+            },
             ClientRequest::RevertLastRestructure,
             ClientRequest::ApplyProjectRestructurePlan {
                 project_id: NodeId(1),
+                title_observations: Vec::new(),
                 plan: ilium_core::RestructurePlan {
                     children: vec![ilium_core::RestructureNode::Pane {
                         id: NodeId(2),
@@ -653,6 +671,7 @@ mod tests {
                 ilium_core::ProgressTaskStatus::Running,
                 42.5,
                 "frame 1200/3000, ETA 8m".to_string(),
+                String::new(),
                 None,
             )
             .expect("valid sample report"),
@@ -716,6 +735,12 @@ mod tests {
             },
             ServerEvent::Error {
                 message: "pane 2 failed to spawn: No such file or directory".to_string(),
+            },
+            ServerEvent::PaneResizeRejected {
+                pane_id: NodeId(2),
+                rows: 24,
+                cols: 80,
+                message: "failed to resize pane: parser busy".to_string(),
             },
             ServerEvent::PaneSessionIdResolved {
                 pane_id: NodeId(2),
@@ -1062,6 +1087,9 @@ mod tests {
     #[tokio::test]
     async fn every_client_request_variant_round_trips() {
         for request in sample_client_requests() {
+            let bounded =
+                decode_bounded_frame::<ClientRequest>(&encode_frame(&request).unwrap()).unwrap();
+            assert_eq!(bounded, request, "bounded decode changed request variant");
             let mut buffer = Vec::new();
             write_frame(&mut buffer, &request).await.unwrap();
 
@@ -1243,6 +1271,9 @@ mod tests {
     #[tokio::test]
     async fn every_server_event_variant_round_trips() {
         for event in sample_server_events() {
+            let bounded =
+                decode_bounded_frame::<ServerEvent>(&encode_frame(&event).unwrap()).unwrap();
+            assert_eq!(bounded, event, "bounded decode changed event variant");
             let mut buffer = Vec::new();
             write_frame(&mut buffer, &event).await.unwrap();
 

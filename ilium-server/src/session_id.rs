@@ -76,6 +76,46 @@ pub fn refresh_for_discovery(system: &mut System, pids: &[Pid]) {
     );
 }
 
+pub(crate) const TRANSCRIPT_READ_LIMITS: ilium_agent_session::TranscriptReadLimits =
+    ilium_agent_session::TranscriptReadLimits {
+        line_bytes: 1024 * 1024,
+        total_read_bytes: 16 * 1024 * 1024,
+        scanned_entries: 4096,
+        retained_path_bytes: 4 * 1024 * 1024,
+    };
+
+/// Bounded evidence variant. A partial filesystem scan never proves exclusive
+/// ownership, even if an earlier rank appeared to find one admissible ID.
+pub fn discover_with_trace_bounded(
+    system: &System,
+    pid: Pid,
+    class: &AgentClass,
+    locator: &TranscriptLocator,
+    project_cwd: &Path,
+    ignore_startup_arguments: bool,
+    excluded_session_ids: &HashSet<String>,
+) -> SessionDiscoveryAttempt {
+    let locator = if locator.read_limits().is_some() {
+        locator.clone()
+    } else {
+        locator.with_read_limits(TRANSCRIPT_READ_LIMITS)
+    };
+    let mut attempt = discover_with_trace(
+        system,
+        pid,
+        class,
+        &locator,
+        project_cwd,
+        ignore_startup_arguments,
+        excluded_session_ids,
+    );
+    if locator.read_limit_reached() {
+        attempt.discovered = None;
+        attempt.phases.push(SessionDiscoveryPhase { phase: "evidence admission", outcome: "unresolved", detail: "transcript read/scan resource limit reached; partial evidence cannot claim a session".into() });
+    }
+    attempt
+}
+
 /// Resolves one project-verified session ID while retaining enough structured
 /// evidence to explain every accepted, skipped, and rejected phase in the
 /// agent debug view. Startup arguments are ignored after an in-process session
@@ -293,15 +333,29 @@ fn from_open_files(
     if !ilium_platform::process_info::open_files_are_observable() {
         return None;
     }
-    let verified_session_ids = sorted_session_ids(
-        ilium_platform::process_info::open_file_paths(pid)
-            .into_iter()
-            .filter_map(|target| {
-                locator
-                    .transcript_from_path(class, &target)
-                    .map(|transcript| transcript.session_id)
-            }),
-    );
+    let paths = match locator.read_limits() {
+        Some(limits) => match ilium_platform::process_info::open_file_paths_bounded(
+            pid,
+            ilium_platform::process_info::OpenFilePathLimits {
+                descriptors: limits.scanned_entries,
+                retained_bytes: limits.retained_path_bytes,
+            },
+        ) {
+            Ok(paths) => paths,
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::OutOfMemory {
+                    locator.mark_read_limit_reached();
+                }
+                return None;
+            }
+        },
+        None => ilium_platform::process_info::open_file_paths(pid),
+    };
+    let verified_session_ids = sorted_session_ids(paths.into_iter().filter_map(|target| {
+        locator
+            .transcript_from_path(class, &target)
+            .map(|transcript| transcript.session_id)
+    }));
     let discovered_session_id =
         uniquely_discovered_session_id(verified_session_ids.iter().cloned(), excluded_session_ids);
     Some(OpenFileDiscovery {

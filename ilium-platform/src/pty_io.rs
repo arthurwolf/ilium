@@ -151,6 +151,7 @@ impl OutputReader {
     }
 }
 
+#[derive(Clone)]
 pub struct ShellProbe {
     #[cfg(any(unix, windows))]
     inner: native::ShellProbe,

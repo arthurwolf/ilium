@@ -200,10 +200,17 @@ async fn read_requests<R>(
     R: AsyncRead + Unpin,
 {
     let mut frame_reader = FrameReader::new(read_half);
+    let preparation = match codec_client(Some(&state), true) {
+        Ok(preparation) => preparation,
+        Err(error) => {
+            tracing::warn!(%error, "server decoder bootstrap failed");
+            return;
+        }
+    };
     let mut terminal_subscription_guard = TerminalSubscriptionGuard::new(Arc::clone(&state));
     let mut has_terminal_stream_selection = false;
     loop {
-        let request: ClientRequest = tokio::select! {
+        let decoded = tokio::select! {
             biased;
             // `write_replies` drops `direct_rx` on every exit path, not only
             // the ones already covered by this loop's own EOF/decode-error
@@ -217,7 +224,7 @@ async fn read_requests<R>(
             // `terminal_subscription_guard` contribution until the peer
             // eventually disconnects or the whole server shuts down.
             () = direct_tx.closed() => break,
-            read_result = frame_reader.read() => match read_result {
+            read_result = decode_client_request(&mut frame_reader, &preparation) => match read_result {
                 Ok(request) => request,
                 Err(ilium_ipc::IpcError::Io(io_error))
                     if io_error.kind() == std::io::ErrorKind::UnexpectedEof =>
@@ -233,6 +240,7 @@ async fn read_requests<R>(
             },
         };
 
+        let request = decoded.view();
         let request_name = request.diagnostic_name();
         if request.is_high_frequency_diagnostic() {
             tracing::debug!(request_name, "client request received");
@@ -346,7 +354,12 @@ async fn read_requests<R>(
             // output produced after the cutover cannot pass the direct batch.
             attach_phase_tx.send_replace(AttachPhase::Replaying);
         }
-        let should_close = handlers::handle_request(&state, request, &direct_tx).await;
+        let should_close = decoded
+            .map_async(|request| async {
+                handlers::handle_request(&state, request, &direct_tx).await
+            })
+            .await;
+        let should_close = *should_close.view();
         // `handle_attach` only returns after every tree/replay/metadata event
         // has entered `direct_tx`. Publishing the phase transition here gives
         // the writer a precise barrier rather than relying on a momentarily
@@ -404,7 +417,7 @@ async fn write_replies<W>(
                     Some(event) => {
                         if let Err(error) = write_server_event(
                             &mut frame_writer,
-                            &event,
+                            event,
                             &mut delivered_terminal_sequences,
                             resynchronization_state.as_deref(),
                         )
@@ -420,7 +433,7 @@ async fn write_replies<W>(
             }
         }
 
-        let event = tokio::select! {
+        let (event, is_broadcast) = tokio::select! {
             biased;
             // Checked ahead of `attach_changed`: this connection's reader
             // task owns both `direct_tx` and `attach_phase_tx` and drops
@@ -433,7 +446,7 @@ async fn write_replies<W>(
             // the `None` arm below (and its broadcast drain) unreachable.
             // Draining `direct_rx` first guarantees that never happens.
             direct_event = direct_rx.recv() => match direct_event {
-                Some(event) => event,
+                Some(event) => (event, false),
                 // The reader loop ended (Detach/KillSession/EOF/decode
                 // error): no more requests will ever be dispatched on this
                 // connection, so no more direct replies are coming either.
@@ -530,7 +543,7 @@ async fn write_replies<W>(
                 continue;
             },
             broadcast_result = broadcast_rx.recv() => match broadcast_result {
-                Ok(event) => event,
+                Ok(event) => (event, true),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
                     if let Some(state) = &resynchronization_state {
@@ -554,7 +567,7 @@ async fn write_replies<W>(
             },
         };
 
-        if !should_forward_terminal_event(&event, &terminal_stream_selection) {
+        if is_broadcast && !should_forward_terminal_event(&event, &terminal_stream_selection) {
             continue;
         }
 
@@ -562,16 +575,37 @@ async fn write_replies<W>(
         // watermark in `broadcast_rx`. Do not spend socket bandwidth sending
         // bytes the client must discard, which otherwise helps recreate the
         // same overrun immediately after repair.
-        if is_redundant_terminal_event(&event, &delivered_terminal_sequences) {
+        if is_broadcast && is_redundant_terminal_event(&event, &delivered_terminal_sequences) {
             continue;
         }
+
+        // A broadcast replay describes the forwarder's gap, not this
+        // connection's gap. Repair from this writer's flushed watermark so
+        // a current client does not serialize and parse an old full journal.
+        // Direct Attach replays never pass through this branch.
+        // An Attach phase change can race this select's direct reply. Origin,
+        // rather than the sampled phase, keeps the full direct replay intact.
+        let event = if is_broadcast {
+            let Some(event) = normalize_broadcast_terminal_replay(
+                event,
+                &delivered_terminal_sequences,
+                resynchronization_state.as_deref(),
+            )
+            .await
+            else {
+                continue;
+            };
+            event
+        } else {
+            event
+        };
 
         // A merged frame can overlap a recovery watermark while still ending
         // above it. Replaying the overlapping prefix would duplicate raw
         // terminal bytes, while dropping the whole frame would lose its
         // suffix. Recover again from the authoritative pane journal instead,
         // which emits exactly the missing contiguous tail.
-        if screen_update_requires_recovery(&event, &delivered_terminal_sequences) {
+        if is_broadcast && screen_update_requires_recovery(&event, &delivered_terminal_sequences) {
             if let Some(state) = &resynchronization_state {
                 tracing::warn!("terminal output frame was not contiguous; resynchronizing");
                 if !write_resynchronization(
@@ -590,7 +624,7 @@ async fn write_replies<W>(
 
         if let Err(error) = write_server_event(
             &mut frame_writer,
-            &event,
+            event,
             &mut delivered_terminal_sequences,
             resynchronization_state.as_deref(),
         )
@@ -600,6 +634,26 @@ async fn write_replies<W>(
             break;
         }
     }
+}
+
+async fn normalize_broadcast_terminal_replay(
+    event: ServerEvent,
+    delivered_terminal_sequences: &HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
+) -> Option<ServerEvent> {
+    let ServerEvent::TerminalReplay { pane_id, .. } = event else {
+        return Some(event);
+    };
+    let Some(state) = state else {
+        // Only isolated writer tests lack a server authority; production
+        // connections always receive one when they attach.
+        return Some(event);
+    };
+    let after_sequence = delivered_terminal_sequences
+        .get(&pane_id)
+        .copied()
+        .unwrap_or_default();
+    handlers::terminal_recovery_event(state, pane_id, after_sequence).await
 }
 
 /// Rebuilds a lagging attached client's render cache from the current server
@@ -621,7 +675,7 @@ where
         }
         if let Err(error) = write_server_event(
             frame_writer,
-            &event,
+            event,
             delivered_terminal_sequences,
             Some(state),
         )
@@ -674,7 +728,7 @@ where
             };
             if let Err(error) = write_server_event(
                 frame_writer,
-                &activity_event,
+                activity_event,
                 delivered_terminal_sequences,
                 Some(state),
             )
@@ -694,7 +748,7 @@ where
         };
         if let Err(error) = write_server_event(
             frame_writer,
-            &event,
+            event,
             delivered_terminal_sequences,
             Some(state),
         )
@@ -721,29 +775,93 @@ fn should_forward_terminal_event(
 
 /// Writes one event and advances the per-connection output watermark only
 /// after the frame reached the socket. Failed writes must not claim delivery.
+const SERVER_CODEC_COST: ilium_execution::JobCost = ilium_execution::JobCost {
+    input_bytes: 128 * 1024 * 1024,
+    result_bytes: 192 * 1024 * 1024,
+};
+
+fn codec_client(
+    state: Option<&ServerState>,
+    is_decoder: bool,
+) -> Result<crate::execution::ExecutionClient, ilium_ipc::IpcError> {
+    if let Some(owner) = state.and_then(|state| state.execution.get()) {
+        return Ok(if is_decoder {
+            owner.decoder.clone()
+        } else {
+            owner.encoder.clone()
+        });
+    }
+    #[cfg(test)]
+    {
+        Ok(crate::execution::test_codec_client(is_decoder))
+    }
+    #[cfg(not(test))]
+    {
+        Err(ilium_ipc::IpcError::Io(std::io::Error::other(
+            "server codec execution owner is not initialized",
+        )))
+    }
+}
+
+async fn decode_client_request<R: AsyncRead + Unpin>(
+    reader: &mut FrameReader<R>,
+    preparation: &crate::execution::ExecutionClient,
+) -> Result<ilium_execution::Retained<ClientRequest>, ilium_ipc::IpcError> {
+    let length = reader.read_encoded_length().await?;
+    let reservation = preparation
+        .reserve(ilium_execution::Lane::Cpu, SERVER_CODEC_COST)
+        .await
+        .map_err(|error| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                "server decoder admission: {error:?}"
+            )))
+        })?;
+    let frame = reader.read_encoded_payload(length).await?;
+    preparation
+        .run_reserved(reservation, move |_| {
+            ilium_ipc::decode_bounded_frame::<ClientRequest>(&frame)
+        })
+        .await
+        .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))
+}
+
 async fn write_server_event<W>(
     frame_writer: &mut FrameWriter<W>,
-    event: &ServerEvent,
+    mut event: ServerEvent,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
 ) -> Result<(), ilium_ipc::IpcError>
 where
     W: AsyncWrite + Unpin,
 {
-    // Queued trigger snapshots are wakeups. Sample at this single writer so
-    // old broadcasts cannot undo a newer attach or recovery snapshot.
-    // Release the settings lock before awaiting a potentially blocked socket.
-    if matches!(event, ServerEvent::TextTriggersChanged { .. }) {
-        let state = state.ok_or_else(|| {
+    // Sample authoritative trigger settings before the worker, releasing the
+    // read lock before any CPU admission or potentially blocked output.
+    if matches!(&event, ServerEvent::TextTriggersChanged { .. }) {
+        let authority = state.ok_or_else(|| {
             ilium_ipc::IpcError::Io(std::io::Error::other(
                 "Text Trigger output requires server authority",
             ))
         })?;
-        let current = crate::text_trigger_config::snapshot(state).await;
-        return frame_writer.write(&current).await;
+        event = crate::text_trigger_config::snapshot(authority).await;
     }
-    frame_writer.write(event).await?;
-    record_delivered_terminal_sequence(delivered_terminal_sequences, event);
+    let preparation = codec_client(state, false)?;
+    let reservation = preparation
+        .reserve(ilium_execution::Lane::Cpu, SERVER_CODEC_COST)
+        .await
+        .map_err(|error| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                "server codec admission: {error:?}"
+            )))
+        })?;
+    let encoded = preparation
+        .run_reserved(reservation, move |_| {
+            let frame = ilium_ipc::encode_frame(&event)?;
+            Ok::<_, ilium_ipc::IpcError>((frame, event))
+        })
+        .await
+        .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))?;
+    frame_writer.write_encoded(&encoded.view().0).await?;
+    record_delivered_terminal_sequence(delivered_terminal_sequences, &encoded.view().1);
     Ok(())
 }
 
@@ -867,8 +985,13 @@ async fn drain_pending_broadcasts<W>(
         {
             continue;
         }
+        let Some(event) =
+            normalize_broadcast_terminal_replay(event, delivered_terminal_sequences, state).await
+        else {
+            continue;
+        };
         if let Err(error) =
-            write_server_event(frame_writer, &event, delivered_terminal_sequences, state).await
+            write_server_event(frame_writer, event, delivered_terminal_sequences, state).await
         {
             tracing::warn!("connection write failed while draining final broadcasts: {error}");
             return;
@@ -1180,6 +1303,313 @@ mod tests {
         assert!(delivered.is_empty());
     }
 
+    #[tokio::test]
+    async fn broadcast_replay_for_closed_pane_is_not_sent_to_a_new_parser() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = ServerState::new(crate::state::ServerStateOptions {
+            session_name: "closed-replay".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("closed-replay.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        });
+        let replay = ServerEvent::TerminalReplay {
+            pane_id: NodeId(9),
+            through_sequence: 8,
+            bytes: b"stale journal".to_vec(),
+            is_complete: true,
+        };
+        let delivered = HashMap::from([(NodeId(9), 7)]);
+        assert_eq!(
+            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state)).await,
+            None,
+        );
+        assert_eq!(
+            normalize_broadcast_terminal_replay(replay.clone(), &delivered, None).await,
+            Some(replay),
+            "isolated writer tests without authority retain their supplied event"
+        );
+        sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full() {
+        let directory = tempfile::tempdir().expect("private directory");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "live-replay-normalization".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let group_id = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "writer test")
+            .expect("root accepts a group");
+        let (request_tx, _request_rx) = mpsc::channel(128);
+        // Each `read` blocks the owned command until this test sends input.
+        // This provides two stable, real PTY journal boundaries without a
+        // timing-based flood or a synthetic journal mutation.
+        assert!(
+            !handlers::handle_request(
+                &state,
+                ClientRequest::NewPane {
+                    parent_group: group_id,
+                    kind: ilium_ipc::NewPaneKind::Command(
+                        "printf 'writer-prefix\\n'; read phase; printf 'writer-tail\\n'; read hold"
+                            .to_string(),
+                    ),
+                    working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+                },
+                &request_tx,
+            )
+            .await
+        );
+        let pane_id = {
+            let panes = state.panes.read().await;
+            assert_eq!(panes.len(), 1, "fixture must own exactly one live pane");
+            *panes.keys().next().expect("registered terminal pane")
+        };
+        let (prefix_sequence, prefix_bytes) = timeout(Duration::from_secs(5), async {
+            loop {
+                let replay = handlers::initial_state_events(&state, false, true)
+                    .await
+                    .into_iter()
+                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
+                if let Some(ServerEvent::TerminalReplay {
+                    through_sequence,
+                    bytes,
+                    is_complete: true,
+                    ..
+                }) = replay
+                {
+                    if bytes.windows(b"writer-prefix".len()).any(|window| window == b"writer-prefix") {
+                        break (through_sequence, bytes);
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("first owned PTY output did not arrive");
+        assert!(prefix_sequence > 0);
+
+        assert!(
+            !handlers::handle_request(
+                &state,
+                ClientRequest::KeyInput {
+                    pane_id,
+                    bytes: b"continue\n".to_vec(),
+                    submission: None,
+                },
+                &request_tx,
+            )
+            .await
+        );
+        let (full_sequence, full_bytes, missing_tail) = timeout(Duration::from_secs(5), async {
+            loop {
+                let replay = handlers::initial_state_events(&state, false, true)
+                    .await
+                    .into_iter()
+                    .find(|event| matches!(event, ServerEvent::TerminalReplay { pane_id: id, .. } if *id == pane_id));
+                if let Some(ServerEvent::TerminalReplay {
+                    through_sequence,
+                    bytes,
+                    is_complete: true,
+                    ..
+                }) = replay
+                {
+                    if through_sequence > prefix_sequence
+                        && bytes.windows(b"writer-tail".len()).any(|window| window == b"writer-tail")
+                    {
+                        if let Some(ServerEvent::ScreenUpdate {
+                            first_sequence,
+                            sequence,
+                            bytes: tail,
+                            ..
+                        }) = handlers::terminal_recovery_event(&state, pane_id, prefix_sequence).await
+                        {
+                            let mut joined = prefix_bytes.clone();
+                            joined.extend_from_slice(&tail);
+                            if first_sequence == prefix_sequence + 1
+                                && sequence == through_sequence
+                                && joined == bytes
+                            {
+                                break (through_sequence, bytes, tail);
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("second owned PTY output did not form a contiguous tail");
+        assert!(!missing_tail.is_empty());
+
+        let (server_stream, mut client_stream) = duplex(64 * 1024);
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
+        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (phase_tx, phase_rx) = watch::channel(AttachPhase::Replaying);
+        let (control_tx, control_rx) = mpsc::channel(1);
+        let (applied_tx, applied_rx) = oneshot::channel();
+        control_tx
+            .send(StreamControlCommand {
+                control: StreamControl::StreamAllTerminals,
+                applied: applied_tx,
+            })
+            .await
+            .expect("queue all-terminal selection");
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            phase_rx,
+            control_rx,
+            Some(Arc::clone(&state)),
+        ));
+        let direct_prefix = ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence: prefix_sequence,
+            bytes: prefix_bytes.clone(),
+            is_complete: true,
+        };
+        direct_tx
+            .send(direct_prefix.clone())
+            .await
+            .expect("direct replay");
+        let first = timeout(
+            Duration::from_secs(5),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("direct prefix timed out")
+        .expect("direct prefix frame");
+        assert_eq!(first, direct_prefix);
+        phase_tx.send_replace(AttachPhase::Ready);
+        timeout(Duration::from_secs(5), applied_rx)
+            .await
+            .expect("terminal selection timed out")
+            .expect("terminal selection not applied");
+
+        let full_replay = ServerEvent::TerminalReplay {
+            pane_id,
+            through_sequence: full_sequence,
+            bytes: full_bytes.clone(),
+            is_complete: true,
+        };
+        broadcast_tx
+            .send(full_replay.clone())
+            .expect("broadcast replay");
+        let second = timeout(
+            Duration::from_secs(5),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("missing tail timed out")
+        .expect("missing tail frame");
+        assert_eq!(
+            second,
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: prefix_sequence + 1,
+                sequence: full_sequence,
+                bytes: missing_tail.clone(),
+            },
+            "broadcast recovery must append only the missing raw bytes"
+        );
+        let mut combined = prefix_bytes;
+        combined.extend_from_slice(&missing_tail);
+        assert_eq!(
+            combined, full_bytes,
+            "the delivered raw stream changed byte order or count"
+        );
+
+        // An old replay through the already-delivered sequence must vanish,
+        // while later metadata still crosses the same ordered writer.
+        broadcast_tx
+            .send(full_replay.clone())
+            .expect("duplicate replay");
+        let marker = ServerEvent::Error {
+            message: "after-tail".to_string(),
+        };
+        broadcast_tx.send(marker.clone()).expect("metadata marker");
+        let next = timeout(
+            Duration::from_secs(5),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("metadata after redundant replay timed out")
+        .expect("metadata after redundant replay frame");
+        assert_eq!(next, marker);
+
+        // A new Attach intentionally resets from a full direct replay. Only
+        // broadcasts are normalized by the connection writer.
+        phase_tx.send_replace(AttachPhase::Replaying);
+        direct_tx
+            .send(full_replay.clone())
+            .await
+            .expect("new attach replay");
+        let attached = timeout(
+            Duration::from_secs(5),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("full attach replay timed out")
+        .expect("full attach replay frame");
+        assert_eq!(attached, full_replay);
+        phase_tx.send_replace(AttachPhase::Ready);
+        broadcast_tx
+            .send(full_replay)
+            .expect("up-to-date broadcast replay");
+        let final_marker = ServerEvent::Error {
+            message: "after-attach".to_string(),
+        };
+        broadcast_tx
+            .send(final_marker.clone())
+            .expect("final metadata marker");
+        let next = timeout(
+            Duration::from_secs(5),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("metadata after up-to-date replay timed out")
+        .expect("metadata after up-to-date replay frame");
+        assert_eq!(next, final_marker);
+
+        drop(direct_tx);
+        drop(phase_tx);
+        drop(broadcast_tx);
+        drop(control_tx);
+        timeout(Duration::from_secs(5), writer)
+            .await
+            .expect("writer did not stop")
+            .expect("writer task panicked");
+        assert!(
+            !handlers::handle_request(&state, ClientRequest::ClosePane { pane_id }, &request_tx,)
+                .await
+        );
+        sound_task.abort();
+    }
+
     #[test]
     fn partial_overlap_and_gaps_require_journal_recovery() {
         let pane_id = NodeId(9);
@@ -1344,20 +1774,15 @@ mod text_trigger_writer_tests {
             let mut sequences = HashMap::new();
             write_server_event(
                 &mut framed,
-                &event("stale"),
+                event("stale"),
                 &mut sequences,
                 Some(&writer_state),
             )
             .await
             .unwrap();
-            write_server_event(
-                &mut framed,
-                &event("A"),
-                &mut sequences,
-                Some(&writer_state),
-            )
-            .await
-            .unwrap();
+            write_server_event(&mut framed, event("A"), &mut sequences, Some(&writer_state))
+                .await
+                .unwrap();
             assert!(sequences.is_empty());
         }));
         let mut prefix = [0_u8; 1];
@@ -1399,7 +1824,7 @@ mod text_trigger_writer_tests {
         )
         .await
         .unwrap());
-        write_server_event(&mut writer, &event("A"), &mut sequences, Some(&state))
+        write_server_event(&mut writer, event("A"), &mut sequences, Some(&state))
             .await
             .unwrap();
         let mut saw_rules = false;
@@ -1417,7 +1842,7 @@ mod text_trigger_writer_tests {
         let mut writer = FrameWriter::new(tokio::io::sink());
         let mut sequences = HashMap::new();
         assert!(
-            write_server_event(&mut writer, &event("untrusted"), &mut sequences, None)
+            write_server_event(&mut writer, event("untrusted"), &mut sequences, None)
                 .await
                 .is_err()
         );
@@ -1538,8 +1963,11 @@ mod text_trigger_ordering_regressions {
             Some(&newer),
             "newer authority was not seeded first"
         );
-        assert_eq!(delivered.last(), Some(&authoritative),
-            "queued older TextTriggersChanged rolled the client list back after authoritative synchronization");
+        assert_eq!(
+            delivered.last(),
+            Some(&authoritative),
+            "queued older TextTriggersChanged rolled the client list back after authoritative synchronization"
+        );
     }
 
     #[tokio::test]

@@ -17,3 +17,4 @@ tokio = { version = "1", features = ["io-util", "macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "rt", "rt-multi-thread"] }
+toml = "0.8.23"

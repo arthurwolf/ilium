@@ -449,7 +449,7 @@ async fn rollback_pre_pane_workspace(
                 return format!(
                     "worktree retained at {}: Git metadata path has no parent",
                     path.display()
-                )
+                );
             }
         },
         Err(problem) => {
@@ -527,7 +527,7 @@ async fn rollback_uncommitted_creation(
     let _repository_lease = match prune::repository_lease(&workspace.repo_common_dir).await {
         Ok(lease) => lease,
         Err(error) => {
-            return format!("worktree retained: rollback repository admission failed: {error}")
+            return format!("worktree retained: rollback repository admission failed: {error}");
         }
     };
     rollback_pre_pane_workspace(
@@ -1066,19 +1066,19 @@ pub(crate) async fn create_agent_in_workspace(
                     return Err(format!(
                         "pane {} created but prompt was not delivered: {error}",
                         pane_id.0
-                    ))
+                    ));
                 }
                 Ok(Err(_)) => {
                     return Err(format!(
                         "pane {} created but prompt delivery was cancelled",
                         pane_id.0
-                    ))
+                    ));
                 }
                 Err(_) => {
                     return Err(format!(
                         "pane {} created but prompt delivery timed out",
                         pane_id.0
-                    ))
+                    ));
                 }
             }
         }

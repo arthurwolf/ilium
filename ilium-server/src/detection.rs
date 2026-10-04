@@ -23,13 +23,14 @@ use ilium_core::{
     AgentActivity, AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery, AgentState,
     AgentTurn, NodeId, PaneStatus,
 };
+use ilium_execution::{JobCost, Lane, Reservation};
 use ilium_ipc::{DetectionReason, PaneDetectionEvidence, ServerEvent};
-use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
 
 use tokio::task::JoinHandle;
 
+use crate::foreground_observation::{self, ProbeRequest};
 use crate::notifications::{self, PendingNotification};
 use crate::pane::{
     agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
@@ -98,9 +99,117 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
     }
 }
 
+const PROCESS_TABLE_BYTES: usize = 128 * 1024 * 1024;
+const EVIDENCE_INPUT_BYTES: usize = 192 * 1024 * 1024;
+const EVIDENCE_RESULT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DUE_PANES: usize = 32;
+const EVIDENCE_DEADLINE: Duration = Duration::from_secs(10);
+struct CachedProcessTable {
+    system: std::sync::Mutex<System>,
+    // Reservation survives coordinator cancellation while any admitted job
+    // still holds this cache. No cached table escapes its admission lifetime.
+    _retention: Reservation,
+}
+fn process_table_estimated_bytes(system: &System) -> usize {
+    system.processes().values().fold(
+        system.processes().len().saturating_mul(4096),
+        |bytes, process| {
+            let command = process.cmd().iter().fold(0usize, |bytes, argument| {
+                bytes.saturating_add(argument.capacity().saturating_mul(2))
+            });
+            bytes
+                .saturating_add(process.name().len().saturating_mul(2))
+                .saturating_add(command)
+                .saturating_add(
+                    process
+                        .cwd()
+                        .map_or(0, |path| path.as_os_str().len().saturating_mul(2)),
+                )
+                .saturating_add(
+                    process
+                        .exe()
+                        .map_or(0, |path| path.as_os_str().len().saturating_mul(2)),
+                )
+        },
+    )
+}
+fn detection_input_estimated_bytes(runtime: &crate::pane::TerminalPaneRuntime) -> usize {
+    let optional = |value: &Option<String>| value.as_ref().map_or(0, String::capacity);
+    let class = |value: &ilium_core::AgentClass| match value {
+        ilium_core::AgentClass::Other(name) => name.capacity(),
+        _ => 0,
+    };
+    let goal = |value: &ConfirmedGoalOwner| {
+        class(&value.agent_class).saturating_add(optional(&value.evidence_line))
+    };
+    let mut bytes = 4096usize
+        .saturating_add(optional(&runtime.session_id))
+        .saturating_add(optional(&runtime.invalidated_session_id))
+        .saturating_add(optional(&runtime.pending_generated_session_id));
+    if let Some(value) = &runtime.session_agent_class {
+        bytes = bytes.saturating_add(class(value));
+    }
+    if let Some(value) = &runtime.confirmed_goal_owner {
+        bytes = bytes.saturating_add(goal(value));
+    }
+    if let Some(value) = &runtime.detection_schedule.cached_identity {
+        bytes = bytes
+            .saturating_add(class(&value.class))
+            .saturating_add(value.process_name.capacity())
+            .saturating_add(value.matched_signature.capacity());
+    }
+    if let Some(value) = &runtime.detection_schedule.cached_screen_classification {
+        bytes = bytes
+            .saturating_add(optional(&value.classification.activity_evidence_line))
+            .saturating_add(optional(&value.classification.goal_evidence_line));
+        if let Some(value) = &value.classification.confirmed_goal_owner {
+            bytes = bytes.saturating_add(goal(value));
+        }
+        if let Some(value) = &value.input_goal_owner {
+            bytes = bytes.saturating_add(goal(value));
+        }
+        if let Some((_, value)) = &value.identity {
+            bytes = bytes.saturating_add(class(value));
+        }
+    }
+    bytes = bytes.saturating_add(
+        runtime
+            .agent_launcher_ancestors
+            .capacity()
+            .saturating_mul(std::mem::size_of::<AgentProcessKey>()),
+    );
+    for key in &runtime.agent_launcher_ancestors {
+        bytes = bytes.saturating_add(class(&key.class));
+    }
+    bytes.saturating_mul(4)
+}
+fn execution_error(error: impl std::fmt::Display) -> crate::error::ServerError {
+    std::io::Error::other(format!("detection evidence execution: {error}")).into()
+}
+
 async fn run_loop(state: std::sync::Arc<ServerState>) {
-    let mut system = System::new();
-    let mut children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+    let Some(owner) = state.execution.get() else {
+        tracing::error!("detection requires bootstrap-owned server execution");
+        return;
+    };
+    let execution = owner.client.clone();
+    let retention = match execution.foundation.try_reserve(
+        Lane::Io,
+        JobCost {
+            input_bytes: PROCESS_TABLE_BYTES,
+            result_bytes: 0,
+        },
+    ) {
+        Ok(retention) => retention,
+        Err(error) => {
+            tracing::error!(?error, "process-table admission failed");
+            return;
+        }
+    };
+    let system = Arc::new(CachedProcessTable {
+        system: std::sync::Mutex::new(System::new()),
+        _retention: retention,
+    });
     let mut last_system_refresh_at = None;
     let mut system_generation = 0_u64;
 
@@ -125,80 +234,103 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         if !crate::agent_debug::is_any_debug_sink_enabled(&state)
             && !system_refresh_required(&state, last_system_refresh_at, Instant::now()).await
         {
-            if let Err(error) =
-                run_due_panes(&state, &mut system, &children_index, system_generation).await
-            {
+            if let Err(error) = run_due_panes(&state, &system, system_generation).await {
                 tracing::error!("detection loop: tick failed: {error}");
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
             continue;
         }
 
-        // The refresh is the syscall-heavy part (`/proc` reads for every
-        // process on the machine); running it on a blocking thread keeps
-        // this tick from stalling the tokio runtime's async tasks (other
-        // panes' IO, other connections) while it happens. `identify_agent`
-        // itself, called below, is pure in-memory iteration over the
-        // already-refreshed snapshot, so it does not need the same
-        // treatment.
-        let refreshed = tokio::task::spawn_blocking(move || {
-            // Lower this thread's scheduling niceness before paying the
-            // `/proc` scan cost below -- under heavy machine-wide load from
-            // *other* processes, this keeps the scan from competing on
-            // equal footing with keystroke-path work for CPU time. Only
-            // ever adjusts the calling thread's own niceness (never another
-            // thread's), so this never needs elevated privileges.
-            // The `sysinfo` process scan below must never compete on equal
-            // footing with keystroke-path work when the machine is loaded.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            ilium_detect::refresh(&mut system);
-            system
-        })
-        .await;
+        // Only remembered interpreted launchers need fresh argv on platforms
+        // whose ordinary snapshot caches it. Exec can change argv without a
+        // new PID/birth key; keep this native read in the owned scan worker.
+        let command_refresh_process_ids = {
+            let panes = state.panes.read().await;
+            let bytes = panes
+                .values()
+                .filter_map(|resource| match resource {
+                    PaneResource::Terminal(runtime) => {
+                        Some(detection_input_estimated_bytes(runtime))
+                    }
+                    _ => None,
+                })
+                .fold(0usize, usize::saturating_add);
+            if bytes > 16 * 1024 * 1024 {
+                tracing::error!("launcher refresh metadata exceeds admission");
+                drop(panes);
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+            let mut process_ids = Vec::new();
+            for resource in panes.values() {
+                if let PaneResource::Terminal(runtime) = resource {
+                    process_ids.extend(
+                        runtime
+                            .agent_launcher_ancestors
+                            .iter()
+                            .map(|key| Pid::from_u32(key.process_id)),
+                    );
+                }
+            }
+            process_ids.sort_unstable();
+            process_ids.dedup();
+            process_ids
+        };
+        let refresh_input_bytes = (64usize * 1024 * 1024).saturating_add(
+            command_refresh_process_ids
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Pid>()),
+        );
+        let process_table = Arc::clone(&system);
+        let refreshed = execution
+            .run(
+                Lane::Io,
+                JobCost {
+                    input_bytes: refresh_input_bytes,
+                    result_bytes: 1024,
+                },
+                move |_| -> Result<(), std::io::Error> {
+                    let mut system = process_table
+                        .system
+                        .lock()
+                        .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
+                    ilium_detect::refresh(&mut system);
+                    if !command_refresh_process_ids.is_empty() {
+                        system.refresh_processes_specifics(
+                            sysinfo::ProcessesToUpdate::Some(&command_refresh_process_ids),
+                            true,
+                            sysinfo::ProcessRefreshKind::nothing()
+                                .with_cmd(sysinfo::UpdateKind::Always),
+                        );
+                    }
+                    if process_table_estimated_bytes(&system) > PROCESS_TABLE_BYTES {
+                        *system = System::new();
+                        return Err(std::io::Error::other(
+                            "process table exceeds retained admission",
+                        ));
+                    }
+                    Ok(())
+                },
+            )
+            .await;
         match refreshed {
-            Ok(refreshed_system) => {
-                system = refreshed_system;
-                children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+            Ok(_completed) => {
                 system_generation = system_generation.saturating_add(1);
                 last_system_refresh_at = Some(Instant::now());
             }
-            Err(join_error) => {
-                // The blocking task panicked, taking the `System` it owned
-                // with it -- there is no way to recover that value, so
-                // this tick reinitializes with a fresh (empty until the
-                // next successful refresh) one rather than leaving `system`
-                // uninitialized for the next loop iteration. Logged and
-                // continued rather than taking the whole detection loop
-                // (and with it every pane's status updates) down over one
-                // bad refresh.
-                //
-                // Deliberately `continue`s rather than falling through to
-                // `run_due_panes` below: classifying every due pane against
-                // this empty snapshot would find no process tree for any of
-                // them, misreporting every currently-detected agent pane as
-                // `PlainShell` for a tick (a real, broadcast status
-                // regression, not a no-op) instead of simply deferring
-                // classification to the next tick once a real refresh
-                // succeeds.
-                tracing::error!("detection loop: sysinfo refresh task panicked: {join_error}");
-                system = System::new();
-                // `last_system_refresh_at` must not keep claiming the old
-                // (now-discarded) snapshot is still fresh -- otherwise a
-                // later tick whose due panes all still carry a live cached
-                // identity can skip `system_refresh_required` entirely and
-                // run `run_due_panes` straight against this empty `system`,
-                // which is exactly the "misreport every agent pane as
-                // PlainShell" outcome the comment above says this branch
-                // avoids. Clearing it forces the very next tick's snapshot
-                // check to require a real refresh unconditionally.
+            Err(error) => {
+                // Failed/overflowed native evidence is not an empty process
+                // table: retain live classification and retry after backoff.
+                tracing::error!(%error, "detection process refresh failed");
                 last_system_refresh_at = None;
+                tokio::time::sleep(Duration::from_millis(250)).await;
                 continue;
             }
         }
 
-        if let Err(error) =
-            run_due_panes(&state, &mut system, &children_index, system_generation).await
-        {
+        if let Err(error) = run_due_panes(&state, &system, system_generation).await {
             tracing::error!("detection loop: tick failed: {error}");
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
 }
@@ -219,30 +351,59 @@ async fn system_refresh_required(
         return true;
     }
 
-    let panes = state.panes.read().await;
-    panes.values().any(|resource| {
-        let PaneResource::Terminal(runtime) = resource else {
-            return false;
-        };
-        if runtime.detection_schedule.next_due > now {
-            return false;
+    let processes = {
+        let panes = state.panes.read().await;
+        let mut processes = Vec::new();
+        for resource in panes.values() {
+            let PaneResource::Terminal(runtime) = resource else {
+                continue;
+            };
+            if runtime.detection_schedule.next_due > now {
+                continue;
+            }
+            let schedule = &runtime.detection_schedule;
+            if schedule.identity_system_generation.is_none()
+                || schedule
+                    .cached_screen_classification
+                    .as_ref()
+                    .is_none_or(|cache| cache.request_generation != schedule.request_generation)
+            {
+                return true;
+            }
+            if let Some(identity) = &schedule.cached_identity {
+                if processes.len() == MAX_DUE_PANES {
+                    return true;
+                }
+                processes.push(identity.pid);
+            }
         }
-        let schedule = &runtime.detection_schedule;
-        if schedule.identity_system_generation.is_none() {
-            return true;
-        }
-        if schedule
-            .cached_screen_classification
-            .as_ref()
-            .is_none_or(|cache| cache.request_generation != schedule.request_generation)
-        {
-            return true;
-        }
-        schedule
-            .cached_identity
-            .as_ref()
-            .is_some_and(|identity| !ilium_platform::process_control::is_running(identity.pid))
-    })
+        processes
+    };
+    if processes.is_empty() {
+        return false;
+    }
+    let Some(owner) = state.execution.get() else {
+        return true;
+    };
+    match owner
+        .client
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 8192,
+                result_bytes: 64,
+            },
+            move |_| -> Result<bool, std::io::Error> {
+                Ok(processes
+                    .into_iter()
+                    .any(|process_id| !ilium_platform::process_control::is_running(process_id)))
+            },
+        )
+        .await
+    {
+        Ok(required) => *required.view(),
+        Err(_) => true,
+    }
 }
 
 fn system_snapshot_age_requires_refresh(last_refresh_at: Option<Instant>, now: Instant) -> bool {
@@ -356,46 +517,83 @@ struct PendingAutoAnswer {
 /// detection tick, another pane, or the Tokio executor.
 async fn deliver_auto_answer(state: Arc<ServerState>, pending: PendingAutoAnswer) {
     let _input_guard = pending.input_gate.lock().await;
-    let (admitted, mut cancel_automated) = {
-        let settings = state.agent_detection_settings.read().await;
-        if settings.revision != pending.settings_revision
-            || !settings.detection.auto_answer_interstitial_prompts
-        {
-            return;
-        }
-        drop(settings);
-        let tree = state.tree.read().await;
-        let Some(ilium_core::NodeKind::Pane { status, .. }) =
-            tree.get(pending.pane_id).map(|node| &node.kind)
-        else {
-            return;
-        };
+    let (probe_request, preflight_cancel_generation) = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pending.pane_id) else {
             return;
         };
-        if !matches!(pending.input.status(), ilium_pty::OwnerStatus::Running)
-            || !Arc::ptr_eq(&pending.input_gate, &runtime.input_gate)
+        if !Arc::ptr_eq(&pending.input_gate, &runtime.input_gate)
             || !runtime.session.input_handle().same_session(&pending.input)
             || runtime.auto_answer_attempt.as_ref() != Some(&pending.attempt)
-            || runtime.detection_schedule.cached_identity.as_ref()
-                != Some(&pending.attempt.identity)
-            || runtime.automated_agent_input_rejection(status).is_some()
-            || !runtime.session.try_screen_snapshot().is_some_and(|screen| {
-                ilium_detect::interstitial_prompt_response(
-                    &pending.attempt.identity.class,
-                    &screen.text,
-                ) == Some(pending.attempt.key)
-            })
         {
             return;
         }
-        // No await separates the fresh process/foreground preflight from
-        // admission. The watch cancels bytes still queued when ownership ends.
-        (
-            pending.input.write(pending.attempt.key.as_bytes()),
-            runtime.agent_input_cancel.subscribe(),
-        )
+        let input_cancel_generation = *runtime.agent_input_cancel.borrow();
+        (ProbeRequest::for_runtime(runtime), input_cancel_generation)
+    };
+    let probe_observation = foreground_observation::observe(&state, probe_request)
+        .await
+        .ok();
+    // Reacquire settings/tree/panes after native work. Input is admitted only
+    // after every current owner, screen, and cancellation fence still agrees.
+    let admission = {
+        let settings = state.agent_detection_settings.read().await;
+        if settings.revision != pending.settings_revision
+            || !settings.detection.auto_answer_interstitial_prompts
+        {
+            None
+        } else {
+            let tree = state.tree.read().await;
+            let panes = state.panes.read().await;
+            match (tree.get(pending.pane_id), panes.get(&pending.pane_id)) {
+                (Some(node), Some(PaneResource::Terminal(runtime))) => {
+                    let status = match &node.kind {
+                        ilium_core::NodeKind::Pane { status, .. } => Some(status),
+                        _ => None,
+                    };
+                    if !matches!(pending.input.status(), ilium_pty::OwnerStatus::Running)
+                        || !Arc::ptr_eq(&pending.input_gate, &runtime.input_gate)
+                        || !runtime.session.input_handle().same_session(&pending.input)
+                        || runtime.auto_answer_attempt.as_ref() != Some(&pending.attempt)
+                        || *runtime.agent_input_cancel.borrow() != preflight_cancel_generation
+                        || runtime.detection_schedule.cached_identity.as_ref()
+                            != Some(&pending.attempt.identity)
+                        || status.is_none_or(|status| {
+                            runtime
+                                .automated_agent_input_rejection(status, probe_observation.as_ref())
+                                .is_some()
+                        })
+                        || !runtime.session.try_screen_snapshot().is_some_and(|screen| {
+                            ilium_detect::interstitial_prompt_response(
+                                &pending.attempt.identity.class,
+                                &screen.text,
+                            ) == Some(pending.attempt.key)
+                        })
+                    {
+                        None
+                    } else {
+                        Some((
+                            pending.input.write(pending.attempt.key.as_bytes()),
+                            runtime.agent_input_cancel.subscribe(),
+                        ))
+                    }
+                }
+                _ => None,
+            }
+        }
+    };
+    let Some((admitted, mut cancel_automated)) = admission else {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pending.pane_id) {
+            if runtime.session.input_handle().same_session(&pending.input) {
+                if let Some(attempt) = runtime.auto_answer_attempt.as_mut() {
+                    if *attempt == pending.attempt {
+                        attempt.phase = AutoAnswerPhase::Suppressed;
+                    }
+                }
+            }
+        }
+        return;
     };
     let result = match admitted {
         Ok(receipt) => tokio::select! {
@@ -425,8 +623,23 @@ async fn deliver_auto_answer(state: Arc<ServerState>, pending: PendingAutoAnswer
         settings.revision == pending.settings_revision
             && settings.detection.auto_answer_interstitial_prompts
     };
-    let process_valid =
-        crate::agent_identity_guard::matches_current_agent_identity(&pending.attempt.identity);
+    let postwrite_request = {
+        let panes = state.panes.read().await;
+        match panes.get(&pending.pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if runtime.session.input_handle().same_session(&pending.input)
+                    && runtime.auto_answer_attempt.as_ref() == Some(&pending.attempt) =>
+            {
+                Some(ProbeRequest::for_runtime(runtime))
+            }
+            _ => None,
+        }
+    };
+    let postwrite_observation = if let Some(request) = postwrite_request {
+        foreground_observation::observe(&state, request).await.ok()
+    } else {
+        None
+    };
     let mut panes = state.panes.write().await;
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pending.pane_id) else {
         return;
@@ -437,7 +650,13 @@ async fn deliver_auto_answer(state: Arc<ServerState>, pending: PendingAutoAnswer
         return;
     }
     let context_valid = settings_valid
-        && process_valid
+        && runtime.agent_input_available
+        && *runtime.agent_input_cancel.borrow() == preflight_cancel_generation
+        && postwrite_observation.as_ref().is_some_and(|observed| {
+            observed.current_agent_identity(runtime)
+                && (observed.shell_owns_terminal() == Some(false)
+                    || !matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell))
+        })
         && matches!(pending.input.status(), ilium_pty::OwnerStatus::Running)
         && runtime.detection_schedule.cached_identity.as_ref() == Some(&pending.attempt.identity)
         && runtime.session.try_screen_snapshot().is_some_and(|screen| {
@@ -476,10 +695,34 @@ fn auto_answer_completion_phase(
 
 async fn run_due_panes(
     state: &Arc<ServerState>,
-    system: &mut System,
-    children_index: &ilium_detect::ProcessChildrenIndex,
+    system: &Arc<CachedProcessTable>,
     system_generation: u64,
 ) -> Result<(), crate::error::ServerError> {
+    run_due_panes_with_hook(state, system, system_generation, || {}).await
+}
+async fn run_due_panes_with_hook(
+    state: &Arc<ServerState>,
+    system: &Arc<CachedProcessTable>,
+    system_generation: u64,
+    before_evidence: impl FnOnce() + Send + 'static,
+) -> Result<(), crate::error::ServerError> {
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| execution_error("server bank not started"))?
+        .client
+        .clone();
+    // Reserve before cloning classification inputs or formatting screens.
+    let reservation = execution
+        .foundation
+        .try_reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: EVIDENCE_INPUT_BYTES,
+                result_bytes: EVIDENCE_RESULT_BYTES,
+            },
+        )
+        .map_err(|error| execution_error(format!("{error:?}")))?;
     let now = Instant::now();
 
     /// One due pane's classification inputs, snapshotted under a brief
@@ -487,7 +730,11 @@ async fn run_due_panes(
     /// run with no lock held at all.
     struct DuePane {
         pane_id: NodeId,
+        input: ilium_pty::PtyInput,
+        agent_generation: u64,
+        title_generation: u64,
         shell_pid: Option<u32>,
+        shell_observer: Option<ilium_pty::PtyShellObserver>,
         screen_generation: u64,
         request_generation: u64,
         confirmed_goal_owner: Option<ConfirmedGoalOwner>,
@@ -499,6 +746,7 @@ async fn run_due_panes(
         session_process_started_at_unix_seconds: Option<u64>,
         pending_generated_session_id: Option<String>,
         identity_system_generation: Option<u64>,
+        agent_launcher_ancestors: Vec<AgentProcessKey>,
         cached_identity: Option<ilium_detect::AgentIdentity>,
         cached_screen_classification: Option<ScreenClassificationCache>,
     }
@@ -515,6 +763,16 @@ async fn run_due_panes(
         std::collections::HashSet<String>,
     ) = {
         let panes = state.panes.read().await;
+        let input_bytes = panes
+            .values()
+            .filter_map(|resource| match resource {
+                PaneResource::Terminal(runtime) => Some(detection_input_estimated_bytes(runtime)),
+                _ => None,
+            })
+            .fold(0usize, usize::saturating_add);
+        if input_bytes > 16 * 1024 * 1024 {
+            return Err(execution_error("pane detection metadata exceeds admission"));
+        }
         let (claimed_session_ids, ambiguous_session_ids) =
             partition_session_claims(panes.iter().filter_map(|(pane_id, resource)| {
                 match resource {
@@ -538,9 +796,17 @@ async fn run_due_panes(
             if runtime.detection_schedule.next_due > now {
                 continue;
             }
+            if due_panes.len() == MAX_DUE_PANES {
+                break;
+            }
             due_panes.push(DuePane {
                 pane_id: *pane_id,
+                input: runtime.session.input_handle(),
+                agent_generation: runtime.agent_generation,
+                title_generation: runtime.title_generation,
                 shell_pid: runtime.session.process_id(),
+                shell_observer: matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell)
+                    .then(|| runtime.session.shell_observer()),
                 screen_generation: runtime.session.screen_generation(),
                 request_generation: runtime.detection_schedule.request_generation,
                 confirmed_goal_owner: runtime.confirmed_goal_owner.clone(),
@@ -553,6 +819,7 @@ async fn run_due_panes(
                     .session_process_started_at_unix_seconds,
                 pending_generated_session_id: runtime.pending_generated_session_id.clone(),
                 identity_system_generation: runtime.detection_schedule.identity_system_generation,
+                agent_launcher_ancestors: runtime.agent_launcher_ancestors.clone(),
                 cached_identity: runtime.detection_schedule.cached_identity.clone(),
                 cached_screen_classification: runtime
                     .detection_schedule
@@ -567,40 +834,98 @@ async fn run_due_panes(
         return Ok(());
     }
 
-    // Capture one coherent Settings revision for the whole detection batch.
-    // A concurrent Settings update becomes visible on the next batch rather
-    // than mixing intervals and custom signatures halfway through this one.
-    let (detection_settings_revision, detection_config, custom_signatures) =
-        state.agent_detection_versioned_snapshot().await;
+    #[derive(Clone)]
+    struct ClassifiedPane {
+        pane_id: NodeId,
+        input: ilium_pty::PtyInput,
+        agent_generation: u64,
+        title_generation: u64,
+        captured_session_id: Option<String>,
+        agent_launcher_ancestors: Vec<AgentProcessKey>,
+        status: PaneStatus,
+        identity: Option<ilium_detect::AgentIdentity>,
+        screen_generation: u64,
+        request_generation: u64,
+        confirmed_goal_owner: Option<ConfirmedGoalOwner>,
+        is_fresh_agent_screen: bool,
+        is_session_identity_invalidated: bool,
+        invalidated_session_id: Option<String>,
+        session_process_id: Option<u32>,
+        pending_generated_session_id: Option<String>,
+        needs_session_discovery: bool,
+        shell_pid: Option<u32>,
+        shell_observer: Option<ilium_pty::PtyShellObserver>,
+        shell_was_plain: bool,
+        shell_ownership: Option<bool>,
+        activity_evidence: Option<ilium_detect::ActivityEvidence>,
+        activity_evidence_line: Option<String>,
+        goal_evidence: Option<ilium_detect::GoalEvidence>,
+        goal_evidence_line: Option<String>,
+        goal_evidence_rule: Option<ilium_detect::GoalEvidenceRule>,
+        goal_evidence_pattern: Option<&'static str>,
+        goal_was_retained: bool,
+        /// Key to auto-send if this tick's screen shows a known one-time
+        /// interstitial dialog (see `ilium_detect::interstitial_prompt_response`),
+        /// carried through from phase 2 since `screen_snapshot.text` itself
+        /// isn't retained on `ClassifiedPane`.
+        interstitial_prompt_response: Option<&'static str>,
+        screen_classification_cache: ScreenClassificationCache,
+    }
+
+    let evidence_state = Arc::clone(state);
+    let process_table = Arc::clone(system);
+    let handle = tokio::runtime::Handle::current();
+    let evidence = tokio::time::timeout(EVIDENCE_DEADLINE, execution.run_reserved(reservation, move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+        before_evidence();
+        let mut system = process_table.system.lock().map_err(|_| std::io::Error::other("process table lock poisoned"))?;
+        let children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+        let state = evidence_state;
+        let stop = context.stop_token();
+        handle.block_on(async move {
+        let (detection_settings_revision, detection_config, custom_signatures) = {
+            let settings = state.agent_detection_settings.read().await;
+            let bytes = settings.custom_signatures.iter().fold(settings.custom_signatures.capacity().saturating_mul(std::mem::size_of::<ilium_detect::AgentSignature>()), |bytes, signature| bytes.saturating_add(signature.name_substring.len().saturating_mul(2)));
+            if bytes > 16 * 1024 * 1024 { return Err(std::io::Error::other("detection signature settings exceed evidence admission")); }
+            (settings.revision, settings.detection, settings.custom_signatures.clone())
+        };
 
     // Phase 2a: identify process trees with no lock held. Screen contents
     // are not captured until identity succeeds, so ordinary shell panes do
     // not allocate a full vt100 text snapshot on every slow-tier check.
     struct IdentifiedPane {
         due: DuePane,
+        agent_launcher_ancestors: Vec<AgentProcessKey>,
         identity: Option<ilium_detect::AgentIdentity>,
         cached_screen_classification: Option<ScreenClassificationCache>,
     }
     let identified_panes: Vec<IdentifiedPane> = due_panes
         .into_iter()
         .map(|due| {
-            let identity = cached_identity_for_generation(
-                due.identity_system_generation,
-                system_generation,
-                &due.cached_identity,
-            )
-            .unwrap_or_else(|| {
+            let mut agent_launcher_ancestors = ilium_detect::retain_current_agent_launchers(
+                &system, &due.agent_launcher_ancestors,
+            );
+            // Changing exclusions invalidates an otherwise generation-matched
+            // identity cache; ordinary panes retain their existing fast path.
+            let cached = if agent_launcher_ancestors.is_empty() && due.agent_launcher_ancestors.is_empty() {
+                cached_identity_for_generation(due.identity_system_generation, system_generation, &due.cached_identity)
+            } else { None };
+            let identity = cached.unwrap_or_else(|| {
                 due.shell_pid.and_then(|shell_pid| {
-                    ilium_detect::identify_agent_with_extra(
-                        system,
-                        Pid::from_u32(shell_pid),
-                        children_index,
-                        &custom_signatures,
+                    ilium_detect::identify_agent_with_extra_excluding(
+                        &system, Pid::from_u32(shell_pid), &children_index,
+                        &custom_signatures, &agent_launcher_ancestors,
                     )
                 })
             });
+            if let (Some(root), Some(owner)) = (due.shell_pid, identity.as_ref()) {
+                for launcher in ilium_detect::agent_launcher_ancestors(&system, Pid::from_u32(root), owner, &custom_signatures) {
+                    if !agent_launcher_ancestors.contains(&launcher) {
+                        agent_launcher_ancestors.push(launcher);
+                    }
+                }
+            }
             let cached_screen_classification =
-                (!crate::agent_debug::is_any_debug_sink_enabled(state))
+                (!crate::agent_debug::is_any_debug_sink_enabled(&state))
                     .then(|| {
                         reusable_screen_classification(
                             due.cached_screen_classification.as_ref(),
@@ -613,6 +938,7 @@ async fn run_due_panes(
                     .flatten();
             IdentifiedPane {
                 due,
+                agent_launcher_ancestors,
                 identity,
                 cached_screen_classification,
             }
@@ -629,41 +955,15 @@ async fn run_due_panes(
             let Some(PaneResource::Terminal(runtime)) = panes.get(&pane.due.pane_id) else {
                 continue;
             };
-            snapshots.insert(pane.due.pane_id, runtime.session.screen_snapshot());
+            let Ok(snapshot) = runtime.session.screen_snapshot_with_limit(2 * 1024 * 1024) else {
+                return Err(std::io::Error::other("detection screen evidence admission limit reached"));
+            };
+            snapshots.insert(pane.due.pane_id, snapshot);
         }
         snapshots
     };
 
-    struct ClassifiedPane {
-        pane_id: NodeId,
-        status: PaneStatus,
-        identity: Option<ilium_detect::AgentIdentity>,
-        screen_generation: u64,
-        request_generation: u64,
-        confirmed_goal_owner: Option<ConfirmedGoalOwner>,
-        is_fresh_agent_screen: bool,
-        is_session_identity_invalidated: bool,
-        invalidated_session_id: Option<String>,
-        session_process_id: Option<u32>,
-        pending_generated_session_id: Option<String>,
-        needs_session_discovery: bool,
-        shell_pid: Option<u32>,
-        activity_evidence: Option<ilium_detect::ActivityEvidence>,
-        activity_evidence_line: Option<String>,
-        goal_evidence: Option<ilium_detect::GoalEvidence>,
-        goal_evidence_line: Option<String>,
-        goal_evidence_rule: Option<ilium_detect::GoalEvidenceRule>,
-        goal_evidence_pattern: Option<&'static str>,
-        goal_was_retained: bool,
-        /// Key to auto-send if this tick's screen shows a known one-time
-        /// interstitial dialog (see `ilium_detect::interstitial_prompt_response`),
-        /// carried through from phase 2 since `screen_snapshot.text` itself
-        /// isn't retained on `ClassifiedPane`.
-        interstitial_prompt_response: Option<&'static str>,
-        screen_classification_cache: ScreenClassificationCache,
-    }
-
-    let classifications: Vec<ClassifiedPane> = identified_panes
+    let mut classifications: Vec<ClassifiedPane> = identified_panes
         .into_iter()
         .map(|identified| {
             let due_pane = identified.due;
@@ -737,6 +1037,11 @@ async fn run_due_panes(
             let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
             ClassifiedPane {
                 pane_id: due_pane.pane_id,
+                input: due_pane.input,
+                agent_generation: due_pane.agent_generation,
+                title_generation: due_pane.title_generation,
+                captured_session_id: due_pane.session_id,
+                agent_launcher_ancestors: identified.agent_launcher_ancestors,
                 status: classified_identity.status,
                 identity,
                 screen_generation,
@@ -749,6 +1054,9 @@ async fn run_due_panes(
                 pending_generated_session_id: due_pane.pending_generated_session_id,
                 needs_session_discovery,
                 shell_pid: due_pane.shell_pid,
+                shell_was_plain: due_pane.shell_observer.is_some(),
+                shell_observer: due_pane.shell_observer,
+                shell_ownership: None,
                 activity_evidence: classified_identity.activity_evidence,
                 activity_evidence_line: classified_identity.activity_evidence_line,
                 goal_evidence: classified_identity.goal_evidence,
@@ -772,7 +1080,7 @@ async fn run_due_panes(
         .filter_map(|pane| pane.identity.as_ref())
         .map(|identity| Pid::from_u32(identity.pid))
         .collect();
-    crate::session_id::refresh_for_discovery(system, &discovery_pids);
+    crate::session_id::refresh_for_discovery(&mut system, &discovery_pids);
     // Sequential (not a one-shot `filter_map`/`collect`) so `claimed_session_ids`
     // accumulates *within* this same tick: once pane A resolves to session
     // S, pane B -- classified later in this same due-batch -- must never
@@ -821,7 +1129,7 @@ async fn run_due_panes(
             .map(|(session_id, _)| session_id.clone())
             .collect();
         let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
-        let transcript_locator = TranscriptLocator::new(&state.home_dir, project_cwd);
+        let transcript_locator = TranscriptLocator::new_bounded(&state.home_dir, project_cwd, crate::session_id::TRANSCRIPT_READ_LIMITS);
         excluded_session_ids.extend(ambiguous_session_ids.iter().cloned());
         // `/resume` can leave the old transcript descriptor open until the
         // CLI finishes switching. For the same process, that old ID is known
@@ -885,8 +1193,8 @@ async fn run_due_panes(
                         "pending identity {session_id} has no verified project transcript yet"
                     ),
                 };
-                let attempt = crate::session_id::discover_with_trace(
-                    system,
+                let attempt = crate::session_id::discover_with_trace_bounded(
+                    &system,
                     Pid::from_u32(identity.pid),
                     &identity.class,
                     &transcript_locator,
@@ -932,13 +1240,97 @@ async fn run_due_panes(
         discovered_session_ids.insert(pane.pane_id, session_id);
     }
 
+        // All work needing the cached process table is complete. A native
+        // ToolHelp foreground scan can block, so it must not hold this mutex.
+        drop(system);
+        if stop.is_stopped() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection evidence cancelled")); }
+        // All filesystem ranks have finished. Reject PID reuse/exec/exit
+        // against fresh single-process evidence before returning a claim.
+        for pane in &mut classifications {
+            if pane.identity.as_ref().is_some_and(|identity| {
+                !crate::agent_identity_guard::matches_current_agent_identity(identity)
+            }) {
+                // Keep the row so phase 3 revokes its existing input epoch and
+                // cancels already queued agent-owned writes. Dropping it would
+                // leave the last admitted identity active until another tick.
+                pane.identity = None;
+                pane.needs_session_discovery = false;
+                pane.confirmed_goal_owner = None;
+                pane.is_fresh_agent_screen = false;
+                pane.interstitial_prompt_response = None;
+                pane.activity_evidence = None;
+                pane.activity_evidence_line = None;
+                pane.goal_evidence = None;
+                pane.goal_evidence_line = None;
+                pane.goal_evidence_rule = None;
+                pane.goal_evidence_pattern = None;
+                pane.goal_was_retained = false;
+                let unavailable = classify_identity(None, "", None);
+                pane.status = unavailable.status.clone();
+                pane.screen_classification_cache = ScreenClassificationCache {
+                    screen_generation: pane.screen_generation,
+                    request_generation: pane.request_generation,
+                    identity: None,
+                    input_goal_owner: None,
+                    classification: unavailable,
+                    is_fresh_agent_screen: false,
+                    interstitial_prompt_response: None,
+                };
+                discovered_session_ids.remove(&pane.pane_id);
+            }
+        }
+        for pane in &mut classifications {
+            if stop.is_stopped() {
+                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection foreground observation cancelled"));
+            }
+            pane.shell_ownership = pane.shell_observer.take().map_or(Some(false), |observer| {
+                observer.shell_owns_terminal()
+            });
+        }
+        discovered_session_ids.retain(|pane_id, _| classifications.iter().any(|pane| pane.pane_id == *pane_id));
+        let optional = |value: &Option<String>| value.as_ref().map_or(0, String::capacity);
+        let mut result_bytes = classifications.len().saturating_mul(8192);
+        for pane in &classifications {
+            result_bytes = result_bytes.saturating_add(pane.agent_launcher_ancestors.capacity().saturating_mul(std::mem::size_of::<AgentProcessKey>()));
+            for key in &pane.agent_launcher_ancestors {
+                if let ilium_core::AgentClass::Other(name) = &key.class { result_bytes = result_bytes.saturating_add(name.capacity()); }
+            }
+            if stop.is_stopped() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection evidence cancelled")); }
+            for amount in [optional(&pane.activity_evidence_line), optional(&pane.goal_evidence_line), optional(&pane.screen_classification_cache.classification.activity_evidence_line), optional(&pane.screen_classification_cache.classification.goal_evidence_line), optional(&pane.captured_session_id), optional(&pane.invalidated_session_id), optional(&pane.pending_generated_session_id)] { result_bytes = result_bytes.saturating_add(amount); }
+            for goal in [pane.confirmed_goal_owner.as_ref(), pane.screen_classification_cache.input_goal_owner.as_ref(), pane.screen_classification_cache.classification.confirmed_goal_owner.as_ref()].into_iter().flatten() { result_bytes = result_bytes.saturating_add(optional(&goal.evidence_line)); }
+            if let Some(identity) = &pane.identity { result_bytes = result_bytes.saturating_add(identity.process_name.capacity()).saturating_add(identity.matched_signature.capacity()); }
+        }
+        for phases in session_discovery_traces.values() { result_bytes = result_bytes.saturating_add(phases.capacity().saturating_mul(std::mem::size_of::<crate::session_id::SessionDiscoveryPhase>())); for phase in phases { result_bytes = result_bytes.saturating_add(phase.detail.capacity()); } }
+        for exclusions in session_discovery_exclusions.values() { for exclusion in exclusions { result_bytes = result_bytes.saturating_add(exclusion.capacity()); } }
+        for session_id in discovered_session_ids.values() { result_bytes = result_bytes.saturating_add(session_id.capacity()); }
+        for path in pane_cwds.values() { result_bytes = result_bytes.saturating_add(path.capacity().saturating_mul(2)); }
+        result_bytes = result_bytes.saturating_add(ambiguous_session_ids.capacity().saturating_mul(std::mem::size_of::<String>()));
+        for session_id in &ambiguous_session_ids { result_bytes = result_bytes.saturating_add(session_id.capacity()); }
+        if result_bytes > EVIDENCE_RESULT_BYTES { return Err(std::io::Error::other("detection evidence result exceeds retained admission")); }
+        Ok((classifications, discovered_session_ids, session_discovery_traces, session_discovery_exclusions, pane_cwds, ambiguous_session_ids, detection_settings_revision, detection_config))
+        })
+    })).await
+        .map_err(|_| execution_error("detection evidence deadline expired; native callback remains owned until it exits"))?
+        .map_err(execution_error)?;
+    let (
+        classifications,
+        gathered_session_ids,
+        session_discovery_traces,
+        session_discovery_exclusions,
+        pane_cwds,
+        captured_ambiguous_session_ids,
+        detection_settings_revision,
+        detection_config,
+    ) = evidence.view();
+    let mut discovered_session_ids = gathered_session_ids.clone();
+
     // Phase 3: brief write-locked critical section applying results.
     // Hold the settings read lock through the tree/pane update. If an update
     // landed while this batch was classifying, discard this stale batch; if
     // one arrives afterward, its forced-due reschedule wins after this lock
     // is released.
     let current_detection_settings = state.agent_detection_settings.read().await;
-    if current_detection_settings.revision != detection_settings_revision {
+    if current_detection_settings.revision != *detection_settings_revision {
         return Ok(());
     }
     let sound_settings = state.sound_settings.read().await.clone();
@@ -947,8 +1339,8 @@ async fn run_due_panes(
     let mut pending_sounds = Vec::new();
     let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
+    let mut pending_empty_title_checks = Vec::new();
     let mut pending_activity_updates = Vec::new();
-    let mut tree_snapshot_changed = false;
     let mut pending_debug_events = Vec::new();
     let mut pending_detection_evidence = Vec::new();
     let mut pending_auto_answers = Vec::new();
@@ -957,7 +1349,31 @@ async fn run_due_panes(
         let mut tree = state.tree.write().await;
         let mut panes = state.panes.write().await;
 
-        for classified_pane in classifications {
+        // Claims may change while native evidence is running. Reconcile again
+        // under the sole mutation owner before accepting any new identity.
+        let (current_claims, current_ambiguous) =
+            partition_session_claims(panes.iter().filter_map(|(pane_id, resource)| {
+                match resource {
+                    PaneResource::Terminal(runtime)
+                        if !runtime.is_session_identity_invalidated
+                            && runtime.verified_agent_exit.is_none() =>
+                    {
+                        runtime
+                            .session_id
+                            .as_ref()
+                            .map(|session_id| (session_id.clone(), *pane_id))
+                    }
+                    _ => None,
+                }
+            }));
+        discovered_session_ids.retain(|pane_id, session_id| {
+            !current_ambiguous.contains(session_id)
+                && current_claims
+                    .get(session_id)
+                    .is_none_or(|owner| owner == pane_id)
+        });
+
+        for classified_pane in classifications.iter().cloned() {
             let pane_id = classified_pane.pane_id;
             let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
                 // The pane was closed (or is no longer a terminal) between
@@ -966,6 +1382,28 @@ async fn run_due_panes(
                 continue;
             };
 
+            if !runtime
+                .session
+                .input_handle()
+                .same_session(&classified_pane.input)
+                || runtime.agent_generation != classified_pane.agent_generation
+                || runtime.title_generation != classified_pane.title_generation
+                || runtime.session_id != classified_pane.captured_session_id
+                || runtime.is_session_identity_invalidated
+                    != classified_pane.is_session_identity_invalidated
+                || runtime.invalidated_session_id != classified_pane.invalidated_session_id
+                || runtime.session_process_id != classified_pane.session_process_id
+            {
+                continue;
+            }
+            if classified_pane
+                .identity
+                .as_ref()
+                .is_some_and(|identity| !ilium_platform::process_control::is_running(identity.pid))
+            {
+                runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
+                continue;
+            }
             // A user-triggered force request that arrived after phase 2's
             // snapshot explicitly asks for a newer sample. Never let this stale
             // pass overwrite that request's due deadline or status.
@@ -973,6 +1411,8 @@ async fn run_due_panes(
                 runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
                 continue;
             }
+
+            runtime.agent_launcher_ancestors = classified_pane.agent_launcher_ancestors.clone();
 
             // Preserve the ownership state that discovery evaluated. Runtime
             // fields may be cleared or replaced below before the diagnostic
@@ -1040,12 +1480,13 @@ async fn run_due_panes(
             } else {
                 false
             };
-            let shell_ownership =
-                if matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell) {
-                    runtime.session.shell_owns_terminal()
-                } else {
-                    Some(false)
-                };
+            if matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell)
+                != classified_pane.shell_was_plain
+            {
+                runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
+                continue;
+            }
+            let shell_ownership = classified_pane.shell_ownership;
             let shell_foreground = shell_ownership == Some(true);
             let was_input_available = runtime.agent_input_available;
             runtime.agent_input_available = classified_pane.identity.is_some()
@@ -1066,7 +1507,7 @@ async fn run_due_panes(
                 runtime.confirmed_goal_owner = classified_pane.confirmed_goal_owner.clone();
             }
             if process_was_replaced {
-                runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                runtime.title_generation = runtime.title_generation.saturating_add(1);
                 pending_title_clears.push((pane_id, runtime.title_generation));
                 if tree.set_last_prompt(pane_id, None).is_ok() {
                     state.broadcast(ServerEvent::PaneLastPromptChanged {
@@ -1178,7 +1619,7 @@ async fn run_due_panes(
             let polled_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
-                &detection_config,
+                detection_config,
             );
             runtime.detection_schedule.current_interval = if is_awaiting_launched_agent(
                 &runtime.origin,
@@ -1255,7 +1696,7 @@ async fn run_due_panes(
                             input: runtime.session.input_handle(),
                             input_gate: Arc::clone(&runtime.input_gate),
                             attempt,
-                            settings_revision: detection_settings_revision,
+                            settings_revision: *detection_settings_revision,
                         });
                     }
                 }
@@ -1265,20 +1706,10 @@ async fn run_due_panes(
                 classified_pane.is_fresh_agent_screen && !runtime.is_showing_fresh_agent_screen;
             runtime.is_showing_fresh_agent_screen = classified_pane.is_fresh_agent_screen;
             if became_fresh_agent_screen {
-                runtime.title_generation = runtime.title_generation.wrapping_add(1);
-                pending_title_clears.push((pane_id, runtime.title_generation));
-                match tree.set_automatic_pane_title(
-                    pane_id,
-                    crate::pane::FRESH_AGENT_TITLE,
-                    None,
-                    None,
-                ) {
-                    Ok(changed) => tree_snapshot_changed |= changed,
-                    Err(error) => tracing::warn!(
-                        "detection loop: failed to reset title for fresh agent pane \
-                         {pane_id:?}: {error}"
-                    ),
-                }
+                // Splash text can survive an acknowledged initial prompt.
+                // It warrants a history check, not revocation of exact input
+                // evidence or an asserted conversation transition.
+                pending_empty_title_checks.push(pane_id);
             }
             if classified_pane.pending_generated_session_id.is_some()
                 && detected_agent_class
@@ -1301,7 +1732,7 @@ async fn run_due_panes(
             let session_is_ambiguously_claimed = runtime
                 .session_id
                 .as_ref()
-                .is_some_and(|session_id| ambiguous_session_ids.contains(session_id));
+                .is_some_and(|session_id| captured_ambiguous_session_ids.contains(session_id));
             let should_clear_session_id = session_identity_is_stale(
                 runtime.is_session_identity_invalidated,
                 session_belongs_to_different_class,
@@ -1318,7 +1749,7 @@ async fn run_due_panes(
                 }
                 runtime.session_id = None;
                 session_was_cleared = true;
-                runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                runtime.title_generation = runtime.title_generation.saturating_add(1);
                 runtime.session_agent_class = None;
                 if !runtime.is_session_identity_invalidated {
                     runtime.session_process_id = None;
@@ -1329,18 +1760,7 @@ async fn run_due_panes(
                     pane_id,
                     title_generation: runtime.title_generation,
                 });
-                match tree.set_automatic_pane_title(
-                    pane_id,
-                    runtime.origin.pane_name_without_stale_session(),
-                    None,
-                    None,
-                ) {
-                    Ok(changed) => tree_snapshot_changed |= changed,
-                    Err(error) => tracing::warn!(
-                        "detection loop: failed to reset automatic title for pane \
-                         {pane_id:?} after clearing its session ID: {error}"
-                    ),
-                }
+                runtime.authored_title_receipt = None;
             }
 
             let mut newly_resolved_session = None;
@@ -1619,6 +2039,7 @@ async fn run_due_panes(
             if let Some((session_id, invalidated_session_id, correlation_id)) =
                 newly_resolved_session
             {
+                pending_empty_title_checks.push(pane_id);
                 let acceptance_reason = session_discovery_traces
                     .get(&pane_id)
                     .and_then(|phases| {
@@ -1808,11 +2229,7 @@ async fn run_due_panes(
         });
     }
 
-    if tree_snapshot_changed {
-        let snapshot = state.tree.read().await.clone();
-        state.broadcast(ServerEvent::TreeSnapshot(snapshot));
-        state.request_snapshot_save();
-    }
+    crate::ipc::handlers::reconcile_empty_agent_titles(state, &pending_empty_title_checks).await;
 
     for pane_id in completed_pane_ids {
         crate::prompt_queue::deliver_next_after_completion(state, pane_id).await;
@@ -2611,6 +3028,228 @@ mod tests {
     use super::*;
     use crate::config::DetectionConfig;
     use ilium_core::{AgentActivity, AgentClass};
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_evidence_cannot_reclassify_a_replaced_pty() {
+        use crate::state::ServerStateOptions;
+        let directory = tempfile::tempdir().expect("directory");
+        let (sound_requests, _) = tokio::sync::mpsc::channel(1);
+        let state = Arc::new(ServerState::new(ServerStateOptions {
+            session_name: "evidence-replacement".into(),
+            session_cwd: directory.path().into(),
+            home_dir: directory.path().into(),
+            snapshot_path: directory.path().join("test.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        let group_id = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "fixture group")
+            .expect("group");
+        let pane_id = state
+            .tree
+            .write()
+            .await
+            .add_pane(group_id, "fixture", ilium_core::PaneContentKind::Terminal)
+            .expect("pane");
+        let marker = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
+        state
+            .tree
+            .write()
+            .await
+            .set_pane_status(pane_id, marker.clone())
+            .expect("status");
+        let spawn = || {
+            crate::pane::TerminalPaneRuntime::new(
+                ilium_pty::PtySession::spawn(
+                    ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                        .arg("-c")
+                        .arg("exec cat"),
+                )
+                .expect("isolated fixture PTY"),
+                crate::pane::TerminalOrigin::PlainShell,
+                None,
+                Duration::from_secs(1),
+            )
+        };
+        state
+            .panes
+            .write()
+            .await
+            .insert(pane_id, PaneResource::Terminal(Box::new(spawn())));
+        let owner = state.execution.get().expect("owner");
+        let retention = owner
+            .client
+            .foundation
+            .try_reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: PROCESS_TABLE_BYTES,
+                    result_bytes: 0,
+                },
+            )
+            .expect("cache admission");
+        let process_table = Arc::new(CachedProcessTable {
+            system: std::sync::Mutex::new(System::new()),
+            _retention: retention,
+        });
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            run_due_panes_with_hook(&task_state, &process_table, 0, move || {
+                let _ = started_tx.send(());
+                release_rx.recv().expect("release evidence fixture");
+            })
+            .await
+        });
+        started_rx.await.expect("native job started");
+        // Actual mutation stays responsive while evidence is blocked. The new
+        // PTY deliberately keeps generation zero, isolating instance fencing.
+        let previous = tokio::time::timeout(Duration::from_secs(2), state.panes.write())
+            .await
+            .expect("registry remains responsive")
+            .insert(pane_id, PaneResource::Terminal(Box::new(spawn())))
+            .expect("old runtime");
+        release_tx.send(()).expect("release");
+        task.await
+            .expect("coordinator")
+            .expect("evidence applied or fenced");
+        assert!(
+            matches!(&state.tree.read().await.get(pane_id).expect("pane").kind, ilium_core::NodeKind::Pane { status, .. } if status == &marker)
+        );
+        if let PaneResource::Terminal(mut runtime) = previous {
+            runtime.session.kill().expect("clean old fixture");
+        }
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("clean replacement fixture");
+        }
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stale_cached_agent_identity_revokes_queued_input_epoch() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let (sound_requests, _) = tokio::sync::mpsc::channel(1);
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "stale-identity-fixture".into(),
+            session_cwd: directory.path().into(),
+            home_dir: directory.path().into(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "fixture group")
+            .expect("group");
+        let pane_id = state
+            .tree
+            .write()
+            .await
+            .add_pane(group, "fixture", ilium_core::PaneContentKind::Terminal)
+            .expect("pane");
+        state
+            .tree
+            .write()
+            .await
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
+            )
+            .expect("agent status");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        let mut runtime = crate::pane::TerminalPaneRuntime::new(
+            session,
+            crate::pane::TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        );
+        let stale_identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: u32::MAX - 1,
+            started_at_unix_seconds: 1,
+            process_name: "codex".into(),
+            matched_signature: "codex".into(),
+            process_tree_depth: 1,
+        };
+        runtime.agent_process_key = Some(crate::pane::agent_process_key(&stale_identity));
+        runtime.detection_schedule.cached_identity = Some(stale_identity);
+        runtime.detection_schedule.identity_system_generation = Some(1);
+        runtime.detection_schedule.next_due = Instant::now() - Duration::from_millis(1);
+        runtime.agent_input_available = true;
+        let mut cancellation = runtime.agent_input_cancel.subscribe();
+        state
+            .panes
+            .write()
+            .await
+            .insert(pane_id, PaneResource::Terminal(Box::new(runtime)));
+        let owner = state.execution.get().expect("owner");
+        let retention = owner
+            .client
+            .foundation
+            .try_reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: PROCESS_TABLE_BYTES,
+                    result_bytes: 0,
+                },
+            )
+            .expect("cache admission");
+        let process_table = Arc::new(CachedProcessTable {
+            system: std::sync::Mutex::new(System::new()),
+            _retention: retention,
+        });
+        run_due_panes(&state, &process_table, 1)
+            .await
+            .expect("stale evidence reduction");
+        tokio::time::timeout(Duration::from_secs(2), cancellation.changed())
+            .await
+            .expect("input cancellation emitted")
+            .expect("input cancellation channel open");
+        assert_eq!(*cancellation.borrow_and_update(), 1);
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(mut runtime)) = panes.remove(&pane_id) else {
+            panic!("fixture runtime remains");
+        };
+        assert!(!runtime.agent_input_available);
+        drop(panes);
+        runtime.session.kill().expect("close fixture");
+        owner.request_shutdown();
+    }
 
     fn config() -> DetectionConfig {
         DetectionConfig {

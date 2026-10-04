@@ -4,15 +4,23 @@
 //! every attached client receives that same path from the CLI and appends to
 //! it. A single tracing subscriber per process routes existing and new
 //! `tracing` events through this boundary. Disabling logging closes the file
-//! immediately and turns writes into a sink without changing call sites.
+//! at its ordered acknowledgement boundary and turns writes into a sink.
+//! File I/O is performed by one bounded process-owned OS thread.
 
-use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use ilium_platform::secure_fs;
+use ilium_execution::{QuotaGroup, RejectReason, WorkerStartError};
+use ilium_platform::owned_worker::WorkerTicket;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
+
+mod service;
+pub use service::{
+    logger_control_bytes, logger_storage_bytes, LoggingHealth, LoggingReceipt, LoggingShutdown,
+    LoggingShutdownDeadline, LoggingShutdownReport, LOGGER_STACK_BYTES, MAX_EVENT_BYTES,
+    MAX_RETAINED_BYTES,
+};
 
 use tracing_subscriber::filter::{FilterExt, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
@@ -20,12 +28,108 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 static PROCESS_LOGGER: OnceLock<Arc<LoggerState>> = OnceLock::new();
+#[derive(Clone)]
+struct RetiringLogger {
+    ticket: WorkerTicket,
+    quota: QuotaGroup,
+    path_bytes: usize,
+}
+enum InitializationState {
+    Idle,
+    Initializing,
+    Retiring(RetiringLogger),
+}
+static PROCESS_INITIALIZATION: Mutex<InitializationState> = Mutex::new(InitializationState::Idle);
+
+struct InitializationAttempt {
+    failed_worker: Option<RetiringLogger>,
+}
+impl InitializationAttempt {
+    fn claim() -> Result<Self, LoggingError> {
+        let previous = {
+            let mut state = PROCESS_INITIALIZATION
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            match &*state {
+                InitializationState::Initializing => return Err(LoggingError::AdmissionBusy),
+                InitializationState::Retiring(owner) if owner.ticket.exit().is_none() => {
+                    return Err(LoggingError::InitializationRetiring);
+                }
+                _ => {}
+            }
+            std::mem::replace(&mut *state, InitializationState::Initializing)
+        };
+        let attempt = Self {
+            failed_worker: None,
+        };
+        // Retired ticket captures can release storage and invoke a quota wake.
+        // The claim remains published, but no initialization mutex is held.
+        drop(previous);
+        Ok(attempt)
+    }
+}
+impl Drop for InitializationAttempt {
+    fn drop(&mut self) {
+        let next = match self.failed_worker.take() {
+            Some(owner) => {
+                owner.ticket.cancel();
+                InitializationState::Retiring(owner)
+            }
+            None => InitializationState::Idle,
+        };
+        let previous = {
+            let mut state = PROCESS_INITIALIZATION
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            std::mem::replace(&mut *state, next)
+        };
+        drop(previous);
+    }
+}
+
+fn clear_retired_initialization(worker_id: u64) {
+    let previous = {
+        let mut state = PROCESS_INITIALIZATION
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !matches!(&*state, InitializationState::Retiring(owner) if owner.ticket.id() == worker_id)
+        {
+            return;
+        }
+        std::mem::replace(&mut *state, InitializationState::Idle)
+    };
+    // Called only after the original ticket reports actual join. Captures and
+    // their quota wake are destroyed outside the initialization gate.
+    drop(previous);
+}
 
 /// Failures that prevent this process from providing the requested log.
 #[derive(Debug, thiserror::Error)]
 pub enum LoggingError {
     #[error("file logging is already initialized in this process")]
     AlreadyInitialized,
+    #[error("file logging is already bound to another quota root")]
+    DifferentQuota,
+    #[error("a failed logging initialization is still retiring")]
+    InitializationRetiring,
+    #[error("logging worker admission failed: {0}")]
+    WorkerAdmission(#[source] WorkerStartError),
+    #[error("logging storage admission rejected: {0:?}")]
+    StorageAdmissionRejected(RejectReason),
+    #[error("logging worker panicked before native retirement completed")]
+    WorkerPanicked,
+    #[error("{0}")]
+    ShutdownDeadline(#[source] Box<LoggingShutdownDeadline>),
+    #[error("logging service admission is busy; retry the control request")]
+    AdmissionBusy,
+    #[error("logging service stopped")]
+    WorkerStopped,
+    #[error("logging acknowledgement deadline elapsed; completion is unknown")]
+    Deadline,
+    #[error("an earlier log event write failed; no partial event was retried")]
+    PriorWriteFailed,
+    #[error("logging I/O failed: {0}")]
+    Io(#[source] io::Error),
     #[error("file logging has not been initialized in this process")]
     NotInitialized,
     #[error("failed to prepare log file {path}: {source}")]
@@ -38,158 +142,175 @@ pub enum LoggingError {
     InstallSubscriber(String),
 }
 
-/// Mutable output state shared by the tracing writer and the Debug setting.
+/// Process owner; the file itself is exclusively owned by the service thread.
 struct LoggerState {
+    quota: QuotaGroup,
     path: PathBuf,
-    enabled: AtomicBool,
-    file: Mutex<Option<File>>,
+    enabled: Arc<AtomicBool>,
+    service: service::Service,
 }
-
 impl LoggerState {
-    fn new(path: PathBuf) -> Self {
-        Self {
+    fn new_admitted(path: &Path, quota: &QuotaGroup) -> Result<Self, LoggingError> {
+        let admission = service::Service::prepare(quota, path)?;
+        let path = path.to_owned();
+        let enabled = Arc::new(AtomicBool::new(false));
+        let service = admission.start(path.clone(), Arc::clone(&enabled), None, || {})?;
+        Ok(Self {
+            quota: quota.clone(),
             path,
-            enabled: AtomicBool::new(false),
-            file: Mutex::new(None),
-        }
+            enabled,
+            service,
+        })
     }
-
+    #[cfg(test)]
+    fn new(path: PathBuf) -> Result<Self, LoggingError> {
+        let quota = service::fixture_quota(&path)?;
+        Self::new_admitted(&path, &quota)
+    }
+    // Startup/off-loop only; the same deadline covers control admission and
+    // its acknowledgement. Interactive callers retain and poll receipts.
     fn set_enabled(&self, enabled: bool) -> Result<(), LoggingError> {
-        let mut file = self
-            .file
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if enabled && file.is_none() {
-            let parent = self
-                .path
-                .parent()
-                .ok_or_else(|| LoggingError::PrepareFile {
-                    path: self.path.clone(),
-                    source: io::Error::new(io::ErrorKind::InvalidInput, "log path has no parent"),
-                })?;
-            // Log files hold terminal contents, so both the directory and the
-            // file are owner-only; `secure_fs` owns what that means per
-            // platform.
-            secure_fs::create_private_directory(parent).map_err(|source| {
-                LoggingError::PrepareFile {
-                    path: self.path.clone(),
-                    source,
+        self.set_enabled_until(
+            enabled,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        )
+    }
+    fn set_enabled_until(
+        &self,
+        enabled: bool,
+        deadline: std::time::Instant,
+    ) -> Result<(), LoggingError> {
+        loop {
+            match self.service.enable(enabled) {
+                Ok(receipt) => {
+                    return receipt.wait_timeout(
+                        deadline.saturating_duration_since(std::time::Instant::now()),
+                    );
                 }
-            })?;
-            let opened_file = secure_fs::private_open_options()
-                .create(true)
-                .append(true)
-                .open(&self.path)
-                .map_err(|source| LoggingError::PrepareFile {
-                    path: self.path.clone(),
-                    source,
-                })?;
-            // The open above only sets the mode when it creates the file, so
-            // an existing log from an older build is tightened here. This
-            // tightens the descriptor that was just opened rather than the
-            // path: a path-based chmod would follow whatever sits at
-            // `self.path` at that later instant, which is exactly the swap
-            // `O_NOFOLLOW` refused a line earlier, and would hand a widened
-            // mode to an attacker-planted replacement instead of to the log.
-            secure_fs::restrict_open_file_to_owner(&opened_file).map_err(|source| {
-                LoggingError::PrepareFile {
-                    path: self.path.clone(),
-                    source,
-                }
-            })?;
-            *file = Some(opened_file);
-        } else if !enabled {
-            *file = None;
+                Err(LoggingError::AdmissionBusy) => {}
+                Err(error) => return Err(error),
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(LoggingError::Deadline);
+            }
+            std::thread::sleep(remaining.min(std::time::Duration::from_millis(1)));
         }
-        self.enabled.store(enabled, Ordering::Release);
-        // `filter_fn` suppresses expensive diagnostic field construction, but
-        // caches each call site's interest. Rebuild after every live toggle
-        // so a call site first seen while disabled becomes observable on
-        // opt-in and stops evaluating fields again after opt-out.
-        drop(file);
-        tracing::callsite::rebuild_interest_cache();
-        Ok(())
     }
 }
 
-/// `tracing_subscriber` mints one fresh writer per event via `with_writer`'s
-/// closure (`Fn() -> W`, no `Clone` bound), and the `Drop` impl below flushes
-/// that writer's buffered bytes exactly once. That pairing -- one writer, one
-/// event, one flush -- is what keeps a formatted event atomic while the
-/// enabled setting may change concurrently on another runtime task; `Clone`
-/// must not be added back here, since two writers cloned from the same
-/// in-progress event would each flush the shared buffer on drop and append
-/// the event twice. Each physical write is serialized inside this process;
-/// `O_APPEND` keeps server/client appends from overwriting each other when
-/// both processes target the same file.
+/// One writer per event; rejected or partially written events are never retried.
 struct DynamicFileWriter {
     state: Arc<LoggerState>,
     event_buffer: Vec<u8>,
+    overflowed: bool,
 }
-
+impl DynamicFileWriter {
+    fn discard_event(&mut self) {
+        self.state.service.release(self.event_buffer.capacity());
+        self.event_buffer = Vec::new();
+        self.overflowed = true;
+        self.state.service.dropped();
+    }
+}
 impl Write for DynamicFileWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if !self.state.enabled.load(Ordering::Acquire) {
+        // A toggle cannot truncate an event already being formatted. The
+        // ordered owner either appends the whole event or counts its rejection.
+        if self.overflowed
+            || (self.event_buffer.is_empty() && !self.state.enabled.load(Ordering::Acquire))
+        {
             return Ok(bytes.len());
         }
-        // `tracing-subscriber` formats one event through several `write`
-        // calls. Buffer them so two processes sharing the file can append one
-        // complete event rather than interleaving formatting fragments.
+        let required = self.event_buffer.len().saturating_add(bytes.len());
+        if required > MAX_EVENT_BYTES {
+            self.discard_event();
+            return Ok(bytes.len());
+        }
+        if required > self.event_buffer.capacity() {
+            let target = required.next_power_of_two().max(64);
+            let reserved = target - self.event_buffer.capacity();
+            if !self.state.service.reserve(reserved) {
+                self.discard_event();
+                return Ok(bytes.len());
+            }
+            let old_capacity = self.event_buffer.capacity();
+            if self
+                .event_buffer
+                .try_reserve_exact(target - self.event_buffer.len())
+                .is_err()
+            {
+                self.state.service.release(reserved);
+                self.discard_event();
+                return Ok(bytes.len());
+            }
+            // Account for the capacity actually returned by the allocator, not
+            // merely the event length. Keep even partially formatted events in
+            // the same process-wide byte budget as queued and writing events.
+            let actual_growth = self.event_buffer.capacity() - old_capacity;
+            if actual_growth > reserved && !self.state.service.reserve(actual_growth - reserved) {
+                self.state.service.release(old_capacity + reserved);
+                self.event_buffer = Vec::new();
+                self.overflowed = true;
+                self.state.service.dropped();
+                return Ok(bytes.len());
+            }
+            if actual_growth < reserved {
+                self.state.service.release(reserved - actual_growth);
+            }
+        }
         self.event_buffer.extend_from_slice(bytes);
         Ok(bytes.len())
     }
-
     fn flush(&mut self) -> io::Result<()> {
-        if self.event_buffer.is_empty() {
-            return Ok(());
+        if !self.event_buffer.is_empty() {
+            self.state
+                .service
+                .event(std::mem::take(&mut self.event_buffer));
         }
-        if !self.state.enabled.load(Ordering::Acquire) {
-            self.event_buffer.clear();
-            return Ok(());
-        }
-        let mut file = self
-            .state
-            .file
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let write_result = match file.as_mut() {
-            Some(file) => file
-                .write_all(&self.event_buffer)
-                .and_then(|()| file.flush()),
-            None => Ok(()),
-        };
-        // Clear even when the write failed: `write_all` may have appended part
-        // of the event before erroring, and `Drop` retries `flush`, so keeping
-        // the buffer would append that partial event a second time and break
-        // the one-writer/one-event/one-flush contract documented on this type.
-        self.event_buffer.clear();
-        write_result
+        Ok(())
     }
 }
-
 impl Drop for DynamicFileWriter {
     fn drop(&mut self) {
-        // The formatting layer owns one writer per event and does not expose
-        // write failures to the application. Best-effort drop flushing keeps
-        // that contract while preserving each event as one append operation.
         let _ = self.flush();
     }
 }
 
 /// Installs this process's one tracing subscriber and optionally opens `path`.
 /// No file is created while `enabled` is false, preserving the normal-user
-/// default even though every call site remains instrumented.
+/// default even though every call site remains instrumented. The caller supplies
+/// its existing quota root; real process bootstrap admits the supervisor first.
+/// Independent fixture roots do not acquire that permanent process designation.
 pub fn initialize(
-    path: impl Into<PathBuf>,
+    path: impl AsRef<Path>,
     enabled: bool,
     process_role: &'static str,
+    quota: &QuotaGroup,
 ) -> Result<(), LoggingError> {
-    let path = path.into();
+    let path = path.as_ref();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut attempt = loop {
+        match InitializationAttempt::claim() {
+            Ok(attempt) => break attempt,
+            Err(LoggingError::AdmissionBusy) => {}
+            Err(error) => return Err(error),
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(LoggingError::Deadline);
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(1)));
+    };
     if let Some(state) = PROCESS_LOGGER.get() {
-        if state.path != path {
+        if state.path.as_path() != path {
             return Err(LoggingError::AlreadyInitialized);
         }
-        state.set_enabled(enabled)?;
+        if !state.quota.shares_root(quota) {
+            return Err(LoggingError::DifferentQuota);
+        }
+        state.set_enabled_until(enabled, deadline)?;
+        drop(attempt);
         tracing::info!(
             process_role,
             process_id = std::process::id(),
@@ -198,8 +319,13 @@ pub fn initialize(
         return Ok(());
     }
 
-    let state = Arc::new(LoggerState::new(path));
-    state.set_enabled(enabled)?;
+    let state = Arc::new(LoggerState::new_admitted(path, quota)?);
+    attempt.failed_worker = Some(RetiringLogger {
+        ticket: state.service.ticket(),
+        quota: quota.clone(),
+        path_bytes: path.as_os_str().as_encoded_bytes().len(),
+    });
+    state.set_enabled_until(enabled, deadline)?;
     let writer_state = Arc::clone(&state);
     let filter_state = Arc::clone(&state);
     let configured_filter =
@@ -222,15 +348,20 @@ pub fn initialize(
         .with_writer(move || DynamicFileWriter {
             state: Arc::clone(&writer_state),
             event_buffer: Vec::new(),
+            overflowed: false,
         })
         .with_filter(verbosity_filter.and(enabled_filter));
-    tracing_subscriber::registry()
+    if let Err(error) = tracing_subscriber::registry()
         .with(formatting_layer)
         .try_init()
-        .map_err(|error| LoggingError::InstallSubscriber(error.to_string()))?;
+    {
+        return Err(LoggingError::InstallSubscriber(error.to_string()));
+    }
     PROCESS_LOGGER
         .set(state)
         .map_err(|_| LoggingError::AlreadyInitialized)?;
+    attempt.failed_worker.take();
+    drop(attempt);
     tracing::info!(
         process_role,
         process_id = std::process::id(),
@@ -239,12 +370,69 @@ pub fn initialize(
     Ok(())
 }
 
-/// Applies the live Debug setting to the current process.
+/// Blocking startup/off-loop compatibility adapter. Interactive/coordination
+/// loops must use `request_set_enabled` and poll its acknowledgement instead.
 pub fn set_enabled(enabled: bool) -> Result<(), LoggingError> {
     PROCESS_LOGGER
         .get()
         .ok_or(LoggingError::NotInitialized)?
         .set_enabled(enabled)
+}
+
+/// Nonblocking live toggle. A successful receipt confirms the ordered file transition.
+pub fn request_set_enabled(enabled: bool) -> Result<LoggingReceipt, LoggingError> {
+    PROCESS_LOGGER
+        .get()
+        .ok_or(LoggingError::NotInitialized)?
+        .service
+        .enable(enabled)
+}
+/// Ordered flush barrier for all previously accepted events.
+pub fn request_flush() -> Result<LoggingReceipt, LoggingError> {
+    PROCESS_LOGGER
+        .get()
+        .ok_or(LoggingError::NotInitialized)?
+        .service
+        .flush()
+}
+/// Process-exit only: reject later events, drain accepted events, flush and close.
+/// Do not call during an in-process CLI/client role handoff. Use `request_flush` before exec.
+pub fn request_shutdown() -> Result<LoggingReceipt, LoggingError> {
+    PROCESS_LOGGER
+        .get()
+        .ok_or(LoggingError::NotInitialized)?
+        .service
+        .shutdown()
+}
+/// Process-exit drain plus native retirement. Async callers poll the returned
+/// owner from their existing timer; blocking callers use one absolute deadline.
+/// Failed initialization also retains its original native ticket for this path.
+pub fn request_shutdown_joined() -> Result<LoggingShutdown, LoggingError> {
+    if let Some(state) = PROCESS_LOGGER.get() {
+        return state.service.shutdown_joined();
+    }
+    let initializing = match PROCESS_INITIALIZATION.try_lock() {
+        Ok(initializing) => initializing,
+        Err(TryLockError::WouldBlock) => return Err(LoggingError::AdmissionBusy),
+        Err(TryLockError::Poisoned(error)) => error.into_inner(),
+    };
+    let owner = match &*initializing {
+        InitializationState::Retiring(owner) => owner.clone(),
+        InitializationState::Initializing => return Err(LoggingError::AdmissionBusy),
+        InitializationState::Idle => return Err(LoggingError::NotInitialized),
+    };
+    drop(initializing);
+    LoggingShutdown::retiring(
+        owner.ticket,
+        &owner.quota,
+        owner.path_bytes,
+        LoggingError::WorkerStopped,
+    )
+}
+
+/// Counters never log recursively, including admission loss and filesystem errors.
+pub fn health() -> Option<LoggingHealth> {
+    PROCESS_LOGGER.get().map(|state| state.service.health())
 }
 
 /// Reports whether this process currently accepts diagnostic events. Runtime
@@ -524,13 +712,149 @@ pub fn install_panic_logging() {
 mod tests {
     use super::*;
 
+    fn writer(state: &Arc<LoggerState>) -> DynamicFileWriter {
+        DynamicFileWriter {
+            state: Arc::clone(state),
+            event_buffer: Vec::new(),
+            overflowed: false,
+        }
+    }
+
+    #[test]
+    fn oversized_event_is_dropped_whole_and_later_events_can_be_saved() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("bounded.log");
+        let state = Arc::new(LoggerState::new(path.clone()).expect("worker"));
+        state.set_enabled(true).expect("enable");
+        let mut oversized = writer(&state);
+        oversized
+            .write_all(b"prefix must disappear")
+            .expect("prefix");
+        oversized
+            .write_all(&vec![b'x'; MAX_EVENT_BYTES])
+            .expect("oversized event");
+        drop(oversized);
+        writeln!(writer(&state), "later event").expect("event");
+        state
+            .service
+            .flush()
+            .expect("admission")
+            .wait_timeout(std::time::Duration::from_secs(5))
+            .expect("flush");
+        assert_eq!(
+            std::fs::read_to_string(path).expect("readback"),
+            "later event\n"
+        );
+        assert_eq!(state.service.health().dropped_events, 1);
+        assert_eq!(state.service.health().retained_bytes, 0);
+    }
+
+    #[test]
+    fn retained_byte_exhaustion_discards_a_multichunk_event_without_writing_its_prefix() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("whole-event.log");
+        let state = Arc::new(LoggerState::new(path.clone()).expect("worker"));
+        state.set_enabled(true).expect("enable");
+        assert!(state.service.reserve(MAX_RETAINED_BYTES));
+        let mut refused = writer(&state);
+        refused
+            .write_all(b"first chunk must disappear")
+            .expect("formatter accepts bytes");
+        refused
+            .write_all(b"second chunk must disappear")
+            .expect("whole event refused");
+        drop(refused);
+        assert_eq!(state.service.health().dropped_events, 1);
+        state.service.release(MAX_RETAINED_BYTES);
+        let mut accepted = writer(&state);
+        accepted.write_all(b"retained ").expect("first chunk");
+        accepted
+            .write_all(b"complete event\n")
+            .expect("second chunk");
+        drop(accepted);
+        state
+            .service
+            .shutdown_joined()
+            .expect("ordered close")
+            .wait_until(std::time::Instant::now() + std::time::Duration::from_secs(5))
+            .expect("native join")
+            .into_result()
+            .expect("flush");
+        assert_eq!(
+            std::fs::read_to_string(path).expect("readback"),
+            "retained complete event\n"
+        );
+        assert_eq!(state.service.health().retained_bytes, 0);
+    }
+
+    #[test]
+    fn repeated_formatter_flush_and_drop_never_duplicate_an_event() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("once.log");
+        let state = Arc::new(LoggerState::new(path.clone()).expect("worker"));
+        state.set_enabled(true).expect("enable");
+        let mut event = writer(&state);
+        event.write_all(b"one event\n").expect("event");
+        event.flush().expect("first enqueue");
+        event.flush().expect("empty enqueue");
+        drop(event);
+        state
+            .service
+            .shutdown()
+            .expect("admission")
+            .wait_timeout(std::time::Duration::from_secs(5))
+            .expect("shutdown");
+        assert_eq!(
+            std::fs::read_to_string(path).expect("readback"),
+            "one event\n"
+        );
+        assert!(matches!(
+            state.service.flush(),
+            Err(LoggingError::WorkerStopped)
+        ));
+    }
+
+    #[test]
+    fn disable_acknowledges_prior_event_before_closing_and_reenable_appends() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("toggles.log");
+        let state = Arc::new(LoggerState::new(path.clone()).expect("worker"));
+        state.set_enabled(true).expect("enable");
+        writer(&state)
+            .write_all(b"disable boundary\n")
+            .expect("event");
+        state
+            .service
+            .enable(false)
+            .expect("admission")
+            .wait_timeout(std::time::Duration::from_secs(5))
+            .expect("disable");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("readback"),
+            "disable boundary\n"
+        );
+        writer(&state).write_all(b"disabled event\n").expect("sink");
+        state.set_enabled(true).expect("reenable");
+        writer(&state).write_all(b"enabled again\n").expect("event");
+        state
+            .service
+            .shutdown()
+            .expect("admission")
+            .wait_timeout(std::time::Duration::from_secs(5))
+            .expect("shutdown");
+        assert_eq!(
+            std::fs::read_to_string(path).expect("readback"),
+            "disable boundary\nenabled again\n"
+        );
+    }
+
     #[test]
     #[ignore = "manual performance benchmark"]
     fn benchmark_event_file_writes() {
         const ITERATIONS: usize = 10_000;
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("benchmark.log");
-        let state = Arc::new(LoggerState::new(path));
+        let state = Arc::new(LoggerState::new(path).expect("logger worker"));
         state.set_enabled(true).expect("enable");
 
         let started_at = std::time::Instant::now();
@@ -538,6 +862,7 @@ mod tests {
             let mut writer = DynamicFileWriter {
                 state: Arc::clone(&state),
                 event_buffer: Vec::new(),
+                overflowed: false,
             };
             writeln!(writer, "event {event_number}: diagnostic payload").expect("event");
         }
@@ -553,7 +878,7 @@ mod tests {
     fn disabled_state_does_not_create_a_file_until_enabled() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("debug.txt");
-        let state = LoggerState::new(path.clone());
+        let state = LoggerState::new(path.clone()).expect("logger worker");
 
         assert!(!path.exists());
         state.set_enabled(true).expect("enable");
@@ -566,16 +891,23 @@ mod tests {
     fn dynamic_writer_appends_only_while_enabled() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("debug.txt");
-        let state = Arc::new(LoggerState::new(path.clone()));
+        let state = Arc::new(LoggerState::new(path.clone()).expect("logger worker"));
         let mut writer = DynamicFileWriter {
             state: Arc::clone(&state),
             event_buffer: Vec::new(),
+            overflowed: false,
         };
 
         writer.write_all(b"ignored\n").expect("disabled write");
         state.set_enabled(true).expect("enable");
         writer.write_all(b"kept\n").expect("enabled write");
-        writer.flush().expect("flush");
+        writer.flush().expect("enqueue");
+        state
+            .service
+            .flush()
+            .expect("flush admission")
+            .wait_timeout(std::time::Duration::from_secs(5))
+            .expect("flush acknowledgement");
 
         assert_eq!(std::fs::read_to_string(path).expect("log"), "kept\n");
     }
@@ -592,7 +924,7 @@ mod tests {
         let path = directory.path().join("diagnostic.txt");
         std::fs::write(&target, "private target").expect("target");
         std::os::unix::fs::symlink(&target, &path).expect("symlink");
-        let state = LoggerState::new(path);
+        let state = LoggerState::new(path).expect("logger worker");
 
         assert!(matches!(
             state.set_enabled(true),
@@ -608,8 +940,8 @@ mod tests {
     fn independent_process_style_writers_append_without_overwriting_each_other() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("shared.txt");
-        let first_state = Arc::new(LoggerState::new(path.clone()));
-        let second_state = Arc::new(LoggerState::new(path.clone()));
+        let first_state = Arc::new(LoggerState::new(path.clone()).expect("logger worker"));
+        let second_state = Arc::new(LoggerState::new(path.clone()).expect("logger worker"));
         first_state.set_enabled(true).expect("first writer");
         second_state.set_enabled(true).expect("second writer");
 
@@ -618,18 +950,32 @@ mod tests {
                 let mut writer = DynamicFileWriter {
                     state: Arc::clone(&first_state),
                     event_buffer: Vec::new(),
+                    overflowed: false,
                 };
                 writeln!(writer, "client-{line}").expect("client append");
             }
+            first_state
+                .service
+                .flush()
+                .expect("admission")
+                .wait_timeout(std::time::Duration::from_secs(5))
+                .expect("flush");
         });
         let second_handle = std::thread::spawn(move || {
             for line in 0..100 {
                 let mut writer = DynamicFileWriter {
                     state: Arc::clone(&second_state),
                     event_buffer: Vec::new(),
+                    overflowed: false,
                 };
                 writeln!(writer, "server-{line}").expect("server append");
             }
+            second_state
+                .service
+                .flush()
+                .expect("admission")
+                .wait_timeout(std::time::Duration::from_secs(5))
+                .expect("flush");
         });
         first_handle.join().expect("client writer thread");
         second_handle.join().expect("server writer thread");

@@ -654,6 +654,7 @@ impl Engine {
             ));
         }
         parser.screen_mut().set_size(rows, cols);
+        self.terminal.screen_reader.advance_resize_epoch();
         self.terminal.generation.fetch_add(1, Ordering::Release);
         drop(parser);
         let _ = self.terminal.changed.send(());

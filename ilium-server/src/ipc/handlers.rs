@@ -21,18 +21,23 @@ use ilium_core::{
     RestructurePlan, ScheduledPaneInput, SessionIdentityTransitionRule, Tree, TreeError,
 };
 use ilium_ipc::{
-    ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource, ServerEvent,
+    ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PaneTitleObservation,
+    PromptSubmissionSource, ServerEvent,
 };
 use ilium_platform::paths;
 use ilium_pty::{OwnerStatus, PtyError, PtyInput, ShutdownReason};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::foreground_observation::{self, ProbeObservation, ProbeRequest};
 use crate::mouse::to_crossterm_event;
 use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::{
     ProgressSetRequestIdentity, ProgressSetRequestOutcome, ProgressSetRequestRecord,
     ProgressSetResult, ServerState, MAXIMUM_CACHED_PROGRESS_SET_REQUESTS,
+};
+use crate::title_eligibility::{
+    self, CollectedTitleEvidence, TitleEvidenceCandidate, TitleRuntimeSnapshot,
 };
 
 /// Caps activity-revision mutations during one continuous PTY output burst.
@@ -111,19 +116,33 @@ pub async fn handle_request(
                 }
                 return false;
             }
-            if let Some(message) = crate::text_triggers::validate_settings(&settings) {
-                send_direct_error(direct_tx, message).await;
-                return false;
-            }
+            let settings =
+                match crate::text_triggers::validate_in_worker(state, settings, None).await {
+                    Ok(settings) => settings,
+                    Err(message) => {
+                        send_direct_error(direct_tx, message).await;
+                        return false;
+                    }
+                };
+            let crate::text_triggers::AcceptedCandidate {
+                settings,
+                retention,
+                ..
+            } = settings;
             let mut accepted = state.text_trigger_settings.write().await;
-            accepted.settings = settings.clone();
+            accepted.settings = settings;
             accepted.revision = accepted.revision.saturating_add(1);
+            accepted.retention = Some(retention);
+            let settings = accepted.settings.clone();
             drop(accepted);
             state.broadcast(ServerEvent::TextTriggersChanged { settings });
             false
         }
-        ClientRequest::UpdateAgentDetectionSettings { settings } => {
-            handle_update_agent_detection_settings(state, settings, direct_tx).await;
+        ClientRequest::UpdateAgentDetectionSettings {
+            request_id,
+            settings,
+        } => {
+            handle_update_agent_detection_settings(state, settings, request_id, direct_tx).await;
             false
         }
         ClientRequest::ResolveSessionRecovery { restore } => {
@@ -525,6 +544,8 @@ pub async fn handle_request(
             pane_id,
             expected_session_id,
             expected_title_generation,
+            expected_presentation_revision,
+            expected_process_id,
             title,
             short_title,
             inferred_icon,
@@ -536,6 +557,8 @@ pub async fn handle_request(
                     pane_id,
                     expected_session_id: &expected_session_id,
                     expected_title_generation,
+                    expected_presentation_revision,
+                    expected_process_id,
                     title,
                     short_title,
                     inferred_icon,
@@ -711,8 +734,11 @@ pub async fn handle_request(
             handle_clear_prompt_queue(state, pane_id, direct_tx).await;
             false
         }
-        ClientRequest::ApplyRestructurePlan(plan) => {
-            handle_apply_restructure_plan(state, plan, direct_tx).await;
+        ClientRequest::ApplyRestructurePlan {
+            plan,
+            title_observations,
+        } => {
+            handle_apply_restructure_plan(state, plan, &title_observations, direct_tx).await;
             false
         }
         ClientRequest::RevertLastRestructure => {
@@ -723,12 +749,14 @@ pub async fn handle_request(
             project_id,
             plan,
             inference_activity_revisions,
+            title_observations,
         } => {
             handle_apply_recommended_project_restructure_plan(
                 state,
                 project_id,
                 plan,
                 &inference_activity_revisions,
+                &title_observations,
                 direct_tx,
             )
             .await;
@@ -738,12 +766,14 @@ pub async fn handle_request(
             project_id,
             plan,
             inference_activity_revisions,
+            title_observations,
         } => {
             handle_apply_project_restructure_plan(
                 state,
                 project_id,
                 plan,
                 &inference_activity_revisions,
+                &title_observations,
                 direct_tx,
             )
             .await;
@@ -754,10 +784,18 @@ pub async fn handle_request(
             false
         }
         ClientRequest::UpdateDebugLogging { enabled } => {
+            let _logging_transaction = state.debug_logging_transaction.lock().await;
             if !enabled {
                 tracing::info!("server file logging disabled from Debug settings");
             }
-            if let Err(error) = ilium_logging::set_enabled(enabled) {
+            let applied = match ilium_logging::request_set_enabled(enabled) {
+                Ok(receipt) => receipt.await,
+                Err(error) => Err(error),
+            };
+            if let Err(error) = applied {
+                // A stalled client's error delivery must not hold up another
+                // connection's logging transition.
+                drop(_logging_transaction);
                 tracing::error!(%error, "failed to apply Debug file logging setting");
                 send_direct_error(
                     direct_tx,
@@ -1222,6 +1260,7 @@ async fn handle_attach(
         send_direct(
             direct_tx,
             ServerEvent::AgentDetectionSettingsChanged {
+                request_id: None,
                 result: Ok(crate::config::agent_detection_settings(
                     &detection,
                     &custom_signatures,
@@ -1275,20 +1314,7 @@ impl TerminalOutputSynchronization<'_> {
                     .get(&pane_id)
                     .copied()
                     .unwrap_or_default();
-                match session.output_recovery_after(after_sequence) {
-                    Some(ilium_pty::PtyOutputRecovery::Delta(chunk)) => {
-                        Some(ServerEvent::ScreenUpdate {
-                            pane_id,
-                            first_sequence: after_sequence.saturating_add(1),
-                            sequence: chunk.sequence,
-                            bytes: chunk.bytes.to_vec(),
-                        })
-                    }
-                    Some(ilium_pty::PtyOutputRecovery::Replay(replay)) => {
-                        Some(terminal_replay_event(pane_id, replay))
-                    }
-                    None => None,
-                }
+                terminal_recovery_from_session(pane_id, session, after_sequence)
             }
         }
     }
@@ -1421,6 +1447,7 @@ async fn state_synchronization_events(
     if include_initial_sync_complete {
         let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
         events.push(ServerEvent::AgentDetectionSettingsChanged {
+            request_id: None,
             result: Ok(crate::config::agent_detection_settings(
                 &detection,
                 &custom_signatures,
@@ -1447,13 +1474,17 @@ async fn handle_session_recovery_resolution(
     if restore {
         crate::restore_snapshot(state, snapshot).await;
         broadcast_and_persist(state).await;
-    } else if let Err(error) = tokio::fs::remove_file(&state.snapshot_path).await {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            send_direct_error(
-                direct_tx,
-                format!("Could not discard stored session snapshot: {error}"),
-            )
-            .await;
+    } else {
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        match crate::persistence::remove_snapshot_ordered(state, write_guard).await {
+            Ok(_write_guard) => {}
+            Err(error) => {
+                send_direct_error(
+                    direct_tx,
+                    format!("Could not discard stored session snapshot: {error}"),
+                )
+                .await;
+            }
         }
     }
     // Every real caller reaches this only through `AttachInteractive` (the
@@ -1548,16 +1579,186 @@ fn canonical_project_directory(path: std::path::PathBuf) -> Result<std::path::Pa
 /// `state.restructure_undo`'s one slot only when the plan actually applies
 /// cleanly -- a rejected plan leaves both the tree and any earlier undo
 /// buffer untouched.
+async fn collect_observed_title_evidence(
+    state: &ServerState,
+    observations: &[PaneTitleObservation],
+) -> Vec<CollectedTitleEvidence> {
+    let candidates = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        observations
+            .iter()
+            .filter_map(|observation| {
+                let node = tree.get(observation.pane_id)?;
+                let project_cwd = tree.pane_cwd(node.id).map(std::path::Path::to_path_buf)?;
+                let runtime = match panes.get(&node.id) {
+                    Some(PaneResource::Terminal(runtime)) => {
+                        Some(TitleRuntimeSnapshot::capture(node, runtime, false))
+                    }
+                    _ => None,
+                };
+                Some(TitleEvidenceCandidate {
+                    observation: observation.clone(),
+                    project_cwd,
+                    runtime,
+                })
+            })
+            .collect()
+    };
+    title_eligibility::collect_title_evidence(state.home_dir.clone(), candidates).await
+}
+
+/// Resets legacy AI text only when the exact current conversation is proven
+/// empty. An unavailable history is never a destructive repair signal.
+pub(crate) async fn reconcile_empty_agent_titles(state: &ServerState, pane_ids: &[NodeId]) {
+    let observations = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        pane_ids
+            .iter()
+            .filter_map(|id| {
+                let node = tree.get(*id)?;
+                let Some(PaneResource::Terminal(runtime)) = panes.get(id) else {
+                    return None;
+                };
+                Some(TitleRuntimeSnapshot::capture(node, runtime, false).observation)
+            })
+            .collect::<Vec<_>>()
+    };
+    let evidence = collect_observed_title_evidence(state, &observations).await;
+    let changed = {
+        let mut tree = state.tree.write().await;
+        let panes = state.panes.read().await;
+        let mut changed = false;
+        for evidence in evidence {
+            let id = evidence.observation().pane_id;
+            let Some(node) = tree.get(id) else {
+                continue;
+            };
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&id) else {
+                continue;
+            };
+            let current = TitleRuntimeSnapshot::capture(node, runtime, false);
+            if !evidence.proves_current_empty_history(node, &current)
+                || runtime
+                    .authored_title_receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.matches(&current))
+            {
+                continue;
+            }
+            let repaired = tree
+                .repair_legacy_restructure_title_source(id)
+                .unwrap_or(false);
+            let reset = tree
+                .set_automatic_pane_title(id, pane::FRESH_AGENT_TITLE, None, None)
+                .unwrap_or(false);
+            changed |= repaired || reset;
+        }
+        changed
+    };
+    if changed {
+        broadcast_and_persist(state).await;
+    }
+}
+
+fn title_grants_under_lock(
+    tree: &Tree,
+    panes: &HashMap<NodeId, PaneResource>,
+    evidence: &[CollectedTitleEvidence],
+    shell_observations: &HashMap<NodeId, ProbeObservation>,
+) -> Vec<ilium_core::NodePresentationRevision> {
+    evidence
+        .iter()
+        .filter_map(|evidence| {
+            let node = tree.get(evidence.observation().pane_id)?;
+            let runtime = match panes.get(&node.id) {
+                Some(PaneResource::Terminal(runtime)) => Some(runtime),
+                _ => None,
+            };
+            let snapshot = runtime.map(|runtime| {
+                let shell_confirmed = shell_observations
+                    .get(&node.id)
+                    .filter(|observed| observed.same_session(runtime))
+                    .is_some_and(|observed| observed.shell_owns_terminal() == Some(true));
+                TitleRuntimeSnapshot::capture(node, runtime, shell_confirmed)
+            });
+            title_eligibility::accepted_title_grant(
+                node,
+                snapshot.as_ref(),
+                evidence,
+                runtime.and_then(|runtime| runtime.authored_title_receipt.as_ref()),
+            )
+        })
+        .collect()
+}
+
+/// Native foreground inspection runs after evidence collection and before
+/// the title transaction. Unknown, refused, or late observations grant no
+/// plain-shell title. The final locked snapshot still fences the PTY lifetime,
+/// session, agent generation, process birth, and presentation revision.
+async fn observe_title_shells(
+    state: &ServerState,
+    evidence: &[CollectedTitleEvidence],
+) -> HashMap<NodeId, ProbeObservation> {
+    let requests = {
+        let panes = state.panes.read().await;
+        evidence
+            .iter()
+            .filter(|item| item.needs_shell_confirmation())
+            .filter_map(|item| {
+                let pane_id = item.observation().pane_id;
+                let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                    return None;
+                };
+                matches!(&runtime.origin, TerminalOrigin::PlainShell).then(|| {
+                    (
+                        pane_id,
+                        ProbeRequest::for_shell(runtime.session.shell_observer()),
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut observed = HashMap::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(750);
+    for (pane_id, request) in requests {
+        let result =
+            tokio::time::timeout_at(deadline, foreground_observation::observe(state, request))
+                .await;
+        match result {
+            Ok(Ok(proof)) => {
+                observed.insert(pane_id, proof);
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(pane_id = pane_id.0, %error, "title foreground unavailable")
+            }
+            Err(_) => break,
+        }
+    }
+    observed
+}
+
 async fn commit_project_restructure(
     state: &ServerState,
     project_id: NodeId,
-    apply: impl FnOnce(&mut Tree) -> Result<Vec<ilium_core::NodeActivityRevision>, TreeError>,
+    evidence: &[CollectedTitleEvidence],
+    apply: impl FnOnce(
+        &mut Tree,
+        &[ilium_core::NodePresentationRevision],
+    ) -> Result<Vec<ilium_core::NodeActivityRevision>, TreeError>,
 ) -> Result<Vec<ilium_core::NodeActivityRevision>, TreeError> {
+    let shell_observations = observe_title_shells(state, evidence).await;
     let mut tree = state.tree.write().await;
+    let panes = state.panes.read().await;
+    let grants = title_grants_under_lock(&tree, &panes, evidence, &shell_observations);
     let mut undo = state.restructure_undo.lock().await;
+    let mut title_undo = state.restructure_title_revisions.lock().await;
     let before = tree.clone();
-    let checkpoints = apply(&mut tree)?;
+    let checkpoints = apply(&mut tree, &grants)?;
+    let accepted_revisions = tree.project_presentation_revisions(project_id)?;
     undo.insert(project_id, before);
+    title_undo.insert(project_id, accepted_revisions);
     state.request_snapshot_save();
     Ok(checkpoints)
 }
@@ -1588,9 +1789,11 @@ async fn project_restructure_event(
 async fn handle_apply_restructure_plan(
     state: &Arc<ServerState>,
     plan: RestructurePlan,
+    title_observations: &[PaneTitleObservation],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let transaction = state.restructure_transaction.lock().await;
+    let evidence = collect_observed_title_evidence(state, title_observations).await;
     let projects = state.tree.read().await.project_ids();
     if projects.len() != 1 {
         drop(transaction);
@@ -1602,11 +1805,11 @@ async fn handle_apply_restructure_plan(
         return;
     }
     let project_id = projects[0];
-    let result = commit_project_restructure(state, project_id, |tree| {
+    let result = commit_project_restructure(state, project_id, &evidence, |tree, grants| {
         if tree.project_ids().len() != 1 {
             return Err(TreeError::RootRequiresProject);
         }
-        tree.apply_project_restructure(project_id, plan)?;
+        tree.apply_project_restructure_with_title_grants(project_id, plan, &[], grants)?;
         Ok(Vec::new())
     })
     .await;
@@ -1651,14 +1854,17 @@ async fn handle_apply_project_restructure_plan(
     project_id: NodeId,
     plan: RestructurePlan,
     inference_activity_revisions: &[ilium_core::NodeActivityRevision],
+    title_observations: &[PaneTitleObservation],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let transaction = state.restructure_transaction.lock().await;
-    let result = commit_project_restructure(state, project_id, |tree| {
-        tree.apply_project_restructure_with_activity_checkpoint(
+    let evidence = collect_observed_title_evidence(state, title_observations).await;
+    let result = commit_project_restructure(state, project_id, &evidence, |tree, grants| {
+        tree.apply_project_restructure_with_title_grants(
             project_id,
             plan,
             inference_activity_revisions,
+            grants,
         )
     })
     .await;
@@ -1672,11 +1878,18 @@ async fn handle_apply_recommended_project_restructure_plan(
     project_id: NodeId,
     plan: RecommendedRestructurePlan,
     inference_activity_revisions: &[ilium_core::NodeActivityRevision],
+    title_observations: &[PaneTitleObservation],
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let transaction = state.restructure_transaction.lock().await;
-    let result = commit_project_restructure(state, project_id, |tree| {
-        tree.apply_recommended_project_restructure(project_id, plan, inference_activity_revisions)
+    let evidence = collect_observed_title_evidence(state, title_observations).await;
+    let result = commit_project_restructure(state, project_id, &evidence, |tree, grants| {
+        tree.apply_recommended_project_restructure_with_title_grants(
+            project_id,
+            plan,
+            inference_activity_revisions,
+            grants,
+        )
     })
     .await;
     let event = project_restructure_event(state, project_id, result).await;
@@ -1712,7 +1925,21 @@ async fn handle_revert_project_restructure(
     } else {
         Some(state.panes.write().await)
     };
-    if let Err(error) = tree.restore_project_from(project_id, previous_tree) {
+    let mut title_undo = state.restructure_title_revisions.lock().await;
+    let preserve_ids = title_undo
+        .get(&project_id)
+        .into_iter()
+        .flatten()
+        .filter_map(|accepted| {
+            tree.get(accepted.node_id)
+                .filter(|node| node.presentation_revision != accepted.revision)
+                .map(|node| node.id)
+        })
+        .collect::<Vec<_>>();
+    if let Err(error) =
+        tree.restore_project_from_preserving_presentations(project_id, previous_tree, &preserve_ids)
+    {
+        drop(title_undo);
         drop(panes);
         drop(undo);
         drop(tree);
@@ -1722,6 +1949,8 @@ async fn handle_revert_project_restructure(
         return;
     }
     undo.remove(&project_id);
+    title_undo.remove(&project_id);
+    drop(title_undo);
     state.request_snapshot_save();
     drop(undo);
     if let Some(panes) = &mut panes {
@@ -1754,8 +1983,67 @@ async fn handle_automatic_pane_title(
     short_title: Option<String>,
     inferred_icon: Option<String>,
 ) {
+    handle_automatic_pane_title_with_probe(
+        state,
+        pane_id,
+        title,
+        short_title,
+        inferred_icon,
+        |state, request| async move { foreground_observation::observe(&state, request).await },
+    )
+    .await;
+}
+
+async fn handle_automatic_pane_title_with_probe<Probe, ProbeFuture>(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    title: String,
+    short_title: Option<String>,
+    inferred_icon: Option<String>,
+    probe: Probe,
+) where
+    Probe: FnOnce(Arc<ServerState>, ProbeRequest) -> ProbeFuture,
+    ProbeFuture:
+        std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
+{
+    let (baseline, request) = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        let Some(node) = tree.get(pane_id) else {
+            return;
+        };
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return;
+        };
+        (
+            TitleRuntimeSnapshot::capture(node, runtime, false),
+            ProbeRequest::for_shell(runtime.session.shell_observer()),
+        )
+    };
+    let shell_observation = probe(Arc::clone(state), request).await.ok();
     let tree_changed = {
         let mut tree = state.tree.write().await;
+        let panes = state.panes.read().await;
+        let Some(node) = tree.get(pane_id) else {
+            return;
+        };
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return;
+        };
+        if TitleRuntimeSnapshot::capture(node, runtime, false) != baseline {
+            return;
+        }
+        let snapshot = TitleRuntimeSnapshot::capture(
+            node,
+            runtime,
+            shell_observation
+                .as_ref()
+                .filter(|proof| proof.same_session(runtime))
+                .is_some_and(|proof| proof.shell_owns_terminal() == Some(true)),
+        );
+        if snapshot.kind != title_eligibility::TerminalTitleKind::ConfirmedPlainShell {
+            return;
+        }
         match tree.set_automatic_pane_title(pane_id, title, short_title, inferred_icon) {
             Ok(changed) => changed,
             Err(error) => {
@@ -1776,6 +2064,8 @@ struct SessionPaneTitleUpdate<'a> {
     pane_id: NodeId,
     expected_session_id: &'a str,
     expected_title_generation: u64,
+    expected_presentation_revision: u64,
+    expected_process_id: Option<u32>,
     title: String,
     short_title: Option<String>,
     inferred_icon: Option<String>,
@@ -1783,6 +2073,24 @@ struct SessionPaneTitleUpdate<'a> {
 }
 
 async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPaneTitleUpdate<'_>) {
+    let observation = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        let Some(node) = tree.get(update.pane_id) else {
+            return;
+        };
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&update.pane_id) else {
+            return;
+        };
+        let mut observation = TitleRuntimeSnapshot::capture(node, runtime, false).observation;
+        observation.presentation_revision = update.expected_presentation_revision;
+        observation.session_id = Some(update.expected_session_id.to_owned());
+        observation.process_id = update.expected_process_id;
+        observation.title_generation = update.expected_title_generation;
+        observation
+    };
+    let evidence = collect_observed_title_evidence(state, &[observation]).await;
+    let shell_observations = observe_title_shells(state, &evidence).await;
     let proposed_title = update.title.clone();
     let expected_session_id = update.expected_session_id.to_string();
     let expected_title_generation = update.expected_title_generation;
@@ -1797,6 +2105,7 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
     if runtime.is_session_identity_invalidated
         || runtime.session_id.as_deref() != Some(update.expected_session_id)
         || runtime.title_generation != update.expected_title_generation
+        || title_grants_under_lock(&tree, &panes, &evidence, &shell_observations).is_empty()
     {
         drop(panes);
         drop(tree);
@@ -1823,39 +2132,19 @@ async fn handle_session_pane_title(state: &Arc<ServerState>, update: SessionPane
         .await;
         return;
     }
-    let changed = match update.title_source {
-        PaneTitleSource::Automatic => tree
-            .set_automatic_pane_title(
-                update.pane_id,
-                update.title,
-                update.short_title,
-                update.inferred_icon,
-            )
-            .unwrap_or_else(|error| {
-                tracing::warn!(
-                    "session title update rejected for pane {:?}: {error}",
-                    update.pane_id
-                );
-                false
-            }),
-        PaneTitleSource::UserSpecified => {
-            match tree.rename_node(
-                update.pane_id,
-                update.title,
-                update.short_title,
-                update.inferred_icon,
-            ) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::warn!(
-                        "session retitle rejected for pane {:?}: {error}",
-                        update.pane_id
-                    );
-                    false
-                }
-            }
-        }
-    };
+    let changed = tree
+        .accept_session_pane_title(
+            update.pane_id,
+            update.expected_presentation_revision,
+            update.title,
+            update.short_title,
+            update.inferred_icon,
+            update.title_source,
+        )
+        .unwrap_or_else(|error| {
+            tracing::warn!(pane_id = update.pane_id.0, %error, "session title rejected");
+            false
+        });
     drop(panes);
     drop(tree);
     if changed {
@@ -2095,14 +2384,14 @@ async fn idempotent_install_progress_monitor(
         let decision = {
             let mut cache = state.progress_set_requests.lock().await;
             match cache.records.get(&request_id) {
-                Some(record) if record.identity != identity => Decision::Return(Err(
-                    progress_rejection(
+                Some(record) if record.identity != identity => {
+                    Decision::Return(Err(progress_rejection(
                         ilium_ipc::ProgressMonitorRejectionCode::InvalidRequest,
                         format!(
                             "progress set request_id {request_id} was already used with different arguments"
                         ),
-                    ),
-                )),
+                    )))
+                }
                 Some(ProgressSetRequestRecord {
                     outcome: ProgressSetRequestOutcome::Pending(completed),
                     ..
@@ -2828,6 +3117,7 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
 async fn handle_update_agent_detection_settings(
     state: &Arc<ServerState>,
     settings: ilium_ipc::AgentDetectionSettings,
+    request_id: Option<u64>,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
     let config_dir = match crate::paths::config_dir() {
@@ -2836,6 +3126,7 @@ async fn handle_update_agent_detection_settings(
             send_direct(
                 direct_tx,
                 ServerEvent::AgentDetectionSettingsChanged {
+                    request_id,
                     result: Err(ilium_ipc::AgentDetectionSettingsError {
                         message: error.to_string(),
                     }),
@@ -2846,13 +3137,31 @@ async fn handle_update_agent_detection_settings(
         }
     };
     match apply_agent_detection_settings(state, settings, config_dir).await {
-        Ok(settings) => state.broadcast(ServerEvent::AgentDetectionSettingsChanged {
-            result: Ok(settings),
-        }),
+        Ok(settings) => {
+            // The persistence operation has finished before either publication.
+            // Only the originating connection receives its correlation ID.
+            if let Some(request_id) = request_id {
+                send_direct(
+                    direct_tx,
+                    ServerEvent::AgentDetectionSettingsChanged {
+                        request_id: Some(request_id),
+                        result: Ok(settings.clone()),
+                    },
+                )
+                .await;
+            }
+            state.broadcast(ServerEvent::AgentDetectionSettingsChanged {
+                request_id: None,
+                result: Ok(settings),
+            });
+        }
         Err(error) => {
             send_direct(
                 direct_tx,
-                ServerEvent::AgentDetectionSettingsChanged { result: Err(error) },
+                ServerEvent::AgentDetectionSettingsChanged {
+                    request_id,
+                    result: Err(error),
+                },
             )
             .await;
         }
@@ -3207,7 +3516,7 @@ async fn handle_new_pane(
     }
 }
 
-/// Longest a conversion-triggered termination may hold the pane registry.
+/// Native process-tree termination timeout; no registry guard spans this wait.
 const TERMINATE_PANE_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Stops the process tree behind one terminal pane while keeping its node,
@@ -3219,34 +3528,15 @@ async fn handle_terminate_pane_process(
     pane_id: NodeId,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let blocking_state = Arc::clone(state);
-    // `terminate_process_tree` polls for up to the timeout, so it must not
-    // run on an async worker thread.
-    let outcome = tokio::task::spawn_blocking(move || {
-        let mut panes = blocking_state.panes.blocking_write();
-        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
-            return Err(format!("pane {pane_id:?} has no running terminal process"));
-        };
-        match runtime
-            .session
-            .terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT)
-        {
-            Ok(_proof) => Ok(()),
+    let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
+        match control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT) {
+            Ok(_) => Ok(()),
             Err(tree_error) => {
-                // Platforms without process-tree proof (or a PTY captured
-                // without a birth identity) still get the direct-child kill.
-                tracing::warn!(
-                    "pane {pane_id:?} process-tree termination unavailable ({tree_error}); killing the direct child"
-                );
-                runtime
-                    .session
-                    .kill()
-                    .map_err(|error| format!("failed to stop the pane process: {error}"))
+                tracing::warn!(%tree_error, "pane process-tree proof unavailable; killing captured direct child");
+                control.kill_direct_child().map_err(std::io::Error::other)
             }
         }
-    })
-    .await
-    .unwrap_or_else(|join_error| Err(format!("pane termination task failed: {join_error}")));
+    }).await;
     let _ = crate::agent_debug::record(
         state,
         pane_id,
@@ -3272,6 +3562,52 @@ async fn handle_terminate_pane_process(
         .await;
 }
 
+/// Native termination owns the captured child handle until physical return.
+/// A caller timeout reports uncertainty; it neither joins a stuck callback
+/// nor claims that the original child or a replacement pane was stopped.
+async fn terminate_pane_process_with_work<Work>(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    work: Work,
+) -> Result<(), String>
+where
+    Work: FnOnce(ilium_pty::PtyTerminationHandle) -> std::io::Result<()> + Send + 'static,
+{
+    let control = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(format!("pane {pane_id:?} has no running terminal process"));
+        };
+        runtime.session.termination_handle()
+    };
+    let Some(execution) = state.execution.get() else {
+        return Err("pane termination unavailable: server execution is not running".to_owned());
+    };
+    let captured_control = control.clone();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        execution.client.run(
+            ilium_execution::Lane::Io,
+            ilium_execution::JobCost {
+                input_bytes: 4096,
+                result_bytes: 4096,
+            },
+            move |_| work(captured_control),
+        ),
+    )
+    .await;
+    let outcome = match result {
+        Ok(result) => result.map(|_| ()).map_err(|error| format!("pane termination failed: {error}")),
+        Err(_) => Err("pane termination timed out; captured native work remains owned and its outcome is uncertain".to_owned()),
+    };
+    let panes = state.panes.read().await;
+    let same_session = matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime)) if control.same_session(&runtime.session.termination_handle()));
+    if !same_session {
+        return Err(format!("pane {pane_id:?} changed during termination; result belongs to the original child and does not establish replacement termination ({outcome:?})"));
+    }
+    outcome
+}
+
 /// Replaces one terminal pane with a new pane running `command_line` in the
 /// same parent, position, and launch directory. The new pane is spawned
 /// before the old one is closed, so a spawn failure leaves the old pane
@@ -3285,6 +3621,33 @@ async fn handle_replace_pane_with_command(
 ) {
     let origin = TerminalOrigin::Command(command_line.clone());
     let publish_guard = state.workspace_spawn_lock.lock().await;
+    let continuity_observation = {
+        let tree = state.tree.read().await;
+        let panes = state.panes.read().await;
+        match (
+            BuiltinAgentProvider::resume_binding(&command_line),
+            tree.get(pane_id),
+            panes.get(&pane_id),
+        ) {
+            (Some((provider, session_id)), Some(node), Some(PaneResource::Terminal(runtime))) => {
+                let snapshot = TitleRuntimeSnapshot::capture(node, runtime, false);
+                (snapshot
+                    .observation
+                    .agent_class
+                    .as_ref()
+                    .and_then(|class| class.provider())
+                    == Some(provider)
+                    && snapshot.observation.session_id.as_deref() == Some(session_id.as_str()))
+                .then_some(snapshot.observation)
+            }
+            _ => None,
+        }
+    };
+    let continuity_evidence = collect_observed_title_evidence(
+        state,
+        &continuity_observation.into_iter().collect::<Vec<_>>(),
+    )
+    .await;
     let mut tree = state.tree.write().await;
     let Some(parent) = tree.parent_of(pane_id) else {
         drop(tree);
@@ -3336,10 +3699,20 @@ async fn handle_replace_pane_with_command(
             return;
         }
     };
+    let has_verified_continuity = {
+        let panes = state.panes.read().await;
+        !title_grants_under_lock(&tree, &panes, &continuity_evidence, &HashMap::new()).is_empty()
+    };
     let placed = tree
         .move_node(new_pane_id, parent, position)
         .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()))
-        .and_then(|()| tree.inherit_pane_title(pane_id, new_pane_id));
+        .and_then(|()| {
+            tree.inherit_pane_title_with_verified_continuity(
+                pane_id,
+                new_pane_id,
+                has_verified_continuity,
+            )
+        });
     if let Err(error) = placed {
         let _ = tree.remove_node(new_pane_id);
         drop(tree);
@@ -3497,13 +3870,10 @@ async fn candidate_new_pane_working_directory(
     match working_directory {
         NewPaneWorkingDirectory::ProjectRoot => None,
         NewPaneWorkingDirectory::FocusedTerminal => {
-            let panes = state.panes.read().await;
-            panes.values().find_map(|resource| match resource {
-                PaneResource::Terminal(runtime) if runtime.detection_schedule.client_focused => {
-                    runtime.session.current_working_directory()
-                }
-                _ => None,
+            focused_terminal_working_directory_with_work(state, |process_id| {
+                ilium_platform::process_info::working_directory(process_id)
             })
+            .await
         }
         NewPaneWorkingDirectory::LastUsed => {
             state.last_terminal_working_directory.lock().await.clone()
@@ -3518,6 +3888,60 @@ async fn candidate_new_pane_working_directory(
                 .map(std::path::Path::to_path_buf)
         }
     }
+}
+
+/// Reading a live process directory can enter native process inspection on
+/// Windows. Capture the focused PTY under a short guard, then inspect on the
+/// finite IO bank and reject a late result after focus or lifetime changes.
+async fn focused_terminal_working_directory_with_work<Work>(
+    state: &ServerState,
+    work: Work,
+) -> Option<std::path::PathBuf>
+where
+    Work: FnOnce(u32) -> Option<std::path::PathBuf> + Send + 'static,
+{
+    let (pane_id, session_identity, process_id) = {
+        let panes = state.panes.read().await;
+        panes
+            .iter()
+            .find_map(|(pane_id, resource)| match resource {
+                PaneResource::Terminal(runtime) if runtime.detection_schedule.client_focused => {
+                    Some((
+                        *pane_id,
+                        runtime.session.identity(),
+                        runtime.session.process_id()?,
+                    ))
+                }
+                _ => None,
+            })?
+    };
+    let execution = state.execution.get()?;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        execution.client.run(
+            ilium_execution::Lane::Io,
+            ilium_execution::JobCost {
+                input_bytes: 4096,
+                result_bytes: 128 * 1024,
+            },
+            move |_| -> Result<_, std::convert::Infallible> { Ok(work(process_id)) },
+        ),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let panes = state.panes.read().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+        return None;
+    };
+    if !runtime.detection_schedule.client_focused
+        || runtime.session.identity() != session_identity
+        || runtime.session.process_id() != Some(process_id)
+        || runtime.session.child_exit().is_some()
+    {
+        return None;
+    }
+    result.view().clone()
 }
 
 /// Failure from [`spawn_and_register_pane_in_directory`]. Distinguishes an
@@ -3769,16 +4193,22 @@ async fn forward_output_with_owner_status(
 ) {
     let mut activity_gate = OutputActivityGate::new();
     let mut subscription_cache = TerminalSubscriptionCache::new();
-    let mut text_trigger_tracker = crate::text_triggers::TriggerTracker::default();
+    let mut text_trigger_tracker = crate::text_triggers::Matcher::default();
+    // This is the newest sequence the forwarder already broadcast, or saw
+    // while nobody subscribed. Lag recovery starts after it, never at the
+    // beginning of the entire bounded journal.
+    let mut covered_sequence = 0_u64;
     let (trigger_delivery_sender, trigger_delivery_receiver) = tokio::sync::mpsc::channel(64);
-    let _trigger_delivery_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(
+    let trigger_delivery_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(
         crate::text_triggers::run_deliveries(
             std::sync::Arc::clone(&state),
             pane_id,
+            input.clone(),
             trigger_delivery_receiver,
         ),
     ));
     let mut owner_finished = false;
+    let mut drain_trigger_deliveries = false;
     loop {
         {
             let panes = state.panes.read().await;
@@ -3836,6 +4266,7 @@ async fn forward_output_with_owner_status(
                         &trigger_delivery_sender,
                     )
                     .await;
+                    covered_sequence = covered_sequence.max(first_chunk.sequence);
                     continue;
                 }
                 match collect_output_burst(first_chunk, &mut receiver).await {
@@ -3847,12 +4278,26 @@ async fn forward_output_with_owner_status(
                         // The visible stream merges extra PTY chunks. Match
                         // against that complete byte range, otherwise a
                         // regexp spanning a drained chunk is never observed.
-                        state.broadcast(ServerEvent::ScreenUpdate {
-                            pane_id,
-                            first_sequence,
-                            sequence,
-                            bytes: bytes.clone(),
-                        });
+                        if sequence > covered_sequence {
+                            if first_sequence == covered_sequence.saturating_add(1) {
+                                state.broadcast(ServerEvent::ScreenUpdate {
+                                    pane_id,
+                                    first_sequence,
+                                    sequence,
+                                    bytes: bytes.clone(),
+                                });
+                                covered_sequence = sequence;
+                            } else if let Some(sequence) = broadcast_terminal_recovery_after(
+                                &state,
+                                pane_id,
+                                &input,
+                                covered_sequence,
+                            )
+                            .await
+                            {
+                                covered_sequence = sequence;
+                            }
+                        }
                         crate::text_triggers::process_output(
                             &state,
                             pane_id,
@@ -3875,7 +4320,16 @@ async fn forward_output_with_owner_status(
                         tracing::warn!(
                             "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                         );
-                        broadcast_terminal_replay(&state, pane_id).await;
+                        if let Some(sequence) = broadcast_terminal_recovery_after(
+                            &state,
+                            pane_id,
+                            &input,
+                            covered_sequence,
+                        )
+                        .await
+                        {
+                            covered_sequence = sequence;
+                        }
                     }
                 }
             }
@@ -3895,10 +4349,27 @@ async fn forward_output_with_owner_status(
                 // potentially 32 MiB replay allocation and an irrelevant IPC
                 // broadcast merely because a hidden forwarder fell behind.
                 if subscription_cache.has_subscribers(&state, pane_id) {
-                    broadcast_terminal_replay(&state, pane_id).await;
+                    if let Some(sequence) =
+                        broadcast_terminal_recovery_after(&state, pane_id, &input, covered_sequence)
+                            .await
+                    {
+                        covered_sequence = sequence;
+                    }
                 }
             }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                drain_trigger_deliveries = true;
+                break;
+            }
+        }
+    }
+    drop(trigger_delivery_sender);
+    if drain_trigger_deliveries {
+        // Natural EOF closes admission and finishes already matched decisions.
+        // Pane replacement/cancellation instead drops the abort-on-drop owner;
+        // the semantic writer also fences its exact original PTY identity.
+        if let Err(error) = trigger_delivery_task.join().await {
+            tracing::error!(pane_id = pane_id.0, %error, "text trigger delivery owner failed during drain");
         }
     }
 }
@@ -3992,19 +4463,32 @@ async fn collect_output_burst(
     }
 }
 
-/// Repairs every attached client's terminal parser after this pane's
-/// server-side output forwarder misses raw chunks. The PTY journal is the
-/// authoritative replay source and carries a sequence watermark, so queued
-/// live bytes at or below it are safely ignored by clients.
-async fn broadcast_terminal_replay(state: &ServerState, pane_id: NodeId) {
-    let replay_event = {
-        let panes = state.panes.read().await;
-        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-            return;
-        };
-        terminal_replay_event(pane_id, runtime.session.output_replay())
+/// Repairs a forwarder gap with the exact tail it has not yet covered. Keep
+/// the pane read lock through the synchronous broadcast so a replacement
+/// cannot interleave its new tree state before this old-session event.
+async fn broadcast_terminal_recovery_after(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected_input: &PtyInput,
+    after_sequence: u64,
+) -> Option<u64> {
+    let panes = state.panes.read().await;
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
     };
-    state.broadcast(replay_event);
+    if !expected_input.same_session(&runtime.session.input_handle()) {
+        return None;
+    }
+    let event = terminal_recovery_from_session(pane_id, &runtime.session, after_sequence)?;
+    let through_sequence = match &event {
+        ServerEvent::ScreenUpdate { sequence, .. } => *sequence,
+        ServerEvent::TerminalReplay {
+            through_sequence, ..
+        } => *through_sequence,
+        _ => return None,
+    };
+    state.broadcast(event);
+    Some(through_sequence)
 }
 
 /// Builds the smallest terminal event needed when one connection makes a
@@ -4019,7 +4503,15 @@ pub(crate) async fn terminal_recovery_event(
     let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
         return None;
     };
-    match runtime.session.output_recovery_after(after_sequence)? {
+    terminal_recovery_from_session(pane_id, &runtime.session, after_sequence)
+}
+
+fn terminal_recovery_from_session(
+    pane_id: NodeId,
+    session: &ilium_pty::PtySession,
+    after_sequence: u64,
+) -> Option<ServerEvent> {
+    match session.output_recovery_after(after_sequence)? {
         ilium_pty::PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
             pane_id,
             first_sequence: after_sequence.saturating_add(1),
@@ -4067,14 +4559,12 @@ pub(crate) fn collect_pane_descendants(tree: &Tree, id: NodeId) -> Vec<NodeId> {
     result
 }
 
-pub(crate) fn teardown_pane_resource(pane_id: NodeId, mut resource: PaneResource) {
+pub(crate) fn teardown_pane_resource(_pane_id: NodeId, mut resource: PaneResource) {
     resource.abort_background_tasks();
     if let PaneResource::Terminal(runtime) = &mut resource {
-        if let Err(error) = runtime.session.kill() {
-            tracing::warn!(
-                "pane {pane_id:?} kill failed (process may have already exited): {error}"
-            );
-        }
+        // The original child is signalled/reaped by its existing owned worker.
+        // Refused native termination is logged there without blocking Tokio.
+        runtime.session.request_shutdown();
     }
 }
 
@@ -4358,7 +4848,17 @@ async fn handle_resize_pane(
     };
 
     if let Some(message) = error_message {
-        send_direct_error(direct_tx, message).await;
+        tracing::error!(?pane_id, rows, cols, %message, "pane resize rejected");
+        send_direct(
+            direct_tx,
+            ServerEvent::PaneResizeRejected {
+                pane_id,
+                rows,
+                cols,
+                message,
+            },
+        )
+        .await;
     } else {
         let _ = crate::agent_debug::record(
             state,
@@ -4494,6 +4994,7 @@ const AUTOMATED_ENTER_DELAY: std::time::Duration = std::time::Duration::from_mil
 
 /// Writes exactly the caller's raw bytes. Keyboard input and explicit
 /// Enter-only actions retain their existing encoding and no staged behavior.
+#[cfg(test)]
 pub(crate) async fn write_key_input(
     state: &ServerState,
     pane_id: NodeId,
@@ -4533,9 +5034,12 @@ async fn write_key_input_with_origin(
         pane_id,
         bytes,
         submission,
-        is_initial_prompt,
-        is_user_directed,
-        prompt_epoch,
+        InputWriteOrigin {
+            is_initial_prompt,
+            is_user_directed,
+            prompt_epoch,
+            expected_invocation: None,
+        },
         &input_gate,
     )
     .await
@@ -4570,9 +5074,12 @@ pub(crate) async fn write_scheduled_key_input(
         pane_id,
         bytes,
         submission,
-        false,
-        false,
-        None,
+        InputWriteOrigin {
+            is_initial_prompt: false,
+            is_user_directed: false,
+            prompt_epoch: None,
+            expected_invocation: None,
+        },
         &input_gate,
     )
     .await
@@ -4613,19 +5120,29 @@ pub(crate) async fn submit_text_trigger_if_current(
     pane_id: NodeId,
     trigger_id: &str,
     message: &str,
-    expected_revision: u64,
+    expected_session: &PtyInput,
 ) -> Result<bool, String> {
     let input_gate = pane_input_gate(state, pane_id).await?;
     let _input_guard = input_gate.lock().await;
+    {
+        let panes = state.panes.read().await;
+        if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+            if expected_session.same_session(&runtime.session.input_handle()))
+        {
+            return Ok(false);
+        }
+    }
     let current_target = {
         let accepted = state.text_trigger_settings.read().await;
-        (accepted.revision == expected_revision)
-            .then(|| {
-                accepted.settings.triggers.iter().find(|trigger| {
-                    trigger.enabled && trigger.id == trigger_id && trigger.message == message
-                })
+        // Delayed deliveries outlive unrelated settings edits, so the fence is
+        // the rule itself (identity, enabled, message) rather than the revision.
+        accepted
+            .settings
+            .triggers
+            .iter()
+            .find(|trigger| {
+                trigger.enabled && trigger.id == trigger_id && trigger.message == message
             })
-            .flatten()
             .map(|trigger| trigger.target)
     };
     let Some(target) = current_target else {
@@ -4652,6 +5169,67 @@ pub(crate) async fn submit_text_trigger_if_current(
     )
     .await?;
     Ok(true)
+}
+
+fn invalidate_submitted_title_observation(
+    tree: &mut Tree,
+    runtime: &mut pane::TerminalPaneRuntime,
+    pane_id: NodeId,
+) -> bool {
+    // An acknowledged Enter supersedes earlier inference even when terminal
+    // editing prevents exact-text recovery. Unknown input never grants a title.
+    runtime.authored_title_receipt = None;
+    match tree.invalidate_presentation(pane_id) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(pane_id = pane_id.0, %error, "submitted task cannot advance title observation");
+            false
+        }
+    }
+}
+
+fn record_authored_title_receipt(
+    tree: &mut Tree,
+    runtime: &mut pane::TerminalPaneRuntime,
+    pane_id: NodeId,
+    text: &str,
+    source: PromptSubmissionSource,
+) -> bool {
+    if !matches!(
+        source,
+        PromptSubmissionSource::Keyboard
+            | PromptSubmissionSource::VoiceControl
+            | PromptSubmissionSource::QueuedPrompt
+            | PromptSubmissionSource::ScheduledInput
+            | PromptSubmissionSource::InitialAgentPrompt
+    ) {
+        return false;
+    }
+    let Some(process) = runtime.agent_process_key.as_ref() else {
+        return false;
+    };
+    let entry = match process.class {
+        ilium_core::AgentClass::Codex => {
+            serde_json::json!({"type":"event_msg", "payload":{"type":"user_message", "message":text}})
+        }
+        ilium_core::AgentClass::Claude => {
+            serde_json::json!({"type":"user", "message":{"content":text}})
+        }
+        ilium_core::AgentClass::Antigravity => serde_json::json!({"display":text}),
+        ilium_core::AgentClass::Other(_) => return false,
+    };
+    if ilium_agent_session::genuine_request_text(&process.class, &entry).is_none() {
+        return false;
+    }
+    let Some(node) = tree.get(pane_id) else {
+        return false;
+    };
+    let snapshot = TitleRuntimeSnapshot::capture(node, runtime, false);
+    let Some(receipt) = title_eligibility::AuthoredRequestReceipt::for_invocation(&snapshot) else {
+        return false;
+    };
+    runtime.authored_title_receipt = Some(receipt);
+    true
 }
 
 pub(crate) async fn submit_terminal_text_locked(
@@ -4685,7 +5263,7 @@ pub(crate) async fn submit_terminal_body_locked(
     source: PromptSubmissionSource,
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
-    {
+    let expected_invocation = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             return Err(format!("pane {pane_id:?} closed before automated input"));
@@ -4706,7 +5284,13 @@ pub(crate) async fn submit_terminal_body_locked(
                 "pane {pane_id:?} is waiting for its worktree; automated input was held: {reason}"
             ));
         }
-    }
+        let input_cancel_generation = *runtime.agent_input_cancel.borrow();
+        AgentInputInvocation {
+            generation: runtime.agent_generation,
+            process: runtime.agent_process_key.clone(),
+            input_cancel_generation,
+        }
+    };
     let is_initial_prompt = source == PromptSubmissionSource::InitialAgentPrompt;
     if !body.is_empty() {
         write_key_input_unlocked(
@@ -4714,9 +5298,12 @@ pub(crate) async fn submit_terminal_body_locked(
             pane_id,
             body,
             None,
-            is_initial_prompt,
-            false,
-            None,
+            InputWriteOrigin {
+                is_initial_prompt,
+                is_user_directed: false,
+                prompt_epoch: None,
+                expected_invocation: Some(&expected_invocation),
+            },
             input_gate,
         )
         .await?;
@@ -4749,12 +5336,42 @@ pub(crate) async fn submit_terminal_body_locked(
         pane_id,
         b"\r",
         Some(source),
-        is_initial_prompt,
-        false,
-        None,
+        InputWriteOrigin {
+            is_initial_prompt,
+            is_user_directed: false,
+            prompt_epoch: None,
+            expected_invocation: Some(&expected_invocation),
+        },
         input_gate,
     )
-    .await
+    .await?;
+    let changed = {
+        let mut tree = state.tree.write().await;
+        let mut panes = state.panes.write().await;
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime))
+                if runtime.agent_generation == expected_invocation.generation
+                    && runtime.agent_process_key == expected_invocation.process
+                    && Arc::ptr_eq(input_gate, &runtime.input_gate) =>
+            {
+                let text = std::str::from_utf8(body)
+                    .unwrap_or_default()
+                    .trim_start_matches("\x1b[200~")
+                    .trim_end_matches("\x1b[201~");
+                let changed = invalidate_submitted_title_observation(&mut tree, runtime, pane_id);
+                if changed {
+                    record_authored_title_receipt(&mut tree, runtime, pane_id, text, source);
+                }
+                changed
+            }
+            _ => false,
+        }
+    };
+    if changed {
+        broadcast_and_persist(state).await;
+    }
+    state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
+    Ok(())
 }
 
 /// A multiline agent prompt must be one paste operation so inner newlines do
@@ -4875,6 +5492,22 @@ async fn invalidate_uncertain_agent_input(
     }
 }
 
+/// One automatic submission's body and Enter belong to the same invocation,
+/// even when detection replaces the agent without replacing its PTY.
+struct AgentInputInvocation {
+    generation: u64,
+    process: Option<AgentProcessKey>,
+    input_cancel_generation: u64,
+}
+
+/// Provenance retained across admission and the ordered delivery receipt.
+struct InputWriteOrigin<'a> {
+    is_initial_prompt: bool,
+    is_user_directed: bool,
+    prompt_epoch: Option<&'a str>,
+    expected_invocation: Option<&'a AgentInputInvocation>,
+}
+
 /// The established title, session-identity, activity and event path for one
 /// physical PTY write. Call only while holding this pane's `input_gate`.
 async fn write_key_input_unlocked(
@@ -4882,32 +5515,71 @@ async fn write_key_input_unlocked(
     pane_id: NodeId,
     bytes: &[u8],
     submission: Option<PromptSubmissionSource>,
-    is_initial_prompt: bool,
-    is_user_directed: bool,
-    prompt_epoch: Option<&str>,
+    origin: InputWriteOrigin<'_>,
     expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
+    write_key_input_unlocked_with_probe(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        origin,
+        expected_input_gate,
+        |request| foreground_observation::observe(state, request),
+    )
+    .await
+}
+
+async fn write_key_input_unlocked_with_probe<Probe, ProbeFuture>(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    origin: InputWriteOrigin<'_>,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    probe: Probe,
+) -> Result<(), String>
+where
+    Probe: FnOnce(ProbeRequest) -> ProbeFuture,
+    ProbeFuture:
+        std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
+{
+    let InputWriteOrigin {
+        is_initial_prompt,
+        is_user_directed,
+        prompt_epoch,
+        expected_invocation,
+    } = origin;
     // The tracker below decides whether these bytes actually completed a
     // semantic line. Looking for CR/LF here would misclassify newlines inside
     // a bracketed paste as submissions.
     let mut submission_correlation_id = None;
 
-    // One cheap tree read supplies both title-tracking eligibility and the
-    // currently detected provider. Session discovery can temporarily have no
-    // accepted ID, but `/clear` must still honor a verified Claude/Codex pane.
-    let is_automatic_plain_shell = {
-        let tree = state.tree.read().await;
-        tree.get(pane_id).is_some_and(|node| {
-            let NodeKind::Pane {
-                status,
-                title_source,
-                ..
-            } = &node.kind
-            else {
-                return false;
-            };
-            matches!(status, PaneStatus::PlainShell) && *title_source == PaneTitleSource::Automatic
-        })
+    // The pane gate serializes other input, but detection and replacement can
+    // still change its runtime while native observation is pending. Capture a
+    // session-bound request under the registry guard, inspect on the existing
+    // finite IO bank, then compare again at the admission point below.
+    let (probe_request, preflight_cancel_generation) = {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            return Err(format!("pane {pane_id:?} closed before input preflight"));
+        };
+        if !Arc::ptr_eq(expected_input_gate, &runtime.input_gate) {
+            return Err(format!("pane {pane_id:?} changed before input preflight"));
+        }
+        let input_cancel_generation = *runtime.agent_input_cancel.borrow();
+        (ProbeRequest::for_runtime(runtime), input_cancel_generation)
+    };
+    let probe_observation = if probe_request.needs_inspection() {
+        match probe(probe_request).await {
+            Ok(observed) => Some(observed),
+            Err(error) => {
+                tracing::debug!(pane_id = pane_id.0, %error, "input preflight unavailable");
+                None
+            }
+        }
+    } else {
+        None
     };
 
     // Validate current ownership immediately before PTY admission. The pane
@@ -4916,6 +5588,7 @@ async fn write_key_input_unlocked(
     let (
         input,
         was_shell_foreground,
+        is_automatic_plain_shell,
         expected_generation,
         expected_process,
         prewrite_agent_class,
@@ -4929,10 +5602,32 @@ async fn write_key_input_unlocked(
         if !Arc::ptr_eq(expected_input_gate, &runtime.input_gate) {
             return Err(format!("pane {pane_id:?} changed before input delivery"));
         }
-        let Some(NodeKind::Pane { status, .. }) = tree.get(pane_id).map(|node| &node.kind) else {
+        if expected_invocation.is_some_and(|expected| {
+            runtime.agent_generation != expected.generation
+                || runtime.agent_process_key != expected.process
+                || *runtime.agent_input_cancel.borrow() != expected.input_cancel_generation
+        }) {
+            return Err(format!(
+                "automatic input refused for pane {pane_id:?}: agent invocation changed during submission"
+            ));
+        }
+        let Some(NodeKind::Pane {
+            status,
+            title_source,
+            ..
+        }) = tree.get(pane_id).map(|node| &node.kind)
+        else {
             return Err(format!("pane {pane_id:?} has no terminal state"));
         };
-        let rejection = runtime.automated_agent_input_rejection(status);
+        let is_automatic_plain_shell =
+            matches!(status, PaneStatus::PlainShell) && *title_source == PaneTitleSource::Automatic;
+        let cancelled_during_preflight =
+            *runtime.agent_input_cancel.borrow() != preflight_cancel_generation;
+        let rejection = if cancelled_during_preflight && runtime.agent_process_key.is_some() {
+            Some("agent input ownership changed during preflight".to_string())
+        } else {
+            runtime.automated_agent_input_rejection(status, probe_observation.as_ref())
+        };
         let active_agent = runtime.agent_process_key.is_some() && rejection.is_none();
         if !is_user_directed {
             if let Some(reason) = rejection {
@@ -4948,10 +5643,14 @@ async fn write_key_input_unlocked(
             runtime.cancel_initial_prompt_delivery();
         }
         let shell_foreground = matches!(&runtime.origin, TerminalOrigin::PlainShell)
-            && runtime.session.shell_owns_terminal().unwrap_or(false);
+            && probe_observation
+                .as_ref()
+                .filter(|observed| observed.same_runtime(runtime))
+                .is_some_and(|observed| observed.shell_owns_terminal() == Some(true));
         (
             runtime.session.input_handle(),
             shell_foreground,
+            is_automatic_plain_shell,
             runtime.agent_generation,
             runtime.agent_process_key.clone(),
             prewrite_agent_class,
@@ -5016,6 +5715,7 @@ async fn write_key_input_unlocked(
     let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
     let mut observed_title = None;
+    let mut authored_title_receipt_changed = false;
     let mut cleared_session_origin_name = None;
     let mut cleared_session_title_generation = None;
     let mut cleared_conversation_title_generation = None;
@@ -5082,8 +5782,20 @@ async fn write_key_input_unlocked(
                     if let Some(prompt) = observed {
                         runtime.legacy_prompt_fallback_blocked = true;
                         runtime.prompt_transcript_epoch = None;
+                        let title_observation_advanced = is_user_directed
+                            && invalidate_submitted_title_observation(&mut tree, runtime, pane_id);
+                        authored_title_receipt_changed |= title_observation_advanced;
                         match prompt.exact_text {
                             Some(text) if !text.is_empty() => {
+                                if title_observation_advanced {
+                                    record_authored_title_receipt(
+                                        &mut tree,
+                                        runtime,
+                                        pane_id,
+                                        &text,
+                                        submission.unwrap_or(PromptSubmissionSource::Keyboard),
+                                    );
+                                }
                                 runtime.last_agent_prompt = Some(text.clone());
                                 runtime.latest_agent_prompt_unavailable = false;
                                 if tree.set_last_prompt(pane_id, Some(text.clone())).is_ok() {
@@ -5172,10 +5884,11 @@ async fn write_key_input_unlocked(
                     let previous_session_id = runtime.session_id.clone();
                     let previous_agent_class = active_agent_class.clone();
                     let previous_process_id = runtime.session_process_id;
+                    runtime.authored_title_receipt = None;
                     runtime.is_session_identity_invalidated = true;
                     runtime.prompt_transcript_epoch = None;
                     runtime.pending_generated_session_id = None;
-                    runtime.title_generation = runtime.title_generation.wrapping_add(1);
+                    runtime.title_generation = runtime.title_generation.saturating_add(1);
                     runtime.pending_session_transition_correlation_id =
                         submission_correlation_id.clone();
                     cleared_session_title_generation = Some(runtime.title_generation);
@@ -5250,8 +5963,8 @@ async fn write_key_input_unlocked(
                     Ok(status) => status,
                     Err(error) => {
                         tracing::error!(
-                        "agent completion acknowledgement rejected for pane {pane_id:?}: {error}"
-                    );
+                            "agent completion acknowledgement rejected for pane {pane_id:?}: {error}"
+                        );
                         None
                     }
                 }
@@ -5445,7 +6158,10 @@ async fn write_key_input_unlocked(
     // Identity/generation invalidations must reach clients before the prompt
     // trigger they fence. Otherwise that trigger queues debug and inference
     // work against the old generation and creates deterministic stale noise.
-    if let Some(source) = submission {
+    if authored_title_receipt_changed {
+        broadcast_and_persist(state).await;
+    }
+    if let Some(source) = submission.filter(|_| expected_invocation.is_none()) {
         state.broadcast(ServerEvent::PanePromptSubmitted { pane_id, source });
     }
 
@@ -5572,11 +6288,15 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     // independent, so this handler never has to be re-checked if that
     // ordering rule changes elsewhere.
     let mut panes = state.panes.write().await;
-    for (pane_id, resource) in panes.drain() {
-        teardown_pane_resource(pane_id, resource);
-    }
+    // Move the existing registry without allocating a second resource list.
+    // Child termination and resource destructors run after both global guards
+    // are released, as they do on the individual pane-close path.
+    let closed_resources = std::mem::take(&mut *panes);
     drop(panes);
     drop(tree);
+    for (pane_id, resource) in closed_resources {
+        teardown_pane_resource(pane_id, resource);
+    }
     state.workspace_close_preferences.write().await.clear();
     state.agent_debug.clear().await;
 
@@ -5596,13 +6316,10 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     // handler runs is guaranteed to finish (writing the *old* snapshot)
     // before we remove the file, rather than racing it.
     {
-        let _write_guard = state.snapshot_write_lock.lock().await;
-        match tokio::fs::remove_file(&state.snapshot_path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                tracing::warn!("failed to remove snapshot file on session kill: {error}")
-            }
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        match crate::persistence::remove_snapshot_ordered(state, write_guard).await {
+            Ok(_write_guard) => {}
+            Err(error) => tracing::warn!("failed to remove snapshot file on session kill: {error}"),
         }
     }
     // Deliberately does not abort other connections' tasks from here --
@@ -5619,6 +6336,858 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
 
 #[cfg(test)]
 mod tests {
+    fn snapshot_io_handler_state(directory: &tempfile::TempDir) -> Arc<ServerState> {
+        let (sound_requests, _sound_receiver) = tokio::sync::mpsc::channel(1);
+        Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "snapshot-handler-test".into(),
+            session_cwd: directory.path().to_owned(),
+            home_dir: directory.path().to_owned(),
+            snapshot_path: directory.path().join("session.json"),
+            socket_path: directory.path().join("isolated.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }))
+    }
+
+    #[cfg(unix)]
+    async fn shell_title_fixture(
+        state: &Arc<ServerState>,
+        directory: &tempfile::TempDir,
+    ) -> NodeId {
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "title fixture")
+            .expect("fixture group");
+        let pane_id = state
+            .tree
+            .write()
+            .await
+            .add_pane(group, "original", PaneContentKind::Terminal)
+            .expect("fixture pane");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("isolated shell PTY");
+        state.panes.write().await.insert(
+            pane_id,
+            PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                session,
+                TerminalOrigin::PlainShell,
+                None,
+                Duration::from_secs(1),
+            ))),
+        );
+        pane_id
+    }
+
+    #[cfg(unix)]
+    async fn assert_no_stale_input_after_sentinel(
+        session: &ilium_pty::PtySession,
+        stale: &[u8],
+        sentinel: &[u8],
+    ) {
+        assert_eq!(stale.last(), Some(&b'\r'));
+        assert_eq!(sentinel.last(), Some(&b'\r'));
+        let stale_text = &stale[..stale.len() - 1];
+        let sentinel_text = &sentinel[..sentinel.len() - 1];
+        let mut changed = session.subscribe_screen_changed();
+        session
+            .input_handle()
+            .write(sentinel)
+            .expect("sentinel admitted")
+            .wait()
+            .await
+            .expect("sentinel delivered");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let output = session.output_replay().bytes;
+                if output
+                    .windows(sentinel_text.len())
+                    .any(|window| window == sentinel_text)
+                {
+                    assert!(!output
+                        .windows(stale_text.len())
+                        .any(|window| window == stale_text));
+                    break;
+                }
+                changed.changed().await.expect("fixture reader stays live");
+            }
+        })
+        .await
+        .expect("sentinel reached fixture PTY");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_key_probe_rejects_replaced_input_gate_without_admitting_stale_bytes() {
+        const STALE: &[u8] = b"stale-replaced-pty\r";
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let input_gate = pane_input_gate(&state, pane_id).await.expect("input gate");
+        let owner = crate::execution::ServerExecution::start().expect("finite server bank");
+        let client = owner.client.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let input_task = tokio::spawn(async move {
+            let _gate_guard = input_gate.lock().await;
+            write_key_input_unlocked_with_probe(
+                &task_state,
+                pane_id,
+                STALE,
+                None,
+                InputWriteOrigin {
+                    is_initial_prompt: false,
+                    is_user_directed: false,
+                    prompt_epoch: None,
+                    expected_invocation: None,
+                },
+                &input_gate,
+                move |request| async move {
+                    foreground_observation::observe_with(
+                        &client,
+                        request,
+                        Duration::from_secs(5),
+                        move |_, _| {
+                            let _ = started_tx.send(());
+                            release_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("release native fixture");
+                            (Some(true), None)
+                        },
+                    )
+                    .await
+                },
+            )
+            .await
+        });
+        started_rx.await.expect("native preflight started");
+        let replacement = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("replacement PTY");
+        let previous = tokio::time::timeout(Duration::from_secs(2), async {
+            let _tree = state.tree.write().await;
+            state
+                .panes
+                .write()
+                .await
+                .insert(
+                    pane_id,
+                    PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                        replacement,
+                        TerminalOrigin::PlainShell,
+                        None,
+                        Duration::from_secs(1),
+                    ))),
+                )
+                .expect("original PTY")
+        })
+        .await
+        .expect("key preflight must not hold tree or panes guards");
+        release_tx.send(()).expect("release native fixture");
+        let error = input_task
+            .await
+            .expect("input task")
+            .expect_err("replaced gate refuses old input");
+        assert!(error.contains("changed before input delivery"), "{error}");
+        let PaneResource::Terminal(mut old_runtime) = previous else {
+            panic!("original fixture remains terminal");
+        };
+        assert_no_stale_input_after_sentinel(&old_runtime.session, STALE, b"old-sentinel\r").await;
+        old_runtime.session.kill().expect("close original fixture");
+        let removed = { state.panes.write().await.remove(&pane_id) };
+        let Some(PaneResource::Terminal(mut new_runtime)) = removed else {
+            panic!("replacement fixture remains terminal");
+        };
+        assert_no_stale_input_after_sentinel(&new_runtime.session, STALE, b"new-sentinel\r").await;
+        new_runtime
+            .session
+            .kill()
+            .expect("close replacement fixture");
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_key_probe_rejects_cancelled_agent_epoch_without_admitting_bytes() {
+        const STALE: &[u8] = b"stale-cancelled-agent\r";
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        state
+            .tree
+            .write()
+            .await
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(
+                    ilium_core::AgentClass::Codex,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
+            )
+            .expect("agent status");
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture runtime");
+            };
+            let identity = ilium_detect::AgentIdentity {
+                class: ilium_core::AgentClass::Codex,
+                pid: u32::MAX - 1,
+                started_at_unix_seconds: 1,
+                process_name: "codex".into(),
+                matched_signature: "codex".into(),
+                process_tree_depth: 1,
+            };
+            runtime.agent_process_key = Some(crate::pane::agent_process_key(&identity));
+            runtime.detection_schedule.cached_identity = Some(identity);
+            runtime.agent_input_available = true;
+        }
+        let input_gate = pane_input_gate(&state, pane_id).await.expect("input gate");
+        let owner = crate::execution::ServerExecution::start().expect("finite server bank");
+        let client = owner.client.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let input_task = tokio::spawn(async move {
+            let _gate_guard = input_gate.lock().await;
+            write_key_input_unlocked_with_probe(
+                &task_state,
+                pane_id,
+                STALE,
+                None,
+                InputWriteOrigin {
+                    is_initial_prompt: false,
+                    is_user_directed: false,
+                    prompt_epoch: None,
+                    expected_invocation: None,
+                },
+                &input_gate,
+                move |request| async move {
+                    foreground_observation::observe_with(
+                        &client,
+                        request,
+                        Duration::from_secs(5),
+                        move |_, _| {
+                            let _ = started_tx.send(());
+                            release_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("release native fixture");
+                            (Some(false), Some(true))
+                        },
+                    )
+                    .await
+                },
+            )
+            .await
+        });
+        started_rx.await.expect("native preflight started");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let _tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture runtime");
+            };
+            runtime
+                .agent_input_cancel
+                .send_modify(|generation| *generation = generation.wrapping_add(1));
+        })
+        .await
+        .expect("key preflight must not hold tree or panes guards");
+        release_tx.send(()).expect("release native fixture");
+        let error = input_task
+            .await
+            .expect("input task")
+            .expect_err("cancelled epoch refuses automatic input");
+        assert!(error.contains("agent input ownership changed"), "{error}");
+        let removed = { state.panes.write().await.remove(&pane_id) };
+        let Some(PaneResource::Terminal(mut runtime)) = removed else {
+            panic!("cancelled fixture remains terminal");
+        };
+        assert_no_stale_input_after_sentinel(&runtime.session, STALE, b"cancel-sentinel\r").await;
+        runtime.session.kill().expect("close fixture");
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_automatic_title_probe_releases_registry_guards_and_rejects_replacement() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let owner = crate::execution::ServerExecution::start().expect("finite server bank");
+        let client = owner.client.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let title_task = tokio::spawn(async move {
+            handle_automatic_pane_title_with_probe(
+                &task_state,
+                pane_id,
+                "stale title".to_owned(),
+                None,
+                None,
+                move |_, request| async move {
+                    foreground_observation::observe_with(
+                        &client,
+                        request,
+                        Duration::from_secs(5),
+                        move |_, _| {
+                            let _ = started_tx.send(());
+                            release_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("release native fixture");
+                            (Some(true), None)
+                        },
+                    )
+                    .await
+                },
+            )
+            .await;
+        });
+        started_rx.await.expect("native observation started");
+        let old_runtime = tokio::time::timeout(Duration::from_secs(2), async {
+            let tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            assert_eq!(tree.get(pane_id).expect("pane").name, "original");
+            let replacement = ilium_pty::PtySession::spawn(
+                ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                    .arg("-c")
+                    .arg("exec cat"),
+            )
+            .expect("replacement PTY");
+            panes
+                .insert(
+                    pane_id,
+                    PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                        replacement,
+                        TerminalOrigin::PlainShell,
+                        None,
+                        Duration::from_secs(1),
+                    ))),
+                )
+                .expect("original PTY")
+        })
+        .await
+        .expect("title probe must not hold tree or panes guards");
+        release_tx.send(()).expect("release native fixture");
+        title_task.await.expect("title task");
+        assert_eq!(
+            state.tree.read().await.get(pane_id).expect("pane").name,
+            "original"
+        );
+        if let PaneResource::Terminal(mut old_runtime) = old_runtime {
+            old_runtime.session.kill().expect("close original fixture");
+        }
+        if let Some(PaneResource::Terminal(mut replacement)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            replacement
+                .session
+                .kill()
+                .expect("close replacement fixture");
+        }
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn current_plain_shell_title_still_applies_after_off_lock_confirmation() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let owner = crate::execution::ServerExecution::start().expect("finite server bank");
+        let client = owner.client.clone();
+        handle_automatic_pane_title_with_probe(
+            &state,
+            pane_id,
+            "current title".to_owned(),
+            None,
+            None,
+            move |_, request| async move {
+                foreground_observation::observe_with(
+                    &client,
+                    request,
+                    Duration::from_secs(2),
+                    |_, _| (Some(true), None),
+                )
+                .await
+            },
+        )
+        .await;
+        assert_eq!(
+            state.tree.read().await.get(pane_id).expect("pane").name,
+            "current title"
+        );
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("close fixture");
+        }
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_termination_releases_registry_and_never_kills_replacement() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            terminate_pane_process_with_work(&task_state, pane_id, move |control| {
+                let _ = started_tx.send(());
+                release_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .map_err(std::io::Error::other)?;
+                control.kill_direct_child().map_err(std::io::Error::other)
+            })
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), started_rx)
+            .await
+            .expect("native callback starts")
+            .expect("native started channel");
+        let replacement = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("replacement fixture");
+        let old = tokio::time::timeout(Duration::from_secs(2), async {
+            let tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            assert!(tree.get(pane_id).is_some());
+            panes
+                .insert(
+                    pane_id,
+                    PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                        replacement,
+                        TerminalOrigin::PlainShell,
+                        None,
+                        Duration::from_secs(1),
+                    ))),
+                )
+                .expect("old runtime")
+        })
+        .await
+        .expect("native termination must release both global registries");
+        release_tx.send(()).expect("release callback");
+        let result = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("callback completes")
+            .expect("termination task");
+        assert!(result
+            .expect_err("replacement result must refuse")
+            .contains("changed during termination"));
+        let replacement = state
+            .panes
+            .write()
+            .await
+            .remove(&pane_id)
+            .expect("replacement still registered");
+        let PaneResource::Terminal(mut replacement) = replacement else {
+            panic!("replacement terminal")
+        };
+        assert!(
+            !replacement.session.has_exited(),
+            "captured termination must not signal replacement"
+        );
+        replacement.session.kill().expect("cleanup replacement");
+        if let PaneResource::Terminal(mut old) = old {
+            old.session.kill().expect("cleanup captured original");
+        }
+        state.execution.get().expect("bank").request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn current_termination_and_unavailable_bank_have_explicit_dispositions() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let refusal = terminate_pane_process_with_work(&state, pane_id, |control| {
+            control.kill_direct_child().map_err(std::io::Error::other)
+        })
+        .await
+        .expect_err("missing bank cannot execute kill");
+        assert!(refusal.contains("server execution is not running"));
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture")
+            };
+            assert!(
+                !runtime.session.has_exited(),
+                "refused operation cannot signal child"
+            );
+        }
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        terminate_pane_process_with_work(&state, pane_id, |control| {
+            control.kill_direct_child().map_err(std::io::Error::other)
+        })
+        .await
+        .expect("current captured child termination succeeds");
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("cleanup current fixture");
+        }
+        state.execution.get().expect("bank").request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn termination_deadline_retains_physical_native_admission() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            terminate_pane_process_with_work(&task_state, pane_id, move |_| {
+                let _ = started_tx.send(());
+                release_rx
+                    .recv_timeout(Duration::from_secs(15))
+                    .map_err(std::io::Error::other)
+            })
+            .await
+        });
+        started_rx.await.expect("physical callback starts");
+        let result = task.await.expect("caller ends after its deadline");
+        assert!(result
+            .expect_err("blocked native must time out")
+            .contains("outcome is uncertain"));
+        let owner = state.execution.get().expect("bank");
+        let full_cost = ilium_execution::JobCost {
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 128,
+        };
+        assert!(matches!(
+            owner
+                .client
+                .foundation
+                .try_reserve(ilium_execution::Lane::Io, full_cost),
+            Err(ilium_execution::RejectReason::InputBytes)
+        ));
+        release_tx.send(()).expect("release physical callback");
+        let released = tokio::time::timeout(
+            Duration::from_secs(2),
+            owner.client.reserve(ilium_execution::Lane::Io, full_cost),
+        )
+        .await
+        .expect("physical release wakeup")
+        .expect("credit available after callback");
+        drop(released);
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("cleanup fixture");
+        }
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocked_focused_directory_probe_releases_guards_and_rejects_focus_change() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture")
+            };
+            runtime.detection_schedule.client_focused = true;
+        }
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let proposed = directory.path().to_path_buf();
+        let task = tokio::spawn(async move {
+            focused_terminal_working_directory_with_work(&task_state, move |_| {
+                let _ = started_tx.send(());
+                release_rx.recv_timeout(Duration::from_secs(5)).ok()?;
+                Some(proposed)
+            })
+            .await
+        });
+        started_rx.await.expect("native callback starts");
+        tokio::time::timeout(Duration::from_millis(250), async {
+            let _tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture")
+            };
+            runtime.detection_schedule.client_focused = false;
+        })
+        .await
+        .expect("native read must release both shared registries");
+        release_tx.send(()).expect("release native callback");
+        assert!(task.await.expect("directory task").is_none());
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture")
+            };
+            runtime.detection_schedule.client_focused = true;
+        }
+        let current =
+            candidate_new_pane_working_directory(&state, NewPaneWorkingDirectory::FocusedTerminal)
+                .await;
+        assert_eq!(current.as_deref(), Some(directory.path()));
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("cleanup fixture");
+        }
+        state.execution.get().expect("bank").request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn current_agent_title_receipt_survives_off_lock_collection_and_stale_generation_refuses()
+    {
+        let directory = tempfile::tempdir().expect("isolated title directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let input = {
+            let mut tree = state.tree.write().await;
+            tree.set_pane_launch_cwd(pane_id, directory.path().to_path_buf())
+                .expect("fixture cwd");
+            tree.set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(
+                    ilium_core::AgentClass::Codex,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
+            )
+            .expect("synthetic agent fixture status");
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture runtime")
+            };
+            runtime.agent_process_key = Some(AgentProcessKey {
+                class: ilium_core::AgentClass::Codex,
+                process_id: runtime.session.process_id().expect("owned fixture PID"),
+                started_at_unix_seconds: 1,
+            });
+            runtime.agent_generation = 5;
+            runtime.title_generation = 3;
+            runtime.session_id = Some("fixture-session".to_owned());
+            runtime.session_agent_class = Some(ilium_core::AgentClass::Codex);
+            runtime.session.input_handle()
+        };
+        // The fake agent uses an owned cat PTY. Construct its authored receipt
+        // only after real delivery completes; no transcript file is invented.
+        input
+            .write(b"authored task for title fixture\r")
+            .expect("authored fixture input admitted")
+            .wait()
+            .await
+            .expect("actual fixture delivery completed");
+        let baseline = {
+            let mut tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture runtime")
+            };
+            assert!(record_authored_title_receipt(
+                &mut tree,
+                runtime,
+                pane_id,
+                "authored task for title fixture",
+                PromptSubmissionSource::Keyboard
+            ));
+            TitleRuntimeSnapshot::capture(tree.get(pane_id).expect("fixture node"), runtime, false)
+        };
+        assert_eq!(
+            baseline.observation.session_id.as_deref(),
+            Some("fixture-session"),
+            "the positive fixture must publish a class-bound session identity"
+        );
+        handle_session_pane_title(
+            &state,
+            SessionPaneTitleUpdate {
+                pane_id,
+                expected_session_id: "fixture-session",
+                expected_title_generation: baseline.observation.title_generation,
+                expected_presentation_revision: baseline.observation.presentation_revision,
+                expected_process_id: baseline.observation.process_id,
+                title: "current agent title".to_owned(),
+                short_title: None,
+                inferred_icon: None,
+                title_source: PaneTitleSource::Automatic,
+            },
+        )
+        .await;
+        let revision = {
+            let tree = state.tree.read().await;
+            let node = tree.get(pane_id).expect("fixture node");
+            assert_eq!(node.name, "current agent title");
+            node.presentation_revision
+        };
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture runtime")
+            };
+            runtime.title_generation += 1;
+        }
+        handle_session_pane_title(
+            &state,
+            SessionPaneTitleUpdate {
+                pane_id,
+                expected_session_id: "fixture-session",
+                expected_title_generation: baseline.observation.title_generation,
+                expected_presentation_revision: revision,
+                expected_process_id: baseline.observation.process_id,
+                title: "stale title must not apply".to_owned(),
+                short_title: None,
+                inferred_icon: None,
+                title_source: PaneTitleSource::Automatic,
+            },
+        )
+        .await;
+        assert_eq!(
+            state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .expect("fixture node")
+                .name,
+            "current agent title"
+        );
+        if let Some(PaneResource::Terminal(mut runtime)) =
+            state.panes.write().await.remove(&pane_id)
+        {
+            runtime.session.kill().expect("cleanup owned fixture");
+        };
+    }
+
+    #[tokio::test]
+    async fn missing_pane_resize_reports_the_rejected_geometry() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let pane_id = NodeId(u64::MAX);
+        handle_resize_pane(
+            &state,
+            pane_id,
+            24,
+            80,
+            PaneResizeCause::HostTerminal,
+            &direct_tx,
+        )
+        .await;
+        match direct_rx.try_recv().expect("resize rejection") {
+            ServerEvent::PaneResizeRejected {
+                pane_id: rejected,
+                rows,
+                cols,
+                message,
+            } => {
+                assert_eq!(rejected, pane_id);
+                assert_eq!((rows, cols), (24, 80));
+                assert!(message.contains("no pane found"));
+            }
+            other => panic!("expected correlated resize rejection, got {other:?}"),
+        }
+        assert!(direct_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn kill_handler_waits_for_snapshot_guard_then_removes_without_recreation() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = snapshot_io_handler_state(&directory);
+        crate::persistence::save_snapshot(&state)
+            .await
+            .expect("initial save");
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        let mut events = state.events.subscribe();
+        let killing_state = Arc::clone(&state);
+        let kill = tokio::spawn(async move { handle_kill_session(&killing_state).await });
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("kill reached deletion fence")
+            .expect("event");
+        assert!(matches!(event, ServerEvent::TreeSnapshot(_)));
+        assert!(state.is_session_killed());
+        assert!(
+            state.snapshot_path.exists(),
+            "existing guard fences actual deletion"
+        );
+        drop(write_guard);
+        tokio::time::timeout(Duration::from_secs(5), kill)
+            .await
+            .expect("kill completed")
+            .expect("kill task");
+        assert!(!state.snapshot_path.exists());
+        assert!(crate::persistence::save_snapshot(&state).await.is_err());
+        crate::persistence::shutdown_snapshot_service(&state)
+            .await
+            .expect("drain");
+        assert!(!state.snapshot_path.exists());
+    }
+
+    #[tokio::test]
+    async fn recovery_discard_removes_via_snapshot_owner_and_keeps_live_session_writable() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = snapshot_io_handler_state(&directory);
+        crate::persistence::save_snapshot(&state)
+            .await
+            .expect("initial save");
+        let snapshot = crate::persistence::load_snapshot(&state.snapshot_path)
+            .await
+            .expect("readback")
+            .expect("saved snapshot");
+        *state.pending_session_recovery.lock().await = Some(snapshot);
+        let (direct_tx, _direct_rx) = tokio::sync::mpsc::channel(128);
+        handle_session_recovery_resolution(&state, false, &direct_tx).await;
+        assert!(!state.snapshot_path.exists());
+        assert!(!state.is_session_killed(), "discard is not a session kill");
+        crate::persistence::save_snapshot(&state)
+            .await
+            .expect("fresh live save");
+        assert!(state.snapshot_path.exists());
+        crate::persistence::shutdown_snapshot_service(&state)
+            .await
+            .expect("drain");
+    }
 
     #[tokio::test]
     async fn output_burst_collects_an_immediately_following_reader_chunk() {
@@ -5653,6 +7222,352 @@ mod tests {
         assert_eq!(bytes, b"firstsecond");
     }
 
+    #[cfg(unix)]
+    async fn forwarder_fixture_marker(
+        state: &ServerState,
+        pane_id: NodeId,
+        changed: &mut tokio::sync::watch::Receiver<()>,
+        marker: &str,
+    ) -> ilium_pty::PtyOutputReplay {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                let replay = {
+                    let panes = state.panes.read().await;
+                    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                        panic!("fixture terminal was removed");
+                    };
+                    if runtime.session.screen_text().contains(marker) {
+                        let replay = runtime.session.output_replay();
+                        replay
+                            .bytes
+                            .windows(marker.len())
+                            .any(|window| window == marker.as_bytes())
+                            .then_some(replay)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(replay) = replay {
+                    return replay;
+                }
+                changed.changed().await.expect("fixture PTY remains live");
+            }
+        })
+        .await
+        .expect("fixture marker did not reach the owned PTY journal")
+    }
+
+    #[cfg(unix)]
+    async fn forwarder_fixture_chunks_through(
+        receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+        after_sequence: u64,
+        through_sequence: u64,
+    ) -> Vec<ilium_pty::PtyOutputChunk> {
+        assert!(through_sequence > after_sequence);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let mut chunks = Vec::new();
+            let mut expected = after_sequence + 1;
+            while expected <= through_sequence {
+                let chunk = receiver
+                    .recv()
+                    .await
+                    .expect("small fixture phase must retain every native PTY chunk");
+                assert_eq!(
+                    chunk.sequence, expected,
+                    "native PTY sequence is contiguous"
+                );
+                chunks.push(chunk);
+                expected += 1;
+            }
+            chunks
+        })
+        .await
+        .expect("native PTY output did not reach the fixture receiver")
+    }
+
+    #[cfg(unix)]
+    async fn forwarder_fixture_next_terminal_event(
+        receiver: &mut tokio::sync::broadcast::Receiver<ServerEvent>,
+        pane_id: NodeId,
+    ) -> ServerEvent {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let event = receiver
+                    .recv()
+                    .await
+                    .expect("fixture server event channel remains open");
+                if matches!(
+                    &event,
+                    ServerEvent::ScreenUpdate { pane_id: id, .. }
+                        | ServerEvent::TerminalReplay { pane_id: id, .. }
+                        if *id == pane_id
+                ) {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("owned forwarder did not publish a terminal event")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn owned_forwarder_repairs_two_forced_lags_without_duplicate_bytes() {
+        let directory = tempfile::tempdir().expect("private fixture directory");
+        let bulk_path = directory.path().join("bulk-output.bin");
+        let bulk = std::fs::File::create(&bulk_path).expect("create sparse eviction input");
+        // Real bytes cross the ordinary PTY owner and its unchanged 32 MiB journal.
+        // The extra MiB guarantees eviction even when PTY read chunk sizes vary.
+        bulk.set_len(33 * 1024 * 1024)
+            .expect("size sparse eviction input");
+        let (sound_requests, _sound_receiver) = tokio::sync::mpsc::channel(1);
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "forwarder-two-lags".into(),
+            session_cwd: directory.path().to_owned(),
+            home_dir: directory.path().to_owned(),
+            snapshot_path: directory.path().join("session.json"),
+            socket_path: directory.path().join("isolated.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree
+                .add_group(ilium_core::ROOT_ID, "forwarder fixture")
+                .expect("fixture group");
+            tree.add_pane(group, "one owner", PaneContentKind::Terminal)
+                .expect("fixture pane")
+        };
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg(
+                    "read gate; printf 'baseline-ready\\n'; \
+                     read gate; printf 'gap-one-a\\n'; \
+                     read gate; printf 'gap-one-b\\n'; \
+                     read gate; cat bulk-output.bin; printf 'eviction-ready\\n'; read hold",
+                ),
+        )
+        .expect("spawn one owned PTY");
+        let mut native_output = session.subscribe_output_bytes();
+        let mut screen_changed = session.subscribe_screen_changed();
+        let input = session.input_handle();
+        let owner_status = input.subscribe_status();
+        assert_eq!(
+            session.output_replay().through_sequence,
+            0,
+            "the gated shell must produce no bytes before subscription"
+        );
+        state.panes.write().await.insert(
+            pane_id,
+            PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                session,
+                TerminalOrigin::Command("forwarder fixture".into()),
+                None,
+                Duration::from_secs(1),
+            ))),
+        );
+        let no_panes = std::collections::HashSet::new();
+        state.replace_terminal_subscriptions(false, &no_panes, true, &no_panes);
+        let mut published = state.events.subscribe();
+        // This one-slot receiver belongs only to this test. Sending two real
+        // journaled chunks without yielding forces RecvError::Lagged exactly.
+        let (forward_sender, forward_receiver) = tokio::sync::broadcast::channel(1);
+        let forwarder = tokio::spawn(forward_output_with_owner_status(
+            Arc::clone(&state),
+            pane_id,
+            forward_receiver,
+            input.clone(),
+            owner_status,
+        ));
+
+        input
+            .write(b"next\r")
+            .expect("baseline input accepted")
+            .wait()
+            .await
+            .expect("baseline input delivered");
+        let baseline =
+            forwarder_fixture_marker(&state, pane_id, &mut screen_changed, "baseline-ready").await;
+        assert!(baseline.is_complete);
+        let baseline_chunks =
+            forwarder_fixture_chunks_through(&mut native_output, 0, baseline.through_sequence)
+                .await;
+        let mut delivered_baseline = Vec::new();
+        for chunk in baseline_chunks {
+            let sequence = chunk.sequence;
+            let bytes = chunk.bytes.to_vec();
+            forward_sender
+                .send(chunk)
+                .expect("forwarder receiver remains open");
+            let event = forwarder_fixture_next_terminal_event(&mut published, pane_id).await;
+            assert_eq!(
+                event,
+                ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: sequence,
+                    sequence,
+                    bytes: bytes.clone(),
+                }
+            );
+            delivered_baseline.extend_from_slice(&bytes);
+        }
+        assert_eq!(delivered_baseline, baseline.bytes);
+
+        input
+            .write(b"next\r")
+            .expect("first gap input accepted")
+            .wait()
+            .await
+            .expect("first gap input delivered");
+        let first =
+            forwarder_fixture_marker(&state, pane_id, &mut screen_changed, "gap-one-a").await;
+        let mut missing = forwarder_fixture_chunks_through(
+            &mut native_output,
+            baseline.through_sequence,
+            first.through_sequence,
+        )
+        .await;
+        input
+            .write(b"next\r")
+            .expect("second gap input accepted")
+            .wait()
+            .await
+            .expect("second gap input delivered");
+        let after_first_gap =
+            forwarder_fixture_marker(&state, pane_id, &mut screen_changed, "gap-one-b").await;
+        missing.extend(
+            forwarder_fixture_chunks_through(
+                &mut native_output,
+                first.through_sequence,
+                after_first_gap.through_sequence,
+            )
+            .await,
+        );
+        assert!(
+            missing.len() >= 2,
+            "two gated writes must create two PTY chunks"
+        );
+        assert!(after_first_gap.bytes.starts_with(&baseline.bytes));
+        for chunk in missing {
+            forward_sender
+                .send(chunk)
+                .expect("forwarder receiver remains open");
+        }
+        let recovered = forwarder_fixture_next_terminal_event(&mut published, pane_id).await;
+        let missing_bytes = after_first_gap.bytes[baseline.bytes.len()..].to_vec();
+        assert_eq!(
+            recovered,
+            ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: baseline.through_sequence + 1,
+                sequence: after_first_gap.through_sequence,
+                bytes: missing_bytes.clone(),
+            },
+            "first forced lag must publish exactly the contiguous missing tail"
+        );
+        let mut conserved = delivered_baseline;
+        conserved.extend_from_slice(&missing_bytes);
+        assert_eq!(conserved, after_first_gap.bytes);
+
+        input
+            .write(b"next\r")
+            .expect("eviction input accepted")
+            .wait()
+            .await
+            .expect("eviction input delivered");
+        let evicted =
+            forwarder_fixture_marker(&state, pane_id, &mut screen_changed, "eviction-ready").await;
+        assert!(
+            !evicted.is_complete,
+            "33 MiB must evict the oldest journal bytes"
+        );
+        assert!(
+            evicted.bytes.starts_with(b"\x1bc"),
+            "evicted replay resets the parser"
+        );
+        assert!(evicted.through_sequence > after_first_gap.through_sequence + 1);
+
+        let (native_receiver_lagged, last_two) =
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut lagged = false;
+                let mut last_two = std::collections::VecDeque::new();
+                loop {
+                    match native_output.recv().await {
+                        Ok(chunk) => {
+                            let is_last = chunk.sequence == evicted.through_sequence;
+                            last_two.push_back(chunk);
+                            if last_two.len() > 2 {
+                                last_two.pop_front();
+                            }
+                            if is_last {
+                                return (lagged, last_two);
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            lagged = true;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            panic!("gated PTY output channel closed")
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("eviction marker chunk did not reach the native receiver");
+        assert!(
+            native_receiver_lagged,
+            "bulk PTY output must overflow its reader ring"
+        );
+        assert_eq!(last_two.len(), 2);
+        assert_eq!(last_two[1].sequence, evicted.through_sequence);
+        for chunk in last_two {
+            forward_sender
+                .send(chunk)
+                .expect("forwarder receiver remains open");
+        }
+        let recovered = forwarder_fixture_next_terminal_event(&mut published, pane_id).await;
+        assert_eq!(
+            recovered,
+            ServerEvent::TerminalReplay {
+                pane_id,
+                through_sequence: evicted.through_sequence,
+                bytes: evicted.bytes,
+                is_complete: false,
+            },
+            "second forced lag must send exactly the retained reset replay"
+        );
+
+        drop(forward_sender);
+        tokio::time::timeout(Duration::from_secs(30), forwarder)
+            .await
+            .expect("owned forwarder did not drain")
+            .expect("owned forwarder panicked");
+        loop {
+            match published.try_recv() {
+                Ok(ServerEvent::ScreenUpdate { pane_id: id, .. })
+                | Ok(ServerEvent::TerminalReplay { pane_id: id, .. })
+                    if id == pane_id =>
+                {
+                    panic!("forwarder duplicated terminal bytes after recovery")
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                Err(error) => panic!("server event ring lost fixture evidence: {error}"),
+            }
+        }
+        state.replace_terminal_subscriptions(true, &no_panes, false, &no_panes);
+        let Some(PaneResource::Terminal(mut runtime)) = state.panes.write().await.remove(&pane_id)
+        else {
+            panic!("fixture PTY was not registered");
+        };
+        runtime.session.kill().expect("close owned fixture PTY");
+    }
     #[tokio::test]
     #[ignore = "manual performance benchmark"]
     async fn benchmark_output_subframe_coalescing() {
@@ -5839,10 +7754,10 @@ mod tests {
                 None,
             );
             assert!(runtime
-                .automated_agent_input_rejection(&unverified_agent)
+                .automated_agent_input_rejection(&unverified_agent, None)
                 .is_some());
             assert!(runtime
-                .automated_agent_input_rejection(&PaneStatus::PlainShell)
+                .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
                 .is_none());
             runtime.agent_process_key = Some(owner.clone());
             runtime.agent_generation = 7;
@@ -5952,6 +7867,75 @@ mod tests {
             .await;
             assert_eq!(state.tree.read().await.last_prompt(pane_id), None);
         }
+        // A delayed worker reply must not repair a different invocation,
+        // even when its public session ID and Enter token happen to match.
+        for mismatch in [
+            "generation",
+            "process_id",
+            "process_birth",
+            "provider",
+            "invalidated_session",
+            "session_provider",
+            "session_process_id",
+            "session_process_birth",
+        ] {
+            {
+                let mut panes = state.panes.write().await;
+                let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                    panic!("registered test terminal");
+                };
+                match mismatch {
+                    "generation" => runtime.agent_generation += 1,
+                    "process_id" => runtime.agent_process_key.as_mut().unwrap().process_id += 1,
+                    "process_birth" => {
+                        runtime
+                            .agent_process_key
+                            .as_mut()
+                            .unwrap()
+                            .started_at_unix_seconds += 1;
+                    }
+                    "provider" => {
+                        runtime.agent_process_key.as_mut().unwrap().class =
+                            ilium_core::AgentClass::Claude;
+                    }
+                    "invalidated_session" => runtime.is_session_identity_invalidated = true,
+                    "session_provider" => {
+                        runtime.session_agent_class = Some(ilium_core::AgentClass::Claude);
+                    }
+                    "session_process_id" => runtime.session_process_id = Some(43),
+                    "session_process_birth" => {
+                        runtime.session_process_started_at_unix_seconds = Some(2);
+                    }
+                    _ => unreachable!("fixed mismatch inventory"),
+                }
+            }
+            handle_exact_agent_prompt_from_transcript(
+                &state,
+                pane_id,
+                "verified-session",
+                "epoch-7",
+                "stale invocation correction".to_string(),
+            )
+            .await;
+            assert_eq!(
+                state.tree.read().await.last_prompt(pane_id),
+                None,
+                "{mismatch}"
+            );
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("registered test terminal");
+            };
+            assert!(runtime.latest_agent_prompt_unavailable, "{mismatch}");
+            let epoch = runtime.prompt_transcript_epoch.as_ref().unwrap();
+            assert_eq!(epoch.token, "epoch-7", "{mismatch}");
+            runtime.agent_process_key = Some(epoch.process.clone());
+            runtime.agent_generation = 7;
+            runtime.is_session_identity_invalidated = false;
+            runtime.session_agent_class = Some(ilium_core::AgentClass::Codex);
+            runtime.session_process_id = Some(42);
+            runtime.session_process_started_at_unix_seconds = Some(1);
+        }
         let repaired_prompt = "recovered\nexact trailing  ";
         handle_exact_agent_prompt_from_transcript(
             &state,
@@ -5979,6 +7963,160 @@ mod tests {
         }
         teardown_state_panes(&state);
         sound_task.abort();
+    }
+
+    #[tokio::test]
+    async fn staged_automatic_enter_rejects_changed_invocation_with_same_pty() {
+        let directory = tempfile::tempdir().expect("isolated staged-invocation fixture");
+        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "staged-invocation-fence".to_string(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical isolated launch directory"),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("staged-invocation.snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let project_id = tree.project_ids()[0];
+            tree.add_pane(project_id, "staged fixture", PaneContentKind::Terminal)
+                .expect("fixture terminal")
+        };
+        spawn_and_register_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await
+        .expect("owned actual PTY");
+        // Deliberately preserve the established plain-terminal policy: a fabricated
+        // live agent key would independently fail fresh process validation even
+        // without the new fence and would not provide a discriminating regression.
+        state
+            .tree
+            .write()
+            .await
+            .set_pane_status(pane_id, PaneStatus::PlainShell)
+            .unwrap();
+        let (input_gate, input, expected) = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("terminal fixture runtime");
+            };
+            assert!(runtime.agent_process_key.is_none());
+            let input_cancel_generation = *runtime.agent_input_cancel.borrow();
+            (
+                Arc::clone(&runtime.input_gate),
+                runtime.session.input_handle(),
+                AgentInputInvocation {
+                    generation: runtime.agent_generation,
+                    process: None,
+                    input_cancel_generation,
+                },
+            )
+        };
+        let input_guard = input_gate.lock().await;
+        let mut events = state.events.subscribe();
+        let body_result = write_key_input_unlocked(
+            &state,
+            pane_id,
+            b"staged invocation body",
+            None,
+            InputWriteOrigin {
+                is_initial_prompt: false,
+                is_user_directed: false,
+                prompt_epoch: None,
+                expected_invocation: Some(&expected),
+            },
+            &input_gate,
+        )
+        .await;
+        // The body has completed its actual writer receipt and bookkeeping.
+        // Model only the generation transition so every old admission guard still
+        // permits the terminal: this isolates the new cross-stage fence.
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("retained terminal runtime");
+            };
+            runtime.agent_generation = expected.generation.checked_add(1).unwrap();
+            assert!(Arc::ptr_eq(&runtime.input_gate, &input_gate));
+            assert!(input.same_session(&runtime.session.input_handle()));
+            assert!(runtime
+                .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
+                .is_none());
+        }
+        let enter_result = write_key_input_unlocked(
+            &state,
+            pane_id,
+            b"\r",
+            Some(PromptSubmissionSource::QueuedPrompt),
+            InputWriteOrigin {
+                is_initial_prompt: false,
+                is_user_directed: false,
+                prompt_epoch: None,
+                expected_invocation: Some(&expected),
+            },
+            &input_gate,
+        )
+        .await;
+        let mut submitted = false;
+        while let Ok(event) = events.try_recv() {
+            submitted |= matches!(event, ServerEvent::PanePromptSubmitted { pane_id: changed, .. }
+                if changed == pane_id);
+        }
+        let baseline_enter_result = write_key_input_unlocked(
+            &state,
+            pane_id,
+            b"\r",
+            Some(PromptSubmissionSource::QueuedPrompt),
+            InputWriteOrigin {
+                is_initial_prompt: false,
+                is_user_directed: false,
+                prompt_epoch: None,
+                expected_invocation: None,
+            },
+            &input_gate,
+        )
+        .await;
+        let mut baseline_submitted = false;
+        while let Ok(event) = events.try_recv() {
+            baseline_submitted |= matches!(event,
+                ServerEvent::PanePromptSubmitted { pane_id: changed, .. } if changed == pane_id);
+        }
+        drop(input_guard);
+        // Release local native-writer handle before the owned session cleanup.
+        drop(input);
+        teardown_state_panes(&state);
+        sound_task.abort();
+        let _ = sound_task.await;
+        assert!(
+            body_result.is_ok(),
+            "real body delivery failed: {body_result:?}"
+        );
+        assert!(
+            enter_result.as_ref().is_err_and(
+                |message| message.contains("agent invocation changed during submission")
+            ),
+            "changed invocation must reject Enter before admission: {enter_result:?}"
+        );
+        assert!(!submitted, "rejected Enter cannot emit PanePromptSubmitted");
+        assert!(
+            baseline_enter_result.is_ok(),
+            "unfenced PlainShell baseline: {baseline_enter_result:?}"
+        );
+        assert!(
+            baseline_submitted,
+            "accepted baseline Enter must emit PanePromptSubmitted"
+        );
     }
 
     #[test]
@@ -6523,6 +8661,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_trigger_cannot_cross_pty_replacement_and_fresh_owner_has_real_readback() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("trigger-owner-fence").await;
+        let original_input = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("terminal fixture");
+            };
+            runtime.session.input_handle()
+        };
+        {
+            let mut accepted = state.text_trigger_settings.write().await;
+            accepted.settings = ilium_ipc::TextTriggerSettings {
+                triggers: vec![ilium_ipc::TextTrigger {
+                    id: "owner-fenced-trigger".into(),
+                    regexp: "never-matched-fixture-marker".into(),
+                    message: "fresh owner literal receipt".into(),
+                    target: ilium_ipc::TextTriggerTarget::Terminals,
+                    ..ilium_ipc::TextTrigger::default()
+                }],
+            };
+            accepted.revision = 1;
+        }
+        let previous = state
+            .panes
+            .write()
+            .await
+            .remove(&pane_id)
+            .expect("original pane");
+        spawn_and_register_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await
+        .expect("replacement isolated PTY");
+        assert!(!submit_text_trigger_if_current(
+            &state,
+            pane_id,
+            "owner-fenced-trigger",
+            "fresh owner literal receipt",
+            &original_input,
+        )
+        .await
+        .expect("stale semantic decision rejected"));
+        let replacement_input = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("replacement fixture");
+            };
+            runtime.session.input_handle()
+        };
+        assert!(submit_text_trigger_if_current(
+            &state,
+            pane_id,
+            "owner-fenced-trigger",
+            "fresh owner literal receipt",
+            &replacement_input,
+        )
+        .await
+        .expect("fresh semantic decision acknowledged"));
+        wait_for_settled_output_sequence(&state, pane_id).await;
+        let text =
+            crate::pane::read_current_terminal_screen(&state, pane_id, vt100::Screen::contents)
+                .await
+                .expect("authoritative replacement screen");
+        assert!(text.contains("fresh owner literal receipt"), "{text}");
+        teardown_pane_resource(pane_id, previous);
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
     async fn initial_attach_includes_authoritative_agent_detection_settings_before_sync_complete() {
         let (state, _pane_id, _directory) =
             state_with_one_terminal_pane("agent-detection-attach-settings").await;
@@ -6538,6 +8748,7 @@ mod tests {
             .expect("attach sends sync boundary");
         let ServerEvent::AgentDetectionSettingsChanged {
             result: Ok(settings),
+            ..
         } = &events[settings_index]
         else {
             panic!("initial settings must be authoritative success");
@@ -6561,6 +8772,7 @@ mod tests {
         handle_request(
             &state,
             ClientRequest::UpdateAgentDetectionSettings {
+                request_id: None,
                 settings: ilium_ipc::AgentDetectionSettings {
                     working_poll_seconds: 10,
                     idle_poll_seconds: 45,
@@ -6576,7 +8788,45 @@ mod tests {
 
         assert!(matches!(
             direct_rx.recv().await,
-            Some(ServerEvent::AgentDetectionSettingsChanged { result: Err(_) })
+            Some(ServerEvent::AgentDetectionSettingsChanged { result: Err(_), .. })
+        ));
+        let after = state.agent_detection_settings_snapshot().await;
+        let after_wire = crate::config::agent_detection_settings(&after.0, &after.1);
+        assert_eq!(before_wire, after_wire);
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn correlated_agent_detection_rejection_echoes_id_without_changing_live_settings() {
+        let (state, _pane_id, _directory) =
+            state_with_one_terminal_pane("agent-detection-invalid-settings").await;
+        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let before = state.agent_detection_settings_snapshot().await;
+        let before_wire = crate::config::agent_detection_settings(&before.0, &before.1);
+
+        handle_request(
+            &state,
+            ClientRequest::UpdateAgentDetectionSettings {
+                request_id: Some(73),
+                settings: ilium_ipc::AgentDetectionSettings {
+                    working_poll_seconds: 10,
+                    idle_poll_seconds: 45,
+                    custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                        name_substring: "  ".to_string(),
+                        class: ilium_core::AgentClass::Claude,
+                    }],
+                },
+            },
+            &direct_tx,
+        )
+        .await;
+
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::AgentDetectionSettingsChanged {
+                request_id: Some(73),
+                result: Err(_)
+            })
         ));
         let after = state.agent_detection_settings_snapshot().await;
         let after_wire = crate::config::agent_detection_settings(&after.0, &after.1);
@@ -6666,6 +8916,7 @@ mod tests {
                     ilium_core::ProgressTaskStatus::Running,
                     55.0,
                     "last observed before restart".to_string(),
+                    String::new(),
                     None,
                 )
                 .unwrap(),
@@ -6692,6 +8943,7 @@ mod tests {
                     ilium_core::ProgressTaskStatus::NotStartedYet,
                     0.0,
                     "pending".to_string(),
+                    String::new(),
                     None,
                 )
                 .unwrap(),
@@ -6715,6 +8967,7 @@ mod tests {
                     ilium_core::ProgressTaskStatus::Done,
                     100.0,
                     "finished".to_string(),
+                    String::new(),
                     None,
                 )
                 .unwrap(),
@@ -7524,6 +9777,61 @@ mod tests {
             (current_pane_id, current_sequence),
         ]);
 
+        // The forwarder publishes the exact retained tail for its gap,
+        // rather than a parser-resetting copy of the entire journal.
+        let (missing_input, other_input) = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(missing)) = panes.get(&missing_pane_id) else {
+                panic!("missing pane is not a terminal");
+            };
+            let Some(PaneResource::Terminal(other)) = panes.get(&current_pane_id) else {
+                panic!("other pane is not a terminal");
+            };
+            (missing.session.input_handle(), other.session.input_handle())
+        };
+        let mut output_rx = state.events.subscribe();
+        let published_sequence = broadcast_terminal_recovery_after(
+            &state,
+            missing_pane_id,
+            &missing_input,
+            missing_sequence.saturating_sub(1),
+        )
+        .await
+        .expect("retained output needs a recovery broadcast");
+        let published_event = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                let event = output_rx.recv().await.expect("broadcast remains open");
+                if matches!(&event, ServerEvent::ScreenUpdate { pane_id, .. } if *pane_id == missing_pane_id) {
+                    break event;
+                }
+            }
+        })
+        .await
+        .expect("missing pane recovery was not broadcast");
+        let ServerEvent::ScreenUpdate {
+            first_sequence,
+            sequence,
+            bytes,
+            ..
+        } = published_event
+        else {
+            panic!("retained tail must be a live update");
+        };
+        assert_eq!(first_sequence, missing_sequence);
+        assert_eq!(sequence, published_sequence);
+        assert!(!bytes.is_empty());
+        assert_eq!(
+            broadcast_terminal_recovery_after(
+                &state,
+                missing_pane_id,
+                &other_input,
+                missing_sequence.saturating_sub(1),
+            )
+            .await,
+            None,
+            "a replaced pane owner must not broadcast its predecessor's output"
+        );
+
         let events = resynchronization_events(&state, &delivered_sequences).await;
         let terminal_events: Vec<&ServerEvent> = events
             .iter()
@@ -7677,6 +9985,7 @@ mod tests {
                 }],
             },
             &inference_activity_revisions,
+            &[],
             &direct_tx,
         )
         .await;
@@ -7761,6 +10070,7 @@ mod tests {
                 ],
             },
             &inference_activity_revisions,
+            &[],
             &direct_tx,
         )
         .await;
@@ -7950,14 +10260,26 @@ mod tests {
             project_id,
             plan.clone(),
             &revisions,
+            &[],
             &direct_tx,
         );
         tokio::pin!(apply);
-        std::future::poll_fn(|cx| {
-            assert!(apply.as_mut().poll(cx).is_pending());
-            std::task::Poll::Ready(())
-        })
-        .await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                assert!(apply.as_mut().poll(cx).is_pending());
+                if state.tree.try_read().is_err() {
+                    std::task::Poll::Ready(())
+                } else {
+                    // Eligibility collection runs outside the transaction lock;
+                    // wait for its completion before testing undo lock ordering.
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("apply reaches the transaction while undo is held");
         assert!(state.tree.try_read().is_err());
         drop(held_undo);
         tokio::time::timeout(Duration::from_secs(5), apply)
@@ -7990,7 +10312,12 @@ mod tests {
             .unwrap();
         assert_eq!(restored.tree, accepted);
         handle_apply_recommended_project_restructure_plan(
-            &state, project_id, plan, &revisions, &direct_tx,
+            &state,
+            project_id,
+            plan,
+            &revisions,
+            &[],
+            &direct_tx,
         )
         .await;
         assert!(matches!(
@@ -8055,6 +10382,14 @@ mod tests {
             .await
             .contains_key(&project_id));
     }
+    mod title_safety_regressions {
+        include!("title_safety_tests.rs");
+    }
+
+    mod title_delivery_regressions {
+        include!("title_delivery_tests.rs");
+    }
+
     mod ordered_owner_regressions {
         use super::*;
         include!("ordered_owner_regressions.rs");

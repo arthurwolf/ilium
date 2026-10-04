@@ -254,15 +254,32 @@ impl Tree {
         plan: RecommendedRestructurePlan,
         inference_activity_revisions: &[NodeActivityRevision],
     ) -> Result<Vec<NodeActivityRevision>, TreeError> {
+        let observations = self.project_presentation_revisions(project_id)?;
+        self.apply_recommended_project_restructure_with_title_grants(
+            project_id,
+            plan,
+            inference_activity_revisions,
+            &observations,
+        )
+    }
+
+    pub fn apply_recommended_project_restructure_with_title_grants(
+        &mut self,
+        project_id: NodeId,
+        plan: RecommendedRestructurePlan,
+        inference_activity_revisions: &[NodeActivityRevision],
+        accepted_title_observations: &[crate::NodePresentationRevision],
+    ) -> Result<Vec<NodeActivityRevision>, TreeError> {
         if self.project_animation_generation(project_id)? != plan.expected_animation_generation {
             return Err(recommendation_error("Stale project animation generation"));
         }
         plan.validate_assignments()?;
         let mut updated = self.clone();
-        let checkpoints = updated.apply_project_restructure_with_activity_checkpoint(
+        let checkpoints = updated.apply_project_restructure_with_title_grants(
             project_id,
             plan.structure,
             inference_activity_revisions,
+            accepted_title_observations,
         )?;
         for entry in plan.entries {
             let mut node_id = project_id;

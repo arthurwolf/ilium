@@ -77,7 +77,7 @@ pub(crate) async fn spawn_repository_admission(
             Err(error) => {
                 return Err(format!(
                     "cannot inspect launch repository boundary: {error}"
-                ))
+                ));
             }
         }
     }
@@ -455,7 +455,7 @@ async fn snapshot_gate(
         WorkspacePruneMode::DiscardFiles { confirmed_path }
             if *confirmed_path == target.worktree_root => {}
         WorkspacePruneMode::DiscardFiles { .. } => {
-            return Err("discard confirmation does not name the exact worktree path".into())
+            return Err("discard confirmation does not name the exact worktree path".into());
         }
     }
     Ok((workspace, control))

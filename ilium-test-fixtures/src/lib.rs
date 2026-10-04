@@ -125,6 +125,17 @@ pub enum FixtureBehavior {
         mouse_tracking: bool,
     },
 
+    /// A synthetic composer with one genuine history entry. Up recalls the
+    /// configured exact UTF-8 text; Enter submits that semantic text and
+    /// exits without flushing the held transcript, like the crash fixture.
+    CrashAfterRecalledPrompt {
+        previous_prompt: String,
+        prompt_path: PathBuf,
+        transcript_path: Option<PathBuf>,
+        exit_code: i32,
+        mouse_tracking: bool,
+    },
+
     /// Prints the current contents of one file and exits. Used as a portable
     /// progress probe without depending on `cat`, PowerShell, or Python.
     PrintFile { path: PathBuf },
@@ -362,6 +373,7 @@ mod tests {
             | FixtureBehavior::ChangeOnly
             | FixtureBehavior::GoalLifecycle { .. }
             | FixtureBehavior::CrashAfterSubmittedPrompt { .. }
+            | FixtureBehavior::CrashAfterRecalledPrompt { .. }
             | FixtureBehavior::PrintFile { .. }
             | FixtureBehavior::RepaintThenReappear
             | FixtureBehavior::EchoSubmittedLine { .. }
@@ -398,6 +410,13 @@ mod tests {
             FixtureBehavior::CrashAfterSubmittedPrompt {
                 prompt_path: PathBuf::from("/tmp/crash-prompt"),
                 transcript_path: Some(PathBuf::from("/tmp/crash-transcript")),
+                exit_code: 42,
+                mouse_tracking: true,
+            },
+            FixtureBehavior::CrashAfterRecalledPrompt {
+                previous_prompt: "history café 日本語 🦀\ntrailing spaces  ".to_string(),
+                prompt_path: PathBuf::from("/tmp/recalled-prompt"),
+                transcript_path: Some(PathBuf::from("/tmp/recalled-transcript")),
                 exit_code: 42,
                 mouse_tracking: true,
             },

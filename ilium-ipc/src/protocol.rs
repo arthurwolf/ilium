@@ -17,6 +17,20 @@ use ilium_core::{
 use ilium_sound::{SoundSettings, SoundSourceKind};
 use serde::{Deserialize, Serialize};
 
+/// Presentation and conversation captured before an AI title proposal begins.
+/// Eligibility is deliberately absent: the server establishes it from its own
+/// receipt-backed task evidence or a project-verified transcript. Activity
+/// revisions remain separate because ordinary output does not change a title.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneTitleObservation {
+    pub pane_id: NodeId,
+    pub presentation_revision: u64,
+    pub agent_class: Option<AgentClass>,
+    pub session_id: Option<String>,
+    pub process_id: Option<u32>,
+    pub title_generation: u64,
+}
+
 /// Live server-owned settings that control agent identification and polling.
 /// A zero `*_poll_seconds` value is the explicit wire sentinel for the
 /// detector's effective 500 ms minimum, preserving a configured zero across
@@ -605,6 +619,8 @@ pub enum ClientRequest {
         /// the agent return to a fresh conversation. Prevents a worker that
         /// summarized the pre-clear screen from restoring its stale title.
         expected_title_generation: u64,
+        expected_presentation_revision: u64,
+        expected_process_id: Option<u32>,
         title: String,
         short_title: Option<String>,
         inferred_icon: Option<String>,
@@ -615,7 +631,10 @@ pub enum ClientRequest {
     /// pre-restructure tree in a one-slot undo buffer before applying, so a
     /// single `RevertLastRestructure` can undo it. Appended last to keep
     /// every earlier variant's bincode discriminant stable.
-    ApplyRestructurePlan(RestructurePlan),
+    ApplyRestructurePlan {
+        plan: RestructurePlan,
+        title_observations: Vec<PaneTitleObservation>,
+    },
     /// Restores the tree exactly as it was immediately before the most
     /// recent successfully-applied `ApplyRestructurePlan` on this server, if
     /// any is still held in its one-slot undo buffer. A no-op (surfaced as
@@ -631,6 +650,7 @@ pub enum ClientRequest {
         /// The server applies valid plans after later activity, checkpointing
         /// only these revisions so anything newer remains eligible next time.
         inference_activity_revisions: Vec<NodeActivityRevision>,
+        title_observations: Vec<PaneTitleObservation>,
     },
     /// Restores only `project_id` from its own latest restructure undo point.
     RevertProjectRestructure {
@@ -850,6 +870,8 @@ pub enum ClientRequest {
     /// Replaces the server-owned agent detection intervals and custom
     /// signatures. Appended to keep all earlier bincode discriminants stable.
     UpdateAgentDetectionSettings {
+        /// None for ordinary updates; Some identifies an exact value save.
+        request_id: Option<u64>,
         settings: AgentDetectionSettings,
     },
     /// Stops the agent process tree inside `pane_id` but keeps the pane node
@@ -877,6 +899,7 @@ pub enum ClientRequest {
         project_id: NodeId,
         plan: ilium_core::animation_recommendation::RecommendedRestructurePlan,
         inference_activity_revisions: Vec<NodeActivityRevision>,
+        title_observations: Vec<PaneTitleObservation>,
     },
     /// Direct user terminal typing, paste, or explicit voice/control keys.
     /// Append-only variant keeps existing KeyInput bincode discriminants.
@@ -936,7 +959,7 @@ impl ClientRequest {
             Self::EnqueuePrompt { .. } => "enqueue_prompt",
             Self::ClearPromptQueue { .. } => "clear_prompt_queue",
             Self::SetSessionPaneTitle { .. } => "set_session_pane_title",
-            Self::ApplyRestructurePlan(_) => "apply_restructure_plan",
+            Self::ApplyRestructurePlan { .. } => "apply_restructure_plan",
             Self::RevertLastRestructure => "revert_last_restructure",
             Self::ApplyProjectRestructurePlan { .. } => "apply_project_restructure_plan",
             Self::RevertProjectRestructure { .. } => "revert_project_restructure",
@@ -1054,6 +1077,7 @@ pub enum ServerEvent {
         first_sequence: u64,
         /// Newest pane-local PTY journal chunk represented by `bytes`.
         sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
         bytes: Vec<u8>,
     },
     /// A pane's detected status changed (agent identity/activity, or
@@ -1106,6 +1130,7 @@ pub enum ServerEvent {
     TerminalReplay {
         pane_id: NodeId,
         through_sequence: u64,
+        #[serde(with = "crate::terminal_bytes")]
         bytes: Vec<u8>,
         is_complete: bool,
     },
@@ -1322,6 +1347,8 @@ pub enum ServerEvent {
     /// requesting connection; successful values are broadcast to all clients.
     /// Appended to preserve existing bincode discriminants.
     AgentDetectionSettingsChanged {
+        /// Attach/broadcast use None. A correlated result goes to its requester.
+        request_id: Option<u64>,
         result: Result<AgentDetectionSettings, AgentDetectionSettingsError>,
     },
     /// Outcome of `ClientRequest::TerminatePaneProcess`: `Ok` only after the
@@ -1330,5 +1357,14 @@ pub enum ServerEvent {
     PaneProcessTerminated {
         pane_id: NodeId,
         result: Result<(), String>,
+    },
+    /// Rejected resize, correlated with the requested geometry so the client
+    /// can allow an explicit retry without invalidating a newer request.
+    /// Appended to preserve existing bincode discriminants.
+    PaneResizeRejected {
+        pane_id: NodeId,
+        rows: u16,
+        cols: u16,
+        message: String,
     },
 }

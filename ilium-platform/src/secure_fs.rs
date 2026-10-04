@@ -22,6 +22,114 @@ use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
 
+/// Opens an existing regular file for reading, preserving ordinary symlink
+/// resolution. Validate the opened handle rather than a raced path metadata
+/// check. On Unix, a FIFO swapped into the path cannot block the open.
+pub fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("read source is not a regular file"));
+    }
+    Ok(file)
+}
+
+/// Flushes the directory entry after publishing a file by rename. The file
+/// itself must already have been flushed. An unsupported directory flush is
+/// an error, never a successful durability acknowledgement.
+pub fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .open(parent)?
+            .sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "directory flush requires platform durable replacement",
+        ))
+    }
+}
+
+/// Metadata acknowledgement level for directory creation/removal. Keep this
+/// distinct from flushed file contents: unsupported directory fsync must not
+/// be described as a successful flush, or disable native directory operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectorySyncOutcome {
+    Synced,
+    Unsupported,
+}
+
+pub fn sync_parent_directory_if_supported(path: &Path) -> io::Result<DirectorySyncOutcome> {
+    match sync_parent_directory(path) {
+        Ok(()) => Ok(DirectorySyncOutcome::Synced),
+        Err(error) if error.kind() == io::ErrorKind::Unsupported => {
+            Ok(DirectorySyncOutcome::Unsupported)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Publishes an already flushed temporary file and waits for the platform's
+/// durable replacement operation. Both paths must be on the same filesystem.
+/// Also supports renaming a directory to a new path; the domain writer must
+/// hold its mutation lock and validate destination conflicts before calling.
+pub fn replace_file_durably(source: &Path, destination: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        };
+        let wide = |path: &Path| -> io::Result<Vec<u16>> {
+            let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();
+            if value.contains(&0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "path contains NUL",
+                ));
+            }
+            value.push(0);
+            Ok(value)
+        };
+        let source = wide(source)?;
+        let destination = wide(destination)?;
+        // SAFETY: both buffers are NUL-terminated and live through the call.
+        if unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(source, destination)?;
+        sync_parent_directory(destination)
+    }
+}
+
 /// Creates `path` and any missing parents, restricted to the current user.
 ///
 /// Every directory this creates -- the leaf *and* each intermediate parent --
@@ -562,6 +670,42 @@ impl NoFollowDirectory {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn durable_replacement_preserves_flushed_contents_on_readback() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let destination = directory.path().join("saved");
+        let source = directory.path().join("pending");
+        std::fs::write(&destination, b"previous").expect("previous file");
+        std::fs::write(&source, b"replacement").expect("pending file");
+        std::fs::File::open(&source)
+            .expect("pending handle")
+            .sync_all()
+            .expect("flush contents");
+        super::replace_file_durably(&source, &destination).expect("durable replacement");
+        assert_eq!(
+            std::fs::read(&destination).expect("saved readback"),
+            b"replacement"
+        );
+        assert!(!source.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_read_follows_symlinks_but_rejects_fifo_without_a_writer() {
+        use std::os::unix::ffi::OsStrExt;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("image");
+        let link = directory.path().join("linked-image");
+        std::fs::write(&source, b"image bytes").expect("image");
+        std::os::unix::fs::symlink(&source, &link).expect("symlink");
+        assert!(super::open_regular_file(&link).is_ok());
+        let fifo = directory.path().join("fifo");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path");
+        // SAFETY: NUL-terminated task-owned path, no existing object there.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(super::open_regular_file(&fifo).is_err());
+        assert!(super::open_regular_file(directory.path()).is_err());
+    }
     use super::*;
 
     #[cfg(unix)]

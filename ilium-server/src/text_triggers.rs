@@ -31,6 +31,8 @@ use tokio::sync::mpsc;
 
 use crate::ipc::handlers::submit_text_trigger_if_current;
 use crate::state::ServerState;
+mod matching;
+pub use matching::Matcher;
 
 /// Grace period measured from the first scan observing an admission missing.
 /// This is a repaint heuristic, not a bound on how long real redraws can take.
@@ -48,29 +50,105 @@ const MAX_SLICE_BYTES: usize = 8 * 1024;
 const MAX_KEY_CHARS: usize = 512;
 
 /// One bounded output-match job. The forwarder owns the sender and an
-/// abort-on-drop worker, so a slow agent composer cannot stall PTY output.
+/// abort-on-drop worker. Full delivery queues apply backpressure instead of
+/// discarding an already matched semantic decision.
 pub struct TriggerDelivery {
     pub trigger_id: String,
     pub message: String,
     pub settings_revision: u64,
+    /// Detection-to-send wait taken from the rule at match time.
+    pub delay: Duration,
+    /// When the match was detected; the send is due at `detected_at + delay`.
+    pub detected_at: Instant,
+    // Last field: original string allocations die before their storage lease.
+    _retention: std::sync::Arc<ilium_execution::StorageAdmission>,
 }
 
+/// Delayed deliveries one pane may hold before the bounded channel applies
+/// backpressure to the matcher.
+const MAX_PENDING_DELIVERIES: usize = 64;
+
+/// Owns the pane's delivery queue. Each delivery waits until its own due time;
+/// a short delay never queues behind a long one. Equal due times keep arrival
+/// order. Dropping this future drops every pending delivery with it.
 pub async fn run_deliveries(
     state: std::sync::Arc<ServerState>,
     pane_id: NodeId,
+    input: ilium_pty::PtyInput,
     mut receiver: mpsc::Receiver<TriggerDelivery>,
 ) {
-    while let Some(delivery) = receiver.recv().await {
-        if let Err(error) = submit_text_trigger_if_current(
-            &state,
-            pane_id,
-            &delivery.trigger_id,
-            &delivery.message,
-            delivery.settings_revision,
-        )
-        .await
-        {
-            tracing::warn!(pane_id = pane_id.0, trigger_id = %delivery.trigger_id, %error, "text trigger submission failed");
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+
+    struct Pending(Reverse<(Instant, u64)>, TriggerDelivery);
+    impl PartialEq for Pending {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+    impl Eq for Pending {}
+    impl PartialOrd for Pending {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for Pending {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.0.cmp(&other.0)
+        }
+    }
+
+    let mut pending: BinaryHeap<Pending> = BinaryHeap::new();
+    let mut sequence = 0u64;
+    let mut is_open = true;
+    while is_open || !pending.is_empty() {
+        let next_due = pending.peek().map(|entry| (entry.0).0 .0);
+        let due_sleep = async {
+            match next_due {
+                Some(due) => tokio::time::sleep_until(tokio::time::Instant::from_std(due)).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            received = receiver.recv(), if is_open && pending.len() < MAX_PENDING_DELIVERIES => match received {
+                Some(delivery) => {
+                    let due = delivery.detected_at + delivery.delay;
+                    sequence += 1;
+                    pending.push(Pending(Reverse((due, sequence)), delivery));
+                }
+                None => is_open = false,
+            },
+            () = due_sleep => {
+                let Some(Pending(_, delivery)) = pending.pop() else { continue };
+                deliver(&state, pane_id, &input, delivery).await;
+            }
+        }
+    }
+}
+
+async fn deliver(
+    state: &ServerState,
+    pane_id: NodeId,
+    input: &ilium_pty::PtyInput,
+    delivery: TriggerDelivery,
+) {
+    match submit_text_trigger_if_current(
+        state,
+        pane_id,
+        &delivery.trigger_id,
+        &delivery.message,
+        input,
+    )
+    .await
+    {
+        Ok(true) => {
+            tracing::debug!(pane_id = pane_id.0, trigger_id = %delivery.trigger_id, settings_revision = delivery.settings_revision, "text trigger semantic input acknowledged")
+        }
+        Ok(false) => {
+            tracing::debug!(pane_id = pane_id.0, trigger_id = %delivery.trigger_id, "text trigger decision cancelled: pane replaced, or rule removed, disabled or edited")
+        }
+        Err(error) => {
+            tracing::warn!(pane_id = pane_id.0, trigger_id = %delivery.trigger_id, %error, "text trigger submission failed")
         }
     }
 }
@@ -149,28 +227,110 @@ impl KeyState {
     }
 }
 
-/// Per-rule instance bookkeeping plus the rule's compiled expression, so the
-/// regexp is compiled once per rule revision rather than once per output chunk.
+const COMPILED_CACHE_BYTES: usize = 16 * 1024 * 1024;
+const COMPILED_CACHE_ENTRIES: usize = 64;
+struct CompiledEntry {
+    pattern: String,
+    regex: std::sync::Arc<regex_automata::meta::Regex>,
+    bytes: usize,
+}
+#[derive(Default)]
+struct CompiledCache {
+    entries: VecDeque<CompiledEntry>,
+    bytes: usize,
+}
+impl CompiledCache {
+    fn get(&mut self, pattern: &str) -> Option<std::sync::Arc<regex_automata::meta::Regex>> {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.pattern == pattern)
+        {
+            let entry = self.entries.remove(index)?;
+            let regex = entry.regex.clone();
+            self.entries.push_front(entry);
+            return Some(regex);
+        }
+        // These are the exact regex1.12.3 string-facade builder defaults.
+        // Semantic rule admissions are separate and survive computational eviction.
+        let regex = regex_automata::meta::Regex::builder()
+            .configure(
+                regex_automata::meta::Regex::config()
+                    .nfa_size_limit(Some(10 * 1024 * 1024))
+                    .hybrid_cache_capacity(2 * 1024 * 1024)
+                    .match_kind(regex_automata::MatchKind::LeftmostFirst)
+                    .utf8_empty(true)
+                    .pool_capacity(0),
+            )
+            .syntax(regex_automata::util::syntax::Config::default().utf8(true))
+            .build(pattern)
+            .ok()?;
+        let bytes = regex
+            .memory_usage()
+            .saturating_mul(2)
+            .saturating_add(pattern.len())
+            .saturating_add(512);
+        let regex = std::sync::Arc::new(regex);
+        // Oversized valid patterns still match using the job's transient working
+        // allowance; they simply do not become permanently resident cache entries.
+        if bytes > COMPILED_CACHE_BYTES {
+            return Some(regex);
+        }
+        while self.bytes.saturating_add(bytes) > COMPILED_CACHE_BYTES
+            || self.entries.len() >= COMPILED_CACHE_ENTRIES
+        {
+            let evicted = self.entries.pop_back()?;
+            self.bytes = self.bytes.saturating_sub(evicted.bytes);
+        }
+        self.bytes += bytes;
+        self.entries.push_front(CompiledEntry {
+            pattern: pattern.into(),
+            regex: regex.clone(),
+            bytes,
+        });
+        Some(regex)
+    }
+}
+thread_local! {
+    // Production callers execute on the fixed shared CPU bank. Its resident
+    // declaration retains this TLS allocation through actual thread teardown.
+    static COMPILED_REGEX: std::cell::RefCell<CompiledCache> = std::cell::RefCell::new(CompiledCache::default());
+}
+fn matching_regex(pattern: &str) -> Option<std::sync::Arc<regex_automata::meta::Regex>> {
+    COMPILED_REGEX.with(|cache| cache.borrow_mut().get(pattern))
+}
+
+/// Semantic per-rule admission state. Replaceable compiled expressions live
+/// in the CPU owner's bounded cache, independently of main/alternate tables.
 struct RuleTable {
     regexp: String,
-    regex: Regex,
     keys: HashMap<String, KeyState>,
 }
 
 impl RuleTable {
-    fn new(trigger: &TextTrigger) -> Option<Self> {
-        Some(Self {
+    fn new(trigger: &TextTrigger) -> Self {
+        Self {
             regexp: trigger.regexp.clone(),
-            regex: Regex::new(&trigger.regexp).ok()?,
             keys: HashMap::new(),
-        })
+        }
     }
 
+    #[cfg(test)]
     fn count_matches(&self, lines: &[String]) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
+        let Some(regex) = matching_regex(&self.regexp) else {
+            return counts;
+        };
+        // Explicit cache bypasses meta's internal per-CPU cache pool. Only
+        // one current rule's working cache exists during sequential evaluation.
+        let mut cache = regex.create_cache();
         for line in lines {
-            for found in self.regex.find_iter(line) {
-                let key = normalize_key(found.as_str());
+            let mut matches =
+                regex_automata::util::iter::Searcher::new(regex_automata::Input::new(line));
+            while let Some(found) =
+                matches.advance(|input| Ok(regex.search_with(&mut cache, input)))
+            {
+                let key = normalize_key(&line[found.range()]);
                 if !key.is_empty() {
                     *counts.entry(key).or_insert(0) += 1;
                 }
@@ -331,7 +491,6 @@ fn slice_end(bytes: &[u8], start: usize, newline_budget: usize) -> usize {
 #[derive(Default)]
 pub struct TriggerTracker {
     shadow: vt100::Parser,
-    needs_resync: bool,
     /// Main-screen and alternate-screen instances are remembered separately:
     /// leaving the alternate screen restores the main text unchanged and must
     /// not read as new output.
@@ -361,11 +520,11 @@ impl TriggerTracker {
         let mut parser = vt100::Parser::new(rows.max(1), cols.max(1), 0);
         parser.process(formatted_state);
         self.shadow = parser;
-        self.needs_resync = false;
     }
 
     /// Feeds `bytes` (an empty slice only rescans) and returns the id of the
     /// trigger for every new instance, one entry per instance.
+    #[cfg(test)]
     pub fn feed(
         &mut self,
         bytes: &[u8],
@@ -398,6 +557,7 @@ impl TriggerTracker {
         fired
     }
 
+    #[cfg(test)]
     fn evaluate(
         &mut self,
         enabled: &[&TextTrigger],
@@ -434,9 +594,7 @@ impl TriggerTracker {
             }
             let is_new_rule = !table.contains_key(&trigger.id);
             if is_new_rule {
-                let Some(rule) = RuleTable::new(trigger) else {
-                    continue;
-                };
+                let rule = RuleTable::new(trigger);
                 table.insert(trigger.id.clone(), rule);
             }
             let Some(rule) = table.get_mut(&trigger.id) else {
@@ -463,109 +621,292 @@ struct EvaluationContext {
     status: PaneStatus,
     settings: ilium_ipc::TextTriggerSettings,
     settings_revision: u64,
+    _storage: std::sync::Arc<ilium_execution::StorageAdmission>,
+}
+
+pub(crate) fn execution_client(
+    state: &ServerState,
+) -> Result<crate::execution::ExecutionClient, String> {
+    if let Some(execution) = state.execution.get() {
+        return Ok(execution.client.clone());
+    }
+    #[cfg(test)]
+    return Ok(crate::execution::test_general_client());
+    #[cfg(not(test))]
+    Err("Text Trigger execution owner is unavailable".to_owned())
+}
+
+/// Includes collection/string capacity, rather than the encoded wire length.
+pub(crate) fn settings_bytes(settings: &ilium_ipc::TextTriggerSettings) -> Option<usize> {
+    if settings.triggers.len() > 4096 {
+        return None;
+    }
+    let mut bytes = std::mem::size_of_val(settings).checked_add(
+        settings
+            .triggers
+            .capacity()
+            .checked_mul(std::mem::size_of::<TextTrigger>())?,
+    )?;
+    for trigger in &settings.triggers {
+        bytes = bytes
+            .checked_add(trigger.id.capacity())?
+            .checked_add(trigger.regexp.capacity())?
+            .checked_add(trigger.message.capacity())?
+            .checked_add(trigger.sample_text.capacity())?;
+    }
+    Some(bytes)
+}
+
+/// Validation executes on a real CPU bank. The admitted original settings
+/// allocation transfers to a small, exact lifetime charge before publication.
+pub(crate) struct AcceptedCandidate {
+    pub(crate) settings: ilium_ipc::TextTriggerSettings,
+    pub(crate) retention: std::sync::Arc<ilium_execution::StorageAdmission>,
+    #[cfg(test)]
+    pub(crate) validation_thread: std::thread::ThreadId,
+}
+
+pub(crate) async fn validate_in_worker(
+    state: &ServerState,
+    settings: ilium_ipc::TextTriggerSettings,
+    storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+) -> Result<AcceptedCandidate, String> {
+    const MAX_SETTINGS_BYTES: usize = 16 * 1024 * 1024;
+    let bytes = settings_bytes(&settings)
+        .filter(|bytes| *bytes <= MAX_SETTINGS_BYTES)
+        .ok_or_else(|| {
+            "Text Trigger settings exceed the 16 MiB retained allocation limit".to_owned()
+        })?;
+    let client = execution_client(state)?;
+    let storage = match storage {
+        Some(storage) => storage,
+        None => client
+            .reserve_storage(bytes.max(256))
+            .await
+            .map_err(|error| format!("Text Trigger retained settings admission: {error:?}"))?,
+    };
+    let reservation = client
+        .reserve(
+            ilium_execution::Lane::Cpu,
+            ilium_execution::JobCost {
+                input_bytes: 64 * 1024 * 1024,
+                result_bytes: 32 * 1024 * 1024,
+            },
+        )
+        .await
+        .map_err(|error| format!("Text Trigger validation admission: {error:?}"))?;
+    let validated = client
+        .run_reserved(reservation, move |_context| {
+            let error = validate_settings(&settings);
+            Ok::<_, std::convert::Infallible>((
+                settings,
+                error,
+                storage,
+                std::thread::current().id(),
+            ))
+        })
+        .await
+        .map_err(|error| format!("Text Trigger validation failed: {error}"))?;
+    if let Some(message) = &validated.view().1 {
+        return Err(message.clone());
+    }
+    let ((settings, _, retention, validation_thread), validation_charge) = validated.into_parts();
+    #[cfg(not(test))]
+    let _ = validation_thread;
+    let settings = AcceptedCandidate {
+        settings,
+        retention,
+        #[cfg(test)]
+        validation_thread,
+    };
+    drop(validation_charge);
+    Ok(settings)
 }
 
 async fn load_context(state: &ServerState, pane_id: NodeId) -> Option<EvaluationContext> {
-    let status = state
-        .tree
-        .read()
-        .await
-        .get(pane_id)
-        .and_then(|node| match &node.kind {
-            NodeKind::Pane { status, .. } => Some(status.clone()),
-            _ => None,
-        })?;
-    let accepted = state.text_trigger_settings.read().await;
-    Some(EvaluationContext {
-        status,
-        settings: accepted.settings.clone(),
-        settings_revision: accepted.revision,
-    })
+    use ilium_core::AllocationSize;
+    let client = execution_client(state).ok()?;
+    loop {
+        let settings_size = {
+            let accepted = state.text_trigger_settings.read().await;
+            settings_bytes(&accepted.settings)?
+        };
+        let status_size = {
+            let tree = state.tree.read().await;
+            match &tree.get(pane_id)?.kind {
+                NodeKind::Pane { status, .. } => status.retained_bytes(),
+                _ => return None,
+            }
+        };
+        let size = settings_size
+            .saturating_add(status_size)
+            .saturating_add(4096);
+        let storage = client.reserve_storage(size).await.ok()?;
+        let (settings, settings_revision) = {
+            let accepted = state.text_trigger_settings.read().await;
+            if settings_bytes(&accepted.settings)? > settings_size {
+                continue;
+            }
+            (accepted.settings.clone(), accepted.revision)
+        };
+        let status = {
+            let tree = state.tree.read().await;
+            match &tree.get(pane_id)?.kind {
+                NodeKind::Pane { status, .. } if status.retained_bytes() <= status_size => {
+                    status.clone()
+                }
+                NodeKind::Pane { .. } => continue,
+                _ => return None,
+            }
+        };
+        return Some(EvaluationContext {
+            status,
+            settings,
+            settings_revision,
+            _storage: storage,
+        });
+    }
 }
 
-fn deliver(
-    pane_id: NodeId,
-    context: &EvaluationContext,
-    fired: Vec<String>,
-    delivery_sender: &mpsc::Sender<TriggerDelivery>,
-) {
-    for trigger_id in fired {
-        let Some(trigger) = context
-            .settings
-            .triggers
-            .iter()
-            .find(|trigger| trigger.id == trigger_id)
-        else {
-            continue;
-        };
-        if let Err(error) = delivery_sender.try_send(TriggerDelivery {
+async fn enqueue_delivery(
+    client: &crate::execution::ExecutionClient,
+    trigger: &TextTrigger,
+    settings_revision: u64,
+    sender: &mpsc::Sender<TriggerDelivery>,
+) -> Result<(), String> {
+    let bytes = std::mem::size_of::<TriggerDelivery>()
+        .checked_add(128)
+        .and_then(|bytes| bytes.checked_add(trigger.id.capacity()))
+        .and_then(|bytes| bytes.checked_add(trigger.message.capacity()))
+        .ok_or_else(|| "Text Trigger delivery allocation overflow".to_owned())?;
+    let retention = client
+        .reserve_storage(bytes)
+        .await
+        .map_err(|error| format!("Text Trigger delivery storage admission: {error:?}"))?;
+    // Admission precedes cloning. The queue and active semantic writer retain
+    // the same allocation charge; awaiting a full queue holds no registry lock.
+    sender
+        .send(TriggerDelivery {
             trigger_id: trigger.id.clone(),
             message: trigger.message.clone(),
-            settings_revision: context.settings_revision,
-        }) {
-            tracing::warn!(pane_id = pane_id.0, trigger_id = %trigger.id, %error, "text trigger delivery queue is full or closed");
-        }
-    }
+            settings_revision,
+            delay: Duration::from_secs(u64::from(
+                trigger
+                    .delay_seconds
+                    .min(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS),
+            )),
+            detected_at: Instant::now(),
+            _retention: retention,
+        })
+        .await
+        .map_err(|_| "Text Trigger delivery owner closed".to_owned())
 }
 
 pub async fn process_output(
     state: &ServerState,
     pane_id: NodeId,
-    tracker: &mut TriggerTracker,
+    tracker: &mut Matcher,
     bytes: &[u8],
     delivery_sender: &mpsc::Sender<TriggerDelivery>,
 ) {
-    let bytes = if tracker.needs_resync {
-        let Some(((rows, cols), formatted)) =
-            crate::pane::read_current_terminal_screen(state, pane_id, |screen| {
-                (screen.size(), screen.state_formatted())
-            })
-            .await
-        else {
+    let now = Instant::now();
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(error) => {
+            report_matching_error(state, pane_id, error);
             return;
-        };
-        tracker.replace_screen(rows, cols, &formatted);
-        // The current frame already contains this chunk; do not replay it.
-        &[]
+        }
+    };
+    if let Some(pending) = tracker.pending_operation() {
+        if let Err(error) = tracker.apply(pending, &client, delivery_sender).await {
+            report_matching_error(state, pane_id, error);
+            return;
+        }
+    }
+    let replace = tracker.needs_resync;
+    let (source, geometry, storage, origin) = if replace {
+        match matching::project_current_screen(state, pane_id, &client).await {
+            Ok(Some(projected)) => (
+                projected.bytes,
+                projected.geometry,
+                projected.storage,
+                Some((projected.input, projected.reader, projected.resize_epoch)),
+            ),
+            Ok(None) => {
+                tracker.needs_resync = true;
+                return;
+            }
+            Err(error) => {
+                report_matching_error(state, pane_id, error);
+                return;
+            }
+        }
     } else {
-        let Some((rows, cols)) =
+        let Some(geometry) =
             crate::pane::read_current_terminal_screen(state, pane_id, vt100::Screen::size).await
         else {
             tracker.needs_resync = true;
             return;
         };
-        tracker.resize(rows, cols, Instant::now());
-        bytes
+        let size = bytes
+            .len()
+            .saturating_add(std::mem::size_of::<matching::Operation>())
+            .saturating_add(4096);
+        let storage = match client.reserve_storage(size).await {
+            Ok(storage) => storage,
+            Err(error) => {
+                report_matching_error(
+                    state,
+                    pane_id,
+                    format!("Text Trigger original feed admission: {error:?}"),
+                );
+                return;
+            }
+        };
+        (bytes.to_vec(), geometry, storage, None)
     };
     let Some(context) = load_context(state, pane_id).await else {
         return;
     };
-    let fired = tracker.feed(
-        bytes,
-        &context.settings.triggers,
-        &context.status,
-        Instant::now(),
-    );
-    deliver(pane_id, &context, fired, delivery_sender);
+    if let Some((input, reader, resize_epoch)) = &origin {
+        // load_context awaited after screen preparation. Revalidate the
+        // originating session and resize epoch at operation acceptance;
+        // dimensions alone cannot detect an away-and-back resize.
+        if !crate::pane::terminal_reader_is_current(state, pane_id, input).await
+            || reader.try_with_screen_and_resize_epoch(|screen, epoch| (screen.size(), epoch))
+                != Some((geometry, *resize_epoch))
+        {
+            tracker.needs_resync = true;
+            return;
+        }
+    }
+    let operation = std::sync::Arc::new(matching::Operation {
+        context: std::sync::Arc::new(context),
+        bytes: source,
+        geometry,
+        replace,
+        now,
+        _storage: storage,
+    });
+    if let Err(error) = tracker.apply(operation, &client, delivery_sender).await {
+        report_matching_error(state, pane_id, error);
+    }
 }
-
-/// Called when PTY chunks were dropped: the tracker's screen no longer matches
-/// the pane's, so it adopts the pane's real screen and rescans it.
+fn report_matching_error(state: &ServerState, pane_id: NodeId, error: String) {
+    tracing::error!(pane_id=pane_id.0,%error,"Text Trigger matching did not settle; original state was not reset");
+    state.broadcast(ilium_ipc::ServerEvent::Error {
+        message: format!("Text Trigger matching for pane{}: {error}", pane_id.0),
+    });
+}
+/// Sampling gaps adopt the authoritative screen while retaining admissions.
+/// Transient matches lost by the broadcast ring remain explicitly unverified.
 pub async fn resync_after_gap(
     state: &ServerState,
     pane_id: NodeId,
-    tracker: &mut TriggerTracker,
+    tracker: &mut Matcher,
     delivery_sender: &mpsc::Sender<TriggerDelivery>,
 ) {
-    let snapshot = crate::pane::read_current_terminal_screen(state, pane_id, |screen| {
-        (screen.size(), screen.state_formatted())
-    })
-    .await;
-    let Some(((rows, cols), formatted_state)) = snapshot else {
-        tracker.needs_resync = true;
-        return;
-    };
-    tracker.replace_screen(rows, cols, &formatted_state);
+    tracker.needs_resync = true;
     process_output(state, pane_id, tracker, &[], delivery_sender).await;
 }
 
@@ -581,6 +922,13 @@ pub fn validate_settings(settings: &ilium_ipc::TextTriggerSettings) -> Option<St
             return Some(format!(
                 "Text Trigger {} regexp must not be empty",
                 index + 1
+            ));
+        }
+        if trigger.delay_seconds > ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS {
+            return Some(format!(
+                "Text Trigger {} delay must be at most {} seconds",
+                index + 1,
+                ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
             ));
         }
         if trigger.message.contains(['\r', '\n']) {
@@ -615,6 +963,41 @@ mod tests {
     use super::*;
     use ilium_ipc::{TextTrigger, TextTriggerSettings};
 
+    #[tokio::test]
+    async fn a_full_delivery_queue_preserves_matched_decisions_and_literal_fifo_messages() {
+        let client = crate::execution::test_general_client();
+        let mut first = TextTrigger {
+            id: "first".into(),
+            message: "literal first".into(),
+            ..TextTrigger::default()
+        };
+        let (sender, mut receiver) = mpsc::channel(1);
+        enqueue_delivery(&client, &first, 7, &sender).await.unwrap();
+        first.id = "second".into();
+        first.message = "literal second".into();
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let owned_sender = sender.clone();
+        let mut pending = tokio::spawn(async move {
+            entered_sender.send(()).unwrap();
+            enqueue_delivery(&client, &first, 8, &owned_sender).await
+        });
+        entered_receiver.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut pending)
+                .await
+                .is_err()
+        );
+        let admitted = receiver.recv().await.unwrap();
+        assert_eq!(admitted.trigger_id, "first");
+        assert_eq!(admitted.message, "literal first");
+        assert_eq!(admitted.settings_revision, 7);
+        pending.await.unwrap().unwrap();
+        let admitted = receiver.recv().await.unwrap();
+        assert_eq!(admitted.trigger_id, "second");
+        assert_eq!(admitted.message, "literal second");
+        assert_eq!(admitted.settings_revision, 8);
+    }
+
     fn rule(regexp: &str) -> Vec<TextTrigger> {
         vec![TextTrigger {
             id: "rule".to_string(),
@@ -623,6 +1006,7 @@ mod tests {
             message: "reply".to_string(),
             target: TextTriggerTarget::Both,
             sample_text: String::new(),
+            delay_seconds: 0,
         }]
     }
 
@@ -665,6 +1049,84 @@ mod tests {
         fn rescan(&mut self) -> usize {
             self.feed(b"")
         }
+    }
+
+    #[test]
+    fn explicit_matching_cache_preserves_string_regex_defaults() {
+        let patterns = [
+            r"",
+            r"foo|foobar",
+            r"\b\w+\b",
+            r"(?i)ä+",
+            r"(?m)^.*$",
+            r"a*?",
+            r"(?s).+",
+            r"(?-u:[a-z]+)",
+            r"[\p{Greek}\p{Emoji}]+",
+        ];
+        let lines = ["", "foobar foo", "äÄ aaa", "αβ γ  🐈", "a\nb\r\n", "é.a"];
+        for pattern in patterns {
+            let facade = regex::Regex::new(pattern).unwrap();
+            let direct = matching_regex(pattern).unwrap();
+            let mut cache = direct.create_cache();
+            for line in lines {
+                let expected = facade
+                    .find_iter(line)
+                    .map(|matched| matched.range())
+                    .collect::<Vec<_>>();
+                let mut matches =
+                    regex_automata::util::iter::Searcher::new(regex_automata::Input::new(line));
+                let mut actual = Vec::new();
+                while let Some(matched) =
+                    matches.advance(|input| Ok(direct.search_with(&mut cache, input)))
+                {
+                    actual.push(matched.range());
+                }
+                assert_eq!(actual, expected, "pattern={pattern:?}, line={line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn compiled_cache_evicts_computation_without_resetting_semantic_keys() {
+        let mut cache = CompiledCache::default();
+        let original = cache.get("needle").unwrap();
+        for index in 0..COMPILED_CACHE_ENTRIES + 8 {
+            cache.get(&format!("pattern{index}")).unwrap();
+        }
+        assert!(cache.entries.len() <= COMPILED_CACHE_ENTRIES);
+        assert!(cache.bytes <= COMPILED_CACHE_BYTES);
+        let replacement = cache.get("needle").unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&original, &replacement));
+        let mut tracker = TriggerTracker::default();
+        let trigger = TextTrigger {
+            id: "cache-rule".into(),
+            enabled: true,
+            regexp: "needle".into(),
+            message: "reply".into(),
+            sample_text: String::new(),
+            delay_seconds: 0,
+            target: TextTriggerTarget::Both,
+        };
+        let now = Instant::now();
+        assert_eq!(
+            tracker.feed(
+                b"needle",
+                std::slice::from_ref(&trigger),
+                &PaneStatus::PlainShell,
+                now
+            ),
+            vec!["cache-rule"]
+        );
+        COMPILED_REGEX.with(|cache| *cache.borrow_mut() = CompiledCache::default());
+        assert!(tracker
+            .feed(
+                &[],
+                &[trigger],
+                &PaneStatus::PlainShell,
+                now + Duration::from_millis(1)
+            )
+            .is_empty());
     }
 
     #[test]
@@ -942,9 +1404,7 @@ mod tests {
         let mut authoritative = vt100::Parser::new(6, 40, 0);
         authoritative.process(b"abracrabdara one\r\nlost output\r\n");
         let formatted = authoritative.screen().state_formatted();
-        harness.tracker.needs_resync = true;
         harness.tracker.replace_screen(6, 40, &formatted);
-        assert!(!harness.tracker.needs_resync);
         assert_eq!(harness.rescan(), 0);
         authoritative.process(b"abracrabdara two\r\n");
         let formatted = authoritative.screen().state_formatted();

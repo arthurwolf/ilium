@@ -20,6 +20,7 @@ ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-detect = { version = "0.1.0", path = "../ilium-detect" }
+ilium-execution = { version = "0.1.0", path = "../ilium-execution" }
 ilium-git = { version = "0.1.0", path = "../ilium-git" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
@@ -30,6 +31,7 @@ ilium-transport = { version = "0.1.0", path = "../ilium-transport" }
 ignore = "0.4.33"
 notify-rust = "4.18.0"
 regex = "1.12.3"
+regex-automata = "0.4.18"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_norway = "0.9.42"

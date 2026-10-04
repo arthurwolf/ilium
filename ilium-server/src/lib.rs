@@ -21,6 +21,8 @@ mod agent_prompt;
 pub mod config;
 mod detection;
 pub mod error;
+mod execution;
+mod foreground_observation;
 mod git_status;
 mod http_api;
 mod initial_prompt;
@@ -36,12 +38,14 @@ mod scheduled_input;
 mod session_backups;
 mod session_id;
 mod shell_title;
+mod snapshot_io;
 mod snapshot_state;
 mod sounds;
 mod state;
 mod task_guard;
 mod text_trigger_config;
 mod text_triggers;
+mod title_eligibility;
 mod voice_relay;
 mod workspace;
 mod workspace_custody;
@@ -61,6 +65,8 @@ use crate::config::{DetectionConfig, HttpApiConfig, NotificationsConfig, Session
 use crate::error::ServerError;
 use crate::state::{ServerState, ServerStateOptions};
 use crate::task_guard::AbortOnDropHandle;
+
+pub use crate::execution::ServerResources;
 
 pub use crate::sounds::{NoopSoundPlayer, SoundPlayer, SystemSoundPlayer};
 
@@ -130,6 +136,18 @@ const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(200);
 /// a socket that accepts a connection belongs to a live server and is never
 /// displaced.
 pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
+    // Embedders and independent fixtures retain their own quota identity;
+    // only the binary's explicit bootstrap designates a permanent process root.
+    run_with_resources(options, ServerResources::new()).await
+}
+
+/// Runs with the exact root and admission wake created before startup logging.
+/// Consuming the resource value prevents an accidental second bank from using
+/// the same bootstrap value; clones held by logger/storage retain the ledger.
+pub async fn run_with_resources(
+    options: ServerOptions,
+    resources: ServerResources,
+) -> Result<(), ServerError> {
     let endpoint = SessionEndpoint::from_path(&options.socket_path);
     // A live session must never be displaced; only a crashed predecessor's
     // debris may be cleared, which `bind` does for itself.
@@ -177,6 +195,12 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         agent_debug_menu_enabled: options.agent_debug_menu_enabled,
         progress_monitor_enabled: options.progress_monitor_enabled,
     }));
+    let execution = execution::ServerExecution::start_with_resources(resources)?;
+    // This fresh State has not been published; a duplicate bootstrap would
+    // indicate a composition-root bug, rather than silently multiplying pools.
+    if state.execution.set(execution).is_err() {
+        return Err(std::io::Error::other("server execution was already started").into());
+    }
     if let Some(path) = &options.sound_config_path {
         // Invariant: this fresh ServerState has not been shared with consumers.
         state
@@ -194,13 +218,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     let initial_backup_bucket = session_backups::capture_on_start(&state).await;
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
-        match persistence::load_snapshot_or_migrate(
-            &state.snapshot_path,
-            &state.session_cwd,
-            &state.home_dir,
-        )
-        .await
-        {
+        match persistence::load_snapshot_for_state(&state).await {
             Ok(Some(snapshot))
                 if matches!(
                     options.session_recovery,
@@ -256,6 +274,11 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
     // comment.
     tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
     state.abort_all_connection_tasks();
+    // The codec bank must survive the grace period so final ordered events
+    // can be encoded and flushed before connection cancellation.
+    if let Some(execution) = state.execution.get() {
+        execution.request_shutdown();
+    }
     // Worktree requests are server-owned after dispatch. Joining here keeps
     // an in-flight Git add or its exact rollback from being cut off by
     // session shutdown, even if the requesting socket already disappeared.
@@ -278,6 +301,9 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         let _write_guard = state.snapshot_write_lock.lock().await;
     }
     snapshot_writer_task.abort();
+    if let Err(error) = persistence::shutdown_snapshot_service(&state).await {
+        tracing::error!(%error, "snapshot I/O shutdown did not complete successfully");
+    }
     sound_playback_task.abort();
 
     // Best-effort: a clean `KillSession` shutdown has usually already
@@ -786,6 +812,7 @@ mod restore_tests {
                     ilium_core::ProgressTaskStatus::Running,
                     35.0,
                     "saved work".into(),
+                    String::new(),
                     None,
                 )
                 .unwrap(),

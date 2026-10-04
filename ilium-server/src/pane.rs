@@ -35,6 +35,36 @@ pub const DEFAULT_PANE_COLS: u16 = 80;
 /// The next verified session may replace it through normal title inference.
 pub const FRESH_AGENT_TITLE: &str = "<new>";
 
+/// Captures the exact runtime reader and input identity without formatting or
+/// copying terminal state under the registry lock.
+pub(crate) async fn current_terminal_reader(
+    state: &crate::state::ServerState,
+    pane_id: NodeId,
+) -> Option<(
+    ilium_pty::PtyInput,
+    ilium_pty::ScreenReader,
+    watch::Receiver<()>,
+)> {
+    let panes = state.panes.read().await;
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
+    };
+    Some((
+        runtime.session.input_handle(),
+        runtime.session.current_screen_reader(),
+        runtime.session.subscribe_screen_changed(),
+    ))
+}
+
+pub(crate) async fn terminal_reader_is_current(
+    state: &crate::state::ServerState,
+    pane_id: NodeId,
+    input: &ilium_pty::PtyInput,
+) -> bool {
+    let panes = state.panes.read().await;
+    matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime)) if runtime.session.input_handle().same_session(input))
+}
+
 /// Waits for an authoritative screen outside the pane registry lock. The input
 /// handle fences replacement; watches are subscribed before the first attempt
 /// so a resize completion cannot be lost between the read and the wait.
@@ -284,12 +314,16 @@ pub struct TerminalPaneRuntime {
     /// coherent sample must also be Idle before completion becomes unread.
     pub pending_idle_confirmation: bool,
     pub agent_process_key: Option<AgentProcessKey>,
+    /// Same-provider interpreter ancestors previously proven to launch a live
+    /// owner. Keep across child replacements; detection prunes exact old births.
+    pub agent_launcher_ancestors: Vec<AgentProcessKey>,
     pub agent_generation: u64,
     pub agent_input_available: bool,
     /// Invalidates admitted automated delivery when this invocation exits or
     /// is replaced. Manual input still awaits its receipt for recovery.
     pub agent_input_cancel: watch::Sender<u64>,
     pub verified_agent_exit: Option<VerifiedAgentExit>,
+    pub authored_title_receipt: Option<crate::title_eligibility::AuthoredRequestReceipt>,
     pub last_agent_prompt: Option<String>,
     pub latest_agent_prompt_unavailable: bool,
     /// Unfenced legacy transcript reports are bootstrap-only after input.
@@ -385,10 +419,12 @@ impl TerminalPaneRuntime {
             detected_agent_class: None,
             pending_idle_confirmation: false,
             agent_process_key: None,
+            agent_launcher_ancestors: Vec::new(),
             agent_generation: 0,
             agent_input_available: false,
             agent_input_cancel: watch::channel(0).0,
             verified_agent_exit: None,
+            authored_title_receipt: None,
             last_agent_prompt: None,
             latest_agent_prompt_unavailable: false,
             legacy_prompt_fallback_blocked: false,
@@ -427,6 +463,7 @@ impl TerminalPaneRuntime {
         self.agent_input_cancel
             .send_modify(|generation| *generation = generation.wrapping_add(1));
         self.verified_agent_exit = None;
+        self.authored_title_receipt = None;
         self.last_agent_prompt = None;
         self.latest_agent_prompt_unavailable = false;
         self.prompt_transcript_epoch = None;
@@ -494,8 +531,13 @@ impl TerminalPaneRuntime {
     }
 
     /// A negative process scan never proves exit, but it cannot authorize
-    /// automated input. Refresh the exact PID before each body and Enter.
-    pub(crate) fn automated_agent_input_rejection(&self, status: &PaneStatus) -> Option<String> {
+    /// automated input. The caller supplies a fresh, session-bound scan for
+    /// each body and Enter; this pure check runs under the pane registry guard.
+    pub(crate) fn automated_agent_input_rejection(
+        &self,
+        status: &PaneStatus,
+        observation: Option<&crate::foreground_observation::ProbeObservation>,
+    ) -> Option<String> {
         let Some(owner) = self.agent_process_key.as_ref() else {
             return status
                 .known_agent_state()
@@ -516,14 +558,14 @@ impl TerminalPaneRuntime {
             return Some("historical agent identity does not authorize terminal input".to_string());
         }
         if matches!(&self.origin, TerminalOrigin::PlainShell)
-            && self.session.shell_owns_terminal() != Some(false)
+            && observation
+                .filter(|observed| observed.same_runtime(self))
+                .and_then(|observed| observed.shell_owns_terminal())
+                != Some(false)
         {
             return Some("agent foreground ownership is unavailable".to_string());
         }
-        let Some(identity) = self.detection_schedule.cached_identity.as_ref() else {
-            return Some("agent identity is not cached".to_string());
-        };
-        if !crate::agent_identity_guard::matches_current_agent_identity(identity) {
+        if !observation.is_some_and(|observed| observed.current_agent_identity(self)) {
             return Some("fresh agent process identity could not be confirmed".to_string());
         }
         None
@@ -1020,6 +1062,45 @@ pub fn spawn_terminal_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn unknown_native_observation_cannot_authorize_automatic_agent_input() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        let mut runtime = TerminalPaneRuntime::new(
+            session,
+            TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        );
+        let identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Codex,
+            pid: 123,
+            started_at_unix_seconds: 456,
+            process_name: "codex".to_owned(),
+            matched_signature: "codex".to_owned(),
+            process_tree_depth: 1,
+        };
+        runtime.agent_process_key = Some(agent_process_key(&identity));
+        runtime.detection_schedule.cached_identity = Some(identity);
+        runtime.agent_input_available = true;
+        let status =
+            PaneStatus::from_activity(AgentClass::Codex, ilium_core::AgentActivity::Working, None);
+        assert!(runtime
+            .automated_agent_input_rejection(&status, None)
+            .is_some());
+        runtime.origin = TerminalOrigin::Command("codex".to_owned());
+        assert!(runtime
+            .automated_agent_input_rejection(&status, None)
+            .is_some());
+        runtime.session.kill().expect("close fixture");
+    }
 
     #[test]
     fn exact_fresh_claude_launch_gets_a_matching_uuid_argument() {

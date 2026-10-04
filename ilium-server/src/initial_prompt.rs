@@ -5,8 +5,9 @@
 //! it does not prove the agent CLI has finished startup and installed its
 //! composer. This module waits for a provider-specific visible free-form
 //! prompt before using the normal server input boundary to submit the original
-//! request. It prefers the live process-tree classification, with a screen
-//! fallback for the small startup window before that detector's next tick.
+//! request. It waits for recorded process ownership before admitting the first
+//! byte, then prefers the live provider classification with registry screen
+//! matching when that classification is not yet available.
 
 use std::sync::Arc;
 

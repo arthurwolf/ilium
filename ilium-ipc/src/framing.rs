@@ -39,9 +39,109 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024; // 64 MiB
 
 const LENGTH_HEADER_BYTES: usize = 4;
 
-// Historical agent recovery and explicit user-origin prompt epochs require
+/// Owned wire payload suitable for preparation on a CPU worker. Construction
+/// enforces the same limit as the on-wire header before growing its buffer.
+#[derive(Debug)]
+pub struct EncodedFrame {
+    payload: Vec<u8>,
+}
+
+impl EncodedFrame {
+    pub fn retained_bytes(&self) -> usize {
+        self.payload.capacity()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("IPC payload exceeds frame limit at {0} bytes")]
+struct PayloadLimit(usize);
+
+fn encode_error(error: bincode::Error) -> IpcError {
+    if let bincode::ErrorKind::Io(io_error) = error.as_ref() {
+        if let Some(limit) = io_error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<PayloadLimit>())
+        {
+            return IpcError::frame_too_large(limit.0);
+        }
+    }
+    IpcError::Bincode(error)
+}
+
+struct LimitedPayload<'a>(&'a mut Vec<u8>);
+impl std::io::Write for LimitedPayload<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let required = self
+            .0
+            .len()
+            .checked_add(bytes.len())
+            .filter(|size| *size <= MAX_FRAME_LEN as usize)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    PayloadLimit(self.0.len().saturating_add(bytes.len())),
+                )
+            })?;
+        if required > self.0.capacity() {
+            let capacity = required
+                .max(self.0.capacity().saturating_mul(2).max(8192))
+                .min(MAX_FRAME_LEN as usize);
+            self.0
+                .try_reserve_exact(capacity - self.0.len())
+                .map_err(std::io::Error::other)?;
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Pure CPU work; callers with an interactive or coordination loop must run
+/// this on their bounded execution bank, keeping its owned result charged.
+pub fn encode_frame<T: Serialize>(value: &T) -> Result<EncodedFrame, IpcError> {
+    let mut payload = Vec::new();
+    bincode::serialize_into(LimitedPayload(&mut payload), value).map_err(encode_error)?;
+    Ok(EncodedFrame { payload })
+}
+
+/// Conservative allocation capacity for this module's `LimitedPayload`
+/// growth rule. Sizing is pure and must run on the same CPU worker as encoding.
+/// The estimate includes the 8192-byte initial growth floor and each doubling;
+/// it preserves the wire limit and does not allocate the serialized payload.
+pub fn encoded_capacity_bound<T: Serialize>(value: &T) -> Result<usize, IpcError> {
+    let length = usize::try_from(bincode::serialized_size(value)?)
+        .map_err(|_| IpcError::frame_too_large(usize::MAX))?;
+    if length > MAX_FRAME_LEN as usize {
+        return Err(IpcError::frame_too_large(length));
+    }
+    Ok(if length == 0 {
+        0
+    } else {
+        length
+            .saturating_mul(2)
+            .max(8192)
+            .min(MAX_FRAME_LEN as usize)
+    })
+}
+
+/// Pure ordered decoding, separated from transport reads for worker ownership.
+pub fn decode_frame<T: DeserializeOwned>(frame: &EncodedFrame) -> Result<T, IpcError> {
+    Ok(frame_decode_options()
+        .with_limit(u64::from(MAX_FRAME_LEN))
+        .deserialize(&frame.payload)?)
+}
+
+/// Allocation-bounded production decoding for the closed audited IPC graph.
+/// Generic framing remains available for ordinary serializer fixtures.
+pub fn decode_bounded_frame<T: crate::BoundedMessage>(frame: &EncodedFrame) -> Result<T, IpcError> {
+    crate::bounded_decode::decode_bounded(&frame.payload)
+}
+
+// Persisted presentation revisions and captured title observations require
 // a matching peer. The tag must occupy only bits in FRAME_SCHEMA_MASK.
-const FRAME_SCHEMA_TAG: u32 = 0xB800_0000;
+const FRAME_SCHEMA_TAG: u32 = 0xC000_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -98,42 +198,55 @@ where
         // `bincode::serialize`, but appends into the retained buffer
         // instead of allocating a fresh Vec per frame.
         self.payload.clear();
-        bincode::serialize_into(&mut self.payload, value)?;
-        let length: u32 = self
-            .payload
+        bincode::serialize_into(LimitedPayload(&mut self.payload), value).map_err(encode_error)?;
+        self.write_payload().await
+    }
+
+    /// Emits an already prepared complete payload without encoding on this
+    /// task. The caller retains the charged result through the final flush.
+    pub async fn write_encoded(&mut self, frame: &EncodedFrame) -> Result<(), IpcError> {
+        Self::write_payload_bytes(&mut self.writer, &frame.payload).await
+    }
+
+    async fn write_payload(&mut self) -> Result<(), IpcError> {
+        Self::write_payload_bytes(&mut self.writer, &self.payload).await
+    }
+
+    async fn write_payload_bytes(writer: &mut W, payload: &[u8]) -> Result<(), IpcError> {
+        let length: u32 = payload
             .len()
             .try_into()
-            .map_err(|_| IpcError::frame_too_large(self.payload.len()))?;
+            .map_err(|_| IpcError::frame_too_large(payload.len()))?;
         if length > MAX_FRAME_LEN {
-            return Err(IpcError::frame_too_large(self.payload.len()));
+            return Err(IpcError::frame_too_large(payload.len()));
         }
 
         let length_header = frame_length_word(length).to_le_bytes();
         let buffers = [
             std::io::IoSlice::new(&length_header),
-            std::io::IoSlice::new(&self.payload),
+            std::io::IoSlice::new(payload),
         ];
-        let first_write = self.writer.write_vectored(&buffers).await?;
+        let first_write = writer.write_vectored(&buffers).await?;
         if first_write == 0 {
             return Err(IpcError::Io(std::io::Error::from(
                 std::io::ErrorKind::WriteZero,
             )));
         }
 
-        let frame_len = LENGTH_HEADER_BYTES.saturating_add(self.payload.len());
+        let frame_len = LENGTH_HEADER_BYTES.saturating_add(payload.len());
         if first_write < LENGTH_HEADER_BYTES {
-            self.writer.write_all(&length_header[first_write..]).await?;
-            self.writer.write_all(&self.payload).await?;
+            writer.write_all(&length_header[first_write..]).await?;
+            writer.write_all(payload).await?;
         } else if first_write < frame_len {
-            self.writer
-                .write_all(&self.payload[first_write - LENGTH_HEADER_BYTES..])
+            writer
+                .write_all(&payload[first_write - LENGTH_HEADER_BYTES..])
                 .await?;
         }
 
         // A raw socket half's flush is a free no-op; a buffered writer
         // (this module is generic over any `AsyncWrite`) would otherwise
         // hold the frame indefinitely and the peer would never see it.
-        self.writer.flush().await?;
+        writer.flush().await?;
         Ok(())
     }
 }
@@ -166,10 +279,48 @@ where
     where
         T: DeserializeOwned,
     {
+        self.read_payload_into_buffer().await?;
+        Ok(frame_decode_options()
+            .with_limit(u64::from(MAX_FRAME_LEN))
+            .deserialize(&self.payload)?)
+    }
+
+    /// Reads every payload byte in order without doing CPU deserialization.
+    /// Reserve input and result admission before calling this method.
+    pub async fn read_encoded(&mut self) -> Result<EncodedFrame, IpcError> {
+        self.read_payload_into_buffer().await?;
+        Ok(EncodedFrame {
+            payload: std::mem::take(&mut self.payload),
+        })
+    }
+
+    /// Read only the fixed-size header while idle. This must precede CPU/byte
+    /// admission so an idle peer cannot monopolize a finite execution bank.
+    pub async fn read_encoded_length(&mut self) -> Result<u32, IpcError> {
         let mut length_bytes = [0u8; LENGTH_HEADER_BYTES];
         self.reader.read_exact(&mut length_bytes).await?;
-        let length = frame_payload_length(u32::from_le_bytes(length_bytes))?;
+        frame_payload_length(u32::from_le_bytes(length_bytes))
+    }
 
+    /// Read the previously validated header's payload after byte admission.
+    /// The caller must retain ordered ownership between header and payload;
+    /// abandoning either operation requires closing that stream.
+    pub async fn read_encoded_payload(&mut self, length: u32) -> Result<EncodedFrame, IpcError> {
+        self.read_payload_length_into_buffer(length).await?;
+        Ok(EncodedFrame {
+            payload: std::mem::take(&mut self.payload),
+        })
+    }
+
+    async fn read_payload_into_buffer(&mut self) -> Result<(), IpcError> {
+        let length = self.read_encoded_length().await?;
+        self.read_payload_length_into_buffer(length).await
+    }
+
+    async fn read_payload_length_into_buffer(&mut self, length: u32) -> Result<(), IpcError> {
+        if length > MAX_FRAME_LEN {
+            return Err(IpcError::bad_length_prefix(length));
+        }
         self.payload.resize(length as usize, 0);
         match self.reader.read_exact(&mut self.payload).await {
             Ok(_) => {}
@@ -179,7 +330,7 @@ where
             Err(error) => return Err(IpcError::Io(error)),
         }
 
-        Ok(frame_decode_options().deserialize(&self.payload)?)
+        Ok(())
     }
 }
 
@@ -220,6 +371,66 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn prepared_encoding_matches_legacy_wire_and_decodes_after_transport_read() {
+        let value = vec!["first".to_owned(), "second".to_owned()];
+        let prepared = encode_frame(&value).expect("CPU encoding");
+        let mut bytes = Vec::new();
+        FrameWriter::new(&mut bytes)
+            .write_encoded(&prepared)
+            .await
+            .expect("prepared emission");
+        let payload = bincode::serialize(&value).expect("legacy encoding");
+        assert_eq!(
+            &bytes[..4],
+            &frame_length_word(payload.len() as u32).to_le_bytes()
+        );
+        assert_eq!(&bytes[4..], payload.as_slice());
+        let mut reader = FrameReader::new(bytes.as_slice());
+        let received = reader.read_encoded().await.expect("ordered transport read");
+        assert_eq!(
+            decode_frame::<Vec<String>>(&received).expect("CPU decoding"),
+            value
+        );
+    }
+
+    #[tokio::test]
+    async fn header_can_complete_before_payload_admission_or_allocation() {
+        let value = vec!["ordered".to_owned()];
+        let payload = bincode::serialize(&value).unwrap();
+        let (mut peer, stream) = tokio::io::duplex(64);
+        peer.write_all(&frame_length_word(payload.len() as u32).to_le_bytes())
+            .await
+            .unwrap();
+        let mut reader = FrameReader::new(stream);
+        let length = reader.read_encoded_length().await.unwrap();
+        assert_eq!(length as usize, payload.len());
+        assert_eq!(
+            reader.payload.capacity(),
+            0,
+            "no payload allocation before admission"
+        );
+        peer.write_all(&payload).await.unwrap();
+        let frame = reader.read_encoded_payload(length).await.unwrap();
+        assert_eq!(decode_frame::<Vec<String>>(&frame).unwrap(), value);
+    }
+
+    #[test]
+    fn oversized_preparation_preserves_typed_frame_error() {
+        let error = encode_frame(&vec![0_u8; MAX_FRAME_LEN as usize]).unwrap_err();
+        assert!(matches!(error, IpcError::FrameTooLarge { actual, max }
+            if actual > MAX_FRAME_LEN as usize && max == MAX_FRAME_LEN));
+    }
+
+    #[test]
+    fn payload_limit_rejects_growth_before_retaining_excess_bytes() {
+        use std::io::Write;
+        let mut payload = vec![0; MAX_FRAME_LEN as usize];
+        let capacity = payload.capacity();
+        assert!(LimitedPayload(&mut payload).write_all(&[1]).is_err());
+        assert_eq!(payload.len(), MAX_FRAME_LEN as usize);
+        assert_eq!(payload.capacity(), capacity);
+    }
     use std::io::Cursor;
     use std::pin::Pin;
     use std::task::{Context, Poll};
@@ -482,6 +693,7 @@ mod tests {
             project_id,
             plan: plan.clone(),
             inference_activity_revisions: revisions.clone(),
+            title_observations: Vec::new(),
         };
         let bytes = bincode::serialize(&request).unwrap();
         let decoded: crate::ClientRequest = frame_decode_options().deserialize(&bytes).unwrap();
@@ -503,7 +715,24 @@ mod prompt_attempt_wire_tests {
     #[test]
     fn previous_schema_is_rejected_before_decoding_changed_prompt_queue_shape() {
         assert!(frame_payload_length(0xA800_0000 | 16).is_err());
+        assert!(frame_payload_length(0xB800_0000 | 16).is_err());
         assert!(frame_payload_length(0xB000_0000 | 16).is_err());
         assert_eq!(frame_payload_length(frame_length_word(16)).unwrap(), 16);
+    }
+    #[test]
+    fn declared_encoded_capacity_covers_real_growth_at_floor_and_doubling_boundaries() {
+        for length in [0, 1, 8191, 8192, 8193, 16383, 16384, 16385, 65537] {
+            let value = vec![0xA5u8; length];
+            let bound = encoded_capacity_bound(&value).expect("sizing");
+            let frame = encode_frame(&value).expect("encoding");
+            assert!(
+                frame.retained_bytes() <= bound,
+                "actual payload growth at {length} exceeds preadmission"
+            );
+            assert_eq!(
+                decode_frame::<Vec<u8>>(&frame).expect("unchanged wire"),
+                value
+            );
+        }
     }
 }

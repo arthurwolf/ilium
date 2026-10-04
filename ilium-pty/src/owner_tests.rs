@@ -1082,6 +1082,11 @@ fn native_resize_stall_keeps_the_latest_consistent_presentation_frame() {
     });
     let elapsed = started.elapsed();
     let current_unavailable = harness.screen_reader.try_with_frame(|_, _| ()).is_none();
+    let epoch_current_unavailable = harness
+        .screen_reader
+        .clone()
+        .try_with_screen_and_resize_epoch(|_, _| ())
+        .is_none();
     control.release.send(()).unwrap();
     receipt.wait_blocking().unwrap();
     assert!(elapsed < Duration::from_millis(100));
@@ -1090,10 +1095,75 @@ fn native_resize_stall_keeps_the_latest_consistent_presentation_frame() {
         ("LATEST".into(), (0, 6), (64, 80), true, generation)
     );
     assert!(current_unavailable);
+    assert!(epoch_current_unavailable);
+    assert_eq!(
+        harness
+            .screen_reader
+            .try_with_screen_and_resize_epoch(|screen, epoch| (screen.size(), epoch)),
+        Some(((10, 20), 1))
+    );
     assert_eq!(
         harness
             .screen_reader
             .try_with_frame(|screen, _| screen.size()),
         Some((10, 20))
     );
+}
+
+#[test]
+fn resize_epoch_fences_same_size_resizes_without_rejecting_output_or_rollback() {
+    let harness = Harness::new(OwnerLimits::default(), None, None);
+    let current = || {
+        harness
+            .screen_reader
+            .clone()
+            .try_with_screen_and_resize_epoch(|screen, epoch| (screen.size(), epoch))
+            .unwrap()
+    };
+    assert_eq!(current(), ((64, 80), 0));
+    harness.output(b"ordinary output");
+    harness.fence();
+    assert_eq!(current(), ((64, 80), 0));
+    harness
+        .input
+        .resize(64, 80)
+        .unwrap()
+        .wait_blocking()
+        .unwrap();
+    assert_eq!(current(), ((64, 80), 1));
+    harness
+        .input
+        .resize(12, 30)
+        .unwrap()
+        .wait_blocking()
+        .unwrap();
+    harness
+        .input
+        .resize(64, 80)
+        .unwrap()
+        .wait_blocking()
+        .unwrap();
+    assert_eq!(current(), ((64, 80), 3));
+    harness.control.lock().unwrap().fail_next = true;
+    let error = harness
+        .input
+        .resize(10, 20)
+        .unwrap()
+        .wait_blocking()
+        .unwrap_err();
+    assert!(matches!(
+        error.failure,
+        DeliveryFailure::Resize { restored: true, .. }
+    ));
+    assert_eq!(current(), ((64, 80), 3));
+    let writer = harness.parser.write().unwrap();
+    assert!(harness
+        .screen_reader
+        .clone()
+        .try_with_screen_and_resize_epoch(|_, _| ())
+        .is_none());
+    drop(writer);
+    harness.output(b"more output");
+    harness.fence();
+    assert_eq!(current(), ((64, 80), 3));
 }

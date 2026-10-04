@@ -53,14 +53,22 @@ fn run_launch(launch: ServerLaunch) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let resources = ilium_server::ServerResources::new();
+    if let Err(error) = resources.initialize_process() {
+        eprintln!("failed to initialise server process resources: {error}");
+        return ExitCode::FAILURE;
+    }
     let file_logging_enabled_hint =
         ilium_logging::file_logging_enabled_hint(&config_dir.join("config.toml"))
             .ok()
             .flatten()
             .unwrap_or(false);
-    if let Err(error) =
-        ilium_logging::initialize(&launch.log_path, file_logging_enabled_hint, "server")
-    {
+    if let Err(error) = ilium_logging::initialize(
+        &launch.log_path,
+        file_logging_enabled_hint,
+        "server",
+        &resources.quota_group(),
+    ) {
         eprintln!("failed to initialise server logging: {error}");
         return ExitCode::FAILURE;
     }
@@ -78,7 +86,7 @@ fn run_launch(launch: ServerLaunch) -> ExitCode {
     if let Err(error) = ilium_logging::set_enabled(server_config.debug.file_logging_enabled) {
         tracing::error!(%error, "failed to apply server file logging configuration");
         eprintln!("failed to apply server file logging configuration: {error}");
-        return ExitCode::FAILURE;
+        return finish_logging(ExitCode::FAILURE);
     }
     tracing::info!(
         session_name = launch.session_name,
@@ -109,16 +117,30 @@ fn run_launch(launch: ServerLaunch) -> ExitCode {
         Err(error) => {
             tracing::error!(%error, error_debug = ?error, "failed to start the tokio runtime");
             eprintln!("failed to start the tokio runtime: {error}");
-            return ExitCode::FAILURE;
+            return finish_logging(ExitCode::FAILURE);
         }
     };
-    let exit_code = runtime.block_on(async_main(launch, config_dir, server_config));
+    let exit_code = runtime.block_on(async_main(launch, config_dir, server_config, resources));
     // Explicit, bounded shutdown instead of letting `runtime` drop
     // implicitly: an implicit drop of a multi-thread Runtime blocks the
     // current thread indefinitely for any still-running blocking-pool
     // thread (e.g. a stuck `paplay`/`mpv` sound-playback subprocess that
     // `run()`'s task-abort pass could not actually interrupt).
     runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    finish_logging(exit_code)
+}
+
+/// Called only after runtime work stops, or on a post-initialization startup
+/// error. The main thread may wait here; Tokio/UI coordination never does.
+fn finish_logging(exit_code: ExitCode) -> ExitCode {
+    let drained = match ilium_logging::request_shutdown() {
+        Ok(receipt) => receipt.wait_timeout(Duration::from_secs(5)),
+        Err(error) => Err(error),
+    };
+    if let Err(error) = drained {
+        // The logger may be stalled or closed. Do not recursively log this.
+        eprintln!("server logging shutdown was not confirmed: {error}");
+    }
     exit_code
 }
 
@@ -126,6 +148,7 @@ async fn async_main(
     launch: ServerLaunch,
     config_dir: PathBuf,
     server_config: ilium_server::config::ServerConfig,
+    resources: ilium_server::ServerResources,
 ) -> ExitCode {
     let options = ilium_server::ServerOptions {
         session_name: launch.session_name,
@@ -153,7 +176,7 @@ async fn async_main(
         progress_monitor_enabled: server_config.progress_monitor_enabled,
         session_backups_enabled: server_config.session_backups_enabled,
     };
-    match ilium_server::run(options).await {
+    match ilium_server::run_with_resources(options, resources).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("server exited with an error: {error}");

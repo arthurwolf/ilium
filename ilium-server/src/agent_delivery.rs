@@ -17,8 +17,9 @@ const READINESS_RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 const MAXIMUM_DELIVERY_TEXT_BYTES: usize = 8 * 1024;
 
 /// Shared safe boundary for the one-shot prompt attached to a new agent pane.
-/// Unlike progress delivery it permits the provider-registry screen fallback
-/// during the short window before process detection arrives.
+/// A visible composer is necessary but cannot establish process ownership.
+/// Wait for ownership before pinning the body/Enter invocation; registry screen
+/// matching remains available if the provider classification is not yet set.
 pub(crate) async fn deliver_initial_prompt_when_ready(
     state: &ServerState,
     pane_id: NodeId,
@@ -73,6 +74,12 @@ pub(crate) async fn deliver_initial_prompt_when_ready(
 }
 
 fn initial_prompt_is_ready(runtime: &crate::pane::TerminalPaneRuntime) -> bool {
+    // First detection advances the invocation generation even for the same
+    // newly launched process. Sending a body earlier would leave its delayed
+    // Enter fenced out after adoption, with an ambiguous partial submission.
+    if runtime.agent_process_key.is_none() {
+        return false;
+    }
     let Some(screen) = runtime.session.try_screen_snapshot() else {
         return false;
     };
@@ -424,6 +431,7 @@ mod tests {
                 status,
                 42.5,
                 "frame 425/1000".to_string(),
+                String::new(),
                 (status == ProgressTaskStatus::Error).then(|| "renderer crashed".to_string()),
             )
             .unwrap(),
@@ -466,5 +474,57 @@ mod tests {
         assert!(!codex_startup_is_pending(
             ">_ OpenAI Codex\nmodel:     GPT-6-Luna low   /model to change\n› Ask Codex to do anything"
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_prompt_waits_for_owned_process_even_when_composer_is_visible() {
+        let directory = tempfile::tempdir().expect("isolated initial ownership fixture");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("printf '>_ OpenAI Codex\n› '; exec cat"),
+        )
+        .expect("owned fixture PTY");
+        let mut runtime = crate::pane::TerminalPaneRuntime::new(
+            session,
+            crate::pane::TerminalOrigin::Command("fixture composer".to_string()),
+            None,
+            Duration::from_secs(1),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut composer_is_ready = false;
+        while std::time::Instant::now() < deadline {
+            if let Some(screen) = runtime.session.try_screen_snapshot() {
+                composer_is_ready = ilium_detect::is_agent_prompt_ready_at_cursor(
+                    &ilium_core::AgentClass::Codex,
+                    &screen.text,
+                    screen.cursor_position.0,
+                    screen.cursor_position.1,
+                    &screen.dimmed_cells,
+                );
+                if composer_is_ready {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let delivery_is_ready = initial_prompt_is_ready(&runtime);
+        let owns_process = runtime.agent_process_key.is_some();
+        // Reap our own child before assertions, including the expected RED.
+        runtime
+            .session
+            .shutdown_blocking(Duration::from_secs(5))
+            .expect("owned readiness fixture teardown");
+        assert!(
+            composer_is_ready,
+            "fixture must expose a genuinely ready composer"
+        );
+        assert!(
+            !owns_process,
+            "fixture models the pre-detection ownership window"
+        );
+        assert!(!delivery_is_ready,
+            "initial body must wait for ownership; first detection must not invalidate a body already sent");
     }
 }

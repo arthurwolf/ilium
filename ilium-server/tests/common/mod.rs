@@ -306,6 +306,10 @@ impl TestServer {
             ilium_sound::SoundSettings::default(),
             Arc::new(NoopSoundPlayer),
             false,
+            NotificationsConfig {
+                enabled: false,
+                ..NotificationsConfig::default()
+            },
         )
         .await
     }
@@ -323,6 +327,10 @@ impl TestServer {
             ilium_sound::SoundSettings::default(),
             Arc::new(NoopSoundPlayer),
             true,
+            NotificationsConfig {
+                enabled: false,
+                ..NotificationsConfig::default()
+            },
         )
         .await
     }
@@ -341,6 +349,29 @@ impl TestServer {
             sound_settings,
             sound_player,
             false,
+            NotificationsConfig {
+                enabled: false,
+                ..NotificationsConfig::default()
+            },
+        )
+        .await
+    }
+
+    /// Explicit task alert policy for fixtures that verify opt-in playback.
+    pub async fn start_with_sound_player_and_notifications(
+        session_name: &str,
+        detection_config: DetectionConfig,
+        sound_settings: ilium_sound::SoundSettings,
+        sound_player: Arc<dyn SoundPlayer>,
+        notifications_config: NotificationsConfig,
+    ) -> Self {
+        Self::start_with_sound_player_and_agent_debug(
+            session_name,
+            detection_config,
+            sound_settings,
+            sound_player,
+            false,
+            notifications_config,
         )
         .await
     }
@@ -351,6 +382,7 @@ impl TestServer {
         sound_settings: ilium_sound::SoundSettings,
         sound_player: Arc<dyn SoundPlayer>,
         agent_debug_menu_enabled: bool,
+        notifications_config: NotificationsConfig,
     ) -> Self {
         // Taken before anything is started, and released when this server is
         // dropped at the end of the test.
@@ -377,10 +409,7 @@ impl TestServer {
             home_dir: ilium_platform::paths::canonicalize(dir.path())
                 .expect("canonical test home directory"),
             detection_config,
-            notifications_config: NotificationsConfig {
-                enabled: false,
-                ..NotificationsConfig::default()
-            },
+            notifications_config,
             sound_settings,
             sound_config_path: None,
             sound_player,
@@ -475,6 +504,7 @@ mod tests {
                 detection_evidence: Vec::new(),
             },
             ServerEvent::AgentDetectionSettingsChanged {
+                request_id: None,
                 result: Ok(ilium_ipc::AgentDetectionSettings {
                     working_poll_seconds: 10,
                     idle_poll_seconds: 45,

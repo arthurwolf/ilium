@@ -252,3 +252,76 @@ fn stalled_child_input_returns_a_bounded_error_without_freezing_screen_reads() {
         "stalled_child_input_returns_a_bounded_error_without_freezing_screen_reads",
     );
 }
+
+#[test]
+fn session_drop_does_not_wait_for_original_child_control_mutex() {
+    let session = PtySession::spawn(
+        PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+            .arg("-c")
+            .arg("exec cat"),
+    )
+    .expect("owned drop fixture");
+    let child = Arc::clone(&session.child);
+    let exit = Arc::clone(&session.child_exit);
+    let reaper = session._child_reaper.ticket();
+    let child_guard = child.lock().expect("hold original native child control");
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let caller = std::thread::spawn(move || {
+        started_tx.send(()).expect("caller starts");
+        drop(session);
+        done_tx.send(()).expect("drop finished");
+    });
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("caller ready");
+    let bounded_drop = done_rx.recv_timeout(Duration::from_secs(1));
+    // Always release before joining, including the original blocking path.
+    drop(child_guard);
+    caller.join().expect("join owned drop caller");
+    reaper
+        .join_until(Instant::now() + Duration::from_secs(2))
+        .expect("original child reaped");
+    assert!(exit.lock().expect("exit receipt").is_some());
+    assert!(
+        bounded_drop.is_ok(),
+        "Drop blocked on original child control mutex"
+    );
+}
+
+#[test]
+fn session_shutdown_deadline_includes_blocked_original_child_control() {
+    let mut session = PtySession::spawn(
+        PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+            .arg("-c")
+            .arg("exec cat"),
+    )
+    .expect("owned shutdown fixture");
+    let child = Arc::clone(&session.child);
+    let reaper = session._child_reaper.ticket();
+    let child_guard = child.lock().expect("hold original native child control");
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let caller = std::thread::spawn(move || {
+        started_tx.send(()).expect("caller starts");
+        let result = session.shutdown_blocking(Duration::from_millis(50));
+        done_tx.send(result).expect("shutdown disposition");
+        drop(session);
+    });
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("caller ready");
+    let bounded_shutdown = done_rx.recv_timeout(Duration::from_secs(1));
+    drop(child_guard);
+    caller.join().expect("join owned shutdown caller");
+    reaper
+        .join_until(Instant::now() + Duration::from_secs(2))
+        .expect("original child reaped");
+    let report = bounded_shutdown
+        .expect("shutdown deadline began after blocking native child control")
+        .expect("shutdown has a bounded disposition");
+    assert!(
+        report.pending.contains(&reaper.id()),
+        "a blocked physical reaper must remain pending"
+    );
+}

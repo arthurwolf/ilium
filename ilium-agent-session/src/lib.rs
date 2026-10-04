@@ -14,11 +14,163 @@ use std::path::{Path, PathBuf};
 use ilium_core::AgentClass;
 use serde_json::Value;
 
+mod request_evidence;
+pub use request_evidence::{
+    genuine_request_text, is_codex_injected_message, GenuineRequestEvidence,
+};
+
 /// A transcript whose filename, embedded session ID, and project cwd agree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedTranscript {
     pub session_id: String,
     pub path: PathBuf,
+}
+
+/// Cooperative upper bounds for one complete transcript-discovery attempt.
+#[derive(Debug, Clone, Copy)]
+pub struct TranscriptReadLimits {
+    pub line_bytes: usize,
+    pub total_read_bytes: usize,
+    pub scanned_entries: usize,
+    pub retained_path_bytes: usize,
+}
+#[derive(Debug)]
+struct TranscriptReadBudget {
+    limits: TranscriptReadLimits,
+    read_bytes: std::sync::atomic::AtomicUsize,
+    entries: std::sync::atomic::AtomicUsize,
+    path_bytes: std::sync::atomic::AtomicUsize,
+    exhausted: std::sync::atomic::AtomicBool,
+}
+impl TranscriptReadBudget {
+    fn new(limits: TranscriptReadLimits) -> Self {
+        Self {
+            limits,
+            read_bytes: 0.into(),
+            entries: 0.into(),
+            path_bytes: 0.into(),
+            exhausted: false.into(),
+        }
+    }
+    fn charge(&self, counter: &std::sync::atomic::AtomicUsize, bytes: usize, limit: usize) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.exhausted.load(Ordering::Acquire) {
+            return false;
+        }
+        if counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(bytes).filter(|total| *total <= limit)
+            })
+            .is_ok()
+        {
+            return true;
+        }
+        self.exhausted.store(true, Ordering::Release);
+        false
+    }
+    fn fail(&self) -> std::io::Error {
+        self.exhausted
+            .store(true, std::sync::atomic::Ordering::Release);
+        std::io::Error::other("transcript discovery resource limit reached")
+    }
+}
+fn bounded_line(
+    reader: &mut impl BufRead,
+    budget: &TranscriptReadBudget,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::new();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok((!line.is_empty()).then_some(line));
+        }
+        let count = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |position| position + 1);
+        if line.len().saturating_add(count) > budget.limits.line_bytes
+            || !budget.charge(&budget.read_bytes, count, budget.limits.total_read_bytes)
+        {
+            return Err(budget.fail());
+        }
+        let ends_line = available[count - 1] == b'\n';
+        line.extend_from_slice(&available[..count]);
+        reader.consume(count);
+        if ends_line {
+            return Ok(Some(line));
+        }
+    }
+}
+fn transcript_metadata_matches_bounded(
+    class: &AgentClass,
+    path: &Path,
+    expected_session_id: &str,
+    expected_project_cwd: &Path,
+    budget: &TranscriptReadBudget,
+) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut reader = BufReader::new(file);
+    while let Ok(Some(line)) = bounded_line(&mut reader, budget) {
+        let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        let identity = match class {
+            AgentClass::Claude => claude_identity(&entry),
+            AgentClass::Codex => codex_identity(&entry),
+            _ => None,
+        };
+        if let Some((session_id, cwd)) = identity {
+            return session_id == expected_session_id
+                && same_canonical_project(Path::new(cwd), expected_project_cwd);
+        }
+    }
+    false
+}
+fn bounded_candidate_paths(
+    directory: &Path,
+    recursive: bool,
+    extension: &str,
+    budget: &TranscriptReadBudget,
+) -> Vec<PathBuf> {
+    let mut pending = vec![directory.to_owned()];
+    let mut paths = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries {
+            if !budget.charge(&budget.entries, 1, budget.limits.scanned_entries) {
+                return Vec::new();
+            }
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if !(kind.is_file() || recursive && kind.is_dir()) {
+                continue;
+            }
+            let path = entry.path();
+            if !budget.charge(
+                &budget.path_bytes,
+                path.capacity()
+                    .saturating_mul(2)
+                    .saturating_add(std::mem::size_of::<PathBuf>() * 2),
+                budget.limits.retained_path_bytes,
+            ) {
+                return Vec::new();
+            }
+            if kind.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|value| value.to_str()) == Some(extension) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
 }
 
 /// Project-scoped access to the local Claude Code, Codex, and Antigravity
@@ -27,6 +179,7 @@ pub struct VerifiedTranscript {
 pub struct TranscriptLocator {
     home: PathBuf,
     project_cwd: PathBuf,
+    read_budget: Option<std::sync::Arc<TranscriptReadBudget>>,
 }
 
 impl TranscriptLocator {
@@ -35,7 +188,40 @@ impl TranscriptLocator {
         Self {
             home: home.to_path_buf(),
             project_cwd: canonical_or_original(project_cwd),
+            read_budget: None,
         }
+    }
+
+    /// Bounds discovery across every locator operation in one evidence job.
+    /// Exhaustion is sticky: a partial scan must never prove unique ownership.
+    pub fn new_bounded(home: &Path, project_cwd: &Path, limits: TranscriptReadLimits) -> Self {
+        let mut locator = Self::new(home, project_cwd);
+        locator.read_budget = Some(std::sync::Arc::new(TranscriptReadBudget::new(limits)));
+        locator
+    }
+    pub fn with_read_limits(&self, limits: TranscriptReadLimits) -> Self {
+        Self {
+            home: self.home.clone(),
+            project_cwd: self.project_cwd.clone(),
+            read_budget: Some(std::sync::Arc::new(TranscriptReadBudget::new(limits))),
+        }
+    }
+    pub fn read_limits(&self) -> Option<TranscriptReadLimits> {
+        self.read_budget.as_ref().map(|budget| budget.limits)
+    }
+    /// Adapter overflow invalidates every partial ownership conclusion in the
+    /// same bounded attempt, including stronger ranks evaluated earlier.
+    pub fn mark_read_limit_reached(&self) {
+        if let Some(budget) = &self.read_budget {
+            budget
+                .exhausted
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    pub fn read_limit_reached(&self) -> bool {
+        self.read_budget
+            .as_ref()
+            .is_some_and(|budget| budget.exhausted.load(std::sync::atomic::Ordering::Acquire))
     }
 
     /// Finds exactly one verified transcript for `session_id` in this project.
@@ -62,7 +248,7 @@ impl TranscriptLocator {
             })
             .filter_map(|path| self.transcript_from_path(class, &path));
         let transcript = matches.next()?;
-        if matches.next().is_some() {
+        if matches.next().is_some() || self.read_limit_reached() {
             return None;
         }
         Some(transcript)
@@ -89,7 +275,17 @@ impl TranscriptLocator {
                 path: path.to_path_buf(),
             });
         }
-        if !transcript_metadata_matches(class, path, &session_id, &self.project_cwd) {
+        let matches = match &self.read_budget {
+            Some(budget) => transcript_metadata_matches_bounded(
+                class,
+                path,
+                &session_id,
+                &self.project_cwd,
+                budget,
+            ),
+            None => transcript_metadata_matches(class, path, &session_id, &self.project_cwd),
+        };
+        if !matches || self.read_limit_reached() {
             return None;
         }
         Some(VerifiedTranscript {
@@ -98,8 +294,35 @@ impl TranscriptLocator {
         })
     }
 
+    /// Reports genuine-request evidence only after path, session ID, and
+    /// project cwd have been verified by the same locator. Missing or
+    /// unreadable history is never treated as a verified empty conversation.
+    pub fn genuine_request_evidence(
+        &self,
+        class: &AgentClass,
+        session_id: &str,
+    ) -> std::io::Result<GenuineRequestEvidence> {
+        let Some(transcript) = self.transcript_for_session(class, session_id) else {
+            return Ok(GenuineRequestEvidence::Unavailable);
+        };
+        request_evidence::request_evidence_from_path(
+            class,
+            &transcript.path,
+            &transcript.session_id,
+        )
+    }
+
     /// Enumerates format-shaped paths without making any ownership claim.
     fn candidate_paths(&self, class: &AgentClass) -> Vec<PathBuf> {
+        if let Some(budget) = &self.read_budget {
+            let (directory, recursive, extension) = match class {
+                AgentClass::Claude => (self.claude_project_dir(), false, "jsonl"),
+                AgentClass::Codex => (self.codex_sessions_dir(), true, "jsonl"),
+                AgentClass::Antigravity => (self.antigravity_conversations_dir(), false, "db"),
+                AgentClass::Other(_) => return Vec::new(),
+            };
+            return bounded_candidate_paths(&directory, recursive, extension, budget);
+        }
         match class {
             AgentClass::Claude => transcript_files_directly_under(&self.claude_project_dir()),
             AgentClass::Codex => transcript_files_recursively_under(&self.codex_sessions_dir()),
@@ -174,6 +397,25 @@ impl TranscriptLocator {
         let Ok(file) = std::fs::File::open(history_path) else {
             return false;
         };
+        if let Some(budget) = &self.read_budget {
+            let mut reader = BufReader::new(file);
+            while let Ok(Some(line)) = bounded_line(&mut reader, budget) {
+                let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
+                    continue;
+                };
+                if entry.get("conversationId").and_then(Value::as_str) != Some(expected_session_id)
+                {
+                    continue;
+                }
+                return entry
+                    .get("workspace")
+                    .and_then(Value::as_str)
+                    .is_some_and(|workspace| {
+                        same_canonical_project(Path::new(workspace), &self.project_cwd)
+                    });
+            }
+            return false;
+        }
         BufReader::new(file)
             .lines()
             .map_while(Result::ok)
@@ -363,6 +605,49 @@ fn looks_like_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_discovery_rejects_long_lines_and_partial_directory_scans() {
+        let home = tempfile::tempdir().expect("home");
+        let project = tempfile::tempdir().expect("project");
+        let session_id = "11111111-1111-4111-8111-111111111111";
+        let path = write_claude_transcript(home.path(), project.path(), project.path(), session_id);
+        let limits = TranscriptReadLimits {
+            line_bytes: 4096,
+            total_read_bytes: 8192,
+            scanned_entries: 64,
+            retained_path_bytes: 65536,
+        };
+        let locator = TranscriptLocator::new_bounded(home.path(), project.path(), limits);
+        assert!(locator
+            .transcript_for_session(&AgentClass::Claude, session_id)
+            .is_some());
+        let oversized = TranscriptLocator::new_bounded(
+            home.path(),
+            project.path(),
+            TranscriptReadLimits {
+                line_bytes: 16,
+                ..limits
+            },
+        );
+        assert!(oversized
+            .transcript_from_path(&AgentClass::Claude, &path)
+            .is_none());
+        assert!(oversized.read_limit_reached());
+        std::fs::write(path.with_file_name("unrelated.jsonl"), "{}").expect("scan fixture");
+        let partial = TranscriptLocator::new_bounded(
+            home.path(),
+            project.path(),
+            TranscriptReadLimits {
+                scanned_entries: 1,
+                ..limits
+            },
+        );
+        assert!(partial
+            .transcript_for_session(&AgentClass::Claude, session_id)
+            .is_none());
+        assert!(partial.read_limit_reached());
+    }
 
     fn write_claude_transcript(
         home: &Path,

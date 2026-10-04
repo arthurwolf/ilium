@@ -15,6 +15,8 @@
 //! - [`file_lock`] -- one cross-process exclusive lock, used to serialize
 //!   competing first-attach processes so two clients cannot start rival
 //!   servers for one project.
+//! - [`provider_admission`] -- two native-account finite-provider slots,
+//!   acquired only in bounded IO work and retained through actual body exit.
 //! - [`paths`] -- resolving a path to its real location without leaving a
 //!   Windows extended-length prefix in front of it, and locating the user-wide
 //!   configuration directory.
@@ -45,8 +47,13 @@
 //! than an error, and callers already treat that as a normal condition instead
 //! of a failure.
 
+pub mod animation_files;
+pub mod animation_sandbox;
+pub mod audio_backend;
+pub mod child_limits;
 pub mod detached;
 pub mod file_lock;
+pub mod flatpak_host;
 #[cfg(unix)]
 pub mod interruptible_reader;
 pub mod minecraft;
@@ -57,6 +64,7 @@ pub mod owned_worker;
 pub mod paths;
 pub mod process_control;
 pub mod process_info;
+pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
 pub mod runtime_dir;
 pub mod secure_fs;

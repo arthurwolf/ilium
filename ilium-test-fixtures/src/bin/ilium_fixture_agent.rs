@@ -62,6 +62,20 @@ fn main() {
             transcript_path.as_deref(),
             exit_code,
             mouse_tracking,
+            None,
+        ),
+        FixtureBehavior::CrashAfterRecalledPrompt {
+            previous_prompt,
+            prompt_path,
+            transcript_path,
+            exit_code,
+            mouse_tracking,
+        } => run_crash_after_submitted_prompt(
+            &prompt_path,
+            transcript_path.as_deref(),
+            exit_code,
+            mouse_tracking,
+            Some(&previous_prompt),
         ),
         FixtureBehavior::PrintFile { path } => {
             let contents = std::fs::read_to_string(&path)
@@ -289,6 +303,7 @@ fn run_crash_after_submitted_prompt(
     transcript_path: Option<&std::path::Path>,
     exit_code: i32,
     mouse_tracking: bool,
+    recalled_prompt: Option<&str>,
 ) {
     assert_ne!(exit_code, 0, "crash fixture requires a nonzero exit code");
     // Read-only and retained until exit: descriptor ownership must be visible,
@@ -315,7 +330,11 @@ fn run_crash_after_submitted_prompt(
     if mouse_tracking {
         emit("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h");
     }
-    let submission = read_crash_submission().expect("read complete crash fixture submission");
+    let submission = match recalled_prompt {
+        Some(previous_prompt) => read_recalled_submission(previous_prompt),
+        None => read_crash_submission(),
+    }
+    .expect("read complete crash fixture submission");
     std::fs::write(prompt_path, submission)
         .unwrap_or_else(|error| panic!("write {}: {error}", prompt_path.display()));
     emit("\r\nFATAL_FIXTURE_CRASH: agent exited before transcript flush\r\n");
@@ -325,6 +344,33 @@ fn run_crash_after_submitted_prompt(
         let _ = crossterm::terminal::disable_raw_mode();
     }
     std::process::exit(exit_code);
+}
+
+fn read_recalled_submission(previous_prompt: &str) -> Option<Vec<u8>> {
+    // A real (deliberately narrow) line-editor action, not interpreting raw
+    // escape bytes as user text. This fixture only accepts Up then Enter.
+    let mut key = [0_u8; 1];
+    let mut sequence = Vec::new();
+    loop {
+        if std::io::stdin().read(&mut key).ok()? == 0 {
+            return None;
+        }
+        sequence.push(key[0]);
+        if sequence == b"\x1b[A" || sequence == b"\x1bOA" {
+            emit(&format!(
+                "\r\x1b[2K› {}",
+                previous_prompt.replace('\n', "\r\n")
+            ));
+            break;
+        }
+        if sequence.len() >= 3 {
+            return None;
+        }
+    }
+    if std::io::stdin().read(&mut key).ok()? == 0 || !matches!(key[0], b'\r' | b'\n') {
+        return None;
+    }
+    Some(previous_prompt.as_bytes().to_vec())
 }
 
 fn read_crash_submission() -> Option<Vec<u8>> {

@@ -168,6 +168,87 @@ fn retain_child_exit(
     }
 }
 
+/// Captured control for the original PTY child. Native termination and the
+/// child mutex may block; execute this handle on an owned worker after
+/// releasing the server registry. Sharing the original child handle preserves
+/// its reaper and avoids signalling a recycled bare PID.
+#[derive(Clone)]
+pub struct PtyTerminationHandle {
+    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    child_exit: Arc<Mutex<Option<PtyChildExit>>>,
+    process_id: Option<u32>,
+    identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+}
+
+impl PtyTerminationHandle {
+    pub fn same_session(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.child, &other.child)
+    }
+
+    pub fn terminate_process_tree(
+        &self,
+        timeout: std::time::Duration,
+    ) -> std::io::Result<ilium_platform::process_control::PtyTerminationProof> {
+        let identity = self.identity.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "PTY child birth identity was not captured",
+            )
+        })?;
+        ilium_platform::process_control::terminate_pty_process_tree(identity, timeout)
+    }
+
+    pub fn kill_direct_child(&self) -> Result<(), PtyError> {
+        let mut child = self.child.lock().map_err(|_| {
+            PtyError::Kill(std::io::Error::other("PTY child control lock poisoned"))
+        })?;
+        if let Ok(Some(status)) = child.try_wait() {
+            retain_child_exit(&self.child_exit, self.process_id, status);
+            return Ok(());
+        }
+        child.kill().map_err(PtyError::Kill)
+    }
+}
+
+/// Equality is pointer identity, not equality of the empty marker value.
+/// Keeping a clone cannot keep the native child or ordered PTY owner alive.
+#[derive(Clone, Default)]
+pub struct PtySessionIdentity(Arc<()>);
+
+impl PartialEq for PtySessionIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for PtySessionIdentity {}
+
+impl std::fmt::Debug for PtySessionIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PtySessionIdentity")
+    }
+}
+
+/// Read-only native foreground observation captured from one PTY lifetime.
+/// The OS inspection may block (ToolHelp on Windows); callers must execute it
+/// on an admitted worker, never while holding a server registry guard.
+#[derive(Clone)]
+pub struct PtyShellObserver {
+    identity: PtySessionIdentity,
+    probe: ShellProbe,
+    process_id: Option<u32>,
+}
+
+impl PtyShellObserver {
+    pub fn identity(&self) -> &PtySessionIdentity {
+        &self.identity
+    }
+
+    pub fn shell_owns_terminal(&self) -> Option<bool> {
+        self.probe.shell_owns_terminal(self.process_id?)
+    }
+}
+
 /// One spawned command behind a pty, plus the `vt100` parser that turns its
 /// raw byte stream into a renderable/queryable screen.
 pub struct PtySession {
@@ -178,6 +259,7 @@ pub struct PtySession {
     screen_generation: Arc<AtomicU64>,
     screen_reader: ScreenReader,
     owner: PtyOwner,
+    identity: PtySessionIdentity,
     shell_probe: ShellProbe,
     // The reaper holds only the child, never parser or journal. It polls even
     // when a descendant keeps the slave fd open after the direct child exits.
@@ -188,7 +270,7 @@ pub struct PtySession {
     process_id: Option<u32>,
     // Captured while the PTY child is still owned. Worktree teardown must
     // refuse a stale/reused PID rather than signal an unrelated process.
-    pty_process_identity: Option<ilium_platform::process_control::PtyProcessIdentity>,
+    pty_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     // Held so `subscribe_screen_changed` can hand out clones; a `watch`
     // receiver never lets its sender's send fail as "no receivers left"
     // while at least one clone (this one) is alive.
@@ -441,7 +523,9 @@ impl PtySession {
         // process has exited or been reaped.
         let process_id = child.process_id();
         let pty_process_identity = process_id.and_then(|process_id| {
-            ilium_platform::process_control::capture_pty_process(process_id).ok()
+            ilium_platform::process_control::capture_pty_process(process_id)
+                .ok()
+                .map(Arc::new)
         });
         let child = Arc::new(Mutex::new(child));
         let child_exit = Arc::new(Mutex::new(None));
@@ -452,26 +536,37 @@ impl PtySession {
             WorkerKind::Cooperative,
             StopToken::default(),
             || {},
-            move |_stop| loop {
-                let exited = {
-                    let mut child = reaper_child
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    // A status-query failure is not proof that the owned
-                    // child was reaped. Keep custody and retry; shutdown may
-                    // honestly report a pending reaper if the OS never answers.
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            retain_child_exit(&reaper_exit, process_id, status);
-                            true
+            move |stop| {
+                let mut termination_requested = false;
+                loop {
+                    let exited = {
+                        let mut child = reaper_child
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        // A status-query failure is not proof that the owned
+                        // child was reaped. Keep custody and retry; shutdown may
+                        // honestly report a pending reaper if the OS never answers.
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                retain_child_exit(&reaper_exit, process_id, status);
+                                true
+                            }
+                            Ok(None) | Err(_) => {
+                                if stop.is_stopped() && !termination_requested {
+                                    termination_requested = true;
+                                    if let Err(error) = child.kill() {
+                                        tracing::warn!(?process_id, %error, "owned PTY child termination failed; reaper custody retained");
+                                    }
+                                }
+                                false
+                            }
                         }
-                        Ok(None) | Err(_) => false,
+                    };
+                    if exited {
+                        break;
                     }
-                };
-                if exited {
-                    break;
+                    std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
                 }
-                std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
             },
         ) {
             Ok(worker) => worker,
@@ -539,6 +634,7 @@ impl PtySession {
             screen_generation,
             screen_reader,
             owner,
+            identity: PtySessionIdentity::default(),
             shell_probe,
             child,
             _child_reaper: child_reaper,
@@ -557,8 +653,33 @@ impl PtySession {
         self.owner.input()
     }
 
-    /// Explicitly terminates this session's direct child and requests owner
-    /// cancellation, then observes worker joins within one shared deadline.
+    /// Cheap lifetime identity for comparing an off-lock observation with
+    /// the session currently installed in a pane. It does not keep the child
+    /// process alive and never authorizes input on its own.
+    pub fn identity(&self) -> PtySessionIdentity {
+        self.identity.clone()
+    }
+
+    /// Clone the read-only native probe while the pane registry is locked;
+    /// invoke it only after dropping the registry guard, on a bounded worker.
+    pub fn shell_observer(&self) -> PtyShellObserver {
+        PtyShellObserver {
+            identity: self.identity(),
+            probe: self.shell_probe.clone(),
+            process_id: self.process_id,
+        }
+    }
+
+    /// Requests termination on the already-owned child reaper and stops PTY
+    /// transport. This performs no native child control or blocking join.
+    pub fn request_shutdown(&self) {
+        self._child_reaper.ticket().cancel();
+        self.owner.request_shutdown();
+    }
+
+    /// Requests direct-child termination and owner cancellation, then observes
+    /// physical worker joins within one shared deadline. Pending workers retain
+    /// the original child control and cannot be mistaken for a completed stop.
     /// Use only for an owned session being closed, outside Tokio and shared
     /// registry locks. Pending handles remain owned by the platform supervisor.
     pub fn shutdown_blocking(
@@ -567,7 +688,7 @@ impl PtySession {
     ) -> Result<crate::owner::ShutdownReport, PtyError> {
         let timeout = timeout.min(std::time::Duration::from_secs(60));
         let deadline = std::time::Instant::now() + timeout;
-        self.kill()?;
+        self.request_shutdown();
         let mut report = self
             .owner
             .shutdown_blocking(deadline.saturating_duration_since(std::time::Instant::now()));
@@ -612,6 +733,14 @@ impl PtySession {
         self.screen_reader.with_frame(|screen, _| f(screen))
     }
 
+    /// Clones the existing current-only reader without copying a screen or
+    /// starting a worker. Capture the originating session identity alongside
+    /// it before releasing a registry lock; deferred consumers must fence that
+    /// identity before acting on the result.
+    pub fn current_screen_reader(&self) -> ScreenReader {
+        self.screen_reader.clone()
+    }
+
     /// Current-only nonblocking read. Automation must not use retained frames.
     pub fn try_with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> Option<R> {
         self.screen_reader.try_with_frame(|screen, _| f(screen))
@@ -625,6 +754,40 @@ impl PtySession {
     /// Presentation may receive the retained frame while the parser is busy.
     pub fn screen_snapshot(&self) -> ScreenSnapshot {
         self.screen_reader.with_frame(Self::snapshot_from_screen)
+    }
+
+    /// Capture one coherent frame only after a no-allocation retained-byte
+    /// preflight. Overflow is explicit; no shortened text is presented as
+    /// complete detection evidence. vt100 0.16 cells expose borrowed contents.
+    pub fn screen_snapshot_with_limit(&self, limit: usize) -> std::io::Result<ScreenSnapshot> {
+        self.screen_reader.with_frame(|screen, generation| {
+            let (rows, columns) = screen.size();
+            let cells = usize::from(rows).saturating_mul(usize::from(columns));
+            // Vec growth may retain twice the populated dim-cell count;
+            // String growth may retain twice the visible text bytes.
+            let mut bytes = cells
+                .saturating_mul(12)
+                .saturating_add(usize::from(rows).saturating_mul(2))
+                .saturating_add(std::mem::size_of::<ScreenSnapshot>());
+            if bytes > limit {
+                return Err(std::io::Error::other(
+                    "terminal evidence frame exceeds retained-byte limit",
+                ));
+            }
+            for row in 0..rows {
+                for column in 0..columns {
+                    if let Some(cell) = screen.cell(row, column) {
+                        bytes = bytes.saturating_add(cell.contents().len().saturating_mul(2));
+                        if bytes > limit {
+                            return Err(std::io::Error::other(
+                                "terminal evidence text exceeds retained-byte limit",
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(Self::snapshot_from_screen(screen, generation))
+        })
     }
 
     /// Returns no frame when mutation is underway, instead of stale evidence.
@@ -663,6 +826,17 @@ impl PtySession {
     /// report one.
     pub fn process_id(&self) -> Option<u32> {
         self.process_id
+    }
+
+    /// Capture child control under a short registry guard. Invoke its native
+    /// operations only after releasing that guard, on an owned worker.
+    pub fn termination_handle(&self) -> PtyTerminationHandle {
+        PtyTerminationHandle {
+            child: Arc::clone(&self.child),
+            child_exit: Arc::clone(&self.child_exit),
+            process_id: self.process_id,
+            identity: self.pty_process_identity.clone(),
+        }
     }
 
     /// Terminates the owned PTY lineage for worktree removal and waits up to
@@ -813,20 +987,10 @@ impl PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        // Preserve direct-child custody. The independently owned reaper will
-        // observe and collect its exit even if a descendant holds the PTY open.
-        {
-            let mut child = self.child.lock().unwrap_or_else(|error| error.into_inner());
-            match child.try_wait() {
-                Ok(Some(status)) => retain_child_exit(&self.child_exit, self.process_id, status),
-                Ok(None) | Err(_) => {
-                    let _ = child.kill();
-                }
-            }
-        }
-        self.owner.request_shutdown();
-        // `child_reaper` and owner transport workers retain JoinHandles in
-        // ilium-platform until each thread exits. Drop never blocks Tokio.
+        // The existing reaper retains the original Child mutex through actual
+        // exit. A caller holding registry locks must only signal cancellation;
+        // a stalled native child control remains owned off the Tokio executor.
+        self.request_shutdown();
     }
 }
 
@@ -837,6 +1001,24 @@ mod owner_regression_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_screen_snapshot_rejects_before_clone_and_keeps_complete_frame() {
+        let mut session = PtySession::spawn(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("isolated PTY");
+        assert!(session.screen_snapshot_with_limit(1).is_err());
+        let frame = session
+            .screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("complete frame");
+        assert_eq!(frame.generation, session.screen_generation());
+        assert_eq!(frame.text, session.screen_snapshot().text);
+        session.kill().expect("fixture cleanup");
+    }
 
     #[test]
     fn child_exit_receipt_preserves_unsigned_codes_and_the_first_observation() {

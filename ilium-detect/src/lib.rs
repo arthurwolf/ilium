@@ -23,7 +23,9 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use ilium_core::{AgentClass, AgentProvider, AgentTurn, BuiltinAgentProvider, GoalState};
+use ilium_core::{
+    AgentClass, AgentProcessKey, AgentProvider, AgentTurn, BuiltinAgentProvider, GoalState,
+};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use unicode_width::UnicodeWidthChar;
 
@@ -1640,6 +1642,18 @@ pub fn identify_agent_with_extra(
     children_index: &ProcessChildrenIndex,
     extra_signatures: &[AgentSignature],
 ) -> Option<AgentIdentity> {
+    identify_agent_with_extra_excluding(system, shell_pid, children_index, extra_signatures, &[])
+}
+
+/// Skip only previously observed interpreter launchers, never their children.
+/// Exact process births fence PID reuse; native exec on the same PID remains valid.
+pub fn identify_agent_with_extra_excluding(
+    system: &System,
+    shell_pid: Pid,
+    children_index: &ProcessChildrenIndex,
+    extra_signatures: &[AgentSignature],
+    excluded_launchers: &[AgentProcessKey],
+) -> Option<AgentIdentity> {
     // Tracks the best match found so far as (is_interpreted, depth, pid)
     // plus its class -- the CLI process is closer to the pane shell than
     // its internal helper processes (for example Codex's code-mode host),
@@ -1693,13 +1707,22 @@ pub fn identify_agent_with_extra(
                         .map(|process_match| (index > 0, candidate, process_match))
                 });
             if let Some((is_interpreted, matched_name, process_match)) = matched {
-                let key = (is_interpreted, depth, pid.as_u32());
-                let is_better = match &best {
-                    None => true,
-                    Some((existing_key, _, _, _)) => key < *existing_key,
+                let process_key = AgentProcessKey {
+                    class: process_match.class.clone(),
+                    process_id: pid.as_u32(),
+                    started_at_unix_seconds: process.start_time(),
                 };
-                if is_better {
-                    best = Some((key, pid, matched_name, process_match));
+                let excluded = excluded_launchers.contains(&process_key)
+                    && is_inferred_agent_launcher(process, &process_match.class, extra_signatures);
+                if !excluded {
+                    let key = (is_interpreted, depth, pid.as_u32());
+                    let is_better = match &best {
+                        None => true,
+                        Some((existing_key, _, _, _)) => key < *existing_key,
+                    };
+                    if is_better {
+                        best = Some((key, pid, matched_name, process_match));
+                    }
                 }
             }
         }
@@ -1723,6 +1746,98 @@ pub fn identify_agent_with_extra(
             process_tree_depth: depth,
         },
     )
+}
+
+/// Whether this match is only a program handed to an interpreter, rather
+/// than the current kernel name or invoked native executable. This also
+/// preserves a native executable whose main thread changed its kernel name.
+fn is_inferred_agent_launcher(
+    process: &sysinfo::Process,
+    class: &AgentClass,
+    extra_signatures: &[AgentSignature],
+) -> bool {
+    if match_process_name_with_extra(
+        &process.name().to_string_lossy().to_lowercase(),
+        extra_signatures,
+    )
+    .is_some()
+    {
+        return false;
+    }
+    let arguments = process.cmd();
+    if !argument_file_name(arguments, 0)
+        .as_deref()
+        .is_some_and(is_interpreter_name)
+    {
+        return false;
+    }
+    interpreted_program_name(arguments)
+        .and_then(|name| match_process_name_with_extra(&name, extra_signatures))
+        .is_some_and(|matched| &matched.class == class)
+}
+
+/// Capture same-provider inferred ancestors only while their selected child
+/// exists in this supplied snapshot. Commit no partial chain outside the pane.
+pub fn agent_launcher_ancestors(
+    system: &System,
+    pane_root: Pid,
+    owner: &AgentIdentity,
+    extra_signatures: &[AgentSignature],
+) -> Vec<AgentProcessKey> {
+    let owner_pid = Pid::from_u32(owner.pid);
+    let Some(process) = system.process(owner_pid) else {
+        return Vec::new();
+    };
+    if process.start_time() != owner.started_at_unix_seconds || owner_pid == pane_root {
+        return Vec::new();
+    }
+    let mut next = process.parent();
+    let mut visited = HashSet::from([owner_pid]);
+    let mut ancestors = Vec::new();
+    while let Some(pid) = next {
+        if !visited.insert(pid) {
+            return Vec::new();
+        }
+        let Some(parent) = system.process(pid) else {
+            return Vec::new();
+        };
+        if is_inferred_agent_launcher(parent, &owner.class, extra_signatures) {
+            ancestors.push(AgentProcessKey {
+                class: owner.class.clone(),
+                process_id: pid.as_u32(),
+                started_at_unix_seconds: parent.start_time(),
+            });
+        }
+        if pid == pane_root {
+            return ancestors;
+        }
+        next = parent.parent();
+    }
+    Vec::new()
+}
+
+/// A complete refreshed process snapshot permits pruning ended or reused keys.
+/// This does not infer an exit cause or change historical recovery ownership.
+pub fn retain_current_agent_launchers(
+    system: &System,
+    launchers: &[AgentProcessKey],
+) -> Vec<AgentProcessKey> {
+    launchers
+        .iter()
+        .filter(|key| {
+            system
+                .process(Pid::from_u32(key.process_id))
+                .is_some_and(|process| {
+                    process.start_time() == key.started_at_unix_seconds
+                        && process.exists()
+                        && !matches!(
+                            process.status(),
+                            sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead
+                        )
+                })
+        })
+        .cloned()
+        .collect()
 }
 
 /// A process's arguments as the program itself would see them.
@@ -1820,24 +1935,155 @@ pub fn identifying_process_names(process: &sysinfo::Process) -> Vec<String> {
     candidates
 }
 
-/// The lowercase file name of the program an interpreter was asked to run.
-///
-/// Skips the interpreter's own flags, then takes the first whitespace-separated
-/// token of what follows. The token matters: `sh -c` receives an entire command
-/// line as one argument, so `sh -c "vim codex.md"` would otherwise be read as a
-/// program named `vim codex.md` -- which contains `codex` and would be matched
-/// as the agent by a registry that works on substrings.
+/// The program handed to an interpreter. Shell-command evidence must describe
+/// one literal invocation; an option operand is never a script identity.
 fn interpreted_program_name(arguments: &[std::ffi::OsString]) -> Option<String> {
-    let program = arguments
-        .iter()
-        .skip(1)
-        .find(|argument| !argument.to_string_lossy().starts_with('-'))?;
-    let first_token = program
-        .to_string_lossy()
-        .split_whitespace()
-        .next()?
-        .to_owned();
-    Path::new(&first_token)
+    let interpreter = argument_file_name(arguments, 0)?;
+    let interpreter = interpreter.trim_end_matches(".exe");
+    let is_shell = matches!(interpreter, "sh" | "bash" | "dash" | "zsh" | "ksh" | "fish");
+    let mut options = arguments.iter().skip(1);
+    let mut command_operand = false;
+    let mut program = None;
+    while let Some(argument) = options.next() {
+        let text = argument.to_string_lossy();
+        if text == "--" {
+            // Option parsing ends here, even if the script is named -c.
+            program = options.next();
+            break;
+        }
+        if !text.starts_with('-') || text == "-" {
+            program = Some(argument);
+            break;
+        }
+        if is_shell {
+            if interpreter == "fish" && text == "--command" {
+                command_operand = true;
+                program = options.next();
+                break;
+            }
+            // Support the actual pane -c launch, login/interactive variants,
+            // and their combined flags. Other options may consume operands
+            // (e.g. bash --rcfile/-o): refuse inference rather than label the
+            // operand as an agent. This is not a general shell option parser.
+            if text.starts_with("--")
+                || !text[1..]
+                    .chars()
+                    .all(|flag| matches!(flag, 'c' | 'i' | 'l'))
+            {
+                return None;
+            }
+            if text[1..].contains('c') {
+                command_operand = true;
+                program = options.next();
+                break;
+            }
+            continue;
+        }
+        if interpreter == "env" && matches!(text.as_ref(), "-S" | "--split-string") {
+            command_operand = true;
+            program = options.next();
+            break;
+        }
+        if matches!(
+            text.as_ref(),
+            "-c" | "-e" | "--eval" | "--print" | "-p" | "-m"
+        ) {
+            return None;
+        }
+    }
+    let program = program?;
+    if command_operand {
+        literal_single_command_program(&program.to_string_lossy())
+    } else {
+        std::path::Path::new(program)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+    }
+}
+
+/// Conservative identity parser, not a shell execution or expansion engine.
+/// Validate the whole command even though only its first word is returned.
+fn literal_single_command_program(command: &str) -> Option<String> {
+    #[derive(Clone, Copy)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+    let mut quote = Quote::None;
+    let mut characters = command.chars();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut program = None;
+    while let Some(character) = characters.next() {
+        if character == '\0' {
+            return None;
+        }
+        match quote {
+            Quote::Single => {
+                if character == '\'' {
+                    quote = Quote::None;
+                } else {
+                    word.push(character);
+                }
+            }
+            Quote::Double => match character {
+                '"' => quote = Quote::None,
+                '$' | '`' => return None,
+                '\\' => {
+                    let escaped = characters.next()?;
+                    if matches!(escaped, '\0' | '\n' | '\r') {
+                        return None;
+                    }
+                    if !matches!(escaped, '$' | '`' | '"' | '\\') {
+                        word.push('\\');
+                    }
+                    word.push(escaped);
+                }
+                _ => word.push(character),
+            },
+            Quote::None => match character {
+                '\'' => {
+                    quote = Quote::Single;
+                    in_word = true;
+                }
+                '"' => {
+                    quote = Quote::Double;
+                    in_word = true;
+                }
+                '\\' => {
+                    let escaped = characters.next()?;
+                    if matches!(escaped, '\0' | '\n' | '\r') {
+                        return None;
+                    }
+                    word.push(escaped);
+                    in_word = true;
+                }
+                ' ' | '\t' => {
+                    if in_word && program.is_none() {
+                        program = Some(std::mem::take(&mut word));
+                    }
+                    word.clear();
+                    in_word = false;
+                }
+                ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' | '\n' | '\r' | '$' | '`'
+                | '*' | '?' | '[' | ']' | '~' => return None,
+                '#' if !in_word => return None,
+                _ => {
+                    word.push(character);
+                    in_word = true;
+                }
+            },
+        }
+    }
+    if !matches!(quote, Quote::None) {
+        return None;
+    }
+    if in_word && program.is_none() {
+        program = Some(word);
+    }
+    let program = program?;
+    std::path::Path::new(&program)
         .file_name()
         .map(|name| name.to_string_lossy().to_lowercase())
 }
@@ -1975,6 +2221,137 @@ mod tests {
         assert!(
             classify_process_name_with_extra("vim", &[]).is_none(),
             "editing a file named after an agent must not look like the agent"
+        );
+    }
+
+    #[test]
+    fn compound_shell_commands_cannot_revive_a_stopped_agent() {
+        for command in [
+            "codex; printf returned",
+            "'/tmp/fixtures/codex' --resume session; sleep 1",
+            "claude && printf returned",
+            "codex || printf returned",
+            "codex | cat",
+            "codex & wait",
+            "codex\nprintf returned",
+            "codex > output",
+            "codex $(printf argument)",
+            "codex `printf argument`",
+        ] {
+            let arguments = [
+                std::ffi::OsString::from("/bin/sh"),
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ];
+            assert_eq!(
+                interpreted_program_name(&arguments),
+                None,
+                "a compound or dynamic shell command cannot prove a live agent: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_shell_commands_keep_literal_quoted_agent_identity() {
+        for (command, expected) in [
+            ("'/tmp/fixtures/codex' --resume session", "codex"),
+            (
+                "\"/tmp/fixture directory/claude\" --resume session",
+                "claude",
+            ),
+            ("codex --prompt 'literal ; | & > text'", "codex"),
+            ("claude --prompt \"literal ; | & > text\"", "claude"),
+        ] {
+            let arguments = [
+                std::ffi::OsString::from("/bin/sh"),
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ];
+            assert_eq!(
+                interpreted_program_name(&arguments).as_deref(),
+                Some(expected),
+                "literal quotes must not invalidate a single agent invocation: {command}"
+            );
+        }
+    }
+
+    // Add to the existing ilium-detect test module, beside main's two RED tests.
+    #[test]
+    fn literal_shell_identity_rejects_malformed_or_dynamic_operands() {
+        for command in [
+            "codex '",
+            "codex \"",
+            "codex \\",
+            "'codex' \\",
+            "codex \\\nargument",
+            "codex \\\rargument",
+            "codex $(echo x)",
+            "codex \"$(echo x)\"",
+            "codex `echo x`",
+            "codex \"`echo x`\"",
+            "codex ${dynamic}",
+            "codex # comment",
+            "codex;",
+            "codex &&",
+            "codex\0",
+        ] {
+            assert_eq!(literal_single_command_program(command), None, "{command:?}");
+        }
+        for command in [
+            "codex --prompt escaped\\;literal",
+            "codex --prompt escaped\\|literal",
+            "codex --prompt 'literal $(data) `data`'",
+            "  'co'dex --prompt \"literal \\\"quoted\\\" data\"  ",
+        ] {
+            assert_eq!(
+                literal_single_command_program(command).as_deref(),
+                Some("codex"),
+                "{command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_command_mode_is_specific_to_shells_and_combined_c_flags() {
+        for shell in ["/bin/sh", "/bin/bash", "/bin/zsh", "sh.exe"] {
+            let simple = [
+                shell.into(),
+                "-lc".into(),
+                "'/tmp/fixtures/codex' -c code_mode".into(),
+            ];
+            assert_eq!(interpreted_program_name(&simple).as_deref(), Some("codex"));
+            let compound = [shell.into(), "-lc".into(), "codex; printf returned".into()];
+            assert_eq!(interpreted_program_name(&compound), None);
+        }
+        for interpreter in ["python3", "node", "bun"] {
+            let code = [
+                interpreter.into(),
+                "-c".into(),
+                "codex; unrelated_code".into(),
+            ];
+            assert_eq!(interpreted_program_name(&code), None);
+        }
+    }
+
+    #[test]
+    fn literal_script_operands_preserve_interpreter_and_agent_configuration_arguments() {
+        for interpreter in ["sh", "node", "bun", "env"] {
+            let script = [
+                interpreter.into(),
+                "/tmp/fixture directory/codex".into(),
+                "-c".into(),
+                "code_mode=enabled".into(),
+            ];
+            assert_eq!(interpreted_program_name(&script).as_deref(), Some("codex"));
+        }
+        let split_env = [
+            "env".into(),
+            "-S".into(),
+            "'/tmp/fixture directory/codex' -c code_mode".into(),
+        ];
+        assert_eq!(
+            interpreted_program_name(&split_env).as_deref(),
+            Some("codex")
         );
     }
 
@@ -2997,15 +3374,44 @@ Goal achieved (3m)
     #[test]
     #[cfg(unix)]
     fn identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
+        use ilium_platform::process_control::{prepare_process_tree, ProcessTreeGuard};
         use std::os::unix::fs::PermissionsExt;
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        struct OwnedWrapper {
+            child: Child,
+            process_tree: Option<ProcessTreeGuard>,
+        }
+
+        impl Drop for OwnedWrapper {
+            fn drop(&mut self) {
+                // Close the parent's release pipe, then signal the owned group
+                // before reaping its leader: its numeric identity stays reserved.
+                drop(self.child.stdin.take());
+                if let Some(process_tree) = self.process_tree.as_mut() {
+                    let _ = process_tree.terminate();
+                } else {
+                    let _ = self.child.kill();
+                }
+                let _ = self.child.wait();
+            }
+        }
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let node_path = tmp.path().join("node");
         let native_path = tmp.path().join("codex-native");
-        std::fs::write(&native_path, "#!/bin/sh\nsleep 5\n").expect("write native script");
+        let readiness_path = tmp.path().join("native-ready");
+        // The native shell stays alive until its parent-owned pipe closes.
+        // Builtin read avoids an unrelated sleep descendant or fixed lifetime.
+        std::fs::write(
+            &native_path,
+            "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nIFS= read -r release\n",
+        )
+        .expect("write native script");
         std::fs::write(
             &node_path,
-            format!("#!/bin/sh\n\"{}\" &\nwait\n", native_path.display()),
+            "#!/bin/sh\nexec 3<&0\n\"$2\" \"$3\" <&3 &\nwait\n",
         )
         .expect("write wrapper script");
         std::fs::set_permissions(&node_path, std::fs::Permissions::from_mode(0o755))
@@ -3013,29 +3419,49 @@ Goal achieved (3m)
         std::fs::set_permissions(&native_path, std::fs::Permissions::from_mode(0o755))
             .expect("chmod native");
 
-        // The argument is never executed -- it only needs a file name
-        // containing "codex" so the wrapper matches via
-        // `interpreted_program_name`, exactly like Bun's shim being handed
-        // its own script path as `node`'s argument.
-        let mut wrapper = std::process::Command::new(&node_path)
+        // The first argument identifies the interpreter wrapper, like Bun's
+        // shim. Explicit stdin inheritance keeps the background child on the
+        // release pipe instead of the shell's default /dev/null. Preserve
+        // it on fd3 before the asynchronous list resets its own stdin.
+        let mut command = Command::new(&node_path);
+        command
             .arg(tmp.path().join("codex-shim"))
-            .spawn()
-            .expect("spawn wrapper");
+            .arg(&native_path)
+            .arg(&readiness_path)
+            .stdin(Stdio::piped());
+        prepare_process_tree(&mut command);
+        let child = command.spawn().expect("spawn wrapper");
+        let mut wrapper = OwnedWrapper {
+            child,
+            process_tree: None,
+        };
+        wrapper.process_tree =
+            Some(ProcessTreeGuard::attach(wrapper.child.id()).expect("own wrapper process tree"));
 
-        // Give the wrapper's own shell body time to actually fork its child
-        // before the process table is sampled.
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let native_process_id = loop {
+            if let Ok(text) = std::fs::read_to_string(&readiness_path) {
+                if let Ok(process_id) = text.trim().parse::<u32>() {
+                    break process_id;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "native child did not become ready"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
 
         let mut system = System::new_all();
         system.refresh_all();
-        let identity = identify_agent(&system, Pid::from_u32(wrapper.id()))
-            .expect("the native child must be found as a codex-matching descendant");
-
+        let identity = identify_agent(&system, Pid::from_u32(wrapper.child.id()));
+        // Cleanup precedes assertions, and the guard also handles earlier panics.
+        drop(wrapper);
+        let identity =
+            identity.expect("the native child must be found as a codex-matching descendant");
         assert_eq!(identity.class, AgentClass::Codex);
         assert_eq!(identity.process_name, "codex-native");
-
-        let _ = wrapper.kill();
-        let _ = wrapper.wait();
+        assert_eq!(identity.pid, native_process_id);
     }
 
     /// A name that matches no built-in signature is only classified once a
@@ -3069,5 +3495,62 @@ Goal achieved (3m)
             classify_process_name_with_extra("claude", &[custom]),
             Some(AgentClass::Claude)
         );
+    }
+}
+
+#[cfg(test)]
+mod shell_option_identity_tests {
+    use super::*;
+    // Add inside the existing pure detector test module.
+    #[test]
+    fn shell_option_operands_cannot_impersonate_an_agent() {
+        for arguments in [
+            vec!["fish", "--command", "codex; printf returned"],
+            vec!["fish", "--command", "codex $(printf argument)"],
+            vec!["bash", "--rcfile", "/tmp/codex"],
+            vec!["bash", "--rcfile", "/tmp/codex", "-c", "echo unrelated"],
+            vec!["bash", "--init-file", "/tmp/claude"],
+            vec!["bash", "-o", "codex"],
+            vec!["bash", "--command", "codex"],
+        ] {
+            let arguments: Vec<std::ffi::OsString> =
+                arguments.into_iter().map(Into::into).collect();
+            assert_eq!(interpreted_program_name(&arguments), None, "{arguments:?}");
+        }
+        let simple: Vec<std::ffi::OsString> =
+            ["fish", "--command", "'/tmp/codex' --prompt 'literal ;'"]
+                .into_iter()
+                .map(Into::into)
+                .collect();
+        assert_eq!(interpreted_program_name(&simple).as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn interpreter_option_terminator_keeps_next_operand_literal() {
+        for interpreter in ["sh", "bash", "fish", "node", "bun", "env", "python3"] {
+            let arguments: Vec<std::ffi::OsString> = [
+                interpreter,
+                "--",
+                "/tmp/path with spaces/codex",
+                "-c",
+                "ignored config",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+            assert_eq!(
+                interpreted_program_name(&arguments).as_deref(),
+                Some("codex")
+            );
+        }
+        let dash_script: Vec<std::ffi::OsString> = ["sh", "--", "-c", "codex; echo unrelated"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        assert_eq!(
+            interpreted_program_name(&dash_script).as_deref(),
+            Some("-c")
+        );
+        assert!(classify_process_name_with_extra("-c", &[]).is_none());
     }
 }

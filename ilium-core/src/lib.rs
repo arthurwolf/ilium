@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub mod allocation;
+pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
 
@@ -33,6 +35,9 @@ pub enum PaneContentKind {
 /// and display.
 pub const MAXIMUM_PROGRESS_JOB_ID_BYTES: usize = 256;
 pub const MAXIMUM_PROGRESS_MESSAGE_BYTES: usize = 2_048;
+/// Multi-line, self-contained explanation shown when the user hovers the
+/// compact `message`.
+pub const MAXIMUM_PROGRESS_DETAILS_BYTES: usize = 8_192;
 pub const MAXIMUM_PROGRESS_ERROR_BYTES: usize = 4_096;
 pub const MAXIMUM_PROGRESS_MONITOR_ERROR_BYTES: usize = 2_048;
 
@@ -106,7 +111,13 @@ pub struct ProgressTaskReport {
     pub job_id: String,
     pub status: ProgressTaskStatus,
     pub percent: f32,
+    /// Compact one-line description that must make sense to a reader who has
+    /// seen none of the agent session. Always visible in the footer.
     pub message: String,
+    /// Optional longer, multi-line description (what the task is, why it
+    /// runs, what the percent means, what happens next). Shown on hover.
+    #[serde(default)]
+    pub details: String,
     pub error: Option<String>,
 }
 
@@ -118,6 +129,7 @@ impl ProgressTaskReport {
         status: ProgressTaskStatus,
         percent: f32,
         message: String,
+        details: String,
         error: Option<String>,
     ) -> Result<Self, ProgressValidationError> {
         let mut report = Self {
@@ -129,6 +141,7 @@ impl ProgressTaskReport {
                 percent
             },
             message,
+            details,
             error,
         };
         if report.error.as_deref() == Some("") {
@@ -152,6 +165,7 @@ impl ProgressTaskReport {
             MAXIMUM_PROGRESS_MESSAGE_BYTES,
             true,
         )?;
+        validate_details(&self.details)?;
         match (&self.status, &self.error) {
             (ProgressTaskStatus::Error, Some(error)) => {
                 validate_bounded_text("error", error, MAXIMUM_PROGRESS_ERROR_BYTES, false)
@@ -254,6 +268,24 @@ pub enum ProgressValidationError {
     },
     #[error("{field} contains a control character")]
     ControlCharacter { field: &'static str },
+}
+
+/// Details may span lines (`\n`, `\r`, `\t`) but carry no other control
+/// character.
+fn validate_details(value: &str) -> Result<(), ProgressValidationError> {
+    if value.len() > MAXIMUM_PROGRESS_DETAILS_BYTES {
+        return Err(ProgressValidationError::TextTooLong {
+            field: "details",
+            maximum_bytes: MAXIMUM_PROGRESS_DETAILS_BYTES,
+        });
+    }
+    if value
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return Err(ProgressValidationError::ControlCharacter { field: "details" });
+    }
+    Ok(())
 }
 
 fn validate_bounded_text(
@@ -1091,6 +1123,15 @@ impl PaneTitleSource {
     }
 }
 
+/// Presentation version captured with an inference and checked at apply time.
+/// Activity revisions cannot serve this purpose: ordinary terminal output
+/// advances them without changing title ownership or the visible title.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodePresentationRevision {
+    pub node_id: NodeId,
+    pub revision: u64,
+}
+
 /// Identifies who last established a node's position in the workspace tree.
 /// For groups and split views this is also their creation source; panes and
 /// folders already exist before an AI restructure, so the value instead
@@ -1372,6 +1413,7 @@ pub fn slugify_branch(text: &str) -> String {
 /// the resulting path against existing directories and repository ownership.
 pub fn expand_worktree_path_template(
     template: &str,
+    project_path: &Path,
     repo_parent: &Path,
     repo_name: &str,
     branch_slug: &str,
@@ -1384,6 +1426,9 @@ pub fn expand_worktree_path_template(
             remaining = tail;
         } else if let Some(tail) = remaining.strip_prefix("{repo_name}") {
             expanded.push_str(repo_name);
+            remaining = tail;
+        } else if let Some(tail) = remaining.strip_prefix("{project}") {
+            expanded.push_str(&project_path.to_string_lossy());
             remaining = tail;
         } else if let Some(tail) = remaining.strip_prefix("{branch_slug}") {
             expanded.push_str(branch_slug);
@@ -1479,6 +1524,12 @@ pub struct Node {
     /// leaves snapshots from before this distinction unlocked.
     #[serde(default)]
     pub is_name_fixed: bool,
+    /// Advances on each accepted presentation decision, including an
+    /// equal-text user rename. This is independent of content activity and
+    /// survives snapshots; undo advances the live value instead of replaying
+    /// an earlier value from its saved tree.
+    #[serde(default)]
+    pub presentation_revision: u64,
     /// User-owned sidebar bookmark. It belongs to the durable domain node so
     /// every node kind has one consistent right-click action and restored
     /// sessions keep the user's navigation landmarks.
@@ -1608,6 +1659,8 @@ pub struct NodeActivityUpdate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TreeError {
+    #[error("presentation revision exhausted for node {0:?}")]
+    PresentationRevisionExhausted(NodeId),
     #[error("node {0:?} not found")]
     NodeNotFound(NodeId),
     #[error("node {0:?} is not a group")]
@@ -1823,6 +1876,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: Some(0),
@@ -1838,6 +1892,12 @@ impl Tree {
         let id = NodeId(self.next_id);
         self.next_id += 1;
         id
+    }
+
+    /// Allocated node slots retained by the map, including unused capacity.
+    /// Snapshot admission uses this rather than node count after deletions.
+    pub fn retained_node_capacity(&self) -> usize {
+        self.nodes.capacity()
     }
 
     pub fn get(&self, id: NodeId) -> Option<&Node> {
@@ -2305,6 +2365,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2392,6 +2453,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2431,6 +2493,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2499,6 +2562,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2549,6 +2613,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2615,6 +2680,7 @@ impl Tree {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -2690,7 +2756,17 @@ impl Tree {
         for id in old_container_ids {
             updated.nodes.remove(&id);
         }
-        Self::rebuild_restructure_children(&mut updated, ROOT_ID, &plan.children)?;
+        let accepted_title_revisions = self
+            .nodes
+            .values()
+            .map(|node| (node.id, node.presentation_revision))
+            .collect();
+        Self::rebuild_restructure_children(
+            &mut updated,
+            ROOT_ID,
+            &plan.children,
+            &accepted_title_revisions,
+        )?;
         for node in updated.nodes.values_mut() {
             node.last_restructure_activity_revision = Some(node.activity_revision);
         }
@@ -2728,11 +2804,34 @@ impl Tree {
         plan: RestructurePlan,
         inference_activity_revisions: &[NodeActivityRevision],
     ) -> Result<Vec<NodeActivityRevision>, TreeError> {
+        let title_observations = self.project_presentation_revisions(project_id)?;
+        self.apply_project_restructure_with_title_grants(
+            project_id,
+            plan,
+            inference_activity_revisions,
+            &title_observations,
+        )
+    }
+
+    /// The server passes only observations whose conversation and presentation
+    /// eligibility it has verified. A missing or stale observation preserves
+    /// that leaf's complete title bundle while the structural move proceeds.
+    pub fn apply_project_restructure_with_title_grants(
+        &mut self,
+        project_id: NodeId,
+        plan: RestructurePlan,
+        inference_activity_revisions: &[NodeActivityRevision],
+        accepted_title_observations: &[NodePresentationRevision],
+    ) -> Result<Vec<NodeActivityRevision>, TreeError> {
         if !self.get(project_id).is_some_and(Node::is_project) {
             return Err(TreeError::NotAProject(project_id));
         }
 
         let next_animation_generation = self.next_project_animation_generation(project_id)?;
+        let accepted_title_revisions: HashMap<NodeId, u64> = accepted_title_observations
+            .iter()
+            .map(|observation| (observation.node_id, observation.revision))
+            .collect();
 
         let mut referenced = RestructureReferences::default();
         self.validate_restructure_children(
@@ -2825,12 +2924,43 @@ impl Tree {
             updated.nodes.remove(&id);
         }
 
-        Self::rebuild_restructure_children(&mut updated, project_id, &plan.children)?;
+        Self::rebuild_restructure_children(
+            &mut updated,
+            project_id,
+            &plan.children,
+            &accepted_title_revisions,
+        )?;
         let checkpoint_activity_revisions =
             updated.mark_project_restructured_at(project_id, inference_activity_revisions)?;
         updated.get_mut(project_id)?.animation_generation = next_animation_generation;
         *self = updated;
         Ok(checkpoint_activity_revisions)
+    }
+
+    /// Captures only presentation generations of existing leaves. The
+    /// server may forward a subset as grants after checking its live agent
+    /// session and verified-request evidence.
+    pub fn project_presentation_revisions(
+        &self,
+        project_id: NodeId,
+    ) -> Result<Vec<NodePresentationRevision>, TreeError> {
+        if !self.get(project_id).is_some_and(Node::is_project) {
+            return Err(TreeError::NotAProject(project_id));
+        }
+        let mut revisions: Vec<_> = self
+            .nodes
+            .values()
+            .filter(|node| {
+                (node.is_pane() || node.is_folder())
+                    && self.project_ancestor(node.id) == Some(project_id)
+            })
+            .map(|node| NodePresentationRevision {
+                node_id: node.id,
+                revision: node.presentation_revision,
+            })
+            .collect();
+        revisions.sort_unstable_by_key(|entry| entry.node_id);
+        Ok(revisions)
     }
 
     /// Records the inference snapshot for surviving entries. Plan-created
@@ -2887,6 +3017,33 @@ impl Tree {
         project_id: NodeId,
         previous: &Tree,
     ) -> Result<(), TreeError> {
+        let fixed_ids = self
+            .nodes
+            .values()
+            .filter(|node| node.is_name_fixed && self.is_ancestor_of(project_id, node.id))
+            .map(|node| node.id)
+            .collect::<Vec<_>>();
+        self.restore_project_from_preserving_presentations(project_id, previous, &fixed_ids)
+    }
+
+    /// Restores hierarchy while retaining presentations changed after the
+    /// recorded apply. The adapter supplies its accepted post-apply revisions;
+    /// core also always protects fixed user names.
+    pub fn restore_project_from_preserving_presentations(
+        &mut self,
+        project_id: NodeId,
+        previous: &Tree,
+        preserve_ids: &[NodeId],
+    ) -> Result<(), TreeError> {
+        let preserved = self
+            .nodes
+            .values()
+            .filter(|node| {
+                self.is_ancestor_of(project_id, node.id)
+                    && (node.is_name_fixed || preserve_ids.contains(&node.id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let next_generation = self.next_project_animation_generation(project_id)?;
         let previous_project = previous
             .get(project_id)
@@ -2895,6 +3052,28 @@ impl Tree {
         let recommendation = previous_project.inferred_animation.clone();
         let mut updated = self.clone();
         updated.restore_project_from_in_place(project_id, previous)?;
+        for current in preserved {
+            let Some(restored) = updated.nodes.get_mut(&current.id) else {
+                continue;
+            };
+            restored.name = current.name;
+            restored.short_name = current.short_name;
+            restored.inferred_icon = current.inferred_icon;
+            restored.is_name_fixed = current.is_name_fixed;
+            if let (
+                NodeKind::Pane {
+                    title_source: restored_source,
+                    ..
+                },
+                NodeKind::Pane {
+                    title_source: current_source,
+                    ..
+                },
+            ) = (&mut restored.kind, current.kind)
+            {
+                *restored_source = current_source;
+            }
+        }
         let project = updated.get_mut(project_id)?;
         project.inferred_animation = recommendation;
         project.animation_generation = next_generation;
@@ -2914,6 +3093,17 @@ impl Tree {
             return Err(TreeError::NotAProject(project_id));
         }
 
+        // Undo may recreate structural containers, but never resurrect a
+        // removed leaf with its old presentation revision (or a missing PTY).
+        // Such a resurrection would reopen a previously captured title grant.
+        for node in previous.nodes.values().filter(|node| {
+            previous.is_ancestor_of(project_id, node.id) && (node.is_pane() || node.is_folder())
+        }) {
+            if self.get(node.id).is_none() {
+                return Err(TreeError::NodeNotFound(node.id));
+            }
+        }
+
         let current_descendants: Vec<NodeId> = self
             .nodes
             .keys()
@@ -2926,7 +3116,11 @@ impl Tree {
                 self.get(*node_id).map(|node| {
                     (
                         *node_id,
-                        (node.activity_revision, node.last_focus_activity_revision),
+                        (
+                            node.activity_revision,
+                            node.last_focus_activity_revision,
+                            node.presentation_revision,
+                        ),
                     )
                 })
             })
@@ -2942,13 +3136,16 @@ impl Tree {
             .cloned()
             .collect();
         for node in &mut previous_descendants {
-            let Some((activity_revision, last_focus_activity_revision)) =
+            let Some((activity_revision, last_focus_activity_revision, presentation_revision)) =
                 current_activity_checkpoints.get(&node.id)
             else {
                 continue;
             };
             node.activity_revision = *activity_revision;
             node.last_focus_activity_revision = *last_focus_activity_revision;
+            node.presentation_revision = presentation_revision
+                .checked_add(1)
+                .ok_or(TreeError::PresentationRevisionExhausted(node.id))?;
         }
         for node in previous_descendants {
             self.nodes.insert(node.id, node);
@@ -3092,6 +3289,7 @@ impl Tree {
         tree: &mut Tree,
         parent: NodeId,
         nodes: &[RestructureNode],
+        accepted_title_revisions: &HashMap<NodeId, u64>,
     ) -> Result<(), TreeError> {
         for node in nodes {
             let child_id = match node {
@@ -3102,20 +3300,25 @@ impl Tree {
                     icon,
                 } => {
                     let existing = tree.get_mut(*id)?;
+                    let accepts_title = !existing.is_name_fixed
+                        && accepted_title_revisions.get(id).copied()
+                            == Some(existing.presentation_revision);
                     existing.parent = Some(parent);
-                    if !existing.is_name_fixed {
+                    if accepts_title {
                         existing.name = title.clone();
                         existing.short_name = short_title.clone();
                         existing.inferred_icon = icon.clone();
+                        // Structure inference is an automatic presentation
+                        // proposal, not a user-authored fixed name.
+                        if let NodeKind::Pane { title_source, .. } = &mut existing.kind {
+                            *title_source = PaneTitleSource::Automatic;
+                        }
+                        existing.presentation_revision = existing
+                            .presentation_revision
+                            .checked_add(1)
+                            .ok_or(TreeError::PresentationRevisionExhausted(*id))?;
                     }
                     existing.structure_source = StructureSource::LlmRestructure;
-                    // A restructure-authored title is curated, not a
-                    // per-turn automatic guess: freeze it the same way a
-                    // plain user rename does, so the background per-pane
-                    // titler never overwrites it on the pane's next turn.
-                    if let NodeKind::Pane { title_source, .. } = &mut existing.kind {
-                        *title_source = PaneTitleSource::UserSpecified;
-                    }
                     *id
                 }
                 RestructureNode::Folder {
@@ -3125,13 +3328,20 @@ impl Tree {
                     icon,
                 } => {
                     let existing = tree.get_mut(*id)?;
+                    let accepts_title = !existing.is_name_fixed
+                        && accepted_title_revisions.get(id).copied()
+                            == Some(existing.presentation_revision);
                     existing.parent = Some(parent);
-                    if !existing.is_name_fixed {
+                    existing.structure_source = StructureSource::LlmRestructure;
+                    if accepts_title {
                         existing.name = title.clone();
                         existing.short_name = short_title.clone();
                         existing.inferred_icon = icon.clone();
+                        existing.presentation_revision = existing
+                            .presentation_revision
+                            .checked_add(1)
+                            .ok_or(TreeError::PresentationRevisionExhausted(*id))?;
                     }
-                    existing.structure_source = StructureSource::LlmRestructure;
                     *id
                 }
                 RestructureNode::Group {
@@ -3152,6 +3362,7 @@ impl Tree {
                             inferred_animation: None,
                             animation_generation: 0,
                             is_name_fixed: false,
+                            presentation_revision: 0,
                             is_bookmarked: false,
                             activity_revision: 0,
                             last_restructure_activity_revision: None,
@@ -3160,7 +3371,12 @@ impl Tree {
                             kind: NodeKind::Container(ContainerNode::group()),
                         },
                     );
-                    Self::rebuild_restructure_children(tree, group_id, children)?;
+                    Self::rebuild_restructure_children(
+                        tree,
+                        group_id,
+                        children,
+                        accepted_title_revisions,
+                    )?;
                     group_id
                 }
                 RestructureNode::ExistingGroup { id, children } => {
@@ -3174,7 +3390,12 @@ impl Tree {
                     existing.parent = Some(parent);
                     existing.structure_source = StructureSource::LlmRestructure;
                     container.children.clear();
-                    Self::rebuild_restructure_children(tree, *id, children)?;
+                    Self::rebuild_restructure_children(
+                        tree,
+                        *id,
+                        children,
+                        accepted_title_revisions,
+                    )?;
                     *id
                 }
                 RestructureNode::ExistingSplitView { id, children } => {
@@ -3187,7 +3408,12 @@ impl Tree {
                     }
                     existing.parent = Some(parent);
                     container.children.clear();
-                    Self::rebuild_restructure_children(tree, *id, children)?;
+                    Self::rebuild_restructure_children(
+                        tree,
+                        *id,
+                        children,
+                        accepted_title_revisions,
+                    )?;
                     *id
                 }
             };
@@ -3231,6 +3457,17 @@ impl Tree {
         Ok(())
     }
 
+    /// Invalidates in-flight presentation proposals after a new authored task
+    /// without changing the user's current presentation bundle.
+    pub fn invalidate_presentation(&mut self, id: NodeId) -> Result<(), TreeError> {
+        let node = self.get_mut(id)?;
+        node.presentation_revision = node
+            .presentation_revision
+            .checked_add(1)
+            .ok_or(TreeError::PresentationRevisionExhausted(id))?;
+        Ok(())
+    }
+
     /// Unconditionally renames an entry and permanently fixes its complete
     /// presentation bundle, so no automatic titler or restructure overwrites
     /// it. For a pane this also marks its title `UserSpecified`. `short_name` is the short-form alternative
@@ -3250,10 +3487,15 @@ impl Tree {
             || node.inferred_icon != inferred_icon
             || !node.is_name_fixed
             || node.structure_source != StructureSource::Manual;
+        let next_presentation_revision = node
+            .presentation_revision
+            .checked_add(1)
+            .ok_or(TreeError::PresentationRevisionExhausted(id))?;
         node.name = name;
         node.short_name = short_name;
         node.inferred_icon = inferred_icon;
         node.is_name_fixed = true;
+        node.presentation_revision = next_presentation_revision;
         node.structure_source = StructureSource::Manual;
         if let NodeKind::Pane { title_source, .. } = &mut node.kind {
             *title_source = PaneTitleSource::UserSpecified;
@@ -3271,30 +3513,61 @@ impl Tree {
         source_id: NodeId,
         replacement_id: NodeId,
     ) -> Result<(), TreeError> {
+        self.inherit_pane_title_with_verified_continuity(source_id, replacement_id, false)
+    }
+
+    /// The adapter may grant non-fixed inheritance only after verifying that
+    /// both invocations continue the same conversation and its request history.
+    pub fn inherit_pane_title_with_verified_continuity(
+        &mut self,
+        source_id: NodeId,
+        replacement_id: NodeId,
+        has_verified_conversation_continuity: bool,
+    ) -> Result<(), TreeError> {
         let source = self
             .get(source_id)
             .ok_or(TreeError::NodeNotFound(source_id))?;
         let NodeKind::Pane { title_source, .. } = &source.kind else {
             return Err(TreeError::NotAPane(source_id));
         };
-        let presentation = (
-            source.name.clone(),
-            source.short_name.clone(),
-            source.inferred_icon.clone(),
-            source.is_name_fixed,
-            source.structure_source,
-            *title_source,
-        );
+        // A replacement invocation cannot inherit an unverified AI title.
+        // A fixed, user-owned bundle is safe to transfer explicitly.
+        let presentation =
+            (source.is_name_fixed || has_verified_conversation_continuity).then(|| {
+                (
+                    source.name.clone(),
+                    source.short_name.clone(),
+                    source.inferred_icon.clone(),
+                    source.structure_source,
+                    source.is_name_fixed,
+                    *title_source,
+                )
+            });
         let replacement = self.get_mut(replacement_id)?;
         let NodeKind::Pane { title_source, .. } = &mut replacement.kind else {
             return Err(TreeError::NotAPane(replacement_id));
         };
-        replacement.name = presentation.0;
-        replacement.short_name = presentation.1;
-        replacement.inferred_icon = presentation.2;
-        replacement.is_name_fixed = presentation.3;
-        replacement.structure_source = presentation.4;
-        *title_source = presentation.5;
+        if let Some((
+            name,
+            short_name,
+            inferred_icon,
+            structure_source,
+            is_name_fixed,
+            inherited_source,
+        )) = presentation
+        {
+            let next_presentation_revision = replacement
+                .presentation_revision
+                .checked_add(1)
+                .ok_or(TreeError::PresentationRevisionExhausted(replacement_id))?;
+            replacement.name = name;
+            replacement.short_name = short_name;
+            replacement.inferred_icon = inferred_icon;
+            replacement.is_name_fixed = is_name_fixed;
+            replacement.structure_source = structure_source;
+            *title_source = inherited_source;
+            replacement.presentation_revision = next_presentation_revision;
+        }
         Ok(())
     }
 
@@ -3314,7 +3587,7 @@ impl Tree {
         let NodeKind::Pane { title_source, .. } = &node.kind else {
             return Err(TreeError::NotAPane(id));
         };
-        if title_source.is_user_specified() {
+        if node.is_name_fixed || title_source.is_user_specified() {
             return Ok(false);
         }
         let title = title.into();
@@ -3324,9 +3597,93 @@ impl Tree {
         {
             return Ok(false);
         }
+        let next_presentation_revision = node
+            .presentation_revision
+            .checked_add(1)
+            .ok_or(TreeError::PresentationRevisionExhausted(id))?;
         node.name = title;
         node.short_name = short_title;
         node.inferred_icon = inferred_icon;
+        node.presentation_revision = next_presentation_revision;
+        Ok(true)
+    }
+
+    /// Applies a session inference only against the exact presentation seen
+    /// by its worker. The server must additionally prove current conversation
+    /// identity and genuine request evidence under its tree/runtime locks.
+    pub fn accept_session_pane_title(
+        &mut self,
+        id: NodeId,
+        expected_presentation_revision: u64,
+        title: impl Into<String>,
+        short_title: Option<String>,
+        inferred_icon: Option<String>,
+        _requested_title_source: PaneTitleSource,
+    ) -> Result<bool, TreeError> {
+        let node = self.get(id).ok_or(TreeError::NodeNotFound(id))?;
+        if !node.is_pane()
+            || node.is_name_fixed
+            || matches!(
+                &node.kind,
+                NodeKind::Pane {
+                    title_source: PaneTitleSource::UserSpecified,
+                    ..
+                }
+            )
+            || node.presentation_revision != expected_presentation_revision
+        {
+            return Ok(false);
+        }
+        let title = title.into();
+        // An explicit request to the AI still produces an inferred label.
+        // Only a literal user rename creates fixed/manual ownership.
+        let node = self.get_mut(id)?;
+        let NodeKind::Pane {
+            title_source: current_source,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if node.is_name_fixed || current_source.is_user_specified() {
+            return Ok(false);
+        }
+        let next_presentation_revision = node
+            .presentation_revision
+            .checked_add(1)
+            .ok_or(TreeError::PresentationRevisionExhausted(id))?;
+        *current_source = PaneTitleSource::Automatic;
+        node.name = title;
+        node.short_name = short_title;
+        node.inferred_icon = inferred_icon;
+        node.presentation_revision = next_presentation_revision;
+        Ok(true)
+    }
+
+    /// Repairs only the provable old AI-restructure ownership state. A fixed
+    /// title or a non-fixed UserSpecified title with unknown provenance stays
+    /// untouched; the server separately decides whether verified empty
+    /// conversation evidence warrants resetting the visible title.
+    pub fn repair_legacy_restructure_title_source(
+        &mut self,
+        id: NodeId,
+    ) -> Result<bool, TreeError> {
+        let node = self.get_mut(id)?;
+        if node.is_name_fixed || node.structure_source != StructureSource::LlmRestructure {
+            return Ok(false);
+        }
+        let NodeKind::Pane { title_source, .. } = &mut node.kind else {
+            return Err(TreeError::NotAPane(id));
+        };
+        if *title_source != PaneTitleSource::UserSpecified {
+            return Ok(false);
+        }
+        let next_presentation_revision = node
+            .presentation_revision
+            .checked_add(1)
+            .ok_or(TreeError::PresentationRevisionExhausted(id))?;
+        *title_source = PaneTitleSource::Automatic;
+        node.presentation_revision = next_presentation_revision;
         Ok(true)
     }
 
@@ -3357,16 +3714,24 @@ impl Tree {
             unreachable!("the pane kind was validated before the project move");
         };
 
+        let is_name_fixed = node.is_name_fixed;
         let title = title.into();
         let changed = node.name != title
             || node.short_name.is_some()
             || node.inferred_icon.is_some()
             || title_source.is_user_specified();
-        node.name = title;
-        node.short_name = None;
-        node.inferred_icon = None;
-        *title_source = PaneTitleSource::Automatic;
-
+        if !is_name_fixed {
+            node.name = title;
+            node.short_name = None;
+            node.inferred_icon = None;
+            node.is_name_fixed = false;
+            *title_source = PaneTitleSource::Automatic;
+            node.presentation_revision = node
+                .presentation_revision
+                .checked_add(1)
+                .ok_or(TreeError::PresentationRevisionExhausted(node.id))?;
+        }
+        let changed = changed && !is_name_fixed;
         let placement_changed = node.parent != Some(project_id);
         if placement_changed {
             updated_tree.move_node(id, project_id, None)?;
@@ -4267,7 +4632,8 @@ mod tests {
                 )
                 .unwrap();
             }
-            tree.inherit_pane_title(source, replacement).unwrap();
+            tree.inherit_pane_title_with_verified_continuity(source, replacement, true)
+                .unwrap();
             let original = tree.get(source).unwrap();
             let converted = tree.get(replacement).unwrap();
             assert_eq!(converted.name, original.name);
@@ -4310,6 +4676,7 @@ mod tests {
         assert_eq!(
             expand_worktree_path_template(
                 "{repo_parent}/{repo_name}.worktrees/{branch_slug}",
+                Path::new("/tmp/projects/acme-api"),
                 Path::new("/tmp/projects"),
                 "acme-api",
                 "agent-fix-login",
@@ -4319,12 +4686,24 @@ mod tests {
         assert_eq!(
             expand_worktree_path_template(
                 "{repo_parent}/{repo_name}/{branch_slug}",
+                Path::new("/tmp/{repo_name}/{branch_slug}-repo"),
                 Path::new("/tmp/{repo_name}"),
                 "{branch_slug}-repo",
                 "agent-task",
             ),
             PathBuf::from("/tmp/{repo_name}/{branch_slug}-repo/agent-task"),
             "replacement values are literal path components, not new templates"
+        );
+        assert_eq!(
+            expand_worktree_path_template(
+                "{project}/.ilium/{branch_slug}",
+                Path::new("/tmp/{branch_slug}/repo"),
+                Path::new("/tmp"),
+                "repo",
+                "task"
+            ),
+            PathBuf::from("/tmp/{branch_slug}/repo/.ilium/task"),
+            "project path bytes remain literal during single-pass expansion"
         );
     }
 
@@ -5630,6 +6009,7 @@ mod tests {
                 ProgressTaskStatus::Running,
                 42.0,
                 "frame 1200/3000".to_string(),
+                String::new(),
                 None,
             )
             .unwrap(),
@@ -5661,12 +6041,50 @@ mod tests {
     }
 
     #[test]
+    fn progress_details_may_span_lines_but_not_carry_other_control_characters() {
+        let report = |details: &str| {
+            ProgressTaskReport::new(
+                "job".to_string(),
+                ProgressTaskStatus::Running,
+                10.0,
+                "Building the app".to_string(),
+                details.to_string(),
+                None,
+            )
+        };
+        assert!(report("What: build\nWhy: release\r\n\tNext: ship").is_ok());
+        assert!(report("").is_ok());
+        assert_eq!(
+            report("bad\u{7}bell"),
+            Err(ProgressValidationError::ControlCharacter { field: "details" })
+        );
+        assert_eq!(
+            report(&"x".repeat(MAXIMUM_PROGRESS_DETAILS_BYTES + 1)),
+            Err(ProgressValidationError::TextTooLong {
+                field: "details",
+                maximum_bytes: MAXIMUM_PROGRESS_DETAILS_BYTES,
+            })
+        );
+        // The compact message stays a single line.
+        assert!(ProgressTaskReport::new(
+            "job".to_string(),
+            ProgressTaskStatus::Running,
+            10.0,
+            "two\nlines".to_string(),
+            String::new(),
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn progress_report_invariants_are_strict() {
         let done = ProgressTaskReport::new(
             "job".to_string(),
             ProgressTaskStatus::Done,
             17.0,
             "finished".to_string(),
+            String::new(),
             None,
         )
         .unwrap();
@@ -5676,6 +6094,7 @@ mod tests {
                 "job".to_string(),
                 ProgressTaskStatus::Running,
                 101.0,
+                String::new(),
                 String::new(),
                 None
             ),
@@ -5687,6 +6106,7 @@ mod tests {
                 ProgressTaskStatus::Error,
                 42.0,
                 String::new(),
+                String::new(),
                 None
             ),
             Err(ProgressValidationError::MissingTaskError)
@@ -5696,6 +6116,7 @@ mod tests {
                 "bad\njob".to_string(),
                 ProgressTaskStatus::Running,
                 42.0,
+                String::new(),
                 String::new(),
                 None
             ),
@@ -5710,6 +6131,7 @@ mod tests {
             ProgressTaskStatus::Running,
             64.0,
             "rendering".to_string(),
+            String::new(),
             None,
         )
         .unwrap();
@@ -5857,7 +6279,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_agent_session_reset_discards_old_title_and_grouping() {
+    fn fresh_agent_session_reset_preserves_fixed_title_while_resetting_grouping() {
         let mut tree = Tree::new();
         let project = tree
             .ensure_launch_project(PathBuf::from("/tmp/project"))
@@ -5892,9 +6314,9 @@ mod tests {
             .reset_terminal_pane_for_fresh_conversation(pane_id, "<new>")
             .unwrap());
         let pane = tree.get(pane_id).unwrap();
-        assert_eq!(pane.name, "<new>");
-        assert_eq!(pane.short_name, None);
-        assert_eq!(pane.inferred_icon, None);
+        assert_eq!(pane.name, "User title for old work");
+        assert_eq!(pane.short_name.as_deref(), Some("Old work"));
+        assert_eq!(pane.inferred_icon.as_deref(), Some("📜"));
         assert_eq!(pane.parent, Some(project));
         assert_eq!(
             tree.children_of(project).unwrap(),
@@ -5904,7 +6326,8 @@ mod tests {
         let NodeKind::Pane { title_source, .. } = &pane.kind else {
             panic!("expected terminal pane");
         };
-        assert_eq!(*title_source, PaneTitleSource::Automatic);
+        assert_eq!(*title_source, PaneTitleSource::UserSpecified);
+        assert!(pane.is_name_fixed);
         assert!(!tree
             .reset_terminal_pane_for_fresh_conversation(pane_id, "<new>")
             .unwrap());
@@ -6051,7 +6474,7 @@ mod tests {
         let NodeKind::Pane { title_source, .. } = &tree.get(pane_a).unwrap().kind else {
             panic!("expected a pane");
         };
-        assert_eq!(*title_source, PaneTitleSource::UserSpecified);
+        assert_eq!(*title_source, PaneTitleSource::Automatic);
 
         tree.rename_node(pane_a, "User refined backend task", None, None)
             .unwrap();
@@ -6834,6 +7257,7 @@ mod tests {
                 inferred_animation: None,
                 animation_generation: 0,
                 is_name_fixed: false,
+                presentation_revision: 0,
                 is_bookmarked: false,
                 activity_revision: 0,
                 last_restructure_activity_revision: None,
@@ -7020,6 +7444,7 @@ mod pane_signal_tests {
                 "job".to_string(),
                 status,
                 percent,
+                String::new(),
                 String::new(),
                 (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
             )
@@ -7443,5 +7868,356 @@ mod pane_signal_tests {
         let acknowledged = tree.acknowledge_progress_outcome(pane).unwrap().unwrap();
         assert_eq!(acknowledged.attention, ProgressAttention::Acknowledged);
         assert_eq!(tree.acknowledge_progress_outcome(pane).unwrap(), None);
+    }
+
+    #[test]
+    fn stale_restructure_title_keeps_a_new_manual_bundle_while_moving_the_pane() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/presentation-cas"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Agent", PaneContentKind::Terminal)
+            .unwrap();
+        let observed = tree.project_presentation_revisions(project).unwrap();
+        tree.rename_node(pane, "Mine", Some("My Task".into()), Some("📌".into()))
+            .unwrap();
+        tree.apply_project_restructure_with_title_grants(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Group {
+                    title: "Moved".into(),
+                    short_title: None,
+                    icon: None,
+                    children: vec![RestructureNode::Pane {
+                        id: pane,
+                        title: "Stale AI".into(),
+                        short_title: None,
+                        icon: None,
+                    }],
+                }],
+            },
+            &[],
+            &observed,
+        )
+        .unwrap();
+        let node = tree.get(pane).unwrap();
+        assert_eq!(node.name, "Mine");
+        assert_eq!(node.short_name.as_deref(), Some("My Task"));
+        assert_eq!(node.inferred_icon.as_deref(), Some("📌"));
+        assert!(node.is_name_fixed);
+        assert_eq!(node.structure_source, StructureSource::LlmRestructure);
+        assert_ne!(node.parent, Some(project));
+        assert!(matches!(
+            &node.kind,
+            NodeKind::Pane {
+                title_source: PaneTitleSource::UserSpecified,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn newer_accepted_title_defeats_an_older_restructure_title() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/newer-title")).unwrap();
+        let pane = tree
+            .add_pane(project, "Agent", PaneContentKind::Terminal)
+            .unwrap();
+        let old = tree.project_presentation_revisions(project).unwrap();
+        assert!(tree
+            .accept_session_pane_title(
+                pane,
+                old[0].revision,
+                "Newer title",
+                Some("Newer".into()),
+                None,
+                PaneTitleSource::Automatic,
+            )
+            .unwrap());
+        assert!(!tree
+            .accept_session_pane_title(
+                pane,
+                old[0].revision,
+                "Stale session title",
+                None,
+                None,
+                PaneTitleSource::Automatic,
+            )
+            .unwrap());
+        tree.apply_project_restructure_with_title_grants(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Pane {
+                    id: pane,
+                    title: "Stale restructure title".into(),
+                    short_title: None,
+                    icon: None,
+                }],
+            },
+            &[],
+            &old,
+        )
+        .unwrap();
+        assert_eq!(tree.get(pane).unwrap().name, "Newer title");
+    }
+
+    #[test]
+    fn current_grant_changes_title_without_claiming_manual_ownership() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/current-grant"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Agent", PaneContentKind::Terminal)
+            .unwrap();
+        let observed = tree.project_presentation_revisions(project).unwrap();
+        tree.apply_project_restructure_with_title_grants(
+            project,
+            RestructurePlan {
+                children: vec![RestructureNode::Pane {
+                    id: pane,
+                    title: "Authorized title".into(),
+                    short_title: Some("Authorized".into()),
+                    icon: Some("🔐".into()),
+                }],
+            },
+            &[],
+            &observed,
+        )
+        .unwrap();
+        let node = tree.get(pane).unwrap();
+        assert_eq!(node.name, "Authorized title");
+        assert!(!node.is_name_fixed);
+        assert_eq!(node.presentation_revision, observed[0].revision + 1);
+        assert!(matches!(
+            &node.kind,
+            NodeKind::Pane {
+                title_source: PaneTitleSource::Automatic,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_repair_needs_nonfixed_ai_provenance() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/legacy-title"))
+            .unwrap();
+        let ai = tree
+            .add_pane(project, "AI title", PaneContentKind::Terminal)
+            .unwrap();
+        let manual = tree
+            .add_pane(project, "Manual title", PaneContentKind::Terminal)
+            .unwrap();
+        for id in [ai, manual] {
+            let node = tree.get_mut(id).unwrap();
+            if let NodeKind::Pane { title_source, .. } = &mut node.kind {
+                *title_source = PaneTitleSource::UserSpecified;
+            }
+        }
+        tree.get_mut(ai).unwrap().structure_source = StructureSource::LlmRestructure;
+        assert!(tree.repair_legacy_restructure_title_source(ai).unwrap());
+        assert_eq!(tree.get(ai).unwrap().name, "AI title");
+        assert!(!tree.repair_legacy_restructure_title_source(manual).unwrap());
+        assert!(matches!(
+            &tree.get(manual).unwrap().kind,
+            NodeKind::Pane {
+                title_source: PaneTitleSource::UserSpecified,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn undo_advances_presentation_version_instead_of_reopening_old_grants() {
+        let mut tree = Tree::new();
+        let project = tree.add_project(PathBuf::from("/tmp/undo-title")).unwrap();
+        let pane = tree
+            .add_pane(project, "Old", PaneContentKind::Terminal)
+            .unwrap();
+        let before = tree.clone();
+        let old_revision = tree.get(pane).unwrap().presentation_revision;
+        tree.accept_session_pane_title(
+            pane,
+            old_revision,
+            "New",
+            None,
+            None,
+            PaneTitleSource::Automatic,
+        )
+        .unwrap();
+        let before_undo = tree.get(pane).unwrap().presentation_revision;
+        tree.restore_project_from(project, &before).unwrap();
+        assert!(tree.get(pane).unwrap().presentation_revision > before_undo);
+        assert!(!tree
+            .accept_session_pane_title(
+                pane,
+                old_revision,
+                "Stale",
+                None,
+                None,
+                PaneTitleSource::Automatic,
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn replacement_inherits_only_fixed_presentation() {
+        let mut tree = Tree::new();
+        let project = tree
+            .add_project(PathBuf::from("/tmp/replacement-title"))
+            .unwrap();
+        let ai = tree
+            .add_pane(project, "AI title", PaneContentKind::Terminal)
+            .unwrap();
+        let replacement = tree
+            .add_pane(project, "Fresh", PaneContentKind::Terminal)
+            .unwrap();
+        tree.inherit_pane_title(ai, replacement).unwrap();
+        assert_eq!(tree.get(replacement).unwrap().name, "Fresh");
+        tree.rename_node(ai, "Human title", None, Some("📌".into()))
+            .unwrap();
+        tree.inherit_pane_title(ai, replacement).unwrap();
+        assert_eq!(tree.get(replacement).unwrap().name, "Human title");
+        assert!(tree.get(replacement).unwrap().is_name_fixed);
+    }
+}
+
+#[cfg(test)]
+mod title_revision_overflow_tests {
+    use super::*;
+    #[test]
+    fn exhausted_title_revision_rejects_rename_without_changing_the_bundle() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "Initial").unwrap();
+        let pane = tree
+            .add_pane(group, "Original", PaneContentKind::Terminal)
+            .unwrap();
+        tree.get_mut(pane).unwrap().presentation_revision = u64::MAX;
+        assert!(tree.rename_node(pane, "Too late", None, None).is_err());
+        assert_eq!(tree.get(pane).unwrap().name, "Original");
+        assert_eq!(tree.get(pane).unwrap().presentation_revision, u64::MAX);
+    }
+}
+
+#[cfg(test)]
+mod title_reset_contract_tests {
+    use super::*;
+    #[test]
+    fn fresh_nonfixed_title_is_reset_and_stale_explicit_title_cannot_replace_manual_name() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(std::path::PathBuf::from("/tmp/title-contract"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Original", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_automatic_pane_title(pane, "Old task", Some("Old".into()), Some("book".into()))
+            .unwrap();
+        let before_reset = tree.get(pane).unwrap().presentation_revision;
+        assert!(tree
+            .reset_terminal_pane_for_fresh_conversation(pane, "<new>")
+            .unwrap());
+        assert_eq!(tree.get(pane).unwrap().name, "<new>");
+        assert!(tree.get(pane).unwrap().presentation_revision > before_reset);
+        tree.rename_node(pane, "Mine", None, None).unwrap();
+        let current = tree.get(pane).unwrap().presentation_revision;
+        assert!(!tree
+            .accept_session_pane_title(
+                pane,
+                current,
+                "AI",
+                None,
+                None,
+                PaneTitleSource::UserSpecified
+            )
+            .unwrap());
+        assert_eq!(tree.get(pane).unwrap().name, "Mine");
+    }
+}
+
+#[cfg(test)]
+mod title_undo_preservation_tests {
+    use super::*;
+    #[test]
+    fn renaming_away_and_back_never_reuses_a_presentation_observation() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(std::path::PathBuf::from("/tmp/title-rename-aba"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Original", PaneContentKind::Terminal)
+            .unwrap();
+        tree.rename_node(pane, "Mine", None, None).unwrap();
+        let captured_revision = tree.get(pane).unwrap().presentation_revision;
+        tree.rename_node(pane, "Temporary", None, None).unwrap();
+        tree.rename_node(pane, "Mine", None, None).unwrap();
+        assert_eq!(tree.get(pane).unwrap().name, "Mine");
+        assert!(tree.get(pane).unwrap().presentation_revision > captured_revision);
+        assert!(!tree
+            .accept_session_pane_title(
+                pane,
+                captured_revision,
+                "Stale",
+                None,
+                None,
+                PaneTitleSource::Automatic
+            )
+            .unwrap());
+        assert_eq!(tree.get(pane).unwrap().name, "Mine");
+    }
+    #[test]
+    fn undo_cannot_resurrect_a_closed_leaf_and_reopen_its_title_grant() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(std::path::PathBuf::from("/tmp/title-closed-undo"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Original", PaneContentKind::Terminal)
+            .unwrap();
+        let previous = tree.clone();
+        tree.set_automatic_pane_title(pane, "Later", None, None)
+            .unwrap();
+        tree.remove_node(pane).unwrap();
+        let current = tree.clone();
+        assert!(
+            matches!(tree.restore_project_from(project, &previous), Err(TreeError::NodeNotFound(id)) if id == pane)
+        );
+        assert_eq!(tree, current);
+    }
+    #[test]
+    fn undo_preserves_later_authored_and_newer_ai_presentations() {
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(std::path::PathBuf::from("/tmp/title-undo"))
+            .unwrap();
+        let pane = tree
+            .add_pane(project, "Original", PaneContentKind::Terminal)
+            .unwrap();
+        let previous = tree.clone();
+        tree.set_automatic_pane_title(pane, "Structure title", None, None)
+            .unwrap();
+        tree.set_automatic_pane_title(
+            pane,
+            "Newer task",
+            Some("Newer".into()),
+            Some("book".into()),
+        )
+        .unwrap();
+        let live_revision = tree.get(pane).unwrap().presentation_revision;
+        tree.restore_project_from_preserving_presentations(project, &previous, &[pane])
+            .unwrap();
+        assert_eq!(tree.get(pane).unwrap().name, "Newer task");
+        assert!(tree.get(pane).unwrap().presentation_revision > live_revision);
+        tree.rename_node(pane, "Mine", Some("M".into()), Some("pin".into()))
+            .unwrap();
+        tree.restore_project_from(project, &previous).unwrap();
+        let restored = tree.get(pane).unwrap();
+        assert_eq!(restored.name, "Mine");
+        assert_eq!(restored.short_name.as_deref(), Some("M"));
+        assert_eq!(restored.inferred_icon.as_deref(), Some("pin"));
+        assert!(restored.is_name_fixed);
     }
 }

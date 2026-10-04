@@ -25,6 +25,9 @@ pub struct PaneDebugLogSnapshot {
     pub log: PaneDebugLog,
 }
 
+/// Snapshot preflight rejected the requested retained-memory allowance.
+pub(crate) struct SnapshotMemoryLimit;
+
 /// Durable journal owner for one detached session server.
 pub struct AgentDebugRecorder {
     enabled: AtomicBool,
@@ -121,6 +124,7 @@ impl AgentDebugRecorder {
             .append(occurred_at_unix_millis, source, context, draft)
     }
 
+    #[cfg(test)]
     pub async fn snapshot(&self) -> Vec<PaneDebugLogSnapshot> {
         let logs = self.logs.read().await;
         let mut snapshots: Vec<_> = logs
@@ -132,6 +136,32 @@ impl AgentDebugRecorder {
             .collect();
         snapshots.sort_by_key(|snapshot| snapshot.pane_id);
         snapshots
+    }
+
+    /// Preflight under the journal lock, before allocating a deep snapshot.
+    /// Used only by the session snapshot OS owner; rejection preserves logs.
+    pub(crate) async fn snapshot_with_limit(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<PaneDebugLogSnapshot>, SnapshotMemoryLimit> {
+        let logs = self.logs.read().await;
+        let bytes = logs.values().fold(
+            logs.len()
+                .saturating_mul(std::mem::size_of::<PaneDebugLogSnapshot>()),
+            |bytes, log| bytes.saturating_add(crate::snapshot_io::estimated_debug_log_bytes(log)),
+        );
+        if bytes > limit {
+            return Err(SnapshotMemoryLimit);
+        }
+        let mut snapshots: Vec<_> = logs
+            .iter()
+            .map(|(pane_id, log)| PaneDebugLogSnapshot {
+                pane_id: *pane_id,
+                log: log.clone(),
+            })
+            .collect();
+        snapshots.sort_by_key(|snapshot| snapshot.pane_id);
+        Ok(snapshots)
     }
 
     pub async fn restore(&self, snapshots: Vec<PaneDebugLogSnapshot>) {
@@ -464,6 +494,42 @@ mod tests {
 
     fn draft(summary: &str) -> AgentDebugEventDraft {
         AgentDebugEventDraft::information(AgentDebugEventKind::PromptSubmitted, summary)
+    }
+
+    #[tokio::test]
+    async fn snapshot_preflight_rejects_spare_capacity_without_losing_journal() {
+        let recorder = AgentDebugRecorder::new(true);
+        recorder
+            .append(
+                NodeId(7),
+                AgentDebugSource::Pty,
+                AgentDebugContext::default(),
+                draft("kept"),
+            )
+            .await
+            .expect("entry");
+        {
+            let mut logs = recorder.logs.write().await;
+            let entry = &mut logs.get_mut(&NodeId(7)).expect("log").entries[0];
+            entry.summary.reserve(8192);
+        }
+        assert!(recorder.snapshot_with_limit(1024).await.is_err());
+        let snapshot = recorder
+            .snapshot_with_limit(16384)
+            .await
+            .ok()
+            .expect("larger allowance");
+        assert_eq!(snapshot[0].log.entries[0].summary, "kept");
+        assert_eq!(snapshot[0].log.next_sequence, 2);
+        assert_eq!(
+            recorder
+                .replay(NodeId(7), None)
+                .await
+                .expect("journal")
+                .3
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

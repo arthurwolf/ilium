@@ -928,10 +928,19 @@ async fn resize_on_an_unknown_pane_returns_an_error_not_a_dropped_connection() {
     .expect("write ResizePane request");
 
     let event: ServerEvent = read_frame(&mut client).await.expect("read a reply");
-    assert!(
-        matches!(event, ServerEvent::Error { .. }),
-        "expected an Error reply for an unknown pane id, got {event:?}"
-    );
+    match event {
+        ServerEvent::PaneResizeRejected {
+            pane_id,
+            rows,
+            cols,
+            message,
+        } => {
+            assert_eq!(pane_id, NodeId(999));
+            assert_eq!((rows, cols), (40, 100));
+            assert!(message.contains("no pane found"));
+        }
+        other => panic!("expected a correlated resize rejection, got {other:?}"),
+    }
 
     // The connection must still be usable after the error -- send a real
     // request and confirm it still gets handled.

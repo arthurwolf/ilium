@@ -31,6 +31,15 @@ impl TextTriggerTarget {
     }
 }
 
+/// Seconds between detecting a trigger match and sending its message when the
+/// rule does not say otherwise. Rules stored before the delay existed carry no
+/// `delay_seconds` key and load with this value too.
+pub const DEFAULT_TEXT_TRIGGER_DELAY_SECONDS: u32 = 60;
+
+/// Longest accepted delay (24 hours). Bounds the server's pending-delivery
+/// timers; `0` sends immediately.
+pub const MAX_TEXT_TRIGGER_DELAY_SECONDS: u32 = 24 * 60 * 60;
+
 /// One ordered rule. Each instance of text matching `regexp` on the pane's
 /// screen attempts one `message` submission, however that text later scrolls,
 /// repaints or moves. An instance is identified by its matched text; it is
@@ -49,6 +58,10 @@ pub struct TextTrigger {
     /// Draft/sample text retained with the rule so its preview remains useful
     /// when the user returns to edit it.
     pub sample_text: String,
+    /// Whole seconds to wait between detecting a match and sending `message`.
+    /// A missing key (rules authored before this setting) deserializes to
+    /// [`DEFAULT_TEXT_TRIGGER_DELAY_SECONDS`] through the struct default.
+    pub delay_seconds: u32,
 }
 
 impl Default for TextTrigger {
@@ -60,6 +73,7 @@ impl Default for TextTrigger {
             message: String::new(),
             target: TextTriggerTarget::Both,
             sample_text: String::new(),
+            delay_seconds: DEFAULT_TEXT_TRIGGER_DELAY_SECONDS,
         }
     }
 }
@@ -87,6 +101,12 @@ impl TextTriggerSettings {
             if !ids.insert(&trigger.id) {
                 return Err(format!("Text Trigger {} repeats an existing id", index + 1));
             }
+            if trigger.delay_seconds > MAX_TEXT_TRIGGER_DELAY_SECONDS {
+                return Err(format!(
+                    "Text Trigger {} delay exceeds {MAX_TEXT_TRIGGER_DELAY_SECONDS} seconds",
+                    index + 1
+                ));
+            }
         }
         Ok(())
     }
@@ -106,6 +126,7 @@ mod tests {
                 message: "continue".to_string(),
                 target: TextTriggerTarget::Agents,
                 sample_text: "ready".to_string(),
+                delay_seconds: 15,
             }],
         };
         let encoded = bincode::serialize(&settings).expect("serialize settings");
@@ -145,5 +166,50 @@ mod identity_tests {
         let mut value = settings("stable");
         value.triggers.push(value.triggers[0].clone());
         assert!(value.validate_identities().is_err());
+    }
+}
+
+#[cfg(test)]
+mod delay_tests {
+    use super::*;
+
+    #[test]
+    fn rules_stored_before_the_delay_existed_load_with_the_default() {
+        let legacy = r#"
+            triggers = [
+                { id = "old", enabled = true, regexp = "ready", message = "go", target = "agents", sample_text = "" },
+            ]
+        "#;
+        let settings: TextTriggerSettings = toml::from_str(legacy).expect("legacy rule parses");
+        assert_eq!(settings.triggers[0].delay_seconds, 60);
+        assert_eq!(TextTrigger::default().delay_seconds, 60);
+    }
+
+    #[test]
+    fn explicit_delay_round_trips_through_toml_including_zero() {
+        for delay in [0, 1, 90, MAX_TEXT_TRIGGER_DELAY_SECONDS] {
+            let settings = TextTriggerSettings {
+                triggers: vec![TextTrigger {
+                    id: "r".into(),
+                    delay_seconds: delay,
+                    ..TextTrigger::default()
+                }],
+            };
+            let text = toml::to_string(&settings).expect("serialize");
+            let back: TextTriggerSettings = toml::from_str(&text).expect("parse");
+            assert_eq!(back.triggers[0].delay_seconds, delay);
+        }
+    }
+
+    #[test]
+    fn validation_rejects_delays_beyond_the_maximum() {
+        let settings = TextTriggerSettings {
+            triggers: vec![TextTrigger {
+                id: "r".into(),
+                delay_seconds: MAX_TEXT_TRIGGER_DELAY_SECONDS + 1,
+                ..TextTrigger::default()
+            }],
+        };
+        assert!(settings.validate_identities().is_err());
     }
 }

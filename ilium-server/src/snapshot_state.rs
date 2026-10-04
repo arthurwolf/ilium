@@ -90,7 +90,7 @@ impl SnapshotState {
         self.state.load(Ordering::Acquire) == DIRTY
     }
 
-    #[cfg(test)]
+    /// Observational fence; callers still require write ownership against deletion.
     pub fn is_session_killed(&self) -> bool {
         self.state.load(Ordering::Acquire) == KILLED
     }

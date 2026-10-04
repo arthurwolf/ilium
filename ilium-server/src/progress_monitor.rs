@@ -192,8 +192,10 @@ pub enum ProgressMonitorOutcome {
 
 /// Executes exactly one bounded server-equivalent probe.
 pub async fn preflight(command: &str) -> Result<ProgressMonitorPreflight, ProgressProbeError> {
-    let checked_at_unix_millis = unix_millis();
     let report = run_probe(command, ProbeExecutionLimits::default()).await?;
+    // Observation is complete only after the probe supplies a valid report.
+    // Its execution time must not consume a terminal footer's display window.
+    let checked_at_unix_millis = unix_millis();
     Ok(ProgressMonitorPreflight {
         report,
         checked_at_unix_millis,
@@ -402,6 +404,8 @@ struct RawProgressReport {
     #[serde(default)]
     message: String,
     #[serde(default)]
+    details: String,
+    #[serde(default)]
     error: Option<String>,
 }
 
@@ -559,6 +563,7 @@ async fn run_probe(
         raw.status,
         raw.percent as f32,
         raw.message,
+        raw.details,
         raw.error,
     )
     .map_err(|error| {
@@ -779,6 +784,27 @@ pub(crate) mod test_probes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn preflight_timestamps_successful_observation_after_probe_execution() {
+        let command = format!(
+            "{}; {}",
+            test_probes::sleep_seconds(1),
+            test_probes::emit_text(
+                r#"{"job_id":"slow-terminal-probe","status":"done","percent":100}"#,
+            ),
+        );
+        let started_at = unix_millis();
+        let result = preflight(&command).await.unwrap();
+        assert!(
+            result.checked_at_unix_millis >= started_at + 900,
+            "completion visibility must not spend its deadline executing the probe: start={started_at}, observation={}",
+            result.checked_at_unix_millis,
+        );
+        assert!(result.checked_at_unix_millis <= unix_millis());
+    }
+
     #[tokio::test]
     async fn preflight_accepts_all_exact_wire_statuses_and_normalizes_done() {
         for status in ["not-started-yet", "running", "error", "done"] {
@@ -819,6 +845,15 @@ mod tests {
             let error = preflight(&test_probes::emit_text(json)).await.unwrap_err();
             assert_eq!(error.kind, ProgressProbeFailureKind::InvalidReport);
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_carries_multi_line_details_alongside_the_compact_message() {
+        let json = r#"{"job_id":"job","status":"running","percent":40,"message":"Building the app - crate 4 of 10","details":"What: build\nWhy: release"}"#;
+        let preflight = preflight(&test_probes::emit_text(json)).await.unwrap();
+        assert_eq!(preflight.report.message, "Building the app - crate 4 of 10");
+        assert_eq!(preflight.report.details, "What: build\nWhy: release");
     }
 
     #[tokio::test]
@@ -902,6 +937,7 @@ mod tests {
             ProgressTaskStatus::Running,
             50.0,
             String::new(),
+            String::new(),
             None,
         )
         .unwrap();
@@ -915,6 +951,7 @@ mod tests {
             "expected".to_string(),
             ProgressTaskStatus::NotStartedYet,
             0.0,
+            String::new(),
             String::new(),
             None,
         )

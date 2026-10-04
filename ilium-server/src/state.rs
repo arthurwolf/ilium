@@ -81,6 +81,8 @@ pub(crate) struct ProgressSetRequestCache {
 pub struct VersionedTextTriggerSettings {
     pub settings: ilium_ipc::TextTriggerSettings,
     pub revision: u64,
+    // The original accepted allocation stays charged until replacement/drop.
+    pub(crate) retention: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
 /// One coherent runtime snapshot consumed by the detector. Keeping the
@@ -161,11 +163,11 @@ pub struct ServerState {
     /// Acquire before text_trigger_settings; never while holding tree/panes.
     pub(crate) text_trigger_settings_transaction: Mutex<()>,
     pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
-    pub tree: RwLock<Tree>,
-    pub panes: RwLock<PaneRegistry>,
+    pub tree: std::sync::Arc<RwLock<Tree>>,
+    pub panes: std::sync::Arc<RwLock<PaneRegistry>>,
     /// Server-owned, pane-keyed semantic debug history. It is separate from
     /// the hot tree snapshot transported after structural changes.
-    pub agent_debug: AgentDebugRecorder,
+    pub agent_debug: std::sync::Arc<AgentDebugRecorder>,
     /// Most recently selected terminal launch directory in this session.
     pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
     pub pending_session_recovery: Mutex<Option<SessionSnapshot>>,
@@ -175,7 +177,14 @@ pub struct ServerState {
     /// Apply and undo share one publication boundary; socket replies occur after release.
     pub restructure_transaction: Mutex<()>,
     pub restructure_undo: Mutex<HashMap<NodeId, Tree>>,
+    pub restructure_title_revisions:
+        Mutex<HashMap<NodeId, Vec<ilium_core::NodePresentationRevision>>>,
     pub snapshot_write_lock: std::sync::Arc<Mutex<()>>,
+    pub(crate) snapshot_io: tokio::sync::OnceCell<crate::snapshot_io::SnapshotIo>,
+    /// Finite CPU/I/O bank, started once before interactive coordination.
+    pub(crate) execution: std::sync::OnceLock<crate::execution::ServerExecution>,
+    /// Keep applied logging transitions and their IPC broadcasts in one order.
+    pub(crate) debug_logging_transaction: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
     /// check and PTY write. Lock ordering is this mutex, then `tree`, then
     /// `panes`; no other workflow acquires it, so a replaced timer cannot fire
@@ -198,7 +207,8 @@ pub struct ServerState {
     /// Runtime-only Git facts. The tree stores creation provenance, never
     /// potentially stale dirty counts or upstream information.
     pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
-    pub(crate) workspace_close_preferences: RwLock<HashMap<NodeId, WorkspaceClosePreference>>,
+    pub(crate) workspace_close_preferences:
+        std::sync::Arc<RwLock<HashMap<NodeId, WorkspaceClosePreference>>>,
     workspace_git_full_requests: mpsc::Sender<NodeId>,
     workspace_git_full_receiver: Mutex<Option<mpsc::Receiver<NodeId>>>,
     workspace_creation_tasks: std::sync::Mutex<WorkspaceCreationTasks>,
@@ -359,20 +369,26 @@ impl ServerState {
             text_trigger_config_path: std::sync::OnceLock::new(),
             text_trigger_settings_transaction: Mutex::new(()),
             sound_requests: options.sound_requests,
-            tree: RwLock::new(tree),
-            panes: RwLock::new(HashMap::new()),
-            agent_debug: AgentDebugRecorder::new(options.agent_debug_menu_enabled),
+            tree: std::sync::Arc::new(RwLock::new(tree)),
+            panes: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            agent_debug: std::sync::Arc::new(AgentDebugRecorder::new(
+                options.agent_debug_menu_enabled,
+            )),
             last_terminal_working_directory: Mutex::new(None),
             pending_session_recovery: Mutex::new(None),
             restructure_transaction: Mutex::new(()),
             restructure_undo: Mutex::new(HashMap::new()),
+            restructure_title_revisions: Mutex::new(HashMap::new()),
             snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
+            snapshot_io: tokio::sync::OnceCell::new(),
+            execution: std::sync::OnceLock::new(),
+            debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
             workspace_repository_locks: Mutex::new(HashMap::new()),
             workspace_spawn_lock: Mutex::new(()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
-            workspace_close_preferences: RwLock::new(HashMap::new()),
+            workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
             workspace_git_full_requests,
             workspace_git_full_receiver: Mutex::new(Some(workspace_git_full_receiver)),
             workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),
@@ -657,9 +673,8 @@ impl ServerState {
         self.snapshot_state.is_dirty()
     }
 
-    /// Whether this session has been killed. Tests only, for the same
-    /// reason as above.
-    #[cfg(test)]
+    /// Observational kill fence for snapshot admission. Persistence checks
+    /// this only while retaining the snapshot write guard through disk completion.
     pub fn is_session_killed(&self) -> bool {
         self.snapshot_state.is_session_killed()
     }
@@ -680,6 +695,10 @@ impl ServerState {
         let tree = self.tree.read().await;
         let mut undo = self.restructure_undo.lock().await;
         undo.retain(|project_id, _| tree.get(*project_id).is_some());
+        self.restructure_title_revisions
+            .lock()
+            .await
+            .retain(|project_id, _| tree.get(*project_id).is_some());
     }
 }
 
