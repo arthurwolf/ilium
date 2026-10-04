@@ -482,6 +482,57 @@ function Restore-IliumTransactionPath($Journal, [switch]$PathApplied) {
     Write-Warning 'Concurrent user PATH edits were preserved; ambiguous PATH ownership was not assumed.'
 }
 
+function Remove-IliumUninstallResidue([string]$Root, [string]$Bin) {
+    $stateDirectory = Join-Path $Root 'installer-state'
+    $statePath = Join-Path $stateDirectory 'state.json'
+    if (-not [IO.File]::Exists($statePath)) { return }
+    Assert-IliumPlainPath $stateDirectory
+    Assert-IliumPlainPath $statePath
+    $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    if ($state.schema -ne 1 -or $state.owner -cne 'ilium-windows-installer-1' -or $state.root -cne $Root -or
+        $state.bin -cne $Bin -or $state.path_added -isnot [bool] -or $state.path_added) {
+        Write-Warning 'Uninstall ownership state changed; installer metadata was preserved.'
+        return
+    }
+
+    $canRemoveState = $true
+    $versionsDirectory = Join-Path $Root 'versions'
+    if ([IO.Directory]::Exists($versionsDirectory)) {
+        Assert-IliumPlainPath $versionsDirectory
+        if ([IO.Directory]::GetFileSystemEntries($versionsDirectory).Length -eq 0) {
+            [IO.Directory]::Delete($versionsDirectory, $false)
+        } else { $canRemoveState = $false }
+    }
+
+    $defaultBin = Join-Path $Root 'bin'
+    if ($Bin -ieq $defaultBin -and [IO.Directory]::Exists($Bin)) {
+        Assert-IliumPlainPath $Bin
+        if ([IO.Directory]::GetFileSystemEntries($Bin).Length -eq 0) {
+            [IO.Directory]::Delete($Bin, $false)
+        } else { $canRemoveState = $false }
+    } elseif ($Bin -ine $defaultBin) {
+        foreach ($executable in @('ilium', 'ilium-server')) {
+            $launcher = Join-Path $Bin ($executable + '.cmd')
+            Assert-IliumPlainPath $launcher
+            if ([IO.File]::Exists($launcher)) { $canRemoveState = $false }
+        }
+    }
+
+    $stateEntries = @(Get-ChildItem -LiteralPath $stateDirectory -Force)
+    if ($stateEntries.Count -ne 1 -or $stateEntries[0].Name -cne 'state.json' -or $stateEntries[0].PSIsContainer) {
+        $canRemoveState = $false
+    }
+    if (-not $canRemoveState) { return }
+
+    # Re-read ownership immediately before deleting the only installer-owned
+    # state file. Unknown metadata and retained modified receipts keep it intact.
+    $state = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    if ($state.schema -ne 1 -or $state.owner -cne 'ilium-windows-installer-1' -or $state.root -cne $Root -or
+        $state.bin -cne $Bin -or $state.path_added -isnot [bool] -or $state.path_added) { return }
+    [IO.File]::Delete($statePath)
+    [IO.Directory]::Delete($stateDirectory, $false)
+}
+
 function Get-IliumRecoveryCommand {
     param([string]$Version, [string]$InstallDir, [string]$BinDir, [switch]$NoModifyPath, [switch]$Uninstall)
     # Recovery also works after an HTTPS bootstrap without a local script.
@@ -595,8 +646,15 @@ function Invoke-IliumInstall {
             $journal.ready = $true
             Write-IliumAtomic (Join-Path $stateDirectory 'transaction.json') ($journal | ConvertTo-Json -Compress)
             $committed = $true
-            try { Recover-IliumTransaction $root $bin }
-            catch { Write-Warning "Uninstall cleanup deferred at $quarantine; retry this installer with -Uninstall." }
+            $recoveryComplete = $false
+            try {
+                Recover-IliumTransaction $root $bin
+                $recoveryComplete = -not [IO.File]::Exists((Join-Path $stateDirectory 'transaction.json'))
+            } catch { Write-Warning "Uninstall cleanup deferred at $quarantine; retry this installer with -Uninstall." }
+            if ($recoveryComplete) {
+                try { Remove-IliumUninstallResidue $root $bin }
+                catch { Write-Warning 'Empty uninstall metadata cleanup deferred; unknown or inaccessible content was preserved.' }
+            }
             Write-Output 'ilium-install: stage=complete action=uninstall unknown_content=preserved'
             return
         }

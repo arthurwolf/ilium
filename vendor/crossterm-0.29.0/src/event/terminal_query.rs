@@ -6,7 +6,7 @@
 
 use super::{Event, InternalEvent, KeyCode};
 
-const MAX_REPLY_BYTES: usize = 256;
+pub(super) const MAX_REPLY_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReplyPrefix {

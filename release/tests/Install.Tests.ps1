@@ -248,7 +248,43 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         Test-Path (Join-Path $unknown 'keep') | Should -BeTrue
         Test-Path (Join-Path $script:root 'config.toml') | Should -BeTrue
         [IO.File]::ReadAllText((Join-Path $script:bin 'ilium.cmd')) | Should -Be 'keep'
+        Test-Path (Join-Path $script:root 'installer-state/state.json') | Should -BeTrue
         $script:userPath | Should -Be 'C:\other;;C:\keep'
+    }
+    It 'removes owned metadata and empty default directories after uninstall' {
+        $script:bin = Join-Path $script:root 'bin'
+        $script:fixtureArchive = New-TestRelease '1.0.0'
+        Invoke-IliumInstall -Version '1.0.0' -InstallDir $script:root
+        $authored = Join-Path $script:root 'config.toml'
+        [IO.File]::WriteAllText($authored, 'keep')
+        $before = $script:userPath
+
+        Invoke-IliumInstall -Uninstall -InstallDir $script:root
+
+        Test-Path (Join-Path $script:root 'installer-state/state.json') | Should -BeFalse
+        Test-Path (Join-Path $script:root 'installer-state') | Should -BeFalse
+        Test-Path (Join-Path $script:root 'versions') | Should -BeFalse
+        Test-Path $script:bin | Should -BeFalse
+        Test-Path $script:root | Should -BeTrue
+        Test-Path (Join-Path $script:root '.install-lock') | Should -BeTrue
+        [IO.File]::ReadAllText($authored) | Should -Be 'keep'
+        $script:userPath | Should -Be $before
+    }
+    It 'preserves unknown installer metadata while removing empty default directories' {
+        $script:bin = Join-Path $script:root 'bin'
+        $script:fixtureArchive = New-TestRelease '1.0.0'
+        Invoke-IliumInstall -Version '1.0.0' -InstallDir $script:root
+        $unknown = Join-Path $script:root 'installer-state/authored.json'
+        [IO.File]::WriteAllText($unknown, 'keep')
+
+        Invoke-IliumInstall -Uninstall -InstallDir $script:root
+
+        Test-Path $unknown | Should -BeTrue
+        Test-Path (Join-Path $script:root 'installer-state/state.json') | Should -BeTrue
+        Test-Path (Join-Path $script:root 'versions') | Should -BeFalse
+        Test-Path $script:bin | Should -BeFalse
+        [IO.File]::ReadAllText($unknown) | Should -Be 'keep'
+        Test-Path (Join-Path $script:root '.install-lock') | Should -BeTrue
     }
     It 'rejects low disk space before any downloads' {
         Mock Get-IliumFreeSpace { 1024 }

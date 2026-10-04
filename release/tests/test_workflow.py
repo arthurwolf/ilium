@@ -647,6 +647,41 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('build_windows_ort.py', (ROOT / '.github/workflows/release.yml').read_text())
         self.assertIn('${{ runner.temp }}/native-work/*/*.log', (ROOT / '.github/workflows/release.yml').read_text())
 
+    def test_windows_pester_setup_accepts_pinned_module_publisher_transition(self):
+        windows_target = next(target for target in self.targets if target['os'] == 'windows')
+        arguments = SimpleNamespace(manifest=ROOT / 'release/targets.toml', target=windows_target['rust_target'],
+                                    workspace=ROOT / 'Cargo.toml', tag='v0.1.0', runner_identity=windows_target['runner'],
+                                    work=self.root / 'work', output=self.root / 'output')
+        captured = []
+
+        class ReachedPesterSetup(Exception):
+            pass
+
+        def capture_logged(command, root, log, environment=None, timeout=10_800):
+            invocation = list(map(str, command))
+            if any(Path(part).name == 'build_windows_ort.py' for part in invocation):
+                output = self.root / 'work/windows-ort'
+                output.mkdir(parents=True, exist_ok=True)
+                pipeline.write_json(output / 'environment.json', {'ORT_LIB_LOCATION': str(self.root)})
+            if Path(log).name == 'pester-setup.log':
+                captured.append(invocation)
+                raise ReachedPesterSetup
+
+        with patch.object(pipeline.platform, 'system', return_value='Windows'), \
+                patch.object(pipeline.platform, 'machine', return_value='AMD64'), \
+                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline, 'download', side_effect=lambda _url, path, _digest: Path(path).write_bytes(b'fixture')), \
+                patch.object(pipeline, 'logged', side_effect=capture_logged):
+            with self.assertRaises(ReachedPesterSetup):
+                pipeline.native(arguments)
+
+        self.assertEqual(len(captured), 1)
+        setup_command = captured[0]
+        self.assertEqual(setup_command[:3], ['powershell.exe', '-NoProfile', '-NonInteractive'])
+        setup_script = setup_command[setup_command.index('-Command') + 1]
+        self.assertIn('Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force', setup_script)
+        self.assertIn('-SkipPublisherCheck', setup_script)
+
     def test_aggregate_real_archive_parsing_and_source_tamper_gates(self):
         arguments = self.create_native_fixture()
         with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):

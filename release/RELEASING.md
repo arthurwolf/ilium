@@ -384,7 +384,7 @@ lifecycle evidence rather than substituting a portable parser result.
 `candidate.json` retains the complete macOS asset map and native/source bindings.
 Every later candidate read repeats these checks. Attestation covers the packages
 and receipts; the shared draft, publication, public asset readback and recovery
-paths use the same complete asset inventory. The stable names match the README's
+paths use the same complete asset inventory. The stable names match the installation guide's (src/docs/installation.md)
 six direct ZIP/PKG/DMG links. GitHub asset digests and `candidate.json` carry their
 hashes; the five-entry `SHA256SUMS` remains the portable native-archive inventory
 used by the public installers. These source contracts still require successful
@@ -522,6 +522,6 @@ restoration.
 Keep source commit, runner, target, archive and binary hashes, native loader and
 embedding output, install/PTY receipts, release readbacks and Pages readbacks.
 Do not print secrets. Proposed, built, audited, uploaded, published and publicly
-installed are distinct states. Advertise the commands in README only after all
+installed are distinct states. Advertise the commands in the installation guide (src/docs/installation.md) only after all
 five native literal-command receipts pass. Preserve the existing demo gallery
-and inference/privacy text when updating README.
+and inference/privacy text when updating the installation guide (src/docs/installation.md).

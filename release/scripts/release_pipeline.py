@@ -312,7 +312,7 @@ def native(arguments):
             continue
         logged([sys.executable, '-m', 'unittest', 'discover', '-s', 'release/tests', '-p', test_module.name], root, work / (test_module.stem + '.log'), environment)
     if target['os'] == 'windows':
-        pester_setup = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force; Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force"
+        pester_setup = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force; Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck"
         logged(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', pester_setup], root, work / 'pester-setup.log', environment)
         for shell in ('powershell.exe', 'pwsh.exe'):
             pester_command = "Import-Module Pester -RequiredVersion 5.7.1 -Force; $result = Invoke-Pester -Path release/tests/Install.Tests.ps1 -Output Detailed -PassThru; if ($result.FailedCount -gt 0 -or $result.PassedCount -lt 1) { exit 1 }"
