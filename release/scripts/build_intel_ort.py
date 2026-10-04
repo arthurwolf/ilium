@@ -188,9 +188,9 @@ def build(arguments):
     require(command_identity(["lipo", "-archs", str(runtime)])["stdout"].strip() == "x86_64", "built ONNX Runtime is not Intel-only")
     cargo_values = cargo_environment(runtime.parent, arguments.cargo_home, arguments.cargo_target_dir)
     environment.update(cargo_values)
-    cargo_command = ["cargo", "build", "--locked", "--release", "--manifest-path", arguments.cargo_workspace, "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"]
+    cargo_command = ["cargo", "build", "--locked", "--release", "--manifest-path", arguments.cargo_workspace, "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"]
     logged_command(cargo_command, arguments.cargo_workspace.parent, environment, arguments.output_root / "cargo-build.log")
-    binaries = {name: digest((arguments.cargo_target_dir / "x86_64-apple-darwin/release" / name).read_bytes()) for name in ("ilium", "ilium-server")}
+    binaries = {name: digest((arguments.cargo_target_dir / "x86_64-apple-darwin/release" / name).read_bytes()) for name in ("ilium", "ilium-server", "ilium-animation-helper")}
     receipt = {"schema": 1, "state": "built-not-qualified", "publication_allowed": False, "source_register": register, "source_register_sha256": digest(arguments.source_register.read_bytes()), "tag_resolution": tag_evidence, "toolchain": toolchain, "runner_identity": arguments.runner_identity, "native_identity": {"system": platform.system(), "machine": platform.machine(), "release": platform.release(), "version": platform.version()}, "ort_command": list(map(str, command)), "cargo_command": list(map(str, cargo_command)), "environment": cargo_values, "runtime": {"path": str(runtime), "sha256": digest(runtime.read_bytes()), "version": VERSION}, "remaining_gate": "native audit and real post-install embedding inference using the shipped runtime"}
     receipt.update(binaries=binaries, workspace_sha256=digest(arguments.cargo_workspace.read_bytes()), lock_sha256=digest((arguments.cargo_workspace.parent / "Cargo.lock").read_bytes()))
     atomic_write(arguments.output, (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode())

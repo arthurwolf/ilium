@@ -285,12 +285,12 @@ def build(arguments):
     environment.update(cargo_values)
     cargo_command = ["cargo", "build", "--locked", "--release", "--manifest-path",
                      str(arguments.cargo_workspace), "--target", TARGET,
-                     "--bin", "ilium", "--bin", "ilium-server"]
+                     "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"]
     logged_command(cargo_command, arguments.cargo_workspace.parent, environment,
                    arguments.output_root / "cargo-build.log")
     binary_directory = arguments.cargo_target_dir / TARGET / "release"
     binaries = {name: digest((binary_directory / name).read_bytes())
-                for name in ("ilium.exe", "ilium-server.exe")}
+                for name in ("ilium.exe", "ilium-server.exe", "ilium-animation-helper.exe")}
     receipt = {
         "schema": 1,
         "state": "built-not-qualified",

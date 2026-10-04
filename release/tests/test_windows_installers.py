@@ -20,7 +20,10 @@ WIX_NAMESPACE = '{http://wixtoolset.org/schemas/v4/wxs}'
 
 
 def make_archive(directory, version='0.1.0', members=None):
-    members = members or {'ilium.exe': b'client', 'ilium-server.exe': b'server', 'onnxruntime.dll': b'ort',
+    members = members or {'ilium.exe': b'client', 'ilium-server.exe': b'server',
+                          'ilium-animation-helper.exe': b'helper', 'onnxruntime.dll': b'ort',
+                          **{name: (ROOT / 'ilium-animation-js/assets/packages' / name).read_bytes()
+                             for name in release_tool.APPROVED_PACKAGES},
                           'VERSION': (version + '\n').encode(), 'THIRD-PARTY.txt': b'notices'}
     archive = Path(directory) / 'ilium-windows-x86_64.zip'
     with zipfile.ZipFile(archive, 'w') as package:
@@ -36,7 +39,22 @@ class PackagingTests(unittest.TestCase):
             archive = make_archive(temporary)
             files = installers.extract_package(archive, '0.1.0', Path(temporary) / 'package')
             self.assertEqual(files['ilium.exe'], hashlib.sha256(b'client').hexdigest())
-            self.assertEqual(set(files), {'ilium.exe', 'ilium-server.exe', 'onnxruntime.dll', 'VERSION', 'THIRD-PARTY.txt'})
+            self.assertEqual(set(files), {'ilium.exe', 'ilium-server.exe', 'ilium-animation-helper.exe',
+                                          'onnxruntime.dll', *release_tool.APPROVED_PACKAGES,
+                                          'VERSION', 'THIRD-PARTY.txt'})
+            for name, digest in release_tool.APPROVED_PACKAGES.items():
+                self.assertEqual(files[name], digest)
+
+    def test_extract_rejects_tampered_official_animation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_archive(temporary)
+            with zipfile.ZipFile(source) as archive:
+                members = {entry.filename.rsplit('/', 1)[-1]: archive.read(entry)
+                           for entry in archive.infolist() if not entry.is_dir()}
+            members['carpet-1.0.0.iliumanim'] = b'tampered archive'
+            archive = make_archive(temporary, members=members)
+            with self.assertRaises(release_tool.ReleaseError):
+                installers.extract_package(archive, '0.1.0', Path(temporary) / 'tampered')
 
     def test_extract_rejects_unexpected_traversal_version_and_missing_members(self):
         cases = {
@@ -58,7 +76,9 @@ class PackagingTests(unittest.TestCase):
                 installers.version_from_tag(tag)
 
     def test_wix_source_is_per_user_with_user_path_and_clean_removal(self):
-        files = {'ilium.exe': 'a', 'ilium-server.exe': 'b', 'onnxruntime.dll': 'c'}
+        files = {'ilium.exe': 'a', 'ilium-server.exe': 'b', 'ilium-animation-helper.exe': 'c',
+                 'onnxruntime.dll': 'd', **{name: release_tool.APPROVED_PACKAGES[name]
+                                           for name in release_tool.APPROVED_PACKAGES}}
         source = installers.render_wix(Path('C:/pkg'), files, '0.1.0')
         root = ElementTree.fromstring(source)
         package = root.find(WIX_NAMESPACE + 'Package')
@@ -70,7 +90,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual((environment.get('Name'), environment.get('System'), environment.get('Action'), environment.get('Part')), ('PATH', 'no', 'set', 'last'))
         registry = next(package.iter(WIX_NAMESPACE + 'RegistryValue'))
         self.assertEqual((registry.get('Root'), registry.get('KeyPath')), ('HKCU', 'yes'))
-        self.assertEqual(len(list(package.iter(WIX_NAMESPACE + 'File'))), 3)
+        self.assertEqual(len(list(package.iter(WIX_NAMESPACE + 'File'))), 6)
         self.assertEqual({item.get('Directory') for item in package.iter(WIX_NAMESPACE + 'RemoveFolder')}, {'INSTALLFOLDER', 'IliumPrograms'})
 
     def test_wix_escapes_source_paths(self):

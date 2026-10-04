@@ -26,9 +26,9 @@ import tempfile
 import time
 import tomllib
 
-from release_tool import (JsonArgumentParser, ReleaseError, digest, emit,
+from release_tool import (APPROVED_PACKAGES, JsonArgumentParser, ReleaseError, digest, emit,
                           read_json, safe_member_name, selected_target,
-                          workspace_version)
+                          version_identity, workspace_version)
 
 
 def require(condition, message):
@@ -159,12 +159,12 @@ def validate_intel_commands(receipt, workspace=None):
     expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", ort[10], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
     require(ort == expected_ort, "Intel ORT command differs from the reviewed Xcode/x86_64 recipe")
     cargo = receipt.get("cargo_command")
-    require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Intel Cargo command evidence is missing/malformed")
+    require(isinstance(cargo, list) and len(cargo) == 14 and all(isinstance(value, str) for value in cargo), "Intel Cargo command evidence is missing/malformed")
     manifest = PurePosixPath(cargo[5])
     require(manifest.is_absolute() and manifest.name == "Cargo.toml" and ".." not in manifest.parts, "Intel Cargo manifest identity is invalid")
     require(workspace is None or manifest == PurePosixPath(str(Path(workspace).resolve())), "Intel Cargo command used a different workspace path")
-    expected_cargo = ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"]
-    require(cargo == expected_cargo, "Intel Cargo command differs from the locked native release-pair build")
+    expected_cargo = ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"]
+    require(cargo == expected_cargo, "Intel Cargo command differs from the locked native release build")
     environment = receipt.get("environment")
     require(isinstance(environment, dict), "Intel Cargo environment evidence is missing")
     for variable in ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR"):
@@ -251,10 +251,10 @@ def validate_windows_build_receipt(receipt, runtimes, runner="windows-2025", wor
     invocation = receipt.get("ort_invocation")
     require(isinstance(invocation, list) and len(invocation) == len(ort) + 3 and [value.casefold() for value in invocation[:3]] == ["cmd.exe", "/d", "/c"] and invocation[3:] == ort, "Windows ORT invocation evidence is malformed")
     cargo = receipt.get("cargo_command")
-    require(isinstance(cargo, list) and len(cargo) == 12 and all(isinstance(value, str) for value in cargo), "Windows Cargo command evidence is missing/malformed")
+    require(isinstance(cargo, list) and len(cargo) == 14 and all(isinstance(value, str) for value in cargo), "Windows Cargo command evidence is missing/malformed")
     manifest = receipt_path(cargo[5])
     require(manifest.is_absolute() and manifest.name == "Cargo.toml" and ".." not in manifest.parts and (workspace is None or manifest == receipt_path(str(Path(workspace).resolve()))), "Windows Cargo manifest identity is invalid")
-    require(cargo == ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server"], "Windows Cargo command differs from the locked native release-pair build")
+    require(cargo == ["cargo", "build", "--locked", "--release", "--manifest-path", cargo[5], "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"], "Windows Cargo command differs from the locked native release build")
     environment = receipt.get("environment")
     required_paths = ("ORT_LIB_LOCATION", "ORT_LIB_PATH", "CARGO_HOME", "CARGO_TARGET_DIR")
     require(isinstance(environment, dict) and all(isinstance(environment.get(name), str) and receipt_path(environment[name]).is_absolute() and ".." not in receipt_path(environment[name]).parts for name in required_paths), "Windows Cargo boundary lacks absolute owned paths")
@@ -280,7 +280,9 @@ def system_dependency(operating_system, name):
         return (name.startswith("/System/Library/Frameworks/") or name.startswith("/usr/lib/")) and "onnx" not in name.casefold() and ".." not in name
     if operating_system == "windows":
         # Vendor CRT/UCRT redistributables are intentionally not exempted.
-        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll", "combase.dll", "pdh.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
+        # Core Audio is supplied by Windows, not redistributed with ilium:
+        # https://learn.microsoft.com/en-us/windows/win32/coreaudio/header-files-and-system-components
+        return name.casefold() in {"kernel32.dll", "user32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "ws2_32.dll", "ntdll.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "rpcrt4.dll", "gdi32.dll", "comdlg32.dll", "comctl32.dll", "shlwapi.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll", "cfgmgr32.dll", "propsys.dll", "dwmapi.dll", "powrprof.dll", "iphlpapi.dll", "dnsapi.dll", "msvcrt.dll", "dbghelp.dll", "dxgi.dll", "combase.dll", "pdh.dll", "mmdevapi.dll"} or bool(re.fullmatch(r"(?:api|ext)-ms-win-[a-z0-9-]+\.dll", name.casefold()))
     return bool(re.fullmatch(r"(?:lib(?:c|m|pthread|dl|rt|resolv|util|ssl|crypto)\.so\.[0-9]+|ld-linux[^/]*\.so\.[0-9]+|lib(?:asound|udev|gcc_s)\.so\.[0-9]+|libstdc\+\+\.so\.6)", name))
 
 
@@ -573,7 +575,7 @@ def audit(arguments):
     require(not arguments.directory.is_symlink() and directory.is_dir(), "installed candidate directory is missing or a link")
     inventory = validate_runtime_inventory(read_json(arguments.runtime_inventory), arguments.target)
     dependencies = read_json(arguments.dependency_inventory)
-    expected = {*target["executables"], "VERSION", "THIRD-PARTY.txt", *(item["name"] for item in inventory["files"])}
+    expected = {*target["executables"], *target["packages"], "VERSION", "THIRD-PARTY.txt", *(item["name"] for item in inventory["files"])}
     actual = {path.name for path in directory.iterdir()}
     # Notices are generated only after complete licence review. They may be absent
     # on the first audit, but every other missing/extra byte blocks the candidate.
@@ -581,6 +583,9 @@ def audit(arguments):
     for path in directory.iterdir():
         require(path.is_file() and not path.is_symlink(), "candidate contains a link/directory/special file")
     require((directory / "VERSION").read_bytes() == (version + "\n").encode(), "installed VERSION differs from workspace/tag")
+    for name in target["packages"]:
+        require(digest((directory / name).read_bytes()) == APPROVED_PACKAGES[name],
+                f"official animation package differs from compiled release identity: {name}")
     for item in inventory["files"]:
         path = directory / item["name"]
         require(digest(path.read_bytes()) == item["sha256"], f"runtime hash differs: {path.name}")
@@ -641,8 +646,8 @@ def audit(arguments):
         for variable in ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"):
             environment.pop(variable, None)
         result = run([directory / executable, "--version"], environment)
-        require(result.stdout.strip() == f"{executable.removesuffix('.exe')} {version}" and not result.stderr, f"native version output differs: {executable}")
-        versions[executable] = result.stdout.strip()
+        require(not result.stderr, f"native version emitted diagnostics: {executable}")
+        versions[executable] = version_identity(executable, result.stdout, version)
     receipt["binary_versions"] = versions
     require(qualified_hashes == {name: digest((directory / name).read_bytes()) for name in code}, "candidate code changed during native runtime qualification")
     receipt["files"] = {name: digest((directory / name).read_bytes()) for name in sorted(expected)}

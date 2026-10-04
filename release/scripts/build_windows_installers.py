@@ -35,7 +35,7 @@ HOMEPAGE = 'https://github.com/arthurwolf/ilium'
 MSI_UPGRADE_CODE = '6F1B7D0E-2C54-4A9B-9E3D-51C8A4B7F0D2'
 MSI_COMPONENT_CODE = 'A4D07E19-5B83-4C62-B0F1-7E2C9D3A8F46'
 EXE_APP_ID = '{{C3A92E58-7B16-4D0F-8A41-0E5D9F2B6C73}'
-MEMBER_PATTERN = re.compile(r'\A(?:ilium\.exe|ilium-server\.exe|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\Z')
+MEMBER_PATTERN = re.compile(r'\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\Z')
 VERSION_PATTERN = re.compile(r'\A(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\Z')
 MAX_MEMBER_BYTES = 1_073_741_824
 MAX_TOTAL_BYTES = 2_000_000_000
@@ -96,7 +96,9 @@ def extract_package(archive, version, destination):
             require(total <= MAX_TOTAL_BYTES, 'ZIP expanded size exceeds bound')
             seen.add(name)
             (destination / name).write_bytes(package.read(entry))
-    require({'ilium.exe', 'ilium-server.exe', 'VERSION', 'THIRD-PARTY.txt'} <= seen, 'ZIP is missing a required member')
+    require({'ilium.exe', 'ilium-server.exe', 'ilium-animation-helper.exe', *release_tool.APPROVED_PACKAGES, 'VERSION', 'THIRD-PARTY.txt'} <= seen, 'ZIP is missing a required member')
+    for name, digest in release_tool.APPROVED_PACKAGES.items():
+        require(sha(destination / name) == digest, 'official animation package hash differs: ' + name)
     require((destination / 'VERSION').read_bytes() == (version + '\n').encode(), 'ZIP VERSION differs from the release version')
     return {name: sha(destination / name) for name in sorted(seen)}
 
@@ -159,45 +161,259 @@ Source: "*"; DestDir: "{app}"; Flags: ignoreversion
 [Code]
 const
   EnvironmentKey = 'Environment';
+  OwnershipKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{C3A92E58-7B16-4D0F-8A41-0E5D9F2B6C73}_is1';
+
+var
+  PathBefore, PathAfter, PathEntry: string;
+  PathExisted, PathOwned: Cardinal;
+  PathReceiptRetained: Boolean;
+
+function ExpandEnvironmentStringsW(Source, Destination: string; Size: Cardinal): Cardinal;
+  external 'ExpandEnvironmentStringsW@kernel32.dll stdcall';
+
+procedure PathRequire(Condition: Boolean; const Message: string);
+begin
+  if not Condition then
+    RaiseException('Ilium PATH ownership: ' + Message);
+end;
+
+function NormalizePathToken(Value: string): string;
+var
+  Expanded: string;
+  Size: Cardinal;
+begin
+  Value := Trim(Value);
+  if Length(Value) >= 2 then
+    if (Value[1] = '"') and (Value[Length(Value)] = '"') then
+      Value := Copy(Value, 2, Length(Value) - 2);
+  SetLength(Expanded, 32768);
+  Size := ExpandEnvironmentStringsW(Value, Expanded, 32768);
+  PathRequire((Size > 0) and (Size <= 32768), 'environment expansion failed');
+  SetLength(Expanded, Size - 1);
+  StringChangeEx(Expanded, '/', '\', True);
+  while Length(Expanded) > 3 do
+  begin
+    if Expanded[Length(Expanded)] <> '\' then
+      Break;
+    Delete(Expanded, Length(Expanded), 1);
+  end;
+  Result := Lowercase(Expanded);
+end;
+
+function EntryCount(const List, Entry: string): Integer;
+var
+  Remaining, Token, Wanted: string;
+  Separator: Integer;
+begin
+  Result := 0;
+  Remaining := List;
+  Wanted := NormalizePathToken(Entry);
+  repeat
+    Separator := Pos(';', Remaining);
+    if Separator = 0 then
+      Token := Remaining
+    else
+      Token := Copy(Remaining, 1, Separator - 1);
+    if Trim(Token) <> '' then
+      if NormalizePathToken(Token) = Wanted then
+        Result := Result + 1;
+    if Separator > 0 then
+      Delete(Remaining, 1, Separator);
+  until Separator = 0;
+end;
 
 function ListContains(const List, Entry: string): Boolean;
 begin
-  Result := Pos(';' + Lowercase(Entry) + ';', ';' + Lowercase(List) + ';') > 0;
+  Result := EntryCount(List, Entry) > 0;
+end;
+
+function ReadUserPath(var Current: string): Boolean;
+begin
+  Current := '';
+  Result := RegValueExists(HKCU64, EnvironmentKey, 'Path');
+  if Result then
+    PathRequire(RegQueryStringValue(HKCU64, EnvironmentKey, 'Path', Current),
+      'PATH is unreadable or has an unsupported registry type');
+end;
+
+function AppendedPath(const Before, Entry: string): string;
+begin
+  Result := Before;
+  if Result <> '' then
+    if Result[Length(Result)] <> ';' then
+      Result := Result + ';';
+  Result := Result + Entry;
+end;
+
+function LoadPathReceipt(const Entry: string): Boolean;
+var
+  Version: Cardinal;
+begin
+  Result := RegValueExists(HKCU64, OwnershipKey, 'IliumPathReceipt');
+  if not Result then
+  begin
+    PathRequire(not RegValueExists(HKCU64, OwnershipKey, 'IliumPathBefore'),
+      'incomplete receipt requires reconciliation');
+    Exit;
+  end;
+  PathRequire(RegQueryDWordValue(HKCU64, OwnershipKey, 'IliumPathReceipt', Version), 'unreadable receipt');
+  PathRequire(Version = 1, 'unsupported receipt');
+  PathRequire(RegQueryDWordValue(HKCU64, OwnershipKey, 'IliumPathExisted', PathExisted), 'missing existence receipt');
+  PathRequire(RegQueryDWordValue(HKCU64, OwnershipKey, 'IliumPathOwned', PathOwned), 'missing ownership receipt');
+  PathRequire(RegQueryStringValue(HKCU64, OwnershipKey, 'IliumPathBefore', PathBefore), 'missing original PATH');
+  PathRequire(RegQueryStringValue(HKCU64, OwnershipKey, 'IliumPathAfter', PathAfter), 'missing appended PATH');
+  PathRequire(RegQueryStringValue(HKCU64, OwnershipKey, 'IliumPathEntry', PathEntry), 'missing entry receipt');
+  PathRequire((PathExisted <= 1) and (PathOwned <= 1), 'invalid receipt flags');
+  PathRequire((PathExisted = 1) or (PathBefore = ''), 'invalid absent PATH receipt');
+  PathRequire(PathEntry = Entry, 'install directory differs from retained ownership');
+  if PathOwned = 1 then
+  begin
+    PathRequire(not ListContains(PathBefore, Entry), 'owned entry was already present');
+    PathRequire(PathAfter = AppendedPath(PathBefore, Entry), 'invalid append receipt');
+  end
+  else
+    PathRequire((PathBefore = PathAfter) and ListContains(PathBefore, Entry), 'invalid borrowed entry receipt');
+end;
+
+function RestoredPath(const Current: string): string;
+var
+  Suffix: string;
+begin
+  { Only the unchanged original prefix proves ownership of the appended span.
+    Concurrent suffix entries are retained; moved/duplicated entries are ambiguous. }
+  PathRequire(Copy(Current, 1, Length(PathAfter)) = PathAfter, 'PATH prefix changed; preserving it');
+  Suffix := Copy(Current, Length(PathAfter) + 1, Length(Current));
+  if Suffix <> '' then
+    PathRequire(Suffix[1] = ';', 'appended entry boundary changed; preserving it');
+  PathRequire(EntryCount(Current, PathEntry) = 1, 'entry ownership is ambiguous; preserving PATH');
+  Result := PathBefore + Suffix;
+  { The separator after the sole owned entry becomes unnecessary when the
+    original value was empty; keep every later byte, including empty entries. }
+  if (PathBefore = '') and (Suffix <> '') then
+    Result := Copy(Suffix, 2, Length(Suffix));
+end;
+
+procedure SavePathReceipt;
+begin
+  PathRequire(RegWriteStringValue(HKCU64, OwnershipKey, 'IliumPathBefore', PathBefore), 'cannot retain original PATH');
+  PathRequire(RegWriteStringValue(HKCU64, OwnershipKey, 'IliumPathAfter', PathAfter), 'cannot retain appended PATH');
+  PathRequire(RegWriteStringValue(HKCU64, OwnershipKey, 'IliumPathEntry', PathEntry), 'cannot retain entry');
+  PathRequire(RegWriteDWordValue(HKCU64, OwnershipKey, 'IliumPathExisted', PathExisted), 'cannot retain existence');
+  PathRequire(RegWriteDWordValue(HKCU64, OwnershipKey, 'IliumPathOwned', PathOwned), 'cannot retain ownership');
+  PathRequire(RegWriteDWordValue(HKCU64, OwnershipKey, 'IliumPathReceipt', 1), 'cannot commit receipt');
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): string;
+var
+  Current, Ignored: string;
+begin
+  Result := '';
+  try
+    PathReceiptRetained := LoadPathReceipt(ExpandConstant('{app}'));
+    if PathReceiptRetained then
+    begin
+      PathRequire(ReadUserPath(Current), 'retained PATH disappeared');
+      if PathOwned = 1 then
+        Ignored := RestoredPath(Current)
+      else
+        PathRequire(ListContains(Current, PathEntry), 'borrowed entry disappeared');
+    end
+    else
+    begin
+      PathRequire(not RegValueExists(HKCU64, OwnershipKey, 'UninstallString'),
+        'existing installation lacks an ownership receipt');
+      ReadUserPath(Current);
+    end;
+  except
+    Result := GetExceptionMessage;
+  end;
 end;
 
 procedure AddToUserPath(const Entry: string);
 var
-  Current: string;
+  Current, Verified: string;
+  Existed: Boolean;
 begin
-  if not RegQueryStringValue(HKCU, EnvironmentKey, 'Path', Current) then
-    Current := '';
-  if ListContains(Current, Entry) then
+  Existed := ReadUserPath(Current);
+  if PathReceiptRetained then
+  begin
+    { Inno 6.5.4 deletes/recreates the uninstall key inside PerformInstall.
+      Keep the receipt loaded by PrepareToInstall; never adopt the installed
+      PATH as a fresh borrowed baseline when that key has been recreated. }
+    PathRequire(PathEntry = Entry, 'retained install directory changed');
+    PathRequire(Existed, 'retained PATH disappeared');
+    if PathOwned = 1 then
+      Verified := RestoredPath(Current)
+    else
+      PathRequire(ListContains(Current, Entry), 'borrowed entry disappeared');
+    SavePathReceipt;
+    PathRequire(ReadUserPath(Verified), 'retained PATH disappeared after receipt restoration');
+    PathRequire(Verified = Current, 'PATH changed during receipt restoration');
     Exit;
-  if (Current <> '') and (Current[Length(Current)] <> ';') then
-    Current := Current + ';';
-  RegWriteExpandStringValue(HKCU, EnvironmentKey, 'Path', Current + Entry);
+  end;
+  PathEntry := Entry;
+  PathBefore := Current;
+  PathExisted := 0;
+  if Existed then
+    PathExisted := 1;
+  PathOwned := 0;
+  PathAfter := Current;
+  if not ListContains(Current, Entry) then
+  begin
+    PathOwned := 1;
+    PathAfter := AppendedPath(Current, Entry);
+  end;
+  SavePathReceipt;
+  PathRequire(ReadUserPath(Verified) = Existed, 'PATH existence changed before append');
+  PathRequire(Verified = Current, 'PATH changed before append');
+  if PathOwned = 1 then
+    PathRequire(RegWriteStringValue(HKCU64, EnvironmentKey, 'Path', PathAfter), 'PATH append failed');
+  PathRequire(ReadUserPath(Verified), 'PATH append is absent');
+  PathRequire(Verified = PathAfter, 'PATH append readback differs');
 end;
 
 procedure RemoveFromUserPath(const Entry: string);
 var
-  Current, Needle: string;
-  Position: Integer;
+  Current, Restored, Verified: string;
 begin
-  if not RegQueryStringValue(HKCU, EnvironmentKey, 'Path', Current) then
+  PathRequire(PathEntry = Entry, 'uninstall directory differs from receipt');
+  if PathOwned = 0 then
     Exit;
-  Current := ';' + Current + ';';
-  Needle := ';' + Entry + ';';
-  Position := Pos(Lowercase(Needle), Lowercase(Current));
-  while Position > 0 do
+  PathRequire(ReadUserPath(Current), 'owned PATH disappeared');
+  Restored := RestoredPath(Current);
+  PathRequire(ReadUserPath(Verified), 'PATH disappeared before restoration');
+  PathRequire(Verified = Current, 'PATH changed before restoration');
+  if (PathExisted = 0) and (Current = PathAfter) then
   begin
-    Delete(Current, Position, Length(Needle) - 1);
-    Position := Pos(Lowercase(Needle), Lowercase(Current));
+    PathRequire(RegDeleteValue(HKCU64, EnvironmentKey, 'Path'), 'cannot restore absent PATH');
+    PathRequire(not RegValueExists(HKCU64, EnvironmentKey, 'Path'), 'absent PATH readback differs');
+  end
+  else
+  begin
+    PathRequire(RegWriteStringValue(HKCU64, EnvironmentKey, 'Path', Restored), 'PATH restoration failed');
+    PathRequire(ReadUserPath(Verified), 'restored PATH is absent');
+    PathRequire(Verified = Restored, 'restored PATH readback differs');
   end;
-  if (Length(Current) > 0) and (Current[1] = ';') then
-    Delete(Current, 1, 1);
-  if (Length(Current) > 0) and (Current[Length(Current)] = ';') then
-    Delete(Current, Length(Current), 1);
-  RegWriteExpandStringValue(HKCU, EnvironmentKey, 'Path', Current);
+end;
+
+function InitializeUninstall: Boolean;
+var
+  Current, Ignored: string;
+begin
+  Result := False;
+  try
+    { Read before Inno removes its uninstall registry key. }
+    PathRequire(LoadPathReceipt(ExpandConstant('{app}')), 'missing receipt; preserving PATH');
+    if PathOwned = 1 then
+    begin
+      PathRequire(ReadUserPath(Current), 'owned PATH disappeared');
+      Ignored := RestoredPath(Current);
+    end;
+    Result := True;
+  except
+    Log(GetExceptionMessage);
+    SuppressibleMsgBox(GetExceptionMessage, mbError, MB_OK, IDOK);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -208,7 +424,7 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  if CurUninstallStep = usPostUninstall then
+  if CurUninstallStep = usUninstall then
     RemoveFromUserPath(ExpandConstant('{app}'));
 end;
 '''
@@ -302,8 +518,10 @@ def wait_removed(directory, label):
 
 
 def check_installed(directory, version, label):
-    for name in ('ilium.exe', 'ilium-server.exe'):
+    for name in ('ilium.exe', 'ilium-server.exe', 'ilium-animation-helper.exe', *release_tool.APPROVED_PACKAGES):
         require((directory / name).is_file(), label + ' did not install ' + name)
+    for name, digest in release_tool.APPROVED_PACKAGES.items():
+        require(sha(directory / name) == digest, label + ' installed wrong animation package: ' + name)
     require(path_has(str(directory)), label + ' did not add the install directory to the user PATH')
     reported = subprocess.run([str(directory / 'ilium.exe'), '--version'], capture_output=True, text=True, timeout=60)
     require(reported.returncode == 0 and version in reported.stdout, label + ' installed client does not report ' + version)
@@ -315,26 +533,8 @@ def check_removed(directory, label):
 
 
 def smoke(arguments):
-    require(os.name == 'nt', 'smoke runs only on Windows')
-    version = version_from_tag(arguments.tag)
-    installers = arguments.installers.resolve()
-    directory = Path(os.environ['LOCALAPPDATA']) / 'Programs' / 'ilium'
-    require(not directory.exists() and not path_has(str(directory)), 'smoke needs a clean account')
-    log = arguments.log.resolve()
-    log.mkdir(parents=True, exist_ok=True)
-    msi = installers / MSI_NAME
-    run(['msiexec', '/i', str(msi), '/qn', '/norestart', '/l*v', str(log / 'msi-install.log')])
-    check_installed(directory, version, 'MSI')
-    run(['msiexec', '/x', str(msi), '/qn', '/norestart', '/l*v', str(log / 'msi-uninstall.log')])
-    check_removed(directory, 'MSI')
-    setup = installers / EXE_NAME
-    run([str(setup), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/LOG=' + str(log / 'exe-install.log')])
-    check_installed(directory, version, 'EXE')
-    uninstaller = next(directory.glob('unins*.exe'), None)
-    require(uninstaller is not None, 'EXE installer wrote no uninstaller')
-    run([str(uninstaller), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'])
-    check_removed(directory, 'EXE')
-    emit('result', command='smoke', state='passed', version=version, installers={name: sha(installers / name) for name in INSTALLER_NAMES})
+    from smoke_windows_installers import smoke as audited_smoke  # Load the native gate only for smoke.
+    audited_smoke(arguments)  # Require audited bytes, lifecycle, reinstall and removal evidence.
 
 
 def parser():
@@ -351,6 +551,10 @@ def parser():
     command = commands.add_parser('smoke', allow_abbrev=False)
     command.add_argument('--tag', required=True)
     command.add_argument('--installers', type=Path, required=True)
+    command.add_argument('--archive', type=Path, required=True)  # Bind the retained audited ZIP.
+    command.add_argument('--audit-report', type=Path, required=True)  # Require the native audit receipt.
+    command.add_argument('--manifest', type=Path, required=True)  # Reuse the approved Windows target.
+    command.add_argument('--disposable-account', action='store_true')  # Attest exclusive VM test-account custody.
     command.add_argument('--log', type=Path, required=True)
     return result
 

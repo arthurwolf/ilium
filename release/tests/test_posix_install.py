@@ -79,6 +79,9 @@ class PosixInstallTests(unittest.TestCase):
                 prefix = target["archive"].removesuffix(".tar.gz")
                 client = f'#!/bin/sh\nif [ "${{1:-}}" = --wait ]; then read answer; fi\nprintf "ilium {version}\\n"\n/bin/sh "$(dirname "$0")/ilium-server" --version\n'
                 files = {"THIRD-PARTY.txt": b"Synthetic test licence\n", "VERSION": (version + "\n").encode(), "ilium": client.encode(), "ilium-server": f'#!/bin/sh\nprintf "ilium-server {version}\\n"\n'.encode()}
+                helper = "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(release_tool.helper_version_record(version)) + "\n"
+                files["ilium-animation-helper"] = helper.encode()
+                files.update({name: (ROOT / "ilium-animation-js/assets/packages" / name).read_bytes() for name in release_tool.APPROVED_PACKAGES})
                 if native_client:
                     files["ilium"] = Path("/bin/sh").read_bytes()
                 entries = [(prefix, None)] + [(prefix + "/" + name, data) for name, data in sorted(files.items())]
@@ -88,7 +91,7 @@ class PosixInstallTests(unittest.TestCase):
                     for name, data in entries:
                         info = tarfile.TarInfo(name)
                         info.type = tarfile.DIRTYPE if data is None else tarfile.REGTYPE
-                        info.mode = 0o755 if data is None or name.rsplit("/", 1)[-1] in ("ilium", "ilium-server") else 0o644
+                        info.mode = 0o755 if data is None or name.rsplit("/", 1)[-1] in ("ilium", "ilium-server", "ilium-animation-helper") else 0o644
                         if isinstance(data, tuple):
                             info.type, info.linkname = data
                             data = b""
@@ -202,6 +205,7 @@ class PosixInstallTests(unittest.TestCase):
             "unexpected": lambda p, e: e + [(p + "/other-program", b"bad")],
             "partial": lambda p, e: e[:-1],
             "version-mismatch": lambda p, e: [(n, b"9.9.9\n" if n.endswith("/VERSION") else d) for n, d in e],
+            "tampered-official-animation": lambda p, e: [(n, b"tampered archive" if n.endswith("/beach-1.0.0.iliumanim") else d) for n, d in e],
             "special": lambda p, e: e + [(p + "/fifo", (tarfile.FIFOTYPE, ""))],
             "extended": lambda p, e: e + [(p + "/header", (tarfile.XHDTYPE, ""))],
         }

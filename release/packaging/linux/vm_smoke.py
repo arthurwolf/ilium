@@ -17,6 +17,7 @@ import hashlib
 import json
 from pathlib import Path
 import secrets
+import shlex  # Quote each guest argument before sending it through SSH's shell.
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,7 @@ users:
     ssh_authorized_keys:
       - {key}
 package_update: true
-packages: [python3, flatpak, squashfs-tools, libfuse2t64, rpm]
+packages: [python3, flatpak, squashfs-tools, libfuse2t64, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
 runcmd:
   - [touch, /var/lib/cloud/instance/ilium-ready]
 '''
@@ -51,6 +52,39 @@ def sha256(path):
         while block := source.read(1 << 20):
             value.update(block)
     return value.hexdigest()
+
+
+def upload_manifest(source, target):
+    """Bind every transferred regular file to its exact absolute guest location."""
+    source = Path(source)
+    if source.is_symlink() or not source.exists():
+        raise ValueError('upload source is missing or a symlink: ' + str(source))
+    files = sorted(source.rglob('*')) if source.is_dir() else [source]
+    result = {}
+    for path in files:
+        if path.is_symlink():
+            raise ValueError('symlink in upload source: ' + str(path))
+        if not path.is_file():
+            continue
+        guest = Path('/home/tester') / target
+        if source.is_dir():
+            guest /= path.relative_to(source)
+        result[str(guest)] = sha256(path)
+    if not result:
+        raise ValueError('upload has no regular files: ' + str(source))
+    return result
+
+
+def guest_manifest_command(manifest):
+    code = ('import hashlib,json,sys; from pathlib import Path; '
+            'expected=json.loads(sys.argv[1]); '
+            'bad=[name for name,digest in expected.items() if '
+            'not Path(name).is_file() or Path(name).is_symlink() or '
+            'hashlib.sha256(Path(name).read_bytes()).hexdigest()!=digest]; '
+            'print(json.dumps({"type":"result","command":"vm-inputs",'
+            '"state":"failed" if bad else "passed","files":len(expected),'
+            '"mismatches":bad[:10]})); sys.exit(bool(bad))')
+    return shlex.join(['python3', '-c', code, json.dumps(manifest, sort_keys=True)])
 
 
 def verified_image(path):
@@ -75,6 +109,44 @@ def ssh(port, key, command, timeout=3600):
     return run(['ssh', *SSH_OPTIONS, '-i', key, '-p', str(port), 'tester@127.0.0.1', command], timeout=timeout)
 
 
+def format_plan(value):  # Validate the whole request before any image or VM operation.
+    requested = value.split(',')  # Preserve the caller's explicit order.
+    if not all(requested) or len(requested) != len(set(requested)):  # Reject empty members and duplicates rather than silently shrinking coverage.
+        raise ValueError('--formats must contain distinct, nonempty format names')  # A malformed request cannot qualify anything.
+    if not set(requested) <= {'deb', 'appimage', 'snap', 'flatpak'}:  # The VM always requires the host lane, which does not support RPM.
+        raise ValueError('--formats supports only deb,appimage,snap,flatpak')  # Reject unsupported names before boot.
+    return requested, [name for name in requested if name != 'flatpak']  # Flatpak's installed proof belongs to the mandatory host lane.
+
+
+def capture_command(action):  # Preserve transfer or guest timeout evidence without skipping owned VM teardown.
+    try:  # Keep the existing run and SSH adapters usable by callers and fixtures.
+        return action()  # Retain the real exit status of completed commands.
+    except subprocess.TimeoutExpired as error:  # SSH timeouts can still leave useful guest diagnostics to collect.
+        stdout = error.stdout.decode(errors='replace') if isinstance(error.stdout, bytes) else (error.stdout or '')  # Preserve partial command output.
+        stderr = error.stderr.decode(errors='replace') if isinstance(error.stderr, bytes) else (error.stderr or '')  # Preserve partial command errors.
+        return subprocess.CompletedProcess(error.cmd, 124, stdout, stderr + '\ncommand timed out\n')  # A timeout is always a failed gate.
+    except OSError as error:  # A missing transport executable cannot become successful coverage.
+        return subprocess.CompletedProcess([], 127, '', str(error) + '\n')  # Let the caller retain the launch failure and stop safely.
+
+
+def stop_owned_vm(process, port, key):
+    """Reap our child before releasing its PID; never signal a detached PID."""
+    if process.poll() is None:
+        try:
+            ssh(port, key, 'sudo poweroff', timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            emit('warning', message='guest shutdown failed; stopping owned QEMU child: ' + str(error)[:500])
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--packages', type=Path, required=True)
@@ -86,6 +158,10 @@ def main(argv=None):
     parser.add_argument('--memory', default='6G')
     parser.add_argument('--cpus', default='4')
     arguments = parser.parse_args(argv)
+    try:  # Reject unusable coverage before creating work or contacting the image server.
+        requested, inspected = format_plan(arguments.formats)  # Plan mandatory host coverage and applicable offline coverage together.
+    except ValueError as error:  # Preserve argparse's normal invalid-option behavior.
+        parser.error(str(error))  # Exit before keys, transfers or QEMU exist.
     work, log = arguments.work.resolve(), arguments.log.resolve()
     work.mkdir(parents=True)
     log.mkdir(parents=True, exist_ok=True)
@@ -100,47 +176,92 @@ def main(argv=None):
     port = 20000 + secrets.randbelow(20000)
     command = ['qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', arguments.cpus, '-m', arguments.memory, '-display', 'none',
                '-drive', 'file=%s,if=virtio' % (work / 'overlay.qcow2'), '-drive', 'file=%s,if=virtio,format=raw' % (work / 'seed.img'),
-               '-nic', 'user,hostfwd=tcp:127.0.0.1:%d-:22' % port, '-pidfile', work / 'qemu.pid', '-daemonize']
-    started = run(command)
-    if started.returncode != 0:
-        emit('error', message='qemu failed: ' + started.stderr[-500:])
+               '-nic', 'user,hostfwd=tcp:127.0.0.1:%d-:22' % port]
+    qemu_log = (log / 'vm-qemu.log').open('x')
+    try:
+        process = subprocess.Popen([str(part) for part in command], stdout=qemu_log, stderr=subprocess.STDOUT)
+    except OSError as error:
+        qemu_log.close()
+        emit('error', message='qemu failed to start: ' + str(error)[:500])
         return 1
-    emit('progress', stage='boot', ssh_port=port)
-    pid = (work / 'qemu.pid').read_text().strip()
+    emit('progress', stage='boot', ssh_port=port, vm_process_id=process.pid)
     failed = 1
     try:
-        for _ in range(180):
-            if ssh(port, key, 'test -e /var/lib/cloud/instance/ilium-ready', timeout=30).returncode == 0:
+        for attempt in range(180):
+            if process.poll() is not None:
+                emit('error', message='qemu exited before cloud-init; see ' + str(log / 'vm-qemu.log'))
+                return 1
+            ready = capture_command(lambda: ssh(port, key, 'test -e /var/lib/cloud/instance/ilium-ready', timeout=30))  # A slow boot can exceed one SSH handshake deadline.
+            (log / ('vm-ready-%d.log' % attempt)).write_text(ready.stdout + ready.stderr, encoding='utf-8')  # Preserve every failed readiness attempt before retry or teardown.
+            if ready.returncode == 0:
                 break
             time.sleep(5)
         else:
             emit('error', message='virtual machine never finished cloud-init')
             return 1
         emit('progress', stage='ready', os=ssh(port, key, '. /etc/os-release && echo "$PRETTY_NAME $(uname -r)"').stdout.strip())
-        for source, target in ((ROOT / 'release/scripts', 'repo/release/scripts'), (ROOT / 'release/packaging', 'repo/release/packaging'), (arguments.packages, 'packages')):
-            ssh(port, key, 'mkdir -p ' + str(Path(target).parent))
-            copied = run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, '-r', source, 'tester@127.0.0.1:' + target])
+        uploads = ((ROOT / 'release/scripts', 'repo/release/scripts'), (ROOT / 'release/packaging', 'repo/release/packaging'), (arguments.packages.resolve(), 'packages'), (ROOT / 'LICENSE', 'repo/LICENSE'), (ROOT / 'Cargo.toml', 'repo/Cargo.toml'))  # Every required source and package input must reach the guest.
+        manifest = {}
+        for index, (source, target) in enumerate(uploads):  # Preserve transfer evidence separately from smoke output.
+            manifest.update(upload_manifest(source, target))
+            prepared = capture_command(lambda: ssh(port, key, shlex.join(['mkdir', '-p', str(Path(target).parent)]), timeout=30))  # Quote the remote directory argument and bound preparation.
+            (log / ('vm-copy-%d-prepare.log' % index)).write_text(prepared.stdout + prepared.stderr, encoding='utf-8')  # Retain remote preparation diagnostics.
+            if prepared.returncode != 0:  # Do not copy into an unverified guest location.
+                emit('error', message='guest directory preparation failed: ' + prepared.stderr[-500:])  # Report the failed prerequisite.
+                return 1  # The existing finally block still reaps the owned VM.
+            fresh = capture_command(lambda: ssh(port, key, 'test ! -e ' + shlex.quote(target) + ' && test ! -L ' + shlex.quote(target), timeout=30))
+            (log / ('vm-copy-%d-fresh.log' % index)).write_text(fresh.stdout + fresh.stderr, encoding='utf-8')
+            if fresh.returncode != 0:
+                emit('error', message='guest upload destination already exists: ' + target)
+                return 1
+            copied = capture_command(lambda: run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, '-r', source, 'tester@127.0.0.1:' + target], timeout=600))  # Check all uploads, including LICENSE and Cargo.toml.
+            (log / ('vm-copy-%d.log' % index)).write_text(copied.stdout + copied.stderr, encoding='utf-8')  # Keep diagnostics even for a failed file upload.
             if copied.returncode != 0:
                 emit('error', message='scp failed: ' + copied.stderr[-500:])
                 return 1
-        run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, ROOT / 'LICENSE', 'tester@127.0.0.1:repo/LICENSE'])
-        run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, ROOT / 'Cargo.toml', 'tester@127.0.0.1:repo/Cargo.toml'])
+        (log / 'vm-inputs-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        verified = capture_command(lambda: ssh(port, key, guest_manifest_command(manifest), timeout=120))
+        (log / 'vm-inputs-verification.jsonl').write_text(verified.stdout + verified.stderr, encoding='utf-8')
+        try:
+            proof = json.loads(verified.stdout)
+        except (ValueError, TypeError):
+            proof = None
+        expected_proof = {'type': 'result', 'command': 'vm-inputs', 'state': 'passed', 'files': len(manifest), 'mismatches': []}
+        if verified.returncode != 0 or proof != expected_proof:
+            emit('error', message='guest uploaded input hashes differ or verification is unavailable')
+            return 1
+        emit('result', command='vm-inputs', state='passed', files=len(manifest))
+        failed = 0  # Applicable inspection and mandatory host results can now only add failures.
         for subcommand in ('inspect', 'host'):
-            extra = ' --log /home/tester/log-%s' % subcommand if subcommand == 'host' else ''
-            result = ssh(port, key, 'python3 /home/tester/repo/release/scripts/smoke_linux_packages.py %s --arch %s --packages /home/tester/packages --formats %s%s' % (
-                subcommand, arguments.arch, arguments.formats, extra))
+            formats = inspected if subcommand == 'inspect' else requested  # The host always receives every validated requested format.
+            if not formats:  # Flatpak-only requests have no supported offline inspector.
+                evidence = dict(command='vm-inspect', state='not-applicable', formats=[], required_host_formats=requested, reason='Flatpak has no offline inspector; host acceptance remains required')  # This is explicitly not a passed smoke result.
+                (log / 'vm-inspect.jsonl').write_text(json.dumps({'type': 'result', **evidence}, separators=(',', ':')) + '\n', encoding='utf-8')  # Retain the exact applicability decision.
+                emit('result', **evidence)  # Make the missing offline lane visible to the caller.
+                continue  # The mandatory host iteration still follows.
+            guest_command = ['python3', '/home/tester/repo/release/scripts/smoke_linux_packages.py', subcommand, '--arch', arguments.arch, '--packages', '/home/tester/packages', '--formats', ','.join(formats)]  # Build explicit guest argv without shell interpolation.
+            if subcommand == 'host':  # Host logs and private Flatpak selection retain their public caller contracts.
+                guest_command += ['--log', '/home/tester/log-host']  # Preserve the guest diagnostics destination.
+                if 'flatpak' in requested:  # Lifecycle isolates HOME/XDG, so keep installation lookup stable.
+                    guest_command += ['--flatpak-user-dir', '/home/tester/flatpak-install']  # Preserve the primary's explicit private directory.
+            result = capture_command(lambda: ssh(port, key, shlex.join(guest_command)))  # A guest timeout remains failed while allowing log collection.
             (log / ('vm-%s.jsonl' % subcommand)).write_text(result.stdout + result.stderr, encoding='utf-8')
             for line in result.stdout.splitlines():
                 print(line, flush=True)
-            failed = 0 if result.returncode == 0 and (failed == 0 or subcommand == 'inspect') else 1
+            failed = int(bool(failed or result.returncode != 0))  # A later success cannot erase an earlier required-stage failure.
             if subcommand == 'host':
-                run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, '-r', 'tester@127.0.0.1:log-host', log])
+                copied = capture_command(lambda: run(['scp', *SSH_OPTIONS, '-i', key, '-P', port, '-r', 'tester@127.0.0.1:log-host', log], timeout=600))  # Collect host diagnostics after success, failure or SSH timeout.
+                (log / 'vm-host-log-copy.log').write_text(copied.stdout + copied.stderr, encoding='utf-8')  # Retain collection errors before VM teardown.
+                if copied.returncode != 0:  # Missing required diagnostic evidence cannot qualify the VM run.
+                    emit('error', message='host diagnostics copy failed: ' + copied.stderr[-500:])  # Surface the transfer failure alongside native output.
+                    failed = 1  # Never overwrite a prior smoke failure with successful cleanup.
         emit('result', command='vm-smoke', state='failed' if failed else 'passed', log=str(log))
         return failed
     finally:
-        ssh(port, key, 'sudo poweroff', timeout=30)
-        time.sleep(5)
-        run(['kill', pid])
+        try:
+            stop_owned_vm(process, port, key)
+        finally:
+            qemu_log.close()
 
 
 if __name__ == '__main__':

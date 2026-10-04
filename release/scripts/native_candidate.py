@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from audit_native import (audit, generate_notices, licence_bytes, native_identity,
                           parse_dependencies, parse_macos_load_commands, run,
                           reject_windows_dynamic_crt, system_dependency, windows_version)
-from release_tool import (JsonArgumentParser, ReleaseError, digest, emit, package,
+from release_tool import (APPROVED_PACKAGES, JsonArgumentParser, ReleaseError, digest, emit, package,
                           read_json, safe_member_name, selected_target, workspace_version)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -237,6 +237,11 @@ def build(arguments):
         source = plain(arguments.build_directory / name)
         shutil.copy2(source, candidate / name)
         binaries[name] = {'source_path': str(source), 'sha256': sha(source)}
+    for name in target['packages']:
+        source = plain(ROOT / 'ilium-animation-js/assets/packages' / name)
+        require(sha(source) == APPROVED_PACKAGES[name], 'Official animation package differs from compiled release identity: ' + name)
+        shutil.copyfile(source, candidate / name)
+        require(sha(candidate / name) == APPROVED_PACKAGES[name], 'Copied animation package changed: ' + name)
     (candidate / 'VERSION').write_text(version + '\n', encoding='utf-8')
     licence, ort_evidence = extract_ort_notices(arguments.ort_source_archive, ROOT / 'release/ort-source.json', evidence_directory)
     inventory, loader = discovery(arguments, target, candidate, licence)
@@ -271,7 +276,7 @@ def build(arguments):
     package(SimpleNamespace(manifest=arguments.manifest, workspace=arguments.workspace, target=arguments.target, tag=arguments.tag, audit_report=audit_path, directory=candidate, output=archive))
     (output / 'SHA256SUMS').write_text(sha(archive) + '  ' + archive.name + '\n', encoding='utf-8')
     audit_receipt = read_json(audit_path)
-    receipt = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'archive': {'path': str(archive), 'sha256': sha(archive)}, 'native_audit': {'path': str(audit_path), 'sha256': sha(audit_path)}, 'runtime_inventory': {'path': str(runtime_path), 'sha256': sha(runtime_path)}, 'dependency_inventory': {'path': str(dependencies_path), 'sha256': sha(dependencies_path)}, 'embedding_receipt': {'path': str(embedding_path), 'sha256': sha(embedding_path)}, 'build_outputs': binaries, 'workspace_sha256': sha(arguments.workspace), 'lock_sha256': sha(arguments.workspace.parent / 'Cargo.lock'), 'embedding_model_register_sha256': sha(ROOT / 'release/embedding-model.json'), 'ort_source_notices': ort_evidence, 'pre_relocation_loader': loader, 'files': audit_receipt['files']}
+    receipt = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'archive': {'path': str(archive), 'sha256': sha(archive)}, 'native_audit': {'path': str(audit_path), 'sha256': sha(audit_path)}, 'runtime_inventory': {'path': str(runtime_path), 'sha256': sha(runtime_path)}, 'dependency_inventory': {'path': str(dependencies_path), 'sha256': sha(dependencies_path)}, 'embedding_receipt': {'path': str(embedding_path), 'sha256': sha(embedding_path)}, 'build_outputs': binaries, 'official_packages': {name: APPROVED_PACKAGES[name] for name in target['packages']}, 'workspace_sha256': sha(arguments.workspace), 'lock_sha256': sha(arguments.workspace.parent / 'Cargo.lock'), 'embedding_model_register_sha256': sha(ROOT / 'release/embedding-model.json'), 'ort_source_notices': ort_evidence, 'pre_relocation_loader': loader, 'files': audit_receipt['files']}
     if windows_ort_binding is not None:
         receipt['windows_ort_build_receipt'] = windows_ort_binding
         receipt['windows_ort_cmake_cache'] = windows_cmake_binding

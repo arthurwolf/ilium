@@ -263,7 +263,7 @@ version_owned() {
     owned_directory=$install_root/versions/$owned_version
     receipt=$state/version-$owned_version
     [ -d "$owned_directory/bin" ] && [ ! -L "$owned_directory" ] && [ ! -L "$owned_directory/bin" ] && [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
-    awk '{if(NF!=2 || length($1)!=64 || $1!~/^[0-9a-f]+$/ || $2!~/^[A-Za-z0-9][A-Za-z0-9._-]*$/ || seen[$2]++){bad=1;exit 1}} END {if(bad || !seen["ilium"] || !seen["ilium-server"] || !seen["VERSION"] || !seen["THIRD-PARTY.txt"])exit 1}' "$receipt" || return 1
+    awk '{if(NF!=2 || length($1)!=64 || $1!~/^[0-9a-f]+$/ || $2!~/^[A-Za-z0-9][A-Za-z0-9._-]*$/ || seen[$2]++){bad=1;exit 1}} END {bundle=seen["ilium-animation-helper"]+seen["beach-1.0.0.iliumanim"]+seen["carpet-1.0.0.iliumanim"]; if(bad || !seen["ilium"] || !seen["ilium-server"] || !seen["VERSION"] || !seen["THIRD-PARTY.txt"] || (bundle!=0 && bundle!=3))exit 1}' "$receipt" || return 1
     while IFS=' ' read -r _ member; do printf '%s\n' "$owned_directory/bin/$member"; done < "$receipt" > "$work/owned-paths"
     find "$owned_directory" -print > "$work/actual-paths" || return 1
     while IFS= read -r actual_path; do
@@ -275,7 +275,11 @@ version_owned() {
         if [ "${2:-}" = allow-missing ] && [ ! -e "$owned_directory/bin/$member" ] && [ ! -L "$owned_directory/bin/$member" ]; then continue; fi
         [ -f "$owned_directory/bin/$member" ] && [ ! -L "$owned_directory/bin/$member" ] || return 1
         [ "$(hash_file "$owned_directory/bin/$member")" = "$expected" ] || return 1
-        case "$member" in ilium|ilium-server) [ -x "$owned_directory/bin/$member" ] || return 1 ;; esac
+        case "$member" in
+            ilium|ilium-server|ilium-animation-helper) [ -x "$owned_directory/bin/$member" ] || return 1 ;;
+            beach-1.0.0.iliumanim) [ "$expected" = 4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30 ] || return 1 ;;
+            carpet-1.0.0.iliumanim) [ "$expected" = c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870 ] || return 1 ;;
+        esac
     done < "$receipt"
 }
 
@@ -390,8 +394,8 @@ EOF
         case "$member" in "$prefix/"*) basename=${member#"$prefix/"} ;; *) fail "Archive path escapes expected root" ;; esac
         case "$basename" in ''|*/*|*..*) fail "Traversal or invalid archive member" ;; esac
         case "$basename" in
-            ilium|ilium-server) [ "$member_mode" = 493 ] || fail "Executable mode is not 0755" ;;
-            VERSION|THIRD-PARTY.txt) [ "$member_mode" = 420 ] || fail "Data member mode is not 0644" ;;
+            ilium|ilium-server|ilium-animation-helper) [ "$member_mode" = 493 ] || fail "Executable mode is not 0755" ;;
+            VERSION|THIRD-PARTY.txt|beach-1.0.0.iliumanim|carpet-1.0.0.iliumanim) [ "$member_mode" = 420 ] || fail "Data member mode is not 0644" ;;
             lib*.so|lib*.so.*) [ "$target_os" = linux ] && [ "$member_mode" = 420 ] || fail "Unexpected runtime library" ;;
             lib*.dylib) [ "$target_os" = macos ] && [ "$member_mode" = 420 ] || fail "Unexpected runtime library" ;;
             *) fail "Unexpected archive member" ;;
@@ -405,11 +409,13 @@ EOF
 done
 LC_ALL=C sort -u "$work/members" > "$work/sorted-members"
 cmp -s "$work/members" "$work/sorted-members" || fail "Duplicate or noncanonical archive member order"
-for member in VERSION THIRD-PARTY.txt ilium ilium-server; do grep -x "$member" "$work/members" >/dev/null || fail "Archive is missing a required pair member"; done
+for member in VERSION THIRD-PARTY.txt ilium ilium-server ilium-animation-helper beach-1.0.0.iliumanim carpet-1.0.0.iliumanim; do grep -x "$member" "$work/members" >/dev/null || fail "Archive is missing a required payload member"; done
 mkdir "$work/extract" || fail "Cannot create private extraction directory"
 (cd "$work/extract" && tar -xf ../archive.tar) 2> "$work/archive-error" || fail "Archive extraction failed"
 candidate=$work/extract/$prefix
-for member in ilium ilium-server; do [ -f "$candidate/$member" ] && [ ! -L "$candidate/$member" ] && [ -x "$candidate/$member" ] || fail "Extracted executable pair is incomplete"; done
+for member in ilium ilium-server ilium-animation-helper; do [ -f "$candidate/$member" ] && [ ! -L "$candidate/$member" ] && [ -x "$candidate/$member" ] || fail "Extracted executable payload is incomplete"; done
+[ "$(hash_file "$candidate/beach-1.0.0.iliumanim")" = 4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30 ] || fail "Official beach animation differs from compiled release identity"
+[ "$(hash_file "$candidate/carpet-1.0.0.iliumanim")" = c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870 ] || fail "Official carpet animation differs from compiled release identity"
 printf '%s\n' "$version" > "$work/expected-version"
 cmp -s "$candidate/VERSION" "$work/expected-version" || fail "Archive VERSION differs from requested release"
 while IFS= read -r member; do printf '%s %s\n' "$(hash_file "$candidate/$member")" "$member"; done < "$work/members" > "$work/version-receipt"

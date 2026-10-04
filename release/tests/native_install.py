@@ -5,6 +5,7 @@ Local-asset qualification does not certify public HTTPS acquisition. All home,
 config, runtime and installation state is task-owned; no user PATH is modified.
 """
 from __future__ import annotations
+import argparse
 import hashlib
 import http.server
 import json
@@ -23,6 +24,8 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'release/scripts'))
+import release_tool
+import smoke_installed_animation as animation_gate
 from audit_native import native_identity, run
 from release_tool import JsonArgumentParser, ReleaseError, emit, load_targets, selected_target
 
@@ -403,7 +406,7 @@ def qualify(arguments):
     identity = native_identity(target, arguments.runner_identity)
     require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', arguments.tag), 'Explicit safe release tag required')
     version = arguments.tag[1:]
-    for value in (arguments.expected_client_sha256, arguments.expected_server_sha256):
+    for value in (arguments.expected_client_sha256, arguments.expected_server_sha256, arguments.expected_helper_sha256):
         require(re.fullmatch('[0-9a-f]{64}', value), 'Explicit paired binary hashes required')
     literal = arguments.literal_public_command
     preview = arguments.pages_script_url
@@ -522,17 +525,32 @@ def qualify(arguments):
             after_repeat = retain_json(artifacts, 'repeat-after-state.json', after_repeat_value)
             scenarios['repeat'] = {'state': 'passed', 'installer': repeated, 'before': before_repeat, 'after': after_repeat, 'version': version}
             pair = installed_pair(install, version)
-            expected = dict(zip(target['executables'], (arguments.expected_client_sha256, arguments.expected_server_sha256)))
+            expected_pair = dict(zip(target['executables'][:2], (arguments.expected_client_sha256, arguments.expected_server_sha256)))
+            expected = {**expected_pair, target['executables'][2]: arguments.expected_helper_sha256}
             for name, value in expected.items():
                 path = pair / name
                 require(path.is_file() and not path.is_symlink() and sha(path) == value, 'Installed pair differs from audited release: ' + name)
+            for name, digest in release_tool.APPROVED_PACKAGES.items():
+                path = pair / name
+                require(path.is_file() and not path.is_symlink() and sha(path) == digest, 'Installed official animation differs from compiled release: ' + name)
+            helper_name = target['executables'][2]
+            helper_version = subprocess.run([str(pair / helper_name), '--version'], env=env, capture_output=True, text=True, timeout=120)
+            require(helper_version.returncode == 0 and not helper_version.stderr and release_tool.version_identity(helper_name, helper_version.stdout, version) == 'ilium-animation-helper ' + version, 'Installed helper version identity failed')
+            animation_receipt = animation_gate.smoke(
+                argparse.Namespace(
+                    workspace=ROOT / 'Cargo.toml', root=pair, manifest=arguments.manifest,
+                    audit=arguments.archive_directory / 'audits' / (target['rust_target'] + '.json'),
+                    output=artifacts / 'installed-animation.json', os=target['os'],
+                    arch=target['arch'], tag=arguments.tag, format='archive'),
+                environment=env)
+            animation_reference = file_reference(artifacts / 'installed-animation.json', artifacts)
             if public_command:
                 public_after = public_script_hash(target['os'], preview)
                 require(public_after == public_before, 'Public installer changed across literal command execution')
                 if target['os'] == 'windows':
                     windows_account_after = windows_disposable_identity(env)
                     require(str(bin_directory).casefold() in [entry.strip().rstrip('\\/').casefold() for entry in (windows_account_after.get('user_path') or '').split(';')], 'Literal install did not persist the disposable account user PATH')
-                for name in target['executables']:
+                for name in target['executables'][:2]:
                     launcher = bin_directory / (name.removesuffix('.exe') + '.cmd' if target['os'] == 'windows' else name)
                     if target['os'] == 'windows':
                         env['ILIUM_NATIVE_LAUNCHER'] = str(launcher)
@@ -565,7 +583,7 @@ def qualify(arguments):
                 tests.append({'name': name, 'command': list(map(str, invocation)), 'exit_code': result.returncode,
                               'stdout': file_reference(artifacts / (name + '.stdout.txt'), artifacts),
                               'stderr': file_reference(artifacts / (name + '.stderr.txt'), artifacts)})
-            require(all(sha(pair / name) == value for name, value in expected.items()), 'Installed pair changed during native tests')
+            require(all(sha(pair / name) == value for name, value in expected.items()) and all(sha(pair / name) == digest for name, digest in release_tool.APPROVED_PACKAGES.items()), 'Installed animation payload changed during native tests')
             scenarios['pty'] = {'state': 'passed', 'tests': tests}
             sentinel = bin_directory / 'task-owned-unrelated-sentinel.txt'
             sentinel.write_text('must survive ownership-aware uninstall\n', encoding='utf-8')
@@ -580,7 +598,7 @@ def qualify(arguments):
             uninstall = run_installer(uninstall_command, env, artifacts, 'owned-uninstall', succeeds=True)
             env.pop('ILIUM_NATIVE_UNINSTALL', None)
             require(sentinel.is_file() and sentinel.read_text(encoding='utf-8') == 'must survive ownership-aware uninstall\n', 'Ownership-aware uninstall removed unrelated sentinel')
-            require(not pair.exists() and all(not (bin_directory / (name.removesuffix('.exe') + '.cmd' if target['os'] == 'windows' else name)).exists() for name in target['executables']), 'Owned uninstall retained owned pair or launchers')
+            require(not pair.exists() and all(not (bin_directory / (name.removesuffix('.exe') + '.cmd' if target['os'] == 'windows' else name)).exists() for name in target['executables'][:2]), 'Owned uninstall retained owned pair or launchers')
             if target['os'] == 'windows':
                 restored = windows_disposable_identity(env)
                 require(restored.get('user_path') == windows_account_before.get('user_path'), 'Disposable user PATH was not restored by owned uninstall')
@@ -600,7 +618,7 @@ def qualify(arguments):
             path_reference = retain_json(artifacts, 'path-lifecycle.json', path_record)
             scenarios['path_deduplication'] = {'state': 'passed', 'evidence': path_reference}
             uninstall_record = {'schema': 1, 'pair_removed': not pair.exists(),
-                                'launchers_removed': all(not (bin_directory / (name.removesuffix('.exe') + '.cmd' if target['os'] == 'windows' else name)).exists() for name in target['executables']),
+                                'launchers_removed': all(not (bin_directory / (name.removesuffix('.exe') + '.cmd' if target['os'] == 'windows' else name)).exists() for name in target['executables'][:2]),
                                 'path_restored': final_path_state == original_path_state,
                                 'sentinel_name': sentinel.name, 'sentinel_sha256': sha(sentinel),
                                 'sentinel_survived': sentinel.is_file()}
@@ -610,7 +628,7 @@ def qualify(arguments):
             if arguments.origin != 'local':
                 scenarios = {name: value for name, value in scenarios.items() if name in {'upgrade', 'repeat', 'path_deduplication', 'pty', 'uninstall'}}
             retained_evidence = evidence_inventory(artifacts)
-            receipt = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'installer_sha256': sha(arguments.installer), 'installer_command': list(map(str, command)), 'literal_public_command': literal, 'pages_script_url': preview, 'preview_public_command': public_command if preview else None, 'public_script_sha256': public_before, 'windows_account_before': windows_account_before, 'windows_account_after': windows_account_after, 'launcher_results': launcher_results, 'installer_source_mode': source_mode, 'executed_installer_sha256': sha(source) if target['os'] == 'windows' else sha(arguments.installer), 'origin': arguments.origin, 'public_transport_verified': arguments.origin == PUBLIC_ORIGIN, 'archive': assets, 'archive_sha256': assets['archive_sha256'], 'installed_pair_directory': str(pair), 'installed_client_sha256': arguments.expected_client_sha256, 'installed_server_sha256': arguments.expected_server_sha256, 'installed_pair_sha256': expected, 'installed_embedding': installed_embedding, 'native_test_binary_sha256': sha(arguments.native_test_binary), 'pty_tests': tests, 'scenarios': scenarios, 'requests': server.requests if server else [], 'evidence_directory': str(artifacts), 'evidence_files': retained_evidence, 'evidence_files_sha256': evidence_digest(retained_evidence), 'isolated_state_cleaned': True}
+            receipt = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'installer_sha256': sha(arguments.installer), 'installer_command': list(map(str, command)), 'literal_public_command': literal, 'pages_script_url': preview, 'preview_public_command': public_command if preview else None, 'public_script_sha256': public_before, 'windows_account_before': windows_account_before, 'windows_account_after': windows_account_after, 'launcher_results': launcher_results, 'installer_source_mode': source_mode, 'executed_installer_sha256': sha(source) if target['os'] == 'windows' else sha(arguments.installer), 'origin': arguments.origin, 'public_transport_verified': arguments.origin == PUBLIC_ORIGIN, 'archive': assets, 'archive_sha256': assets['archive_sha256'], 'installed_pair_directory': str(pair), 'installed_client_sha256': arguments.expected_client_sha256, 'installed_server_sha256': arguments.expected_server_sha256, 'installed_helper_sha256': arguments.expected_helper_sha256, 'installed_pair_sha256': expected_pair, 'installed_official_packages_sha256': release_tool.APPROVED_PACKAGES, 'installed_helper_version': helper_version.stdout, 'installed_animation': animation_receipt, 'installed_animation_evidence': animation_reference, 'installed_embedding': installed_embedding, 'native_test_binary_sha256': sha(arguments.native_test_binary), 'pty_tests': tests, 'scenarios': scenarios, 'requests': server.requests if server else [], 'evidence_directory': str(artifacts), 'evidence_files': retained_evidence, 'evidence_files_sha256': evidence_digest(retained_evidence), 'isolated_state_cleaned': True}
         finally:
             if server:
                 server.shutdown(); server.server_close()
@@ -650,7 +668,7 @@ def parser():
     result = JsonArgumentParser(description=__doc__, allow_abbrev=False)
     for name in ('manifest', 'installer', 'archive-directory', 'native-test-binary', 'output', 'embedding-wrapper', 'embedding-command', 'embedding-model', 'embedding-model-register'):
         result.add_argument('--' + name, type=Path, required=True)
-    for name in ('tag', 'target', 'expected-client-sha256', 'expected-server-sha256', 'expected-embedding-wrapper-sha256', 'expected-embedding-command-sha256', 'expected-embedding-model-register-sha256', 'expected-embedding-model-files', 'expected-embedding-runtime-files'):
+    for name in ('tag', 'target', 'expected-client-sha256', 'expected-server-sha256', 'expected-helper-sha256', 'expected-embedding-wrapper-sha256', 'expected-embedding-command-sha256', 'expected-embedding-model-register-sha256', 'expected-embedding-model-files', 'expected-embedding-runtime-files'):
         result.add_argument('--' + name, required=True)
     result.add_argument('--origin', default='local')
     result.add_argument('--literal-public-command', help='exact canonical no-argument public command; Windows requires a disposable hosted CI account')

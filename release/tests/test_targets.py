@@ -72,18 +72,35 @@ class TargetManifestTests(unittest.TestCase):
         self.assertEqual(record["manifest"], str(MANIFEST))
         self.assertEqual(len(record["targets"]), 5)
         expected = [
-            ("linux", "x86_64", "x86_64-unknown-linux-gnu", "ubuntu-22.04", "ilium-linux-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
-            ("linux", "aarch64", "aarch64-unknown-linux-gnu", "ubuntu-22.04-arm", "ilium-linux-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
-            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2025", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe"], "pinned-source-build"),
-            ("macos", "aarch64", "aarch64-apple-darwin", "macos-15", "ilium-macos-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "upstream-prebuilt"),
-            ("macos", "x86_64", "x86_64-apple-darwin", "macos-15-intel", "ilium-macos-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server"], "pinned-source-build"),
+            ("linux", "x86_64", "x86_64-unknown-linux-gnu", "ubuntu-22.04", "ilium-linux-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server", "ilium-animation-helper"], "upstream-prebuilt"),
+            ("linux", "aarch64", "aarch64-unknown-linux-gnu", "ubuntu-22.04-arm", "ilium-linux-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server", "ilium-animation-helper"], "upstream-prebuilt"),
+            ("windows", "x86_64", "x86_64-pc-windows-msvc", "windows-2025", "ilium-windows-x86_64.zip", "zip", ["ilium.exe", "ilium-server.exe", "ilium-animation-helper.exe"], "pinned-source-build"),
+            ("macos", "aarch64", "aarch64-apple-darwin", "macos-15", "ilium-macos-aarch64.tar.gz", "tar.gz", ["ilium", "ilium-server", "ilium-animation-helper"], "upstream-prebuilt"),
+            ("macos", "x86_64", "x86_64-apple-darwin", "macos-15-intel", "ilium-macos-x86_64.tar.gz", "tar.gz", ["ilium", "ilium-server", "ilium-animation-helper"], "pinned-source-build"),
         ]
         for target, row in zip(record["targets"], expected):
             with self.subTest(target=target["rust_target"]):
                 fields = ("os", "arch", "rust_target", "runner", "archive", "format", "executables", "ort_strategy")
                 self.assertEqual(tuple(target[field] for field in fields), row)
+                self.assertEqual(target["packages"], list(tool.APPROVED_PACKAGES))
                 self.assertEqual(target["minimum_tested_os"], row[3])
-                self.assertEqual(set(target), {*fields, "minimum_tested_os"})
+                self.assertEqual(set(target), {*fields, "packages", "minimum_tested_os"})
+
+    def test_helper_version_requires_one_exact_jsonl_result(self):
+        valid = tool.helper_version_record("0.1.0") + "\n"
+        self.assertEqual(tool.version_identity("ilium-animation-helper.exe", valid, "0.1.0"),
+                         "ilium-animation-helper 0.1.0")
+        malformed = (
+            valid.rstrip("\n"),
+            valid + valid,
+            '{"type":"result","type":"result","command":"version","name":"ilium-animation-helper","version":"0.1.0"}\n',
+            valid.replace('0.1.0', '9.9.9'),
+            valid.replace('"command":"version"', '"command":"ipc"'),
+            'ilium-animation-helper 0.1.0\n',
+        )
+        for output in malformed:
+            with self.subTest(output=output), self.assertRaises(tool.ReleaseError):
+                tool.version_identity("ilium-animation-helper.exe", output, "0.1.0")
 
     def test_removed_intel_row_is_rejected(self):
         document = self.document()
@@ -105,8 +122,8 @@ class TargetManifestTests(unittest.TestCase):
             "os": "windows", "arch": "x86_64",
             "native_identity": {"system": "Windows", "machine": "AMD64", "runner": "windows-2025"},
             "dependency_closure": {"complete": True},
-            "binary_versions": {"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"},
-            "files": {"ilium.exe": "a" * 64, "ilium-server.exe": "b" * 64,
+            "binary_versions": {"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0", "ilium-animation-helper.exe": "ilium-animation-helper 0.1.0"},
+            "files": {"ilium.exe": "a" * 64, "ilium-server.exe": "b" * 64, "ilium-animation-helper.exe": "f" * 64, **tool.APPROVED_PACKAGES,
                       "VERSION": "c" * 64, "THIRD-PARTY.txt": "d" * 64,
                       "onnxruntime.dll": "e" * 64},
             "notices": {"state": "reviewed", "sha256": "d" * 64},
@@ -121,6 +138,10 @@ class TargetManifestTests(unittest.TestCase):
                                       "source_sha256": "f" * 64, "rust_crt": "static", "ort_crt": "static"}
             path.write_text(json.dumps(receipt))
             self.assertEqual(tool.audit_receipt(path, target, "0.1.0", "v0.1.0"), receipt)
+            receipt["files"]["beach-1.0.0.iliumanim"] = "0" * 64
+            path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "official animation package"):
+                tool.audit_receipt(path, target, "0.1.0", "v0.1.0")
 
     def test_replaced_target_pair_is_rejected(self):
         document = self.document()
@@ -150,6 +171,7 @@ class TargetManifestTests(unittest.TestCase):
             "archive": "ilium-linux-amd64.tar.gz",
             "format": "zip",
             "executables": ["ilium"],
+            "packages": ["beach-1.0.0.iliumanim"],
             "minimum_tested_os": "ubuntu-20.04",
         }
         for field, value in mutations.items():

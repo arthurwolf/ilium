@@ -45,7 +45,11 @@ def make_archive(directory, architecture='x86_64', members=None, version=VERSION
     client = elf_with_needed(['libonnxruntime.so.1', 'libasound.so.2', 'libssl.so.3', 'libcrypto.so.3', 'libc.so.6'])
     server = elf_with_needed(['libgcc_s.so.1', 'libm.so.6', 'libc.so.6'])
     runtime = elf_with_needed(['libstdc++.so.6', 'libc.so.6'])
-    members = members or {'ilium': client, 'ilium-server': server, 'libonnxruntime.so.1': runtime,
+    members = members or {'ilium': client, 'ilium-server': server,
+                          'ilium-animation-helper': elf_with_needed(['libc.so.6']),
+                          'libonnxruntime.so.1': runtime,
+                          **{name: (ROOT / 'ilium-animation-js/assets/packages' / name).read_bytes()
+                             for name in release_tool.APPROVED_PACKAGES},
                           'VERSION': (version + '\n').encode(), 'THIRD-PARTY.txt': b'notices'}
     prefix = 'ilium-linux-' + architecture
     archive = Path(directory) / (prefix + '.tar.gz')
@@ -77,8 +81,22 @@ class PayloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             archive = make_archive(temporary)
             files = packages.extract_package(archive, 'x86_64', VERSION, Path(temporary) / 'package')
-            self.assertEqual(set(files), {'ilium', 'ilium-server', 'libonnxruntime.so.1', 'VERSION', 'THIRD-PARTY.txt'})
+            self.assertEqual(set(files), {'ilium', 'ilium-server', 'ilium-animation-helper', 'libonnxruntime.so.1',
+                                          *release_tool.APPROVED_PACKAGES, 'VERSION', 'THIRD-PARTY.txt'})
+            for name, digest in release_tool.APPROVED_PACKAGES.items():
+                self.assertEqual(files[name], digest)
             self.assertEqual(files['THIRD-PARTY.txt'], hashlib.sha256(b'notices').hexdigest())
+
+    def test_extract_rejects_tampered_official_animation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_archive(temporary)
+            with tarfile.open(source, 'r:gz') as archive:
+                members = {member.name.rsplit('/', 1)[-1]: archive.extractfile(member).read()
+                           for member in archive if member.isfile()}
+            members['beach-1.0.0.iliumanim'] = b'tampered archive'
+            archive = make_archive(temporary, members=members)
+            with self.assertRaises(release_tool.ReleaseError):
+                packages.extract_package(archive, 'x86_64', VERSION, Path(temporary) / 'tampered')
 
     def test_extract_rejects_unexpected_members_and_version_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -121,8 +139,8 @@ class DependencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             plan = packages.dependency_plan(self.package_directory(temporary), 'x86_64')
             self.assertNotIn('libonnxruntime.so.1', plan['sonames'])
-            self.assertEqual(packages.deb_depends(plan), 'libasound2t64 | libasound2, libc6 (>= 2.35), libgcc-s1, libssl3t64 | libssl3, libstdc++6')
-            self.assertEqual(packages.rpm_requires(plan), ['libasound.so.2()(64bit)', 'libc.so.6(GLIBC_2.35)(64bit)', 'libcrypto.so.3()(64bit)',
+            self.assertEqual(packages.deb_depends(plan), 'bubblewrap, libasound2t64 | libasound2, libc6 (>= 2.35), libgcc-s1, libssl3t64 | libssl3, libstdc++6')
+            self.assertEqual(packages.rpm_requires(plan), ['bubblewrap', 'libasound.so.2()(64bit)', 'libc.so.6(GLIBC_2.35)(64bit)', 'libcrypto.so.3()(64bit)',
                                                           'libgcc_s.so.1()(64bit)', 'libssl.so.3()(64bit)', 'libstdc++.so.6()(64bit)'])
 
     def test_unreviewed_dependency_is_refused(self):
@@ -153,7 +171,7 @@ class BuildTests(unittest.TestCase):
             second, _files = self.built_deb(temporary, 'second')
             self.assertEqual(first.read_bytes(), second.read_bytes())
             receipt = {'package_files': files}
-            self.assertEqual(smoke.inspect_package('deb', first, receipt, 'x86_64'), {'files': 5})
+            self.assertEqual(smoke.inspect_package('deb', first, receipt, 'x86_64'), {'files': 8})
 
     def test_deb_inspection_detects_tampered_payload(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -175,7 +193,7 @@ class BuildTests(unittest.TestCase):
                     self.assertEqual((member.uid, member.gid, member.uname, member.gname, member.mtime), (0, 0, 'root', 'root', packages.EPOCH))
             with tarfile.open(fileobj=io.BytesIO(lzma.decompress(self.member(data, 'control.tar.xz')))) as archive:
                 control = archive.extractfile('./control').read().decode()
-            self.assertIn('Depends: libasound2t64 | libasound2, libc6 (>= 2.35)', control)
+            self.assertIn('Depends: bubblewrap, libasound2t64 | libasound2, libc6 (>= 2.35)', control)
             self.assertIn('Architecture: amd64', control)
 
     @staticmethod
@@ -208,6 +226,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(document['confinement'], 'classic')
         self.assertEqual(document['architectures'], ['arm64'])
         self.assertEqual(document['apps']['ilium']['command'], 'lib/ilium/ilium')
+        self.assertEqual(document['apps']['helper']['command'], 'lib/ilium/ilium-animation-helper')
         self.assertEqual(document['version'], '0.1.0')
         with self.assertRaises(release_tool.ReleaseError):
             packages.snap_version('1' * 33)
@@ -262,7 +281,7 @@ class RenderTests(unittest.TestCase):
                 release_tool.read_json = real_reader
                 tools.update(original)
             self.assertEqual(first.read_bytes(), second.read_bytes())
-            self.assertEqual(smoke.inspect_package('appimage', first, {'package_files': files}, 'x86_64'), {'files': 5})
+            self.assertEqual(smoke.inspect_package('appimage', first, {'package_files': files}, 'x86_64'), {'files': 8})
 
     @unittest.skipUnless(shutil.which('mksquashfs') and shutil.which('unsquashfs'), 'squashfs-tools are required')
     def test_snap_layout_round_trips_through_squashfs(self):
@@ -276,7 +295,7 @@ class RenderTests(unittest.TestCase):
             (root / 'share/doc/ilium/THIRD-PARTY.txt').write_bytes((directory / 'THIRD-PARTY.txt').read_bytes())
             image = Path(temporary) / 'ilium.snap'
             packages.mksquashfs(root, image)
-            self.assertEqual(smoke.inspect_package('snap', image, {'package_files': files}, 'x86_64'), {'files': 5})
+            self.assertEqual(smoke.inspect_package('snap', image, {'package_files': files}, 'x86_64'), {'files': 8})
 
 
 class PipelineContractTests(unittest.TestCase):

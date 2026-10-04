@@ -28,7 +28,8 @@ class ArchiveContractTests(unittest.TestCase):
         self.workspace = self.root / "Cargo.toml"
         self.workspace.write_text('[workspace.package]\nversion = "0.1.0"\n')
         self.target = tool.load_targets(ROOT / "release/targets.toml")[0]
-        self.files = {"ilium": b"synthetic client; never execute", "ilium-server": b"synthetic server; never execute", "VERSION": b"0.1.0\n", "THIRD-PARTY.txt": b"Reviewed fixture licence text\n"}
+        self.files = {"ilium": b"synthetic client; never execute", "ilium-server": b"synthetic server; never execute", "ilium-animation-helper": b"synthetic helper; never execute", "VERSION": b"0.1.0\n", "THIRD-PARTY.txt": b"Reviewed fixture licence text\n"}
+        self.files.update({name: (ROOT / "ilium-animation-js/assets/packages" / name).read_bytes() for name in tool.APPROVED_PACKAGES})
         for name, content in self.files.items():
             (self.directory / name).write_bytes(content)
         self.receipt = self.root / "audit.json"
@@ -40,7 +41,7 @@ class ArchiveContractTests(unittest.TestCase):
             "target": self.target["rust_target"], "tag": "v0.1.0", "version": "0.1.0",
             "os": self.target["os"], "arch": self.target["arch"],
             "files": {name: hashlib.sha256(content).hexdigest() for name, content in self.files.items()},
-            "binary_versions": {"ilium": "ilium 0.1.0", "ilium-server": "ilium-server 0.1.0"},
+            "binary_versions": {"ilium": "ilium 0.1.0", "ilium-server": "ilium-server 0.1.0", "ilium-animation-helper": "ilium-animation-helper 0.1.0"},
             "native_identity": {"system": "Linux", "machine": "x86_64", "runner": "fixture"},
             "dependency_closure": {"complete": True},
             "notices": {"state": "reviewed", "sha256": hashlib.sha256(self.files["THIRD-PARTY.txt"]).hexdigest()},
@@ -113,6 +114,23 @@ class ArchiveContractTests(unittest.TestCase):
                 result, record = self.invoke("verify-package", self.archive(members))
                 self.assertNotEqual(result.returncode, 0, reason)
                 self.assertEqual(record["type"], "error")
+
+    def test_missing_or_tampered_official_animation_and_helper_are_rejected(self):
+        prefix = "ilium-linux-x86_64"
+        for name in ("ilium-animation-helper", *tool.APPROVED_PACKAGES):
+            with self.subTest(name=name):
+                members = [(prefix, None)] + [(f"{prefix}/{member}", content) for member, content in sorted(self.files.items()) if member != name]
+                result, _record = self.invoke("verify-package", self.archive(members))
+                self.assertNotEqual(result.returncode, 0)
+        for name in tool.APPROVED_PACKAGES:
+            with self.subTest(tampered=name):
+                original = self.files[name]
+                self.files[name] = original + b"tampered"
+                self.write_receipt()
+                result, record = self.invoke("package", self.root / self.target["archive"])
+                self.assertNotEqual(result.returncode, 0, record)
+                self.files[name] = original
+                self.write_receipt()
 
     def test_links_special_files_and_nondeterministic_metadata_are_rejected(self):
         for attribute, value in (("type", tarfile.SYMTYPE), ("type", tarfile.LNKTYPE), ("type", tarfile.FIFOTYPE), ("mtime", 10), ("uid", 42), ("mode", 0o777)):
@@ -190,12 +208,13 @@ class ArchiveContractTests(unittest.TestCase):
 
     def test_windows_zip_has_fixed_order_modes_and_timestamp(self):
         self.target = tool.load_targets(ROOT / "release/targets.toml")[2]
-        self.files = {"ilium.exe": b"client", "ilium-server.exe": b"server", "VERSION": b"0.1.0\n", "THIRD-PARTY.txt": b"Reviewed fixture licence text\n"}
+        self.files = {"ilium.exe": b"client", "ilium-server.exe": b"server", "ilium-animation-helper.exe": b"helper", "VERSION": b"0.1.0\n", "THIRD-PARTY.txt": b"Reviewed fixture licence text\n"}
+        self.files.update({name: (ROOT / "ilium-animation-js/assets/packages" / name).read_bytes() for name in tool.APPROVED_PACKAGES})
         for path in self.directory.iterdir():
             path.unlink()
         for name, content in self.files.items():
             (self.directory / name).write_bytes(content)
-        self.write_receipt(os="windows", arch="x86_64", binary_versions={"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0"}, native_identity={"system": "Windows", "machine": "AMD64", "runner": "fixture"}, windows_ort={"state": "passed", "source_tag": "v1.24.2", "source_commit": "058787ceead760166e3c50a0a4cba8a833a6f53f", "source_sha256": "a" * 64, "rust_crt": "static", "ort_crt": "static"})
+        self.write_receipt(os="windows", arch="x86_64", binary_versions={"ilium.exe": "ilium 0.1.0", "ilium-server.exe": "ilium-server 0.1.0", "ilium-animation-helper.exe": "ilium-animation-helper 0.1.0"}, native_identity={"system": "Windows", "machine": "AMD64", "runner": "fixture"}, windows_ort={"state": "passed", "source_tag": "v1.24.2", "source_commit": "058787ceead760166e3c50a0a4cba8a833a6f53f", "source_sha256": "a" * 64, "rust_crt": "static", "ort_crt": "static"})
         path = self.root / self.target["archive"]
         result, record = self.invoke("package", path)
         self.assertEqual(result.returncode, 0, record)

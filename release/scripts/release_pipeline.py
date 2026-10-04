@@ -26,7 +26,9 @@ import urllib.parse
 import urllib.request
 
 import build_linux_packages as linux_packages
+import build_macos_packages as macos_packages
 import build_windows_installers as windows_installers
+import smoke_macos_packages as macos_smoke
 import pages
 import release_tool
 
@@ -297,7 +299,7 @@ def native(arguments):
                 environment['LD_LIBRARY_PATH'] = str(ort_library_directory) + (os.pathsep + existing_loader_path if existing_loader_path else '')
             else:
                 environment['PATH'] = str(ort_library_directory) + os.pathsep + environment['PATH']
-        logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server'], root, work / 'release-build.log', environment)
+        logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server', '--bin', 'ilium-animation-helper'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
     logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
     logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment, timeout=3600)
@@ -421,6 +423,64 @@ def linux_package_inventory(directory, tag, row, archive_sha256, package_files):
     return {**built, receipt_name: sha(directory / receipt_name)}
 
 
+def macos_native_binding(native, target, source_root, commit):
+    """Reconstruct the package builder's exact bindings from qualified native inputs."""
+    native, source_root = Path(native), Path(source_root)
+    native_files = {name: sha(native / name) for name in (*macos_packages.native_names, target['archive'])}
+    harness = release_tool.read_json(native / 'native-test-harness.json')
+    return {'source_commit': commit,
+            'source_inputs': {name: sha(source_root / name) for name in macos_packages.source_names},
+            'source_archive': target['archive'], 'source_archive_sha256': native_files[target['archive']],
+            'native_audit_sha256': native_files['native-audit.json'],
+            'native_candidate_receipt_sha256': native_files['native-candidate-receipt.json'],
+            'native_test_harness_sha256': native_files['native-test-harness.json'],
+            'native_files': native_files,
+            'native_evidence_files_sha256': evidence_files_digest(harness['evidence_files'])}
+
+
+def macos_package_inventory(directory, target, audit, binding, source_root):
+    """Rehash every container and reopen all native installed-format evidence."""
+    directory, source_root = Path(directory), Path(source_root)
+    build_name = macos_packages.receipt_name(target['arch'])
+    smoke_name = macos_packages.smoke_receipt_name(target['arch'])
+    build = macos_packages.read_json(directory / build_name)
+    proof = macos_packages.read_json(directory / smoke_name)
+    import smoke_installed_animation as animation_gate
+    smoke_sources = {name: sha(source_root / name) for name in
+                    ('release/scripts/smoke_macos_packages.py', 'release/tests/test_macos_packages.py',
+                     *animation_gate.SOURCE_FILES)}
+    macos_smoke.validate_smoke_receipt(proof, build, target, audit, binding, sha(directory / build_name),
+                                     smoke_sources, release_tool.read_json(source_root / 'release/embedding-model.json'))
+    for name in macos_packages.package_names(target['arch']):
+        path = macos_packages.regular_file(directory / name)
+        require(sha(path) == build['packages'][name] and path.stat().st_size == build['package_bytes'][name], 'macOS package bytes differ: ' + name)
+    # Portable parsing independently rejoins ZIP/PKG members to the native audit.
+    zip_path = directory / macos_packages.package_name(target['arch'], 'zip')
+    content = release_tool.read_archive(zip_path, dict(target, archive=zip_path.name, format='zip'), audit)
+    release_tool.verify_content(content, audit, audit['version'])
+    pkg_path = directory / macos_packages.package_name(target['arch'], 'pkg')
+    parts = macos_smoke.product_parts(pkg_path.read_bytes(), build['layout']['pkg']['component'])
+    content = macos_smoke.parse_cpio(parts['Payload'], build['payload_tree'])
+    release_tool.verify_content(content, audit, audit['version'])
+    macos_smoke.validate_package_metadata(parts['Distribution'], parts['PackageInfo'], build['layout'], build['payload_tree'])
+    # DMG traversal needs Darwin's native mount. Its exact container hash and the
+    # source-detached installed lifecycle above bind that native observation.
+    return {**build['packages'], build_name: sha(directory / build_name), smoke_name: sha(directory / smoke_name)}
+
+
+def validate_macos_candidate_binding(binding, target, metadata, source_root):
+    require(isinstance(binding, dict) and set(binding) == {'source_commit', 'source_inputs', 'source_archive', 'source_archive_sha256', 'native_audit_sha256', 'native_candidate_receipt_sha256', 'native_test_harness_sha256', 'native_files', 'native_evidence_files_sha256'}, 'candidate macOS binding schema differs')
+    require(binding['source_commit'] == metadata['commit'] and binding['source_archive'] == target['archive'] and binding['source_archive_sha256'] == metadata['archives'][target['archive']], 'candidate macOS source/archive binding differs')
+    require(binding['source_inputs'] == {name: sha(Path(source_root) / name) for name in macos_packages.source_names}, 'candidate macOS packaging source changed')
+    native = metadata['target_receipts'][target['rust_target']]
+    for field, native_field in (('native_audit_sha256', 'native_audit_sha256'), ('native_candidate_receipt_sha256', 'candidate_receipt_sha256'), ('native_test_harness_sha256', 'native_test_harness_sha256'), ('native_evidence_files_sha256', 'evidence_files_sha256')):
+        require(binding[field] == native[native_field], 'candidate macOS native custody differs: ' + field)
+    files = binding['native_files']
+    require(isinstance(files, dict) and set(files) == set(macos_packages.native_names) | {target['archive']} and all(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) for value in files.values()), 'candidate macOS native file inventory differs')
+    for name, digest in ((target['archive'], binding['source_archive_sha256']), ('native-audit.json', binding['native_audit_sha256']), ('native-candidate-receipt.json', binding['native_candidate_receipt_sha256']), ('native-test-harness.json', binding['native_test_harness_sha256']), ('native-test-binary', native['harness_sha256'])):
+        require(files[name] == digest, 'candidate macOS native file binding differs: ' + name)
+
+
 def aggregate(arguments):
     targets = release_tool.load_targets(arguments.manifest)
     root = arguments.workspace.resolve().parent
@@ -453,6 +513,8 @@ def aggregate(arguments):
         audit = release_tool.audit_receipt(audit_path, target, version, arguments.tag)
         release_tool.verify_content(release_tool.read_archive(archive, target, audit), audit, version)
         require(bridge['files'] == audit['files'], 'candidate member hashes differ from native audit')
+        require(bridge.get('official_packages') == {name: release_tool.APPROVED_PACKAGES[name] for name in target['packages']}, 'native bridge official animation inventory differs')
+        require(set(bridge.get('build_outputs', {})) == set(target['executables']) and all(bridge['build_outputs'][name].get('sha256') == audit['files'][name] for name in target['executables'] if target['os'] != 'macos'), 'native bridge executable inventory differs')
         harness = release_tool.read_json(native / 'native-test-harness.json')
         require(harness.get('filename') == harness_name and harness.get('source_commit') == commit and harness.get('target') == target['rust_target'] and harness.get('tag') == arguments.tag and harness.get('sha256') == sha(native / harness['filename']), 'native test harness identity mismatch')
         require(harness.get('evidence_files') == evidence_file_hashes(native), 'native evidence inventory differs from the exact harness receipt')
@@ -491,34 +553,72 @@ def aggregate(arguments):
         shutil.copyfile(archive, destination)
         archives[target['archive']] = sha(destination)
         suffix = '.exe' if target['os'] == 'windows' else ''
-        receipts[target['rust_target']] = {'native_audit_sha256': sha(audit_path), 'candidate_receipt_sha256': sha(bridge_path), 'client_sha256': audit['files']['ilium' + suffix], 'server_sha256': audit['files']['ilium-server' + suffix], 'harness_sha256': harness['sha256'], 'native_test_harness_sha256': sha(native / 'native-test-harness.json'), 'evidence_files': harness['evidence_files'], 'evidence_files_sha256': evidence_files_digest(harness['evidence_files']), 'installed_embedding': {'wrapper_sha256': sha(embedding_wrapper), 'command_sha256': sha(embedding_spec_path), 'model_register_sha256': sha(root / 'release/embedding-model.json'), 'model_files': model_files, 'runtime_files': harness.get('runtime_files', {})}}
+        receipts[target['rust_target']] = {'native_audit_sha256': sha(audit_path), 'candidate_receipt_sha256': sha(bridge_path), 'client_sha256': audit['files']['ilium' + suffix], 'server_sha256': audit['files']['ilium-server' + suffix], 'helper_sha256': audit['files']['ilium-animation-helper' + suffix], 'official_packages': {name: audit['files'][name] for name in target['packages']}, 'harness_sha256': harness['sha256'], 'native_test_harness_sha256': sha(native / 'native-test-harness.json'), 'evidence_files': harness['evidence_files'], 'evidence_files_sha256': evidence_files_digest(harness['evidence_files']), 'installed_embedding': {'wrapper_sha256': sha(embedding_wrapper), 'command_sha256': sha(embedding_spec_path), 'model_register_sha256': sha(root / 'release/embedding-model.json'), 'model_files': model_files, 'runtime_files': harness.get('runtime_files', {})}}
         shutil.copyfile(audit_path, output / 'audits' / (target['rust_target'] + '.json'))
     windows_row = next(row for row in targets if row['os'] == 'windows')
     installers_directory = arguments.windows_installers.resolve()
-    require(installers_directory.is_dir() and not installers_directory.is_symlink() and windows_installers.inventory_matches(installers_directory), 'Windows installer artifact inventory differs')
+    import validate_animation_smoke as animation_smoke
+    windows_marker = installers_directory / animation_smoke.WINDOWS_NAME
+    require(installers_directory.is_dir() and not installers_directory.is_symlink() and
+            {path.name for path in installers_directory.iterdir()} ==
+            {*windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME,
+             animation_smoke.WINDOWS_NAME}, 'Windows installer artifact inventory differs')
     windows_audit = release_tool.audit_receipt(output / 'audits' / (windows_row['rust_target'] + '.json'), windows_row, release_tool.workspace_version(arguments.workspace, arguments.tag), arguments.tag)
     windows_installer_hashes = windows_installer_inventory(installers_directory, arguments.tag, archives[windows_row['archive']], windows_audit['files'])
+    package_animation_smoke = {}
+    require(windows_marker.is_file() and not windows_marker.is_symlink(),
+            'Windows installed animation marker is missing or aliased')
+    animation_smoke.validate(release_tool.read_json(windows_marker), target=windows_row,
+                             tag=arguments.tag, audit_path=output / 'audits' / (windows_row['rust_target'] + '.json'),
+                             source_root=root, packages=installers_directory,
+                             archive_sha256=archives[windows_row['archive']])
+    package_animation_smoke[windows_row['rust_target']] = sha(windows_marker)
+    shutil.copyfile(windows_marker, output / 'audits' / animation_smoke.WINDOWS_NAME)
     for name in sorted(windows_installer_hashes):
         shutil.copyfile(installers_directory / name, output / name)
     linux_rows = [row for row in targets if row['os'] == 'linux']
     packages_directory = arguments.linux_packages.resolve()
-    expected_packages = {name for row in linux_rows for name in (*linux_packages.package_names(row['arch']), linux_packages.receipt_name(row['arch']))}
+    expected_packages = {name for row in linux_rows for name in (*linux_packages.package_names(row['arch']), linux_packages.receipt_name(row['arch']), animation_smoke.LINUX_NAME.format(arch=row['arch']))}
     require(packages_directory.is_dir() and not packages_directory.is_symlink() and {path.name for path in packages_directory.iterdir()} == expected_packages, 'Linux package artifact inventory differs')
     linux_package_hashes = {}
     for row in linux_rows:
         linux_audit = release_tool.audit_receipt(output / 'audits' / (row['rust_target'] + '.json'), row, release_tool.workspace_version(arguments.workspace, arguments.tag), arguments.tag)
         linux_package_hashes.update(linux_package_inventory(packages_directory, arguments.tag, row, archives[row['archive']], linux_audit['files']))
+        marker_name = animation_smoke.LINUX_NAME.format(arch=row['arch'])
+        marker = packages_directory / marker_name
+        require(marker.is_file() and not marker.is_symlink(),
+                'Linux installed animation marker is missing or aliased')
+        animation_smoke.validate(release_tool.read_json(marker), target=row, tag=arguments.tag,
+                                 audit_path=output / 'audits' / (row['rust_target'] + '.json'),
+                                 source_root=root, packages=packages_directory,
+                                 archive_sha256=archives[row['archive']])
+        package_animation_smoke[row['rust_target']] = sha(marker)
+        shutil.copyfile(marker, output / 'audits' / marker_name)
     for name in sorted(linux_package_hashes):
         shutil.copyfile(packages_directory / name, output / name)
+    macos_rows = [row for row in targets if row['os'] == 'macos']
+    macos_directory = arguments.macos_packages.resolve()
+    expected_macos = {name for row in macos_rows for name in (*macos_packages.package_names(row['arch']), macos_packages.receipt_name(row['arch']), macos_packages.smoke_receipt_name(row['arch']))}
+    require(macos_directory.is_dir() and not macos_directory.is_symlink() and {path.name for path in macos_directory.iterdir()} == expected_macos, 'macOS package artifact inventory differs')
+    macos_hashes, macos_bindings = {}, {}
+    for row in macos_rows:
+        native = artifacts / ('native-' + row['rust_target'])
+        binding = macos_native_binding(native, row, root, commit)
+        audit = release_tool.audit_receipt(output / 'audits' / (row['rust_target'] + '.json'), row, version, arguments.tag)
+        macos_hashes.update(macos_package_inventory(macos_directory, row, audit, binding, root))
+        macos_bindings[row['rust_target']] = binding
+    for name in sorted(macos_hashes):
+        shutil.copyfile(macos_directory / name, output / name)
     (output / 'SHA256SUMS').write_text(''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)), encoding='ascii')
     (output / 'VERSION').write_text(version + '\n', encoding='ascii')
     for name in ('install.sh', 'install.ps1'):
         shutil.copyfile(root / 'release' / name, output / name)
-    source_inputs = {name: sha(root / name) for name in ('Cargo.toml', 'Cargo.lock', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json')}
-    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes}
+    import smoke_installed_animation as animation_gate
+    source_inputs = {name: sha(root / name) for name in ('Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES)}
+    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes, 'macos_packages': macos_hashes, 'macos_bindings': macos_bindings, 'package_animation_smoke': package_animation_smoke}
     write_json(output / 'candidate.json', metadata)
     pages.build_pages(arguments.manifest, output / 'site', arguments.tag, output / 'SHA256SUMS', source_root=root)
-    gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives) + sorted(windows_installer_hashes) + sorted(linux_package_hashes)]))
+    gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives) + sorted(windows_installer_hashes) + sorted(linux_package_hashes) + sorted(macos_hashes)]))
     emit('result', command='aggregate', state='passed', output=str(output), archives=archives, commit=commit)
 
 
@@ -527,25 +627,49 @@ def candidate_data(directory, manifest, workspace):
     metadata = release_tool.read_json(directory / 'candidate.json')
     targets = release_tool.load_targets(manifest)
     version = release_tool.workspace_version(workspace, metadata['tag'])
-    expected_inputs = {'Cargo.toml', 'Cargo.lock', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json'}
+    import validate_animation_smoke as animation_smoke
+    expected_inputs = {'Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES}
     require(set(metadata.get('source_inputs', {})) == expected_inputs, 'candidate source inventory differs')
     for name, digest in metadata['source_inputs'].items():
         require(sha(Path(workspace).resolve().parent / name) == digest, 'candidate source input changed: ' + name)
-    expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', *windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME, *metadata.get('linux_packages', {})}
+    expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', *windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME, *metadata.get('linux_packages', {}), *metadata.get('macos_packages', {})}
     actual_names = {path.name for path in directory.iterdir()}
     require(actual_names in (expected_names, expected_names | {'qualification.json'}), 'candidate aggregate file inventory differs')
     require(metadata.get('schema') == 1 and re.fullmatch('[0-9a-f]{40}', metadata.get('commit', '')), 'candidate source identity is invalid')
     require(set(metadata['archives']) == {row['archive'] for row in targets} and set(metadata['target_receipts']) == {row['rust_target'] for row in targets}, 'candidate target/archive inventory differs')
+    package_rows = [row for row in targets if row['os'] in ('linux', 'windows')]
+    require(set(metadata.get('package_animation_smoke', {})) ==
+            {row['rust_target'] for row in package_rows},
+            'candidate Linux/Windows installed animation evidence differs')
+    expected_audits = {row['rust_target'] + '.json' for row in targets} | {
+        animation_smoke.WINDOWS_NAME, *(animation_smoke.LINUX_NAME.format(arch=row['arch'])
+                                        for row in targets if row['os'] == 'linux')}
+    require({path.name for path in (directory / 'audits').iterdir()} == expected_audits,
+            'candidate audit and package-smoke inventory differs')
     require(set(metadata.get('installers', {})) == {'install.sh', 'install.ps1'}, 'candidate installer inventory differs')
     for name, digest in metadata['installers'].items():
         require(sha(directory / name) == digest, 'candidate installer bytes changed')
-    linux_listed = 0
+    linux_listed, macos_listed = 0, 0
+    require(set(metadata.get('macos_bindings', {})) == {row['rust_target'] for row in targets if row['os'] == 'macos'}, 'candidate macOS architecture bindings differ')
     for target in targets:
         archive = directory / target['archive']
         require(metadata['archives'][target['archive']] == sha(archive), 'candidate archive bytes changed')
         audit_path = directory / 'audits' / (target['rust_target'] + '.json')
         require(sha(audit_path) == metadata['target_receipts'][target['rust_target']]['native_audit_sha256'], 'candidate audit bytes changed')
         audit = release_tool.audit_receipt(audit_path, target, version, metadata['tag'])
+        if target['os'] in ('linux', 'windows'):
+            marker_name = (animation_smoke.WINDOWS_NAME if target['os'] == 'windows' else
+                           animation_smoke.LINUX_NAME.format(arch=target['arch']))
+            marker_path = directory / 'audits' / marker_name
+            require(marker_path.is_file() and not marker_path.is_symlink(),
+                    'candidate installed animation marker is missing or aliased')
+            require(sha(marker_path) == metadata['package_animation_smoke'][target['rust_target']],
+                    'candidate package animation smoke bytes changed')
+            animation_smoke.validate(release_tool.read_json(marker_path), target=target,
+                                     tag=metadata['tag'], audit_path=audit_path,
+                                     source_root=Path(workspace).resolve().parent,
+                                     packages=directory,
+                                     archive_sha256=metadata['archives'][target['archive']])
         release_tool.verify_content(release_tool.read_archive(archive, target, audit), audit, version)
         release_tool.validate_checksums(directory / 'SHA256SUMS', targets, archive)
         if target['os'] == 'windows':
@@ -554,14 +678,21 @@ def candidate_data(directory, manifest, workspace):
             inventory = linux_package_inventory(directory, metadata['tag'], target, metadata['archives'][target['archive']], audit['files'])
             require(all(metadata.get('linux_packages', {}).get(name) == digest for name, digest in inventory.items()), 'candidate Linux package inventory differs')
             linux_listed += len(inventory)
+        if target['os'] == 'macos':
+            binding = metadata['macos_bindings'][target['rust_target']]
+            validate_macos_candidate_binding(binding, target, metadata, Path(workspace).resolve().parent)
+            inventory = macos_package_inventory(directory, target, audit, binding, Path(workspace).resolve().parent)
+            require(all(metadata.get('macos_packages', {}).get(name) == digest for name, digest in inventory.items()), 'candidate macOS package inventory differs')
+            macos_listed += len(inventory)
     require(linux_listed == len(metadata.get('linux_packages', {})), 'candidate lists Linux packages no target owns')
+    require(macos_listed == len(metadata.get('macos_packages', {})), 'candidate lists macOS packages no target owns')
     pages.verify_pages(directory / 'site', directory / 'SHA256SUMS', source_root=Path(workspace).resolve().parent, manifest=manifest)
     return metadata, targets
 
 
 def validate_install_receipt(metadata, proof, target, *, public):
     require(proof.get('schema') == 2 and proof.get('state') == 'passed' and proof.get('publication_allowed') is True, 'native installation did not pass')
-    for key, expected in (('tag', metadata['tag']), ('target', target['rust_target']), ('archive_sha256', metadata['archives'][target['archive']]), ('installed_client_sha256', metadata['target_receipts'][target['rust_target']]['client_sha256']), ('installed_server_sha256', metadata['target_receipts'][target['rust_target']]['server_sha256'])):
+    for key, expected in (('tag', metadata['tag']), ('target', target['rust_target']), ('archive_sha256', metadata['archives'][target['archive']]), ('installed_client_sha256', metadata['target_receipts'][target['rust_target']]['client_sha256']), ('installed_server_sha256', metadata['target_receipts'][target['rust_target']]['server_sha256']), ('installed_helper_sha256', metadata['target_receipts'][target['rust_target']]['helper_sha256'])):
         require(proof.get(key) == expected, 'qualification identity mismatch: ' + key)
     expected_system = {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
@@ -573,6 +704,33 @@ def validate_install_receipt(metadata, proof, target, *, public):
     expected_pair = {'ilium' + suffix: metadata['target_receipts'][target['rust_target']]['client_sha256'],
                      'ilium-server' + suffix: metadata['target_receipts'][target['rust_target']]['server_sha256']}
     require(proof.get('installed_pair_sha256') == expected_pair, 'installed pair digest map differs')
+    require(proof.get('installed_official_packages_sha256') == metadata['target_receipts'][target['rust_target']]['official_packages'] == release_tool.APPROVED_PACKAGES, 'installed official animation digest map differs')
+    require(release_tool.version_identity('ilium-animation-helper' + suffix, proof.get('installed_helper_version', ''), metadata['tag'][1:]) == 'ilium-animation-helper ' + metadata['tag'][1:], 'installed helper version identity differs')
+    import smoke_installed_animation as animation_gate
+    animation = proof.get('installed_animation')
+    require(isinstance(animation, dict) and animation.get('state') == 'passed' and
+            animation.get('publication_allowed') is False and
+            animation.get('native_audit_sha256') == metadata['target_receipts'][target['rust_target']]['native_audit_sha256'] and
+            animation.get('source_files') == {name: metadata['source_inputs'][name] for name in animation_gate.SOURCE_FILES} and
+            animation.get('installed_root') == proof.get('installed_pair_directory') and
+            animation.get('executable_root') == proof.get('installed_pair_directory') and
+            animation.get('launcher_command') == [str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]), 'release-animation-probe'] and
+            animation.get('target') == target['rust_target'] and animation.get('tag') == metadata['tag'] and
+            animation.get('format') == 'archive' and animation.get('native_identity', {}).get('system') == expected_system and
+            animation.get('native_identity', {}).get('machine') in expected_machines and
+            animation.get('installed_files', {}).get(target['executables'][0]) == proof['installed_client_sha256'] and
+            animation.get('installed_files', {}).get(target['executables'][2]) == proof['installed_helper_sha256'] and
+            all(animation.get('installed_files', {}).get(name) == digest for name, digest in release_tool.APPROVED_PACKAGES.items()),
+            'installed animation proof is missing or not aggregate-bound')
+    catalogue, renders = animation_gate.parse_probe_output(animation.get('stdout', ''))
+    require(catalogue == animation.get('catalogue') and renders == animation.get('renders') and
+            catalogue.get('client_sha256') == proof['installed_client_sha256'] and
+            catalogue.get('helper_sha256') == proof['installed_helper_sha256'] and
+            catalogue.get('client_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]) and
+            catalogue.get('helper_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][2]) and
+            animation.get('stdout_sha256') == hashlib.sha256(animation['stdout'].encode('utf-8')).hexdigest() and
+            animation.get('stderr_sha256') == hashlib.sha256(b'').hexdigest(),
+            'installed animation process, frame, or helper receipt differs')
     require(proof.get('isolated_state_cleaned') is True, 'isolated owned installation was not cleaned')
     origin = proof.get('origin')
     source_mode = proof.get('installer_source_mode')
@@ -683,6 +841,11 @@ def validate_install_evidence(proof, receipt_path, target=None):
         if path.is_file():
             actual[path.relative_to(evidence).as_posix()] = sha(path)
     require(actual == proof.get('evidence_files') and evidence_files_digest(actual) == proof.get('evidence_files_sha256'), 'native installation evidence bytes differ from receipt')
+    animation_reference = proof.get('installed_animation_evidence')
+    require(isinstance(animation_reference, dict) and
+            animation_reference == {'path': 'installed-animation.json', 'sha256': actual.get('installed-animation.json')} and
+            json.loads((evidence / 'installed-animation.json').read_text(encoding='utf-8')) == proof.get('installed_animation'),
+            'installed animation retained evidence differs from receipt')
     def evidence_path(reference):
         require(isinstance(reference, dict) and set(reference) == {'path', 'sha256'} and
                 re.fullmatch(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*', reference.get('path', '')) and
@@ -847,7 +1010,7 @@ def github(path, *, method='GET', payload=None, binary=None):
 def publication_files(candidate):
     candidate = Path(candidate)
     metadata = release_tool.read_json(candidate / 'candidate.json')
-    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']))]
+    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
 
 
 def validate_release(release, tag, files, *, draft, immutable):
@@ -1050,7 +1213,7 @@ def install(arguments):
         with installer.open('xb') as script:
             script.write(content)
         write_json(proof.parent / 'preview-acquisition.json', {'schema': 1, 'url': script_url, 'sha256': release_tool.digest(content), 'deployment_id': preview['deployment_id'], 'tag': metadata['tag'], 'commit': metadata['commit']})
-    command = [sys.executable, root / 'release/tests/native_install.py', '--manifest', arguments.manifest.resolve(), '--installer', installer, '--archive-directory', arguments.candidate.resolve(), '--origin', origin, '--tag', metadata['tag'], '--target', target['rust_target'], '--runner-identity', target['runner'], '--expected-client-sha256', expected['client_sha256'], '--expected-server-sha256', expected['server_sha256'], '--native-test-binary', harness_binary, '--output', proof]
+    command = [sys.executable, root / 'release/tests/native_install.py', '--manifest', arguments.manifest.resolve(), '--installer', installer, '--archive-directory', arguments.candidate.resolve(), '--origin', origin, '--tag', metadata['tag'], '--target', target['rust_target'], '--runner-identity', target['runner'], '--expected-client-sha256', expected['client_sha256'], '--expected-server-sha256', expected['server_sha256'], '--expected-helper-sha256', expected['helper_sha256'], '--native-test-binary', harness_binary, '--output', proof]
     embedding = expected['installed_embedding']
     command.extend(['--embedding-wrapper', root / 'release/tests/embedding_acceptance.py',
                     '--embedding-command', native / 'embedding-command.json',
@@ -1502,6 +1665,7 @@ def parser():
             command.add_argument('--artifacts', type=Path, required=True)
             command.add_argument('--windows-installers', type=Path, required=True)
             command.add_argument('--linux-packages', type=Path, required=True)
+            command.add_argument('--macos-packages', type=Path, required=True)
             command.add_argument('--output', type=Path, required=True)
         if name in {'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'recovery-ready', 'readback', 'recover'}:
             command.add_argument('--candidate', type=Path, required=True)

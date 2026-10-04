@@ -2,7 +2,7 @@
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import sys
 import tempfile
@@ -20,6 +20,200 @@ import release_tool
 import release_pipeline as pipeline
 import pages
 import build_linux_packages as linux_packages
+import smoke_installed_animation as animation_gate
+import validate_animation_smoke as animation_smoke
+
+
+def synthetic_animation_receipt(target, pair_directory, source_inputs, *,
+                                client_hash='e' * 64, server_hash='f' * 64,
+                                helper_hash='0' * 64, audit_hash='c' * 64):
+    """Create an inert but complete publication-validator fixture for one target."""
+    pair = PureWindowsPath(pair_directory) if target['os'] == 'windows' else Path(pair_directory)
+    client, server, helper = target['executables']
+    catalogue = {'type': 'artifact', 'gate': 'installed_catalogue',
+                 'packages': ['beach', 'carpet'], 'client_path': str(pair / client),
+                 'client_sha256': client_hash, 'helper_path': str(pair / helper),
+                 'helper_sha256': helper_hash, 'worker_threads_before': 1,
+                 'worker_bytes_before': 1024}
+    renders = [{'type': 'artifact', 'gate': 'installed_render',
+                'package': filename.split('-')[0], 'archive_sha256': digest,
+                'helper_sha256': helper_hash, 'rendered_frames': 2,
+                'physical_retirement': True, 'worker_threads_before': 1,
+                'worker_threads_after': 1, 'worker_bytes_before': 1024,
+                'worker_bytes_after': 1024}
+               for filename, digest in release_tool.APPROVED_PACKAGES.items()]
+    result = {'type': 'result', 'gate': 'installed_animation', 'state': 'passed',
+              'publication_allowed': False, 'packages': ['beach', 'carpet']}
+    output = ''.join(json.dumps(row) + '\n' for row in [catalogue, *renders, result])
+    return {'schema': 1, 'state': 'passed', 'publication_allowed': False,
+            'scope': 'installed-animation-contract', 'format': 'archive',
+            'target': target['rust_target'], 'tag': 'v0.1.0', 'version': '0.1.0',
+            'installed_root': pair_directory, 'executable_root': pair_directory,
+            'launcher_command': [str(pair / client), 'release-animation-probe'],
+            'native_audit_sha256': audit_hash,
+            'source_files': {name: source_inputs[name] for name in animation_gate.SOURCE_FILES},
+            'installed_files': {client: client_hash, server: server_hash,
+                                helper: helper_hash, **release_tool.APPROVED_PACKAGES},
+            'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin',
+                                          'windows': 'Windows'}[target['os']],
+                                'machine': target['arch']},
+            'stdout': output, 'stdout_sha256': release_tool.digest(output.encode()),
+            'stderr_sha256': release_tool.digest(b''),
+            'catalogue': catalogue, 'renders': renders}
+
+
+def synthetic_package_animation_marker(target, source, native, archive,
+                                       package_directory, package_hashes, audit):
+    """Inert receipt fixture; validation still reparses all nested records."""
+    source_inputs = animation_smoke.source_hashes(source)
+    marker = {'schema': 1, 'state': 'passed', 'publication_allowed': False,
+              'target': target['rust_target'], 'tag': 'v0.1.0',
+              'archive_sha256': pipeline.sha(archive),
+              'native_audit_sha256': pipeline.sha(native / 'native-audit.json'),
+              'source_files': source_inputs, 'package_files': package_hashes,
+              'native_identity': {'system': {'linux': 'Linux', 'windows': 'Windows'}[target['os']],
+                                  'machine': target['arch']}}
+    if target['os'] == 'windows':
+        directory = r'C:\Users\synthetic\AppData\Local\Programs\ilium'
+        proof = synthetic_animation_receipt(
+            target, directory, source_inputs,
+            client_hash=audit['files']['ilium.exe'],
+            server_hash=audit['files']['ilium-server.exe'],
+            helper_hash=audit['files']['ilium-animation-helper.exe'],
+            audit_hash=marker['native_audit_sha256'])
+        expected_inputs = {'archive': marker['archive_sha256'],
+                           'audit': marker['native_audit_sha256'],
+                           'manifest': pipeline.sha(source / 'release/targets.toml'),
+                           'receipt': pipeline.sha(package_directory /
+                                                   pipeline.windows_installers.RECEIPT_NAME),
+                           **package_hashes}
+        rows = [{'type': 'binding', 'tag': 'v0.1.0', 'version': '0.1.0',
+                 'package_files': audit['files'], 'sha256': expected_inputs,
+                 'source_files': source_inputs},
+                {'type': 'account-before',
+                 'identity': {'local_app_data': r'C:\Users\synthetic\AppData\Local'},
+                 'custody': 'github-hosted'}]
+        for kind in ('msi', 'exe'):
+            for phase in ('initial', 'repeated'):
+                label = kind + '-' + phase
+                command = [str(PureWindowsPath(directory) / 'ilium.exe'),
+                           'release-animation-probe']
+                rows.append({'type': 'command-exit', 'label': label + '-animation',
+                             'returncode': 0, 'stdout': proof['stdout'], 'stderr': ''})
+                rows.append({'type': 'installed-animation', 'label': label,
+                             'command': command, 'stdout_sha256': proof['stdout_sha256'],
+                             'catalogue': proof['catalogue'], 'renders': proof['renders'],
+                             'job_empty': True})
+            rows.append({'type': 'format-result', 'format': kind, 'state': 'passed'})
+        rows.append({'type': 'result', 'state': 'passed', 'version': '0.1.0',
+                     'installers': package_hashes, 'input_sha256': expected_inputs,
+                     'source_files': source_inputs,
+                     'native_exe_msi': True, 'public_release_verified': False})
+        marker['journal'] = rows
+        marker['proofs'] = animation_smoke.windows_events(rows, audit, expected_inputs,
+                                                          source_inputs)
+        filename = animation_smoke.WINDOWS_NAME
+    else:
+        container_proofs = {}
+        for label, (kind, image) in animation_smoke.linux_container_labels().items():
+            directory = ('/usr/lib/ilium' if kind in ('deb', 'rpm') else
+                         '/tmp/ilium/appimage/0.1.0-' + audit['files']['ilium'][:16])
+            proof = synthetic_animation_receipt(
+                target, directory, source_inputs,
+                client_hash=audit['files']['ilium'],
+                server_hash=audit['files']['ilium-server'],
+                helper_hash=audit['files']['ilium-animation-helper'],
+                audit_hash=marker['native_audit_sha256'])
+            container_proofs[label] = {
+                'schema': 1, 'state': 'passed', 'publication_allowed': False,
+                'scope': 'installed-animation-container', 'tag': 'v0.1.0',
+                'format': kind, 'image': image, 'arch': target['arch'],
+                'package': linux_packages.package_name(target['arch'], kind),
+                'package_sha256': package_hashes[linux_packages.package_name(target['arch'], kind)],
+                'source_archive_sha256': marker['archive_sha256'],
+                'native_audit_sha256': marker['native_audit_sha256'],
+                'source_files': {name: source_inputs[name] for name in animation_gate.SOURCE_FILES},
+                'installed_files': proof['installed_files'],
+                'client_path': proof['catalogue']['client_path'],
+                'helper_path': proof['catalogue']['helper_path'],
+                'stdout': proof['stdout'], 'stdout_sha256': proof['stdout_sha256'],
+                'catalogue': proof['catalogue'], 'renders': proof['renders']}
+        roots = {'deb': '/usr/lib/ilium',
+                 'snap': '/snap/ilium/12/lib/ilium',
+                 'flatpak': '/app/lib/ilium',
+                 'appimage': '/tmp/ilium/appimage/fixture'}
+        commands = {'deb': ['/usr/bin/ilium', 'release-animation-probe'],
+                    'snap': ['snap', 'run', 'ilium', 'release-animation-probe'],
+                    'flatpak': ['/tmp/flatpak-client.sh', 'release-animation-probe'],
+                    'appimage': ['/tmp/appimage-client.sh', 'release-animation-probe']}
+        host = {}
+        for kind in animation_smoke.HOST_FORMATS:
+            root = roots[kind]
+            proof = synthetic_animation_receipt(
+                target, root, source_inputs,
+                client_hash=audit['files']['ilium'],
+                server_hash=audit['files']['ilium-server'],
+                helper_hash=audit['files']['ilium-animation-helper'],
+                audit_hash=marker['native_audit_sha256'])
+            proof.update(format=kind, launcher_command=commands[kind])
+            if kind == 'flatpak':
+                proof['installed_root'] = '/tmp/flatpak/installation/files/lib/ilium'
+            host[kind] = proof
+        marker['containers'] = container_proofs
+        marker['host'] = host
+        identity = {'system': 'Linux', 'machine': target['arch']}
+        provenance = {'arch': target['arch'], 'tag': 'v0.1.0',
+                      'source_archive_sha256': marker['archive_sha256'],
+                      'native_audit_sha256': marker['native_audit_sha256'],
+                      'source_files': {name: source_inputs[name]
+                                       for name in animation_gate.SOURCE_FILES}}
+        marker['container_events'] = [
+            {'type': 'result', 'command': 'containers', 'format': kind,
+             'environment': image, 'state': 'passed',
+             'package': linux_packages.package_name(target['arch'], kind),
+             'package_sha256': package_hashes[linux_packages.package_name(target['arch'], kind)],
+             'execution': 'extract-and-run' if kind == 'appimage' else 'native-container',
+             'animation': {'content_sha256': animation_smoke.content_sha(
+                 container_proofs[kind + '-' + image.replace('/', '_').replace(':', '_')])},
+             **provenance}
+            for kind, image in animation_smoke.linux_container_labels().values()]
+        marker['container_events'].append({'type': 'summary', 'command': 'containers',
+                                           'arch': target['arch'], 'tag': 'v0.1.0',
+                                           'native_identity': identity,
+                                           'state': 'passed', 'failed': 0})
+        marker['host_events'] = []
+        for kind in animation_smoke.HOST_FORMATS:
+            # The native host calls smoke_installed_animation.smoke() in-process;
+            # its two JSONL rows precede the enclosing host terminal result.
+            proof_bytes = (json.dumps(host[kind], indent=2, sort_keys=True) + '\n').encode('utf-8')
+            proof_path = '/tmp/synthetic-host-logs/' + kind + '-host-installed-animation.json'
+            marker['host_events'].append({
+                'type': 'artifact', 'path': proof_path,
+                'sha256': hashlib.sha256(proof_bytes).hexdigest(),
+                'bytes': len(proof_bytes)})
+            marker['host_events'].append({
+                'type': 'result', 'state': 'passed',
+                'scope': 'installed-animation-contract', 'format': kind,
+                'publication_allowed': False})
+            marker['host_events'].append({
+                'type': 'result', 'command': 'host', 'format': kind,
+                'state': 'passed', 'package': linux_packages.package_name(target['arch'], kind),
+                'package_sha256': package_hashes[linux_packages.package_name(target['arch'], kind)],
+                'execution': {'deb': 'native-host', 'snap': 'classic',
+                              'flatpak': 'sandbox', 'appimage': 'fuse'}[kind],
+                'gates': dict.fromkeys(('preflight', 'install', 'verify', 'remove',
+                                        'absence', 'state_cleanup'), 'passed'),
+                'removed': True, 'animation_sha256': animation_smoke.content_sha(host[kind]),
+                'log': '/tmp/synthetic-host-logs/' + kind + '-host.log',
+                **provenance})
+        marker['host_events'].append({'type': 'summary', 'command': 'host',
+                                      'arch': target['arch'], 'tag': 'v0.1.0',
+                                      'native_identity': identity,
+                                      'state': 'passed', 'failed': 0})
+        marker['appimage_fuse'] = {'fuse_mount': '/tmp/synthetic-fuse',
+                                   'mount_records': [['/tmp/synthetic-fuse', 'fuse.squashfuse']]}
+        filename = animation_smoke.LINUX_NAME.format(arch=target['arch'])
+    pipeline.write_json(package_directory / filename, marker)
 
 
 class WorkflowTests(unittest.TestCase):
@@ -41,6 +235,24 @@ class WorkflowTests(unittest.TestCase):
                     seen.add(dependency)
         visit(name, set())
         return seen
+
+    def test_native_package_smoke_is_sealed_before_artifact_upload(self):
+        for job_name, smoke_token, marker_token in (
+            ('windows-installers', 'build_windows_installers.py smoke',
+             'validate_animation_smoke.py'),
+            ('linux-packages', 'smoke_linux_packages.py host',
+             'validate_animation_smoke.py')):
+            with self.subTest(job=job_name):
+                steps = self.workflow['jobs'][job_name]['steps']
+                smoke = next(index for index, step in enumerate(steps)
+                             if smoke_token in step.get('run', ''))
+                seal = next(index for index, step in enumerate(steps)
+                            if marker_token in step.get('run', ''))
+                upload = next(index for index, step in enumerate(steps)
+                              if step.get('with', {}).get('name', '').startswith(job_name))
+                self.assertLess(smoke, seal)
+                self.assertLess(seal, upload)
+                self.assertNotIn('if', steps[seal])
 
     def test_five_manifest_driven_native_and_install_matrices(self):
         targets = release_tool.load_targets(ROOT / 'release/targets.toml')
@@ -72,11 +284,109 @@ class WorkflowTests(unittest.TestCase):
         host = next(step['run'] for step in job['steps'] if 'smoke_linux_packages.py host' in step.get('run', ''))
         for package_format in ('snap', 'flatpak', 'deb', 'appimage'):
             self.assertIn(package_format, host)
+        self.assertIn('--flatpak-user-dir', host,
+                      'lifecycle HOME/XDG isolation must not change the Flatpak installation')
         aggregate = '\n'.join(step.get('run', '') for step in self.workflow['jobs']['aggregate']['steps'])
         self.assertIn('--linux-packages linux-packages', aggregate)
         subjects = next(step['with']['subject-path'] for step in self.workflow['jobs']['attest']['steps'] if 'subject-path' in step.get('with', {}))
         for pattern in ('candidate/*.deb', 'candidate/*.rpm', 'candidate/*.AppImage', 'candidate/*.flatpak', 'candidate/*.snap', 'candidate/linux-packages-*.json'):
             self.assertIn(pattern, subjects)
+
+    def test_macos_packages_use_both_native_rows_and_complete_smoke_contract(self):
+        targets = [row for row in release_tool.load_targets(ROOT / 'release/targets.toml') if row['os'] == 'macos']
+        job = self.workflow['jobs']['macos-packages']
+        self.assertEqual(sorted(job['needs']), ['native', 'source'])
+        self.assertEqual(job['runs-on'], '${{ matrix.runner }}')
+        self.assertEqual(job['strategy']['fail-fast'], 'false')
+        self.assertEqual(sorted((row['arch'], row['rust_target'], row['runner']) for row in job['strategy']['matrix']['include']),
+                         sorted((row['arch'], row['rust_target'], row['runner']) for row in targets))
+        commands = {}
+        for step in job['steps']:
+            words = shlex.split(step.get('run', ''), comments=True)
+            if len(words) > 1 and words[1] in ('release/scripts/build_macos_packages.py', 'release/scripts/smoke_macos_packages.py'):
+                self.assertNotIn(words[1], commands)
+                commands[words[1]] = words
+        self.assertEqual(len(commands), 2)
+        for script, words in commands.items():
+            for flag, value in (('--tag', '${{ needs.source.outputs.tag }}'), ('--arch', '${{ matrix.arch }}'),
+                                ('--source-commit', '${{ needs.source.outputs.commit }}'), ('--runner-identity', '${{ matrix.runner }}'),
+                                ('--native', 'native-macos'), ('--archive', 'native-macos/ilium-macos-${{ matrix.arch }}.tar.gz')):
+                self.assertEqual(words.count(flag), 1)
+                self.assertEqual(words[words.index(flag) + 1], value)
+        build = commands['release/scripts/build_macos_packages.py']
+        smoke = commands['release/scripts/smoke_macos_packages.py']
+        self.assertEqual(build[2], 'build')
+        self.assertEqual(build[build.index('--output') + 1], 'macos-packages')
+        self.assertEqual(build[build.index('--work') + 1], smoke[smoke.index('--build-work') + 1])
+        self.assertEqual(smoke[smoke.index('--packages') + 1], 'macos-packages')
+        self.assertEqual(smoke[smoke.index('--output') + 1], 'macos-packages/macos-smoke-${{ matrix.arch }}.json')
+        self.assertEqual(smoke[smoke.index('--root') + 1], '$RUNNER_TEMP/macos-package-smoke')
+        upload = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'macos-packages-${{ matrix.arch }}')
+        self.assertEqual(upload['with']['path'], 'macos-packages/')
+        self.assertEqual(upload['with']['if-no-files-found'], 'error')
+        diagnostics = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'diagnostics-macos-packages-${{ matrix.arch }}')
+        self.assertEqual(diagnostics['if'], 'always()')
+        for path in ('${{ runner.temp }}/macos-package-work/', '${{ runner.temp }}/macos-package-smoke/'):
+            self.assertIn(path, diagnostics['with']['path'])
+        self.assertIn('macos-packages', self.workflow['jobs']['aggregate']['needs'])
+        aggregate = '\n'.join(step.get('run', '') for step in self.workflow['jobs']['aggregate']['steps'])
+        self.assertIn('--macos-packages macos-packages', aggregate)
+        download = next(step for step in self.workflow['jobs']['aggregate']['steps'] if step.get('with', {}).get('pattern') == 'macos-packages-*')
+        self.assertEqual(download['with']['path'], 'macos-packages')
+        self.assertEqual(download['with']['merge-multiple'], 'true')
+        subjects = next(step['with']['subject-path'] for step in self.workflow['jobs']['attest']['steps'] if 'subject-path' in step.get('with', {}))
+        for pattern in ('candidate/*.zip', 'candidate/*.pkg', 'candidate/*.dmg', 'candidate/macos-packages-*.json', 'candidate/macos-smoke-*.json'):
+            self.assertIn(pattern, subjects)
+
+    def linux_smoke_commands(self) -> dict[str, list[str]]:  # Parse actual workflow commands instead of accepting loose format substrings.
+        commands: dict[str, list[str]] = {}  # Keep exactly one invocation for each supported smoke mode.
+        for step in self.workflow['jobs']['linux-packages']['steps']:  # Inspect only the bounded Linux packaging job.
+            for line in step.get('run', '').splitlines():  # Preserve each shell command's own arguments.
+                words = shlex.split(line, comments=True)  # Ignore explanatory shell comments while respecting quoted expressions.
+                if words[:2] != ['python', 'release/scripts/smoke_linux_packages.py']:  # Skip unrelated setup and publication commands.
+                    continue  # Only actual smoke invocations define native coverage.
+                self.assertGreaterEqual(len(words), 3)  # A malformed invocation must not disappear from coverage.
+                command = words[2]  # Match the CLI subcommand emitted by the real workflow.
+                self.assertNotIn(command, commands)  # Duplicate invocations cannot hide a conflicting required-format list.
+                commands[command] = words  # Retain exact flag values for every subsequent assertion.
+        return commands  # Reuse this parser without inventing a second workflow matrix.
+
+    def test_linux_smoke_modes_require_exact_explicit_format_coverage(self):  # Protect required native gates from silently shrinking.
+        commands = self.linux_smoke_commands()  # Read the actual YAML run commands.
+        expected = {'inspect': {'deb', 'rpm', 'appimage', 'snap'}, 'containers': {'deb', 'rpm', 'appimage'}, 'host': {'deb', 'appimage', 'snap', 'flatpak'}}  # Flatpak requires native private deployment, while RPM uses native distro containers.
+        self.assertEqual(set(commands), set(expected))  # Every declared mode must run exactly once.
+        for command, formats in expected.items():  # Check each mode independently of names elsewhere in the job.
+            with self.subTest(command=command):  # Identify the exact mode whose coverage changed.
+                words = commands[command]  # Work with shell-parsed arguments rather than substring matches.
+                self.assertEqual(words.count('--formats'), 1)  # Require one explicit, unambiguous coverage selection.
+                actual = words[words.index('--formats') + 1].split(',')  # Read the exact comma-separated public option.
+                self.assertEqual(len(actual), len(set(actual)))  # Reject duplicated formats that might conceal a missing one.
+                self.assertEqual(set(actual), formats)  # Reject missing and unsupported mode/format combinations.
+                self.assertEqual(words[words.index('--arch') + 1], '${{ matrix.arch }}')  # Bind every mode to both native matrix rows.
+                self.assertEqual(words[words.index('--packages') + 1], 'linux-packages')  # Inspect and execute the same built package directory.
+        host = commands['host']  # Preserve primary's verified Flatpak caller correction.
+        self.assertEqual(host.count('--flatpak-user-dir'), 1)  # Require an explicit installation identity across HOME/XDG isolation.
+        self.assertEqual(host[host.index('--flatpak-user-dir') + 1], '$RUNNER_TEMP/flatpak-install')  # Keep the supplied fresh, task-owned installation path.
+
+    def test_linux_inspection_retains_logs_without_masking_failure(self):  # A successful tee must never qualify a failed offline inspector.
+        job = self.workflow['jobs']['linux-packages']  # Keep the existing package artifact boundary.
+        inspection = next(step for step in job['steps'] if 'smoke_linux_packages.py inspect ' in step.get('run', ''))  # Find the actual inspector invocation.
+        self.assertIn('set -o pipefail', inspection['run'])  # Propagate the inspector's failure through the logging pipeline.
+        words = self.linux_smoke_commands()['inspect']  # Parse the command using the same public argument grammar.
+        self.assertEqual(words[-3:], ['|', 'tee', '$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl'])  # Retain the inspector's exact JSONL outside release assets.
+        diagnostics = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'diagnostics-linux-packages-${{ matrix.arch }}')  # Locate the existing diagnostics upload.
+        self.assertEqual(diagnostics.get('if'), 'always()')  # Failed native checks must still upload available diagnostics.
+        self.assertEqual(set(diagnostics['with']['path'].splitlines()), {'${{ runner.temp }}/package-smoke-inspect/', '${{ runner.temp }}/package-smoke/', '${{ runner.temp }}/package-smoke-host/'})  # Preserve every smoke mode's evidence directory.
+        artifact = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'linux-packages-${{ matrix.arch }}')  # Keep successful package upload separate from diagnostics.
+        self.assertEqual(artifact['with']['path'], 'linux-packages/')  # Extra acceptance files must not change the pipeline's exact asset inventory.
+        self.assertNotIn('if', artifact)  # Package upload retains the normal prior-step-success condition.
+
+    def test_linux_packaging_declares_inspection_prerequisites(self):  # Avoid relying on rpm package transitive dependencies for offline inspection.
+        setup = next(step['run'] for step in self.workflow['jobs']['linux-packages']['steps'] if step.get('name') == 'Packaging toolchain')  # Read the actual disposable-runner setup.
+        install = next(shlex.split(line, comments=True) for line in setup.splitlines() if 'apt-get install ' in line)  # Parse the native package-manager invocation.
+        self.assertTrue({'rpm', 'rpm2cpio', 'cpio', 'squashfs-tools', 'flatpak', 'fuse3'} <= set(install))  # Declare every nonbaseline inspector and sandbox/mount package.
+        self.assertIn('command -v snap', setup)  # Missing Snap tooling must fail before the required build and host gate.
+        self.assertIn('command -v docker', setup)  # Native container coverage cannot disappear when Docker is unavailable.
 
     def test_actual_cli_dispatches_hyphenated_and_baseline_commands(self):
         with patch.object(pipeline, 'capture_baseline') as baseline:
@@ -180,17 +490,38 @@ class PipelineTests(unittest.TestCase):
         for filename in ('targets.toml', 'embedding-model.json', 'ort-source.json', 'ort-runtime.json', 'licence-sources.json', 'install.sh', 'install.ps1'):
             shutil.copyfile(ROOT / 'release' / filename, source / 'release' / filename)
         shutil.copyfile(ROOT / 'release/tests/embedding_acceptance.py', source / 'release/tests/embedding_acceptance.py')
+        for filename in ('release/scripts/release_tool.py', 'release/scripts/audit_native.py', 'release/scripts/build_macos_packages.py', 'release/scripts/smoke_macos_packages.py', 'release/tests/test_macos_packages.py'):
+            destination = source / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / filename, destination)
         (source / 'Cargo.toml').write_text('[workspace.package]\nversion = "0.1.0"\n')
         (source / 'Cargo.lock').write_text('# Synthetic fixture lock bytes\n')
+        for filename in (name for name in pipeline.macos_packages.source_names
+                         if name.startswith(('ilium-animation-js/', 'ilium-client/', 'ilium-platform/'))):
+            destination = source / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / filename, destination)
+        for filename in animation_smoke.SOURCE_FILES:
+            destination = source / filename
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / filename, destination)
         artifacts = self.root / 'artifacts'; artifacts.mkdir()
         for target in self.targets:
             directory = artifacts / ('native-' + target['rust_target']); directory.mkdir()
             (directory / 'candidate').mkdir(); (directory / 'evidence').mkdir()
-            content = {target['executables'][0]: b'fixture client', target['executables'][1]: b'fixture server', 'VERSION': b'0.1.0\n', 'THIRD-PARTY.txt': b'Reviewed synthetic fixture notice bytes\n'}
+            content = {target['executables'][0]: b'fixture client', target['executables'][1]: b'fixture server', target['executables'][2]: b'fixture helper', **{name: (ROOT / 'ilium-animation-js/assets/packages' / name).read_bytes() for name in release_tool.APPROVED_PACKAGES}, 'VERSION': b'0.1.0\n', 'THIRD-PARTY.txt': b'Reviewed synthetic fixture notice bytes\n'}
+            if target['os'] == 'macos':
+                from test_macos_packages import fixture_macho
+                content['ilium'] = fixture_macho(target['arch'], True, b'synthetic client')
+                content['ilium-server'] = fixture_macho(target['arch'], True, b'synthetic server')
+                content['ilium-animation-helper'] = fixture_macho(target['arch'], True, b'synthetic helper')
+                content['libonnxruntime.1.24.2.dylib'] = fixture_macho(target['arch'], False, b'synthetic runtime')
             hashes = {name: hashlib.sha256(value).hexdigest() for name, value in content.items()}
             audit = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': target['rust_target'], 'tag': 'v0.1.0', 'version': '0.1.0', 'os': target['os'], 'arch': target['arch'], 'files': hashes, 'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[target['os']], 'machine': target['arch'], 'runner': target['runner']}, 'dependency_closure': {'complete': True}, 'binary_versions': {name: name.removesuffix('.exe') + ' 0.1.0' for name in target['executables']}, 'notices': {'state': 'reviewed', 'sha256': hashes['THIRD-PARTY.txt']}}
             if target['os'] == 'macos':
                 audit.update(loader_paths={'state': 'passed'}, embedding={'state': 'passed'}, signing={'state': 'unsigned'}, notarization={'state': 'disabled'})
+                audit['native_identity']['machine'] = pipeline.macos_packages.architectures[target['arch']][0]
                 if target['arch'] == 'x86_64':
                     audit['intel_ort'] = {'state': 'passed', 'source_tag': 'v1.24.2', 'source_commit': '058787ceead760166e3c50a0a4cba8a833a6f53f', 'source_sha256': 'a' * 64}
             windows_receipt = None
@@ -213,6 +544,8 @@ class PipelineTests(unittest.TestCase):
                     (installers_directory / name).write_bytes(b'synthetic fixture ' + name.encode())
                     installer_hashes[name] = pipeline.sha(installers_directory / name)
                 pipeline.write_json(installers_directory / pipeline.windows_installers.RECEIPT_NAME, {'schema': 1, 'tag': 'v0.1.0', 'source_archive_sha256': pipeline.sha(archive), 'package_files': hashes, 'installers': installer_hashes})
+                synthetic_package_animation_marker(target, source, directory, archive,
+                                                   installers_directory, installer_hashes, audit)
             if target['os'] == 'linux':
                 packages_directory = self.root / 'linux-packages'; packages_directory.mkdir(exist_ok=True)
                 package_hashes = {}
@@ -220,6 +553,8 @@ class PipelineTests(unittest.TestCase):
                     (packages_directory / name).write_bytes(b'synthetic fixture ' + name.encode())
                     package_hashes[name] = pipeline.sha(packages_directory / name)
                 pipeline.write_json(packages_directory / linux_packages.receipt_name(target['arch']), {'schema': 1, 'tag': 'v0.1.0', 'arch': target['arch'], 'source_archive_sha256': pipeline.sha(archive), 'package_files': hashes, 'packages': package_hashes})
+                synthetic_package_animation_marker(target, source, directory, archive,
+                                                   packages_directory, package_hashes, audit)
             model_directory = directory / 'evidence/model'; model_directory.mkdir()
             model_hashes = {}
             for name in ('model.onnx', 'tokenizer.json', 'config.json', 'special_tokens_map.json', 'tokenizer_config.json'):
@@ -247,14 +582,59 @@ class PipelineTests(unittest.TestCase):
             harness['evidence_files'] = pipeline.evidence_file_hashes(directory)
             pipeline.write_json(directory / 'native-test-harness.json', harness)
             (directory / 'SHA256SUMS').write_text(pipeline.sha(archive) + '  ' + target['archive'] + '\n')
-            bridge = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': target['rust_target'], 'tag': 'v0.1.0', 'archive': {'sha256': pipeline.sha(archive)}, 'native_audit': {'sha256': pipeline.sha(directory / 'native-audit.json')}, 'files': hashes, 'workspace_sha256': pipeline.sha(source / 'Cargo.toml'), 'lock_sha256': pipeline.sha(source / 'Cargo.lock'), 'embedding_model_register_sha256': pipeline.sha(source / 'release/embedding-model.json'), 'embedding_wrapper_sha256': embedding_wrapper_sha, 'embedding_model_files': model_hashes}
+            bridge = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': target['rust_target'], 'tag': 'v0.1.0', 'archive': {'sha256': pipeline.sha(archive)}, 'native_audit': {'sha256': pipeline.sha(directory / 'native-audit.json')}, 'files': hashes, 'official_packages': dict(release_tool.APPROVED_PACKAGES), 'build_outputs': {name: {'sha256': hashes[name]} for name in target['executables']}, 'workspace_sha256': pipeline.sha(source / 'Cargo.toml'), 'lock_sha256': pipeline.sha(source / 'Cargo.lock'), 'embedding_model_register_sha256': pipeline.sha(source / 'release/embedding-model.json'), 'embedding_wrapper_sha256': embedding_wrapper_sha, 'embedding_model_files': model_hashes}
             for key, filename in (('runtime_inventory', 'runtime-inventory.json'), ('dependency_inventory', 'dependency-inventory.json'), ('embedding_receipt', 'embedding-receipt.json')):
                 bridge[key] = {'sha256': pipeline.sha(directory / filename)}
             if windows_receipt is not None:
                 bridge['windows_ort_build_receipt'] = {'path': 'evidence/windows-ort-build-receipt.json', 'sha256': pipeline.sha(directory / 'evidence/windows-ort-build-receipt.json')}
                 bridge['windows_ort_cmake_cache'] = {'path': 'evidence/windows-ort-CMakeCache.txt', 'sha256': pipeline.sha(directory / 'evidence/windows-ort-CMakeCache.txt')}
             pipeline.write_json(directory / 'native-candidate-receipt.json', bridge)
-        return SimpleNamespace(manifest=source / 'release/targets.toml', workspace=source / 'Cargo.toml', tag='v0.1.0', artifacts=artifacts, windows_installers=installers_directory, linux_packages=self.root / 'linux-packages', output=self.root / 'aggregate')
+            if target['os'] == 'macos':
+                self.create_macos_products(source, directory, target, audit, content)
+        return SimpleNamespace(manifest=source / 'release/targets.toml', workspace=source / 'Cargo.toml', tag='v0.1.0', artifacts=artifacts, windows_installers=installers_directory, linux_packages=self.root / 'linux-packages', macos_packages=self.root / 'products', output=self.root / 'aggregate')
+
+    def create_macos_products(self, source, native, target, audit, content):
+        """Serialize inert ZIP/XAR/CPIO containers and synthetic installed receipts."""
+        from test_macos_packages import cpio_record, fixture_package_info, xar_payload
+        from test_macos_publication import qualified_fixture
+        packages = pipeline.macos_packages
+        products = self.root / 'products'; products.mkdir(exist_ok=True)
+        binding = pipeline.macos_native_binding(native, target, source, 'a' * 40)
+        layout = packages.package_layout(target['arch'], '0.1.0')
+        tree = {name: {'kind': 'file', 'mode': 0o755 if name in target['executables'] else 0o644,
+                       'bytes': len(value), 'sha256': hashlib.sha256(value).hexdigest()} for name, value in content.items()}
+        zip_path = products / packages.package_name(target['arch'], 'zip')
+        release_tool.write_archive(zip_path, dict(target, archive=zip_path.name, format='zip'), content)
+        payload = cpio_record('.', b'', 0o40755, 2)
+        for name, value in content.items():
+            payload += cpio_record('./' + name, value, 0o100000 | tree[name]['mode'], 1)
+        payload += cpio_record('TRAILER!!!', b'', 0, 1)
+        payload += b'\0' * (-len(payload) % 512)
+        parts = {'Distribution': packages.distribution_xml(layout),
+                 'ilium-component.pkg/PackageInfo': fixture_package_info(layout, tree),
+                 'ilium-component.pkg/Bom': b'BOMStore' + b'\0' * 24,
+                 'ilium-component.pkg/Payload': payload}
+        (products / packages.package_name(target['arch'], 'pkg')).write_bytes(xar_payload(parts))
+        (products / packages.package_name(target['arch'], 'dmg')).write_bytes(b'nonmountable synthetic DMG fixture')
+        build = {'schema': 1, 'state': 'built-not-qualified', 'publication_allowed': False, 'native_payload_executed': False,
+                 'tag': 'v0.1.0', 'version': '0.1.0', 'arch': target['arch'], 'target': target['rust_target'], **binding,
+                 'package_files': audit['files'], 'payload_tree': tree,
+                 'packages': {name: pipeline.sha(products / name) for name in packages.package_names(target['arch'])},
+                 'package_bytes': {name: (products / name).stat().st_size for name in packages.package_names(target['arch'])},
+                 'layout': layout, 'distribution_sha256': release_tool.digest(parts['Distribution']), 'component_sha256': 'a' * 64,
+                 'native_identity': {**audit['native_identity'], 'translated': False}, 'toolchain': {'synthetic_fixture': True},
+                 'commands': [{'label': 'pkgbuild', 'command': ['/usr/bin/pkgbuild', '--compression', 'legacy'], 'exit_code': 0}],
+                 'payload_signing': audit['signing'], 'payload_notarization': audit['notarization'],
+                 'container_signing': dict.fromkeys(packages.formats, 'unsigned'),
+                 'container_notarization': dict.fromkeys(packages.formats, 'disabled'), 'credentials_used': False,
+                 'owned_images_detached': True, 'work_retained': True}
+        pipeline.write_json(products / packages.receipt_name(target['arch']), build)
+        fixture = SimpleNamespace(base=self.root, source=source, native=native, files=audit['files'], audit=audit,
+                                  runtime_name='libonnxruntime.1.24.2.dylib', identity=audit['native_identity'],
+                                  target=target, tag='v0.1.0', version='0.1.0', arch=target['arch'])
+        proof = qualified_fixture(fixture, build, binding)
+        proof['smoke_source_inputs'] = {name: pipeline.sha(source / name) for name in proof['smoke_source_inputs']}
+        pipeline.write_json(products / packages.smoke_receipt_name(target['arch']), proof)
 
     def test_windows_native_uses_pinned_source_builder_without_crt_pool_arguments(self):
         arguments = pipeline.parser().parse_args(['native', '--tag', 'v0.1.0', '--target', 'x86_64-pc-windows-msvc', '--runner-identity', 'windows-2025', '--work', str(self.root / 'work'), '--output', str(self.root / 'output')])
@@ -293,7 +673,7 @@ class PipelineTests(unittest.TestCase):
         (arguments.output / 'qualification.json').write_text('{}')
         published = {path.name for path in pipeline.publication_files(arguments.output)}
         self.assertTrue(names <= published)
-        self.assertEqual(len(published), 5 + 6 + 3 + 12)
+        self.assertEqual(len(published), 5 + 6 + 3 + 12 + 10)
         installer = arguments.output / pipeline.windows_installers.MSI_NAME
         installer.write_bytes(installer.read_bytes() + b'changed')
         with self.assertRaises(ValueError):
@@ -312,6 +692,305 @@ class PipelineTests(unittest.TestCase):
         package.write_bytes(package.read_bytes() + b'changed')
         with self.assertRaises(ValueError):
             pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    def test_aggregate_requires_both_native_package_animation_markers(self):
+        for index, os_name in enumerate(('windows', 'linux')):
+            with self.subTest(os=os_name):
+                self.root = Path(self.temp.name) / ('missing-smoke-' + str(index))
+                self.root.mkdir()
+                arguments = self.create_native_fixture()
+                path = (arguments.windows_installers / animation_smoke.WINDOWS_NAME
+                        if os_name == 'windows' else
+                        arguments.linux_packages / animation_smoke.LINUX_NAME.format(arch='aarch64'))
+                path.unlink()
+                with patch.object(pipeline, 'git_identity', return_value='a' * 40), \
+                     patch.object(pipeline, 'emit'), self.assertRaises((ValueError, OSError)):
+                    pipeline.aggregate(arguments)
+
+    def test_candidate_reparses_package_animation_after_coordinated_hash_change(self):
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        path = arguments.output / 'audits' / animation_smoke.LINUX_NAME.format(arch='x86_64')
+        marker = release_tool.read_json(path)
+        flatpak = marker['host']['flatpak']
+        rows = [json.loads(line) for line in flatpak['stdout'].splitlines()]
+        rows[1]['physical_retirement'] = False
+        flatpak['stdout'] = ''.join(json.dumps(row) + '\n' for row in rows)
+        flatpak['stdout_sha256'] = release_tool.digest(flatpak['stdout'].encode())
+        flatpak['renders'][0] = rows[1]
+        path.write_text(json.dumps(marker, sort_keys=True) + '\n', encoding='utf-8')
+        candidate = arguments.output / 'candidate.json'
+        metadata = release_tool.read_json(candidate)
+        metadata['package_animation_smoke']['x86_64-unknown-linux-gnu'] = pipeline.sha(path)
+        candidate.write_text(json.dumps(metadata, sort_keys=True) + '\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'physically retire'):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    def test_package_animation_marker_rejects_foreign_installed_roots(self):
+        arguments = self.create_native_fixture()
+        for target in (row for row in self.targets if row['os'] in ('windows', 'linux')
+                       and row['arch'] == 'x86_64'):
+            with self.subTest(os=target['os']):
+                native = arguments.artifacts / ('native-' + target['rust_target'])
+                archive = native / target['archive']
+                if target['os'] == 'windows':
+                    packages = arguments.windows_installers
+                    marker = release_tool.read_json(packages / animation_smoke.WINDOWS_NAME)
+                    first = next(row for row in marker['journal']
+                                 if row.get('type') == 'installed-animation')
+                    first['command'][0] = r'C:\Foreign\ilium.exe'
+                else:
+                    packages = arguments.linux_packages
+                    marker = release_tool.read_json(packages / animation_smoke.LINUX_NAME.format(arch='x86_64'))
+                    marker['host']['flatpak']['executable_root'] = marker['host']['flatpak']['installed_root']
+                with self.assertRaises(ValueError):
+                    animation_smoke.validate(
+                        marker, target=target, tag='v0.1.0',
+                        audit_path=native / 'native-audit.json',
+                        source_root=arguments.workspace.parent, packages=packages,
+                        archive_sha256=pipeline.sha(archive))
+
+    def test_package_animation_marker_rejects_stale_passing_package_smoke(self):
+        arguments = self.create_native_fixture()
+        cases = (
+            ('x86_64-pc-windows-msvc', arguments.windows_installers,
+             pipeline.windows_installers.MSI_NAME, animation_smoke.WINDOWS_NAME),
+            ('x86_64-unknown-linux-gnu', arguments.linux_packages,
+             linux_packages.package_name('x86_64', 'deb'),
+             animation_smoke.LINUX_NAME.format(arch='x86_64')),
+            ('x86_64-unknown-linux-gnu', arguments.linux_packages,
+             linux_packages.package_name('x86_64', 'snap'),
+             animation_smoke.LINUX_NAME.format(arch='x86_64')),
+        )
+        for target_name, packages_directory, package_name, marker_name in cases:
+            with self.subTest(target=target_name, package=package_name):
+                target = next(row for row in self.targets if row['rust_target'] == target_name)
+                native = arguments.artifacts / ('native-' + target_name)
+                package = packages_directory / package_name
+                old = package.read_bytes()
+                marker = release_tool.read_json(packages_directory / marker_name)
+                try:
+                    package.write_bytes(old + b'changed ancillary installer bytes')
+                    # A sealer can record the new file hash, but old successful
+                    # native journals must still fail against their consumed bytes.
+                    marker['package_files'][package_name] = pipeline.sha(package)
+                    with self.assertRaisesRegex(ValueError, 'consum|provenance'):
+                        animation_smoke.validate(
+                            marker, target=target, tag='v0.1.0',
+                            audit_path=native / 'native-audit.json',
+                            source_root=arguments.workspace.parent,
+                            packages=packages_directory,
+                            archive_sha256=pipeline.sha(native / target['archive']))
+                finally:
+                    package.write_bytes(old)
+
+    def test_linux_animation_marker_requires_terminal_cleanup_and_group_summaries(self):
+        arguments = self.create_native_fixture()
+        target = next(row for row in self.targets
+                      if row['rust_target'] == 'x86_64-unknown-linux-gnu')
+        native = arguments.artifacts / ('native-' + target['rust_target'])
+        original = release_tool.read_json(
+            arguments.linux_packages /
+            animation_smoke.LINUX_NAME.format(arch='x86_64'))
+        self.assertEqual(len(original['host_events']), 13)
+        animation_smoke.validate(
+            original, target=target, tag='v0.1.0',
+            audit_path=native / 'native-audit.json',
+            source_root=arguments.workspace.parent,
+            packages=arguments.linux_packages,
+            archive_sha256=pipeline.sha(native / target['archive']))
+        mutations = (
+            lambda marker: marker['host_events'][2]['gates'].__setitem__('state_cleanup', 'failed'),
+            lambda marker: marker['host_events'].__delitem__(-1),
+            lambda marker: marker['container_events'][-1].__setitem__('state', 'failed'),
+            lambda marker: marker['host_events'].__delitem__(1),
+            lambda marker: marker['host_events'].insert(3, {'type': 'warning', 'message': 'unknown'}),
+            lambda marker: marker['host_events'][1].__setitem__('format', 'snap'),
+            lambda marker: marker['host_events'][0].__setitem__('sha256', 'f' * 64),
+            lambda marker: marker['host_events'][2].__setitem__('log', '/tmp/foreign/deb-host.log'),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate.__code__.co_firstlineno):
+                marker = deepcopy(original)
+                mutate(marker)
+                with self.assertRaises(ValueError):
+                    animation_smoke.validate(
+                        marker, target=target, tag='v0.1.0',
+                        audit_path=native / 'native-audit.json',
+                        source_root=arguments.workspace.parent,
+                        packages=arguments.linux_packages,
+                        archive_sha256=pipeline.sha(native / target['archive']))
+
+    def test_windows_animation_marker_requires_original_smoke_source(self):
+        arguments = self.create_native_fixture()
+        target = next(row for row in self.targets if row['os'] == 'windows')
+        native = arguments.artifacts / ('native-' + target['rust_target'])
+        original = release_tool.read_json(
+            arguments.windows_installers / animation_smoke.WINDOWS_NAME)
+        for index in (0, -1):
+            with self.subTest(journal_row=index):
+                marker = deepcopy(original)
+                marker['journal'][index]['source_files'][
+                    'release/scripts/smoke_windows_installers.py'] = 'f' * 64
+                with self.assertRaisesRegex(ValueError, 'Windows smoke run'):
+                    animation_smoke.validate(
+                        marker, target=target, tag='v0.1.0',
+                        audit_path=native / 'native-audit.json',
+                        source_root=arguments.workspace.parent,
+                        packages=arguments.windows_installers,
+                        archive_sha256=pipeline.sha(native / target['archive']))
+
+    def test_native_package_sealer_requires_retained_real_probe_records(self):
+        arguments = self.create_native_fixture()
+        for target_name, marker_name in (
+            ('x86_64-pc-windows-msvc', animation_smoke.WINDOWS_NAME),
+            ('x86_64-unknown-linux-gnu', animation_smoke.LINUX_NAME.format(arch='x86_64'))):
+            with self.subTest(target=target_name):
+                target = next(row for row in self.targets if row['rust_target'] == target_name)
+                native = arguments.artifacts / ('native-' + target_name)
+                packages = (arguments.windows_installers if target['os'] == 'windows'
+                            else arguments.linux_packages)
+                marker_path = packages / marker_name
+                marker = release_tool.read_json(marker_path)
+                marker_path.unlink()
+                log = self.root / ('seal-log-' + target['os'])
+                log.mkdir()
+                inputs = dict(workspace=arguments.workspace, manifest=arguments.manifest,
+                              audit=native / 'native-audit.json',
+                              archive=native / target['archive'], packages=packages,
+                              target=target_name, tag='v0.1.0',
+                              windows_journal=None, container_log=None, host_log=None)
+                if target['os'] == 'windows':
+                    journal = log / 'smoke.jsonl'
+                    journal.write_text(''.join(json.dumps(row) + '\n' for row in marker['journal']))
+                    inputs['windows_journal'] = journal
+                else:
+                    container_log = log / 'container'; container_log.mkdir()
+                    host_log = log / 'host'; host_log.mkdir()
+                    for offset, kind in enumerate(animation_smoke.HOST_FORMATS):
+                        marker['host_events'][3 * offset]['path'] = str(
+                            host_log / (kind + '-host-installed-animation.json'))
+                        marker['host_events'][3 * offset + 2]['log'] = str(
+                            host_log / (kind + '-host.log'))
+                    for label, proof in marker['containers'].items():
+                        (container_log / (label + '-installed-animation.json')).write_text(
+                            json.dumps(proof) + '\n')
+                    (container_log / 'containers-results.jsonl').write_text(
+                        ''.join(json.dumps(row) + '\n' for row in marker['container_events']))
+                    for kind, proof in marker['host'].items():
+                        (host_log / (kind + '-host-installed-animation.json')).write_text(
+                            json.dumps(proof, indent=2, sort_keys=True) + '\n')
+                    (host_log / 'host-results.jsonl').write_text(
+                        ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
+                    (host_log / 'appimage-host.log').write_text(
+                        json.dumps(marker['appimage_fuse']) + '\n')
+                    inputs['container_log'], inputs['host_log'] = container_log, host_log
+                with patch.object(animation_smoke.platform, 'system', return_value=
+                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
+                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
+                     patch.object(release_tool, 'emit'):
+                    animation_smoke.seal(SimpleNamespace(**inputs))
+                self.assertEqual(release_tool.read_json(marker_path), marker)
+                if target['os'] == 'linux':
+                    foreign = deepcopy(marker['host_events'])
+                    foreign[0]['path'] = '/tmp/foreign/deb-host-installed-animation.json'
+                    foreign[2]['log'] = '/tmp/foreign/deb-host.log'
+                    (inputs['host_log'] / 'host-results.jsonl').write_text(
+                        ''.join(json.dumps(row) + '\n' for row in foreign))
+                    with patch.object(animation_smoke.platform, 'system', return_value='Linux'), \
+                         patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
+                         patch.object(release_tool, 'emit'), \
+                         self.assertRaisesRegex(ValueError, 'another smoke log'):
+                        animation_smoke.seal(SimpleNamespace(**inputs))
+                    (inputs['host_log'] / 'host-results.jsonl').write_text(
+                        ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
+                marker_path.unlink()
+                if target['os'] == 'windows':
+                    inputs['windows_journal'].write_text('{}\n')
+                else:
+                    (inputs['host_log'] / 'flatpak-host-installed-animation.json').unlink()
+                with patch.object(animation_smoke.platform, 'system', return_value=
+                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
+                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
+                     patch.object(release_tool, 'emit'), self.assertRaises((ValueError, OSError)):
+                    animation_smoke.seal(SimpleNamespace(**inputs))
+
+    def test_aggregate_publishes_all_ten_bound_macos_assets_and_rejects_each_changed_file(self):
+        packages = pipeline.macos_packages
+        names = {name for arch in ('x86_64', 'aarch64') for name in (*packages.package_names(arch), packages.receipt_name(arch), packages.smoke_receipt_name(arch))}
+        original_root = self.root
+        for index, name in enumerate(sorted(names)):
+            with self.subTest(asset=name):
+                self.root = original_root / str(index); self.root.mkdir()
+                arguments = self.create_native_fixture()
+                with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+                    pipeline.aggregate(arguments)
+                metadata, _ = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+                self.assertEqual(set(metadata['macos_packages']), names)
+                (arguments.output / 'qualification.json').write_text('{}')
+                self.assertTrue(names <= {path.name for path in pipeline.publication_files(arguments.output)})
+                asset = arguments.output / name
+                asset.write_bytes(asset.read_bytes() + b'changed')
+                with self.assertRaises(ValueError):
+                    pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        self.root = original_root
+
+    def test_aggregate_requires_complete_macos_assets_and_passed_installed_receipt(self):
+        original_root = self.root
+        for index, case in enumerate(('missing-dmg', 'extra-file', 'failed-smoke', 'wrong-source', 'missing-format')):
+            with self.subTest(case=case):
+                self.root = original_root / str(index); self.root.mkdir()
+                arguments = self.create_native_fixture()
+                packages = pipeline.macos_packages
+                if case == 'missing-dmg':
+                    (arguments.macos_packages / packages.package_name('aarch64', 'dmg')).unlink()
+                elif case == 'extra-file':
+                    (arguments.macos_packages / 'foreign').write_bytes(b'foreign fixture')
+                else:
+                    path = arguments.macos_packages / packages.smoke_receipt_name('aarch64')
+                    receipt = release_tool.read_json(path)
+                    if case == 'failed-smoke': receipt['state'] = 'failed'
+                    if case == 'wrong-source': receipt['source_commit'] = 'b' * 40
+                    if case == 'missing-format': receipt['formats'].pop('pkg')
+                    path.write_text(json.dumps(receipt) + '\n', encoding='utf-8')
+                with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'), self.assertRaises(ValueError):
+                    pipeline.aggregate(arguments)
+        self.root = original_root
+
+    def test_aggregate_reparses_macos_containers_after_coordinated_receipt_rehash(self):
+        from test_macos_packages import xar_payload
+        original_root = self.root
+        for index, kind in enumerate(('zip', 'pkg')):
+            with self.subTest(format=kind):
+                self.root = original_root / kind; self.root.mkdir()
+                arguments = self.create_native_fixture()
+                packages = pipeline.macos_packages
+                target = next(row for row in self.targets if row['os'] == 'macos' and row['arch'] == 'aarch64')
+                asset = arguments.macos_packages / packages.package_name('aarch64', kind)
+                if kind == 'zip':
+                    native = arguments.artifacts / ('native-' + target['rust_target'])
+                    audit = release_tool.read_json(native / 'native-audit.json')
+                    content = release_tool.read_archive(asset, dict(target, archive=asset.name, format='zip'), audit)
+                    content['ilium'] = b'foreign executable fixture'
+                    asset.unlink()
+                    release_tool.write_archive(asset, dict(target, archive=asset.name, format='zip'), content)
+                else:
+                    parts = pipeline.macos_smoke.product_parts(asset.read_bytes(), 'ilium-component.pkg')
+                    parts['PackageInfo'] = parts['PackageInfo'].replace(b'/usr/local/lib/ilium/0.1.0/aarch64', b'/foreign/install')
+                    asset.write_bytes(xar_payload({'Distribution': parts.pop('Distribution'), **{'ilium-component.pkg/' + name: value for name, value in parts.items()}}))
+                build_path = arguments.macos_packages / packages.receipt_name('aarch64')
+                build = release_tool.read_json(build_path)
+                build['packages'][asset.name] = pipeline.sha(asset)
+                build['package_bytes'][asset.name] = asset.stat().st_size
+                build_path.write_text(json.dumps(build) + '\n', encoding='utf-8')
+                smoke_path = arguments.macos_packages / packages.smoke_receipt_name('aarch64')
+                proof = release_tool.read_json(smoke_path)
+                proof.update(packages=build['packages'], package_bytes=build['package_bytes'], build_receipt_sha256=pipeline.sha(build_path))
+                smoke_path.write_text(json.dumps(proof) + '\n', encoding='utf-8')
+                with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'), self.assertRaises(ValueError):
+                    pipeline.aggregate(arguments)
+        self.root = original_root
 
     def test_aggregate_rejects_linux_packages_built_from_other_files(self):
         arguments = self.create_native_fixture()
@@ -380,7 +1059,12 @@ class PipelineTests(unittest.TestCase):
         target = self.targets[0]
         expected = metadata['target_receipts'][target['rust_target']]
         suffix = '.exe' if target['os'] == 'windows' else ''
-        proof = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'target': target['rust_target'], 'archive_sha256': metadata['archives'][target['archive']], 'installed_client_sha256': expected['client_sha256'], 'installed_server_sha256': expected['server_sha256'], 'installed_pair_sha256': {'ilium' + suffix: expected['client_sha256'], 'ilium-server' + suffix: expected['server_sha256']}, 'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[target['os']], 'machine': target['arch'], 'runner': target['runner']}, 'origin': 'local', 'installer_source_mode': 'exact-functions-with-local-download-adapter' if target['os'] == 'windows' else 'unmodified-installer', 'public_transport_verified': False, 'isolated_state_cleaned': True, 'native_test_binary_sha256': expected['harness_sha256'], 'installer_sha256': metadata['installers']['install.ps1' if target['os'] == 'windows' else 'install.sh'], 'pty_tests': [{'name': name, 'command': ['/tmp/harness', name, '--exact', '--nocapture', '--test-threads=1'], 'exit_code': 0, 'stdout': {'path': 'x', 'sha256': '0' * 64}, 'stderr': {'path': 'y', 'sha256': '1' * 64}} for name in pipeline.PTY_TESTS]}
+        proof = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'target': target['rust_target'], 'archive_sha256': metadata['archives'][target['archive']], 'installed_client_sha256': expected['client_sha256'], 'installed_server_sha256': expected['server_sha256'], 'installed_helper_sha256': expected['helper_sha256'], 'installed_helper_version': release_tool.helper_version_record('0.1.0') + '\n', 'installed_official_packages_sha256': dict(release_tool.APPROVED_PACKAGES), 'installed_pair_sha256': {'ilium' + suffix: expected['client_sha256'], 'ilium-server' + suffix: expected['server_sha256']}, 'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[target['os']], 'machine': target['arch'], 'runner': target['runner']}, 'origin': 'local', 'installer_source_mode': 'exact-functions-with-local-download-adapter' if target['os'] == 'windows' else 'unmodified-installer', 'public_transport_verified': False, 'isolated_state_cleaned': True, 'native_test_binary_sha256': expected['harness_sha256'], 'installer_sha256': metadata['installers']['install.ps1' if target['os'] == 'windows' else 'install.sh'], 'pty_tests': [{'name': name, 'command': ['/tmp/harness', name, '--exact', '--nocapture', '--test-threads=1'], 'exit_code': 0, 'stdout': {'path': 'x', 'sha256': '0' * 64}, 'stderr': {'path': 'y', 'sha256': '1' * 64}} for name in pipeline.PTY_TESTS]}
+        proof['installed_pair_directory'] = '/tmp/install/versions/0.1.0/bin'
+        proof['installed_animation'] = synthetic_animation_receipt(
+            target, proof['installed_pair_directory'], metadata['source_inputs'],
+            client_hash=expected['client_sha256'], server_hash=expected['server_sha256'],
+            helper_hash=expected['helper_sha256'], audit_hash=expected['native_audit_sha256'])
         with self.assertRaisesRegex(ValueError, 'embedding'):
             pipeline.validate_install_receipt(metadata, proof, target, public=False)
 
@@ -492,11 +1176,13 @@ class PipelineTests(unittest.TestCase):
         initial_logs = logs('initial-install', 0)
         scenarios = {'prior_fixture': {'state': 'passed', 'kind': 'task-owned-audited-bytes', 'fixture_version': '0.0.0-task7b-prior', 'candidate_version': '0.1.0', 'installer': initial_logs, 'snapshot': prior}, 'corrupt_candidate_rollback': {'state': 'passed', 'installer': corrupt_logs, 'before': prior, 'after': corrupt_after}, 'upgrade': {'state': 'passed', 'installer': upgrade_logs, 'from': '0.0.0-task7b-prior', 'to': '0.1.0'}, 'repeat': {'state': 'passed', 'installer': repeat_logs, 'before': repeat_before, 'after': repeat_after, 'version': '0.1.0'}, 'path_deduplication': {'state': 'passed', 'evidence': path_ref}, 'pty': {'state': 'passed', 'tests': tests}, 'uninstall': {'state': 'passed', 'installer': uninstall_logs, 'evidence': uninstall_ref}}
         embedding = {'state': 'passed', 'executable_path': embedding_raw['executable_path'], 'process_id': 123, 'binary_sha256': '1' * 64, 'model_sha256': '2' * 64, 'loaded_runtime': '', 'vector_sha256': pipeline.release_tool.digest(json.dumps(vector).encode()), 'stdout': embedding_stdout, 'stderr': embedding_stderr}
-        proof = {'origin': 'local', 'tag': 'v0.1.0', 'installed_pair_sha256': {'ilium': '1' * 64, 'ilium-server': '2' * 64}, 'pty_tests': tests, 'scenarios': scenarios, 'installed_embedding': embedding}
+        animation = {'state': 'passed', 'scope': 'synthetic-evidence-only'}
+        animation_reference = write('installed-animation.json', animation)
+        proof = {'origin': 'local', 'tag': 'v0.1.0', 'installed_pair_sha256': {'ilium': '1' * 64, 'ilium-server': '2' * 64}, 'pty_tests': tests, 'scenarios': scenarios, 'installed_embedding': embedding, 'installed_animation': animation, 'installed_animation_evidence': animation_reference}
         def rebind():
             values = {item.relative_to(evidence).as_posix(): pipeline.sha(item) for item in evidence.iterdir()}
             proof['evidence_files'] = values; proof['evidence_files_sha256'] = pipeline.evidence_files_digest(values)
-            for container in (scenarios['prior_fixture']['snapshot'], scenarios['corrupt_candidate_rollback']['before'], scenarios['corrupt_candidate_rollback']['after'], scenarios['repeat']['before'], scenarios['repeat']['after'], scenarios['path_deduplication']['evidence'], scenarios['uninstall']['evidence'], embedding['stdout'], embedding['stderr']):
+            for container in (scenarios['prior_fixture']['snapshot'], scenarios['corrupt_candidate_rollback']['before'], scenarios['corrupt_candidate_rollback']['after'], scenarios['repeat']['before'], scenarios['repeat']['after'], scenarios['path_deduplication']['evidence'], scenarios['uninstall']['evidence'], embedding['stdout'], embedding['stderr'], animation_reference):
                 container['sha256'] = values[container['path']]
             for result in (initial_logs, corrupt_logs, upgrade_logs, repeat_logs, uninstall_logs, *tests):
                 result['stdout']['sha256'] = values[result['stdout']['path']]; result['stderr']['sha256'] = values[result['stderr']['path']]
@@ -525,7 +1211,7 @@ class PipelineTests(unittest.TestCase):
     @unittest.skipIf(sys.platform == 'win32', 'aggregate/install POSIX-fixture flows; they only run on the Linux aggregate runner')
     def test_bound_qualification_rejects_missing_failed_and_changed_receipts(self):
         embedding_binding = {'wrapper_sha256': '5' * 64, 'command_sha256': '6' * 64, 'model_register_sha256': '7' * 64, 'model_files': {'model.onnx': '8' * 64}, 'runtime_files': {}}
-        manifest = {'schema': 1, 'tag': 'v0.1.0', 'commit': 'a' * 40, 'archives': {row['archive']: 'b' * 64 for row in self.targets}, 'installers': {'install.sh': '2' * 64, 'install.ps1': '3' * 64}, 'target_receipts': {row['rust_target']: {'native_audit_sha256': 'c' * 64, 'candidate_receipt_sha256': 'd' * 64, 'client_sha256': 'e' * 64, 'server_sha256': 'f' * 64, 'harness_sha256': '1' * 64, 'installed_embedding': embedding_binding} for row in self.targets}}
+        manifest = {'schema': 1, 'tag': 'v0.1.0', 'commit': 'a' * 40, 'source_inputs': {name: '4' * 64 for name in animation_gate.SOURCE_FILES}, 'archives': {row['archive']: 'b' * 64 for row in self.targets}, 'installers': {'install.sh': '2' * 64, 'install.ps1': '3' * 64}, 'target_receipts': {row['rust_target']: {'native_audit_sha256': 'c' * 64, 'candidate_receipt_sha256': 'd' * 64, 'client_sha256': 'e' * 64, 'server_sha256': 'f' * 64, 'helper_sha256': '0' * 64, 'official_packages': dict(release_tool.APPROVED_PACKAGES), 'harness_sha256': '1' * 64, 'installed_embedding': embedding_binding} for row in self.targets}}
         receipts = {}
         scenario_names = {'prior_fixture', 'corrupt_candidate_rollback', 'upgrade', 'repeat', 'path_deduplication', 'pty', 'uninstall'}
         for row in self.targets:
@@ -551,11 +1237,11 @@ class PipelineTests(unittest.TestCase):
             manifest['target_receipts'][row['rust_target']]['installed_embedding'] = target_binding
             pty_tests = [{'name': name, 'command': ['/tmp/harness', name, '--exact', '--nocapture', '--test-threads=1'], 'exit_code': 0, 'stdout': reference, 'stderr': reference} for name in pipeline.PTY_TESTS]
             scenarios = {'prior_fixture': {'state': 'passed', 'kind': 'task-owned-audited-bytes', 'fixture_version': '0.0.0-task7b-prior', 'candidate_version': '0.1.0', 'installer': installer, 'snapshot': reference}, 'corrupt_candidate_rollback': {'state': 'passed', 'installer': failed_installer, 'before': reference, 'after': reference}, 'upgrade': {'state': 'passed', 'installer': installer, 'from': '0.0.0-task7b-prior', 'to': '0.1.0'}, 'repeat': {'state': 'passed', 'installer': installer, 'before': reference, 'after': reference, 'version': '0.1.0'}, 'path_deduplication': {'state': 'passed', 'evidence': reference}, 'pty': {'state': 'passed', 'tests': pty_tests}, 'uninstall': {'state': 'passed', 'installer': installer, 'evidence': reference}}
-            receipts[row['rust_target']] = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'tag': manifest['tag'], 'target': row['rust_target'], 'archive_sha256': manifest['archives'][row['archive']], 'installed_client_sha256': 'e' * 64, 'installed_server_sha256': 'f' * 64, 'installed_pair_sha256': {'ilium' + suffix: 'e' * 64, 'ilium-server' + suffix: 'f' * 64}, 'installed_pair_directory': pair_directory, 'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[row['os']], 'machine': row['arch'], 'runner': row['runner'], 'future_identity': 'retained'}, 'origin': 'local', 'installer_source_mode': 'exact-functions-with-local-download-adapter' if row['os'] == 'windows' else 'unmodified-installer', 'isolated_state_cleaned': True, 'public_transport_verified': False, 'installer_sha256': manifest['installers']['install.ps1' if row['os'] == 'windows' else 'install.sh'], 'native_test_binary_sha256': '1' * 64, 'pty_tests': pty_tests, 'installed_embedding': installed_embedding, 'scenarios': scenarios, 'evidence_files': evidence_files, 'evidence_files_sha256': pipeline.evidence_files_digest(evidence_files)}
+            receipts[row['rust_target']] = {'schema': 2, 'state': 'passed', 'publication_allowed': True, 'tag': manifest['tag'], 'target': row['rust_target'], 'archive_sha256': manifest['archives'][row['archive']], 'installed_client_sha256': 'e' * 64, 'installed_server_sha256': 'f' * 64, 'installed_helper_sha256': '0' * 64, 'installed_helper_version': release_tool.helper_version_record('0.1.0') + '\n', 'installed_official_packages_sha256': dict(release_tool.APPROVED_PACKAGES), 'installed_pair_sha256': {'ilium' + suffix: 'e' * 64, 'ilium-server' + suffix: 'f' * 64}, 'installed_pair_directory': pair_directory, 'native_identity': {'system': {'linux': 'Linux', 'macos': 'Darwin', 'windows': 'Windows'}[row['os']], 'machine': row['arch'], 'runner': row['runner'], 'future_identity': 'retained'}, 'origin': 'local', 'installer_source_mode': 'exact-functions-with-local-download-adapter' if row['os'] == 'windows' else 'unmodified-installer', 'isolated_state_cleaned': True, 'public_transport_verified': False, 'installer_sha256': manifest['installers']['install.ps1' if row['os'] == 'windows' else 'install.sh'], 'native_test_binary_sha256': '1' * 64, 'pty_tests': pty_tests, 'installed_embedding': installed_embedding, 'installed_animation': synthetic_animation_receipt(row, pair_directory, manifest['source_inputs']), 'scenarios': scenarios, 'evidence_files': evidence_files, 'evidence_files_sha256': pipeline.evidence_files_digest(evidence_files)}
         qualified = pipeline.qualify_receipts(manifest, receipts, self.targets, public=False)
         self.assertEqual(qualified['archives'], manifest['archives'])
         self.assertEqual(qualified['commit'], manifest['commit'])
-        for mode in ('missing', 'failed', 'hash', 'pair', 'public', 'pty', 'harness', 'installer', 'identity', 'pair-map', 'cleanup', 'source-mode', 'origin', 'prior-schema', 'corrupt-schema', 'upgrade-schema', 'repeat-schema', 'path-schema', 'pty-schema', 'uninstall-schema'):
+        for mode in ('missing', 'failed', 'hash', 'pair', 'helper-hash', 'helper-version', 'official-package', 'animation', 'public', 'pty', 'harness', 'installer', 'identity', 'pair-map', 'cleanup', 'source-mode', 'origin', 'prior-schema', 'corrupt-schema', 'upgrade-schema', 'repeat-schema', 'path-schema', 'pty-schema', 'uninstall-schema'):
             changed = deepcopy(receipts)
             first = self.targets[0]['rust_target']
             if mode == 'missing':
@@ -566,6 +1252,14 @@ class PipelineTests(unittest.TestCase):
                 changed[first]['archive_sha256'] = '0' * 64
             elif mode == 'pair':
                 changed[first]['installed_client_sha256'] = '0' * 64
+            elif mode == 'helper-hash':
+                changed[first]['installed_helper_sha256'] = '1' * 64
+            elif mode == 'helper-version':
+                changed[first]['installed_helper_version'] = release_tool.helper_version_record('9.9.9') + '\n'
+            elif mode == 'official-package':
+                changed[first]['installed_official_packages_sha256']['carpet-1.0.0.iliumanim'] = '0' * 64
+            elif mode == 'animation':
+                changed[first]['installed_animation']['renders'][1]['physical_retirement'] = False
             elif mode == 'pty':
                 changed[first]['pty_tests'] = []
             elif mode == 'harness':

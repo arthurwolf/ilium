@@ -15,7 +15,7 @@ BeforeAll {
         $file = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
         $zip = New-Object IO.Compression.ZipArchive($file, [IO.Compression.ZipArchiveMode]::Create)
         try {
-            $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe')
+            $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim')
             if ($Mode -eq 'partial') { $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium.exe') }
             if ($Mode -eq 'traversal') { $names += '../escape.exe' }
             if ($Mode -eq 'absolute') { $names += 'C:/escape.exe' }
@@ -27,6 +27,8 @@ BeforeAll {
                 $stream = $entry.Open()
                 try {
                     $data = [Text.Encoding]::UTF8.GetBytes("fixture-$name-$Version")
+                    if ($name.EndsWith('.iliumanim')) { $data = [IO.File]::ReadAllBytes((Join-Path $PSScriptRoot ('../../ilium-animation-js/assets/packages/' + $name))) }
+                    if ($name -eq 'beach-1.0.0.iliumanim' -and $Mode -eq 'tampered-animation') { $data = [Text.Encoding]::UTF8.GetBytes('tampered package') }
                     if ($name -eq 'VERSION') { $data = [Text.Encoding]::UTF8.GetBytes("$Version`n") }
                     if ($name -eq 'VERSION' -and $Mode -eq 'version') { $data = [Text.Encoding]::UTF8.GetBytes("99.0.0`n") }
                     $stream.Write($data, 0, $data.Length)
@@ -86,7 +88,7 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         ($script:downloadTls -band ([Net.SecurityProtocolType]::Ssl3 -bor [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11)) | Should -Be 0
         [Net.ServicePointManager]::SecurityProtocol | Should -Be $before
     }
-    It 'rejects unsafe <Mode> archive without selecting it' -TestCases @(@{Mode='traversal'}, @{Mode='absolute'}, @{Mode='duplicate'}, @{Mode='unexpected'}, @{Mode='partial'}, @{Mode='reparse'}, @{Mode='version'}) {
+    It 'rejects unsafe <Mode> archive without selecting it' -TestCases @(@{Mode='traversal'}, @{Mode='absolute'}, @{Mode='duplicate'}, @{Mode='unexpected'}, @{Mode='partial'}, @{Mode='reparse'}, @{Mode='version'}, @{Mode='tampered-animation'}) {
         param($Mode)
         Install-TestVersion '1.0.0'
         { Install-TestVersion '2.0.0' $Mode } | Should -Throw

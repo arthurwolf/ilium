@@ -53,8 +53,9 @@ EPOCH = 946684800
 EPOCH_DATE = '2000-01-01'
 LIBRARY_DIRECTORY = 'usr/lib/ilium'
 VERSION_PATTERN = re.compile(r'\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?\Z')
-MEMBER_PATTERN = re.compile(r'\A(?:ilium|ilium-server|VERSION|THIRD-PARTY\.txt|lib[A-Za-z0-9_+-]+\.so(?:\.[0-9]+)*)\Z')
-EXECUTABLE_MEMBERS = ('ilium', 'ilium-server')
+MEMBER_PATTERN = re.compile(r'\A(?:ilium|ilium-server|ilium-animation-helper|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|lib[A-Za-z0-9_+-]+\.so(?:\.[0-9]+)*)\Z')
+EXECUTABLE_MEMBERS = ('ilium', 'ilium-server', 'ilium-animation-helper')
+PUBLIC_EXECUTABLE_MEMBERS = ('ilium', 'ilium-server')
 MAX_MEMBER_BYTES = 1_073_741_824
 MAX_TOTAL_BYTES = 2_000_000_000
 # The tarball is built on the ubuntu-22.04 runner; nothing it needs may exceed that glibc.
@@ -156,7 +157,9 @@ def extract_package(archive, architecture, version, destination):
             source = package.extractfile(member)
             require(source is not None, 'tar member is unreadable: ' + name)
             (destination / name).write_bytes(source.read())
-    require({'ilium', 'ilium-server', 'VERSION', 'THIRD-PARTY.txt'} <= seen, 'tarball is missing a required member')
+    require(set(EXECUTABLE_MEMBERS) | set(release_tool.APPROVED_PACKAGES) | {'VERSION', 'THIRD-PARTY.txt'} <= seen, 'tarball is missing a required member')
+    for name, digest in release_tool.APPROVED_PACKAGES.items():
+        require(sha(destination / name) == digest, 'official animation package hash differs: ' + name)
     require((destination / 'VERSION').read_bytes() == (version + '\n').encode(), 'tarball VERSION differs from the release version')
     return {name: sha(destination / name) for name in sorted(seen)}
 
@@ -225,13 +228,15 @@ def dependency_plan(package_directory, architecture):
 
 
 def deb_depends(plan):
-    depends = ['libc6 (>= %d.%d)' % plan['glibc']]
+    # The helper's kernel namespace is launched through /usr/bin/bwrap.
+    # ELF DT_NEEDED cannot express this executable runtime prerequisite.
+    depends = ['bubblewrap', 'libc6 (>= %d.%d)' % plan['glibc']]
     depends.extend(DEB_PACKAGES[group] for group in plan['groups'] if group in DEB_PACKAGES)
     return ', '.join(sorted(depends))
 
 
 def rpm_requires(plan):
-    requires = ['libc.so.6(GLIBC_%d.%d)(64bit)' % plan['glibc']]
+    requires = ['bubblewrap', 'libc.so.6(GLIBC_%d.%d)(64bit)' % plan['glibc']]
     requires.extend('%s()(64bit)' % name for name in plan['sonames'] if SYSTEM_LIBRARIES[name] != 'glibc')
     return sorted(requires)
 
@@ -280,7 +285,7 @@ def install_tree(package_directory, destination, version, *, licence_path):
     package_directory = Path(package_directory)
     require(not destination.exists(), 'install tree must be new')
     copy_payload(package_directory, destination / LIBRARY_DIRECTORY)
-    for name in EXECUTABLE_MEMBERS:
+    for name in PUBLIC_EXECUTABLE_MEMBERS:
         link(destination / 'usr/bin' / name, '../lib/ilium/' + name)
     documents = destination / 'usr/share/doc/ilium'
     write_file(documents / 'THIRD-PARTY.txt', (package_directory / 'THIRD-PARTY.txt').read_bytes())
@@ -509,6 +514,8 @@ apps:
     command: lib/ilium/ilium
   server:
     command: lib/ilium/ilium-server
+  helper:
+    command: lib/ilium/ilium-animation-helper
 '''
 
 
@@ -539,6 +546,12 @@ command=ilium
 shared=network;
 sockets=pulseaudio;
 filesystems=host;
+
+[Session Bus Policy]
+# The trusted CLI launches its exact running /app deployment on the host.
+# This is full host-command authority, not a sandbox for the CLI or its panes.
+# Unverified animation bytes remain in the separately confined host helper.
+org.freedesktop.Flatpak=talk
 '''
 
 

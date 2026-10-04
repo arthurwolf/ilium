@@ -384,6 +384,22 @@
       "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
       "source_commit": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4",
       "reviewed_by": "official repository at the crate-publisher VCS identity (.cargo_vcs_info.json sha1, path spirv); SPDX declaration Apache-2.0 retained"
+    },
+    "selectors@0.38.0": {
+      "file": "licences/9663d4276861b361f598ccd4edd30cbce9f431284bab7c6e44cd70ba9ff9ff34.txt",
+      "sha256": "9663d4276861b361f598ccd4edd30cbce9f431284bab7c6e44cd70ba9ff9ff34",
+      "source": "https://raw.githubusercontent.com/servo/stylo/572ecba2d1600e7c3d490586692a209faf703baa/selectors/parser.rs",
+      "source_commit": "572ecba2d1600e7c3d490586692a209faf703baa",
+      "reviewed_by": "lock-authenticated crate MPL-2.0 declaration and original source-header notice retained; separate pinned SPDX MPL-2.0 reference, no copyright invented",
+      "reference_license_source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/json/details/MPL-2.0.json",
+      "reference_license_source_sha256": "b8ff8c9347b0c39a8747254e04788b3f2a63ed348f318458cd4096d85e6add95"
+    },
+    "v8@152.2.0": {
+      "file": "licences/67b48538b9e96698aa1729eb0e0613f92ee853d021b4aaf7752b74e8b04fed0b.txt",
+      "sha256": "67b48538b9e96698aa1729eb0e0613f92ee853d021b4aaf7752b74e8b04fed0b",
+      "source": "https://raw.githubusercontent.com/denoland/rusty_v8/2768994f664e8a6e3aba27503606c58339136e2a/LICENSE; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.fdlibm; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.strongtalk; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.v8; https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE?format=TEXT; https://chromium.googlesource.com/chromium/deps/icu/+/d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx/+/b16984ce99c702355a5b2b4c52574e82cec41fb9/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind/+/1fd455816c724182cf8736811182bf0c37b03035/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc/+/75ae50cd48c8a9d70f552ccff040029968778da9/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/google/highway/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-APACHE?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-BOOST?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-MIT?format=TEXT; https://raw.githubusercontent.com/Maratyszcza/FP16/782eea126dc5c755827be751a099eb01826175cf/LICENSE; https://raw.githubusercontent.com/jk-jeon/dragonbox/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Apache2-LLVM; https://raw.githubusercontent.com/jk-jeon/dragonbox/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Boost; https://chromium.googlesource.com/chromium/src/+/e2ee5821963baed92f29e830f05d257fbfdc6bdd/LICENSE?format=TEXT; https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/src/partition_alloc/partition_alloc.h?format=TEXT",
+      "source_commit": "2768994f664e8a6e3aba27503606c58339136e2a",
+      "reviewed_by": "publisher VCS identity (dirty=true), exact engine/dependency gitlinks and PartitionAlloc GitOrigin-RevId; packaged MIT declaration retained; deployed native binary component closure separately required"
     }
   }
 }

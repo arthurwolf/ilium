@@ -246,15 +246,15 @@ function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [strin
             }
             if (-not $name.StartsWith($Prefix + '/', [StringComparison]::Ordinal)) { throw 'Absolute or traversal ZIP path.' }
             $basename = $name.Substring($Prefix.Length + 1)
-            if ($basename -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or -not $seen.Add($basename)) {
+            if ($basename -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or -not $seen.Add($basename)) {
                 throw 'Unsafe traversal, duplicate or unexpected ZIP member.'
             }
             if (($kind -ne 0 -and $kind -ne 32768) -or ($attributes -band 1040)) { throw 'ZIP symlink, reparse point or non-regular file.' }
             $total += $entry.Length
             if ($entry.Length -le 0 -or $entry.Length -gt 1073741824 -or $total -gt 2000000000) { throw 'ZIP expanded size exceeds bound.' }
         }
-        foreach ($required in @('ilium.exe', 'ilium-server.exe', 'VERSION', 'THIRD-PARTY.txt')) {
-            if (-not $seen.Contains($required)) { throw 'ZIP is missing a required matched-pair member.' }
+        foreach ($required in @('ilium.exe', 'ilium-server.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim', 'VERSION', 'THIRD-PARTY.txt')) {
+            if (-not $seen.Contains($required)) { throw 'ZIP is missing a required payload member.' }
         }
         [IO.Directory]::CreateDirectory($Destination) | Out-Null
         foreach ($entry in $zip.Entries) {
@@ -277,6 +277,8 @@ function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [strin
     $expected = [Text.Encoding]::ASCII.GetBytes("$Version`n")
     $actual = [IO.File]::ReadAllBytes($versionPath)
     if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($expected)) { throw 'Archive VERSION differs from the requested release.' }
+    if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne '4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30' -or
+        (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne 'c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870') { throw 'Official animation archive differs from compiled release identity.' }
 }
 
 function Confirm-IliumBinaryVersion([string]$Directory, [string]$Version) {
@@ -284,11 +286,15 @@ function Confirm-IliumBinaryVersion([string]$Directory, [string]$Version) {
         $output = & (Join-Path $Directory ($executable + '.exe')) --version 2>&1
         if ($LASTEXITCODE -ne 0 -or ($output -join "`n").Trim() -cne "$executable $Version") { throw "Packaged $executable version identity failed." }
     }
+    $helper = & (Join-Path $Directory 'ilium-animation-helper.exe') --version 2>&1
+    $helperLines = @($helper)
+    $expected = '{"type":"result","command":"version","name":"ilium-animation-helper","version":"' + $Version + '"}'
+    if ($LASTEXITCODE -ne 0 -or $helperLines.Count -ne 1 -or ([string]$helperLines[0]) -cne $expected) { throw 'Packaged animation helper version identity failed.' }
 }
 
 function Get-IliumSigningStatus([string]$Directory) {
     $unsigned = $false
-    foreach ($executable in @('ilium.exe', 'ilium-server.exe')) {
+    foreach ($executable in @('ilium.exe', 'ilium-server.exe', 'ilium-animation-helper.exe')) {
         $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $Directory $executable) -ErrorAction Stop
         if ($signature.Status -eq 'NotSigned') { $unsigned = $true }
         elseif ($signature.Status -ne 'Valid') { throw "Authenticode verification failed for $executable ($($signature.Status))." }
@@ -333,11 +339,15 @@ function Test-IliumOwnedVersion([string]$Root, [string]$Version, [switch]$AllowM
     $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
     $names = @($receipt.PSObject.Properties.Name)
     foreach ($required in @('ilium.exe', 'ilium-server.exe', 'VERSION', 'THIRD-PARTY.txt')) { if ($required -cnotin $names) { return $false } }
+    $bundle = @(@('ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim') | Where-Object { $_ -cin $names })
+    if ($bundle.Count -ne 0 -and $bundle.Count -ne 3) { return $false }
     $children = @(Get-ChildItem -LiteralPath $versionDirectory -Force)
     if ($children.Count -ne 1 -or $children[0].Name -cne 'bin' -or -not $children[0].PSIsContainer) { return $false }
     foreach ($file in Get-ChildItem -LiteralPath $directory -Force) { if ($file.PSIsContainer -or $file.Name -cnotin $names) { return $false } }
     foreach ($property in $receipt.PSObject.Properties) {
-        if ($property.Name -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or $property.Value -cnotmatch '\A[0-9a-f]{64}\z') { return $false }
+        if ($property.Name -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or $property.Value -cnotmatch '\A[0-9a-f]{64}\z') { return $false }
+        if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne '4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30') { return $false }
+        if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne 'c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870') { return $false }
         $path = Join-Path $directory $property.Name
         Assert-IliumPlainPath $path
         if (-not [IO.File]::Exists($path)) { if ($AllowMissing) { continue }; return $false }

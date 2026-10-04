@@ -24,11 +24,23 @@ until timeout 60 "$@" --cwd "$project" new-pane -- sh -c 'echo ilium-smoke-ok; s
     "$@" --cwd "$project" kill-session default >/dev/null 2>&1 || true
     sleep 2
 done
-sleep 1
-running=$(timeout 30 "$@" --cwd "$project" ls)
-printf '%s\n' "$running"
-case "$running" in *running*) ;; *) echo 'lifecycle: session is not running after new-pane' >&2; exit 1 ;; esac
+session_is_running() {
+    printf '%s\n' "$1" | awk '$1 == "default" && $2 == "running" && NF == 2 { found=1 } END { exit !found }'
+}
+# The server can accept new-pane before its snapshot becomes visible to ls.
+# Twelve bounded probes tolerate that publication delay without creating another pane.
+attempt=1
+while :; do
+    running=$(timeout 5 "$@" --cwd "$project" ls)
+    if session_is_running "$running"; then
+        printf '%s\n' "$running"
+        break
+    fi
+    [ "$attempt" -lt 12 ] || { printf '%s\n' "$running"; echo 'lifecycle: session is not running after new-pane' >&2; exit 1; }
+    attempt=$((attempt + 1))
+    sleep 1
+done
 timeout 30 "$@" --cwd "$project" kill-session default
 ended=$(timeout 30 "$@" --cwd "$project" ls)
-case "$ended" in *running*) echo 'lifecycle: session survived kill-session' >&2; exit 1 ;; esac
+if session_is_running "$ended"; then echo 'lifecycle: session survived kill-session' >&2; exit 1; fi
 echo 'lifecycle: passed'

@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "release/scripts"))
+import release_tool
 
 
 class NativeAuditTests(unittest.TestCase):
@@ -46,7 +47,7 @@ class NativeAuditTests(unittest.TestCase):
             "runtime": {"path": str(native / "build/Release/Release/libonnxruntime.1.24.2.dylib"), "version": "1.24.2", "sha256": "b" * 64},
             "environment": {"ORT_LIB_LOCATION": str(native / "build/Release/Release"), "ORT_LIB_PATH": str(native / "build/Release/Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target")},
             "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
-            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server"],
+            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"],
         }
 
     def windows_build_receipt(self):
@@ -82,7 +83,7 @@ class NativeAuditTests(unittest.TestCase):
             "ort_environment": {"CMAKE_GENERATOR_INSTANCE": str(installation)},
             "ort_command": ort_command,
             "ort_invocation": ["cmd.exe", "/d", "/c", *ort_command],
-            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server"],
+            "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"],
             "environment": {"ORT_LIB_LOCATION": str(build / "Release"), "ORT_LIB_PATH": str(build / "Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target"), "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS": "-Ctarget-feature=+crt-static"},
             "runtime": {"path": str(build / "Release/onnxruntime.dll"), "version": "1.24.2", "sha256": "c" * 64},
             "import_library": {"path": str(build / "Release/onnxruntime.lib"), "sha256": "d" * 64},
@@ -119,6 +120,23 @@ class NativeAuditTests(unittest.TestCase):
                     audit.reject_windows_dynamic_crt(name)
         for name in ("kernel32.dll", "api-ms-win-crt-runtime-l1-1-0.dll"):
             audit.reject_windows_dynamic_crt(name)
+
+    def test_windows_audio_system_import_requires_reviewed_exact_name(self):
+        audit = self.module("audit_native")
+        source = "https://learn.microsoft.com/en-us/windows/win32/coreaudio/header-files-and-system-components"
+        inventory = {"files": [], "system_libraries": [
+            {"name": "Mmdevapi.dll", "reviewed": True, "source": source},
+        ]}
+        graph = {"ilium.exe": ["MMDEVAPI.dll"], "ilium-server.exe": []}
+        shipped = {"ilium.exe", "ilium-server.exe"}
+        self.assertEqual(audit.validate_closure("windows", graph, inventory, shipped), [])
+        inventory["system_libraries"][0]["reviewed"] = False
+        with self.assertRaisesRegex(ValueError, "undeclared/unreviewed"):
+            audit.validate_closure("windows", graph, inventory, shipped)
+        inventory["system_libraries"][0]["reviewed"] = True
+        for name in ("mmdevapi-extra.dll", "C:/Windows/System32/mmdevapi.dll"):
+            with self.subTest(name=name):
+                self.assertFalse(audit.system_dependency("windows", name))
 
     def test_linux_system_openssl_edges_are_reviewed_os_libraries(self):
         audit = self.module("audit_native")
@@ -470,10 +488,13 @@ class NativeAuditTests(unittest.TestCase):
             candidate = root / "installed"
             candidate.mkdir()
             source = root / "fixture.c"
-            for executable in ("ilium", "ilium-server"):
-                source.write_text('#include <stdio.h>\n#include <string.h>\nint main(int argc, char **argv) { if (argc == 2 && strcmp(argv[1], "--version") == 0) { puts("' + executable + ' 0.1.0"); return 0; } return 2; }\n')
+            for executable in ("ilium", "ilium-server", "ilium-animation-helper"):
+                version_output = release_tool.helper_version_record("0.1.0") if executable == "ilium-animation-helper" else executable + " 0.1.0"
+                source.write_text('#include <stdio.h>\n#include <string.h>\nint main(int argc, char **argv) { if (argc == 2 && strcmp(argv[1], "--version") == 0) { puts(' + json.dumps(version_output) + '); return 0; } return 2; }\n')
                 subprocess.run(["cc", str(source), "-o", str(candidate / executable)], check=True, capture_output=True)
             (candidate / "VERSION").write_text("0.1.0\n")
+            for name in release_tool.APPROVED_PACKAGES:
+                shutil.copyfile(ROOT / "ilium-animation-js/assets/packages" / name, candidate / name)
             workspace = root / "Cargo.toml"
             workspace.write_text('[workspace.package]\nversion = "0.1.0"\n')
             lock = root / "Cargo.lock"
@@ -490,7 +511,7 @@ class NativeAuditTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             receipt = json.loads(output.read_text())
             self.assertEqual(receipt["state"], "passed")
-            self.assertEqual(receipt["binary_versions"], {"ilium": "ilium 0.1.0", "ilium-server": "ilium-server 0.1.0"})
+            self.assertEqual(receipt["binary_versions"], {"ilium": "ilium 0.1.0", "ilium-server": "ilium-server 0.1.0", "ilium-animation-helper": "ilium-animation-helper 0.1.0"})
             self.assertEqual(receipt["files"]["ilium"], hashlib.sha256((candidate / "ilium").read_bytes()).hexdigest())
             runtime.write_text(json.dumps({"schema": 1, "state": "blocked"}))
             result = subprocess.run(arguments, capture_output=True, text=True)

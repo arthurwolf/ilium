@@ -22,8 +22,12 @@ import zipfile
 
 TARGET_FIELDS = frozenset(
     ("os", "arch", "rust_target", "runner", "archive", "format",
-     "executables", "ort_strategy", "minimum_tested_os")
+     "executables", "packages", "ort_strategy", "minimum_tested_os")
 )
+APPROVED_PACKAGES = {
+    "beach-1.0.0.iliumanim": "4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30",
+    "carpet-1.0.0.iliumanim": "c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870",
+}
 # This is an acceptance constraint, not a second generated release matrix.
 # The manifest supplies the records consumed by packaging and installers.
 APPROVED_PAIRS = frozenset(
@@ -60,12 +64,15 @@ def validate_target(target, index):
         missing = sorted(TARGET_FIELDS - set(target))
         unknown = sorted(set(target) - TARGET_FIELDS)
         raise ReleaseError(f"{location} fields differ: missing={missing}, unknown={unknown}")
-    for field in TARGET_FIELDS - {"executables"}:
+    for field in TARGET_FIELDS - {"executables", "packages"}:
         if not isinstance(target[field], str) or not target[field]:
             raise ReleaseError(f"{location}.{field} must be a non-empty string")
     executables = target["executables"]
     if not isinstance(executables, list) or not all(isinstance(value, str) for value in executables):
         raise ReleaseError(f"{location}.executables must be an array of strings")
+    packages = target["packages"]
+    if not isinstance(packages, list) or not all(isinstance(value, str) for value in packages):
+        raise ReleaseError(f"{location}.packages must be an array of strings")
     archive = target["archive"]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", archive) or ".." in archive:
         raise ReleaseError(f"{location}.archive is not a safe basename")
@@ -91,7 +98,8 @@ def validate_policy(target):
         "runner": runner,
         "archive": f"ilium-{operating_system}-{architecture}.{archive_format}",
         "format": archive_format,
-        "executables": [f"ilium{executable_suffix}", f"ilium-server{executable_suffix}"],
+        "executables": [f"ilium{executable_suffix}", f"ilium-server{executable_suffix}", f"ilium-animation-helper{executable_suffix}"],
+        "packages": list(APPROVED_PACKAGES),
         "ort_strategy": "pinned-source-build" if (operating_system, architecture) in {
             ("macos", "x86_64"), ("windows", "x86_64")
         } else "upstream-prebuilt",
@@ -130,6 +138,36 @@ def load_targets(manifest):
 
 def digest(content):
     return hashlib.sha256(content).hexdigest()
+
+
+def helper_version_record(version):
+    return json.dumps({"type": "result", "command": "version", "name": "ilium-animation-helper", "version": version}, separators=(",", ":"))
+
+
+def version_identity(executable, output, version):
+    """Validate native --version output and return one canonical receipt value."""
+    label = executable.removesuffix(".exe")
+    identity = f"{label} {version}"
+    if label != "ilium-animation-helper":
+        if output.strip() != identity or len(output.splitlines()) != 1:
+            raise ReleaseError(f"native version output differs: {executable}")
+        return identity
+    if not output.endswith("\n") or len(output.splitlines()) != 1:
+        raise ReleaseError("animation helper must emit one JSONL version record")
+    def unique_keys(pairs):
+        record = {}
+        for key, value in pairs:
+            if key in record:
+                raise ReleaseError("animation helper version has duplicate JSON keys")
+            record[key] = value
+        return record
+    try:
+        record = json.loads(output, object_pairs_hook=unique_keys)
+    except (ValueError, TypeError) as error:
+        raise ReleaseError("animation helper version is invalid JSONL") from error
+    if record != {"type": "result", "command": "version", "name": label, "version": version}:
+        raise ReleaseError("animation helper version identity differs")
+    return identity
 
 
 def read_json(path):
@@ -199,9 +237,12 @@ def audit_receipt(path, target, version, tag):
         safe_member_name(name)
         if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
             raise ReleaseError(f"invalid audit SHA-256 for {name}")
-    required = {*target["executables"], "VERSION", "THIRD-PARTY.txt"}
+    required = {*target["executables"], *target["packages"], "VERSION", "THIRD-PARTY.txt"}
     if not required <= set(files):
-        raise ReleaseError("audit inventory is missing the matched pair, VERSION or notices")
+        raise ReleaseError("audit inventory is missing the matched payload, VERSION or notices")
+    for name in target["packages"]:
+        if files[name] != APPROVED_PACKAGES[name]:
+            raise ReleaseError(f"official animation package differs from compiled release identity: {name}")
     for executable in target["executables"]:
         label = executable.removesuffix(".exe")
         if receipt.get("binary_versions", {}).get(executable) != f"{label} {version}":

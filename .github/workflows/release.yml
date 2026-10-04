@@ -72,7 +72,7 @@ jobs:
     - name: Linux native build prerequisites
       run: 'sudo apt-get update
 
-        sudo apt-get install -y libasound2-dev pkg-config libssl-dev'
+        sudo apt-get install -y bubblewrap libasound2-dev pkg-config libssl-dev'
       if: matrix.os == 'linux'
     - name: Windows Visual Studio 2022 Build Tools (the pinned ORT source build needs VS 17; windows-2025 ships only VS 18)
       if: matrix.os == 'windows'
@@ -146,8 +146,10 @@ jobs:
       run: python release/scripts/build_windows_installers.py build --tag "${{ needs.source.outputs.tag }}" --archive
         native-windows/ilium-windows-x86_64.zip --work "$RUNNER_TEMP/installer-work" --output windows-installers
     - name: Silent install, run and uninstall both packages
-      run: python release/scripts/build_windows_installers.py smoke --tag "${{ needs.source.outputs.tag }}" --installers
-        windows-installers --log "$RUNNER_TEMP/installer-smoke"
+      run: | # Supply the native gate's explicit custody inputs.
+        python release/scripts/build_windows_installers.py smoke --tag "${{ needs.source.outputs.tag }}" --installers windows-installers --archive native-windows/ilium-windows-x86_64.zip --audit-report native-windows/native-audit.json --manifest release/targets.toml --log "$RUNNER_TEMP/installer-smoke" # Bind acceptance to audited bytes and retain diagnostics.
+    - name: Seal native installer animation evidence
+      run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target x86_64-pc-windows-msvc --tag "${{ needs.source.outputs.tag }}" --audit native-windows/native-audit.json --archive native-windows/ilium-windows-x86_64.zip --packages windows-installers --windows-journal "$RUNNER_TEMP/installer-smoke/smoke.jsonl"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: windows-installers
@@ -195,18 +197,29 @@ jobs:
     - name: Packaging toolchain
       run: |
         sudo apt-get update
-        sudo apt-get install -y rpm squashfs-tools flatpak fuse3
+        sudo apt-get install -y bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 # Supply the helper launcher and package inspectors.
+        command -v snap >/dev/null # Require the runner's existing Snap tooling before building or installing.
+        command -v docker >/dev/null # Require native distribution-container coverage on this runner.
     - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
       run: python release/scripts/build_linux_packages.py build --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch
         }}" --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --work "$RUNNER_TEMP/package-work" --output linux-packages
-    - name: Unpack every package and compare its payload with the audited files
-      run: python release/scripts/smoke_linux_packages.py inspect --arch "${{ matrix.arch }}" --packages linux-packages
+    - name: Inspect all four offline formats against their receipt-bound files # Flatpak is checked after private native deployment.
+      run: | # Retain inspection evidence without hiding a failed inspector behind tee.
+        set -o pipefail # A failed required format must fail this workflow step.
+        mkdir -p "$RUNNER_TEMP/package-smoke-inspect" # Keep diagnostics outside the exact package artifact inventory.
+        python release/scripts/smoke_linux_packages.py inspect --arch "${{ matrix.arch }}" --packages linux-packages --formats deb,rpm,appimage,snap | tee "$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl" # Require every supported offline format explicitly.
     - name: Install and run deb, rpm and AppImage in distribution containers
-      run: python release/scripts/smoke_linux_packages.py containers --arch "${{ matrix.arch }}" --packages linux-packages
-        --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke"
+      run: |
+        set -o pipefail
+        mkdir -p "$RUNNER_TEMP/package-smoke"
+        python release/scripts/smoke_linux_packages.py containers --arch "${{ matrix.arch }}" --packages linux-packages --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke/containers-results.jsonl"
     - name: Install and run Snap, Flatpak, deb and the AppImage FUSE mount on the disposable runner
-      run: python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages
-        --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host"
+      run: |
+        set -o pipefail
+        mkdir -p "$RUNNER_TEMP/package-smoke-host"
+        python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+    - name: Seal native Linux animation evidence
+      run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "${{ matrix.rust_target }}" --tag "${{ needs.source.outputs.tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: linux-packages-${{ matrix.arch }}
@@ -218,9 +231,72 @@ jobs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: diagnostics-linux-packages-${{ matrix.arch }}
-        path: |
+        path: | # Keep all smoke diagnostics even when a required gate fails.
+          ${{ runner.temp }}/package-smoke-inspect/
           ${{ runner.temp }}/package-smoke/
           ${{ runner.temp }}/package-smoke-host/
+        if-no-files-found: warn
+        retention-days: 30
+  macos-packages:
+    needs:
+    - source
+    - native
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - arch: aarch64
+          rust_target: aarch64-apple-darwin
+          runner: macos-15
+        - arch: x86_64
+          rust_target: x86_64-apple-darwin
+          runner: macos-15-intel
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-${{ matrix.rust_target }}
+        path: native-macos
+    - name: Build ZIP, PKG and DMG from the audited native tarball
+      run: >-
+        python release/scripts/build_macos_packages.py build
+        --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch }}"
+        --source-commit "${{ needs.source.outputs.commit }}" --runner-identity "${{ matrix.runner }}"
+        --native native-macos --archive "native-macos/ilium-macos-${{ matrix.arch }}.tar.gz"
+        --work "$RUNNER_TEMP/macos-package-work" --output macos-packages
+    - name: Qualify all three installed formats with hidden source and build inputs
+      run: >-
+        python release/scripts/smoke_macos_packages.py
+        --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch }}"
+        --source-commit "${{ needs.source.outputs.commit }}" --runner-identity "${{ matrix.runner }}"
+        --native native-macos --archive "native-macos/ilium-macos-${{ matrix.arch }}.tar.gz"
+        --packages macos-packages --build-work "$RUNNER_TEMP/macos-package-work"
+        --root "$RUNNER_TEMP/macos-package-smoke"
+        --output "macos-packages/macos-smoke-${{ matrix.arch }}.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: macos-packages-${{ matrix.arch }}
+        path: macos-packages/
+        if-no-files-found: error
+        retention-days: 30
+    - name: Retain package build and lifecycle diagnostics
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-macos-packages-${{ matrix.arch }}
+        path: |
+          ${{ runner.temp }}/macos-package-work/
+          ${{ runner.temp }}/macos-package-smoke/
         if-no-files-found: warn
         retention-days: 30
   aggregate:
@@ -229,6 +305,7 @@ jobs:
     - native
     - windows-installers
     - linux-packages
+    - macos-packages
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -254,9 +331,14 @@ jobs:
         pattern: linux-packages-*
         path: linux-packages
         merge-multiple: true
-    - name: Assemble exact five archives, Windows installers, Linux packages and installer/site bytes
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        pattern: macos-packages-*
+        path: macos-packages
+        merge-multiple: true
+    - name: Assemble exact native archives, installed-format receipts and installer/site bytes
       run: python release/scripts/release_pipeline.py aggregate --tag "${{ needs.source.outputs.tag }}" --artifacts
-        native-artifacts --windows-installers windows-installers --linux-packages linux-packages --output candidate
+        native-artifacts --windows-installers windows-installers --linux-packages linux-packages --macos-packages macos-packages --output candidate
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: candidate
@@ -381,6 +463,14 @@ jobs:
           candidate/*.snap
 
           candidate/linux-packages-*.json
+
+          candidate/*.pkg
+
+          candidate/*.dmg
+
+          candidate/macos-packages-*.json
+
+          candidate/macos-smoke-*.json
 
           candidate/SHA256SUMS
 
