@@ -37,6 +37,10 @@ Each tree node is a `Container`, `Pane`, or persisted folder root. A container i
 
 Agent input is serialized through a pane-local gate and an ordered PTY receipt, with global tree/pane locks released before awaiting delivery. Automated bodies and Enter require fresh process/foreground ownership, and an invocation cancellation watch revokes queued delivery on ownership loss. Explicit user-origin IPC keeps manual shell interaction separate. A dedicated uncapped composer tracker records exact receipt-backed prompts; opaque edits keep the latest prompt unavailable and label any previous exact prompt separately. Transcript corrections require the same invocation/session/Enter epoch and a complete post-submission record, and can repair only an unknown latest prompt. Client statistics caches additionally fence provider/session/project/home identity and worker generation, preserving a stopped session while preventing replacement panes from inheriting its metrics.
 
+Native foreground and process-identity preflights run on the existing finite I/O bank after capturing the PTY lifetime and invocation under a short pane guard. The final input/title admission checks the lifetime, agent generation, process birth, session and cancellation epoch again. A 500 ms caller deadline declines an unavailable proof while the physical native worker retains its admission until it returns. Process termination captures the original child-control handle and birth identity before leaving the registry; a five-second caller deadline reports an uncertain outcome rather than claiming that the child stopped. Focused-terminal directory inspection follows the same off-lock capture and revalidation pattern, falling back to the project directory when its proof is unavailable or stale.
+
+PTY destruction and ordinary pane teardown only request cancellation. The existing owned child reaper performs one termination attempt through the original child-control handle and keeps that handle and its admission until actual exit is observed. A blocked native child mutex therefore cannot delay the Tokio caller or start the shutdown deadline late; an expired deadline retains the physical reaper as pending custody rather than claiming that it joined. Native termination failures are logged by that reaper.
+
 ### Left panel — the tree
 
 The left panel renders this tree via `tui-tree-widget`: expand/collapse groups, select a pane to focus it on the right, reorder entries one step at a time (hover an entry's up/down arrows, or leader `m` for keyboard move-mode), drag-and-drop a row onto any other row or the empty space below the tree to reparent it there, double-click a real tree entry to open the same Rename prompt as the context menu, and right-click an entry for create/rename/move/close actions.
@@ -58,8 +62,8 @@ The right panel renders a normal pane alone, or every child of a selected split 
 - Every AI restructure prompt includes the concrete animation catalog and relevant typed scene controls. The reply must supply a deduplicated recommendation table and pointers for the project and every output entry, including groups and split views, even when Semantic rendering is disabled. The client validates concrete kinds, control bounds, conditional dependencies and resource policy before sending an expanded `RecommendedRestructurePlan`. Core checks exact output-path coverage and the captured project generation, builds a candidate tree and publishes structure plus recommendation metadata together. The server serializes apply/undo publication, retains the undo image until restore succeeds and requests the existing debounced snapshot save; an acknowledgement proves the in-memory commit, not completed disk persistence. Recommendations travel in ordinary tree snapshots and survive reattach. Undo restores the previous recommendations while advancing the generation so an older inference cannot overwrite it.
 - Click either panel to focus it. When a terminal application enables an xterm mouse protocol (for example `vim`, `htop`, or `lazygit`), ilium forwards clicks, drags, scrolls, and modifiers to that PTY using its requested encoding.
 - Terminal history can be navigated with the wheel or Shift+PageUp/Shift+PageDown; Shift+End returns immediately to ilium's live output. Full-screen applications that own their mouse history also receive xterm Ctrl+End (Claude Code's native jump-to-bottom shortcut). While ilium history is being inspected, incoming output and agent resize redraws continue in a separate live parser, so neither can move or corrupt the frozen historical viewport.
-- The agent toolbar's Smart Copy action captures an immutable clone of the visible `vt100::Screen`, numbers its visible lines and non-whitespace word runs, and sends only those references to the configured inference provider. The response is streamed as JSONL: every record must resolve wholly against the frozen snapshot before it becomes selectable, so model-authored replacement text and stale live-screen coordinates cannot reach the clipboard. The first valid record dismisses the blocking progress dialog; later records appear incrementally and flash for 500 ms. Overlapping candidates prefer the smallest region and the wheel cycles the alternatives under the pointer.
-- A terminal pane may own one long-task progress registration. Registration is transactional: the server validates one bounded JSON probe before replacing an existing monitor and returns a correlated acknowledgement with its generation ID. The detached server—not the agent—then performs every recurring probe, keeps task `error` distinct from monitor degradation/failure, persists terminal evidence, and waits for a verified clean agent composer before submitting the result. The result message is the monitor's only effect on the agent: it never pauses, resumes, or otherwise touches the agent's `/goal`.
+- The agent toolbar's Smart Copy action captures an immutable clone of the visible `vt100::Screen`, numbers its visible lines and non-whitespace word runs, and sends only those references to the configured inference provider. The response is streamed as JSONL: every record must resolve wholly against the frozen snapshot before it becomes selectable, so model-authored replacement text and stale live-screen coordinates cannot reach the clipboard. The first valid record dismisses the blocking progress dialog; later records appear incrementally and flash for 500 ms. Overlapping candidates prefer the smallest region and the wheel cycles the alternatives under the pointer. `smart_copy_tokens` adds the pre-scanned fine-grained layer without any model call: per-line regex detectors (URLs, e-mail, IP, endpoints, paths and `file:line` locations, qualified and identifier names, hashes, versions, assignments, flags, quotes, key/value fields, sentences, dates, amounts, phones), a multi-line postal-address matcher, and `vt100` cell-attribute runs (foreground colour, highlight, bold, italic, underline). Path-shaped tokens carry a `PathProbe`; the UI thread resolves them through `PathContext` (pane cwd, its ancestors, the project root, `~`, a few conventional source directories, a bounded stat budget) when the session is built, relabelling hits as `file`/`directory` and dropping implausible misses. Every non-empty line is also a region, and regions are deduplicated by exact geometry with structural, line, detail, token and styled regions in that priority. Clicks toggle a region in a persistent multi-selection that stays inverted and is written to the clipboard on each click. Smart Copy light (`smart_copy_light.rs`, `[terminal] smart_copy_light` / `smart_copy_light_key`, on by default with Ctrl) reuses the same capture and detection but never queues a model request: `App::try_start_smart_copy_light` starts it from a mouse event carrying the configured modifier over a terminal pane, clicks only toggle regions, and `finish_smart_copy_light` copies the selection once on release and installs a `SmartCopyPreview` that `draw_smart_copy_preview` renders with a one-second countdown gauge. Release is inferred (terminals do not report modifier release): a Kitty key-release event, the first mouse event lacking the modifier, focus loss, or `RELEASE_IDLE_GRACE` after the last event once something is selected.
+- A terminal pane may own one long-task progress registration. Registration is transactional: the server validates one bounded JSON probe before replacing an existing monitor and returns a correlated acknowledgement with its generation ID. The detached server—not the agent—then performs every recurring probe, keeps task `error` distinct from monitor degradation/failure, persists terminal evidence, and waits for a verified clean agent composer before submitting the result. Each report carries two human-facing descriptions that must make sense without any session context: a one-line `message` (always shown in the footer, followed by a hover marker) and an optional multi-line `details` (What/Why/Now/Next/Watch, at most 8 KiB, shown in a tooltip when the pointer rests on the footer); the managed agent instruction block (`progress-instructions.hbs`, schema version 6) tells agents how to write both. The result message is the monitor's only effect on the agent: it never pauses, resumes, or otherwise touches the agent's `/goal`.
 - The second header icon of a detected Claude Code or Codex pane opens the costs-and-stats popover: hover previews it, a click pins it (non-modal, so keystrokes keep reaching the agent; only pointer events over the popover are claimed), and the icon or its close control dismisses it. Its data never touches the server or the wire: `session_stats` parses the agent's own JSONL transcript into a `SessionStats` value, `session_stats_store` runs that parse on a low-priority worker thread per pane, and `session_stats_ui` draws four tabs (Overview, Tokens, Activity, Prompts) onto a tall off-screen buffer that is windowed into the frame, sized to fill the right-hand panel. Its over-time graphs use `ascii_chart`, a port of the asciichart/rasciigraph plotting algorithm (same glyphs, label precision and NaN gaps, validated against rasciigraph's published outputs) that returns a grid of kind-tagged cells so the caller colours each series, and that can downsample by per-column maximum so spikes survive. Transcripts reach several gigabytes with lines above 30 MB, so the parser is incremental (a per-pane `StatsAccumulator` resumes at its byte offset and ignores a trailing partial line), filters raw bytes with a regex set before deserialising, counts tool failures from bytes without parsing tool-result lines, and merges Claude's repeated per-block usage by message id rather than summing it. Token counts are normalised across providers (`input` is uncached input, cache read/write are separate, Codex's cached share is subtracted from its inclusive input count). The popover shows dollars only when the agent recorded them (Claude Code's `cost-state` snapshot); the agent-cost indicators below price tokens themselves.
 - Agent-cost indicators (Settings > Agent Cost) reuse those same transcript snapshots; nothing about them touches the server or the wire. `session_stats` additionally keeps per-minute, per-model token buckets. Claude Code writes sub-agent and workflow calls to `<session>/subagents/**/*.jsonl` rather than the main transcript (a measured session billed $1,021 while its main file priced at $19), so the store's worker folds those files in through `StatsAccumulator::ingest_extra_file`, each resuming at its own offset and deduplicated by message id; advisor-model calls appear in no transcript and are covered only by the CLI's recorded `cost-state` total. `cost_model` is the pure policy: a longest-prefix `PriceTable` (Anthropic rows from Anthropic's published list, OpenAI rows from third-party reports of its list, user overrides under `[cost.prices]`; an unpriced model marks the figure a lower bound instead of guessing), five calibrations that turn dollars into one of five levels (fixed bands, median of open agents, percentiles of the user's own past sessions, fraction of a budget, burn rate), sparkline bucketing and spike detection. `cost_history` scans past sessions for the history calibration without parsing whole files: Claude Code's last `cost-state` total, or Codex's last cumulative `total_token_usage`, from a bounded tail of each transcript, cached by path, size and mtime, on one lowest-priority worker. The quota metric (`CostMetric::Quota`) swaps the unit, not the machinery: `StatsAccumulator` turns consecutive Codex `rate_limits` readings of one window period into per-minute `QuotaBucket`s (a reset or lower reading only re-baselines), `cost_history` reads each Codex session's first and last reading for history percentiles, and the tracker feeds those series through the same calibrations, sparkline and spike logic with quota cut points, budget and spike floor. Claude Code transcripts carry no quota, so those rows are marked unavailable and draw nothing. `cost_tracker` derives each agent's `PaneCost` from its `SessionStats` only when the snapshot changed or the sparkline window moved, and rebuilds one immutable `CostOverlay` (per-row level, group roll-ups, totals, ranks) that `tree_ui` only reads, so a mouse-move redraw never re-prices. `cost_overlay` decides what a row shows from each option's enabled flag and visibility (always, or only while that entry is hovered) and paints it just left of the hover action buttons; `cost_settings`/`cost_settings_ui` own the `[cost]` table and the tab. Sorting by cost is `TreeOrder::CostDescending`, derived from `[cost].sort_by_cost` rather than persisted as a UI order, with the ranking threaded through `tree_ordering`, the hit-test cache and selection reconciliation so render order and click targets cannot disagree. The row action buttons form one compact strip flush with the list's right edge, and the hover highlight covers the whole entry.
 
@@ -113,29 +117,37 @@ The three live maps share the embedded Natural Earth coastline. USGS retains all
 
 Pi (`ilium-ambient::pi_digits`) computes an exact bounded integer-spigot prefix with single-process generation admission and prepares an atlas from unchanged bundled Cascadia Code on an owned worker. Native text and map labels use the bounded `Scene::native_glyph` hook through the client host; font Braille uses actual glyph coverage. Chess (`ilium-ambient::live_chess`) owns a bounded Lichess TV line stream, validates authoritative FEN positions and draws original supersampled silhouettes. Feed clocks are last-reported values; the protocol supplies no observation timestamp, so only receipt age is claimed. No synthetic replay is used by these live scenes.
 
+Wind (`ilium-ambient::scenes::wind`) is the one scene that reacts to the workspace. The `Scene` contract gained `wants_occupancy` and `occupancy(&OccupancyMask)`: for a scene that asks, `background_composition::screen_occupancy` builds a mask of every cell the compositor may not paint (outside the painted regions, or not a safe blank) from the final workspace buffer before each frame request, and `AnimationSurface::set_occupancy` carries it to the worker with a change counter that is part of the request and render-cache identity, so an unchanged screen costs nothing and other scenes pay nothing. Inside the scene, `flow` compares consecutive masks: a row that gained cells and equals a neighbouring row of the previous mask (whose source row changed) is vertical scroll, a shifted row is horizontal motion, anything else is text appearing from nowhere. `sim` integrates dots under wind, gusts, drag and optional gravity in fixed sub-steps, confines them to empty cells, and turns each classified cell into an impulse (along the motion for scroll, away from the cell for appearance) that also moves dots out of the newly occupied cell. Merged dots are scene-owned native glyphs, so the shared look still colours them.
+
 Carpet (`ilium-ambient::scenes::carpet`) separates typed controls, bounded hidden-body simulations, legal chess, and hatch projection. Compact sphere/capsule heights combine by maximum; a reusable sampled height field bends only the hatch lines, leaving color and dither to the client. Camera projection and inverse ground picking share one transform. The default-enabled Infinite lines control extends the flat hatch lattice to viewport edges, including lines outside the simulation square; disabling it restores square-clipped ink. Exterior lines remain decorative: picking and all simulation coordinates retain the finite ground domain. The client forwards optional field-relative pointer coordinates through `Scene::pointer` without consuming terminal mouse events. Simulation speed integrates elapsed time without replaying backward clock corrections; civil clocks read `Frame::now` and an explicit UTC offset. Automated chess uses an owned cancellable search worker with stale-result guards; live chess reuses authoritative Lichess TV positions and retains captured-piece fades through subsequent feed updates. Presentation reconfiguration preserves games; changing the seed requests a fresh scene.
 
 Snake stores its actual body and previous body for interpolation through turns and growth. A pure bounded breadth-first planner finds food routes inside the free forward arc of a Hamiltonian cycle, preserving the body's cyclic escape order. It commits each route until food is reached; cycle successors provide a legal fallback when no shortcut is available. Mode changes start the selected simulation afresh, including a return from chess. Step-time or easing edits preserve the game, settle the current pose and start a new interval. Each search visits at most one entry per cell and checks four neighbors, on boards capped at 32×32. Tapered capsules, a distinct head, feeding pulses and breathing food share the existing height renderer without exceeding the body-plus-food grid budget. All 44 Carpet defaults come from the captured session preferences; explicit saved values override missing-field defaults.
 
-OpenStreetMap (`ilium-ambient::scenes::openstreetmap`) renders ten provenance-recorded, bundled ODbL extracts, local Overpass JSON or an explicitly configured HTTPS source. An owned worker decodes bounded inputs outside the render path; decoded bodies are limited to 16 MiB. A two-map cache and the last usable map survive camera and presentation changes without refetching. Projection and layer rasterization share the user palette. The client reserves complete attribution rows above the existing status and voice footer, using the same geometry for rendering, PTY sizing and settings interaction. If the viewport cannot show the complete credit, it suppresses the map. Source queries, timestamps, hashes and licensing are retained with the catalogue assets.
+OpenStreetMap (`ilium-ambient::scenes::openstreetmap`) renders ten provenance-recorded, bundled ODbL extracts, local Overpass JSON or an explicitly configured HTTPS source. Stable destination and list IDs support five offline themes built from those exact bundles and expanded themes whose unbundled anchors require the configured service; a selected arbitrary point never resolves to a nearby bundle. The scene's saved label and coordinates are independent of the shared observer. Explicit Enter submits the picker's full address to the selected Photon, configured Nominatim-compatible, or legacy city-only provider; direct coordinates and map movement are local. The Photon/Nominatim search adapter validates raw coordinates before `GeoLocation` normalization, bounds responses and positive-result cache reads, permits no redirects, and rate limits submitted requests. The optional city-only provider retains Open-Meteo place-name matching and trailing-segment ranking through the same bounded parser, transport and 32-slot persistent cache. Cache slots replace older answers on hash collision but verify the full query digest before use. The picker retains actual worker admission after modal close, discards stale replies after input changes, and binds OSM confirmation to the exact project path captured at opening. An owned map worker decodes bounded inputs outside the render path; decoded bodies are limited to 16 MiB. A two-map cache and the last usable map survive camera and presentation changes without refetching. Projection and layer rasterization share the user palette. The client reserves complete attribution rows above the existing status and voice footer, using the same geometry for rendering, PTY sizing and settings interaction. If the viewport cannot show the complete credit, it suppresses the map. Source queries, timestamps, hashes and licensing are retained with the catalogue assets.
 
 Voxel landscape (`ilium-ambient::scenes::voxel_landscape`) prepares absolute-coordinate 16-block chunks on one owned, cancellable low-priority worker. A pure terrain kernel supplies climate, exclusive solid heights, river occupancy and real cave air intervals. Ecology classifies the unchanged columns into 52 surface environments, then a deterministic wetland layer derives shallow pools and mud islands for both visible occupancy and feature placement; cached kernel columns remain unchanged. The catalogue contains 208 distinct geometry recipes and 64 original procedural 8×8 textures, distributed under this repository's MIT licence; no Minecraft or texture-pack artwork is embedded. Coordinate-owned features and complete village street plans are sampled through a halo, then a bounded overlay resolves solid blocks and air carves. The renderer projects exposed cube faces into a 2D depth buffer with stable global block identities and a total tie order. Camera motion uses absolute scene time, while the UI receives the latest prepared mesh through a single slot and never waits for generation. Material luminance drives the shared dither threshold; per-cell colours independently apply monochrome or pastel palette, hue, saturation and lightness. All scene controls persist through the existing ambient settings.
 
+Saved Java worlds use the separate `ilium-ambient::minecraft` source pipeline and `SavedScene`, selected by `SavedMapsSettings` in the scene registry. `ilium-platform::minecraft` owns installation discovery and lossless directory identities. Blocking catalog, Anvil/NBT decoding, source qualification and native asset preparation run on the scene-owned worker; the UI receives prepared frames. Chunk coverage rejects absent, unfinished or unsupported input rather than inventing air. The planner retains its original block-evidence targets separately from the complete inverse-projected renderer source, which must cover the route, viewport and neighbor/tint support. Native solids and fluids share the selected asset bank and one raster depth/ownership frame. Final painted-owner acknowledgements alone advance appearance history; generation, source identity and issued-pose checks reject stale acknowledgements. History uses a separate cache repository and never writes to world files. This source path is still experimental and requires local native/render acceptance; generated voxel terrain remains the default.
+
 Topographic maps (`ilium-ambient::scenes::topographic_maps`) embeds one 12-bit equirectangular elevation PNG per measured body under `ilium-ambient/assets/topography/` (NOAA ETOPO 2022, NASA LOLA/MOLA/Magellan/MESSENGER/Dawn, all public domain; provenance in `manifest.json`, regenerated by `build_assets.py`). Each frame samples the grid per Braille dot through a flat or orthographic camera, derives integer contour levels from the elevation and marks a dot wherever a neighbour's level differs, so lines are one dot wide with no vector step. A world is decoded or generated (fictional worlds: seeded spherical value noise, no seam) on one owned worker; the scene keeps drawing the previous world and dissolves to the next when ready. Everything is a pure function of the animation clock and settings.
 
-Shared look (`ilium-ambient::style`, `ilium-ambient::dither`): colour, brightness and dithering are not scene concerns. `Appearance` (colour mode, 38 palettes, colour source, reverse/shift/spread, brightness, contrast, gamma, colour intensity, hue shift, invert, edge fade, grey tint, pattern contrast/invert, 20 style presets) is one value on `AnimationSettings`, so changing it changes every animation. `AnimationFrame::pack` turns dot tones into Braille with any `DitherMode` (Bayer 2/4/8/16, stipple, blue noise from a void-and-cluster tile, gradient noise, halftone, line screens, crosshatch, white noise, or Floyd-Steinberg/Atkinson/Sierra-Lite error diffusion). The compositor then colours each ink cell from the scene colour (if any), dot coverage, screen position and time through `Appearance::shade`. The loop cache stores packed geometry only, so look changes never rebuild it. A panel choice (both/left/right) and a frame-rate cap are likewise global. Settings -> Animations is two columns: a compact scene list with prev/next and the global rows on the left, the selected animation's own rows on the right. Rule: see CLAUDE.md, "Background animations: the shared look is mandatory".
+Shared look (`ilium-ambient::style`, `ilium-ambient::dither`): colour, brightness and dithering are not scene concerns. `Appearance` (colour mode, 38 palettes, colour source, reverse/shift/spread, brightness, contrast, gamma, colour intensity, hue shift, invert, edge fade, grey tint, pattern contrast/invert, a colour `Filter` with strength (46 true colour transforms in `style_filters.rs`), 7 style presets) is one value on `AnimationSettings`, so changing it changes every animation. `AnimationFrame::pack` turns dot tones into Braille with any `DitherMode` (Bayer 2/4/8/16, stipple, blue noise from a void-and-cluster tile, gradient noise, halftone, line screens, crosshatch, white noise, or Floyd-Steinberg/Atkinson/Sierra-Lite error diffusion). The compositor then colours each ink cell from the scene colour (if any), dot coverage, screen position and time through `Appearance::shade`. The loop cache stores packed geometry only, so look changes never rebuild it. The current palette also reaches every scene: `SceneEnv::palette` at construction and `Scene::set_palette` afterwards (every constructor carries a note that plugins must follow it; `create_scene` wraps every scene in `PaletteScene`, which shifts colour scenes onto the palette). A panel choice (both/left/right) and a frame-rate cap are likewise global. Settings -> Animations is two columns: a compact scene list with prev/next and the global rows on the left, the selected animation's own rows on the right. Rule: see CLAUDE.md, "Background animations: the shared look is mandatory".
 
 Vector TD (`ilium-ambient::scenes::vector_td`) is a self-playing tower defense. A `Director` advances one `Game` in fixed 1/30 s steps from a seeded generator, so it is a pure function of settings and forward time; a gap longer than 20 s of game time is skipped, and time running backwards restarts the match. The grid is 20 cells high and as wide as the screen's aspect ratio allows, so the board fills the terminal. Six axis-aligned maps are snapped onto it; each level builds the path samples, blocked cells and per-tower coverage masks once. The AI (`ai.rs`) values every purchase as expected damage per credit from path coverage, shared-path overlap (slows do not stack) and the needs of the next waves, and also decides when to send a wave early, which towers to replace, and where to build. Clearing a level raises the stage (more tower types, higher upgrade caps, more damage, tougher monsters); losing retries the level with a growing handicap relief. `render.rs` draws thin Braille lines, dithered fills and a 3×5 dot font through `draw::Canvas`, which also records the strongest tone per cell so the colour variant tints each cell by its dominant shape; the black-and-white variant supplies no cell colours.
 
-Galactic empires is a live, seeded simulation in `ilium-ambient::scenes::galactic_empires`. Its connected hyperlane graph, resources, diplomacy, fleet arrivals and ownership advance in fixed half-second simulation ticks. A bounded catch-up budget discards suspend time. Territory rendering combines compact radial star influences into smooth per-owner fields, rebuilding affected channels when ownership changes and interpolating them as the camera moves. Neutral systems retain their own field; marker cells prioritize stars over fleets to preserve ownership colors. New maps default to 320 systems. Ownership changes require fleet arrival along a real lane. After 800 ticks the largest empire begins a stronger campaign whose monotonic expansion guarantees eventual unification; the winner remains visible for 30 simulated seconds before a derived seed starts another galaxy. The fixed-orientation camera covers a quarter of the galaxy's disk area and orbits clockwise, independently of simulation speed. No server state, network calls or helper processes are involved.
+Galactic empires is a live, seeded simulation in `ilium-ambient::scenes::galactic_empires`. Its connected hyperlane graph, resources, diplomacy, fleet arrivals and ownership advance in fixed half-second simulation ticks. A bounded catch-up budget discards suspend time. Territory rendering combines compact radial star influences into smooth per-owner fields, rebuilding affected channels when ownership changes and interpolating them as the camera moves. Neutral systems retain their own field; marker cells prioritize stars over fleets to preserve ownership colors. New maps default to 480 systems (50% above the previous 320), configurable from 120 to 720. The 27 scene controls use the shared control/persistence contract; map-generation changes rebuild the world, while visual and timing changes reconfigure it without losing simulation state. Territory radius rebuilds only its cached field. Ownership changes require fleet arrival along a real lane. After 800 ticks the largest empire begins a stronger campaign whose monotonic expansion guarantees eventual unification; the winner remains visible for a configurable pause (default 30 simulated seconds) before a derived seed starts another galaxy. The fixed-orientation camera covers a quarter of the galaxy's disk area and orbits clockwise, independently of simulation speed. No server state, network calls or helper processes are involved.
 
 Settings → Animations uses separate scene and control columns with shared scrolling and responsive widths. Controls have Scene, Motion/rendering, Color and Playback/cache sections; loop-duration sliders use a logarithmic scale. `animation_rows` derives the row list from the settings and the hosted scene: one row per scene, then Background, the selected scene's controls (the built-in scene's controls, or `AmbientSettings::controls` of a hosted one), Location for observer-aware scenes, Speed, Dot density, Dither, the palette rows (hidden when the scene paints its own colors), Playback / Loop seconds / cache line (built-in scenes only; the latter two only while Loop), the scene status line, and the full-screen preview action. Slider, choice, toggle and text rendering, keyboard, mouse, scrolling, the scrollbar and Settings-help anchors all read the same `RowModel`; there are no fixed row indices. Edits go through `AnimationSettings::set_common_control` / `set_scene_control` (hosted scenes forward to `AmbientSettings::set_control`); an `Err(message)` is shown and nothing changes. A Text control opens the shared single-line prompt (`Mode::AnimationTextPrompt`, prefilled, validation message shown inside it).
 
 Video source validation is lexical on the UI thread; discovery and filesystem access belong to its worker. Scans stop after 20,000 entries or two seconds, decoded dot dimensions are capped at 1024×512, and the presentation queue holds at most 12 frames. Local probe and frame operations have three- and five-second watchdog deadlines. Video scene teardown only signals cancellation; managed reapers retain thread and child ownership until exit, with admission held for delayed cleanup. At most two production video workers and four helper processes can be active, so rapid source or scene changes cannot create unbounded work. A blocked filesystem syscall may retain a worker slot, but the UI does not wait for it.
 
+Video's `Series` selector chooses Custom discovery or the shipped Germination catalogue (`ilium-ambient/assets/germination.json`). Changing series preserves every other setting, including dormant Custom source text and recursion. Germination schedules original HTTPS URLs from the catalogue; it does not discover local media. Entries retain title, author, licence, source page, encoded length and SHA-256. The worker acquires one verified encoded body before probing or decoding, holds it in `Stored<Vec<u8>>`, and exposes a token-protected loopback endpoint supporting HEAD and single byte ranges. Both ffprobe and ffmpeg receive that endpoint through the existing request/conversion pipeline. Duration probing retains seekability. A verified catalogue GIF decoder sets `-seekable 0` to avoid a second complete-body header scan while preserving accurate input `-ss`, source-time limits and conversion settings; the verified probe supplies its displayed duration. No encoded media file or disk cache is created. Admission precedes body allocation, with a 64 MiB per-body cap and two process-wide body credits held through endpoint retirement. Provider spacing and HTTP-error cooldowns are cancellable client policies; changed content fails integrity validation.
+
+A blocking frame read may finish after resize or cancellation. The player checks cancellation and current geometry again before interpreting EOF or failure, so an obsolete read result cannot complete or fail the current clip. Resize resumes the selected `PlayItem` at its source position; completion uses cumulative frames across resize segments to preserve Repeat one through a short final segment. A catalogued GIF clip begun at zero resumes by replaying the same conversion from the beginning and discarding exactly the cumulative output frames already queued. Each discarded frame retains the native watchdog and the player's cancellation and geometry checks; a source-time excerpt limit includes the replayed prefix. Custom inputs, other formats and excerpts begun later retain accurate seeking. Optional bounded Video diagnostics use the existing log sink and report native read results plus independent producer/render samples. Those samples are not a coherent snapshot or a terminal presentation acknowledgement; diagnostic runs cannot substitute for ordinary native acceptance.
+
 The preview is the real field. The compositor paints one screen-sized field, at exactly the size and clock the background uses, through every safe blank of the Settings screen; the controls panel is opaque and drawn on top. `f` (or the Full screen preview row) hides the panel; any key or click returns. Opening a modal over Settings (prompt, help, location picker) hides the preview and drops a hosted scene until the modal closes.
 
-The Location row opens `Mode::LocationPicker`: an address field geocoded on a worker thread the modal owns (`ilium_ambient::geocode::search`, results polled each tick and discarded if the modal closes first), direct `lat, lon` entry parsed locally, and a Braille world map with a crosshair (arrows, Shift for big steps, click). Render and mouse share one layout function. Confirming writes the single shared `AmbientSettings.location`.
+The Location row opens `Mode::LocationPicker`: an address field searched on a bounded worker (results polled each tick and discarded if the modal closes first), direct `lat, lon` entry parsed locally, and a Braille world map with a crosshair (arrows, Shift for big steps, click). Render and mouse share one layout function. For stars, night lights and clouds, confirmation writes the shared `AmbientSettings.location`; for OpenStreetMap, it writes only `AmbientSettings.openstreetmap` to the validated project captured at modal opening. The OSM picker keeps the modal open on invalid coordinates, changed project binding or failed persistence. A dedicated three-row credit inside the modal names the Natural Earth public-domain land mask and the current search provider/data licence even when an error occupies the status row; the scene’s reserved OSM geometry credit remains separate and untouched.
 
 `background_composition` reveals the field through eligible workspace blanks after ordinary rendering and before overlays. Text, styled spaces, selections, cursors and wide-character continuations remain foreground; editors, boards, chatroom and Smart Copy inspection stay opaque. Decoration changes only the final Ratatui buffer, so PTY content, cached screens, history, copied text and detection inputs remain untouched.
 
@@ -184,11 +196,406 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
 - **ilium-client** — the `ratatui` TUI: left tree panel + right presentation target, keybinding dispatch (`keys.rs`/`keymap.rs`), one-step tree reordering, and shared `split_layout` viewport geometry used by rendering, PTY sizing, focus, and mouse routing. It sends `ClientRequest`s to the server and renders the `ScreenUpdate`/`PaneStateSnapshot`/`PaneStatusChanged` events it streams back. Its `TerminalView` also compares allocation-free visible-character fingerprints while applying live output, feeding the client-local ordinary-terminal activity animation without adding a server poll or wire state. It owns built-in editor and board panes plus background LLM-assisted session/project naming and the client-local immutable Smart Copy snapshot/worker lifecycle through `ilium-inference`'s selected-provider boundary. When Kilo paid-proxy egress is enabled, its boot path reads the configured MongoDB collection before entering the terminal and keeps the loaded rows in memory only.
   - Reset planning is client-local: one owned background monitor checks the public Claude and Codex announcement feeds while a client is attached, reports observations over a bounded channel, and stops on detach. Settings persist globally under `[reset_planning]`. The Codex status contract distinguishes an `active_watch` forecast window from a scheduled announcement; the status bar labels the forecast window's expiry as the end of the watch, never as a guaranteed reset time. Scheduled announcements may have a null target time, which is shown as time TBD rather than an invented countdown. Claude's current public catalog contains historical announcements but no future schedule field. Reattach triggers an immediate fresh check, so this presentation state does not enter session snapshots or IPC.
 - **ilium-inference** — provider-neutral title/organization/Smart Copy inference. Its base provider contract has concrete Kilo Gateway, local Ollama, OpenAI-compatible, Anthropic, and OpenRouter implementations, with both whole-response and incremental streaming entry points; the client owns its persisted credentials, endpoints, selected models, and the MongoDB source/field mapping for Kilo paid proxies. Proxy records themselves are runtime-only and are never serialized into `config.toml`. Requests use the model's maximum output allowance when known; prompts, not convenience caps, control normal response length. Official OpenAI uses `max_completion_tokens` with documented exact-model maxima, omits forced sampling parameters, and omits the explicit limit for unknown IDs rather than transmitting the 1,000,000-token fallback used by other adapters. OpenAI-compatible catalog discovery authenticates `GET <base>/models`, returns sorted exact IDs without inventing capabilities, and exposes credential-redacted endpoint metadata. The client keeps a last-good catalog and fences asynchronous results with a settings revision so credential/URL/provider edits, including edits away and back, cannot publish stale results. Kilo exposes a live, unauthenticated free-text-model catalog in Settings, with stable Kilo/OpenRouter free-router fallbacks when discovery is unavailable.
+- **ilium-execution** — bounded finite-job CPU and I/O banks on real OS threads, with a separate optional bank for persistent services. Typed jobs retain caller-owned rejected input and charged results; cancellation preserves actual completed effects. One explicit quota group is shared at each process composition root. Per-process limits do not imply a machine-wide limit; external library threads require separate admission. The platform worker supervisor remains the sole join-handle owner, and physical worker charges survive callback return and delayed thread retirement. Domain services retain responsibility for stream ordering, durability and actual presentation acknowledgements.
 - **ilium-logging** — the shared process-diagnostics boundary used by both the detached server and every attached client. One server start selects one private timestamped file under `/tmp/.ilium/<project-session-id>/`; all attached processes append to that path, and the live `[debug].file_logging_enabled` setting opens or closes their writers without changing call sites. Enabling it records complete HTTP and LLM text requests, responses, and errors while still redacting credential headers and URL parameters and replacing binary audio payloads with size summaries; unrelated sensitive per-agent evidence remains outside this process log unless a broader `RUST_LOG` filter is explicitly requested.
 - **ilium-ipc** — `ClientRequest`/`ServerEvent` wire enums plus `write_frame`/`read_frame`: a 4-byte little-endian length prefix followed by that many bytes of bincode payload, generic over any `AsyncRead`/`AsyncWrite` so both the request stream and the event stream reuse the same framing code.
 - **ilium-sound** — cross-platform adapter for XDG/Linux, macOS, and Windows system-sound discovery plus bounded native-command playback. It also owns the pure agent-status transition mapping used by the server, while `ilium-client` only presents the discovered catalog and edits the shared settings.
 - **ilium-voice** — provider-neutral owned actor for full-duplex audio, streaming sample conversion, interruption, and live-provider transport, and for text turns (`VoiceCommand::SendText`): typed sentences are queued and become one user message plus one response request each, in order, only when the provider is free (no response in flight and no tool outputs pending). Its OpenAI adapter speaks the Realtime WebSocket protocol, but the crate has no dependency on ratatui, IPC, or ilium domain types. The client-side `control` module is the separate semantic capability layer: typed commands, stable tool schemas, target resolution, redacted state snapshots, confirmations, deduplication, and structured results. This composition keeps a future provider adapter from duplicating UI behavior and keeps voice from simulating fragile keyboard/mouse coordinates.
 - **ilium** (bin) — `clap`-based CLI: `ilium` attaches or creates the `default` session for the current canonical directory; `ilium new-session <name>`, `ilium ls`, `ilium kill-session <name>`, and `ilium new-pane --session <name> -- <cmd>` remain project-scoped. It spawns `ilium-server` as a separate detached process and hands off to `ilium_client::run` for the TUI.
+
+## Worker and service execution
+
+`ilium-execution` starts fixed OS-thread banks for finite CPU and I/O jobs, plus
+an optional bank for persistent services. Async tasks wait for typed receipts;
+they do not provide CPU offloading. Each composition root owns the bank and
+shares one `QuotaGroup` among its clients. Admission bounds outstanding jobs,
+waiting slots, captured inputs, retained results, physical threads and declared
+resident storage. A reservation precedes expensive capture or stateful
+preparation. Reserved publication remains valid during a concurrent drain;
+explicit cancellation returns work that never started. Callback panics produce
+failed receipts and leave subsequent finite jobs runnable.
+
+`Client.child` gives related producers independent feature limits beneath one
+aggregate parent. Admission charges every ancestor; sibling identities cannot
+multiply that parent's jobs or bytes. The ownership depth is bounded to eight.
+The client's general preparation parent allows512 MiB of inputs and512 MiB of
+results collectively across interactive and standalone banks. Process-shared
+admission groups separately bound all decoder banks to128 MiB and all encoder
+banks to128 MiB, bringing the process ceilings to768 MiB per dimension. Multiple
+readers awaiting frame bodies cannot consume the encoder's directional headroom.
+A dedicated codec CPU thread avoids waiting behind lengthy document jobs. These
+declarations still require queued payloads and installed projections to retain
+their own charges; bank shutdown does not close an independent bank's group.
+
+`Client.try_reserve_detailed` returns the same finite reservation with typed
+refusal evidence. A failed quota check records the requested increment, observed
+usage and limit for its actual dimension while the admission gate is held. The
+boundary identifies the process root or an ancestor distance from the requesting
+client, so a free filesystem child can report a refusal by its shared parent.
+These immutable numbers describe that check; concurrent releases can make a
+later usage snapshot different. Lifecycle, queue and busy-gate refusals carry no
+invented quota observation. The reason-only entry point delegates this admission
+path and preserves existing retry classification. Ordered filesystem writers
+add typed evidence for their own 32 pending-write and 64 MiB retained-byte
+limits, overflow, closed state and identifier exhaustion; execution refusal
+keeps the rejecting ledger's evidence. Owned admission rejection returns the
+original job. Lazy configuration, editor, board and integration adapters show
+this distinction without changing capture order, FIFO, persistence or quotas.
+The reason-only writer entry points use the same admission path. Seven focused
+writer tests pass in the frozen client qualification; full current-workspace,
+release and live checks remain outstanding, as do other admission adapters.
+
+Terminal output and replay use a closed, single-copy byte adapter in the IPC
+contract. Its bincode representation stays identical to the original byte
+vector: a fixed-integer length followed by contiguous bytes. The bounded
+decoder borrows that slice, admits its exact output allocation before copying,
+and rejects nonborrowing callbacks. This lets the unchanged 32 MiB PTY journal
+(including a truncated replay reset prefix) fit the existing 64 MiB decode
+limit. Generic collections and user-input byte vectors retain their
+conservative growth accounting; raw output ordering and replay watermarks
+are unchanged.
+
+`Retained<T>` carries its admission debit through clones and asynchronous
+transfers. `Reservation::retention()` shares the original debit during preparation
+and refused publication without admitting another payload; the guard alone
+does not move destruction to a CPU worker or prove native retirement.
+Keeping an error, result or receipt can keep that debit alive after
+the callback finishes. Bank storage stays charged while a monitor or client
+retains it after workers exit. Platform-owned join supervision retains physical
+worker admission through actual thread exit, including blocked native calls and
+thread-local destruction. External library workers need explicit
+`WorkerAdmission`; a process-local quota does not impose a host-wide limit or
+prove an allocator/RSS bound. Declared peak costs and native library parallelism
+must be audited at each producer.
+
+`Execution::retirement()` pre-admits up to 64 payload envelopes independently
+of ordinary document-job slots. `Retiring<T>` moves a last owner onto the
+existing CPU bank; `RetiringArc<T>` gives independently cloned leaves the same
+contract. The original storage and job guards stay inside the envelope through
+actual destruction. A separate finite recovery mailbox preserves the original
+id, type, allocation and retry sender when publication fails. A connected
+channel alone does not prove a CPU consumer remains: the last CPU body rescues
+stranded entries, and shutdown reports incomplete while recoverable owners
+remain. Callers must retain the execution/recovery owner through their final
+frames and acknowledgements. These primitives are implemented and have focused
+forcing coverage; editor, clipboard and context-menu ownership migration remains
+unfinished. Queue admission and declared bytes do not establish a native RSS
+bound or guarantee destruction after every permitted execution owner is lost.
+
+The remaining editor migration must cover each independently retained leaf,
+including syntax tokens, rendered documents, context text and TextArea undo/yank
+storage. Charging a preparation result does not cover a separately cloned body
+or defer its last-reader destruction. Context operations capture editor instance
+and revision before preparation; admission precedes owned prompt and text copies.
+Refused pane creation retains the original editable draft and captured parent,
+and records focus only after publication. Editor copy dispatch now submits to
+the same bounded clipboard owner and completion acknowledgements as terminal
+copies, reporting success only after acknowledgement. The narrow caller is
+applied; its frozen candidate compiled and passed the existing clipboard tests.
+Current release and live acceptance remain unverified. The other editor
+ownership requirements above remain incomplete; this caller change does not
+qualify native memory or whole-context capture.
+
+Source editor preparation uses the existing document CPU bank with a per-turn
+capture budget, bounded viewport continuations and revision/width/cursor fences.
+The UI composes immutable prepared rows and retains their geometry through the
+matching presentation acknowledgement. Shutdown cancels preparation, joins the
+presenter and releases its last editor frame owners before execution retirement
+joins. This source-window integration is applied to the current tree; frozen
+candidate checks do not qualify the newly combined tree or its release binary.
+Chapter line-offset discovery now counts disjoint source ranges rather than
+repeated prefixes. Isolated original-versus-candidate chapter fixtures pass;
+full-buffer context capture/parsing, TextArea storage and live acceptance remain
+unfinished.
+
+The document leaf migration is currently a private candidate: cloned syntax
+tokens and rendered text retain their original physical storage charge until
+the CPU retirement owner releases the last allocation. Its client build,
+Markdown contracts and editor contracts passed, but the new forcing fixtures
+initially declared job costs smaller than the captured types and were rejected
+before exercising retirement. Those fixture costs are being corrected without
+weakening admission. This candidate is not applied to the current tree.
+The native input owner and complete terminal adapters are now integrated into
+the current tree after producer/caller inventory and guarded three-way merges.
+Input admission precedes terminal mutation. One admitted owner handles normal
+input and terminal capability queries, retains refused semantic events, and
+keeps its session claim through terminal restoration. Connection setup reuses
+the shared codec bank instead of starting a duplicate bank per connection.
+Shutdown errors retain undelivered events and live retirement tickets alongside
+earlier client errors. The declared process limit includes these owners; it is
+not an allocator or measured RSS guarantee. Frozen candidate checks cover the
+selected contracts, but current combined compilation, release and real-terminal
+acceptance remain unverified.
+
+Board file completion retains its original charged result when outbound request
+admission refuses an open. The collector retries that ordered head without
+regenerating the file, copying its request prematurely or recording pending
+focus. The captured parent must still accept normal children; a changed creation
+dialog cancels only the automatic open and preserves the completed file.
+Filesystem shutdown closes and drains editor, board, configuration and
+integration owners independently, including when no editor service exists.
+Their completion notifications are registered before collection, under the
+existing shutdown deadline. Accepted board writes finish; automatic opens are
+explicitly cancelled during shutdown and their disk data remains available.
+
+Finite naming, model discovery, restructuring and Smart Copy also share two
+native-account provider slots across cooperating clients. The platform adapter
+resolves the native account profile independently of HOME, XDG and project paths,
+then probes two permanent owner-only lock files without waiting for a held lock.
+Namespace discovery and probing execute within an admitted I/O job. The existing
+process limiter and the host lock remain owned until the synchronous provider
+body returns or unwinds; output collection and catalog CPU preparation do not
+retain either permit. Only a preflight refusal returns the original captured
+request for a dated retry. An invoked stream is never replayed, including an
+empty response, a partial prefix or a provider failure. Persistent voice uses its
+separate actor lifecycle. This bounds participating binaries using one stable
+account filesystem; it does not constrain older binaries, remote provider work
+or deliberate namespace replacement. An isolated two-child test verifies the
+real shared lock limit and release on child exit despite different HOME, XDG and
+project paths; it does not write the actual account namespace. Caller-ordering
+and integrated release qualification remain open.
+
+Normal voice and the onboarding demonstration prepare prompts, tool schemas,
+configuration and context changes on the existing finite CPU bank. A separate
+finite I/O phase reads an environment credential only when the captured setting
+requires it; its completed original follows the same request into CPU preparation.
+The actor accepts an owned startup proof and a separately preadmitted metadata
+token rather than constructing configuration on the interaction loop. Temporary
+metadata refusal retains the same prepared startup for a dated retry; the token
+pins the actor's quota, so startup cannot substitute another ownership group. Normal context preparation reserves its exact FIFO slot,
+so younger text, push-to-talk and tool commands cannot overtake it. Replacement
+settings fence prepared results, while Stop cancels preparation and waits for
+actual actor and native retirement before another owner can start.
+
+Audio callbacks use bounded preallocated sample rings. The existing persistent
+DSP owner performs sample conversion in both directions; playback pressure retains
+original pending samples there while capture remains serviced. Capture overflow
+reports an incomplete utterance. Push-to-talk commit drains through the last
+admitted capture ordinal, and shutdown can interrupt a blocked audio-delta enqueue.
+These are current source contracts awaiting integrated qualification, not claims
+of real-time deadlines or allocator/RSS bounds. The first environment read still
+allocates before its accepted-size cap; arbitrary external JSON maps have opaque
+spare capacity and require a producer backing declaration. Native backend lifetime
+and library thread costs need separate platform qualification.
+
+The current client composition declares 26 admitted worker roles and 4096 MiB
+of aggregate worker/storage allowance. Its selected single-video-owner scenario
+reserves 3449 MiB plus 128 KiB for the finite bank, immutable parser, clipboard,
+media, presentation, animation frames, icon engine, voice and one video owner.
+Retiring owners still compete for their original admission; the selected scenario
+does not guarantee concurrent replacements will fit. Startup logging, the join
+supervisor and the separate codec bank remain outside this scenario and require
+the reconciliation described below. These figures are source declarations, not
+a whole-process OS-thread bound, allocated RSS or an allocator limit. Native
+helper/library completeness and measured memory acceptance remain separate.
+
+Ambient scene construction receives the composition root's existing execution
+client through `AmbientResources` and `SceneEnv`. Finite carpet-chess searches
+use that CPU bank, one owned receipt and a captured board identity; cancellation
+is checked inside search nodes. Returned moves keep their result admission until
+application. This conversion does not complete admission for the other native
+scene workers: image decoding, caches, helper processes and opaque library
+threads still need producer-specific peak and retirement qualification. Audio
+also needs explicit native-stream admission and a shutdown protocol that cannot
+wait behind a full UI event queue.
+
+Images discovery transfers the original list and diagnostic allocations through
+one shared, independently charged owner; worker, result and scene references
+retain that same allocation. Failed list preparation publishes a terminal error
+state and returns to idle cadence rather than regenerating an empty cache.
+Frozen-source Linux checks cover90 Images tests, all-target Clippy and formatting.
+This qualification does not complete PNG/JPEG/GIF/WebP decoding admission,
+remote discovery or native library memory accounting.
+
+The presentation owner reserves one physical thread with96 MiB of declared
+encoder/resize working storage before spawning, plus97 MiB of independently
+retained frame and control storage. Both use the composition root quota. Actual
+join releases physical admission; the last retained frame or original failure
+receipt releases its separate storage admission. Diff encoding streams against
+the last emitted frame without a whole-frame diff vector. Isolated release tests
+cover refusal before spawn, blocked retirement and storage after actual join;
+full-client output and measured memory qualification remain open.
+
+Snapshot publication flushes and syncs the temporary data file, then uses the
+platform durable replacement operation before reporting success. On Unix that
+operation also syncs the containing directory; Windows uses write-through
+replacement. Existing snapshot persistence readback and oversize-preservation
+tests pass on Linux; crash/power-loss and Windows execution remain unverified.
+
+Presentation acknowledgements retain the exact sources and hit targets actually
+painted in their complete frame. Selection, context menus and Smart Copy use
+those emitted sources. Detach consumes output acknowledgements while draining
+ordered parser work, releasing geometry leases without repinning a finished
+interaction; successful animation receipts still reach their exact scene.
+
+Cost derivation and detail-card formatting use one finite CPU receipt on the
+existing statistics execution client. Captures contain bounded topology IDs,
+settings and immutable statistics identities. Structural revisions fence
+installation independently of newer time requests. Installed statistics and
+history snapshots carry independent storage leases, releasing finite job slots
+after collection. The coordinator owns history scan receipts and drains them
+before CPU admission, including when cost display is disabled or CPU work is
+still pending. CPU derivation reads an immutable history snapshot. Cache-path
+changes immediately invalidate queued or completed scans and fence captured CPU
+generations with a separate epoch; ordinary cancellation preserves the previous
+complete snapshot. Shutdown releases coordinator references before execution
+drain, while independent readers retain the original storage lease. Frozen-source
+checks cover10 history tests and26 cost-tracker tests, including queued/ready
+cache changes and last-reader retirement. Full engine destruction, current-client
+runtime and measured memory qualification remain open. Tree-row acknowledgements
+retain the prepared card, its
+displayed title and visibility policy; rendering borrows those immutable lines.
+A changed acknowledged card requests one redraw, while an unchanged source
+does not create an acknowledgement/redraw loop. These source contracts still
+need integrated compiled and runtime qualification.
+
+Icon search has one supervised stateful owner per client, one replaceable pending
+query and one immutable result mailbox. Result storage remains charged through
+its last consumer. ONNX uses one execution thread and tokenizers parallelism is
+disabled before initialization. Two nonblocking OS lock slots in the shared
+model-cache namespace limit concurrent engines across clients sharing that cache;
+separate cache namespaces remain independent. The512 MiB native declaration
+and cold/warm model memory still require measured qualification.
+
+Media pause/resume effects have one persistent OS-thread owner. Normal voice
+and demonstration mode publish bounded desired-state leases; the owner keeps
+the exact positively acknowledged paused-player set and compensates a Stop
+that arrived while Pause was blocked. Shutdown observes actual supervised
+thread exit. The Tokio-backed zbus configuration avoids its extra internal
+executor thread; its declared native/message peak still needs runtime proof.
+
+Ambient helper `Worker` owners use that same platform supervisor. Scene drop
+signals their existing cancellation flags without joining on the scene thread;
+there is no separate ambient reaper queue. The supervisor retains blocked
+callbacks until actual exit. Its registry limit covers live and retiring owners,
+but shared process admission for those helpers and their native libraries is
+still required; this lifecycle change alone does not supply their memory bounds.
+
+Independent immutable caches use `StorageAdmission`: it debits declared storage
+without inventing another physical thread. The last retained snapshot keeps
+that storage debit even after its producing worker joins. Persistent actors
+reserve mailbox/receipt metadata separately from that immutable allocation.
+Typed channel adapters can split `Retained` into its original value and an
+opaque `Retention` guard. The destination keeps that guard after its payload;
+cloning a guard shares one charge and cannot authorize new heap allocations.
+
+Durable Text Trigger reads use the server's bounded I/O bank and accept only
+regular files within512 KiB. Regex validation uses its CPU bank. An immutable
+settings allocation receives a separate storage lease before the read/validation
+job envelope is released; the accepted state holds the lease until replacement.
+Releasing the read envelope before CPU admission avoids a deadlock when several
+completed reads would otherwise fill all result credits. Invalid or oversized
+sources retain the last accepted settings and revision. These changes do not
+complete the separately inventoried trigger matching and delivery migration.
+
+Matched Text Trigger deliveries retain their own storage leases in the64-item
+FIFO. A full queue waits rather than discarding an already matched decision;
+natural PTY EOF drains admitted deliveries. Each rule carries `delay_seconds` (default 60,
+max 86400, `#[serde(default)]` so rules stored before the field existed load with
+60). The per-pane delivery owner holds a due-time heap (at most 64 pending,
+then the channel backpressures); a delivery is sent at detection time plus its
+delay. Semantic writes check the original PTY instance after acquiring its input
+gate and that the rule (id, enabled, message) is still current; unrelated
+settings edits no longer cancel pending sends. Pane replacement and rule
+removal, disabling or message edits cancel stale decisions explicitly. The
+existing output sampler can still lose transient matches after broadcast gaps;
+screen resynchronization does not establish lossless trigger observation.
+
+The server's CPU bank has process-shared decoder and encoder tenants. Four
+request envelopes cannot consume the two output envelopes; general evidence
+and I/O jobs have separate tenant ceilings. The aggregate declared input and
+result ceilings are each 1280 MiB, with general input512/result128 MiB and codec
+input128/result192 MiB per admitted job. These bounds are shared across
+connections and retain charges while handlers or stream flushes are blocked.
+They describe admission envelopes, not measured resident memory.
+
+CPU preparation adapters can query immutable job ceilings across the shared
+quota root and every tenant ancestor. Disabled CPU workers or zero job allowances
+produce permanent capability refusals. Callers still reserve capacity atomically
+to handle current pressure and shutdown races.
+
+The client owns interaction, layout and composition. Its animation service owns
+scene construction, simulation, rendering and packing, and returns immutable
+frames with native glyphs and styles. Each scene OS owner debits the same client
+process thread quota through actual join, including blocked retirement. Packing
+reserves a24 MiB frame envelope before allocating cells; the final snapshot
+clone releases its independent storage charge even after the engine has joined.
+The existing four-engine and three-frame limits also apply. This accounts for
+owner threads and published frames; opaque scene caches and library-created
+threads require their own domain accounting and do not have an RSS guarantee.
+A composed frame retains its exact sealed
+scene receipt until terminal emission succeeds. Time requests may replace older
+render requests without invalidating the latest complete frame; semantic scene
+and settings changes remain ordered. The presentation owner diffs against its
+last successfully emitted buffer, encodes it and performs terminal output.
+Cursor and layout revisions advance with the output acknowledgement. Mouse
+geometry retains the emitted viewport and terminal instance; provisional layout
+or pane replacement cannot redirect admitted terminal input.
+
+Document preparation is keyed by instance, source revision, width and settings.
+Cross-line syntax, Markdown layout, image decode and font preparation run on the
+finite banks. Ordered file writers acknowledge durable publication before
+clearing dirty state, retargeting Save As or dismissing a save dialog. Editor,
+board and configuration consumers own conflict and rollback decisions; a failed
+acknowledgement never proves that a rename was not published. Directory sync
+reports unsupported platforms explicitly. Detection workers gather owned process
+and transcript evidence; the server reconciles current revisions and exclusive
+session claims centrally.
+
+Server foreground-process evidence still has a synchronous boundary. Six
+server paths probe shell ownership during detection reconciliation, automated
+input checks and title decisions. On Windows this invokes a ToolHelp process
+scan while shared tree or pane guards remain held; Unix uses the narrower
+terminal foreground-process-group query. Moving that evidence outside the
+locks requires revalidating the original pane, agent and presentation revisions
+before applying input or title decisions. Current Linux checks do not qualify
+the Windows scan or complete this remaining I/O migration.
+
+Local PNG preparation uses the shared finite CPU bank. Its concrete decoder
+preflights bounded chunk metadata, inflater buffers, pixel storage and resize
+scratch before construction; cancellation checks also cover encoded-source reads.
+The original encoded source and prepared pixel/name storage retain their admission
+through queued results and the final scene or cache consumer. These declarations
+bound owned work and storage; they do not establish a process-wide RSS limit or
+qualify other image formats and remote transport.
+
+Terminal parsing has an ordered OS owner and immutable UI snapshots. Byte,
+replay, resize, scroll and negotiated-input barriers retain pane identity and
+stream order. Smart Copy captures a matching historical viewport before later
+output can change it. IPC framing separates fixed-size header reads, bounded
+payload admission and pure encoding/decoding; idle connections do not reserve a
+CPU job while waiting for a header. Actual stream flush establishes presentation
+or transport delivery, while persistence and server application use their own
+acknowledgements. These components are workers and services; the future
+user-written JavaScript extension system has a separate contract.
+
+Process bootstrap now designates the shared quota before logging starts.
+The supervisor keeps its permanent physical admission; the ordered logger keeps
+its worker admission through actual join and its storage admission through the
+last retained owner. The server creates `ServerResources` before logging and
+moves that same quota and completion notification into its finite worker bank.
+Independent test banks retain their own quota identities. A Linux qualification
+forces a valid native thread request to return kernel `EAGAIN` in an isolated
+child, verifies registry/custody rollback, restores only that child's soft limit,
+and verifies a later real worker joins. This complements the separate actual
+quota startup test; it does not prove all native library or process resources.
+
+Startup accounting and caller integration remain incomplete. The current
+interactive client still starts five general-bank threads and a separate codec
+bank; the admitted input owner and shared interactive codec migration remain
+private proposals. The current snapshot writer still needs its shared physical
+worker lease and final-write shutdown integration. The platform registry caps
+running and retiring owners at1024, excluding its supervisor. Neither that cap
+nor cooperative declarations establish a whole-process OS-thread/RSS bound.
+Current caller qualification, library thread census and matched runtime
+measurements remain separate acceptance gates.
+
+Integration acceptance remains separate from source implementation. In
+particular, retained terminal-history pins need publication headroom and an
+overload recovery contract; all message queues need byte ownership through their
+consumers; and existing provider/library workers need the shared admission wired
+through actual retirement. Focused foundation tests do not establish whole
+workspace, release, live PTY or performance acceptance.
 
 ## Ordered terminal ownership
 
@@ -339,8 +746,12 @@ Each milestone is meant to be independently runnable/demoable, not a big-bang in
 5. **M4 — Agent detection engine. Done.** `ilium-detect`: the shared built-in provider registry plus extensible generic/custom signatures, process-tree identity check via `sysinfo` (`identify_agent`), text-marker activity check (`classify_activity`, covering the working/waiting-approval/idle states plus the numbered-selection-menu and live-status-line cases added after the original design), `ilium-server`'s adaptive poll loop (`detection.rs`, fast interval for `Working` panes, slow for everything else, both configurable), and icon/color wiring into the client's tree render.
 6. **M5 — Polish. Partially done.** Everything below is configured in `~/.config/ilium/config.toml` and/or the full-screen Settings view, which includes live-persisted Triggers, Voice control, and Debug tabs alongside the other client surfaces.
    - *Config surface.* Server-side, `ilium-server/src/config.rs`'s `[detection]` table covers the two poll intervals plus `[[detection.custom_signatures]]`. Client-side, keybindings, the configurable `[keyboard].shortcut_base`, `[ui].tree_order`, per-provider agent icons, and the four-color theme override are configured there too.
+   - *Inference value saves.* The ordered configuration writer acknowledges durable disk publication before an inference value editor returns to its existing parent view. Save-operation and dialog identities jointly own completion: obsolete receipts cannot dismiss a newer editor or mark its value saved. Admission failures, rejected or lost receipts, and disk errors retain the draft and expose a retryable error. The restructure token-budget editor autosaves valid changes after 600 ms; Enter shares a pending write for the same value, so repeated submissions do not enqueue duplicate writes. Escape revokes the dialog's completion ownership without cancelling an already admitted write, and autosave completion alone never dismisses the editor.
    - *Debug logging.* Defaults off because enabling it records complete HTTP and LLM text requests, responses, provider errors, and application action/error context; credential headers and URL parameters stay redacted, binary audio is summarized, and unrelated sensitive per-agent evidence stays in its separately enabled journal. Enabling `[debug].file_logging_enabled` applies immediately to both client and detached server over IPC; one server lifetime writes `/tmp/.ilium/<project-session-id>/log-<local-start-date-and-time>.txt` with private directory/file permissions.
    - *Triggers.* Maps startup completion, prompt submission, session readiness, useful agent lifecycle transitions, and low-noise plain-terminal checkpoints to zero or more LLM actions: retitle the originating element, restructure its project, or restructure every project. Agent lifecycle events share the sound classifier, prompt origins are explicit across keyboard, voice, scheduled, queued, and initial-agent input, and startup fires only after the complete tree/replay/metadata state stream has loaded. A fresh install enables AI retitling and restructuring: startup restructures every project that has un-restructured activity (a project with none is skipped without a provider call), session-ready/prompt/started-working/background-wait/terminal checkpoints retitle, and a finished agent retitles itself and restructures its own project. Failed automatic restructures are contained by a one-to-thirty-minute retry breaker and reported in the restructure status line. Title style defaults to Labeling.
+   - *Title ownership and eligibility.* Agent labels require a genuine request in that pane's project-verified conversation or acknowledged authored text plus Enter for its exact invocation. Startup screens, assistant output, goal bookkeeping, update requests, progress notifications and sibling work supply no permission to title it. The shared transcript adapter distinguishes positive request evidence, verified empty history and unavailable history; unavailable history preserves existing labels. Client inference captures each leaf's presentation revision and conversation/process identity. The server independently verifies request evidence and compares those observations under its tree/runtime locks across every title and restructuring apply path. A stale or ineligible title is dropped while valid structural grouping and animation recommendations can still apply.
+   - *Presentation lifetime.* Inferred labels remain automatic even after an explicit AI retitle; literal user renames fix the full name/short-name/icon bundle. Persisted checked presentation revisions fence manual renames, newer AI labels, task submission, reset and undo without tracking ordinary output. Undo records accepted presentation revisions and preserves later title changes. Fixed names survive fresh conversations and recovery. Replacement may transfer an inferred title only after verified same-conversation continuity. Restore repairs only non-fixed legacy AI restructuring ownership; visible text resets only when the current own history is verified empty and has no authored delivery receipt.
+
    - *Voice control.* Selects the Realtime model, voice, reasoning effort, semantic-VAD/push-to-talk mode, VAD eagerness, input/output devices, local volume, masked API key, additive multiline prompt, and an opt-in terminal-submission confirmation policy; `OPENAI_API_KEY` is also accepted without persisting a credential. The confirmation policy defaults off, so an explicit request forwards dictated text plus Enter immediately. When enabled, ilium first types the text visibly without Enter, asks whether to submit what is on screen without reading it aloud, and presses Enter in that same pane only after yes. The global bottom-right control remains reachable over every panel and modal, with click-to-toggle and global F8/hold-F8 interaction. Its semantic tools cover navigation, every left-tree mutation/launcher, terminal input and queues, editor and board operations, workspace search, the complete settings registry, and session lifecycle; destructive actions remain explicitly confirmed regardless of the terminal-submission preference.
    - *Typed voice input (`ilium voice say`).* Feeds text into the running voice session as if it had been spoken, so the same model, tools, target rules, and confirmation policy apply and text can be mixed with live microphone audio. The voice session lives in an interactive client (it owns the audio devices, the provider socket, and the tool executor), so the server is only a broker and `ilium-voice`/`ilium-ipc` stay free of each other's concerns:
 
