@@ -788,6 +788,29 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
     serde_json::to_writer(&mut counter, settings).is_ok()
 }
 
+// Quota Busy means a short shared-ledger collision, not capacity exhaustion.
+// Retry only on the scene's existing native thread; cancellation bounds its
+// lifetime and the sleep avoids a hot spin. Genuine admission failures remain
+// explicit startup errors. The operation closure permits deterministic forcing
+// of contention without exposing the quota ledger's private lock.
+fn reserve_wake_storage(
+    stop: &StopToken,
+    mut reserve: impl FnMut() -> Result<StorageAdmission, ilium_execution::RejectReason>,
+) -> Result<Option<StorageAdmission>, ilium_execution::RejectReason> {
+    loop {
+        if stop.is_stopped() {
+            return Ok(None);
+        }
+        match reserve() {
+            Ok(storage) => return Ok(Some(storage)),
+            Err(ilium_execution::RejectReason::Busy) => {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn run(
     shared: &Arc<Shared>,
     mut frame: AnimationFrame,
@@ -798,19 +821,21 @@ fn run(
     let startup_admission = AdmissionGuard(shared);
     // One bounded wake slot shares the original root. The callback retains
     // its original charge if the finite job outlives this scene worker.
-    let native_wake_storage = match shared.quota.reserve_external_storage(4096) {
-        Ok(storage) => Arc::new(storage),
-        Err(error) => {
-            shared
-                .mailbox
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .status
-                .error = Some(format!("Native plugin wake admission: {error:?}"));
-            shared.ready.notify_one();
-            return;
-        }
-    };
+    let native_wake_storage =
+        match reserve_wake_storage(&stop, || shared.quota.reserve_external_storage(4096)) {
+            Ok(Some(storage)) => Arc::new(storage),
+            Ok(None) => return,
+            Err(error) => {
+                shared
+                    .mailbox
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .status
+                    .error = Some(format!("Native plugin wake admission: {error:?}"));
+                shared.ready.notify_one();
+                return;
+            }
+        };
     let (native_wake_sender, native_wake_receiver) = std::sync::mpsc::sync_channel(1);
     let weak_shared = Arc::downgrade(shared);
     let wake_charge = Arc::clone(&native_wake_storage);
@@ -1396,6 +1421,56 @@ mod tests {
     // limits depend on the Rust test harness's chosen parallelism.
     static TEST_OWNER: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn wake_admission_recovers_from_transient_contention() {
+        let quota = isolated_quota();
+        let stop = StopToken::default();
+        let mut calls = 0;
+        let storage = reserve_wake_storage(&stop, || {
+            calls += 1;
+            if calls == 1 {
+                Err(ilium_execution::RejectReason::Busy)
+            } else {
+                quota.reserve_external_storage(4096)
+            }
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(quota.snapshot().worker_bytes, 4096);
+        drop(storage);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn wake_admission_cancels_after_contention_without_retrying() {
+        let stop = StopToken::default();
+        let mut calls = 0;
+        let storage = reserve_wake_storage(&stop, || {
+            calls += 1;
+            stop.stop();
+            Err(ilium_execution::RejectReason::Busy)
+        })
+        .unwrap();
+        assert!(storage.is_none());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn wake_admission_preserves_genuine_capacity_failure() {
+        let stop = StopToken::default();
+        let mut calls = 0;
+        let result = reserve_wake_storage(&stop, || {
+            calls += 1;
+            Err(ilium_execution::RejectReason::WorkerBytes)
+        });
+        assert!(matches!(
+            result,
+            Err(ilium_execution::RejectReason::WorkerBytes)
+        ));
+        assert_eq!(calls, 1);
+    }
+
     struct ControlledScene {
         entered: mpsc::SyncSender<std::thread::ThreadId>,
         release: mpsc::Receiver<()>,
@@ -1604,10 +1679,16 @@ mod tests {
         let (service, entered, release, _) = controlled_in(Some(quota.clone()));
         submit(&service, request(1, 0));
         entered.recv_timeout(Duration::from_secs(3)).unwrap();
+        // The controlled render is parked before frame packing. Capture the
+        // already admitted review/wake storage independently of frame custody.
+        let engine_storage = quota.snapshot().worker_bytes;
         release.send(()).unwrap();
         let frame = snapshot(&service);
         let retained = Arc::clone(&frame);
-        assert_eq!(quota.snapshot().worker_bytes, MAX_FRAME_BYTES);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            engine_storage + MAX_FRAME_BYTES
+        );
         let ticket = service.ticket();
         drop(service);
         ticket

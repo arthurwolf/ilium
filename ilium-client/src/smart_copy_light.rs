@@ -27,8 +27,8 @@ pub const RELEASE_IDLE_GRACE: Duration = Duration::from_millis(1500);
 /// A frame cadence smooth enough for a one-second progress bar.
 pub const PREVIEW_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
-const PREVIEW_MAXIMUM_LINES: usize = 6;
-const PREVIEW_MAXIMUM_WIDTH: usize = 72;
+pub(crate) const PREVIEW_MAXIMUM_LINES: usize = 6;
+pub(crate) const PREVIEW_MAXIMUM_WIDTH: usize = 72;
 
 /// A Smart Copy light interaction in progress.
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +49,10 @@ impl SmartCopyLightState {
 /// What the last light selection put on the clipboard.
 #[derive(Debug, Clone)]
 pub struct SmartCopyPreview {
-    pub text: String,
+    pub text: ilium_execution::RetiringArc<String>,
+    characters: usize,
+    lines: Vec<String>,
+    _facts_retention: Option<ilium_execution::Retention>,
     pub region_count: usize,
     /// False when the clipboard write failed; the dialog says so.
     pub copied: bool,
@@ -57,12 +60,45 @@ pub struct SmartCopyPreview {
 }
 
 impl SmartCopyPreview {
-    pub fn new(text: String, region_count: usize, copied: bool, now: Instant) -> Self {
+    pub(crate) fn from_prepared(
+        text: ilium_execution::RetiringArc<String>,
+        region_count: usize,
+        characters: usize,
+        lines: Vec<String>,
+        copied: bool,
+        now: Instant,
+        retention: Option<ilium_execution::Retention>,
+    ) -> Self {
         Self {
             text,
+            characters,
+            lines,
             region_count,
             copied,
             started_at: now,
+            _facts_retention: retention,
+        }
+    }
+
+    /// Compatibility for explicitly synthetic synchronous UI/unit fixtures.
+    /// Production has no whole-String constructor or preparation bypass.
+    #[cfg(test)]
+    pub fn new(text: String, region_count: usize, copied: bool, now: Instant) -> Self {
+        let characters = text.chars().count();
+        let lines = preview_lines(&text, PREVIEW_MAXIMUM_LINES, PREVIEW_MAXIMUM_WIDTH);
+        let text = crate::execution::test_client()
+            .retirement()
+            .try_reserve::<String>(text.capacity() + 4096)
+            .unwrap()
+            .attach_shared(text);
+        Self {
+            text,
+            characters,
+            lines,
+            region_count,
+            copied,
+            started_at: now,
+            _facts_retention: None,
         }
     }
 
@@ -79,11 +115,11 @@ impl SmartCopyPreview {
     /// The text as shown in the dialog: at most a few lines, each clipped to
     /// a display width, with a final line saying how much more was copied.
     pub fn display_lines(&self) -> Vec<String> {
-        preview_lines(&self.text, PREVIEW_MAXIMUM_LINES, PREVIEW_MAXIMUM_WIDTH)
+        self.lines.clone() // At most six cached bounded lines; never scans original.
     }
 
     pub fn summary(&self) -> String {
-        let characters = self.text.chars().count();
+        let characters = self.characters;
         let regions = if self.region_count == 1 {
             "1 selection".to_string()
         } else {
@@ -102,19 +138,22 @@ impl SmartCopyPreview {
 /// "… N more lines" marker when lines were dropped. Blank lines between
 /// regions are kept so separate selections stay visibly separate.
 pub fn preview_lines(text: &str, maximum_lines: usize, maximum_width: usize) -> Vec<String> {
-    let all_lines: Vec<&str> = text.lines().collect();
-    let shown = if all_lines.len() > maximum_lines {
+    let mut count = 0usize;
+    let mut lines = Vec::with_capacity(maximum_lines.max(1));
+    for line in text.lines() {
+        if lines.len() < maximum_lines.max(1) {
+            lines.push(clip_line(line, maximum_width));
+        }
+        count += 1;
+    }
+    let shown = if count > maximum_lines {
         maximum_lines.saturating_sub(1).max(1)
     } else {
-        all_lines.len()
+        count
     };
-    let mut lines: Vec<String> = all_lines
-        .iter()
-        .take(shown)
-        .map(|line| clip_line(line, maximum_width))
-        .collect();
-    if all_lines.len() > shown {
-        let hidden = all_lines.len() - shown;
+    lines.truncate(shown);
+    if count > shown {
+        let hidden = count - shown;
         lines.push(format!(
             "… {hidden} more line{}",
             if hidden == 1 { "" } else { "s" }
@@ -124,7 +163,7 @@ pub fn preview_lines(text: &str, maximum_lines: usize, maximum_width: usize) -> 
 }
 
 fn clip_line(line: &str, maximum_width: usize) -> String {
-    let cleaned: String = line
+    let mut prefix: String = line
         .chars()
         .map(|character| {
             if character.is_control() {
@@ -133,16 +172,17 @@ fn clip_line(line: &str, maximum_width: usize) -> String {
                 character
             }
         })
+        .take(maximum_width.saturating_add(1))
         .collect();
-    if cleaned.chars().count() <= maximum_width {
-        return cleaned;
+    if prefix.chars().count() <= maximum_width {
+        return prefix;
     }
-    let mut clipped: String = cleaned
+    prefix = prefix
         .chars()
         .take(maximum_width.saturating_sub(1))
         .collect();
-    clipped.push('…');
-    clipped
+    prefix.push('…');
+    prefix
 }
 
 #[cfg(test)]

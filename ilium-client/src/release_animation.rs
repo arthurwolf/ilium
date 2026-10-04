@@ -2,9 +2,8 @@
 //! its sibling helper. This command runs inside the package's native launcher.
 
 use crate::{animation_plugins::PluginCatalogue, execution};
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use ilium_animation_js::{
-    TRUSTED_BOOTSTRAP,
     engine::{ArraySpec, CreateState, TypedArrayKind},
     helper::HelperLimits,
     manifest::AnimationMode,
@@ -12,6 +11,7 @@ use ilium_animation_js::{
     release,
     runtime::{InstancePreparation, PackageInstance},
     surface::{Data, Format, FrameMeta, NoNativeRenderer, Planes, Shape, Surface},
+    TRUSTED_BOOTSTRAP,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};

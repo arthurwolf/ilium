@@ -6,7 +6,9 @@
 //! Production preparation runs on the shared CPU bank; local image reads run
 //! on its I/O bank. The synchronous entrypoint is retained for focused tests.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use ilium_execution::{RetirementReservation, RetiringArc};
 
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
@@ -27,14 +29,79 @@ pub enum HeadingRendering {
     PlainText,
 }
 
+/// One charge follows all independently cloned rendered text leaves. Keeping
+/// the raw Arc private prevents readers from escaping its physical owner.
+pub struct PreparedText {
+    // Drop this reader before its arena owner; the arena retains another Arc.
+    lines: Arc<Vec<Line<'static>>>,
+    owner: RetiringArc<TextArena>,
+}
+impl Clone for PreparedText {
+    fn clone(&self) -> Self {
+        Self {
+            lines: self.lines.clone(),
+            owner: self.owner.clone(),
+        }
+    }
+}
+impl std::ops::Deref for PreparedText {
+    type Target = Vec<Line<'static>>;
+    fn deref(&self) -> &Self::Target {
+        &self.lines
+    }
+}
+pub(crate) struct TextArena {
+    lines: OnceLock<Vec<Arc<Vec<Line<'static>>>>>,
+}
+pub(crate) struct TextPreparation {
+    owner: RetiringArc<TextArena>,
+    lines: Vec<Arc<Vec<Line<'static>>>>,
+}
+impl TextPreparation {
+    pub(crate) fn new(reservation: RetirementReservation<TextArena>) -> Self {
+        Self {
+            owner: reservation.attach_shared(TextArena {
+                lines: OnceLock::new(),
+            }),
+            lines: Vec::new(),
+        }
+    }
+    pub(crate) fn capture(&mut self, lines: Arc<Vec<Line<'static>>>) -> PreparedText {
+        self.lines.push(lines.clone());
+        PreparedText {
+            lines,
+            owner: self.owner.clone(),
+        }
+    }
+    pub(crate) fn finish(self) -> Result<(), &'static str> {
+        self.owner
+            .lines
+            .set(self.lines)
+            .map_err(|_| "rendered text arena was sealed twice")
+    }
+}
+#[cfg(test)]
+impl PreparedText {
+    pub(crate) fn test(lines: Vec<Line<'static>>) -> Self {
+        let retirement = crate::execution::test_document_client().retirement();
+        let reservation = retirement
+            .try_reserve::<TextArena>(16 * 1024 * 1024)
+            .expect("synthetic text fixture retirement admission");
+        let mut preparation = TextPreparation::new(reservation);
+        let text = preparation.capture(Arc::new(lines));
+        preparation.finish().expect("single text fixture seal");
+        text
+    }
+}
+
 /// One block of a document, ready to render: text and authored spacing
 /// passed through as-is, or a header/image converted to a graphics protocol.
 pub enum RenderedBlock {
-    Text(Arc<Vec<Line<'static>>>),
+    Text(PreparedText),
     /// Source-authored vertical space. It remains a first-class block so
     /// content-height and scroll calculations count the same rows the
     /// viewport leaves unpainted.
-    BlankLines(Arc<Vec<Line<'static>>>),
+    BlankLines(PreparedText),
     /// Rasterized header image, two terminal rows tall.
     Header(Protocol),
     /// A loaded content image, sized to fit within the document width.
@@ -63,6 +130,7 @@ pub(crate) struct PreparedLayout {
 /// screenshot can't push the rest of the document off-screen.
 const MAX_IMAGE_ROWS: u16 = 24;
 
+#[cfg(test)]
 pub fn render(
     document: &Document,
     picker: &Picker,
@@ -70,6 +138,11 @@ pub fn render(
     width_cols: u16,
     heading_rendering: HeadingRendering,
 ) -> RenderedDocument {
+    let reservation = crate::execution::test_document_client()
+        .retirement()
+        .try_reserve::<TextArena>(16 * 1024 * 1024)
+        .expect("synthetic rendered document text admission");
+    let mut text = TextPreparation::new(reservation);
     let cell_px = super::raster::cell_pixel_size(picker);
     let blocks = document
         .blocks
@@ -82,9 +155,12 @@ pub fn render(
                 width_cols,
                 cell_px,
                 heading_rendering,
+                &mut text,
             )
         })
         .collect();
+    text.finish()
+        .expect("single synthetic rendered document seal");
     RenderedDocument {
         blocks,
         layout: None,
@@ -98,16 +174,23 @@ fn render_block(
     width_cols: u16,
     cell_px: (u16, u16),
     heading_rendering: HeadingRendering,
+    prepared_text: &mut TextPreparation,
 ) -> RenderedBlock {
     match block {
-        Block::Text(lines) => RenderedBlock::Text(Arc::clone(lines)),
-        Block::BlankLines(lines) => RenderedBlock::BlankLines(Arc::clone(lines)),
+        Block::Text(lines) => RenderedBlock::Text(prepared_text.capture(Arc::clone(lines))),
+        Block::BlankLines(lines) => {
+            RenderedBlock::BlankLines(prepared_text.capture(Arc::clone(lines)))
+        }
         Block::Heading { text, level } => {
             if heading_rendering == HeadingRendering::PlainText {
-                return RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]));
+                return RenderedBlock::Text(
+                    prepared_text.capture(Arc::new(vec![plain_heading_line(text)])),
+                );
             }
             if !safe_geometry(width_cols, cell_px) || text.len() > 1024 {
-                return RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]));
+                return RenderedBlock::Text(
+                    prepared_text.capture(Arc::new(vec![plain_heading_line(text)])),
+                );
             }
             let image = rasterizer.rasterize(text, *level, width_cols, cell_px);
             let size = ratatui::layout::Size::new(width_cols, 2);
@@ -129,10 +212,29 @@ fn render_block(
                 }
             }
         }
-        Block::Image { alt, path } => render_image(alt, path, picker, width_cols),
+        Block::Image { alt, path } => {
+            #[cfg(test)]
+            {
+                render_image(alt, path, picker, width_cols)
+            }
+            #[cfg(not(test))]
+            {
+                match path {
+                    ImagePath::Unsupported(url) => RenderedBlock::Placeholder(Line::styled(
+                        format!("[image: {alt} -- remote images aren't loaded ({url})]"),
+                        Style::new().fg(Color::DarkGray).italic(),
+                    )),
+                    ImagePath::Local(path) => RenderedBlock::Placeholder(Line::styled(
+                        format!("[image unavailable: {alt} ({})]", path.display()),
+                        Style::new().fg(Color::DarkGray).italic(),
+                    )),
+                }
+            }
+        }
     }
 }
 
+#[cfg(test)]
 fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -> RenderedBlock {
     // A `match` (not nested let-else + unreachable!) so a future third
     // `ImagePath` variant fails to compile here instead of panicking at
@@ -241,7 +343,9 @@ pub(crate) fn render_prepared(
     width: u16,
     heading: HeadingRendering,
     cancelled: impl Fn() -> bool,
+    text_reservation: RetirementReservation<TextArena>,
 ) -> Result<RenderedDocument, &'static str> {
+    let mut prepared_text = TextPreparation::new(text_reservation);
     let cell = super::raster::cell_pixel_size(picker);
     let mut blocks = Vec::with_capacity(document.blocks.len());
     let mut graphics = 0usize;
@@ -273,14 +377,30 @@ pub(crate) fn render_prepared(
             Block::Image {
                 path: ImagePath::Unsupported(_),
                 ..
-            } => render_block(block, picker, rasterizer, width, cell, heading),
+            } => render_block(
+                block,
+                picker,
+                rasterizer,
+                width,
+                cell,
+                heading,
+                &mut prepared_text,
+            ),
             Block::Image { alt, .. } => {
                 RenderedBlock::Placeholder(Line::from(format!("[image unavailable: {alt}]")))
             }
             Block::Heading { text, .. } if !graphics_admitted => {
-                RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]))
+                RenderedBlock::Text(prepared_text.capture(Arc::new(vec![plain_heading_line(text)])))
             }
-            _ => render_block(block, picker, rasterizer, width, cell, heading),
+            _ => render_block(
+                block,
+                picker,
+                rasterizer,
+                width,
+                cell,
+                heading,
+                &mut prepared_text,
+            ),
         };
         if matches!(prepared, RenderedBlock::Image(_) | RenderedBlock::Header(_)) {
             graphics += 1;
@@ -288,6 +408,7 @@ pub(crate) fn render_prepared(
         }
         blocks.push(prepared);
     }
+    prepared_text.finish()?;
     Ok(RenderedDocument {
         blocks,
         layout: None,
@@ -675,7 +796,7 @@ mod preparation_limit_tests {
         bitmap[28..30].copy_from_slice(&24u16.to_le_bytes());
         assert!(decode_image(&bitmap).is_none());
         let mut document = RenderedDocument {
-            blocks: vec![RenderedBlock::Text(Arc::new(
+            blocks: vec![RenderedBlock::Text(PreparedText::test(
                 (0..1000).map(|_| Line::from("body")).collect(),
             ))],
             layout: None,

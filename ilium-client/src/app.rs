@@ -1896,6 +1896,8 @@ pub struct App {
     /// walks this stack first so nested dialogs never erase their parents.
     pub(crate) modal_stack: Vec<Mode>,
     pub status_message: Option<String>,
+    pub(crate) external_open: Option<crate::external_open::ExternalOpenService>,
+    pub(crate) external_open_status_storage: Option<ilium_execution::Retention>,
     /// Clipboard ownership must outlive the copy action on Linux, where the
     /// clipboard content can disappear when its last owner is dropped.
     pub(crate) terminal_clipboard: Option<crate::terminal_clipboard::ClipboardService>,
@@ -2086,6 +2088,8 @@ pub struct App {
     /// Pane whose progress footer is under the pointer, with the pointer cell
     /// the long-description tooltip anchors to.
     pub hovered_progress: Option<(NodeId, Position)>,
+    /// Pointer rests on a Codex pane's clickable `/goal resume` footer text.
+    pub hovered_goal_resume: Option<(NodeId, Position)>,
     /// Server-owned, non-persisted Git observations for worktree rows.
     pub workspace_git_statuses: HashMap<NodeId, ilium_ipc::WorkspaceGitStatus>,
     /// The costs-and-stats popover hanging off an agent pane's second header
@@ -2127,6 +2131,16 @@ pub struct App {
     pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
     /// The "Preview" dialog shown for a second after a light selection is copied.
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
+    pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
+    pub(crate) light_copy_preview_generation: Option<u64>,
+    /// Failed preparation returns its entire original frozen session here.
+    /// Bounded failures await exact restoration without replacing newer selections.
+    pub(crate) light_copy_recovery:
+        std::collections::VecDeque<crate::smart_copy_selection::SelectionCompletion>,
+    pub(crate) light_copy_restored:
+        std::collections::VecDeque<crate::smart_copy_selection::RestoredSelection>,
+    pub(crate) light_copy_retry_generation: Option<u64>,
+    pub(crate) light_copy_shutdown: bool,
     smart_copy_source: Option<crate::terminal_view::PaintedTerminal>,
     next_smart_copy_generation: u64,
     /// A multi-write PTY keystroke sequence still being drained by
@@ -2485,6 +2499,8 @@ impl App {
             onboarding_voice_suspended: false,
             modal_stack: Vec::new(),
             status_message: None,
+            external_open: None,
+            external_open_status_storage: None,
             terminal_clipboard: None,
             pending_clipboard_copies: std::collections::HashMap::new(),
             pending_terminal_link: None,
@@ -2598,6 +2614,7 @@ impl App {
             hovered_tree_node: None,
             hovered_status_slot: None,
             hovered_progress: None,
+            hovered_goal_resume: None,
             workspace_git_statuses: HashMap::new(),
             stats_popover: None,
             session_stats: crate::session_stats_store::SessionStatsStore::default(),
@@ -2618,6 +2635,12 @@ impl App {
             smart_copy_session: None,
             smart_copy_light: None,
             smart_copy_preview: None,
+            light_copy_selection: None,
+            light_copy_preview_generation: None,
+            light_copy_recovery: std::collections::VecDeque::with_capacity(8),
+            light_copy_restored: std::collections::VecDeque::with_capacity(8),
+            light_copy_retry_generation: None,
+            light_copy_shutdown: false,
             smart_copy_source: None,
             next_smart_copy_generation: 1,
             pending_staged_keystrokes: None,
@@ -8910,6 +8933,8 @@ impl App {
         if let Some(preparation) = &mut self.terminal_context_preparation {
             match preparation.request_capture(pane_id, generation, &source) {
                 Ok(()) => {
+                    self.light_copy_preview_generation = None;
+                    self.smart_copy_preview = None;
                     self.next_smart_copy_generation = next;
                     self.pending_smart_copy_capture =
                         Some((pane_id, source.identity.clone(), generation));
@@ -8958,7 +8983,7 @@ impl App {
         self.pending_smart_copy_capture = None;
         match completion.result {
             Ok(result) => {
-                let (prepared, _job_hold) = result.into_parts();
+                let (prepared, job_hold) = result.into_parts();
                 self.smart_copy_source = Some(prepared.source);
                 self.install_smart_copy_capture(
                     completion.pane_id,
@@ -8967,6 +8992,13 @@ impl App {
                     prepared.prompt,
                     prepared.charge,
                 );
+                if let Some(session) = self
+                    .smart_copy_session
+                    .as_mut()
+                    .filter(|session| session.generation == completion.generation)
+                {
+                    session.output_retention = Some(job_hold);
+                }
             }
             Err(error) => {
                 self.mode = Mode::Normal;
@@ -8989,6 +9021,28 @@ impl App {
             }
         };
         self.install_smart_copy_capture(pane_id, generation, snapshot, user_prompt, None);
+        #[cfg(test)]
+        {
+            // Explicitly synthetic capture provenance for pre-existing mouse
+            // fixtures. CPU selection preparation still follows the real bank.
+            let client = crate::execution::test_client();
+            let capture = client
+                .try_reserve_external(ilium_execution::JobCost {
+                    input_bytes: 8192,
+                    result_bytes: 8192,
+                })
+                .unwrap()
+                .retain(())
+                .unwrap();
+            let (_, hold) = capture.into_parts();
+            if let Some(session) = &mut self.smart_copy_session {
+                session.output_retention = Some(hold);
+            }
+            if self.light_copy_selection.is_none() {
+                self.light_copy_selection =
+                    Some(crate::smart_copy_selection::SelectionOwner::new(client));
+            }
+        }
     }
     fn install_smart_copy_capture(
         &mut self,
@@ -9067,6 +9121,15 @@ impl App {
     }
 
     pub fn exit_smart_copy(&mut self) {
+        if self.smart_copy_session.is_none()
+            && self.light_copy_recovery.front().is_some_and(|original| {
+                original.original().is_none()
+                    && self.light_copy_retry_generation == Some(original.generation)
+            })
+        {
+            self.light_copy_recovery.pop_front();
+        } // Explicitly acknowledge unknown-source failure.
+        self.light_copy_retry_generation = None; // Explicit Escape/cancel settles this failed original.
         self.smart_copy_light = None;
         self.smart_copy_source = None;
         if let Some(owner) = &mut self.terminal_context_preparation {
@@ -9150,6 +9213,10 @@ impl App {
         mouse: &crossterm::event::MouseEvent,
         position: Position,
     ) -> bool {
+        if !self.light_copy_recovery.is_empty() || !self.light_copy_restored.is_empty() {
+            self.status_message = Some("Earlier failed copy is retained; waiting to restore its selection for Enter/Escape".into());
+            return false;
+        }
         use crossterm::event::MouseEventKind;
         let settings = self.terminal_settings;
         if !settings.smart_copy_light
@@ -9188,6 +9255,7 @@ impl App {
             Instant::now(),
         ));
         self.smart_copy_preview = None;
+        self.light_copy_preview_generation = None;
         self.start_smart_copy(viewport.pane_id);
         if matches!(self.mode, Mode::SmartCopy) {
             return true;
@@ -9210,32 +9278,162 @@ impl App {
     /// The key was released: copy the selection, show the Preview and leave
     /// the mode. An empty selection just leaves.
     pub fn finish_smart_copy_light(&mut self) {
-        if self.smart_copy_light.is_none() {
-            return;
-        }
-        let selection = self
+        let retry = self
             .smart_copy_session
             .as_ref()
-            .map(|session| (session.selected_text(), session.selected_count()))
-            .filter(|(_, count)| *count > 0);
-        self.exit_smart_copy();
-        let Some((text, count)) = selection else {
+            .is_some_and(|session| self.light_copy_retry_generation == Some(session.generation));
+        if self.smart_copy_light.is_none() && !retry {
+            return;
+        }
+        if !self
+            .smart_copy_session
+            .as_ref()
+            .is_some_and(|session| session.selected_count() > 0)
+        {
+            self.exit_smart_copy();
+            return;
+        }
+        let Some(clipboard) = self.terminal_clipboard.as_ref() else {
+            self.status_message = Some(
+                "Clipboard unavailable; selection retained. Enter retries; Escape cancels".into(),
+            );
+            self.light_copy_retry_generation = self
+                .smart_copy_session
+                .as_ref()
+                .map(|session| session.generation);
+            self.smart_copy_light = None;
             return;
         };
-        let copied = arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(text.clone()))
-            .is_ok();
-        self.status_message = Some(if copied {
-            format!("Copied {count} selection(s)")
-        } else {
-            "Could not copy text".to_string()
-        });
-        self.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
-            text,
-            count,
-            copied,
-            Instant::now(),
-        ));
+        let Some(owner) = &mut self.light_copy_selection else {
+            self.status_message = Some(
+                "Selection service unavailable; original retained. Enter retries; Escape cancels"
+                    .into(),
+            );
+            self.light_copy_retry_generation = self
+                .smart_copy_session
+                .as_ref()
+                .map(|session| session.generation);
+            self.smart_copy_light = None;
+            return;
+        };
+        let generation = self
+            .smart_copy_session
+            .as_ref()
+            .map(|session| session.generation);
+        match owner.admit(&mut self.smart_copy_session, clipboard) {
+            Ok(_) => {
+                self.light_copy_preview_generation = generation;
+                self.exit_smart_copy(); // The owner already holds the exact source.
+                self.status_message = Some("Preparing selection for clipboard…".into());
+            }
+            Err(error) => {
+                self.status_message = Some(error); // Original slot and target unchanged.
+                self.light_copy_retry_generation = generation;
+                self.smart_copy_light = None; // Explicit Enter retry or Escape; no hot grace re-admission.
+                self.status_message = self
+                    .status_message
+                    .take()
+                    .map(|error| format!("{error}. Enter retries; Escape cancels"));
+            }
+        }
+    }
+
+    pub(crate) fn collect_light_copy_selection(&mut self) -> bool {
+        let Some(owner) = &mut self.light_copy_selection else {
+            return false;
+        };
+        let mut changed = false;
+        if self.light_copy_recovery.len() + self.light_copy_restored.len() < 8 {
+            if let Some(completion) = owner.collect(self.terminal_clipboard.as_ref()) {
+                let generation = completion.generation;
+                match completion.into_preview(Instant::now()) {
+                    Ok(preview) => {
+                        if self.light_copy_preview_generation == Some(generation) {
+                            self.status_message =
+                                Some(format!("Copied {} selection(s)", preview.region_count));
+                            self.smart_copy_preview = Some(preview);
+                        }
+                    }
+                    Err(original) => {
+                        if matches!(self.mode, Mode::Normal) && self.smart_copy_preview.is_none() {
+                            self.status_message = Some(format!(
+                                "Copy failed: {}. Retained selection is being restored",
+                                original
+                                    .result
+                                    .as_ref()
+                                    .err()
+                                    .map(String::as_str)
+                                    .unwrap_or("delivery unavailable")
+                            ));
+                        }
+                        self.light_copy_recovery.push_back(original);
+                    }
+                }
+                changed = true;
+            }
+        }
+        // Restoration is also CPU-owned; failed originals stay in order when
+        // admission is refused, never clone plaintext or become inaccessible.
+        if !self.light_copy_shutdown {
+            if self
+                .light_copy_recovery
+                .front()
+                .is_some_and(|original| original.original().is_some())
+            {
+                if let Some(original) = self.light_copy_recovery.pop_front() {
+                    if let Err(original) = owner.recover(original) {
+                        self.light_copy_recovery.push_front(original);
+                    }
+                }
+            }
+        }
+        if self.light_copy_recovery.len() + self.light_copy_restored.len() < 8 {
+            if let Some(result) = owner.collect_recovery() {
+                match result {
+                    Ok(restored) => self.light_copy_restored.push_back(restored),
+                    Err(original) => self.light_copy_recovery.push_front(original),
+                }
+                changed = true;
+            }
+        }
+        // Never replace a newer live selection or acknowledged preview.
+        if !self.light_copy_shutdown
+            && !owner.pending_copy()
+            && self.smart_copy_session.is_none()
+            && self.smart_copy_preview.is_none()
+            && self.pending_smart_copy_capture.is_none()
+            && matches!(self.mode, Mode::Normal)
+            && self.modal_stack.is_empty()
+        {
+            if let Some(original) = self
+                .light_copy_recovery
+                .front()
+                .filter(|original| original.original().is_none())
+            {
+                self.light_copy_retry_generation = Some(original.generation);
+                self.status_message = Some("Copy failed; original custody is unknown after worker failure. Escape acknowledges this failure; no copy success claimed".into());
+                self.mode = Mode::SmartCopy;
+                changed = true;
+            } else if let Some(restored) = self.light_copy_restored.pop_front() {
+                let generation = restored.generation;
+                let pane_id = restored.original.pane_id;
+                self.status_message = Some(format!(
+                    "Copy {} failed: {}. Enter retries the retained selection; Escape cancels",
+                    restored.sequence, restored.error
+                ));
+                self.smart_copy_session = Some(restored.original); // Same candidate allocations/click order.
+                self.light_copy_retry_generation = Some(generation);
+                self.smart_copy_light = None; // No automatic grace retry of failures.
+                self.light_copy_preview_generation = None;
+                if self.panes.contains_key(&pane_id) {
+                    self.right_panel_target = RightPanelTarget::Pane { pane_id };
+                    self.focus = FocusTarget::Pane;
+                }
+                self.mode = Mode::SmartCopy;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Escape: leave without copying anything.
@@ -9271,6 +9469,18 @@ impl App {
     }
 
     pub fn smart_copy_copy_current(&mut self) {
+        if self.light_copy_retry_generation.is_some() && self.smart_copy_session.is_none() {
+            self.status_message = Some("Original custody is unknown; this selection cannot be retried. Escape acknowledges the failure".into());
+            return;
+        }
+        if self
+            .smart_copy_session
+            .as_ref()
+            .is_some_and(|session| self.light_copy_retry_generation == Some(session.generation))
+        {
+            self.finish_smart_copy_light(); // Retry the exact original, without toggling/rejoining on UI.
+            return;
+        }
         // Each click toggles the hovered region in a persistent multi-selection
         // and republishes the whole selection to the clipboard.
         let toggled = self
@@ -9281,13 +9491,10 @@ impl App {
             self.status_message = Some("Move over a highlighted Smart Copy selection".to_string());
             return;
         };
-        let Some((text, count)) = self
+        let count = self
             .smart_copy_session
             .as_ref()
-            .map(|session| (session.selected_text(), session.selected_count()))
-        else {
-            return;
-        };
+            .map_or(0, |session| session.selected_count());
         if count == 0 {
             self.status_message = Some(format!("Deselected {label}; selection is empty"));
             return;
@@ -9298,6 +9505,11 @@ impl App {
             self.status_message = Some(format!("{verb} {label}; {count} selected"));
             return;
         }
+        let text = self
+            .smart_copy_session
+            .as_ref()
+            .map(|session| session.selected_text())
+            .unwrap_or_default();
         self.copy_terminal_text_to_clipboard(
             text,
             &format!("{verb} {label}; copied {count} selection(s)"),
@@ -9678,6 +9890,7 @@ impl App {
                 self.hovered_tree_node = None;
                 self.hovered_status_slot = None;
                 self.hovered_progress = None;
+                self.hovered_goal_resume = None;
                 self.tree_toolbar_hovered = false;
                 self.hovered_tree_toolbar_action = None;
             }
@@ -10015,7 +10228,8 @@ impl App {
         &mut self,
         client: ilium_execution::Client,
     ) -> std::sync::Arc<tokio::sync::Notify> {
-        let preparation = crate::document_preparation::DocumentPreparation::new(client.clone());
+        let mut preparation = crate::document_preparation::DocumentPreparation::new(client.clone());
+        preparation.set_capture_budget(self.source_capture_budget.clone());
         let notification = preparation.notification();
         self.document_preparation = Some(preparation);
         self.configure_source_windows(client, notification.clone());
@@ -13202,18 +13416,37 @@ impl App {
     /// operator. Shared by the terminal and editor-line context menus, which
     /// both resolve targets through `open_target::resolve_at`.
     fn open_target_externally(&mut self, target: crate::open_target::OpenTarget) {
-        use crate::open_target::OpenTarget;
-        let (result, display) = match &target {
-            OpenTarget::Url(url) => (ilium_platform::open_external::open_url(url), url.clone()),
-            OpenTarget::File(path) | OpenTarget::Directory(path) => (
-                ilium_platform::open_external::open_path(path),
-                path.display().to_string(),
-            ),
+        self.queue_external_open(target, None);
+    }
+
+    fn queue_external_open(
+        &mut self,
+        target: crate::open_target::OpenTarget,
+        source_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    ) {
+        let Some(service) = &mut self.external_open else {
+            self.status_message = Some("External opening service unavailable".into());
+            return;
         };
-        self.status_message = Some(match result {
-            Ok(()) => format!("Opening {display}"),
-            Err(error) => format!("Could not open {display}: {error}"),
-        });
+        match service.submit(target, source_hold) {
+            Ok(()) => self.status_message = Some("Preparing external opening…".into()),
+            Err((_original, error)) => self.status_message = Some(error),
+        }
+    }
+
+    pub(crate) fn collect_external_open(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(completion) = self
+            .external_open
+            .as_mut()
+            .and_then(|service| service.collect())
+        {
+            // Destroy the preceding message before releasing its original charge.
+            self.status_message = Some(completion.message);
+            self.external_open_status_storage = Some(completion.storage);
+            changed = true;
+        }
+        changed
     }
 
     /// Opens a context-menu file beside the originating pane instead of the
@@ -13353,36 +13586,45 @@ impl App {
             }
         }
     }
+    pub(crate) fn accept_clipboard_completion(
+        &mut self,
+        completion: ilium_execution::Retained<crate::terminal_clipboard::Completion>,
+    ) {
+        let id = completion.view().id;
+        if self
+            .light_copy_selection
+            .as_mut()
+            .is_some_and(|selection| selection.acknowledge(id, &completion.view().result))
+        {
+            return;
+        }
+        if let Some(message) = self.pending_clipboard_copies.remove(&id) {
+            self.status_message = Some(match &completion.view().result {
+                Ok(_) => message,
+                Err(error) => format!("Could not copy text: {error}"),
+            });
+            return;
+        }
+        if self
+            .terminal_input
+            .finish_clipboard(id, completion)
+            .is_none()
+        {
+            self.status_message =
+                Some("Clipboard paste target was removed before the read completed".into());
+        }
+    }
     pub(crate) fn collect_clipboard(&mut self) -> bool {
         let mut changed = false;
-        loop {
-            let completion = self
-                .terminal_clipboard
-                .as_ref()
-                .and_then(|clipboard| clipboard.try_take());
-            let Some(completion) = completion else {
-                break;
-            };
+        while let Some(completion) = self
+            .terminal_clipboard
+            .as_ref()
+            .and_then(|clipboard| clipboard.try_take())
+        {
             changed = true;
-            let id = completion.view().id;
-            if let Some(message) = self.pending_clipboard_copies.remove(&id) {
-                self.status_message = Some(match &completion.view().result {
-                    Ok(_) => message,
-                    Err(error) => format!("Could not copy text: {error}"),
-                });
-                continue;
-            }
-            if self
-                .terminal_input
-                .finish_clipboard(id, completion)
-                .is_none()
-            {
-                self.status_message =
-                    Some("Clipboard paste target was removed before the read completed".into());
-            }
+            self.accept_clipboard_completion(completion);
         }
-        changed |= self.publish_ready_terminal_inputs();
-        changed
+        changed | self.publish_ready_terminal_inputs()
     }
 
     /// Keeps an open terminal menu usable when debug history is disabled by
@@ -16199,9 +16441,11 @@ impl App {
         }
         let Some(viewport) = self.pane_viewport_at(position) else {
             self.hovered_progress = None;
+            self.hovered_goal_resume = None;
             return;
         };
         let id = viewport.pane_id;
+        self.hovered_goal_resume = None;
         self.hovered_progress = (matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
             && viewport
                 .progress_area
@@ -16345,6 +16589,10 @@ impl App {
         }
         if matches!(self.panes.get(&id), Some(PaneRuntime::Board(_))) {
             self.handle_board_pane_mouse(id, viewport.content_area, mouse, position);
+            return;
+        }
+
+        if self.handle_goal_resume_mouse(id, viewport.content_area, mouse, position) {
             return;
         }
 
@@ -16643,19 +16891,14 @@ impl App {
     }
 
     pub fn confirm_terminal_link(&mut self, open: bool) {
-        let _source_hold = self.pending_terminal_link_storage.take();
+        let source_hold = self.pending_terminal_link_storage.take();
         let Some(link) = self.pending_terminal_link.take() else {
             return;
         };
         if open {
             match link {
                 crate::terminal_links::TerminalLink::Url(url) => {
-                    match ilium_platform::open_external::open_url(&url) {
-                        Ok(()) => self.status_message = Some(format!("Opening {url}")),
-                        Err(error) => {
-                            self.status_message = Some(format!("Could not open link: {error}"))
-                        }
-                    }
+                    self.queue_external_open(crate::open_target::OpenTarget::Url(url), source_hold);
                 }
                 crate::terminal_links::TerminalLink::File { path, line, column } => {
                     let target = self.group_for_new_node();
@@ -16667,12 +16910,7 @@ impl App {
                 }
             }
         } else {
-            match arboard::Clipboard::new()
-                .and_then(|mut clipboard| clipboard.set_text(link.display()))
-            {
-                Ok(()) => self.status_message = Some("Link copied to clipboard".to_string()),
-                Err(error) => self.status_message = Some(format!("Could not copy link: {error}")),
-            }
+            self.copy_terminal_text_to_clipboard(link.display(), "Link copied to clipboard");
         }
     }
 
@@ -24960,7 +25198,7 @@ mod tests {
         editor.path = Some(project.path().join("notes.md"));
         editor.textarea = ratatui_textarea::TextArea::from(["# Notes"]);
         editor.view_mode = EditorViewMode::Rendered;
-        editor.rendered = Some(crate::markdown::render::render(
+        editor.install_test_rendered(crate::markdown::render::render(
             &crate::markdown::document::parse("# Notes", project.path()),
             &app.markdown_picker,
             &mut crate::markdown::raster::HeaderRasterizer::new(),
@@ -26077,5 +26315,170 @@ mod board_handoff_tests {
                 .unwrap()
                 .shutdown_complete
         );
+    }
+}
+
+#[cfg(test)]
+mod light_copy_recovery_contract_tests {
+    use super::*;
+    fn admitted_failure_fixture() -> (App, *const u8) {
+        let mut app = App::new("light-copy-owned-recovery".into(), std::env::temp_dir());
+        let client = crate::execution::test_client();
+        app.terminal_clipboard = Some(crate::terminal_clipboard::ClipboardService::fixture_queue(
+            client.clone(),
+        ));
+        app.light_copy_selection = Some(crate::smart_copy_selection::SelectionOwner::new(
+            client.clone(),
+        ));
+        let capture = client
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 8192,
+                result_bytes: 8192,
+            })
+            .unwrap()
+            .retain(())
+            .unwrap();
+        let (_, hold) = capture.into_parts();
+        let mut session = crate::smart_copy::SmartCopySession::fixture_selection(
+            991,
+            &["retained original α", "second selected region"],
+        );
+        session.output_retention = Some(hold);
+        let pointer = session.selected_parts().next().unwrap().as_ptr();
+        app.smart_copy_session = Some(session);
+        app.smart_copy_light = Some(crate::smart_copy_light::SmartCopyLightState::new(
+            app.terminal_settings.smart_copy_light_key,
+            Instant::now(),
+        ));
+        app.mode = Mode::SmartCopy;
+        app.finish_smart_copy_light();
+        assert!(app.smart_copy_session.is_none());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.light_copy_retry_generation.is_none() {
+            app.collect_light_copy_selection();
+            if let Some(reply) = app
+                .terminal_clipboard
+                .as_ref()
+                .unwrap()
+                .fixture_process_next(|_| Err("temporary native failure".into()))
+            {
+                app.accept_clipboard_completion(reply);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "failed original was not returned to selection UI"
+            );
+            std::thread::yield_now();
+        }
+        (app, pointer)
+    }
+    #[test]
+    fn failed_copy_restores_original_selection_and_enter_retries_without_ui_join_or_toggle() {
+        let (mut app, pointer) = admitted_failure_fixture();
+        assert!(matches!(app.mode, Mode::SmartCopy));
+        assert!(app.smart_copy_preview.is_none());
+        assert!(
+            app.smart_copy_light.is_none(),
+            "failed copy must not automatically retry after grace"
+        );
+        let session = app.smart_copy_session.as_ref().unwrap();
+        assert_eq!(session.generation, 991);
+        assert_eq!(session.selected_parts().next().unwrap().as_ptr(), pointer);
+        assert_eq!(session.selected_count(), 2);
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Enter retries"));
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+        assert!(app.smart_copy_session.is_none());
+        assert!(matches!(app.mode, Mode::Normal));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.smart_copy_preview.is_none() {
+            app.collect_light_copy_selection();
+            if let Some(reply) = app
+                .terminal_clipboard
+                .as_ref()
+                .unwrap()
+                .fixture_process_next(|operation| {
+                    let crate::terminal_clipboard::Operation::WriteShared(text) = operation else {
+                        panic!("wrong retry operation");
+                    };
+                    assert_eq!(
+                        text.as_str(),
+                        "retained original α\n\nsecond selected region"
+                    );
+                    Ok(String::new())
+                })
+            {
+                app.accept_clipboard_completion(reply);
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(app.smart_copy_preview.as_ref().unwrap().copied);
+        assert_eq!(app.smart_copy_preview.as_ref().unwrap().region_count, 2);
+    }
+    #[test]
+    fn escape_explicitly_cancels_restored_original_and_does_not_disable_next_admission() {
+        let (mut app, _) = admitted_failure_fixture();
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.smart_copy_session.is_none());
+        assert!(app.light_copy_retry_generation.is_none());
+        assert!(app.light_copy_recovery.is_empty() && app.light_copy_restored.is_empty());
+        let client = crate::execution::test_client();
+        let capture = client
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 8192,
+                result_bytes: 8192,
+            })
+            .unwrap()
+            .retain(())
+            .unwrap();
+        let (_, hold) = capture.into_parts();
+        let mut session = crate::smart_copy::SmartCopySession::fixture_selection(
+            992,
+            &["next independent selection"],
+        );
+        session.output_retention = Some(hold);
+        let mut slot = Some(session);
+        app.light_copy_selection
+            .as_mut()
+            .unwrap()
+            .admit(&mut slot, app.terminal_clipboard.as_ref().unwrap())
+            .unwrap();
+        assert!(
+            slot.is_none(),
+            "one transient copy failure must not permanently close admission"
+        );
+        app.light_copy_shutdown = true;
+        app.light_copy_selection.as_mut().unwrap().native_closed();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.light_copy_selection.as_ref().unwrap().pending() {
+            app.collect_light_copy_selection();
+            if let Some(reply) = app
+                .terminal_clipboard
+                .as_ref()
+                .unwrap()
+                .fixture_process_next(|_| panic!("cancelled next selection must not write"))
+            {
+                app.accept_clipboard_completion(reply);
+            }
+            assert!(Instant::now() < deadline);
+        }
+        app.light_copy_recovery.clear(); // Explicit failed shutdown receipt; whole source retires on CPU.
     }
 }

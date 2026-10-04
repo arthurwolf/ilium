@@ -229,7 +229,7 @@ fn visible_rect(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use super::super::render::PreparedText;
 
     use super::*;
     use ratatui::backend::TestBackend;
@@ -242,9 +242,12 @@ mod tests {
         RenderedDocument {
             layout: None,
             blocks: vec![
-                RenderedBlock::Text(Arc::new(vec![Line::from("before")])),
-                RenderedBlock::BlankLines(Arc::new(vec![Line::default(), Line::default()])),
-                RenderedBlock::Text(Arc::new(vec![Line::from("after")])),
+                RenderedBlock::Text(PreparedText::test(vec![Line::from("before")])),
+                RenderedBlock::BlankLines(PreparedText::test(vec![
+                    Line::default(),
+                    Line::default(),
+                ])),
+                RenderedBlock::Text(PreparedText::test(vec![Line::from("after")])),
             ],
         }
     }
@@ -308,7 +311,9 @@ mod tests {
     fn line_display_changes_both_rendered_height_and_visible_text() {
         let document = RenderedDocument {
             layout: None,
-            blocks: vec![RenderedBlock::Text(Arc::new(vec![Line::from("abcdef")]))],
+            blocks: vec![RenderedBlock::Text(PreparedText::test(vec![Line::from(
+                "abcdef",
+            )]))],
         };
         assert_eq!(content_height(&document, 3, LineDisplay::Clip), 1);
         assert_eq!(content_height(&document, 3, LineDisplay::Wrap), 2);

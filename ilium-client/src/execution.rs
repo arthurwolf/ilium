@@ -12,9 +12,11 @@ const MIB: usize = 1024 * 1024;
 // then count its three previously omitted startup owners: supervisor, logger,
 // and terminal input. Interactive codecs reuse this five-thread bank rather
 // than adding the standalone codec's sixth thread. Additional/retiring owners
-// still compete within 29 roles and the unchanged 4096 MiB storage declaration.
+// and one bounded external-opener reaper compete within 30 roles. Six existing
+// Tokio async/blocking runtime roles bring the total to36, with the
+// unchanged 4096 MiB storage declaration.
 // These declarations do not bound native stacks, allocator RSS, or all OS threads.
-const PROCESS_WORKER_THREADS: usize = 29;
+const PROCESS_WORKER_THREADS: usize = 36;
 const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
 
 pub(crate) fn admission_notification() -> Arc<tokio::sync::Notify> {
@@ -57,6 +59,21 @@ pub fn bootstrap_process_quota() -> std::io::Result<QuotaGroup> {
     let quota = process_quota();
     ilium_execution::initialize_process_supervisor(&quota).map_err(std::io::Error::other)?;
     Ok(quota)
+}
+
+/// CLI bootstrap only, before building its existing runtime. Ordinary client
+/// fixture banks must not install a permanent runtime declaration.
+pub fn bootstrap_runtime_admission(
+    thread_capacity: usize,
+    stack_bytes: usize,
+) -> std::io::Result<()> {
+    ilium_execution::initialize_process_runtime_admission(
+        &process_quota(),
+        thread_capacity,
+        stack_bytes,
+    )
+    .map(|_| ())
+    .map_err(std::io::Error::other)
 }
 
 fn shared_admission_group(
@@ -386,7 +403,7 @@ mod composition_tests {
         let video_storage = quota.reserve_external_storage(104 * MIB).unwrap();
         assert_eq!(quota.snapshot().worker_threads, 26);
         assert_eq!(quota.snapshot().worker_bytes, 3449 * MIB + 128 * 1024);
-        // These three real bootstrap declarations are additive to the
+        // These real bootstrap declarations are additive to the
         // previously selected 26-role feature census, without widening the
         // unchanged 4096 MiB storage ceiling or adding a codec bank thread.
         let supervisor_bytes = ilium_platform::owned_worker::supervisor_declared_bytes();
@@ -404,6 +421,13 @@ mod composition_tests {
         let input_storage = quota
             .reserve_external_storage(crate::terminal_input_owner::input_storage_bytes())
             .unwrap();
+        // Match the external owner's full resident declaration, including
+        // its requested stack and bounded child registry. The existing Tokio
+        // runtime admits its six async/blocking roles before construction.
+        let opener_bytes = crate::external_open::REAPER_BYTES;
+        let opener = quota.reserve_external_worker(1, opener_bytes).unwrap();
+        let runtime_bytes = 6 * 2 * MIB;
+        let runtime = quota.reserve_external_worker(6, runtime_bytes).unwrap();
         assert_eq!(quota.snapshot().worker_threads, PROCESS_WORKER_THREADS);
         assert_eq!(
             quota.snapshot().worker_bytes,
@@ -414,6 +438,8 @@ mod composition_tests {
                 + ilium_logging::logger_storage_bytes(log_path).unwrap()
                 + crate::terminal_input_owner::INPUT_STACK_BYTES
                 + crate::terminal_input_owner::input_storage_bytes()
+                + opener_bytes
+                + runtime_bytes
         );
         // A free native domain slot cannot bypass shared physical admission.
         assert!(matches!(
@@ -448,6 +474,8 @@ mod composition_tests {
             logger_storage,
             input,
             input_storage,
+            opener,
+            runtime,
             filler,
         ));
         assert_eq!(quota.snapshot().worker_threads, 0);

@@ -80,6 +80,7 @@ pub(crate) fn draw_at_with_cursor(
             .is_some_and(|popover| popover.is_visible(Instant::now()));
         if app.hovered_status_slot.is_some()
             || app.hovered_progress.is_some()
+            || app.hovered_goal_resume.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
             || popover_visible
@@ -90,6 +91,7 @@ pub(crate) fn draw_at_with_cursor(
         }
         draw_status_tooltip(frame, app);
         draw_progress_tooltip(frame, app);
+        draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
         if popover_visible {
@@ -316,6 +318,21 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
         return;
     };
     let content = crate::progress_bar::details_tooltip(progress);
+    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+}
+
+fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
+    let Some((_, anchor)) = app.hovered_goal_resume else {
+        return;
+    };
+    let content = crate::status_icons::TooltipContent {
+        title: crate::goal_resume_link::GOAL_RESUME_TOOLTIP.to_owned(),
+        body: format!(
+            "Sends {} to this agent and presses Enter.",
+            crate::goal_resume_link::GOAL_RESUME_COMMAND
+        ),
+        reason: None,
+    };
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
@@ -1035,13 +1052,20 @@ fn draw_text_trigger_dialog(
             disabled: Style::new().add_modifier(Modifier::DIM),
         },
     );
-    frame.render_widget(
-        field(
-            "Delay (seconds)",
-            &state.delay.buf,
-            state.focus == TextTriggerFocus::Delay,
-        ),
-        layout.delay,
+    let delay_style = if state.focus == TextTriggerFocus::Delay {
+        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    crate::text_trigger_dialog::delay_control(area, state).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: Style::new(),
+            label: delay_style,
+            value: delay_style,
+            button: delay_style,
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
     );
     frame.render_widget(
         Paragraph::new("SAMPLE TEXT")
@@ -2113,6 +2137,13 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
+                crate::goal_resume_link::draw_goal_resume_link(
+                    app,
+                    viewport.pane_id,
+                    term.as_ref(),
+                    terminal_area,
+                    frame.buffer_mut(),
+                );
                 term.with_screen(|screen| {
                     // Highlight against the same rect the screen was just drawn
                     // into -- when a completed-agent close action reserves the
@@ -3920,4 +3951,37 @@ pub(crate) fn test_source_window_pixels(
         }
     }
     output
+}
+
+#[cfg(test)]
+mod text_trigger_numeric_control_tests {
+    #[test]
+    fn delay_renders_centered_number_with_decrement_increment_and_entry() {
+        for (width, height) in [(80, 24), (120, 40)] {
+            let state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
+            let area = ratatui::layout::Rect::new(0, 0, width, height);
+            let delay = crate::text_trigger_dialog::layout(area).delay;
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| super::draw_text_trigger_dialog(frame, area, &state))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let position = |symbol: &str| {
+                (delay.x..delay.right())
+                    .find(|&column| buffer[(column, delay.y)].symbol() == symbol)
+                    .unwrap_or_else(|| panic!("{width}x{height}: delay lacks {symbol}"))
+            };
+            let decrement = position("−");
+            let increment = position("+");
+            let entry = position("*");
+            let first_digit = position("6");
+            let last_digit = position("0");
+            assert!(decrement < first_digit && last_digit < increment && increment < entry);
+            assert!(
+                (i32::from(first_digit + last_digit) - i32::from(decrement + increment)).abs() <= 1,
+                "{width}x{height}: delay value is not centered between its step buttons"
+            );
+        }
+    }
 }

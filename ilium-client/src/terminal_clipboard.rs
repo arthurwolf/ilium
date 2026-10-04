@@ -24,7 +24,83 @@ const ERROR: u8 = 5;
 
 pub(crate) enum Operation {
     Read,
+    DeferredWrite(Arc<DeferredState>),
     Write(String),
+    /// The original independently admitted leaf; pipe writing borrows it.
+    WriteShared(ilium_execution::RetiringArc<String>),
+}
+enum DeferredValue {
+    Waiting,
+    Ready(Result<ilium_execution::RetiringArc<String>, String>),
+    Consumed,
+}
+pub(crate) struct DeferredState {
+    value: Mutex<DeferredValue>,
+}
+/// One already-admitted position in the existing native clipboard FIFO.
+/// Dropping an unfilled ticket explicitly fails that position, never skips it.
+pub(crate) struct DeferredWriteTicket {
+    id: u64,
+    state: Arc<DeferredState>,
+    shared: std::sync::Weak<Shared>,
+}
+impl DeferredWriteTicket {
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+    pub(crate) fn fill(&self, text: ilium_execution::RetiringArc<String>) -> Result<(), String> {
+        if text.capacity() > MAX_TEXT {
+            self.fail("Selection exceeds clipboard limit");
+            return Err("Selection exceeds clipboard limit".into());
+        }
+        let mut state = self
+            .state
+            .value
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !matches!(*state, DeferredValue::Waiting) {
+            return Err("Clipboard position already resolved or closed".into());
+        }
+        *state = DeferredValue::Ready(Ok(text));
+        drop(state);
+        self.wake();
+        Ok(())
+    }
+    pub(crate) fn fail(&self, message: &str) {
+        let mut state = self
+            .state
+            .value
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if matches!(*state, DeferredValue::Waiting) {
+            *state = DeferredValue::Ready(Err(message.chars().take(MAX_ERROR / 4).collect()));
+        }
+        drop(state);
+        self.wake();
+    }
+    fn wake(&self) {
+        if let Some(shared) = self.shared.upgrade() {
+            shared.changed.notify_all();
+            shared.notification.notify_one();
+        }
+    }
+}
+impl Drop for DeferredWriteTicket {
+    fn drop(&mut self) {
+        self.fail("Selected copy cancelled before clipboard preparation; not delivered");
+    }
+}
+pub(crate) enum WriteAdmissionError {
+    Busy(String),
+    Closed(String),
+    Failed(String),
+}
+impl WriteAdmissionError {
+    pub(crate) fn message(self) -> String {
+        match self {
+            Self::Busy(message) | Self::Closed(message) | Self::Failed(message) => message,
+        }
+    }
 }
 pub(crate) struct Completion {
     pub id: u64,
@@ -113,41 +189,141 @@ impl ClipboardService {
             Some((executable.to_owned(), vec!["clipboard-helper".into()]));
         Ok(service)
     }
+    #[cfg(test)]
+    pub(crate) fn fixture_queue(client: Client) -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                queue: Mutex::new(Queue {
+                    next_id: 1,
+                    ..Queue::default()
+                }),
+                changed: Condvar::new(),
+                notification: Arc::new(Notify::new()),
+                child: Mutex::new(None),
+                helper_command: Mutex::new(None),
+            }),
+            client,
+            worker: None,
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_process_next(
+        &self,
+        apply: impl FnOnce(Operation) -> Result<String, String>,
+    ) -> Option<Retained<Completion>> {
+        let mut queue = self.shared.queue.lock().unwrap();
+        let front = queue.commands.front()?;
+        let deferred = match &front.operation {
+            Operation::DeferredWrite(state) => Some(try_deferred(state)?),
+            _ => None,
+        };
+        let pending = queue.commands.pop_front().unwrap();
+        queue.active = true;
+        drop(queue);
+        let result = match deferred {
+            Some(Ok(operation)) => apply(operation),
+            Some(Err(error)) => Err(error),
+            None => apply(pending.operation),
+        };
+        let completion = pending
+            .reservation
+            .retain(Completion {
+                id: pending.id,
+                result,
+            })
+            .unwrap();
+        self.shared.queue.lock().unwrap().active = false;
+        Some(completion)
+    }
     pub(crate) fn notification(&self) -> Arc<Notify> {
         self.shared.notification.clone()
     }
     pub(crate) fn submit(&self, operation: Operation) -> Result<u64, (Operation, String)> {
+        self.submit_classified(operation)
+            .map_err(|(original, error)| (original, error.message()))
+    }
+    pub(crate) fn reserve_prepared_write(
+        &self,
+    ) -> Result<DeferredWriteTicket, WriteAdmissionError> {
+        // Construct bounded metadata only; the normal admission counts this
+        // same command among all queued/active/results before any CPU work.
+        let state = Arc::new(DeferredState {
+            value: Mutex::new(DeferredValue::Waiting),
+        });
+        let id = self
+            .submit_classified(Operation::DeferredWrite(state.clone()))
+            .map_err(|(_, error)| error)?;
+        Ok(DeferredWriteTicket {
+            id,
+            state,
+            shared: Arc::downgrade(&self.shared),
+        })
+    }
+    fn submit_classified(
+        &self,
+        operation: Operation,
+    ) -> Result<u64, (Operation, WriteAdmissionError)> {
         let input = match &operation {
-            Operation::Read => 0,
+            Operation::Read | Operation::DeferredWrite(_) => 0,
             Operation::Write(text) => text.capacity(),
+            Operation::WriteShared(_) => 0,
         };
-        if input > MAX_TEXT {
-            return Err((operation, "Clipboard text exceeds 64 MiB".into()));
+        let text_bytes = match &operation {
+            Operation::WriteShared(text) => text.capacity(),
+            _ => input,
+        };
+        if text_bytes > MAX_TEXT {
+            return Err((
+                operation,
+                WriteAdmissionError::Failed("Clipboard text exceeds 64 MiB".into()),
+            ));
         }
         let result = match &operation {
             Operation::Read => MAX_TEXT + MAX_ERROR,
-            Operation::Write(_) => MAX_ERROR,
+            Operation::DeferredWrite(_) | Operation::Write(_) | Operation::WriteShared(_) => {
+                MAX_ERROR
+            }
         };
         let reservation = match self.client.try_reserve_external(JobCost {
             input_bytes: input + 4096,
             result_bytes: result + 4096,
         }) {
             Ok(reservation) => reservation,
-            Err(error) => return Err((operation, format!("Clipboard admission: {error:?}"))),
+            Err(error) => {
+                let message = format!("Clipboard admission: {error:?}");
+                let reason = if matches!(error, ilium_execution::RejectReason::Closed) {
+                    WriteAdmissionError::Closed(message)
+                } else if matches!(
+                    error,
+                    ilium_execution::RejectReason::InvalidCost
+                        | ilium_execution::RejectReason::AccountingPoisoned
+                ) {
+                    WriteAdmissionError::Failed(message)
+                } else {
+                    WriteAdmissionError::Busy(message)
+                };
+                return Err((operation, reason));
+            }
         };
         if let Err(error) = reservation.validate_value_type::<Completion>() {
             return Err((
                 operation,
-                format!("Clipboard completion admission: {error:?}"),
+                WriteAdmissionError::Failed(format!("Clipboard completion admission: {error:?}")),
             ));
         }
         let mut queue = match self.shared.queue.try_lock() {
             Ok(queue) => queue,
             Err(TryLockError::WouldBlock) => {
-                return Err((operation, "Clipboard queue busy; retry".into()))
+                return Err((
+                    operation,
+                    WriteAdmissionError::Busy("Clipboard queue busy; retry".into()),
+                ))
             }
             Err(TryLockError::Poisoned(_)) => {
-                return Err((operation, "Clipboard owner failed".into()))
+                return Err((
+                    operation,
+                    WriteAdmissionError::Failed("Clipboard owner failed".into()),
+                ))
             }
         };
         if queue.closing
@@ -157,15 +333,24 @@ impl ClipboardService {
         {
             return Err((
                 operation,
-                queue
-                    .failure
-                    .clone()
-                    .unwrap_or_else(|| "Clipboard queue unavailable; retry".into()),
+                if queue.closing || queue.exited {
+                    WriteAdmissionError::Closed(
+                        queue
+                            .failure
+                            .clone()
+                            .unwrap_or_else(|| "Clipboard owner closed".into()),
+                    )
+                } else {
+                    WriteAdmissionError::Busy("Clipboard queue unavailable; retry".into())
+                },
             ));
         }
         let id = queue.next_id;
         let Some(next) = id.checked_add(1) else {
-            return Err((operation, "Clipboard sequence exhausted".into()));
+            return Err((
+                operation,
+                WriteAdmissionError::Failed("Clipboard sequence exhausted".into()),
+            ));
         };
         queue.next_id = next;
         queue.commands.push_back(Pending {
@@ -197,14 +382,21 @@ impl ClipboardService {
     }
     /// Only observes actual OS-thread joins. A stuck helper is this service's
     /// own child; killing it breaks pipe I/O without touching user processes.
-    pub(crate) async fn shutdown(mut self) -> io::Result<()> {
+    pub(crate) async fn shutdown(self) -> io::Result<()> {
+        self.shutdown_with_acknowledgements().await.0
+    }
+    /// Returns every retained acknowledgement available at the actual join
+    /// boundary. A deadline/panic is an unknown native outcome, never success;
+    /// the supervisor retains the surviving owner and its native input leaf.
+    pub(crate) async fn shutdown_with_acknowledgements(
+        mut self,
+    ) -> (io::Result<()>, Vec<Retained<Completion>>) {
         self.request_shutdown();
-        let worker = self
-            .worker
-            .take()
-            .ok_or_else(|| io::Error::other("clipboard owner missing"))?;
+        let Some(worker) = self.worker.take() else {
+            return (Err(io::Error::other("clipboard owner missing")), Vec::new());
+        };
         let shared = self.shared.clone();
-        tokio::task::spawn_blocking(move || {
+        match tokio::task::spawn_blocking(move || {
             let ticket = worker.ticket();
             let deadline = Instant::now() + Duration::from_secs(5);
             let joined = ticket.join_until(deadline - Duration::from_millis(500));
@@ -212,31 +404,35 @@ impl ClipboardService {
                 kill_owned_helper(&shared);
                 ticket.cancel();
             }
-            let exit = ticket.join_until(deadline).map_err(|_| {
-                io::Error::other(
-                    "Clipboard owner remains in retiring custody after shutdown deadline",
-                )
-            })?;
-            drop(worker);
-            if joined.is_err() {
-                return Err(io::Error::other(
-                    "Clipboard helper required forced shutdown",
-                ));
-            }
-            if exit != ilium_platform::owned_worker::WorkerExit::Joined {
-                return Err(io::Error::other("Clipboard owner panicked"));
-            }
-            let queue = shared
+            let exit = ticket.join_until(deadline);
+            drop(worker); // A still-running owner remains supervisor-owned.
+            let mut queue = shared
                 .queue
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if let Some(error) = &queue.failure {
-                return Err(io::Error::other(error.clone()));
-            }
-            Ok(())
+            let completions = queue.results.drain(..).collect::<Vec<_>>(); // <= eight, original holds.
+            let result = match exit {
+                Err(_) => Err(io::Error::other(
+                    "Clipboard owner remains in retiring custody after shutdown deadline",
+                )),
+                Ok(_) if joined.is_err() => Err(io::Error::other(
+                    "Clipboard helper required forced shutdown",
+                )),
+                Ok(exit) if exit != ilium_platform::owned_worker::WorkerExit::Joined => {
+                    Err(io::Error::other("Clipboard owner panicked"))
+                }
+                Ok(_) => match &queue.failure {
+                    Some(error) => Err(io::Error::other(error.clone())),
+                    None => Ok(()),
+                },
+            };
+            (result, completions)
         })
         .await
-        .map_err(io::Error::other)?
+        {
+            Ok(receipt) => receipt,
+            Err(error) => (Err(io::Error::other(error)), Vec::new()),
+        }
     }
 }
 impl Drop for ClipboardService {
@@ -304,25 +500,7 @@ impl Helper {
         })
     }
     fn command(&mut self, id: u64, operation: Operation) -> Result<String, String> {
-        let (action, text) = match operation {
-            Operation::Read => (READ, String::new()),
-            Operation::Write(text) => (WRITE, text),
-        };
-        write_packet(&mut self.stdin, action, id, text.as_bytes())
-            .map_err(|error| error.to_string())?;
-        let (status, returned_id, bytes) =
-            read_packet_limit(&mut self.stdout, if action == READ { MAX_TEXT } else { 0 })
-                .map_err(|error| error.to_string())?;
-        if returned_id != id || !matches!(status, OK | ERROR) {
-            return Err("Clipboard helper protocol mismatch".into());
-        }
-        let text = String::from_utf8(bytes)
-            .map_err(|_| "Clipboard helper returned invalid UTF-8".to_string())?;
-        if status == ERROR {
-            Err(text)
-        } else {
-            Ok(text)
-        }
+        exchange(&mut self.stdin, &mut self.stdout, id, operation)
     }
     fn close(&mut self) -> io::Result<()> {
         write_packet(&mut self.stdin, CLOSE, 0, &[])?;
@@ -383,6 +561,90 @@ fn wait_owned_helper(shared: &Shared) -> io::Result<()> {
         std::thread::sleep(Duration::from_millis(5));
     }
 }
+fn exchange<W: Write, R: Read>(
+    writer: &mut W,
+    reader: &mut R,
+    id: u64,
+    operation: Operation,
+) -> Result<String, String> {
+    let (action, bytes): (u8, &[u8]) = match &operation {
+        Operation::DeferredWrite(_) => {
+            return Err("Unprepared clipboard position reached native exchange".into())
+        }
+        Operation::Read => (READ, &[]),
+        Operation::Write(text) => (WRITE, text.as_bytes()),
+        Operation::WriteShared(text) => (WRITE, text.as_bytes()),
+    };
+    write_packet(writer, action, id, bytes).map_err(|error| error.to_string())?;
+    // Keep operation (and its shared original guard) through response read.
+    let (status, returned_id, bytes) =
+        read_packet_limit(reader, if action == READ { MAX_TEXT } else { 0 })
+            .map_err(|error| error.to_string())?;
+    if returned_id != id || !matches!(status, OK | ERROR) {
+        return Err("Clipboard helper protocol mismatch".into());
+    }
+    let text = String::from_utf8(bytes)
+        .map_err(|_| "Clipboard helper returned invalid UTF-8".to_string())?;
+    if status == ERROR {
+        Err(text)
+    } else {
+        Ok(text)
+    }
+}
+
+fn try_deferred(state: &DeferredState) -> Option<Result<Operation, String>> {
+    let mut value = state
+        .value
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if matches!(*value, DeferredValue::Waiting) {
+        return None;
+    }
+    match std::mem::replace(&mut *value, DeferredValue::Consumed) {
+        DeferredValue::Ready(result) => Some(result.map(Operation::WriteShared)),
+        DeferredValue::Consumed => Some(Err("Clipboard position already consumed".into())),
+        DeferredValue::Waiting => None,
+    }
+}
+fn resolve_deferred(
+    operation: Operation,
+    shared: &Shared,
+    stop: &StopToken,
+) -> Result<Operation, String> {
+    let Operation::DeferredWrite(state) = operation else {
+        return Ok(operation);
+    };
+    loop {
+        if let Some(result) = try_deferred(&state) {
+            return result;
+        }
+        let queue = shared
+            .queue
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if queue.closing || stop.is_stopped() {
+            drop(queue);
+            let mut value = state
+                .value
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if matches!(*value, DeferredValue::Waiting) {
+                *value = DeferredValue::Ready(Err(
+                    "Clipboard shutdown cancelled unprepared copy; not delivered".into(),
+                ));
+            }
+            continue;
+        }
+        // One existing owner waits at the FIFO head; no later native command
+        // is processed and no queue lock spans pipe/native operations.
+        drop(
+            shared
+                .changed
+                .wait_timeout(queue, Duration::from_millis(100))
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+    }
+}
 fn run_owner(shared: Arc<Shared>, stop: StopToken) {
     let mut helper: Option<Helper> = None;
     loop {
@@ -409,15 +671,18 @@ fn run_owner(shared: Arc<Shared>, stop: StopToken) {
         let Some(pending) = pending else {
             break;
         };
-        let result = match helper.as_mut() {
-            Some(helper) => helper.command(pending.id, pending.operation),
-            None => match Helper::start(shared.clone()) {
-                Ok(mut started) => {
-                    let result = started.command(pending.id, pending.operation);
-                    helper = Some(started);
-                    result
-                }
-                Err(error) => Err(format!("Clipboard helper startup: {error}")),
+        let result = match resolve_deferred(pending.operation, &shared, &stop) {
+            Err(error) => Err(error),
+            Ok(operation) => match helper.as_mut() {
+                Some(helper) => helper.command(pending.id, operation),
+                None => match Helper::start(shared.clone()) {
+                    Ok(mut started) => {
+                        let result = started.command(pending.id, operation);
+                        helper = Some(started);
+                        result
+                    }
+                    Err(error) => Err(format!("Clipboard helper startup: {error}")),
+                },
             },
         };
         let completion = Completion {
@@ -710,5 +975,89 @@ while True:
             read_packet(&mut bytes.as_slice()).unwrap_err().kind(),
             io::ErrorKind::UnexpectedEof
         );
+    }
+}
+
+#[cfg(test)]
+mod shared_write_tests {
+    use super::*;
+    use std::io::Cursor;
+    use std::sync::mpsc;
+    struct DelayedResponse {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+        response: Cursor<Vec<u8>>,
+        waiting: bool,
+    }
+    impl Read for DelayedResponse {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            if !self.waiting {
+                self.entered.send(()).unwrap();
+                self.release.recv().unwrap();
+                self.waiting = true;
+            }
+            self.response.read(bytes)
+        }
+    }
+    #[test]
+    fn original_shared_leaf_is_kept_through_blocking_response_without_text_copy() {
+        let client = crate::execution::test_client();
+        let leaf = client
+            .retirement()
+            .try_reserve::<String>(8192)
+            .unwrap()
+            .attach_shared("exact original α".into());
+        let weak = Arc::downgrade(&leaf);
+        let pointer = leaf.as_ptr();
+        let mut reply = Vec::new();
+        write_packet(&mut reply, OK, 83, &[]).unwrap();
+        let (entered, receive_entered) = mpsc::channel();
+        let (release, receive_release) = mpsc::channel();
+        let join = std::thread::spawn(move || {
+            let mut writer = Vec::new();
+            let mut reader = DelayedResponse {
+                entered,
+                release: receive_release,
+                response: Cursor::new(reply),
+                waiting: false,
+            };
+            let result = exchange(&mut writer, &mut reader, 83, Operation::WriteShared(leaf));
+            (result, writer)
+        });
+        receive_entered
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        let retained = weak
+            .upgrade()
+            .expect("original must survive while native response is blocked");
+        assert_eq!(retained.as_ptr(), pointer);
+        assert_eq!(retained.as_str(), "exact original α");
+        drop(retained);
+        release.send(()).unwrap();
+        let (result, wire) = join.join().unwrap();
+        assert!(result.is_ok());
+        assert!(
+            weak.upgrade().is_none(),
+            "last shared input wrapper ends only after response"
+        );
+        let (action, id, bytes) = read_packet_limit(&mut Cursor::new(wire), MAX_TEXT).unwrap();
+        assert_eq!((action, id), (WRITE, 83));
+        assert_eq!(bytes, "exact original α".as_bytes());
+    }
+    #[test]
+    fn raw_write_protocol_remains_identical_and_bad_ack_is_not_success() {
+        let mut response = Vec::new();
+        write_packet(&mut response, OK, 92, &[]).unwrap();
+        let mut wire = Vec::new();
+        let result = exchange(
+            &mut wire,
+            &mut Cursor::new(response),
+            91,
+            Operation::Write("raw original".into()),
+        );
+        assert!(result.is_err());
+        let (action, id, bytes) = read_packet_limit(&mut Cursor::new(wire), MAX_TEXT).unwrap();
+        assert_eq!((action, id), (WRITE, 91));
+        assert_eq!(bytes, b"raw original");
     }
 }

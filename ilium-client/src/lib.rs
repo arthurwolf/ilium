@@ -73,6 +73,7 @@ pub mod editor_toolbar;
 pub mod error;
 pub mod execution;
 pub mod explorer_overlay;
+mod external_open;
 pub mod filesystem;
 pub mod help;
 pub mod icon_search_workers;
@@ -131,6 +132,12 @@ pub mod settings_ui;
 pub mod setup_prompt;
 pub mod smart_copy;
 pub mod smart_copy_light;
+mod smart_copy_selection;
+/// Typed source custody returned when light-copy shutdown cannot finish.
+pub use smart_copy_selection::{
+    RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
+};
+pub mod goal_resume_link;
 pub mod smart_copy_tokens;
 pub mod smart_copy_workers;
 mod source_line_facts;
@@ -209,7 +216,7 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 pub use crate::app::ClientExitReason;
-pub use crate::execution::bootstrap_process_quota;
+pub use crate::execution::{bootstrap_process_quota, bootstrap_runtime_admission};
 
 use crate::app::{App, PaneRuntime};
 use crate::connection::Connection;
@@ -668,6 +675,18 @@ async fn run_inner(
         crate::terminal_context_preparation::TerminalContextPreparation::new(context_client);
     let context_notification = context_preparation.notification();
     app.terminal_context_preparation = Some(context_preparation);
+    let external_open_client =
+        execution
+            .client(crate::external_open::limits())
+            .map_err(|error| {
+                ClientError::TerminalSetup(std::io::Error::other(format!(
+                    "external opening client startup: {error:?}"
+                )))
+            })?;
+    let external_open = crate::external_open::ExternalOpenService::start(external_open_client)
+        .map_err(ClientError::TerminalSetup)?;
+    let external_open_notification = external_open.notification();
+    app.external_open = Some(external_open);
     let clipboard_client = execution
         .client(ilium_execution::ClientLimits {
             jobs: 8,
@@ -684,6 +703,16 @@ async fn run_inner(
         .map_err(ClientError::TerminalSetup)?;
     let clipboard_notification = clipboard.notification();
     app.terminal_clipboard = Some(clipboard);
+    let selection_client = execution
+        .client(crate::smart_copy_selection::limits())
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "Light selection admission: {error:?}"
+            )))
+        })?;
+    let selection = crate::smart_copy_selection::SelectionOwner::new(selection_client);
+    let selection_notification = selection.notification();
+    app.light_copy_selection = Some(selection);
     let parsing = crate::terminal_parsing::TerminalParsing::start(
         execution.terminal_parser().map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
@@ -1046,6 +1075,8 @@ async fn run_inner(
             tick_delay = tick_delay.min(Duration::from_millis(100));
         }
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
+        if let Some(delay) = app.light_copy_selection.as_ref().and_then(|owner| owner.retry_delay()) { tick_delay = tick_delay.min(delay); }
+        if !app.light_copy_recovery.is_empty() || !app.light_copy_restored.is_empty() { tick_delay = tick_delay.min(Duration::from_millis(100)); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
         }
@@ -1078,7 +1109,10 @@ async fn run_inner(
             }
             _ = control_notification.notified() => { needs_redraw = true; }
             _ = clipboard_notification.notified() => {needs_redraw=true;}
+            _ = selection_notification.notified() => {needs_redraw=true;}
+
             _ = context_notification.notified() => { needs_redraw=true; }
+            _ = external_open_notification.notified() => { needs_redraw |= app.collect_external_open(); }
             _ = document_notification.notified() => { needs_redraw = true; }
             _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
             _ = statistics_notification.notified() => {
@@ -1333,8 +1367,10 @@ async fn run_inner(
         }
         needs_redraw |= app.collect_document_preparation();
         needs_redraw |= app.collect_terminal_context_preparation();
+        needs_redraw |= app.collect_external_open();
         needs_redraw |= app.collect_emitted_smart_copy_capture();
         needs_redraw |= app.collect_clipboard();
+        needs_redraw |= app.collect_light_copy_selection();
         needs_redraw |= app.collect_editor_files();
         reconcile_debug_logging(&mut app);
         reconcile_debug_logging_server(&mut app);
@@ -1611,6 +1647,7 @@ async fn run_inner(
             }
             app.collect_terminal_context_preparation();
             app.collect_clipboard();
+            app.collect_light_copy_selection();
             app.collect_terminal_baselines();
             dispatch_pending_app_work(&mut app, &mut naming_workers, &mut icon_search_workers, home_dir.as_deref());
             if let Some(reason) = app.projection_admission_failure {
@@ -1641,6 +1678,7 @@ async fn run_inner(
                 // cleared, including a barrier which can produce more input.
                 app.collect_terminal_parsing();
                 app.collect_clipboard();
+            app.collect_light_copy_selection();
                 app.collect_terminal_baselines();
                 if app.terminal_pending_work() == (0, 0, Some((0, 0))) && !naming_workers.has_pending_exact_delivery() && naming_events_rx.is_empty() && !app.has_pending_exact_prompt_reports() && !app.terminal_clipboard.as_ref().is_some_and(|clipboard|clipboard.pending()) && app.terminal_baselines.as_ref().is_none_or(|files| !files.pending()) {
                     break;
@@ -1816,12 +1854,121 @@ async fn run_inner(
     )
     .await
     .map_err(ClientError::TerminalSetup);
-    let clipboard_shutdown_result = match app.terminal_clipboard.take() {
-        Some(clipboard) => clipboard
-            .shutdown()
-            .await
-            .map_err(ClientError::TerminalSetup),
+    let external_open_shutdown_result = match app.external_open.take() {
+        Some(service) => service.shutdown().await.map_err(ClientError::TerminalSetup),
         None => Ok(()),
+    };
+    // Terminal interaction has ended. Release the last bounded acknowledgement
+    // only after its original display message is destroyed.
+    app.status_message = None;
+    app.external_open_status_storage = None;
+    app.light_copy_shutdown = true;
+    if let Some(selection) = &mut app.light_copy_selection {
+        selection.close_admission();
+    }
+    // Bound the normal drain: a blocked native child must reach its existing
+    // shutdown/kill path instead of keeping this coordination loop forever.
+    let selection_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while app
+        .light_copy_selection
+        .as_ref()
+        .is_some_and(|selection| selection.pending())
+        && tokio::time::Instant::now() < selection_deadline
+    {
+        app.collect_clipboard();
+        app.collect_light_copy_selection();
+        if app
+            .light_copy_selection
+            .as_ref()
+            .is_some_and(|selection| selection.pending())
+        {
+            tokio::select! {
+                _ = selection_notification.notified() => {},
+                _ = clipboard_notification.notified() => {},
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+            }
+        }
+    }
+    let clipboard_shutdown_result = match app.terminal_clipboard.take() {
+        Some(clipboard) => {
+            let (result, acknowledgements) = clipboard.shutdown_with_acknowledgements().await;
+            for completion in acknowledgements {
+                app.accept_clipboard_completion(completion);
+            }
+            result.map_err(ClientError::TerminalSetup)
+        }
+        None => Ok(()),
+    };
+    if let Some(selection) = &mut app.light_copy_selection {
+        selection.native_closed();
+    }
+    // CPU is still alive. Missing native replies are already marked unknown.
+    let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while app
+        .light_copy_selection
+        .as_ref()
+        .is_some_and(|selection| selection.pending())
+        && tokio::time::Instant::now() < recovery_deadline
+    {
+        app.collect_light_copy_selection();
+        if app
+            .light_copy_selection
+            .as_ref()
+            .is_some_and(|selection| selection.pending())
+        {
+            tokio::select! {
+                _ = selection_notification.notified() => {},
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+            }
+        }
+    }
+    let selection_shutdown_result = if app
+        .light_copy_selection
+        .as_ref()
+        .is_some_and(|selection| selection.pending())
+    {
+        match app.light_copy_selection.take() {
+            Some(owner) => Err(ClientError::TerminalSetup(std::io::Error::other(
+                crate::smart_copy_selection::SelectionShutdownCustody::new(
+                    owner,
+                    std::mem::take(&mut app.light_copy_recovery),
+                    app.smart_copy_preview.take(),
+                    std::mem::take(&mut app.light_copy_restored),
+                    if app
+                        .smart_copy_session
+                        .as_ref()
+                        .is_some_and(|session| session.is_light)
+                    {
+                        app.smart_copy_session.take()
+                    } else {
+                        None
+                    },
+                ),
+            ))),
+            None => Err(ClientError::TerminalSetup(std::io::Error::other(
+                "Selection custody disappeared",
+            ))),
+        }
+    } else {
+        let result = if app.light_copy_recovery.is_empty() && app.light_copy_restored.is_empty() {
+            Ok(())
+        } else {
+            Err(ClientError::TerminalSetup(std::io::Error::other(
+                "Selection preparation failed; originals retired during shutdown, no copy success claimed")))
+        };
+        app.light_copy_recovery.clear(); // Queues entire original disposal on still-live CPU.
+        app.light_copy_restored.clear(); // Returned Sessions have their original self-retirement permits.
+        if app
+            .smart_copy_session
+            .as_ref()
+            .is_some_and(|session| session.is_light)
+        {
+            app.smart_copy_session = None;
+        }
+        app.light_copy_retry_generation = None;
+        app.smart_copy_preview = None; // Drop original shared leaves before retirement join.
+        app.light_copy_selection = None;
+        result
     };
     let logging_result = tokio::time::timeout(Duration::from_secs(5), app.debug_logging.drain())
         .await
@@ -1904,6 +2051,7 @@ async fn run_inner(
         .and(normal_shutdown_result)
         .and(demonstration_shutdown_result)
         .and(clipboard_shutdown_result)
+        .and(external_open_shutdown_result)
         .and(media_shutdown_result)
         .and(icon_shutdown_result)
         .and(animation_receipt_result)
@@ -1912,6 +2060,13 @@ async fn run_inner(
         .and(filesystem_result)
         .and(execution_result)
         .and(result);
+    let result = match selection_shutdown_result {
+        Ok(()) => result,
+        Err(selection) => Err(crate::smart_copy_selection::preserve_shutdown_error(
+            selection,
+            result.err(),
+        )),
+    };
     let retirement = input_shutdown_result.err();
     if input_failure.is_some() || retirement.is_some() {
         Err(ClientError::Input(Box::new(crate::error::InputRunError {

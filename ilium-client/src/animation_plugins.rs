@@ -13,16 +13,16 @@ pub(crate) mod review_controller;
 use directories::ProjectDirs;
 use ilium_animation_js::{
     manifest::{AnimationMode, Manifest},
-    package::{PackageLimits, inspect_manifest_reader},
+    package::{inspect_manifest_reader, PackageLimits},
     release,
     settings::{validate_schema, validate_settings},
 };
 use ratatui::{
-    Frame,
     layout::{Position, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -1134,7 +1134,7 @@ pub fn draw_plugin_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
 
     fn descriptor() -> PluginDescriptor {
@@ -1234,33 +1234,29 @@ mod tests {
                 preferences.selection_for(&beach).expect("beach defaults"),
             )
             .expect("activate beach");
-        assert!(
-            fence
-                .commit(
-                    &"a".repeat(64),
-                    &carpet,
-                    &mut preferences,
-                    "speed",
-                    json!(4)
-                )
-                .is_err()
-        );
+        assert!(fence
+            .commit(
+                &"a".repeat(64),
+                &carpet,
+                &mut preferences,
+                "speed",
+                json!(4)
+            )
+            .is_err());
         let remembered = preferences.selection_for(&carpet).expect("restore carpet");
         assert_eq!(remembered.settings["speed"], 7);
         preferences
             .activate_selection(&carpet, remembered)
             .expect("restore");
-        assert!(
-            fence
-                .commit(
-                    &"b".repeat(64),
-                    &carpet,
-                    &mut preferences,
-                    "speed",
-                    json!(4)
-                )
-                .is_err()
-        );
+        assert!(fence
+            .commit(
+                &"b".repeat(64),
+                &carpet,
+                &mut preferences,
+                "speed",
+                json!(4)
+            )
+            .is_err());
         fence
             .commit(
                 &"a".repeat(64),
@@ -1274,17 +1270,15 @@ mod tests {
             preferences.selected.as_ref().expect("selected").settings["speed"],
             4
         );
-        assert!(
-            fence
-                .commit(
-                    &"a".repeat(64),
-                    &carpet,
-                    &mut preferences,
-                    "speed",
-                    json!(8)
-                )
-                .is_err()
-        );
+        assert!(fence
+            .commit(
+                &"a".repeat(64),
+                &carpet,
+                &mut preferences,
+                "speed",
+                json!(8)
+            )
+            .is_err());
     }
 
     #[test]
@@ -1477,12 +1471,10 @@ mod tests {
         let catalogue =
             PluginCatalogue::discover_with_bundled_and_stop(&directories, Some(&bundled), || false);
         assert!(catalogue.entries.len() <= MAX_CATALOGUE_ENTRIES);
-        assert!(
-            catalogue
-                .issues
-                .iter()
-                .any(|issue| issue.message == "Animation catalogue exceeds 256 packages")
-        );
+        assert!(catalogue
+            .issues
+            .iter()
+            .any(|issue| issue.message == "Animation catalogue exceeds 256 packages"));
         for &(id, filename, _) in release::PACKAGES {
             assert_eq!(
                 catalogue.find(id).map(|entry| entry.archive_path.as_path()),
@@ -1581,12 +1573,10 @@ mod tests {
         let helper = ilium_platform::animation_sandbox::helper_executable_path(&client)
             .expect("production helper path");
         assert_eq!(helper.parent(), Some(root.as_path()));
-        assert!(
-            fs::symlink_metadata(helper)
-                .expect("installed helper")
-                .file_type()
-                .is_file()
-        );
+        assert!(fs::symlink_metadata(helper)
+            .expect("installed helper")
+            .file_type()
+            .is_file());
         let catalogue = PluginCatalogue::discover_with_bundled_and_stop(
             std::slice::from_ref(&root),
             Some(&root),

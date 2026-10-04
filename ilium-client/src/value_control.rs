@@ -188,10 +188,14 @@ impl ValueControl {
             return None;
         }
         let [previous, next, open] = self.actions();
+        // Word gaps belong to the value; only its outer padding is inert.
         if self
             .value_ink
-            .iter()
-            .any(|rectangle| rectangle.contains(position))
+            .first()
+            .zip(self.value_ink.last())
+            .is_some_and(|(first, last)| {
+                position.y == first.y && (first.x..last.right()).contains(&position.x)
+            })
         {
             let action = match (self.kind, button) {
                 (ControlKind::Choice, PointerButton::Left) => next,
@@ -396,14 +400,41 @@ mod tests {
         }
     }
     #[test]
-    fn labels_spaces_and_non_left_buttons_do_not_fall_through() {
+    fn internal_value_spaces_belong_to_the_clickable_value() {
+        for (kind, left, right) in [
+            (
+                ControlKind::Choice,
+                ControlAction::NextChoice,
+                Some(ControlAction::PreviousChoice),
+            ),
+            (ControlKind::Number, ControlAction::EditNumber, None),
+        ] {
+            let control =
+                ValueControl::new(Rect::new(0, 0, 36, 1), spec(kind, " Local OSM extract "));
+            let value = control.geometry().value;
+            for offset in [6, 10] {
+                let position = Position::new(value.x + offset, value.y);
+                assert_eq!(control.hit(position, PointerButton::Left), Some(left));
+                assert_eq!(control.hit(position, PointerButton::Right), right);
+            }
+            for x in [value.x, value.right() - 1] {
+                assert_eq!(
+                    control.hit(Position::new(x, value.y), PointerButton::Left),
+                    None
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn labels_outer_spaces_and_non_left_buttons_do_not_fall_through() {
         let mut options = spec(ControlKind::Choice, "A B");
         options.label_width = 4;
         let control = ValueControl::new(Rect::new(10, 4, 24, 2), options);
         for x in 9_u16..=34 {
             let expected = match x {
                 15 => Some(ControlAction::PreviousChoice),
-                17 | 19 | 33 => Some(ControlAction::NextChoice),
+                17..=19 | 33 => Some(ControlAction::NextChoice),
                 31 => Some(ControlAction::OpenChoices),
                 _ => None,
             };
@@ -412,7 +443,7 @@ mod tests {
                 expected,
                 "x {x}"
             );
-            let reverse = if x == 17 || x == 19 {
+            let reverse = if (17..=19).contains(&x) {
                 Some(ControlAction::PreviousChoice)
             } else {
                 None

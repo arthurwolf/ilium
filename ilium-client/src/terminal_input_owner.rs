@@ -773,6 +773,11 @@ impl NativeStorage for RootNativeStorage {
 enum InputReaderFactory {
     Native(Arc<ExclusiveInput>),
     #[cfg(test)]
+    NativeObserved(
+        Arc<ExclusiveInput>,
+        std::sync::mpsc::Sender<Arc<RootNativeStorage>>,
+    ),
+    #[cfg(test)]
     Injected(Box<dyn FnMut(Duration) -> io::Result<Option<Event>> + Send>),
 }
 enum InputReader {
@@ -795,6 +800,18 @@ struct InputDriver {
 impl InputDriver {
     fn new(shared: Arc<Shared>, factory: InputReaderFactory) -> io::Result<Self> {
         let reader = match factory {
+            #[cfg(test)]
+            InputReaderFactory::NativeObserved(claim, observer) => {
+                // Construct through the exact production path. The bounded
+                // test handoff observes admission only, never reads the TTY.
+                let driver = Self::new(shared, InputReaderFactory::Native(claim))?;
+                if let InputReader::Native(Some(custody)) = &driver.reader {
+                    observer
+                        .send(Arc::clone(&custody.admission))
+                        .map_err(|_| io::Error::other("isolated native fixture observer closed"))?;
+                }
+                return Ok(driver);
+            }
             InputReaderFactory::Native(claim) => {
                 let storage = Arc::new(RootNativeStorage {
                     mandatory_bytes: input_storage_bytes().saturating_add(INPUT_STACK_BYTES),
@@ -1899,3 +1916,7 @@ mod tests {
 #[cfg(test)]
 #[path = "terminal_input_native_tests.rs"]
 mod native_tests;
+
+#[cfg(test)]
+#[path = "terminal_input_pty_child_tests.rs"]
+mod pty_child_tests;

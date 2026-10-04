@@ -215,6 +215,51 @@ pub fn target_control(
     )
 }
 
+/// Prepare the same numeric row for rendering and pointer dispatch.
+pub fn delay_control(
+    area: Rect,
+    state: &TextTriggerDialogState,
+) -> crate::value_control::ValueControl {
+    let seconds = state.delay_seconds();
+    crate::value_control::ValueControl::new(
+        layout(area).delay,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Number,
+            label: "Delay (seconds)",
+            value: &state.delay.buf,
+            label_width: 16,
+            previous_enabled: seconds > 0,
+            next_enabled: seconds < ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS,
+            open_enabled: true,
+        },
+    )
+}
+
+impl TextTriggerDialogState {
+    /// Buttons change only the draft; the existing Save action owns persistence.
+    pub fn apply_delay_control(
+        &mut self,
+        action: crate::value_control::ControlAction,
+    ) -> Result<(), String> {
+        use crate::value_control::ControlAction;
+        let seconds = match action {
+            ControlAction::Decrement => self.delay_seconds().saturating_sub(1),
+            ControlAction::Increment => self
+                .delay_seconds()
+                .saturating_add(1)
+                .min(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS),
+            ControlAction::EditNumber => {
+                self.focus = TextTriggerFocus::Delay;
+                return Ok(());
+            }
+            _ => return Err("Unsupported text trigger delay action".into()),
+        };
+        self.delay = TextPromptState::new(seconds.to_string());
+        self.focus = TextTriggerFocus::Delay;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod delay_tests {
     use super::*;
@@ -244,5 +289,78 @@ mod delay_tests {
             state.candidate().delay_seconds,
             ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
         );
+    }
+
+    #[test]
+    fn delay_buttons_preserve_authored_rule_and_stop_at_domain_bounds() {
+        use crate::value_control::{ControlAction, PointerButton};
+        let mut state = TextTriggerDialogState::new(None);
+        state.regexp = TextPromptState::new("authored.*λ");
+        state.message = TextPromptState::new("retain this reply");
+        state.target = TextTriggerTarget::Terminals;
+        state.enabled = false;
+        let before = state.candidate();
+        state.apply_delay_control(ControlAction::Decrement).unwrap();
+        let mut expected = before.clone();
+        expected.delay_seconds = 59;
+        assert_eq!(state.candidate(), expected);
+        state.apply_delay_control(ControlAction::Increment).unwrap();
+        assert_eq!(state.candidate(), before);
+
+        state.delay = TextPromptState::new("0");
+        let control = delay_control(Rect::new(0, 0, 80, 24), &state);
+        assert_eq!(
+            control.hit(
+                ratatui::layout::Position::new(
+                    control.geometry().previous.x,
+                    control.geometry().previous.y,
+                ),
+                PointerButton::Left,
+            ),
+            None
+        );
+        state.apply_delay_control(ControlAction::Decrement).unwrap();
+        assert_eq!(state.delay.buf, "0");
+        state.delay = TextPromptState::new(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS.to_string());
+        let control = delay_control(Rect::new(0, 0, 80, 24), &state);
+        assert_eq!(
+            control.hit(
+                ratatui::layout::Position::new(
+                    control.geometry().next.x,
+                    control.geometry().next.y,
+                ),
+                PointerButton::Left,
+            ),
+            None
+        );
+        state.apply_delay_control(ControlAction::Increment).unwrap();
+        assert_eq!(
+            state.delay_seconds(),
+            ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
+        );
+    }
+
+    #[test]
+    fn delay_star_retains_exact_draft_and_blank_steps_from_native_default() {
+        use crate::value_control::ControlAction;
+        let mut state = TextTriggerDialogState::new(None);
+        state.delay = TextPromptState::new("00125");
+        state.delay.cursor = 2;
+        let before = state.candidate();
+        state
+            .apply_delay_control(ControlAction::EditNumber)
+            .unwrap();
+        assert_eq!(state.focus, TextTriggerFocus::Delay);
+        assert_eq!(state.delay.buf, "00125");
+        assert_eq!(state.delay.cursor, 2);
+        assert_eq!(state.candidate(), before);
+        state.delay.buf.clear();
+        state.apply_delay_control(ControlAction::Increment).unwrap();
+        assert_eq!(state.delay_seconds(), 61);
+        let before = state.candidate();
+        assert!(state
+            .apply_delay_control(ControlAction::PreviousChoice)
+            .is_err());
+        assert_eq!(state.candidate(), before);
     }
 }

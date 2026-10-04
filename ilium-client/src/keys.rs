@@ -1566,8 +1566,19 @@ fn handle_text_trigger_dialog_event(
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ if state.focus == TextTriggerFocus::Delay => {
-            // Whole seconds only; editing keys still reach the prompt.
-            if !matches!(key.code, KeyCode::Char(c) if !c.is_ascii_digit()) {
+            use crate::value_control::ControlAction;
+            let action = match key.code {
+                KeyCode::Char('-') => Some(ControlAction::Decrement),
+                KeyCode::Char('+') => Some(ControlAction::Increment),
+                KeyCode::Char('*') => Some(ControlAction::EditNumber),
+                _ => None,
+            };
+            if let Some(action) = action {
+                if let Err(error) = state.apply_delay_control(action) {
+                    app.status_message = Some(error);
+                }
+            } else if !matches!(key.code, KeyCode::Char(c) if !c.is_ascii_digit()) {
+                // Keep direct digits and caret editing, including blank/default semantics.
                 let _ = crate::text_prompt::handle_key(&mut state.delay, key.code);
             }
             app.mode = Mode::TextTriggerDialog(state);

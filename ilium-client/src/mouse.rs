@@ -365,6 +365,23 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
     if let Mode::TextTriggerDialog(state) = &app.mode {
+        let delay = crate::text_trigger_dialog::delay_control(app.layout.screen_area, state);
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && delay.geometry().row.contains(position)
+        {
+            let Mode::TextTriggerDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+            else {
+                unreachable!("matched trigger dialog");
+            };
+            state.focus = crate::text_trigger_dialog::TextTriggerFocus::Delay;
+            if let Some(action) = delay.hit(position, crate::value_control::PointerButton::Left) {
+                if let Err(error) = state.apply_delay_control(action) {
+                    app.status_message = Some(error);
+                }
+            }
+            app.mode = Mode::TextTriggerDialog(state);
+            return;
+        }
         let control = crate::text_trigger_dialog::target_control(app.layout.screen_area, state);
         if control.geometry().row.contains(position)
             && matches!(
@@ -4803,7 +4820,46 @@ mod smart_copy_mouse_tests {
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.focus = FocusTarget::Pane;
         app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.terminal_clipboard = Some(crate::terminal_clipboard::ClipboardService::fixture_queue(
+            crate::execution::test_client(),
+        ));
         (app, pane_id)
+    }
+
+    fn assert_failed_light_copy_restores_exact_existing_selection(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.light_copy_retry_generation.is_none() {
+            app.collect_light_copy_selection();
+            if let Some(reply) = app
+                .terminal_clipboard
+                .as_ref()
+                .unwrap()
+                .fixture_process_next(|_| Err("fixture native unavailable".into()))
+            {
+                app.accept_clipboard_completion(reply);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "owned original restitution deadline"
+            );
+            std::thread::yield_now();
+        }
+        assert!(matches!(app.mode, Mode::SmartCopy));
+        assert!(
+            app.smart_copy_preview.is_none(),
+            "native failure cannot claim copied preview"
+        );
+        let original = app.smart_copy_session.as_ref().unwrap();
+        assert_eq!(original.selected_count(), 1);
+        assert_eq!(
+            original.selected_parts().collect::<Vec<_>>(),
+            ["https://example.test/api"]
+        );
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("Enter retries"));
     }
 
     fn modified(kind: MouseEventKind, position: Position, modifiers: KeyModifiers) -> MouseEvent {
@@ -4862,12 +4918,7 @@ mod smart_copy_mouse_tests {
         );
         assert!(matches!(app.mode, Mode::Normal));
         assert!(app.smart_copy_light.is_none());
-        let preview = app
-            .smart_copy_preview
-            .as_ref()
-            .expect("preview after release");
-        assert_eq!(preview.text, "https://example.test/api");
-        assert_eq!(preview.region_count, 1);
+        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
     }
 
     #[test]
@@ -4950,7 +5001,7 @@ mod smart_copy_mouse_tests {
             }),
         );
         assert!(matches!(app.mode, Mode::Normal));
-        assert!(app.smart_copy_preview.is_some());
+        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
 
         let (mut app, pane_id) = app_with_plain_terminal();
         start(&mut app, pane_id);
@@ -4973,7 +5024,7 @@ mod smart_copy_mouse_tests {
             now + crate::smart_copy_light::RELEASE_IDLE_GRACE + Duration::from_millis(10),
         );
         assert!(app.smart_copy_light.is_none());
-        assert!(app.smart_copy_preview.is_some());
+        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
     }
 
     #[test]

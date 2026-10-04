@@ -1295,6 +1295,147 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn every_native_choice_and_number_paints_and_hits_at_supported_sizes() {
+        use crate::value_control::{ControlAction, ControlStyles, PointerButton};
+
+        let mut checked_choices = 0;
+        let mut checked_numbers = 0;
+        for kind in AnimationKind::ALL {
+            for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
+                for scene_uses_cell_colors in [false, true] {
+                    let settings = AnimationSettings {
+                        kind,
+                        playback_mode,
+                        ..Default::default()
+                    };
+                    let context = RowContext {
+                        scene_uses_cell_colors,
+                        ..Default::default()
+                    };
+                    let model = RowModel::new(&settings, &context);
+                    for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+                        let area = Rect::new(0, 0, width, height);
+                        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                        for row in 0..model.len() {
+                            let view = model.view(row).unwrap();
+                            let (previous, next, open, action) = match view.kind {
+                                RowKind::Choice => {
+                                    checked_choices += 1;
+                                    ("←", "→", "+", ControlAction::OpenChoices)
+                                }
+                                RowKind::Slider(_) => {
+                                    checked_numbers += 1;
+                                    ("−", "+", "*", ControlAction::EditNumber)
+                                }
+                                _ => continue,
+                            };
+                            let scrolls = follow_selection(area, &model, row, Scrolls::default());
+                            let control =
+                                value_control(area, &model, row, scrolls).unwrap_or_else(|| {
+                                    panic!(
+                                        "{kind:?} {width}x{height}: {} has no control",
+                                        view.label
+                                    )
+                                });
+                            let geometry = control.geometry();
+                            terminal
+                                .draw(|frame| control.render(frame, ControlStyles::default()))
+                                .unwrap();
+                            for (rect, glyph) in [
+                                (geometry.previous, previous),
+                                (geometry.next, next),
+                                (geometry.open, open),
+                            ] {
+                                assert_eq!(
+                                    rect.width, 1,
+                                    "{kind:?} {width}x{height}: {} missing {glyph}",
+                                    view.label
+                                );
+                                assert_eq!(
+                                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                                    glyph
+                                );
+                            }
+                            assert_eq!(
+                                value_hit(area, &model, scrolls, Position::new(geometry.open.x, geometry.open.y), PointerButton::Left),
+                                Some((row, action)),
+                                "{kind:?} {width}x{height}: {} open button belongs to a different row", view.label
+                            );
+                            assert_eq!(
+                                value_hit(
+                                    area,
+                                    &model,
+                                    scrolls,
+                                    Position::new(geometry.open.x, geometry.open.y),
+                                    PointerButton::Right
+                                ),
+                                None
+                            );
+                            let metadata = model.control(row).unwrap();
+                            let value_left = if matches!(view.kind, RowKind::Choice) {
+                                metadata
+                                    .stepped(1)
+                                    .filter(|value| *value != metadata.value)
+                                    .map(|_| ControlAction::NextChoice)
+                            } else {
+                                Some(ControlAction::EditNumber)
+                            };
+                            let value_right = if matches!(view.kind, RowKind::Choice) {
+                                metadata
+                                    .stepped(-1)
+                                    .filter(|value| *value != metadata.value)
+                                    .map(|_| ControlAction::PreviousChoice)
+                            } else {
+                                None
+                            };
+                            if let Some((first, last)) =
+                                control.value_ink().first().zip(control.value_ink().last())
+                            {
+                                for x in first.x..last.right() {
+                                    let position = Position::new(x, first.y);
+                                    assert_eq!(
+                                        value_hit(
+                                            area,
+                                            &model,
+                                            scrolls,
+                                            position,
+                                            PointerButton::Left
+                                        ),
+                                        value_left.map(|action| (row, action))
+                                    );
+                                    assert_eq!(
+                                        value_hit(
+                                            area,
+                                            &model,
+                                            scrolls,
+                                            position,
+                                            PointerButton::Right
+                                        ),
+                                        value_right.map(|action| (row, action))
+                                    );
+                                }
+                            }
+                            if matches!(view.kind, RowKind::Slider(_)) {
+                                let slot_center = 2 * u32::from(geometry.value_slot.x)
+                                    + u32::from(geometry.value_slot.width);
+                                let value_center = 2 * u32::from(geometry.value.x)
+                                    + u32::from(geometry.value.width);
+                                assert!(
+                                    slot_center.abs_diff(value_center) <= 1,
+                                    "{kind:?}: {} number is not centered",
+                                    view.label
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked_choices > AnimationKind::ALL.len());
+        assert!(checked_numbers > AnimationKind::ALL.len());
+    }
+
+    #[test]
     fn shared_animation_chrome_paints_the_exact_button_hit_regions() {
         use crate::value_control::{ControlAction, PointerButton};
         let (app, _probe, _project) = settings_app(140, 120);

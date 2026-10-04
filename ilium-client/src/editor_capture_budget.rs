@@ -11,6 +11,7 @@ pub(crate) enum Kind {
     #[cfg(test)]
     Whole,
     Window,
+    Document,
     Syntax,
     #[cfg(test)]
     Context,

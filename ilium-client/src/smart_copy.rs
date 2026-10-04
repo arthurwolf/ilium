@@ -1516,8 +1516,42 @@ pub struct SmartCopySession {
     /// are only ever appended, so an index stays valid for the whole session.
     selected: Vec<usize>,
     pub(crate) output_retention: Option<ilium_execution::Retention>,
+    /// Preadmitted before selected-copy transfer; permits exact UI restoration
+    /// without making final candidate/String destruction an interactive task.
+    pub(crate) return_retirement: Option<ilium_execution::RetirementReservation<SmartCopySession>>,
+    pub(crate) recovery_result_hold: Option<ilium_execution::Retention>,
 }
 
+impl Drop for SmartCopySession {
+    fn drop(&mut self) {
+        let Some(permit) = self.return_retirement.take() else {
+            return;
+        };
+        // Move all potentially large owned fields, never clone their contents.
+        // The snapshot clone contains shared leaves only. The original Session
+        // now holds empty containers; the returned source dies on CPU.
+        let original = Self {
+            generation: self.generation,
+            pane_id: self.pane_id,
+            snapshot: self.snapshot.clone(),
+            phase: std::mem::replace(&mut self.phase, SmartCopyPhase::Connecting),
+            candidates: std::mem::take(&mut self.candidates),
+            received_characters: self.received_characters,
+            exact_output_tokens: self.exact_output_tokens,
+            invalid_lines: self.invalid_lines,
+            started_at: self.started_at,
+            is_light: self.is_light,
+            hovered_cell: self.hovered_cell,
+            overlap_index: self.overlap_index,
+            geometries: std::mem::take(&mut self.geometries),
+            selected: std::mem::take(&mut self.selected),
+            output_retention: self.output_retention.take(),
+            return_retirement: None,
+            recovery_result_hold: self.recovery_result_hold.take(),
+        };
+        drop(permit.attach(original));
+    }
+}
 impl SmartCopySession {
     pub fn new(generation: u64, pane_id: NodeId, snapshot: SmartCopySnapshot) -> Self {
         Self::with_path_context(generation, pane_id, snapshot, &PathContext::default())
@@ -1578,6 +1612,8 @@ impl SmartCopySession {
             geometries,
             selected: Vec::new(),
             output_retention: None,
+            return_retirement: None,
+            recovery_result_hold: None,
         }
     }
 
@@ -1687,6 +1723,51 @@ impl SmartCopySession {
 
     /// Clipboard text for the whole selection: each selected region's text in
     /// click order, one blank line between regions.
+    /// Borrow original candidate text in click order; callers must move the
+    /// session to a CPU job before constructing a whole selected String.
+    pub(crate) fn selected_parts(&self) -> impl Iterator<Item = &str> {
+        self.selected
+            .iter()
+            .filter_map(|index| self.candidates.get(*index))
+            .map(|candidate| candidate.text.as_str())
+    }
+
+    pub(crate) fn selected_bytes(&self) -> Option<usize> {
+        self.selected_parts()
+            .try_fold((0usize, 0usize), |(bytes, count), part| {
+                let separator = if count == 0 { 0 } else { 2 };
+                Some((
+                    bytes.checked_add(separator)?.checked_add(part.len())?,
+                    count + 1,
+                ))
+            })
+            .map(|(bytes, _)| bytes)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_selection(generation: u64, parts: &[&str]) -> Self {
+        let parser = vt100::Parser::new(1, 80, 0);
+        let mut session = Self::new(
+            generation,
+            NodeId(1),
+            SmartCopySnapshot::capture(parser.screen()),
+        );
+        session.candidates = parts
+            .iter()
+            .map(|part| SmartCopyCandidate {
+                label: "synthetic selected region".into(),
+                kind: "text".into(),
+                text: (*part).into(),
+                spans: Vec::new(),
+                cell_count: 0,
+                arrived_at: Instant::now(),
+            })
+            .collect();
+        session.selected = (0..parts.len()).collect();
+        session.is_light = true;
+        session
+    }
+
     pub fn selected_text(&self) -> String {
         self.selected
             .iter()

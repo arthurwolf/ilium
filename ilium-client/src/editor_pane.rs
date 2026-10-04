@@ -59,7 +59,7 @@ fn saturating_u16(value: usize) -> u16 {
 struct HighlightCache {
     revision: u64,
     path: PathBuf,
-    lines: std::sync::Arc<Vec<crate::syntax::LineTokens>>,
+    lines: ilium_execution::RetiringArc<Vec<crate::syntax::LineTokens>>,
 }
 
 /// One terminal row in the Source view. In Clip mode each source line maps
@@ -110,7 +110,7 @@ pub struct EditorPane {
     /// `None` before the pane has ever been rendered. Rendering needs
     /// `&Picker`/`&mut HeaderRasterizer` from `App`, which `EditorPane`
     /// doesn't own, so it can't rebuild itself; it only holds the result.
-    pub rendered: Option<RenderedDocument>,
+    pub rendered: Option<ilium_execution::Retiring<RenderedDocument>>,
     /// Scroll offset (in rendered terminal rows) while `view_mode` is
     /// `Rendered`. Independent of the `TextArea`'s own cursor/scroll,
     /// which stays exactly where editing left it for when the user
@@ -707,10 +707,7 @@ impl EditorPane {
         {
             return None;
         }
-        Ref::filter_map(cache, |cache| {
-            cache.as_ref().map(|cache| cache.lines.as_ref())
-        })
-        .ok()
+        Ref::filter_map(cache, |cache| cache.as_ref().map(|cache| &**cache.lines)).ok()
     }
 
     pub(crate) fn preparation_key(
@@ -988,12 +985,28 @@ impl EditorPane {
         let Some(path) = self.path.clone() else {
             return;
         };
+        let output = crate::execution::test_client()
+            .retirement()
+            .try_reserve::<Vec<crate::syntax::LineTokens>>(32 * 1024 * 1024)
+            .unwrap();
         *self.highlight_cache.get_mut() = crate::syntax::highlight(&path, self.textarea.lines())
             .map(|lines| HighlightCache {
                 revision: self.content_revision,
                 path,
-                lines: std::sync::Arc::new(lines),
+                lines: output.attach_shared(lines),
             });
+    }
+    #[cfg(test)]
+    pub(crate) fn install_test_rendered(&mut self, document: RenderedDocument) {
+        // A synthetic synchronous fixture; production reserves on its job
+        // producer before rendering and transfers that exact output envelope.
+        self.rendered = Some(
+            crate::execution::test_client()
+                .retirement()
+                .try_reserve::<RenderedDocument>(32 * 1024 * 1024)
+                .unwrap()
+                .attach(document),
+        );
     }
     pub(crate) fn clear_preparation(&mut self) {
         self.rendered = None;
