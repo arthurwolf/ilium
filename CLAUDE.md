@@ -1,8 +1,8 @@
 # CLAUDE.md — ilium
 
-Project-specific rules. This is a Rust project; the global `~/.claude/CLAUDE.md` stack/style section (TypeScript/Bun/Vue) does not apply here — its behavioral rules (scope discipline, verification gate, explore-before-acting, no worktrees, architecture-is-mandatory, no stopping to ask "should I continue") still apply in full. See `ARCHITECTURE.md` for the product design, architecture, crate choices, and milestone plan — read it before touching code. `README.md` is the user-facing install/usage document; keep it free of internal design history.
+Project-specific rules. This is a Rust project; the global `~/.claude/CLAUDE.md` stack/style section (TypeScript/Bun/Vue) does not apply here — its behavioral rules (scope discipline, verification gate, explore-before-acting, no worktrees, architecture-is-mandatory, no stopping to ask "should I continue") still apply in full. See `ARCHITECTURE.md` for the product design, architecture, crate choices, and milestone plan — read it before touching code. `README.md` is the short user-facing overview and `src/docs/` holds the full user documentation; keep both free of internal design history.
 
-Documentation lives at the repository root: `README.md` (users), `ARCHITECTURE.md` (design), `CLAUDE.md` (these rules). `docs/` is deliberately git-ignored — it is a scratch area for working notes and plans, so never put anything there that a fresh clone needs.
+Documentation lives at the repository root: `README.md` (short user overview), `src/docs/` (full user documentation, tracked), `ARCHITECTURE.md` (design), `CLAUDE.md` (these rules). `docs/` is deliberately git-ignored — it is a scratch area for working notes and plans, so never put anything there that a fresh clone needs.
 
 ## Ilium process custody
 

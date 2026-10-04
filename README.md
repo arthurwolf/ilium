@@ -2,19 +2,19 @@
 <h1 align="center">Ilium</h1>
 <p align="center"><strong>AI names agents and organizes your project tree.</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
 <p align="center"><sub>Linux · macOS · Windows · Rust · MIT</sub></p>
-<p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#worktrees-and-session-recovery">Worktrees</a> · <a href="#full-reference">Reference</a></p>
+<p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#what-ilium-does">Features</a> · <a href="src/docs/README.md">Full documentation</a></p>
+
+> This README is the short version. The [full documentation](src/docs/README.md) has the step-by-step guides, every setting, key and command.
 
 ## Quick start
 
-For now, [build from source](#building-from-source). We have not published the release downloads or hosted installers yet.
+For now, [build from source](src/docs/building-from-source.md). We have not published the release downloads or hosted installers yet.
 
 Linux and macOS:
 
 ```sh
-curl -fsSL https://ilium-setup.pages.dev/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
-
-If you prefer package installers, use the [.deb](#deb-package), [.rpm](#rpm-package), [AppImage](#appimage), [Snap](#snap-package) or [Flatpak](#flatpak-bundle) (Linux).
 
 Windows PowerShell:
 
@@ -22,19 +22,27 @@ Windows PowerShell:
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-Prefer a download-and-run installer on Windows? Get the latest release as a
-[setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe)
-or an [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi).
-Both install for your user without administrator rights, add Ilium to your `PATH`,
-and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
+For a Windows installer instead, choose the per-user [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi); the [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) is available for manual setup.
+
+Direct release downloads (one package per system):
+
+| System | Downloads |
+| --- | --- |
+| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) |
+| Linux ARM64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak) |
+| macOS Apple Silicon | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.dmg) |
+| macOS Intel | [tar.gz](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.dmg) |
+| Windows x86_64 | [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) |
+
+Verify downloads against [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS). Details: [Installation](src/docs/installation.md).
 
 Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. Re-run the installer to upgrade.
 
-No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately.
+No Rust toolchain is needed for releases. Use a UTF-8 terminal with 256-colour support and install your agent CLI separately. Linux is the primary platform; macOS and Windows are implemented with different test coverage.
 
-[Release packages](#install-from-release-packages) · [Build from source](#building-from-source)
+> **AI privacy:** First-run setup lets you choose Kilo Gateway, paid APIs, local Ollama or Skip. Automatic AI requests remain paused until setup finishes. Kilo Gateway sends prompts to its service. See [Inference and privacy](src/docs/inference-and-privacy.md).
 
-> **AI privacy:** First-run setup lets you choose Kilo Gateway, paid APIs, local Ollama or Skip. Automatic AI requests remain paused until setup finishes. Existing configurations keep their provider; Kilo Gateway sends prompts to its service. [Inference settings](#inference-and-privacy).
+More: [Getting started](src/docs/getting-started.md) · [Building from source](src/docs/building-from-source.md)
 
 ## See it in action
 
@@ -42,340 +50,38 @@ No Rust toolchain is needed. Use a UTF-8 terminal with 256-colour support and in
 <tbody>
 <tr>
 <td width="50%" valign="top">
-<p>
-<strong>AI names agents and organizes the project tree</strong>
-</p>
-<p>
-<a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/01-ai-tree.gif" alt="Ilium names agent panes and organizes the project tree around their work" width="100%">
-</a>
-</p>
+<p><strong>AI names agents and organizes the project tree</strong></p>
+<p><a href="assets/demos/01-ai-tree.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/01-ai-tree.gif" alt="Ilium names agent panes and organizes the project tree around their work" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p>
-<strong>Control Ilium and prompt agents with voice</strong>
-</p>
-<p>
-<a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/02-voice-control.gif" alt="Voice commands trigger Ilium actions and send a prompt to Claude" width="100%">
-</a>
-</p>
+<p><strong>Track agent status and current goals</strong></p>
+<p><a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/08-agent-activity.gif" alt="Agent status changes as work progresses, with its goal shown in the tree" width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
-<p>
-<strong>Give agent panes automatic titles</strong>
-</p>
-<p>
-<a href="assets/demos/03-contextual-titles.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/03-contextual-titles.gif" alt="Ilium titles agent panes from their content while preserving manual names" width="100%">
-</a>
-</p>
+<p><strong>Control Ilium and prompt agents with voice</strong></p>
+<p><a href="assets/demos/02-voice-control.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/02-voice-control.gif" alt="Voice commands trigger Ilium actions and send a prompt to Claude" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p>
-<strong>Transfer a terminal screen between panes</strong>
-</p>
-<p>
-<a href="assets/demos/05-screen-transfer.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/05-screen-transfer.gif" alt="Transfer the visible screen to another pane" width="100%">
-</a>
-</p>
+<p><strong>Use agents, editors, and terminals side by side</strong></p>
+<p><a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/10-mixed-splits.gif" alt="View terminal, editor, and board panes together in a split view" width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
-<p>
-<strong>Inspect agent usage and recorded costs</strong>
-</p>
-<p>
-<a href="assets/demos/06-cost-and-stats.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/06-cost-and-stats.gif" alt="Review an agent’s tokens, activity, prompts, and recorded cost" width="100%">
-</a>
-</p>
+<p><strong>Resume agent sessions after a reboot</strong></p>
+<p><a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/24-agents-survive-reboots.gif" alt="After a reboot sequence, Ilium restores the pane layout and resumes Claude and Codex" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p>
-<strong>Track agent status and current goals</strong>
-</p>
-<p>
-<a href="assets/demos/08-agent-activity.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/08-agent-activity.gif" alt="Agent status changes as work progresses, with its goal shown in the tree" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Use agents, editors, and terminals side by side</strong>
-</p>
-<p>
-<a href="assets/demos/10-mixed-splits.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/10-mixed-splits.gif" alt="View terminal, editor, and board panes together in a split view" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Select and copy terminal output</strong>
-</p>
-<p>
-<a href="assets/demos/11-smart-copy.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/11-smart-copy.gif" alt="Select a region of terminal output and copy it" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Queue prompts for an agent</strong>
-</p>
-<p>
-<a href="assets/demos/13-prompt-queue.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/13-prompt-queue.gif" alt="Queued prompts reach the agent in order as its turns finish" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Get results from background tasks</strong>
-</p>
-<p>
-<a href="assets/demos/14-progress-monitor.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/14-progress-monitor.gif" alt="A background task reports its result to an agent" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Search agents, files, and terminals</strong>
-</p>
-<p>
-<a href="assets/demos/17-workspace-search.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/17-workspace-search.gif" alt="Find agents, files, and terminals, then jump to a match" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>See live agent goals in the project tree</strong>
-</p>
-<p>
-<a href="assets/demos/22-goal-indicators.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/22-goal-indicators.gif" alt="A live Codex goal changes the objective icon in the project tree" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Resume agent sessions after a reboot</strong>
-</p>
-<p>
-<a href="assets/demos/24-agents-survive-reboots.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/24-agents-survive-reboots.gif" alt="After a reboot sequence, Ilium restores the pane layout and resumes Claude and Codex" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top"></td>
-</tr>
-<tr>
-<td colspan="2" width="100%" valign="top">
-<p>
-<strong>Choose an animation, then watch it play</strong>
-</p>
-<p>
-<a href="assets/demos/26-animations.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/26-animations.gif" alt="A gallery of 26 recorded animation demos" width="100%">
-</a>
-</p>
+<p><strong>Choose an animation, then watch it play</strong></p>
+<p><a href="assets/demos/26-animations.gif?raw=true" target="_blank" rel="noopener noreferrer"><img src="assets/demos/26-animations.gif" alt="A gallery of recorded animation demos" width="100%"></a></p>
 </td>
 </tr>
 </tbody>
 </table>
 
-<details>
-<summary>Show the other 15 demos</summary>
-
-<table width="100%">
-<tbody>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Schedule input for a pane</strong>
-</p>
-<p>
-<a href="assets/demos/04-scheduled-input.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/04-scheduled-input.gif" alt="A five-second timer sends text to an agent and then to a terminal" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Set interface and board preferences</strong>
-</p>
-<p>
-<a href="assets/demos/07a-settings-tour-a.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07a-settings-tour-a.gif" alt="The first chapter of the settings tour shows interface and board options" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Configure voice and AI providers</strong>
-</p>
-<p>
-<a href="assets/demos/07b-settings-tour-b.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07b-settings-tour-b.gif" alt="The second chapter of the settings tour shows voice and inference providers" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Configure automatic titles</strong>
-</p>
-<p>
-<a href="assets/demos/07c-settings-tour-c.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/07c-settings-tour-c.gif" alt="The third chapter of the settings tour shows automatic titles and setup options" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Rearrange panes without stopping their processes</strong>
-</p>
-<p>
-<a href="assets/demos/09-pane-tree.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/09-pane-tree.gif" alt="Move a pane into a group and reorder it while its process keeps running" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Request updates from active agents</strong>
-</p>
-<p>
-<a href="assets/demos/12-ask-for-update.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/12-ask-for-update.gif" alt="Send an update request to active agents" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Track work on a Kanban board</strong>
-</p>
-<p>
-<a href="assets/demos/15-kanban.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/15-kanban.gif" alt="Move a card through the Kanban board" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Start a Codex agent from a TODO</strong>
-</p>
-<p>
-<a href="assets/demos/16-agent-from-line.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/16-agent-from-line.gif" alt="Start Codex from a TODO line and have it repair the source" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Detach and reconnect while agents keep running</strong>
-</p>
-<p>
-<a href="assets/demos/18-detach-reattach.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/18-detach-reattach.gif" alt="Reattach while agents and panes keep running" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Edit Markdown in a pane</strong>
-</p>
-<p>
-<a href="assets/demos/19-markdown-editor.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/19-markdown-editor.gif" alt="Edit a Markdown note inside Ilium" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Coordinate Claude and Codex with Chatroom</strong>
-</p>
-<p>
-<a href="assets/demos/20-chatroom.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/20-chatroom.gif" alt="Claude and Codex exchange a handoff through Chatroom" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Respond to confirmation prompts automatically</strong>
-</p>
-<p>
-<a href="assets/demos/21-text-triggers.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/21-text-triggers.gif" alt="A text trigger responds to an agent confirmation question" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Restore panes and resume agent sessions</strong>
-</p>
-<p>
-<a href="assets/demos/23-snapshot-resume.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/23-snapshot-resume.gif" alt="Ilium restores panes and Claude and Codex continue from resumed context" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top">
-<p>
-<strong>Run agents in their own worktrees</strong>
-</p>
-<p>
-<a href="assets/demos/25-worktree-agent.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/25-worktree-agent.gif" alt="A locally labelled Codex-shaped fixture runs on agent/map-east-side; a terminal shows its worktree path, branch, and file diff" width="100%">
-</a>
-</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<p>
-<strong>Convert a session between Claude and Codex</strong>
-</p>
-<p>
-<a href="assets/demos/26-convert-session.gif?raw=true" target="_blank" rel="noopener noreferrer">
-<img src="assets/demos/26-convert-session.gif" alt="A Claude session converts to Codex, which still remembers the secret word, then converts back to Claude" width="100%">
-</a>
-</p>
-</td>
-<td width="50%" valign="top"></td>
-</tr>
-</tbody>
-</table>
-
-</details>
+All demos, with the feature each one shows: [Demo gallery](src/docs/demos.md).
 
 ## Daily use
 
@@ -392,445 +98,52 @@ Prefix: `Ctrl+B`.
 | `:` / `?` | Settings / key reference |
 | `d` / `&` | Detach / kill the session |
 
-Run `ilium` in the project directory to reattach.
+Run `ilium` in the project directory to reattach. Press the prefix twice to send a literal prefix key to the focused pane. Remap it in Settings; `&` ends the session at once, without confirmation.
 
-In tmux, double the prefix to pass it through. Remap it in Settings.
+All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md) and [Panes and layout](src/docs/panes-and-layout.md).
 
 ## What Ilium does
 
-<table width="100%">
-<tbody>
-<tr>
-<td width="50%" valign="top"><strong>Arrange</strong><br>Group panes and split the screen four ways. The project tree stays visible.</td>
-<td width="50%" valign="top"><strong>Track</strong><br>Identify agent CLIs from process trees and read activity from terminal screens.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><strong>Separate</strong><br>Start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup.</td>
-<td width="50%" valign="top"><strong>Resume</strong><br>Detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs.</td>
-</tr>
-</tbody>
-</table>
+- **Arrange**: group panes and split the screen four ways. The project tree stays visible. [Panes and layout](src/docs/panes-and-layout.md)
+- **Track**: identify agent CLIs from process trees and read activity from terminal screens. [Agent monitoring](src/docs/agent-monitoring.md)
+- **Separate**: start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup. [Worktrees](src/docs/worktrees.md)
+- **Resume**: detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs. [Session recovery](src/docs/session-recovery.md)
 
-Also included: workspace search, Smart Copy, scheduled input, prompt queues, and Chatroom.
+Also included:
 
-### Agent monitoring
+- Agent [cost tracking](src/docs/agent-cost.md) and [notifications](src/docs/notifications.md).
+- AI [titles, tree organization and custom instructions](src/docs/titles-and-instructions.md), with [provider and privacy controls](src/docs/inference-and-privacy.md).
+- [Voice control](src/docs/voice.md).
+- [Scheduled input, text triggers, prompt queues, progress monitors and Chatroom](src/docs/automation.md).
+- [Editors, boards](src/docs/editors-and-boards.md) and [Smart Copy](src/docs/smart-copy.md).
+- Ambient [animated backgrounds](src/docs/animations.md): landscapes, space, maps, live data, video and more, all sharing one look.
 
-See agent identity, activity, and longer-running work in the tree. Attention mode highlights the highest-priority status. Hover for the reason.
-
-Choose running indicators in **Settings → Agent Monitoring**. A live progress monitor can suppress finished-turn alerts while work continues.
-
-The `/goal` badge reports observed activity; Ilium does not control the agent.
-
-Enabled prompt, progress and agent-toolbar displays reserve their space before terminal interaction begins, including in plain shells. Updating, wrapping or hiding their text leaves the child terminal's dimensions unchanged. Turn a display off or adjust its row limit in Settings to reclaim or change that space. Explicit settings, split changes and resizing the outer terminal can still resize the child.
-
-#### Recover work after an agent stops
-
-When a detected Claude or Codex process exits or loses terminal ownership, its pane keeps its agent identity and shows an unavailable indicator. Hover for the reason; Ilium reports an exit cause only when it has a matching process receipt.
-
-Right-click the terminal to **Copy last submitted prompt**, copy a selection, line, visible screen or full terminal history, or copy the verified history-file path. Long prompts retain their line breaks and trailing spaces. If terminal-owned editing made the latest prompt uncertain, the menu says so and offers any **previous exact prompt** separately.
-
-If transcript discovery reaches its safety limit, the menu warns that the history-file path is unavailable. Screen, selection and prompt recovery remain available; Ilium never offers an unverified path.
-
-The header stats dot remains available for the retained session: hover to preview or click to pin its recorded metrics. If a transcript refresh fails, retained figures remain visible with an incompleteness warning and the reason. Scroll and selection stay local even if the stopped agent left mouse tracking enabled. You can still paste or type into a surviving shell; agent automation stops when the agent loses ownership.
-
-If a write was only partly delivered before cancellation, Ilium refuses further input to that terminal. Copy the recovered text into another pane to continue.
-
-#### Notifications
-
-**Settings → Sound** also holds the desktop-notification switches, one per event: agent finished, agent needs approval, task succeeded, and task failed or lost. A master switch turns them all off. They live under `[notifications]` in `config.toml` and apply to running sessions within a couple of seconds.
-
-A *task* is a background job an agent registered with `ilium progress`. Its outcome is a different event from the agent finishing its turn, so notifications say "background task finished (agent still working)" and lead with the pane title. By default you hear about the agent finishing, an approval prompt, and failed or lost tasks. Successful tasks stay silent and show only as ✅ in the sidebar. Task alerts are also skipped while the agent is idle or parked, because its own finished alert follows, and same-kind alerts on one pane within 30 seconds merge into the first. Both rules can be changed. Task sounds follow the same rules.
-
-### Agent cost
-
-**Settings → Agent Cost** adds spend indicators, totals, and cost sorting to the tree. The default meter appears when you hover an agent. Measure estimated API dollars (default) or plan quota: percentage points of the Codex rate-limit window used while the agent ran (Codex only, account-wide). Thresholds, budget and history follow the chosen unit.
-
-Costs estimate API list prices from agent and sub-agent transcripts. They can lag live use and do not represent subscription charges. A leading `~` flags an unknown model price.
-
-Choose thresholds based on past sessions, current agents, a budget, or burn rate. Add unknown model prices under `[cost.prices]` in `config.toml`.
-
-## Worktrees and session recovery
-
-Start an agent with `Ctrl+B W`, the tree menus, or the CLI:
+Agent worktrees and recovery in short: start an agent with `Ctrl+B W` or
 
 ```sh
 ilium new-pane --worktree --branch agent/fix-login -- codex
 ```
 
-Use an unused branch. Set `--base <ref>` to choose a different starting point.
+After a restart, Ilium restores the layout and relaunches pane programs, resuming verified Claude Code, Codex, or Antigravity sessions when provider data remains. Unsaved process state does not survive. Snapshots live in `<project>/.ilium/sessions/`; add `.ilium/` to `.gitignore` to keep them out of Git.
 
-**Settings → Git** offers a Linux post-create command for submodules and LFS. Creation runs Git hooks and filters.
-
-Ilium offers cleanup for worktrees it created when they are clean, merged, and unused. Unclear ownership or process state blocks removal.
-
-Branch deletion is separate; discarding files requires the full path.
-
-Snapshots live in `<project>/.ilium/sessions/`; rolling backups live in `.ilium/backups/`. Add `.ilium/` to `.gitignore` to keep session data out of Git. Backups exclude files edited inside pane applications.
-
-After a restart, Ilium restores the layout and relaunches pane programs. It can resume verified Claude Code, Codex, or Antigravity sessions when provider data remains.
-
-Unsaved process state does not survive.
-
-- `--restart-server` keeps the snapshot.
-- `--reset-session` deletes the snapshot.
-- `ilium kill-session <name>` ends the session and its panes.
-
-## Full reference
-
-### Install and platform support
-
-Linux is the primary platform. macOS and Windows support is implemented, with different test coverage. Worktree post-create commands are Linux-only.
-
-Ilium is early software. Check [CI results](https://github.com/arthurwolf/ilium/actions) for your platform.
-
-### Install from release packages
-
-Download packages from [GitHub Releases](https://github.com/arthurwolf/ilium/releases). No Rust toolchain is needed.
-
-No releases were published when checked on 2026-10-03. Until then, [build from source](#building-from-source). [Actions artifacts](https://github.com/arthurwolf/ilium/actions/workflows/release.yml) are candidate builds, not qualified releases.
-
-Download your archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS) from the same release. Verify the checksum before extracting.
-
-Keep the client, server, animation helper, two bundled `.iliumanim` animations and runtime libraries together. The helper and animations live beside the client; moving only `ilium` prevents bundled animation discovery. Add the extracted package directory to `PATH`, then run `ilium` in your project.
-
-#### Linux packages
-
-Choose your archive:
-
-- Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.tar.gz)
-- ARM64: [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.tar.gz)
-
-Verify it in the download directory:
-
-```sh
-sha256sum --ignore-missing --check SHA256SUMS
-```
-
-Confirm the selected archive reports `OK`. Extract with `tar -xzf <archive>` into a new directory, then add the package directory to `PATH`.
-
-The [installer](#quick-start) selects your architecture and verifies downloads. It stores packages under `~/.local/share/ilium` and launchers in `~/.local/bin`, respecting XDG overrides.
-
-The release workflow builds native Linux packages for both architectures under stable names: `ilium-linux-<arch>.<extension>`, with `<arch>` of `x86_64` or `aarch64`. The links below select assets from the newest published release; an Actions candidate is not a published or qualified installation. Aggregation binds each package receipt's payload map to the architecture's native audit and qualified archive. Direct Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora/openSUSE environments); Flatpak uses its declared platform runtime. The packages are unsigned; check the asset digest on the release page.
-
-Native animations require `/usr/bin/bwrap` and a Linux cgroup-v2 delegation that lets Ilium create its own child group with `memory`, `pids` and `cpu` controls. The deb and rpm declare Bubblewrap as a dependency. For an archive, AppImage or classic Snap installation, check that it is available on the host; installing it does not itself grant cgroup delegation or user-namespace permission. The installed animation check must demonstrate those permissions and clean up its own processes before that installation qualifies.
-
-##### deb package
-
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.deb) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.deb).
-
-Debian, Ubuntu and Mint: `sudo apt install ./ilium-linux-x86_64.deb`. It installs to `/usr/lib/ilium` and links `ilium` into `/usr/bin`.
-
-##### rpm package
-
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.rpm) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.rpm).
-
-Fedora: `sudo dnf install ./ilium-linux-x86_64.rpm`. openSUSE: `sudo zypper install ./ilium-linux-x86_64.rpm`. Same layout as the deb.
-
-##### AppImage
-
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.AppImage) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.AppImage).
-
-`chmod +x ilium-linux-x86_64.AppImage && ./ilium-linux-x86_64.AppImage`. It needs FUSE. The first run copies Ilium to `~/.local/share/ilium/appimage` so the session server outlives the mount.
-
-##### Snap package
-
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.snap) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.snap).
-
-`sudo snap install --dangerous --classic ilium-linux-x86_64.snap`. It uses classic confinement, so it is not on the Snap Store. Commands: `ilium`, `ilium.server` and `ilium.helper` (the bundled animation helper).
-
-##### Flatpak bundle
-
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-x86_64.flatpak) · [aarch64](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-linux-aarch64.flatpak).
-
-Experimental: `flatpak install --user ilium-linux-x86_64.flatpak`. The candidate forwards its trusted CLI to the host from the exact running Flatpak deployment, so panes can use host tools. This grants Ilium full host-command access; Flatpak is a distribution format here, not a security boundary for the CLI. Animation packages still run only in Ilium's separately confined helper. The candidate must pass the real installed host-launch, animation-resource and process-cleanup checks before it can be published as a qualified release.
-
-The Linux release gate requires receipt-bound installed-file checks, client, server and helper versions, Beach and Carpet rendering through the installed helper, an isolated pane lifecycle, and verified removal on each native architecture. Distribution containers cover deb, rpm and AppImage extract-and-run; disposable native runners cover deb, Snap, the real Flatpak sandbox and an AppImage FUSE mount. Missing required prerequisites or failed removal fail that gate. Separate VM evidence and public installation evidence remain distinct from these candidate checks; see [Linux acceptance and verification](release/RELEASING.md#linux-acceptance-boundaries).
-
-To remove a normal installation, stop your Ilium sessions and use the package manager that installed it (`apt remove ilium`, `dnf remove ilium`, `snap remove ilium`, or `flatpak uninstall --user io.github.arthurwolf.Ilium` for the user installation above). For AppImage, remove the downloaded image and the version cache you intend to remove under `${XDG_DATA_HOME:-$HOME/.local/share}/ilium/appimage`. Your project files and `.ilium/` session data are separate from the package installation.
-
-#### macOS packages
-
-Choose your archive:
-
-- Apple Silicon: [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.tar.gz)
-- Intel: [`ilium-macos-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.tar.gz)
-
-Compare this output with the archive's entry in `SHA256SUMS`:
-
-```sh
-shasum -a 256 <archive>
-```
-
-After the hashes match, extract with `tar -xzf <archive>` into a new directory. Add the package directory to `PATH`.
-
-The [installer](#quick-start) selects your architecture and uses the same layout as Linux.
-
-The macOS package builders also produce these formats. Publication is pending; the links select assets from the newest published release when available.
-
-| Mac | ZIP | Installer PKG | Disk image DMG |
-| --- | --- | --- | --- |
-| Apple Silicon | [Download ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.zip) | [Download PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.pkg) | [Download DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-aarch64.dmg) |
-| Intel | [Download ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.zip) | [Download PKG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.pkg) | [Download DMG](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-macos-x86_64.dmg) |
-
-For ZIP, extract into a new directory. For DMG, copy the complete Ilium folder out of the mounted image before ejecting it. Keep all three executables, both bundled animations and their runtime libraries together, then add that folder to `PATH`.
-
-The PKG needs administrator approval and installs into `/usr/local/lib/ilium/<version>/<arch>`. Add that directory to `PATH`; the package does not change your shell configuration. You can keep separate versions and choose the one your shell uses.
-
-The ZIP, PKG and DMG packages are unsigned and not notarized. macOS may block downloaded software. Review the release and verify its digest before approving an installation through macOS security controls.
-
-#### Windows packages
-
-For a guided install use [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) or [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) from the same release. To unpack by hand, choose [`ilium-windows-x86_64.zip`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip). Compare this output with its entry in `SHA256SUMS`:
-
-```powershell
-Get-FileHash .\ilium-windows-x86_64.zip -Algorithm SHA256
-```
-
-After the hashes match, extract into a new directory:
-
-```powershell
-Expand-Archive .\ilium-windows-x86_64.zip -DestinationPath .\ilium-package
-```
-
-Add the directory containing all three executables, both bundled animations and runtime DLLs to your user `PATH`.
-
-The [installer](#quick-start) supports PowerShell 5.1+, installs under `%LOCALAPPDATA%\ilium`, and updates your user `PATH`. Open a new terminal after installing.
-
-### Building from source
-
-Install Git, [rustup](https://rustup.rs/), and the native tools below. Clone the repository: it includes patched dependencies needed for the build.
-
-`rust-toolchain.toml` selects the Rust version. Cargo downloads dependencies on the first build.
-
-These commands build the local client, server and animation helper. Copy the two bundled animation packages beside those executables for source-run discovery. For portable release packages, follow [the release guide](release/RELEASING.md).
-
-#### Linux source build
-
-On Debian/Ubuntu:
-
-```sh
-sudo apt-get update
-sudo apt-get install -y git build-essential pkg-config libasound2-dev libssl-dev
-git clone https://github.com/arthurwolf/ilium.git
-cd ilium
-cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
-cp ilium-animation-js/assets/packages/{beach,carpet}-1.0.0.iliumanim target/release/
-./target/release/ilium
-```
-
-On other distributions, install equivalent C/C++ tools, Make, pkg-config, ALSA, and OpenSSL development packages.
-
-Run `make install` to install all three binaries and both animations into `~/.cargo/bin` (or `$CARGO_HOME/bin`). For another destination:
-
-```sh
-make install BIN_DIR="$HOME/.local/bin"
-```
-
-Add your chosen directory to `PATH`.
-
-#### macOS source build
-
-Install Xcode Command Line Tools (`xcode-select --install`), Git, and rustup. Use a native terminal for your architecture:
-
-```sh
-git clone https://github.com/arthurwolf/ilium.git
-cd ilium
-cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
-cp ilium-animation-js/assets/packages/{beach,carpet}-1.0.0.iliumanim target/release/
-./target/release/ilium
-```
-
-Run `make install` to install all three binaries and both animations into `~/.cargo/bin` (or `$CARGO_HOME/bin`). Choose another directory with `make install BIN_DIR="$HOME/.local/bin"`. Add it to `PATH`.
-
-#### Windows source build
-
-Install Git, rustup with the MSVC toolchain, and Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK.
-
-In Developer PowerShell for Visual Studio:
-
-```powershell
-git clone https://github.com/arthurwolf/ilium.git
-Set-Location ilium
-cargo build --locked --release -p ilium -p ilium-server -p ilium-animation-js --bin ilium --bin ilium-server --bin ilium-animation-helper
-Copy-Item ilium-animation-js\assets\packages\beach-1.0.0.iliumanim,ilium-animation-js\assets\packages\carpet-1.0.0.iliumanim target\release\
-.\target\release\ilium.exe
-```
-
-Run from `target\release`, or copy all three executables, both animations and required runtime DLLs into one directory on your user `PATH`.
-
-Open a new terminal before running `ilium` in your project.
-
-### Settings, inference, and privacy
-
-Open Settings with `Ctrl+B :` and the active key map with `Ctrl+B ?`.
-
-On Linux, global settings live in `~/.config/ilium/config.toml`. Use `[keyboard]` for prefixes and `[keybindings]` for action remapping.
-
-#### Inference and privacy
-
-Terminals, agent detection, and session storage work without an LLM. AI titles, tree organization, and optional Smart Copy suggestions use your selected provider.
-
-New installs enable AI titles and tree organization through Kilo Gateway. Choose a local provider such as Ollama or disable the triggers before entering sensitive content.
-
-Kilo's default free model was marked as permitting prompt training when checked on 2026-09-27. Review its [data and usage guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free). You can also select OpenAI-compatible, Anthropic, or OpenRouter providers.
-
-For OpenAI, select **OpenAI-compatible** in **Settings → Inference**, enter your API key, then choose **Load available models**. Use left/right on the Model row to select a discovered ID, or Enter to type one manually. Refreshing the catalog preserves your saved model. The catalog includes every model exposed by your key; some IDs support other APIs rather than text chat, so use **Test provider** to verify your choice.
-
-Submitting an inference value keeps its editor open until the change is saved to disk. If saving fails, your input stays in the editor with an error; press Enter to retry.
-
-File logging is off by default. Enabled logs can retain project prompts and request bodies, with credentials redacted. Treat logs as sensitive.
-
-Restructure prompt size is limited to **200,000 estimated input tokens** by default.
-Change **Settings → Inference → Restructure token budget** or set
-`restructure_prompt_token_limit = 200000` under `[inference]` in `config.toml`.
-The estimate rounds up one token per four Unicode characters; the selected
-provider’s actual context limit still applies. The budget includes instructions,
-scene catalog, protected layouts, and corrective retry feedback.
-
-#### Automatic titles
-
-Agent panes keep their existing names until Ilium can verify a real task from
-that pane's session history or a task submitted to its current agent session.
-Launching an agent, seeing its startup screen, or receiving a monitoring message
-does not establish a task. Missing or unverified history leaves the name intact;
-tree organization can still move the pane into a group.
-
-A name you enter through Rename stays protected, including its short title and
-icon. Asking AI to retitle an agent pane produces an automatic name and follows the
-same task checks. A delayed AI result cannot replace a newer manual name or a
-newer accepted AI title.
-
-#### Custom instructions
-
-**Settings → LLM Instructions** collects seven optional instruction inputs. The same values are available in their feature tabs:
-
-| Instructions | Feature tab |
-|---|---|
-| Voice assistant | Voice control |
-| Entry naming | Titles |
-| Organization; shared naming and organization context | Inference |
-| Project naming; Smart Copy | Inference |
-| Ask for update | Agent Monitoring |
-
-Select an input and press Enter, or click it. In feature tabs, `i` focuses the instruction inputs. Apply with `Ctrl+S`; Esc cancels. Delete clears a selected input. Empty inputs use the built-in defaults. Shared context applies to entry names, project names, and tree organization.
-
-Instructions are added to new requests and saved globally. Both locations edit the same value. Voice instructions refine the assistant's behavior; the other inputs refine their specific task while preserving its required output format.
-
-### Automation and agent setup
-
-Scheduled input and text triggers send commands to panes. Check the target before using them around confirmation prompts. Each text trigger waits its **Delay** (whole seconds, default 60, `0` for immediate) between detecting a match and sending the message; triggers saved before the setting existed also use 60.
-
-Reset forecasts use public Claude and Codex announcements. They cannot predict private rolling limits or guarantee a reset.
-
-Optional agent setup adds marked Chatroom and progress instructions to Claude and Codex configuration files, preserving surrounding text. Chatroom setup also creates `CHATROOM.md` and hooks.
-
-For long jobs, validate a JSON probe with `ilium progress check`, then register it with `ilium progress set`. Ilium polls from the project root and reports the result. Use absolute paths; see `ilium progress --help`. The probe's JSON carries a one-line `message` (always visible in the pane footer) and an optional multi-line `details` that appears when you hover the footer; both are written to make sense without having read the agent's session.
-
-The server accepts unauthenticated `POST /create_agent` requests on `127.0.0.1:8872`. Any local process can submit one. Keep this listener private; change `[http_api].port` if sessions collide.
-
-### Voice
-
-Enable voice control with `F8` or **Settings → Voice control**. It needs an OpenAI Realtime key, network access, and an attached client. Microphone input also needs audio devices.
-
-Check the target before sending text. Destructive semantic actions require confirmation. Terminal submission includes Enter unless you enable its confirmation option.
-
-Send typed text to the live voice conversation:
-
-```sh
-ilium voice say --start "what agents are running?"
-printf '%s\n' "focus the first agent" "say hello to it" | ilium voice say -
-```
-
-`--start` saves the voice-on setting; `-` reads input lines.
-
-Outside Ilium, pass `--cwd` and `--session-name`. An attached client is required. A JSONL result confirms queuing; check the target for the outcome. See `ilium voice say --help`.
-
-### Ambient backgrounds
-
-**Settings → Animations** adds a Braille background, with a full-screen preview (`f`). Choose landscapes, space scenes, video, images, an audio spectrum, or quiet procedural scenes such as aurora curtains, fireflies, window light, frost and crop circles. Each scene has its own controls.
-
-Backgrounds are off by default. Ilium saves your choice per project in `.ilium/config.yaml`. The settings put scenes beside grouped controls; Loop playback builds 30 fps frames in the background and shows packed-frame RAM usage.
-
-Choose **Semantic** and enable **Background** to use the animation recommended by AI tree reorganization. **Project** scope is the default; **Entry** follows the selected pane, group or split. Every reorganization records recommendations, including scene parameters: Paris work can use the offline Paris map, and pathfinding work can use Carpet's Snake. Changing selection makes no extra AI request. Missing recommendations show a status asking you to reorganize the project.
-
-- **Stars, Earth, and satellite clouds** share a location set by address, coordinates, or map. Earth and cloud imagery need network access.
-- **Voxel landscape** slowly pans over an isometric block world. **World source → Generated** offers 52 surface biomes, forests, deserts, villages, cave mouths and ravines, with 208 feature recipes and 64 original Ilium textures. **Saved maps** is an experimental reader for your saved Java worlds. Choose zoom and rendering controls; generated terrain also has vegetation and structure density controls. Generated terrain supports monochrome or pastel dithering with palette, hue, saturation and lightness controls.
-- **Solar system** offers all eight planets, orbit paths, distance and size realism, and speeds up to ten simulated years per second.
-- **Topographic maps** draws contour lines as Braille dots on a slowly panning map or a turning globe, from public elevation surveys embedded offline: Earth (NOAA ETOPO 2022), the Moon (NASA LOLA), Mars (MOLA), Venus (Magellan), Mercury (MESSENGER) and Ceres (Dawn), plus four generated fictional worlds. Choose the world or a cycle, flat or globe, zoom, number of contour lines or a fixed spacing in metres, index lines, thickness, dotted or hidden lines below zero, relief shading, colours, pan direction and speed, start position, and a zero-level shift or tide that floods and drains the shores.
-
-For **Saved maps**, leave **Saved maps folder** blank to use the official launcher location: `~/.minecraft/saves` on Linux, `~/Library/Application Support/minecraft/saves` on macOS, or `%APPDATA%\.minecraft\saves` on Windows. For another launcher, enter the absolute folder containing your worlds. Saved rendering requires the installed Java **1.19.3** client assets in the official launcher folder, even when saves are elsewhere; it does not download them. The reader admits Anvil chunk DataVersions **2834–3218** and fully saved chunks. Older/newer formats, unfinished chunks, missing source coverage or unsupported pack content produce a status message. Saves are read-only; missing terrain is never generated. Tour selection seeks block-derived biome appearances on odd runs and structures on even runs; appearance history counts only terrain present in the emitted background. Native rendering and automatic tours remain experimental.
-
-To use a local texture pack with **Saved maps**, choose a **Custom pack profile**, enter its absolute path in **Custom pack file or folder**, and select **ZIP archive** or **Directory** under **Pack source type**. Set **Root inside pack** when the pack files are nested inside another folder. Each profile retains its own custom path. A blank path uses the installed Java 1.19.3 assets; a selected Java pack overrides their models and textures.
-
-All animations share one look and one set of display controls (Settings -> Animations, lower left): colour mode (Color, Greyscale or Monotone), 38 palettes (pastel, neon, sunset, ocean, viridis, solarized, nord and more), brightness (turn it down to keep the background discreet), contrast, gamma, colour intensity, hue shift, invert, edge fade, grey tint, 7 style presets (Whisper, Soft pastel, Pastel dream, Faded film, Sepia memory, Night vision, Thermal camera, Matrix, Amber terminal, Blueprint and more), 46 colour filters with adjustable strength (red/amber/cyan gels, invert, sepia, cyanotype, duotones, thermal, Game Boy, cross process, channel swaps and more), 15 dithering methods (Bayer, blue noise, halftone, scan lines, crosshatch, Floyd-Steinberg, Atkinson and more), pattern contrast and invert, a frame-rate cap, and whether the animation shows behind both panels, only the left tree panel or only the right terminal panes. Changing any of them changes every animation.
-- **OpenStreetMap** draws real streets, buildings, water, green spaces and railways. Its bundled extracts support offline tours of the world, Europe, Asia-Pacific, coastal cities and the Americas. Choose **Map location** to click a world-map point, enter `latitude, longitude`, or search a full city or street address by pressing Enter. Search uses Photon by default; an authorized Nominatim-compatible service and the older city-only search are selectable in scene settings. Map location belongs to OpenStreetMap and does not change the location used by the sky, weather or city lights. A newly selected point or an expanded landmark/theme list needs an Overpass service you configure; searching an address alone does not download its map geometry. Local Overpass JSON remains available. Map data: [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL. The picker credits its [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) land mask and the selected search provider; city-only results use [Open-Meteo](https://open-meteo.com/en/terms) and GeoNames (CC BY 4.0).
-- **Galactic empires** follows a procedural 480-system star map with rounded colored territories as empires expand, build fleets, make peace and fight to unite the galaxy. Its 27 controls cover map density and spiral shape, empires and seed, camera zoom and orbit, territory size and softness, stars, hyperlanes, fleets and trails, capture flashes, and victory pause. Visual and timing edits apply to the running galaxy; map-generation edits start a new one.
-- **Hex expedition** pans over an endless sea of explorer's islands generated as you watch: jungle, savanna, desert, arctic and volcanic lands, each island with its shore, biomes, one moored ship, one distant goal temple or pyramid, and villages, camps, ruins, caves, mines and shrines placed where they belong. Maps are revealed in the next hex by hex, with animated water, swaying trees, smoke, campfires, geysers, lava and weather. The tile art is drawn by Ilium; no game artwork is used.
-- **Vector TD** is a full-screen tower defense that plays itself, inspired by the [Vector TD](https://www.crazygames.com/game/vector-td) browser game. An AI builds, upgrades and unlocks glowing vector towers against waves of monsters (a boss every tenth wave), sends waves early when its defence is strong, and moves from wave to wave, map to map and level to level while towers and monsters grow stronger. Pick one of six maps or play them all in turn, the start level, waves per level, difficulty and game speed. Colours are black and white or a colour scheme (Neon, Cool, Warm, Phosphor) with brightness, contrast, hue and saturation sliders. The towers, monsters and maps are Ilium's own.
-- **Stars** offers hour/day-per-second speeds, optional constellation lines and simulated satellites. Turning the horizon off includes the whole sky.
-- **Lily pads** supports up to 64 opaque leaves, with optional rooted placement.
-- **Video** needs `ffmpeg`; Germination and random scenes also need `ffprobe`. In **Settings → Animations → Video**, choose **Series → Germination** to play the bundled plant-growth playlist from its original remote URLs. Clips stay in RAM while playing; no downloaded video cache is written to disk. Use the same playback, style, fit and conversion controls as Custom videos. Switching back to **Custom** restores your retained source. Scene status shows the title, author and licence; the [catalogue](ilium-ambient/assets/germination.json) includes source pages and licence links. Folder scans, downloads, decoding and cleanup run away from input handling, with limits and timeouts.
-- **Audio spectrum** uses `pw-record` or `parec` on Linux and WASAPI on Windows. macOS needs a loopback device such as BlackHole.
-- **Images** accepts files, folders, or URLs, with slideshow and pan/zoom options.
-- **Wikipedia** scrolls random articles linked from today’s English Main Page, keeping headings, references, infoboxes, and images. Choose readable Text or the default Braille with zoom; use greyscale or Wikipedia, Pastel, Sepia, and Night palettes, then adjust hue, saturation, lightness, and scroll speed. Downloads are cached for offline reuse.
-- **Live graphs** offers 32 public keyless series: eight crypto markets with genuine OHLC candles, eight daily ECB currency reference rates, solar wind and magnetic measurements, ISS orbital estimates, earthquake activity, Wikipedia edit aggregates and Quicknet randomness. Choose line, bars or candles, time window and refresh rate. Provider minimum intervals apply; received and observed times are shown separately.
-- **Digits of Pi** scrolls up to 20,000 exact digits as native text or real-font Braille. Choose font size, scroll speed, brightness and a hue for each digit.
-- **Live earthquakes** plots the USGS all-day feed, including tiny, zero, negative and unknown magnitudes, with animated markers and magnitude labels. It refreshes at most once per minute.
-- **Live aircraft** plots airborne positions reported by OpenSky over a Braille world coastline. Anonymous global access is limited, so refresh is at least 15 minutes. Every reported aircraft is one undithered dot at twice the brightness of the coastline (heading arrows are an opt-in setting). Coverage is incomplete: OpenSky anonymous data has terrestrial receivers only, so open ocean has few or no reports.
-- **Live boats** uses public Finnish AIS positions from Digitraffic, with a 30-second minimum refresh. It covers Finnish waters, not the global fleet. Aircraft and boats have separate map and marker colors and brightness.
-- **Live chess** follows Lichess TV with dithered pieces, board orientation and independent colors. Clocks show the latest feed values; connection failures retain the last board with its receipt age.
-- **Carpet** bends parallel isometric hatch lines over hidden moving spheres and tubes. Choose mouse hunters, food-seeking Snake, slow Conway Life, automated legal chess, Lichess TV chess, a bouncing DVD ball, planetary orbits, or digital and analog clocks. Snake plans safe food routes with a tapered body, feeding pulses and gently breathing food. Carpet defaults to a 12×12 Snake board; saved project settings take precedence. Infinite lines is enabled by default: hatches continue to the screen edges while the diamond remains the interactive work area. Turn it off to stop the lines at the diamond. Camera, hatch spacing, lift, object size, easing, timing and each mode's behavior are configurable; clocks use an explicit UTC offset independently of animation speed.
-- **Wind** blows dots across the empty parts of your screen. A small physics simulation moves them under a fixed or slowly rotating wind with gusts, air drag and optional gravity; each dot has a configurable weight, so light dots follow the wind and heavy ones resist it and fall faster. Dots live only in cells that show no text and bounce off everything else. When a cell gains a character, Wind works out where it came from: text that scrolls up, down or sideways pushes nearby dots the way it moves, at a configurable speed, so scrolling output appears to sweep the dots along. Text that appears from nowhere, such as typing, pushes dots away more gently. Dot count, weight, weight variation, drag, wind strength, direction, rotation, gusts, gravity, bounce, edge behaviour, both push strengths, push reach and scroll detection range are all settings. Optionally, dots that pile into one cell merge into a larger dot character.
-
-Live sources retain the last good data on request failures; they do not substitute simulated events. Quicknet values are displayed without BLS signature verification.
-
-Imagery comes from NASA GIBS and EUMETSAT (Copyright EUMETSAT). Address search uses Open-Meteo and GeoNames data (CC BY 4.0).
-
-### Command-line reference
+## Command line
 
 | Command | What it does |
 | --- | --- |
 | `ilium` | Attach to or create the current project's `default` session. |
 | `ilium new-session <name>` / `ilium ls` | Create or attach to a named session / list sessions. |
 | `ilium new-pane -- <cmd>` | Add a terminal pane without attaching the TUI. |
-| `ilium new-pane --session-name <name> -- <cmd>` | Add a terminal pane to a named session. |
-| `ilium chat --help` / `ilium progress --help` | Show Chatroom and progress commands. |
-| `ilium voice say --help` | Show typed voice input. |
+| `ilium chat --help` / `ilium progress --help` | Chatroom and progress commands. |
+| `ilium voice say --help` | Typed voice input. |
 
-Run from your project directory or pass `--cwd`. Angle brackets mark placeholders. See `ilium --help` for all commands.
+Every command and flag: [Command-line reference](src/docs/cli-reference.md).
 
-### Editors, boards, and Smart Copy
+## Settings and data
 
-Use the mouse to focus panes, move entries, and scroll history.
+Open Settings with `Ctrl+B :` and the key map with `Ctrl+B ?`. Global settings live in `~/.config/ilium/config.toml` on Linux. Terminals, agent detection and session storage work without an LLM; AI titles, tree organization and optional Smart Copy suggestions use the provider you choose. File logging is off by default. See [Settings](src/docs/settings.md) and [How it works](src/docs/how-it-works.md).
 
-The editor supports Markdown previews and autosave. Boards store cards in a Markdown file or folder you choose.
+## Project, help, and licence
 
-Smart Copy freezes the visible screen and offers regions to copy. AI suggestions select coordinates; clipboard text comes from the captured screen. Click regions to build a multi-selection: selected regions stay inverted, click again to deselect, and every click puts the whole selection on the clipboard. Regions nest, so a URL inside a line is selected by clicking the URL and the whole line by clicking anywhere else on it; the wheel or Tab cycles the overlapping regions under the pointer.
-
-**Smart Copy light** needs no model: hold Ctrl (configurable to Alt or Shift, or switch it off, under Settings → Terminal) over a terminal pane, click regions to select them, then release the key. The selection goes to the clipboard and a short "Preview" dialog shows what was copied while a progress bar counts down one second. Terminals report held modifiers on mouse events but not the key release itself, so releasing is detected from the first mouse event without the key, a key-release event on terminals that send one, focus loss, or about 1.5 s after your last click. Esc cancels without copying.
-
-Without waiting for the AI, Smart Copy recognises: URLs, git remotes, e-mail addresses, IPv4/IPv6 addresses (with ports and prefixes), `host:port` endpoints, domains, file paths (absolute, `~/`, relative and bare names, checked against the pane's working directory, its ancestors and the project root so existing files and directories are labelled), `file:line:col` locations, Rust-style `a::b::C` names and their segments, type names, identifiers, constants, function calls, hashes, UUIDs, versions, package specs, colours, `KEY=value` assignments, command-line flags, quoted strings, `key: value` fields, sentences, timestamps, dates, times, measurements, amounts, phone numbers and postal addresses (street plus postcode and city, on one line or across up to three lines, in English, French, German and Romance-language layouts, plus P.O. boxes). Text the program styled stands out too: foreground-coloured runs (Codex prints file names and commands in blue), highlighted backgrounds, bold, italic and underlined text. Grey and default colours are ignored.
-
-### How it works
-
-One `ilium-server` per project session owns pane processes and session state. Detaching leaves them running.
-
-The client connects over local IPC. Ilium identifies agents from processes and reads activity from terminal screens.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
-
-### Project, help, and licence
-
-Report problems in [issues](https://github.com/arthurwolf/ilium/issues). Include your version, OS, terminal, command, and observed behaviour. Remove private content from logs.
-
-See [AGENTS.md](AGENTS.md) for contribution rules and [ARCHITECTURE.md](ARCHITECTURE.md) for design and prior art.
-
-Workspace checks:
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --no-fail-fast
-```
+Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [AGENTS.md](AGENTS.md) and [Contributing](src/docs/contributing.md).
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).

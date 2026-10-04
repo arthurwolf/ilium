@@ -57,7 +57,7 @@ The left panel renders this tree via `tui-tree-widget`: expand/collapse groups, 
 
 The right panel renders a normal pane alone, or every child of a selected split view. Two and three children follow the split's orientation; four use a 2 by 2 grid. Selecting a child keeps the whole split visible while making only that child active for keyboard and pointer input.
 
-- For a detected agent, its viewport title includes the real agent PID and its session ID when the CLI exposes one; otherwise it explicitly says that the session is unavailable rather than guessing. Submitting exact `/clear` to Claude or Codex immediately discards that detected session ID and every prior title field, showing `<new>` until the replacement session can be verified and titled.
+- For a detected agent, its viewport title includes the real agent PID and its session ID when the CLI exposes one; otherwise it explicitly says that the session is unavailable rather than guessing. Submitting exact `/clear` to Claude or Codex immediately discards that detected session ID and resets an automatic title to `<new>` until the replacement session can be verified and titled. A manually fixed name, short name, icon and ownership survive this reset.
 - AI project restructuring treats every existing split view as a user-owned atomic layout. It may rebuild ordinary groups around a split and retitle the panes inside it, but it cannot create, remove, replace, reorient, reorder, or change the membership of a split. Because the original split and pane IDs survive the authoritative tree snapshot, a currently focused split and its active pane remain focused through the restructure.
 - Every AI restructure prompt includes the concrete animation catalog and relevant typed scene controls. The reply must supply a deduplicated recommendation table and pointers for the project and every output entry, including groups and split views, even when Semantic rendering is disabled. The client validates concrete kinds, control bounds, conditional dependencies and resource policy before sending an expanded `RecommendedRestructurePlan`. Core checks exact output-path coverage and the captured project generation, builds a candidate tree and publishes structure plus recommendation metadata together. The server serializes apply/undo publication, retains the undo image until restore succeeds and requests the existing debounced snapshot save; an acknowledgement proves the in-memory commit, not completed disk persistence. Recommendations travel in ordinary tree snapshots and survive reattach. Undo restores the previous recommendations while advancing the generation so an older inference cannot overwrite it.
 - Click either panel to focus it. When a terminal application enables an xterm mouse protocol (for example `vim`, `htop`, or `lazygit`), ilium forwards clicks, drags, scrolls, and modifiers to that PTY using its requested encoding.
@@ -127,7 +127,7 @@ OpenStreetMap (`ilium-ambient::scenes::openstreetmap`) renders ten provenance-re
 
 Voxel landscape (`ilium-ambient::scenes::voxel_landscape`) prepares absolute-coordinate 16-block chunks on one owned, cancellable low-priority worker. A pure terrain kernel supplies climate, exclusive solid heights, river occupancy and real cave air intervals. Ecology classifies the unchanged columns into 52 surface environments, then a deterministic wetland layer derives shallow pools and mud islands for both visible occupancy and feature placement; cached kernel columns remain unchanged. The catalogue contains 208 distinct geometry recipes and 64 original procedural 8×8 textures, distributed under this repository's MIT licence; no Minecraft or texture-pack artwork is embedded. Coordinate-owned features and complete village street plans are sampled through a halo, then a bounded overlay resolves solid blocks and air carves. The renderer projects exposed cube faces into a 2D depth buffer with stable global block identities and a total tie order. Camera motion uses absolute scene time, while the UI receives the latest prepared mesh through a single slot and never waits for generation. Material luminance drives the shared dither threshold; per-cell colours independently apply monochrome or pastel palette, hue, saturation and lightness. All scene controls persist through the existing ambient settings.
 
-Saved Java worlds use the separate `ilium-ambient::minecraft` source pipeline and `SavedScene`, selected by `SavedMapsSettings` in the scene registry. `ilium-platform::minecraft` owns installation discovery and lossless directory identities. Blocking catalog, Anvil/NBT decoding, source qualification and native asset preparation run on the scene-owned worker; the UI receives prepared frames. Chunk coverage rejects absent, unfinished or unsupported input rather than inventing air. The planner retains its original block-evidence targets separately from the complete inverse-projected renderer source, which must cover the route, viewport and neighbor/tint support. Native solids and fluids share the selected asset bank and one raster depth/ownership frame. Final painted-owner acknowledgements alone advance appearance history; generation, source identity and issued-pose checks reject stale acknowledgements. History uses a separate cache repository and never writes to world files. This source path is still experimental and requires local native/render acceptance; generated voxel terrain remains the default.
+Saved Java worlds use the separate `ilium-ambient::minecraft` source pipeline and `SavedScene`, selected by `SavedMapsSettings` in the scene registry. `ilium-platform::minecraft` owns installation discovery and lossless directory identities. Blocking catalog, Anvil/NBT decoding, source qualification and native asset preparation run on the scene-owned worker; the UI receives prepared frames. Chunk coverage rejects absent, unfinished or unsupported input rather than inventing air. Each selected save can retain up to three disjoint, fully qualified radius-five windows under its stable map identity; across the four-save catalog this is bounded to 384 MiB of decoded-window charge within the 512 MiB catalog reservation. The planner admits up to 384 source chunks, while explicit coverage keeps disconnected saved regions separate and never fills their gaps. The planner retains its original block-evidence targets separately from the complete inverse-projected renderer source, which must cover the route, viewport and neighbor/tint support. Native solids and fluids share the selected asset bank and one raster depth/ownership frame. Final painted-owner acknowledgements alone advance appearance history; generation, source identity and issued-pose checks reject stale acknowledgements. History uses a separate cache repository and never writes to world files. This source path is still experimental and requires local native/render acceptance; generated voxel terrain remains the default.
 
 Topographic maps (`ilium-ambient::scenes::topographic_maps`) embeds one 12-bit equirectangular elevation PNG per measured body under `ilium-ambient/assets/topography/` (NOAA ETOPO 2022, NASA LOLA/MOLA/Magellan/MESSENGER/Dawn, all public domain; provenance in `manifest.json`, regenerated by `build_assets.py`). Each frame samples the grid per Braille dot through a flat or orthographic camera, derives integer contour levels from the elevation and marks a dot wherever a neighbour's level differs, so lines are one dot wide with no vector step. A world is decoded or generated (fictional worlds: seeded spherical value noise, no seam) on one owned worker; the scene keeps drawing the previous world and dissolves to the next when ready. Everything is a pure function of the animation clock and settings.
 
@@ -308,13 +308,16 @@ repeated prefixes. Isolated original-versus-candidate chapter fixtures pass;
 full-buffer context capture/parsing, TextArea storage and live acceptance remain
 unfinished.
 
-The document leaf migration is currently a private candidate: cloned syntax
+The document leaf migration is applied to the current tree: cloned syntax
 tokens and rendered text retain their original physical storage charge until
 the CPU retirement owner releases the last allocation. Its client build,
 Markdown contracts and editor contracts passed, but the new forcing fixtures
 initially declared job costs smaller than the captured types and were rejected
-before exercising retirement. Those fixture costs are being corrected without
-weakening admission. This candidate is not applied to the current tree.
+before exercising retirement. Corrected fixture declarations passed all six
+preparation tests, including independent last-reader release and queued
+cancellation, without weakening admission. Current combined compilation and
+release acceptance remain unverified; TextArea and context ownership migration
+is still incomplete.
 The native input owner and complete terminal adapters are now integrated into
 the current tree after producer/caller inventory and guarded three-way merges.
 Input admission precedes terminal mutation. One admitted owner handles normal
@@ -324,8 +327,29 @@ the shared codec bank instead of starting a duplicate bank per connection.
 Shutdown errors retain undelivered events and live retirement tickets alongside
 earlier client errors. The declared process limit includes these owners; it is
 not an allocator or measured RSS guarantee. Frozen candidate checks cover the
-selected contracts, but current combined compilation, release and real-terminal
-acceptance remain unverified.
+selected contracts, including four isolated Linux PTY cases for input/query
+ordering, large paste, cancellation and retirement. Current combined
+compilation, release and whole-UI real-terminal acceptance remain unverified.
+
+External file, directory and URL launches now use the existing shared I/O bank.
+One client owner retains at most eight ordered requests, with explicit target
+byte limits and launch acknowledgements. A newer click never coalesces an
+earlier launch. Refusal, OS failure and an unknown worker outcome produce
+distinct feedback; shutdown drains accepted requests before closing admission.
+Terminal-link confirmation also uses the existing acknowledged clipboard owner
+for Copy. The UI moves each prepared launch message with its original charge.
+
+The platform adapter owns one reaper with an explicit 2 MiB stack and 32 fixed
+slots covering both in-flight spawns and running children. Argument arrays,
+non-UTF-8 paths, dash-prefixed filenames, null stdio and Windows shell error
+mapping remain at that boundary. Closing never waits for or kills a user
+application; surviving Unix children retain the admitted service through actual
+join, and surviving handles retain its bookkeeping charge. The process
+declaration now counts 30 worker roles under the unchanged 4096 MiB declaration;
+this does not bound native allocator RSS or impose a host-wide limit. The five
+caller/adapter files are applied and formatted. Their new ordering, overload,
+shutdown and real-child fixtures are authored; captured qualification is
+running, so compilation, execution and release acceptance remain unverified.
 
 Board file completion retains its original charged result when outbound request
 admission refuses an open. The collector retries that ordered head without
@@ -421,6 +445,17 @@ platform durable replacement operation before reporting success. On Unix that
 operation also syncs the containing directory; Windows uses write-through
 replacement. Existing snapshot persistence readback and oversize-preservation
 tests pass on Linux; crash/power-loss and Windows execution remain unverified.
+
+The ordered snapshot disk service now reserves one physical worker from the
+existing server execution quota before constructing its channels. Its declaration
+includes a requested 2 MiB stack, the existing 64 MiB service allowance and bounded
+command/path metadata; these are admission declarations, not measured RSS bounds.
+The native supervisor retains that reservation through actual thread join even
+after logical service drop. Production startup fails explicitly if the session
+execution owner is absent; independent test roots create no additional execution
+pool. Captured-source Linux qualification passes all12 snapshot-service tests, including
+blocked retirement, exhausted worker admission and retry readback. This establishes
+the tested service contracts; release and loaded-runtime qualification remain open.
 
 Presentation acknowledgements retain the exact sources and hit targets actually
 painted in their complete frame. Selection, context menus and Smart Copy use
@@ -533,8 +568,16 @@ geometry retains the emitted viewport and terminal instance; provisional layout
 or pane replacement cannot redirect admitted terminal input.
 
 Document preparation is keyed by instance, source revision, width and settings.
-Cross-line syntax, Markdown layout, image decode and font preparation run on the
-finite banks. Ordered file writers acknowledge durable publication before
+Rendered-source capture uses the same interactive turn budget as source windows
+and syntax capture: at most256 KiB and1024 lines in aggregate, with each pane
+receiving at most64 KiB per turn. A partial capture retains its original job
+admission and typed source retirement. Before the next chunk, the full key is
+checked again; a changed editor instance, revision or layout retires the partial
+source instead of mixing revisions. Whole-source size checks occur incrementally
+rather than scanning the entire buffer on the interaction loop. Cross-line
+syntax, Markdown layout, image decode and font preparation run on the finite
+banks. The new capture regressions are authored but not yet executed; existing
+whole-source limits and the separate TextArea bulk-mutation gap remain open. Ordered file writers acknowledge durable publication before
 clearing dirty state, retargeting Save As or dismissing a save dialog. Editor,
 board and configuration consumers own conflict and rollback decisions; a failed
 acknowledgement never proves that a rename was not published. Directory sync
@@ -569,6 +612,17 @@ or transport delivery, while persistence and server application use their own
 acknowledgements. These components are workers and services; the future
 user-written JavaScript extension system has a separate contract.
 
+Light Smart Copy reserves a position in the existing ordered clipboard service
+before moving its original selection to CPU preparation. Later clipboard reads
+and writes cannot pass that position. Prepared text and cached preview facts
+retain their storage admission; successful native acknowledgement starts the
+preview countdown. Preparation or write failure restores the original selection
+for an explicit retry or cancellation. Shutdown drains acknowledgements and
+returns any unresolved original through typed custody before the execution bank
+closes. These source changes are integrated; their new recovery and ordering
+fixtures are awaiting client qualification. Model-assisted selection preparation
+and whole-editor bulk mutation remain separate open inventory items.
+
 Process bootstrap now designates the shared quota before logging starts.
 The supervisor keeps its permanent physical admission; the ordered logger keeps
 its worker admission through actual join and its storage admission through the
@@ -580,15 +634,78 @@ child, verifies registry/custody rollback, restores only that child's soft limit
 and verifies a later real worker joins. This complements the separate actual
 quota startup test; it does not prove all native library or process resources.
 
-Startup accounting and caller integration remain incomplete. The current
-interactive client still starts five general-bank threads and a separate codec
-bank; the admitted input owner and shared interactive codec migration remain
-private proposals. The current snapshot writer still needs its shared physical
-worker lease and final-write shutdown integration. The platform registry caps
-running and retiring owners at1024, excluding its supervisor. Neither that cap
-nor cooperative declarations establish a whole-process OS-thread/RSS bound.
-Current caller qualification, library thread census and matched runtime
-measurements remain separate acceptance gates.
+The interactive client now reuses its five-thread finite bank for codecs and
+has an admitted terminal-input owner. Before constructing either existing Tokio
+runtime, the process root reserves its two async and four blocking roles with
+2 MiB requested stacks. The supervisor retains this fixed runtime declaration
+for process lifetime: a timed runtime shutdown can leave blocked callbacks alive,
+so dropping a local guard would release capacity prematurely. Same-root repeated
+initialization is idempotent; a foreign root or changed declaration is refused.
+The selected client census includes one external-opener reaper and totals36
+roles within the unchanged4096 MiB storage ceiling. Foundation qualification
+covers runtime admission/refusal, idempotence and retained process custody;
+captured-source server and CLI all-target compilation also passes. The later
+client changes require their own qualification; no installed-runtime claim follows.
+
+The snapshot service reserves its persistent OS worker and declared bounded
+mailbox/write storage on the server's existing root before spawn. Its physical
+admission lasts through actual join. Failed coalesced writes restore the dirty
+obligation and reuse the existing750 ms debounce/notification instead of waiting
+for a new user mutation. The ordered writer retains earlier failure history even
+when a later retry succeeds. Captured-source qualification passes the shared-root and retry regressions,
+including authoritative persistence readback. The write envelope alone does not
+qualify native JSON or legacy YAML read/migration peaks; result custody and parser
+admission have separate owners and qualification receipts. Startup normalization now detects a legacy
+project wrapper from the root project predicate instead of cloning the entire
+tree for equality comparison. Both launch-project and agent-resume normalization
+still run. Its frozen-source qualification passes 30 persistence tests (two ignored),
+server all-target compilation, strict Clippy and scoped formatting. These receipts
+predate the later result-retirement changes.
+
+Snapshot reads now return typed owned results with a separate storage lease from
+the existing server quota. The operation reservation can be released at delivery
+while pending recovery retains the decoded result. Restore transfers the same
+lease to server state before its first await; queued snapshot capture handles
+also retain it when they outlive that state. No second worker or quota is created,
+and a pending recovery decision does not consume the write-operation budget.
+Two new fixtures cover storage after actual worker join and storage refusal with
+original-file readback. Frozen-source qualification passes 14 snapshot-service tests,
+30 persistence tests (two ignored), server all-target compilation, strict Clippy
+and scoped formatting. Source and log hashes were independently verified. Decoder
+preallocation remains open, so this change does not establish a complete
+read-memory bound. Production read results now also reserve a destruction
+envelope on the existing CPU bank before decoding. Discard and cancelled
+acknowledgements hand the original result and its same storage lease to that
+bank; no new worker is created. Shutdown releases an unchosen pending recovery
+result before closing the bank. Two additional fixtures park both CPU owners
+and force retirement-slot refusal to check retained custody and unchanged disk
+bytes. These later source changes and fixtures are not yet compiled or executed;
+partial-restore cancellation and exceptional shutdown custody remain unqualified.
+
+Native JSON loading now uses the shared allocation-checked Serde visitors before
+owned strings and collection growth, while preserving trailing-input rejection.
+The caller admits parser scratch separately before queueing the read on the same
+server root. Its conservative declaration covers the installed JSON parser's
+scratch buffer and old/new Vec capacity coexistence; that lease releases after
+the decoder actually returns, while the decoded result keeps its own lease.
+Resource-admission errors have a typed snapshot error. Recovery startup returns
+that error instead of starting a fresh writer that could overwrite the original.
+Operation-capacity and queue-overflow refusals use the same typed error. Snapshot
+worker construction failures also use it because construction admits/spawns a
+worker before any disk operation. Three later authored fixtures force operation,
+parser and worker-creation pressure, verify original-file readback and retry;
+they are not yet compiled or executed.
+Four new fixtures cover the shared decoder, native refusal and readback, trailing
+JSON, and actual refused server startup. These source changes are awaiting their
+own IPC/server qualification. Custom deserializer conversions remain an audit
+obligation; the shared visitors are not a generic allocator or RSS guarantee.
+Norway's eager YAML event/alias graph, migration coexistence, normalization
+scratch and partial-restore/shutdown custody still need separate bounds.
+
+The platform registry caps running and retiring owners at1024, excluding its
+supervisor. Neither that cap nor cooperative declarations establish a whole-process
+OS-thread/RSS bound. Complete caller qualification, library thread census and
+matched runtime measurements remain separate acceptance gates.
 
 Integration acceptance remains separate from source implementation. In
 particular, retained terminal-history pins need publication headroom and an
