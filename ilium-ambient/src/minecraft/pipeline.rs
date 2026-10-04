@@ -50,6 +50,7 @@ pub struct MapReport {
     pub header_candidates: usize,
     pub scan_complete: bool,
     pub rejected_windows: usize,
+    pub selected_windows: usize,
     pub error: Option<String>,
 }
 
@@ -76,9 +77,11 @@ pub enum Error {
 /// Call off the rendering thread, after discover_metadata and the caller's
 /// persistent identity registry have supplied bindings. Most recently played
 /// maps are attempted first, including old timestamps: no absolute age cutoff.
-/// At most four outputs retain loader storage, each admitted at <=32 MiB
-/// logical charge plus <=2 MiB summary policy. This excludes transient decode,
-/// model storage and snapshots retained elsewhere; it is not an RSS limit.
+/// At most four saves retain up to three disjoint loader windows each, each
+/// admitted at <=32 MiB logical charge plus <=2 MiB aggregate summary policy.
+/// The retained loader ceiling is therefore 384 MiB. This excludes transient
+/// decode, model storage and snapshots retained elsewhere; it is not an RSS
+/// limit.
 pub fn prepare_catalog(
     catalog: &catalog::Catalog,
     bindings: &BTreeMap<PathBuf, MapContext>,
@@ -100,6 +103,7 @@ pub fn prepare_catalog(
                 header_candidates: 0,
                 scan_complete: false,
                 rejected_windows: 0,
+                selected_windows: 0,
                 error: None,
             };
             let result = (|| {
@@ -143,6 +147,7 @@ pub fn prepare_catalog(
                     )
                 })?;
                 report.rejected_windows = output.rejected.len();
+                report.selected_windows = output.successful_windows;
                 Ok(output.window)
             })();
             match result {

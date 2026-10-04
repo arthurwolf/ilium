@@ -1943,6 +1943,32 @@ impl GeneratedViewportSession {
         }
         cancel.check()?;
         let fallback_atlases = fallback_atlas_semantics.len();
+        let missing_required_materials = coverage
+            .rows
+            .iter()
+            .filter(|row| row.requirement.required && !row.problems.is_empty())
+            .map(|row| row.requirement.id.to_string())
+            .collect::<Vec<_>>();
+        let missing_materials = if missing_required_materials.is_empty() {
+            String::new()
+        } else {
+            let shown = missing_required_materials
+                .iter()
+                .take(4)
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let remaining = missing_required_materials.len().saturating_sub(4);
+            let suffix = if remaining == 0 {
+                String::new()
+            } else {
+                format!(", and {remaining} more")
+            };
+            format!(
+                "; missing required materials ({}): {shown}{suffix}",
+                missing_required_materials.len()
+            )
+        };
         let status = (material_coverage.0 < material_coverage.1
         || state_gaps > 0
         || model_substitutions > 0
@@ -1951,7 +1977,7 @@ impl GeneratedViewportSession {
         || material_fallbacks > 0
         || fallback_atlases > 0)
         .then(|| format!(
-            "Surface art {}/{}; {compatibility_aliases} texture aliases; {model_substitutions} model substitutions; {state_gaps} state gaps; {rendered_entities} textured fauna candidates; {fauna_gaps} fauna gaps; {fallback_atlases} fauna and {material_fallbacks} material images from reviewed full-pack fallback (not selected-native)",
+            "Surface art {}/{}{missing_materials}; {compatibility_aliases} texture aliases; {model_substitutions} model substitutions; {state_gaps} state gaps; {rendered_entities} textured fauna candidates; {fauna_gaps} fauna gaps; {fallback_atlases} fauna and {material_fallbacks} material images from reviewed full-pack fallback (not selected-native)",
             material_coverage.0, material_coverage.1,
         ));
         if let Some(cache) = pending_cache {

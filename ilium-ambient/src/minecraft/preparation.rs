@@ -2,6 +2,8 @@
 //! surface witnesses become small owned summaries, never cloned block catalogs.
 use super::{evidence, loader, surface, windows};
 
+const MAX_WINDOWS_PER_SAVE: usize = 3;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub surface: surface::Limits,
@@ -54,6 +56,10 @@ pub enum Error {
     UnqualifiedInput,
     #[error("saved preparation summary storage exceeds limit")]
     SummaryLimit,
+    #[error("saved preparation work exceeds the combined window limit")]
+    WorkLimit,
+    #[error("saved preparation windows overlap or disagree on source identity")]
+    OverlappingWindows,
 }
 
 /// A failed attempt retains only its typed error, never its decoded chunks.
@@ -68,13 +74,16 @@ pub struct CandidateSelection {
     /// Index in the supplied finite candidate list. None means this list was
     /// exhausted, not that the save contains no other qualified terrain.
     pub selected_index: Option<usize>,
+    /// Number of qualified, disjoint windows merged into `window`.
+    pub successful_windows: usize,
     pub window: Option<PreparedWindow>,
     pub rejected: Vec<CandidateRejection>,
 }
 
-/// Sequential worker-only retry. The selector defaults to eight candidates;
-/// this adapter enforces its hard sixteen-output ceiling. Each attempt has the
-/// supplied loader/storage/work limits; this is not a scene-wide memory cap.
+/// Sequential worker-only retry. At most three disjoint windows are retained
+/// from the finite candidate list. Each decode has the supplied loader cap;
+/// the aggregate therefore retains at most three 32 MiB-qualified windows per
+/// save. This is not a scene-wide memory cap.
 pub fn load_candidates(
     directory: &std::path::Path,
     source: evidence::Source,
@@ -89,30 +98,85 @@ pub fn load_candidates(
     if source.generation == 0 {
         return Err(Error::InvalidGeneration);
     }
-    load_candidates_with(candidates, cancelled, |candidate| {
-        load_candidate(directory, source, candidate, loading, limits, cancelled)
-    })
+    if loading.max_storage_charge == 0 || loading.max_storage_charge > 32 << 20 {
+        return Err(Error::Loader(loader::Error::StorageLimit));
+    }
+    if limits.summary_bytes == 0 || limits.summary_bytes > 2 << 20 {
+        return Err(Error::SummaryLimit);
+    }
+    let maximum_retained_charge = loading
+        .max_storage_charge
+        .checked_mul(MAX_WINDOWS_PER_SAVE)
+        .ok_or(Error::SummaryLimit)?;
+    let maximum_work_units = limits
+        .work_units
+        .checked_mul(MAX_WINDOWS_PER_SAVE)
+        .ok_or(Error::WorkLimit)?;
+    load_candidates_bounded(
+        candidates,
+        MAX_WINDOWS_PER_SAVE,
+        limits.summary_bytes,
+        maximum_retained_charge,
+        maximum_work_units,
+        cancelled,
+        |candidate| load_candidate(directory, source, candidate, loading, limits, cancelled),
+    )
 }
 
+#[cfg(test)]
 fn load_candidates_with(
     candidates: &[windows::Candidate],
+    cancelled: &dyn Fn() -> bool,
+    prepare: impl FnMut(&windows::Candidate) -> Result<PreparedWindow, Error>,
+) -> Result<CandidateSelection, Error> {
+    load_candidates_bounded(
+        candidates,
+        MAX_WINDOWS_PER_SAVE,
+        Limits::default().summary_bytes,
+        MAX_WINDOWS_PER_SAVE * (32 << 20),
+        MAX_WINDOWS_PER_SAVE * Limits::default().work_units,
+        cancelled,
+        prepare,
+    )
+}
+
+fn load_candidates_bounded(
+    candidates: &[windows::Candidate],
+    max_successful_windows: usize,
+    summary_limit: usize,
+    retained_charge_limit: usize,
+    work_limit: usize,
     cancelled: &dyn Fn() -> bool,
     mut prepare: impl FnMut(&windows::Candidate) -> Result<PreparedWindow, Error>,
 ) -> Result<CandidateSelection, Error> {
     if cancelled() {
         return Err(loader::Error::Cancelled.into());
     }
-    if candidates.len() > 16 {
+    if candidates.len() > 16 || !(1..=MAX_WINDOWS_PER_SAVE).contains(&max_successful_windows) {
         return Err(Error::CandidateLimit);
     }
     let mut selection = CandidateSelection {
         selected_index: None,
+        successful_windows: 0,
         window: None,
         rejected: Vec::with_capacity(candidates.len()),
     };
+    let mut accepted: Vec<PreparedWindow> = Vec::with_capacity(max_successful_windows);
+    let mut accepted_chunks = std::collections::BTreeSet::new();
     for (index, candidate) in candidates.iter().enumerate() {
         if cancelled() {
             return Err(loader::Error::Cancelled.into());
+        }
+        if candidate
+            .requested
+            .iter()
+            .any(|position| accepted_chunks.contains(position))
+        {
+            selection.rejected.push(CandidateRejection {
+                center: candidate.center,
+                error: Error::OverlappingWindows,
+            });
+            continue;
         }
         let result = prepare(candidate);
         // Cancellation can arrive after the last inner checkpoint. Never
@@ -122,9 +186,37 @@ fn load_candidates_with(
         }
         match result {
             Ok(window) => {
-                selection.selected_index = Some(index);
-                selection.window = Some(window);
-                return Ok(selection);
+                let positions: std::collections::BTreeSet<_> =
+                    window.loaded.chunks.keys().copied().collect();
+                if window.loaded.chunks.is_empty()
+                    || window.source.generation == 0
+                    || window.loaded.coverage.chunks != positions
+                    || positions.iter().any(|position| {
+                        !candidate.requested.contains(position)
+                            || accepted_chunks.contains(position)
+                    })
+                {
+                    selection.rejected.push(CandidateRejection {
+                        center: candidate.center,
+                        error: Error::UnqualifiedInput,
+                    });
+                    continue;
+                }
+                if let Some(first) = accepted.first() {
+                    if first.source != window.source {
+                        selection.rejected.push(CandidateRejection {
+                            center: candidate.center,
+                            error: Error::OverlappingWindows,
+                        });
+                        continue;
+                    }
+                }
+                selection.selected_index.get_or_insert(index);
+                accepted_chunks.extend(positions);
+                accepted.push(window);
+                if accepted.len() == max_successful_windows {
+                    break;
+                }
             }
             Err(
                 Error::Loader(loader::Error::Cancelled)
@@ -137,7 +229,173 @@ fn load_candidates_with(
             }),
         }
     }
+    selection.successful_windows = accepted.len();
+    if !accepted.is_empty() {
+        selection.window = Some(merge_windows(
+            accepted,
+            max_successful_windows,
+            summary_limit,
+            retained_charge_limit,
+            work_limit,
+        )?);
+    }
     Ok(selection)
+}
+
+fn merge_windows(
+    mut windows: Vec<PreparedWindow>,
+    maximum_windows: usize,
+    summary_limit: usize,
+    retained_charge_limit: usize,
+    work_limit: usize,
+) -> Result<PreparedWindow, Error> {
+    use std::mem::size_of;
+
+    if windows.is_empty() || windows.len() > maximum_windows {
+        return Err(Error::UnqualifiedInput);
+    }
+    let mut merged = windows.remove(0);
+    let mut accepted_chunks: std::collections::BTreeSet<_> =
+        merged.loaded.chunks.keys().copied().collect();
+    for mut window in windows {
+        if window.source != merged.source
+            || window
+                .loaded
+                .chunks
+                .keys()
+                .any(|position| accepted_chunks.contains(position))
+        {
+            return Err(Error::OverlappingWindows);
+        }
+
+        for axis in 0..2 {
+            merged.core.minimum[axis] = merged.core.minimum[axis].min(window.core.minimum[axis]);
+            merged.core.maximum[axis] = merged.core.maximum[axis].max(window.core.maximum[axis]);
+            merged.bounds.minimum[axis] =
+                merged.bounds.minimum[axis].min(window.bounds.minimum[axis]);
+            merged.bounds.maximum[axis] =
+                merged.bounds.maximum[axis].max(window.bounds.maximum[axis]);
+        }
+
+        let target_count = merged
+            .targets
+            .len()
+            .checked_add(window.targets.len())
+            .ok_or(Error::SummaryLimit)?;
+        let summary_bytes = target_count
+            .checked_mul(size_of::<evidence::TargetSummary>())
+            .and_then(|bytes| bytes.checked_add(size_of::<PreparedWindow>()))
+            .ok_or(Error::SummaryLimit)?;
+        if summary_bytes > summary_limit {
+            return Err(Error::SummaryLimit);
+        }
+        merged
+            .targets
+            .try_reserve_exact(window.targets.len())
+            .map_err(|_| Error::SummaryLimit)?;
+        if merged
+            .targets
+            .capacity()
+            .checked_mul(size_of::<evidence::TargetSummary>())
+            .and_then(|bytes| bytes.checked_add(size_of::<PreparedWindow>()))
+            .is_none_or(|bytes| bytes > summary_limit)
+        {
+            return Err(Error::SummaryLimit);
+        }
+        merged.targets.append(&mut window.targets);
+
+        merged
+            .loaded
+            .issues
+            .try_reserve(window.loaded.issues.len())
+            .map_err(|_| Error::SummaryLimit)?;
+        merged.loaded.issues.append(&mut window.loaded.issues);
+        merged.loaded.rejected_chunks = merged
+            .loaded
+            .rejected_chunks
+            .checked_add(window.loaded.rejected_chunks)
+            .ok_or(Error::SummaryLimit)?;
+        merged.loaded.retained_storage_charge = merged
+            .loaded
+            .retained_storage_charge
+            .checked_add(window.loaded.retained_storage_charge)
+            .ok_or(Error::SummaryLimit)?;
+        merged.work_used = merged
+            .work_used
+            .checked_add(window.work_used)
+            .ok_or(Error::WorkLimit)?;
+        if merged.work_used > work_limit {
+            return Err(Error::WorkLimit);
+        }
+        merged.stats = add_stats(merged.stats, window.stats)?;
+
+        for (&position, chunk) in &window.loaded.chunks {
+            if position != chunk.identity.position || !accepted_chunks.insert(position) {
+                return Err(Error::OverlappingWindows);
+            }
+            merged.loaded.coverage.chunks.insert(position);
+            merged
+                .loaded
+                .chunks
+                .insert(position, std::sync::Arc::clone(chunk));
+        }
+        if window.loaded.coverage.chunks.iter().any(|position| {
+            !window.loaded.chunks.contains_key(position)
+                || !merged.loaded.chunks.contains_key(position)
+        }) {
+            return Err(Error::UnqualifiedInput);
+        }
+    }
+    if merged.loaded.coverage.chunks.len() != merged.loaded.chunks.len() {
+        return Err(Error::UnqualifiedInput);
+    }
+    if merged.loaded.retained_storage_charge > retained_charge_limit {
+        return Err(Error::Loader(loader::Error::StorageLimit));
+    }
+    if merged.work_used > work_limit {
+        return Err(Error::WorkLimit);
+    }
+    Ok(merged)
+}
+
+fn add_stats(mut total: evidence::Stats, next: evidence::Stats) -> Result<evidence::Stats, Error> {
+    total.tiles = total
+        .tiles
+        .checked_add(next.tiles)
+        .ok_or(Error::WorkLimit)?;
+    total.construction_windows = total
+        .construction_windows
+        .checked_add(next.construction_windows)
+        .ok_or(Error::WorkLimit)?;
+    total.columns = total
+        .columns
+        .checked_add(next.columns)
+        .ok_or(Error::WorkLimit)?;
+    total.edge_columns_not_surveyed = total
+        .edge_columns_not_surveyed
+        .checked_add(next.edge_columns_not_surveyed)
+        .ok_or(Error::WorkLimit)?;
+    total.empty_columns = total
+        .empty_columns
+        .checked_add(next.empty_columns)
+        .ok_or(Error::WorkLimit)?;
+    total.band_limited_columns = total
+        .band_limited_columns
+        .checked_add(next.band_limited_columns)
+        .ok_or(Error::WorkLimit)?;
+    total.unrecognized_columns = total
+        .unrecognized_columns
+        .checked_add(next.unrecognized_columns)
+        .ok_or(Error::WorkLimit)?;
+    total.qualifying_components = total
+        .qualifying_components
+        .checked_add(next.qualifying_components)
+        .ok_or(Error::WorkLimit)?;
+    total.operations = total
+        .operations
+        .checked_add(next.operations)
+        .ok_or(Error::WorkLimit)?;
+    Ok(total)
 }
 
 /// Blocking adapter for an owned preparation worker. Header candidates are

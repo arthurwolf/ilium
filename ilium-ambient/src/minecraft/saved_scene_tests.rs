@@ -65,6 +65,19 @@ fn pending_route_replays_pixels_without_receipt_or_history_credit() {
         History::default()
     );
     assert!(scene.route.is_none() && scene.plan.is_none());
+    // A finite survey can find no eligible next line even though the last
+    // saved-world frame is valid. Keep showing that confirmed frame until a
+    // later viewport or tour can replace it; replay carries no display owners.
+    scene.plan_pending = None;
+    scene.unavailable_size = Some([4, 4]);
+    frame.raster.dots.fill(0.0);
+    frame.raster.owner_ids.fill(0);
+    frame.cell_colors.fill([0; 3]);
+    scene.render(&mut frame);
+    assert_eq!(frame.raster.dots[3], 0.75);
+    assert_eq!(frame.cell_colors[0], [20, 30, 40]);
+    assert!(frame.raster.owner_ids.iter().all(|owner| *owner == 0));
+    assert!(scene.receipt.is_none());
     scene.set_palette(&ScenePalette {
         stops: vec![[0, 0, 0], [255, 0, 0]],
         reverse: false,

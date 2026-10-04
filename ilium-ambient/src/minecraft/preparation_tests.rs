@@ -10,6 +10,10 @@ fn fields(entries: Vec<(&str, nbt::Tag)>) -> nbt::Compound {
         .collect()
 }
 fn loaded() -> loader::LoadedWindow {
+    loaded_at([0, 0])
+}
+
+fn loaded_at(position: [i32; 2]) -> loader::LoadedWindow {
     use nbt::Tag;
     let palette = ["air", "grass_block", "grass"].map(|name| {
         let mut state = fields(vec![(
@@ -73,8 +77,8 @@ fn loaded() -> loader::LoadedWindow {
         name: "".into(),
         root: fields(vec![
             ("DataVersion", Tag::Int(3218)),
-            ("xPos", Tag::Int(0)),
-            ("zPos", Tag::Int(0)),
+            ("xPos", Tag::Int(position[0])),
+            ("zPos", Tag::Int(position[1])),
             ("Status", Tag::String("full".into())),
             (
                 "sections",
@@ -87,12 +91,13 @@ fn loaded() -> loader::LoadedWindow {
     };
     loader::LoadedWindow {
         chunks: BTreeMap::from([(
-            [0, 0],
+            position,
             Arc::new(
-                chunk::decode(&document, [0, 0], chunk::Limits::default(), &|| false).unwrap(),
+                chunk::decode(&document, position, chunk::Limits::default(), &|| false).unwrap(),
             ),
         )]),
         coverage: Coverage::default(),
+        retained_storage_charge: 4096,
         ..loader::LoadedWindow::default()
     }
 }
@@ -105,16 +110,22 @@ fn source() -> evidence::Source {
 
 fn retry_candidates(count: usize) -> Vec<windows::Candidate> {
     (0..count)
-        .map(|index| windows::Candidate {
-            center: [index as i32, 0],
-            requested: [[index as i32, 0]].into(),
-            bounds: core(),
+        .map(|index| {
+            let center = [index as i32, 0];
+            windows::Candidate {
+                center,
+                requested: [center].into(),
+                bounds: surface::Bounds {
+                    minimum: [center[0] * 16, 0],
+                    maximum: [center[0] * 16 + 15, 15],
+                },
+            }
         })
         .collect()
 }
 
 #[test]
-fn retries_rejections_in_order_and_stops_at_first_whole_window() {
+fn retries_rejections_then_keeps_more_than_one_qualified_window() {
     let candidates = retry_candidates(4);
     let mut attempts = Vec::new();
     let output = load_candidates_with(&candidates, &|| false, |candidate| {
@@ -122,14 +133,122 @@ fn retries_rejections_in_order_and_stops_at_first_whole_window() {
         if attempts.len() < 3 {
             return Err(Error::SummaryLimit);
         }
-        finish_window(loaded(), source(), core(), 0, Limits::default(), &|| false)
+        finish_window(
+            loaded_at(candidate.center),
+            source(),
+            candidate.bounds,
+            0,
+            Limits::default(),
+            &|| false,
+        )
     })
     .unwrap();
-    assert_eq!(attempts, [[0, 0], [1, 0], [2, 0]]);
+    assert_eq!(attempts, [[0, 0], [1, 0], [2, 0], [3, 0]]);
     assert_eq!(output.selected_index, Some(2));
     assert_eq!(output.rejected.len(), 2);
+    assert_eq!(output.successful_windows, 2);
     assert!(matches!(output.rejected[0].error, Error::SummaryLimit));
-    assert_eq!(output.window.unwrap().source, source());
+    let merged = output.window.unwrap();
+    assert_eq!(merged.source, source());
+    assert_eq!(merged.loaded.chunks.len(), 2);
+}
+
+#[test]
+fn collects_three_disjoint_qualified_windows_under_one_map_identity() {
+    let candidates = retry_candidates(5);
+    let mut attempts = Vec::new();
+    let output = load_candidates_with(&candidates, &|| false, |candidate| {
+        attempts.push(candidate.center);
+        if candidate.center == [0, 0] {
+            return Err(Error::SummaryLimit);
+        }
+        let position = candidate.center;
+        let bounds = surface::Bounds {
+            minimum: [position[0] * 16, position[1] * 16],
+            maximum: [position[0] * 16 + 15, position[1] * 16 + 15],
+        };
+        finish_window(
+            loaded_at(position),
+            source(),
+            bounds,
+            0,
+            Limits::default(),
+            &|| false,
+        )
+    })
+    .unwrap();
+
+    assert_eq!(attempts, [[0, 0], [1, 0], [2, 0], [3, 0]]);
+    assert_eq!(output.selected_index, Some(1));
+    assert_eq!(output.rejected.len(), 1);
+    assert_eq!(output.successful_windows, 3);
+    assert_eq!(output.rejected[0].center, [0, 0]);
+    let merged = output.window.unwrap();
+    assert_eq!(merged.source, source());
+    assert_eq!(merged.core.minimum, [16, 0]);
+    assert_eq!(merged.core.maximum, [63, 15]);
+    assert_eq!(merged.bounds.minimum, [16, 0]);
+    assert_eq!(merged.bounds.maximum, [63, 15]);
+    assert_eq!(
+        merged.loaded.chunks.keys().copied().collect::<Vec<_>>(),
+        [[1, 0], [2, 0], [3, 0]]
+    );
+    assert_eq!(
+        merged.loaded.coverage.chunks,
+        [[1, 0], [2, 0], [3, 0]].into()
+    );
+    assert_eq!(merged.loaded.retained_storage_charge, 3 * 4096);
+    assert!(merged
+        .targets
+        .iter()
+        .all(|target| target.source == source()));
+    assert!(merged
+        .targets
+        .iter()
+        .any(|target| target.key.tile == [3, 0]));
+}
+
+#[test]
+fn overlapping_candidate_is_rejected_without_discarding_later_disjoint_windows() {
+    let candidates = Vec::from([1, 1, 3].map(|x| {
+        let center = [x, 0];
+        windows::Candidate {
+            center,
+            requested: [center].into(),
+            bounds: surface::Bounds {
+                minimum: [x * 16, 0],
+                maximum: [x * 16 + 15, 15],
+            },
+        }
+    }));
+    let mut attempts = Vec::new();
+    let output = load_candidates_with(&candidates, &|| false, |candidate| {
+        attempts.push(candidate.center);
+        finish_window(
+            loaded_at(candidate.center),
+            source(),
+            candidate.bounds,
+            0,
+            Limits::default(),
+            &|| false,
+        )
+    })
+    .unwrap();
+
+    assert_eq!(attempts, [[1, 0], [3, 0]]);
+    assert_eq!(output.successful_windows, 2);
+    assert_eq!(output.rejected.len(), 1);
+    assert!(matches!(
+        output.rejected[0].error,
+        Error::OverlappingWindows
+    ));
+    let merged = output.window.unwrap();
+    assert_eq!(
+        merged.loaded.chunks.keys().copied().collect::<Vec<_>>(),
+        [[1, 0], [3, 0]]
+    );
+    assert_eq!(merged.bounds.minimum, [16, 0]);
+    assert_eq!(merged.bounds.maximum, [63, 15]);
 }
 
 #[test]

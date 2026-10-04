@@ -43,6 +43,7 @@ fn report(save: &catalog::Save) -> MapReport {
         header_candidates: 0,
         scan_complete: true,
         rejected_windows: 0,
+        selected_windows: 0,
         error: None,
     }
 }

@@ -20,7 +20,7 @@ use std::{
 };
 
 const MAX_MAPS: usize = 16;
-const MAX_CHUNKS: usize = 128;
+const MAX_CHUNKS: usize = 384;
 const MAX_PROJECTED_CHUNKS: usize = 512;
 const MAX_TARGETS: usize = 2304;
 const MAX_OWNERS: usize = 8192;

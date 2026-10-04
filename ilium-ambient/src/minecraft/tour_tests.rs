@@ -1282,7 +1282,7 @@ fn rejected_regions_outside_qualified_coverage_do_not_discard_safe_islands() {
 }
 
 #[test]
-fn only_projected_source_accepts_129_chunks_and_clones_retain_its_charge() {
+fn saved_source_accepts_three_window_footprint_and_clones_retain_projected_charge() {
     use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
     use std::sync::atomic::AtomicBool;
 
@@ -1295,14 +1295,25 @@ fn only_projected_source_accepts_129_chunks_and_clones_retain_its_charge() {
     )
     .unwrap();
     let expanded = Arc::new(loaded(&rectangle([0, 0], [128, 0])));
+    let saved = PreparedMap::new(
+        source(4, 7),
+        0,
+        Arc::clone(&expanded),
+        vec![],
+        &mut budget(),
+    )
+    .unwrap();
+    assert_eq!(saved.loaded().chunks.len(), 129);
+
+    let template = Arc::clone(expanded.chunks.get(&[0, 0]).unwrap());
+    let mut oversized = super::super::loader::LoadedWindow::default();
+    for x in 0..=384 {
+        let position = [x, 0];
+        oversized.chunks.insert(position, Arc::clone(&template));
+        oversized.coverage.chunks.insert(position);
+    }
     assert!(matches!(
-        PreparedMap::new(
-            source(4, 7),
-            0,
-            Arc::clone(&expanded),
-            vec![],
-            &mut budget()
-        ),
+        PreparedMap::new(source(4, 7), 0, Arc::new(oversized), vec![], &mut budget()),
         Err(Error::Limit("prepared snapshot"))
     ));
     let account = ByteBudget::new(1 << 20).unwrap();

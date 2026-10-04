@@ -546,10 +546,8 @@ impl Scene for SavedScene {
         };
         if self.plan.is_none() {
             self.request_plan(policy, size, scale);
-            if self.plan_pending.is_some() {
-                if let Some(display) = self.display.as_ref() {
-                    display.replay(frame, scale);
-                }
+            if let Some(display) = self.display.as_ref() {
+                display.replay(frame, scale);
             }
             return;
         }
