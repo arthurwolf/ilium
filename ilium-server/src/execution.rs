@@ -53,6 +53,20 @@ impl ServerResources {
     pub fn initialize_process(&self) -> io::Result<bool> {
         ilium_execution::initialize_process_supervisor(&self.quota).map_err(io::Error::other)
     }
+
+    /// Binary bootstrap only, before constructing the existing Tokio runtime.
+    pub fn initialize_runtime(
+        &self,
+        thread_capacity: usize,
+        stack_bytes: usize,
+    ) -> io::Result<bool> {
+        ilium_execution::initialize_process_runtime_admission(
+            &self.quota,
+            thread_capacity,
+            stack_bytes,
+        )
+        .map_err(io::Error::other)
+    }
 }
 
 impl Default for ServerResources {
@@ -113,6 +127,10 @@ impl<E: std::error::Error + 'static> std::error::Error for ExecutionError<E> {
     }
 }
 impl ServerExecution {
+    pub(crate) fn quota_group(&self) -> QuotaGroup {
+        self.client.quota.clone()
+    }
+
     #[cfg(test)]
     pub(crate) fn start() -> io::Result<Self> {
         Self::start_with_resources(ServerResources::new())

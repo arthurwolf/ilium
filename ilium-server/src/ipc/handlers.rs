@@ -7171,7 +7171,7 @@ mod tests {
         crate::persistence::save_snapshot(&state)
             .await
             .expect("initial save");
-        let snapshot = crate::persistence::load_snapshot(&state.snapshot_path)
+        let snapshot = crate::persistence::load_snapshot_for_state(&state)
             .await
             .expect("readback")
             .expect("saved snapshot");

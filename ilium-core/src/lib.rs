@@ -3687,11 +3687,11 @@ impl Tree {
         Ok(true)
     }
 
-    /// Resets a terminal whose agent conversation started over. The old title
-    /// and tree grouping both described the cleared conversation, so this
-    /// discards every title field and moves the pane directly under its
-    /// owning project. The transition is applied to a clone first so a
-    /// structural rejection cannot leave either half committed.
+    /// Resets a terminal whose agent conversation started over. Automatic
+    /// title fields are replaced, while manually fixed presentation and its
+    /// ownership survive. The pane moves directly under its owning project.
+    /// The transition is applied to a clone first so a structural rejection
+    /// cannot leave either half committed.
     pub fn reset_terminal_pane_for_fresh_conversation(
         &mut self,
         id: NodeId,

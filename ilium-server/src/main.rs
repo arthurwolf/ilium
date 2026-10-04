@@ -98,6 +98,13 @@ fn run_launch(launch: ServerLaunch) -> ExitCode {
     // Linux process handles. The function is a no-op on other platforms.
     ilium_detect::configure_process_refresh();
 
+    if let Err(error) = resources.initialize_runtime(
+        RUNTIME_WORKER_THREADS + RUNTIME_MAX_BLOCKING_THREADS,
+        RUNTIME_THREAD_STACK_BYTES,
+    ) {
+        tracing::error!(%error, "failed to admit server runtime capacity");
+        return finish_logging(ExitCode::FAILURE);
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         // A session coordinates IPC and timers; PTY reads already live on
         // their own threads. Mirroring every host CPU for every detached

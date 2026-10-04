@@ -20,7 +20,7 @@ mod terminal_bytes;
 mod text_trigger;
 mod voice_text;
 
-pub use bounded_decode::BoundedMessage;
+pub use bounded_decode::{deserialize_allocation_checked, AllocationDecodeError, BoundedMessage};
 pub use error::IpcError;
 pub use framing::{
     decode_bounded_frame, decode_frame, encode_frame, encoded_capacity_bound, read_frame,

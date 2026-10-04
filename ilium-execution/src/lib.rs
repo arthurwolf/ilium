@@ -49,6 +49,7 @@ pub use retirement::{
 };
 //
 pub use startup::{
+    initialize_process_runtime_admission,
     // Expose the explicit process designation and pre-capture worker reservation.
     initialize_process_supervisor,
     reserve_admitted_worker,

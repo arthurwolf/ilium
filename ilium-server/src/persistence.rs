@@ -224,11 +224,23 @@ pub(crate) fn load_snapshot_or_migrate_blocking(
     home: &Path,
 ) -> Result<Option<SessionSnapshot>, ServerError> {
     if let Some(mut snapshot) = load_snapshot_blocking(snapshot_path)? {
-        let original_tree = snapshot.tree.clone();
+        // ensure_launch_project preserves every modern project tree, even
+        // when its folder differs from the launch directory. Only a root
+        // without a project receives a legacy wrapper. Inspect that bounded
+        // root list rather than cloning all pane data to detect the change.
+        let tree_changed_by_launch_project = !snapshot
+            .tree
+            .children_of(ilium_core::ROOT_ID)?
+            .iter()
+            .any(|node_id| {
+                snapshot
+                    .tree
+                    .get(*node_id)
+                    .is_some_and(ilium_core::Node::is_project)
+            });
         snapshot
             .tree
             .ensure_launch_project(session_cwd.to_path_buf())?;
-        let tree_changed_by_launch_project = snapshot.tree != original_tree;
         // Both sides must always run: `||` short-circuits and would skip
         // `normalize_agent_resumes`'s mutations (repairing invalid resume
         // bindings, fixing their titles) whenever `ensure_launch_project`
@@ -476,6 +488,7 @@ pub(crate) struct SnapshotSources {
         >,
     >,
     agent_debug: Arc<crate::agent_debug::AgentDebugRecorder>,
+    _restored_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 impl SnapshotSources {
     pub(crate) fn new(state: &ServerState) -> Self {
@@ -484,6 +497,7 @@ impl SnapshotSources {
             panes: Arc::clone(&state.panes),
             workspace_close_preferences: Arc::clone(&state.workspace_close_preferences),
             agent_debug: Arc::clone(&state.agent_debug),
+            _restored_storage: state.snapshot_read_storage(),
         }
     }
 }
@@ -708,12 +722,33 @@ pub(crate) async fn snapshot_service(
     state
         .snapshot_io
         .get_or_try_init(|| async {
-            crate::snapshot_io::SnapshotIo::new(state.snapshot_path.clone()).map_err(|source| {
-                ServerError::Snapshot {
-                    operation: "start worker",
-                    path: state.snapshot_path.clone(),
-                    source: SnapshotError::Io(source),
+            let worker = match state.execution.get() {
+                Some(execution) => crate::snapshot_io::SnapshotIo::new_with_execution(
+                    state.snapshot_path.clone(),
+                    execution,
+                ),
+                #[cfg(test)]
+                None => crate::snapshot_io::SnapshotIo::new_with_quota(
+                    state.snapshot_path.clone(),
+                    &crate::execution::ServerResources::new().quota_group(),
+                ),
+                #[cfg(not(test))]
+                None => {
+                    return Err(crate::snapshot_io::admission_error(
+                        &state.snapshot_path,
+                        "start worker",
+                        "session execution owner is unavailable",
+                    ))
                 }
+            };
+            // Construction performs admission and native spawn, not file I/O.
+            // Startup must not mistake a missing worker for an empty recovery.
+            worker.map_err(|source| {
+                crate::snapshot_io::admission_error(
+                    &state.snapshot_path,
+                    "start worker",
+                    source.to_string(),
+                )
             })
         })
         .await
@@ -721,7 +756,7 @@ pub(crate) async fn snapshot_service(
 
 pub(crate) async fn load_snapshot_for_state(
     state: &ServerState,
-) -> Result<Option<SessionSnapshot>, ServerError> {
+) -> Result<Option<crate::snapshot_io::LoadedSnapshot>, ServerError> {
     snapshot_service(state)
         .await?
         .read(Some((state.session_cwd.clone(), state.home_dir.clone())))
@@ -828,11 +863,18 @@ pub fn spawn_snapshot_writer(state: Arc<ServerState>) -> JoinHandle<()> {
 /// `crate::run`'s shutdown path so a mutation too recent to have been
 /// picked up by the debounce window yet is still persisted before the
 /// server exits.
+/// A failed write re-dirties the same coalescing claim and wakes the existing
+/// writer for its next debounced pass. The atomic killed-session fence refuses
+/// this retry after deletion, and shutdown performs only its existing final
+/// attempt rather than starting another retry task.
 pub async fn flush_pending_snapshot(state: &ServerState) {
     if !state.take_pending_snapshot() {
         return;
     }
     if let Err(error) = save_snapshot(state).await {
+        // Admission pressure or a transient filesystem error must not consume
+        // the only evidence that live state still owes a recovery snapshot.
+        state.request_snapshot_save();
         tracing::error!("failed to write crash-recovery snapshot: {error}");
     }
 }
@@ -961,7 +1003,7 @@ async fn load_snapshot_or_migrate(
         .read(Some((session_cwd.to_owned(), home.to_owned())))
         .await;
     service.shutdown().await?;
-    result
+    result.map(|snapshot| snapshot.map(crate::snapshot_io::LoadedSnapshot::into_test_snapshot))
 }
 
 /// Reads and parses the snapshot at `path`. `Ok(None)` means no snapshot
@@ -994,7 +1036,7 @@ pub(crate) fn load_snapshot_blocking(path: &Path) -> Result<Option<SessionSnapsh
         source: SnapshotError::Io(source),
     })?;
     if metadata.len() > MAX_ENCODED_SNAPSHOT_BYTES {
-        return Err(crate::snapshot_io::error(
+        return Err(crate::snapshot_io::admission_error(
             path,
             "read admission",
             "encoded snapshot exceeds byte limit",
@@ -1003,12 +1045,25 @@ pub(crate) fn load_snapshot_blocking(path: &Path) -> Result<Option<SessionSnapsh
     // take() also bounds a file that grows after metadata was captured.
     let reader =
         std::io::BufReader::with_capacity(64 * 1024, file.take(MAX_ENCODED_SNAPSHOT_BYTES + 1));
-    let mut snapshot: SessionSnapshot =
-        serde_json::from_reader(reader).map_err(|source| ServerError::Snapshot {
-            operation: "parse",
-            path: path_buf.clone(),
-            source: SnapshotError::Json(source),
+    let mut decoder = serde_json::Deserializer::from_reader(reader);
+    let mut snapshot: SessionSnapshot = ilium_ipc::deserialize_allocation_checked(&mut decoder)
+        .map_err(|failure| match failure {
+            ilium_ipc::AllocationDecodeError::Codec(source) => ServerError::Snapshot {
+                operation: "parse",
+                path: path_buf.clone(),
+                source: SnapshotError::Json(source),
+            },
+            refusal => {
+                crate::snapshot_io::admission_error(path, "decode admission", refusal.to_string())
+            }
         })?;
+    // deserialize_seed does not consume trailing input. Preserve from_reader
+    // semantics, including malformed or multiple JSON documents.
+    decoder.end().map_err(|source| ServerError::Snapshot {
+        operation: "parse",
+        path: path_buf.clone(),
+        source: SnapshotError::Json(source),
+    })?;
     // `Tree` derives `Deserialize` so it can be loaded wholesale above, but
     // that bypasses every invariant this crate's own tree mutations
     // (`add_pane`, `move_node`, ...) normally enforce -- a hand-edited or
@@ -1049,7 +1104,7 @@ pub async fn load_snapshot(path: &Path) -> Result<Option<SessionSnapshot>, Serve
     })?;
     let result = service.read(None).await;
     service.shutdown().await?;
-    result
+    result.map(|snapshot| snapshot.map(crate::snapshot_io::LoadedSnapshot::into_test_snapshot))
 }
 
 #[cfg(test)]
@@ -1066,6 +1121,55 @@ mod tests {
         PaneContentKind, PaneProgress, PaneWorkspace, ProgressTaskReport, ProgressTaskStatus,
         ROOT_ID,
     };
+
+    #[test]
+    fn native_snapshot_decode_refusal_preserves_original_and_accepts_later_valid_file() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("snapshot.json");
+        let mut snapshot = sample_snapshot();
+        let oversized = "x".repeat(32 * 1024 * 1024 + 1);
+        snapshot
+            .tree
+            .add_group(ROOT_ID, &oversized)
+            .expect("fixture group");
+        write_snapshot_blocking(&path, &snapshot).expect("encoded fixture below encoded limit");
+        drop(snapshot);
+        drop(oversized);
+        let original = std::fs::read(&path).expect("original bytes");
+        assert!(matches!(
+            load_snapshot_blocking(&path),
+            Err(ServerError::Snapshot {
+                operation: "decode admission",
+                ..
+            })
+        ));
+        assert_eq!(
+            std::fs::read(&path).expect("authoritative readback"),
+            original
+        );
+        write_snapshot_blocking(&path, &sample_snapshot()).expect("valid replacement fixture");
+        assert_eq!(
+            load_snapshot_blocking(&path).expect("retry").unwrap(),
+            sample_snapshot()
+        );
+    }
+
+    #[test]
+    fn native_checked_snapshot_rejects_trailing_document_without_changing_disk() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("snapshot.json");
+        let mut bytes = serde_json::to_vec(&sample_snapshot()).expect("fixture encoding");
+        bytes.extend_from_slice(b" {} ");
+        std::fs::write(&path, &bytes).expect("fixture");
+        assert!(matches!(
+            load_snapshot_blocking(&path),
+            Err(ServerError::Snapshot {
+                operation: "parse",
+                ..
+            })
+        ));
+        assert_eq!(std::fs::read(&path).expect("readback"), bytes);
+    }
 
     #[test]
     fn snapshot_encoding_limit_preserves_previous_file_and_removes_temporary_file() {

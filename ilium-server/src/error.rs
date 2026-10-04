@@ -136,6 +136,9 @@ pub enum ConfigLoadError {
 /// Why a crash-recovery snapshot read/write failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
+    /// Startup must not replace recovery data after resource admission fails.
+    #[error("snapshot resource admission refused: {0}")]
+    ResourceAdmission(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     /// Covers both directions -- `serde_json::Error` is the same type for

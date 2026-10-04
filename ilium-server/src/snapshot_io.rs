@@ -5,7 +5,7 @@ use crate::{
     error::{ServerError, SnapshotError},
     persistence::{self, SessionSnapshot},
 };
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
+use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -20,6 +20,13 @@ use tokio::sync::{oneshot, OwnedMutexGuard};
 
 pub(crate) const MAX_SNAPSHOT_RETAINED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_COMMANDS: usize = 8;
+const WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+// serde_json 1.0.149 IoRead pushes decoded bytes into one scratch Vec.
+// Escapes cannot produce more bytes than the capped encoded input. Installed
+// RawVec doubles capacity; 4x input covers old/new backing coexistence during
+// growth, plus the BufReader. This does not bound Norway's eager event graph.
+const MAX_NATIVE_READ_SCRATCH_BYTES: usize =
+    4 * (persistence::MAX_ENCODED_SNAPSHOT_BYTES as usize + 1) + 64 * 1024;
 
 pub(crate) fn error(
     path: &Path,
@@ -30,6 +37,17 @@ pub(crate) fn error(
         operation,
         path: path.to_owned(),
         source: SnapshotError::Io(io::Error::other(message.into())),
+    }
+}
+pub(crate) fn admission_error(
+    path: &Path,
+    operation: &'static str,
+    message: impl Into<String>,
+) -> ServerError {
+    ServerError::Snapshot {
+        operation,
+        path: path.to_owned(),
+        source: SnapshotError::ResourceAdmission(message.into()),
     }
 }
 struct Budget {
@@ -48,11 +66,59 @@ struct Completion<T> {
     result: Result<T, ServerError>,
     _reservation: Reservation,
 }
+/// A decoded result retains its independent process storage admission after
+/// the operation slot is released. Pending recovery and restored state share
+/// this same lease; there is no second charge for immutable custody handles.
+pub(crate) struct LoadedSnapshot {
+    snapshot: Option<SessionSnapshot>,
+    storage: Arc<ilium_execution::StorageAdmission>,
+    retirement: Option<ilium_execution::RetirementReservation<SessionSnapshot>>,
+}
+impl std::ops::Deref for LoadedSnapshot {
+    type Target = SessionSnapshot;
+    fn deref(&self) -> &Self::Target {
+        // Every live result owns its original until the consuming transfer.
+        self.snapshot.as_ref().expect("live loaded snapshot")
+    }
+}
+impl LoadedSnapshot {
+    pub(crate) fn into_parts(
+        mut self,
+    ) -> (SessionSnapshot, Arc<ilium_execution::StorageAdmission>) {
+        // Ownership transfer is constant work; restored state keeps the same
+        // storage lease. The unused destruction envelope releases metadata.
+        (
+            self.snapshot.take().expect("live loaded snapshot"),
+            Arc::clone(&self.storage),
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn into_test_snapshot(mut self) -> SessionSnapshot {
+        self.snapshot.take().expect("live loaded snapshot")
+    }
+}
+impl Drop for LoadedSnapshot {
+    fn drop(&mut self) {
+        if let Some(retirement) = self.retirement.take() {
+            if let Some(snapshot) = self.snapshot.take() {
+                let mut retiring = retirement.attach(snapshot);
+                retiring.set_storage_guard(Arc::clone(&self.storage));
+                // The preadmitted envelope owns the original through actual
+                // CPU destruction, including an exceptional failed handoff.
+                drop(retiring);
+            }
+        }
+        // Only independent no-bank fixtures use direct destruction. Every
+        // production constructor supplies the existing bank's retirement owner.
+    }
+}
 enum Command {
     CaptureWrite {
         sources: persistence::SnapshotSources,
         runtime: tokio::runtime::Handle,
-        progress_override: Option<persistence::PersistedProgressMonitor>,
+        // Variable-size progress metadata should not inflate every queued
+        // read/flush command. Its allocation follows retained-byte admission.
+        progress_override: Option<Box<persistence::PersistedProgressMonitor>>,
         guard: OwnedMutexGuard<()>,
         ack: oneshot::Sender<Completion<OwnedMutexGuard<()>>>,
         reservation: Reservation,
@@ -66,7 +132,10 @@ enum Command {
     },
     Read {
         migration: Option<(PathBuf, PathBuf)>,
-        ack: oneshot::Sender<Completion<Option<SessionSnapshot>>>,
+        result_storage: Arc<ilium_execution::StorageAdmission>,
+        parser_storage: ilium_execution::StorageAdmission,
+        retirement: Option<ilium_execution::RetirementReservation<SessionSnapshot>>,
+        ack: oneshot::Sender<Completion<Option<LoadedSnapshot>>>,
         reservation: Reservation,
     },
     Remove {
@@ -88,16 +157,69 @@ pub(crate) struct SnapshotIo {
     sender: SyncSender<Command>,
     admission: Mutex<Admission>,
     budget: Arc<Budget>,
+    quota: ilium_execution::QuotaGroup,
+    retirement: Option<ilium_execution::RetirementHandle>,
     _worker: OwnedWorker,
 }
 impl SnapshotIo {
+    #[cfg(test)]
     pub(crate) fn new(path: PathBuf) -> io::Result<Self> {
         Self::start(path, || {})
     }
+    pub(crate) fn new_with_execution(
+        path: PathBuf,
+        execution: &crate::execution::ServerExecution,
+    ) -> io::Result<Self> {
+        Self::start_with_retirement(
+            path,
+            &execution.quota_group(),
+            Some(execution.client.foundation.retirement()),
+            || {},
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn new_with_quota(
+        path: PathBuf,
+        quota: &ilium_execution::QuotaGroup,
+    ) -> io::Result<Self> {
+        Self::start_with_quota(path, quota, || {})
+    }
+    #[cfg(test)]
     fn start(path: PathBuf, before_run: impl FnOnce() + Send + 'static) -> io::Result<Self> {
+        // Independent fixtures do not designate a second process supervisor.
+        Self::start_with_quota(
+            path,
+            &crate::execution::ServerResources::new().quota_group(),
+            before_run,
+        )
+    }
+    #[cfg(test)]
+    fn start_with_quota(
+        path: PathBuf,
+        quota: &ilium_execution::QuotaGroup,
+        before_run: impl FnOnce() + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_retirement(path, quota, None, before_run)
+    }
+    fn start_with_retirement(
+        path: PathBuf,
+        quota: &ilium_execution::QuotaGroup,
+        retirement: Option<ilium_execution::RetirementHandle>,
+        before_run: impl FnOnce() + Send + 'static,
+    ) -> io::Result<Self> {
+        // Reserve before constructing channels/captures. Physical custody keeps
+        // the role charged after logical drop until the native thread is joined.
+        let resident_bytes = MAX_SNAPSHOT_RETAINED_BYTES
+            .checked_add(MAX_COMMANDS * std::mem::size_of::<Command>())
+            .and_then(|bytes| bytes.checked_add(path.capacity().saturating_mul(2)))
+            .and_then(|bytes| bytes.checked_add(4096))
+            .ok_or_else(|| io::Error::other("snapshot worker declaration overflow"))?;
+        let worker_slot =
+            ilium_execution::reserve_admitted_worker(quota, WORKER_STACK_BYTES, resident_bytes)
+                .map_err(io::Error::other)?;
         let (sender, receiver) = mpsc::sync_channel(MAX_COMMANDS);
         let worker_path = path.clone();
-        let worker = spawn_owned(
+        let worker = worker_slot.spawn(
             "ilium-snapshot-io",
             WorkerKind::SynchronousIo,
             StopToken::default(),
@@ -124,7 +246,7 @@ impl SnapshotIo {
                                 .block_on(persistence::capture_snapshot(
                                     &sources,
                                     &worker_path,
-                                    progress_override.as_ref(),
+                                    progress_override.as_deref(),
                                 ))
                                 .and_then(|snapshot| {
                                     if estimated_bytes(&snapshot) > MAX_SNAPSHOT_RETAINED_BYTES {
@@ -162,6 +284,9 @@ impl SnapshotIo {
                         }
                         Command::Read {
                             migration,
+                            result_storage,
+                            parser_storage,
+                            retirement,
                             ack,
                             reservation,
                         } => {
@@ -179,14 +304,21 @@ impl SnapshotIo {
                                 if snapshot.as_ref().is_some_and(|snapshot| {
                                     estimated_bytes(snapshot) > MAX_SNAPSHOT_RETAINED_BYTES
                                 }) {
-                                    return Err(error(
+                                    return Err(admission_error(
                                         &worker_path,
                                         "load admission",
                                         "decoded snapshot exceeds retained-memory limit",
                                     ));
                                 }
-                                Ok(snapshot)
+                                Ok(snapshot.map(|snapshot| LoadedSnapshot {
+                                    snapshot: Some(snapshot),
+                                    storage: result_storage,
+                                    retirement,
+                                }))
                             });
+                            // The decoder and its scratch have actually returned;
+                            // only the independent decoded-result lease survives.
+                            drop(parser_storage);
                             let _ = ack.send(Completion {
                                 result,
                                 _reservation: reservation,
@@ -249,6 +381,8 @@ impl SnapshotIo {
             budget: Arc::new(Budget {
                 bytes: AtomicUsize::new(0),
             }),
+            quota: quota.clone(),
+            retirement,
             _worker: worker,
         })
     }
@@ -261,7 +395,7 @@ impl SnapshotIo {
                     .filter(|total| *total <= MAX_SNAPSHOT_RETAINED_BYTES)
             })
             .map_err(|_| {
-                error(
+                admission_error(
                     &self.path,
                     "admission",
                     "snapshot retained-memory limit exhausted",
@@ -290,7 +424,7 @@ impl SnapshotIo {
                 admission.closed |= shutdown;
                 Ok(())
             }
-            Err(TrySendError::Full(_)) => Err(error(
+            Err(TrySendError::Full(_)) => Err(admission_error(
                 &self.path,
                 "admission",
                 "snapshot command capacity exhausted",
@@ -347,7 +481,7 @@ impl SnapshotIo {
             Command::CaptureWrite {
                 sources,
                 runtime: tokio::runtime::Handle::current(),
-                progress_override: progress_override.cloned(),
+                progress_override: progress_override.cloned().map(Box::new),
                 guard,
                 ack,
                 reservation,
@@ -406,14 +540,47 @@ impl SnapshotIo {
     pub(crate) async fn read(
         &self,
         migration: Option<(PathBuf, PathBuf)>,
-    ) -> Result<Option<SessionSnapshot>, ServerError> {
+    ) -> Result<Option<LoadedSnapshot>, ServerError> {
         // Decode can expand strings/containers beyond encoded size. Reserve the
         // full service budget for its sole result until the receiver consumes it.
         let reservation = self.reserve(MAX_SNAPSHOT_RETAINED_BYTES)?;
+        // This independent storage lease survives operation completion and
+        // physical worker shutdown. Reserve before decoding or queueing data.
+        let result_storage = Arc::new(
+            self.quota
+                .reserve_external_storage(MAX_SNAPSHOT_RETAINED_BYTES)
+                .map_err(|reason| {
+                    admission_error(&self.path, "read storage admission", format!("{reason:?}"))
+                })?,
+        );
+        let parser_storage = self
+            .quota
+            .reserve_external_storage(MAX_NATIVE_READ_SCRATCH_BYTES)
+            .map_err(|reason| {
+                admission_error(&self.path, "read parser admission", format!("{reason:?}"))
+            })?;
+        let retirement = self
+            .retirement
+            .as_ref()
+            .map(|owner| {
+                owner
+                    .try_reserve::<SessionSnapshot>(4096)
+                    .map_err(|reason| {
+                        admission_error(
+                            &self.path,
+                            "read retirement admission",
+                            format!("{reason:?}"),
+                        )
+                    })
+            })
+            .transpose()?;
         let (ack, receiver) = oneshot::channel();
         self.admit(
             Command::Read {
                 migration,
+                result_storage,
+                parser_storage,
+                retirement,
                 ack,
                 reservation,
             },
@@ -651,6 +818,60 @@ mod tests {
     use ilium_core::{Tree, ROOT_ID};
     use std::time::Instant;
 
+    #[test]
+    fn snapshot_native_role_remains_charged_until_blocked_worker_is_joined() {
+        let directory = tempfile::tempdir().expect("directory");
+        let quota = crate::execution::ServerResources::new().quota_group();
+        let (release, gate) = mpsc::channel();
+        let (started, running) = mpsc::channel();
+        let service = SnapshotIo::start_with_quota(
+            directory.path().join("retiring.json"),
+            &quota,
+            move || {
+                started.send(()).expect("started");
+                gate.recv().expect("release");
+            },
+        )
+        .expect("worker");
+        running.recv_timeout(Duration::from_secs(5)).expect("entry");
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert!(quota.snapshot().worker_bytes >= WORKER_STACK_BYTES + MAX_SNAPSHOT_RETAINED_BYTES);
+        let ticket = service._worker.ticket();
+        drop(service);
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert!(ticket.join_until(Instant::now()).is_err());
+        release.send(()).expect("release");
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .expect("joined");
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn snapshot_refuses_exhausted_process_roles_before_entering_worker() {
+        let directory = tempfile::tempdir().expect("directory");
+        let quota = crate::execution::ServerResources::new().quota_group();
+        let limits = quota.snapshot().limits;
+        let occupied = quota
+            .reserve_external_worker(limits.worker_threads, 1)
+            .expect("roles");
+        let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = Arc::clone(&entered);
+        let result = SnapshotIo::start_with_quota(
+            directory.path().join("refused.json"),
+            &quota,
+            move || {
+                observed.store(true, Ordering::Release);
+            },
+        );
+        assert!(result.is_err());
+        assert!(!entered.load(Ordering::Acquire));
+        assert_eq!(quota.snapshot().worker_threads, limits.worker_threads);
+        assert_eq!(quota.snapshot().worker_bytes, 1);
+        drop(occupied);
+    }
+
     fn snapshot(version: u32) -> SessionSnapshot {
         SessionSnapshot {
             version,
@@ -679,6 +900,256 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("started");
         (service, release, worker)
+    }
+
+    #[tokio::test]
+    async fn discarded_loaded_snapshot_keeps_original_storage_until_cpu_destruction() {
+        let directory = tempfile::tempdir().expect("directory");
+        let owner = crate::execution::ServerExecution::start().expect("bank");
+        let quota = owner.quota_group();
+        let service =
+            SnapshotIo::new_with_execution(directory.path().join("discarded.json"), &owner)
+                .expect("disk owner");
+        service.write_boot(snapshot(31)).await.expect("write");
+        let (entered, started) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut receipts = Vec::new();
+        for _ in 0..2 {
+            let (release, gate) = mpsc::channel();
+            let entered = entered.clone();
+            let receipt = owner
+                .client
+                .foundation
+                .try_reserve(
+                    ilium_execution::Lane::Cpu,
+                    ilium_execution::JobCost {
+                        input_bytes: 4096,
+                        result_bytes: 4096,
+                    },
+                )
+                .expect("CPU admission")
+                .submit(move |_: ilium_execution::JobContext| {
+                    entered.send(()).expect("entered");
+                    gate.recv().expect("release");
+                    Ok::<(), ()>(())
+                })
+                .unwrap_or_else(|_| panic!("CPU submit refused"));
+            releases.push(release);
+            receipts.push(receipt);
+        }
+        for _ in 0..2 {
+            started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("both CPU owners parked");
+        }
+        let baseline = quota.snapshot().worker_bytes;
+        let loaded = service.read(None).await.expect("read").expect("snapshot");
+        assert_eq!(loaded.version, 31);
+        let retained = quota.snapshot().worker_bytes;
+        assert!(retained >= baseline + MAX_SNAPSHOT_RETAINED_BYTES);
+        drop(loaded);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            retained,
+            "discard must not destroy or uncharge the original on the caller"
+        );
+        for release in releases {
+            release.send(()).expect("release CPU");
+        }
+        let wake = owner.client.completion_notification();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let notified = wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if quota.snapshot().worker_bytes == baseline {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("retirement completion");
+        drop(receipts);
+        service.shutdown().await.expect("disk shutdown");
+    }
+
+    #[tokio::test]
+    async fn exhausted_retirement_slots_refuse_read_before_decoding_and_preserve_disk() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("retirement-refused.json");
+        let owner = crate::execution::ServerExecution::start().expect("bank");
+        let quota = owner.quota_group();
+        let service = SnapshotIo::new_with_execution(path.clone(), &owner).expect("disk owner");
+        service.write_boot(snapshot(32)).await.expect("write");
+        let original = std::fs::read(&path).expect("original");
+        let retirement = owner.client.foundation.retirement();
+        let permits: Vec<_> = (0..ilium_execution::RETIREMENT_SLOTS)
+            .map(|_| {
+                retirement
+                    .try_reserve::<Vec<u8>>(4096)
+                    .expect("retirement slot")
+            })
+            .collect();
+        let before = quota.snapshot().worker_bytes;
+        assert!(service.read(None).await.is_err());
+        assert_eq!(quota.snapshot().worker_bytes, before);
+        assert_eq!(service.budget.bytes.load(Ordering::Acquire), 0);
+        assert_eq!(std::fs::read(&path).expect("readback"), original);
+        drop(permits);
+        let loaded = service.read(None).await.expect("retry").expect("snapshot");
+        assert_eq!(loaded.version, 32);
+        drop(loaded);
+        service.shutdown().await.expect("disk shutdown");
+    }
+
+    #[tokio::test]
+    async fn loaded_result_and_captured_sources_retain_storage_after_worker_join() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("loaded.json");
+        let quota = crate::execution::ServerResources::new().quota_group();
+        let service = SnapshotIo::new_with_quota(path, &quota).expect("worker");
+        service
+            .write_boot(snapshot(11))
+            .await
+            .expect("initial write");
+        let worker_bytes = quota.snapshot().worker_bytes;
+        let loaded = service.read(None).await.expect("read").expect("snapshot");
+        assert_eq!(loaded.version, 11);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            worker_bytes + MAX_SNAPSHOT_RETAINED_BYTES
+        );
+        // A retained read does not occupy the operation mailbox budget: later
+        // ordered writes must remain usable while a recovery decision waits.
+        service.write_boot(snapshot(12)).await.expect("later write");
+        service.shutdown().await.expect("shutdown");
+        let ticket = service._worker.ticket();
+        drop(service);
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .expect("join");
+        drop(ticket);
+        assert_eq!(quota.snapshot().worker_bytes, MAX_SNAPSHOT_RETAINED_BYTES);
+        let state = capture_state(directory.path());
+        let (snapshot, storage) = loaded.into_parts();
+        state.retain_snapshot_read_storage(storage);
+        *state.tree.write().await = snapshot.tree;
+        let sources = persistence::SnapshotSources::new(&state);
+        drop(state);
+        assert_eq!(quota.snapshot().worker_bytes, MAX_SNAPSHOT_RETAINED_BYTES);
+        drop(sources);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn parser_storage_refusal_preserves_file_and_releases_result_and_operation_credit() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("parser-refused.json");
+        let quota = crate::execution::ServerResources::new().quota_group();
+        let service = SnapshotIo::new_with_quota(path.clone(), &quota).expect("worker");
+        service
+            .write_boot(snapshot(23))
+            .await
+            .expect("fixture write");
+        let original = std::fs::read(&path).expect("original");
+        let baseline = quota.snapshot().worker_bytes;
+        let available = quota.snapshot().limits.worker_bytes - baseline;
+        let occupied_bytes =
+            available - (MAX_SNAPSHOT_RETAINED_BYTES + MAX_NATIVE_READ_SCRATCH_BYTES - 1);
+        let occupied = quota
+            .reserve_external_storage(occupied_bytes)
+            .expect("parser pressure");
+        assert!(matches!(
+            service.read(None).await,
+            Err(ServerError::Snapshot {
+                operation: "read parser admission",
+                source: SnapshotError::ResourceAdmission(_),
+                ..
+            })
+        ));
+        assert_eq!(service.budget.bytes.load(Ordering::Acquire), 0);
+        assert_eq!(quota.snapshot().worker_bytes, baseline + occupied_bytes);
+        assert_eq!(
+            std::fs::read(&path).expect("authoritative readback"),
+            original
+        );
+        drop(occupied);
+        let loaded = service.read(None).await.expect("retry").expect("snapshot");
+        assert_eq!(loaded.version, 23);
+        // Scratch is physically gone at receipt delivery; result stays charged.
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline + MAX_SNAPSHOT_RETAINED_BYTES
+        );
+        drop(loaded);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        service.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn read_operation_pressure_is_typed_and_preserves_original_before_enqueue() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("operation-refused.json");
+        let service = SnapshotIo::new(path.clone()).expect("worker");
+        service
+            .write_boot(snapshot(24))
+            .await
+            .expect("fixture write");
+        let original = std::fs::read(&path).expect("original");
+        let occupied = service
+            .reserve(MAX_SNAPSHOT_RETAINED_BYTES)
+            .expect("operation pressure");
+        assert!(matches!(
+            service.read(None).await,
+            Err(ServerError::Snapshot {
+                operation: "admission",
+                source: SnapshotError::ResourceAdmission(_),
+                ..
+            })
+        ));
+        assert_eq!(
+            service.budget.bytes.load(Ordering::Acquire),
+            MAX_SNAPSHOT_RETAINED_BYTES
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("authoritative readback"),
+            original
+        );
+        drop(occupied);
+        assert_eq!(
+            service
+                .read(None)
+                .await
+                .expect("retry")
+                .expect("snapshot")
+                .version,
+            24
+        );
+        service.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn read_storage_refusal_precedes_decode_and_releases_operation_capacity() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("refused-read.json");
+        let quota = crate::execution::ServerResources::new().quota_group();
+        let service = SnapshotIo::new_with_quota(path.clone(), &quota).expect("worker");
+        service
+            .write_boot(snapshot(21))
+            .await
+            .expect("initial write");
+        let original = std::fs::read(&path).expect("original");
+        let available = quota.snapshot().limits.worker_bytes - quota.snapshot().worker_bytes;
+        let occupied = quota.reserve_external_storage(available).expect("occupied");
+        assert!(service.read(None).await.is_err());
+        assert_eq!(service.budget.bytes.load(Ordering::Acquire), 0);
+        assert_eq!(std::fs::read(&path).expect("readback"), original);
+        drop(occupied);
+        let loaded = service.read(None).await.expect("retry").expect("snapshot");
+        assert_eq!(loaded.version, 21);
+        drop(loaded);
+        service.shutdown().await.expect("shutdown");
     }
 
     #[tokio::test]
@@ -826,6 +1297,81 @@ mod tests {
             agent_debug_menu_enabled: true,
             progress_monitor_enabled: true,
         })
+    }
+
+    #[tokio::test]
+    async fn snapshot_worker_creation_refusal_is_typed_and_retains_recovery_file() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = capture_state(directory.path());
+        let owner = crate::execution::ServerExecution::start().expect("existing bank");
+        assert!(state.execution.set(owner).is_ok());
+        persistence::write_snapshot_blocking(&state.snapshot_path, &snapshot(25)).expect("fixture");
+        let original = std::fs::read(&state.snapshot_path).expect("original bytes");
+        let quota = state.execution.get().expect("actual owner").quota_group();
+        let available = quota.snapshot().limits.worker_bytes - quota.snapshot().worker_bytes;
+        let occupied = quota
+            .reserve_external_storage(available)
+            .expect("worker pressure");
+        assert!(matches!(
+            persistence::load_snapshot_for_state(&state).await,
+            Err(ServerError::Snapshot {
+                operation: "start worker",
+                source: SnapshotError::ResourceAdmission(_),
+                ..
+            })
+        ));
+        assert_eq!(
+            std::fs::read(&state.snapshot_path).expect("readback"),
+            original
+        );
+        assert!(state.snapshot_io.get().is_none());
+        drop(occupied);
+        let loaded = persistence::snapshot_service(&state)
+            .await
+            .expect("retry owner")
+            .read(None)
+            .await
+            .expect("retry read")
+            .expect("snapshot");
+        assert_eq!(loaded.version, 25);
+        drop(loaded);
+        persistence::shutdown_snapshot_service(&state)
+            .await
+            .expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn failed_recovery_write_remains_pending_and_retry_persists_without_another_mutation() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = capture_state(directory.path());
+        // A directory at the exact destination makes atomic file replacement
+        // fail on every platform without relying on user permission bits.
+        std::fs::create_dir(&state.snapshot_path).expect("destination obstruction");
+        state.request_snapshot_save();
+        persistence::flush_pending_snapshot(&state).await;
+        assert!(
+            state.is_snapshot_dirty(),
+            "failed save still owes durability"
+        );
+        std::fs::remove_dir(&state.snapshot_path).expect("remove owned empty obstruction");
+        persistence::flush_pending_snapshot(&state).await;
+        assert!(
+            !state.is_snapshot_dirty(),
+            "successful retry settles the claim"
+        );
+        let saved = persistence::snapshot_service(&state)
+            .await
+            .expect("disk owner")
+            .read(None)
+            .await
+            .expect("readback")
+            .expect("durable snapshot");
+        assert_eq!(saved.tree, *state.tree.read().await);
+        // Ordered flush retains the earlier failure receipt even though the
+        // retry/readback succeeded; it must not retrospectively hide errors.
+        assert!(persistence::shutdown_snapshot_service(&state)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

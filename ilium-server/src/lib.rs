@@ -229,6 +229,14 @@ pub async fn run_with_resources(
             }
             Ok(Some(snapshot)) => restore_snapshot(&state, snapshot).await,
             Ok(None) => {}
+            // An admission failure is not an empty session. Starting the
+            // fresh writer here could overwrite the intact recovery source.
+            Err(
+                error @ ServerError::Snapshot {
+                    source: crate::error::SnapshotError::ResourceAdmission(_),
+                    ..
+                },
+            ) => return Err(error),
             Err(error) => tracing::warn!("failed to load crash-recovery snapshot: {error}"),
         }
     }
@@ -274,6 +282,9 @@ pub async fn run_with_resources(
     // comment.
     tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
     state.abort_all_connection_tasks();
+    // Recovery data remains durable on disk. Return any unchosen decoded
+    // original to CPU destruction before closing the shared bank.
+    drop(state.pending_session_recovery.lock().await.take());
     // The codec bank must survive the grace period so final ordered events
     // can be encoded and flushed before connection cancellation.
     if let Some(execution) = state.execution.get() {
@@ -409,6 +420,17 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
 /// rest of the restore, matching this crate's top-level error-boundary
 /// rule.
 pub(crate) async fn restore_snapshot(
+    state: &Arc<ServerState>,
+    snapshot: crate::snapshot_io::LoadedSnapshot,
+) {
+    let (snapshot, storage) = snapshot.into_parts();
+    // Transfer custody before the first await. Cancellation cannot release
+    // the read admission while restored tree/history data is still live.
+    state.retain_snapshot_read_storage(storage);
+    restore_snapshot_data(state, snapshot).await;
+}
+
+async fn restore_snapshot_data(
     state: &Arc<ServerState>,
     mut snapshot: persistence::SessionSnapshot,
 ) {
@@ -821,7 +843,7 @@ mod restore_tests {
             .unwrap(),
             result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
         };
-        restore_snapshot(
+        restore_snapshot_data(
             &state,
             SessionSnapshot {
                 version: 3,
@@ -1253,7 +1275,7 @@ mod restore_tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
         };
-        restore_snapshot(&state, snapshot).await;
+        restore_snapshot_data(&state, snapshot).await;
 
         assert!(
             !state.panes.read().await.contains_key(&orphan_pane_id),
@@ -1355,7 +1377,7 @@ mod restore_tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
         };
-        restore_snapshot(&state, snapshot).await;
+        restore_snapshot_data(&state, snapshot).await;
 
         assert!(
             !state.panes.read().await.contains_key(&orphan_pane_id),
@@ -1549,6 +1571,36 @@ mod socket_tests {
             progress_monitor_enabled: true,
             session_backups_enabled: false,
         }
+    }
+
+    #[tokio::test]
+    async fn snapshot_admission_refusal_stops_startup_without_replacing_recovery_data() {
+        let directory = tempfile::tempdir().expect("directory");
+        let mut options = server_options(&directory, directory.path().join("admission.sock"), None);
+        options.session_recovery = SessionRecoveryConfig::RestoreAutomatically;
+        let path = options.snapshot_path.clone();
+        std::fs::write(&path, b"retained recovery source").expect("fixture");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("fixture")
+            .set_len(persistence::MAX_ENCODED_SNAPSHOT_BYTES + 1)
+            .expect("encoded refusal fixture");
+        let original = std::fs::read(&path).expect("original bytes");
+        let result = tokio::time::timeout(Duration::from_secs(5), run(options))
+            .await
+            .expect("refused startup must terminate");
+        assert!(matches!(
+            result,
+            Err(ServerError::Snapshot {
+                source: crate::error::SnapshotError::ResourceAdmission(_),
+                ..
+            })
+        ));
+        assert_eq!(
+            std::fs::read(&path).expect("authoritative readback"),
+            original
+        );
     }
 
     /// Asserts through `run` rather than a private helper, because refusing to

@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use ilium_core::{NodeId, PaneWorkspace, Tree};
 use ilium_detect::AgentSignature;
@@ -21,7 +22,6 @@ use tokio::task::JoinHandle;
 use crate::agent_debug::AgentDebugRecorder;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
-use crate::persistence::SessionSnapshot;
 use crate::snapshot_state::SnapshotState;
 use crate::sounds::PlaybackRequest;
 
@@ -170,7 +170,7 @@ pub struct ServerState {
     pub agent_debug: std::sync::Arc<AgentDebugRecorder>,
     /// Most recently selected terminal launch directory in this session.
     pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
-    pub pending_session_recovery: Mutex<Option<SessionSnapshot>>,
+    pub(crate) pending_session_recovery: Mutex<Option<crate::snapshot_io::LoadedSnapshot>>,
     /// One pre-restructure snapshot per project. A project-scoped revert
     /// restores only that project's subtree, leaving concurrent work in
     /// every other project intact.
@@ -289,9 +289,27 @@ pub struct ServerState {
     /// Broker between `ilium voice say` connections and the interactive
     /// client that hosts the voice session (see `crate::voice_relay`).
     pub(crate) voice_text: crate::voice_relay::VoiceTextRelay,
+    // Declared last so restored data fields drop before this final state lease.
+    restored_snapshot_storage: std::sync::Mutex<Option<Arc<ilium_execution::StorageAdmission>>>,
 }
 
 impl ServerState {
+    pub(crate) fn snapshot_read_storage(&self) -> Option<Arc<ilium_execution::StorageAdmission>> {
+        self.restored_snapshot_storage
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+    pub(crate) fn retain_snapshot_read_storage(
+        &self,
+        storage: Arc<ilium_execution::StorageAdmission>,
+    ) {
+        *self
+            .restored_snapshot_storage
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(storage);
+    }
+
     pub(crate) async fn workspace_repository_lock(
         &self,
         common_dir: &std::path::Path,
@@ -410,6 +428,7 @@ impl ServerState {
             next_progress_monitor_id: std::sync::atomic::AtomicU64::new(1),
             progress_set_requests: Mutex::new(ProgressSetRequestCache::default()),
             voice_text: crate::voice_relay::VoiceTextRelay::default(),
+            restored_snapshot_storage: std::sync::Mutex::new(None),
         }
     }
 

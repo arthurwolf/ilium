@@ -275,9 +275,20 @@ fn main() -> ExitCode {
         eprintln!("ilium: process resource startup: {error}");
         return ExitCode::FAILURE;
     }
+    const RUNTIME_WORKER_THREADS: usize = 2;
+    const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
+    const RUNTIME_STACK_BYTES: usize = 2 * 1024 * 1024;
+    if let Err(error) = ilium_client::bootstrap_runtime_admission(
+        RUNTIME_WORKER_THREADS + RUNTIME_MAX_BLOCKING_THREADS,
+        RUNTIME_STACK_BYTES,
+    ) {
+        eprintln!("ilium: runtime admission: {error}");
+        return ExitCode::FAILURE;
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(4)
+        .worker_threads(RUNTIME_WORKER_THREADS)
+        .max_blocking_threads(RUNTIME_MAX_BLOCKING_THREADS)
+        .thread_stack_size(RUNTIME_STACK_BYTES)
         .enable_all()
         .build()
     {

@@ -104,6 +104,49 @@ impl<'de, T: serde::Deserialize<'de>> DeserializeSeed<'de> for MessageSeed<T> {
         T::deserialize(decoder)
     }
 }
+/// A decoder error distinguishes admission refusal from malformed input.
+#[derive(Debug, thiserror::Error)]
+pub enum AllocationDecodeError<E> {
+    #[error("decoded {dimension} admission refused: requested {requested}, limit {limit}")]
+    ResourceLimit {
+        dimension: &'static str,
+        requested: usize,
+        limit: usize,
+    },
+    #[error("decode failed: {0}")]
+    Codec(E),
+}
+
+/// Apply the existing allocation policy to a source-audited Serde graph.
+///
+/// The caller must separately admit the parser's scratch storage and audit
+/// custom deserializers and internally tagged/untagged enums: allocations
+/// performed outside these visitor callbacks are not covered. This is a
+/// requested-capacity admission policy, not an allocator or RSS guarantee.
+/// The sealed IPC message contract and its Bincode framing remain separate.
+pub fn deserialize_allocation_checked<'de, T, D>(
+    decoder: D,
+) -> Result<T, AllocationDecodeError<D::Error>>
+where
+    T: serde::Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    let budget = Budget::default();
+    let result = Seed {
+        inner: MessageSeed::<T>(PhantomData),
+        budget: &budget,
+    }
+    .deserialize(decoder);
+    match (result, budget.refusal.get()) {
+        (_, Some(refusal)) => Err(AllocationDecodeError::ResourceLimit {
+            dimension: refusal.dimension,
+            requested: refusal.requested,
+            limit: refusal.limit,
+        }),
+        (value, None) => value.map_err(AllocationDecodeError::Codec),
+    }
+}
+
 /// Decode with the same fixed integer encoding and trailing-byte rejection as
 /// ordinary framing, refusing resource admission before audited allocations.
 pub fn decode_bounded<T: BoundedMessage>(payload: &[u8]) -> Result<T, IpcError> {
@@ -145,7 +188,7 @@ impl<'de, D: Deserializer<'de>> Deserializer<'de> for Decoder<'_, D> {
         self.inner.deserialize_any(GuardedVisitor {
             inner: visitor,
             budget: self.budget,
-            dynamic_sequence: false,
+            dynamic_sequence: true,
         })
     }
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -815,6 +858,27 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn shared_decoder_preserves_values_and_distinguishes_owned_buffer_refusal() {
+        let borrowed = de::value::StrDeserializer::<de::value::Error>::new("native text");
+        let value: String = deserialize_allocation_checked(borrowed).unwrap();
+        assert_eq!(value, "native text");
+        let owned =
+            de::value::StringDeserializer::<de::value::Error>::new("already allocated".into());
+        assert!(matches!(
+            deserialize_allocation_checked::<String, _>(owned),
+            Err(AllocationDecodeError::ResourceLimit {
+                dimension: "nonborrowing string",
+                ..
+            })
+        ));
+        let malformed = de::value::StrDeserializer::<de::value::Error>::new("not an integer");
+        assert!(matches!(
+            deserialize_allocation_checked::<u64, _>(malformed),
+            Err(AllocationDecodeError::Codec(_))
+        ));
+    }
 
     #[test]
     fn refusal_precedes_the_original_seed_allocation_callback() {
