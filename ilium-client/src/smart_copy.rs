@@ -11,8 +11,10 @@ use ilium_core::NodeId;
 use ratatui::layout::Position;
 use serde::{Deserialize, Serialize};
 
+use crate::smart_copy_tokens::{self, PathContext, PathKind, PathProbe};
+
 pub const ARRIVAL_FLASH_DURATION: Duration = Duration::from_millis(500);
-pub const MAXIMUM_CANDIDATES: usize = 512;
+pub const MAXIMUM_CANDIDATES: usize = 2048;
 const MAXIMUM_DETECTED_CANDIDATES: usize = MAXIMUM_CANDIDATES / 2;
 pub const MAXIMUM_PARTS_PER_CANDIDATE: usize = 128;
 pub const MAXIMUM_JSONL_LINE_BYTES: usize = 64 * 1024;
@@ -52,13 +54,20 @@ struct SnapshotWord {
 
 #[derive(Clone)]
 pub struct SmartCopySnapshot {
-    pub screen: vt100::Screen,
-    pub lines: Vec<PromptLine>,
-    words: Vec<Vec<SnapshotWord>>,
-    detected: Vec<DetectedRegion>,
+    pub screen: std::sync::Arc<vt100::Screen>,
+    pub lines: std::sync::Arc<Vec<PromptLine>>,
+    words: std::sync::Arc<Vec<Vec<SnapshotWord>>>,
+    detected: std::sync::Arc<Vec<DetectedRegion>>,
+    _allocation_hold: Option<std::sync::Arc<crate::terminal_parsing::SnapshotCharge>>,
 }
 
 impl SmartCopySnapshot {
+    pub(crate) fn retain_allocation(
+        &mut self,
+        charge: std::sync::Arc<crate::terminal_parsing::SnapshotCharge>,
+    ) {
+        self._allocation_hold = Some(charge);
+    }
     pub fn capture(screen: &vt100::Screen) -> Self {
         let (rows, columns) = screen.size();
         let mut lines = Vec::with_capacity(usize::from(rows));
@@ -113,17 +122,18 @@ impl SmartCopySnapshot {
             words.push(row_words);
         }
         let mut snapshot = Self {
-            screen: screen.clone(),
-            lines,
-            words,
-            detected: Vec::new(),
+            _allocation_hold: None,
+            screen: std::sync::Arc::new(screen.clone()),
+            lines: std::sync::Arc::new(lines),
+            words: std::sync::Arc::new(words),
+            detected: std::sync::Arc::new(Vec::new()),
         };
-        snapshot.detected = detect_regions(&snapshot);
+        snapshot.detected = std::sync::Arc::new(detect_regions(&snapshot));
         snapshot
     }
 
     pub fn prompt_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&self.lines)
+        serde_json::to_string(self.lines.as_ref())
     }
 
     fn resolve_candidate(&self, spec: CandidateSpec) -> Result<SmartCopyCandidate, String> {
@@ -406,11 +416,27 @@ struct RegionDraft {
     label: String,
     kind: &'static str,
     spans: Vec<CellSpan>,
+    probe: Option<PathProbe>,
 }
 
 fn draft(primary: &mut Vec<RegionDraft>, label: String, kind: &'static str, spans: Vec<CellSpan>) {
+    draft_with_probe(primary, label, kind, spans, None);
+}
+
+fn draft_with_probe(
+    primary: &mut Vec<RegionDraft>,
+    label: String,
+    kind: &'static str,
+    spans: Vec<CellSpan>,
+    probe: Option<PathProbe>,
+) {
     if !spans.is_empty() && primary.len() < MAXIMUM_DETECTED_CANDIDATES {
-        primary.push(RegionDraft { label, kind, spans });
+        primary.push(RegionDraft {
+            label,
+            kind,
+            spans,
+            probe,
+        });
     }
 }
 
@@ -1242,9 +1268,88 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
         }
     }
 
-    let mut regions = Vec::new();
-    let mut geometries = HashSet::new();
-    for mut region in primary.into_iter().chain(details) {
+    // Every non-empty line is selectable on its own, so clicking anywhere on a
+    // line that is not covered by a smaller region (a URL, a path, ...) selects
+    // the whole line.
+    let mut line_regions = Vec::new();
+    for (line_row, line) in lines.iter().enumerate() {
+        if let Some(span) = line.full_span(line_row) {
+            draft(
+                &mut line_regions,
+                format!("line {}", line_row + 1),
+                "line",
+                vec![span],
+            );
+        }
+        if let Some(start) = is_command_prefix_end(&line.text) {
+            if let Some(span) = line.content_span(line_row, start, line.chars.len()) {
+                draft(
+                    &mut line_regions,
+                    format!("command text on line {}", line_row + 1),
+                    "command-text",
+                    vec![span],
+                );
+            }
+        }
+    }
+
+    // Tokens: URLs, paths, qualified names, addresses, values and so on.
+    let mut token_regions = Vec::new();
+    for (line_row, line) in lines.iter().enumerate() {
+        for token in smart_copy_tokens::scan_line(&line.text) {
+            if let Some(span) = line.content_span(line_row, token.start, token.end) {
+                draft_with_probe(
+                    &mut token_regions,
+                    token.label,
+                    token.kind,
+                    vec![span],
+                    token.probe,
+                );
+            }
+        }
+    }
+    let row_texts = lines
+        .iter()
+        .map(|line| line.text.clone())
+        .collect::<Vec<_>>();
+    for address in smart_copy_tokens::scan_postal_addresses(&row_texts) {
+        let spans = address
+            .rows
+            .iter()
+            .filter_map(|(row, start, end)| lines[*row].content_span(*row, *start, *end))
+            .collect::<Vec<_>>();
+        draft(&mut token_regions, address.label, address.kind, spans);
+    }
+
+    // Styled runs: foreground colour, highlight, bold, italic and underline
+    // mark things the program considers significant (Codex prints file names
+    // and commands in colour).
+    let mut styled_regions = Vec::new();
+    for row in 0..height {
+        for run in smart_copy_tokens::styled_runs(&snapshot.screen, row) {
+            draft(
+                &mut styled_regions,
+                run.label,
+                run.kind,
+                vec![CellSpan {
+                    row,
+                    start_column: run.start_column,
+                    end_column: run.end_column,
+                }],
+            );
+        }
+    }
+
+    let mut regions: Vec<DetectedRegion> = Vec::new();
+    let mut geometries: std::collections::HashMap<Vec<CellSpan>, usize> =
+        std::collections::HashMap::new();
+    for mut region in primary
+        .into_iter()
+        .chain(details)
+        .chain(token_regions)
+        .chain(styled_regions)
+        .chain(line_regions)
+    {
         if regions.len() >= MAXIMUM_DETECTED_CANDIDATES {
             break;
         }
@@ -1252,7 +1357,18 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             .spans
             .sort_by_key(|span| (span.row, span.start_column, span.end_column));
         region.spans.dedup();
-        if region.spans.len() > MAXIMUM_PARTS_PER_CANDIDATE || geometries.contains(&region.spans) {
+        if region.spans.len() > MAXIMUM_PARTS_PER_CANDIDATE {
+            continue;
+        }
+        if let Some(&existing) = geometries.get(&region.spans) {
+            // A specific kind (an address, a path) that covers exactly what a
+            // generic line or paragraph covers names that region better.
+            let is_generic = |kind: &str| matches!(kind, "line" | "paragraph");
+            if is_generic(&regions[existing].kind) && !is_generic(region.kind) {
+                regions[existing].kind = region.kind.to_string();
+                regions[existing].label = region.label;
+                regions[existing].probe = region.probe;
+            }
             continue;
         }
         let text = region
@@ -1276,13 +1392,14 @@ fn detect_regions(snapshot: &SmartCopySnapshot) -> Vec<DetectedRegion> {
             .iter()
             .map(|span| usize::from(span.end_column - span.start_column + 1))
             .sum();
-        geometries.insert(region.spans.clone());
+        geometries.insert(region.spans.clone(), regions.len());
         regions.push(DetectedRegion {
             label: region.label,
             kind: region.kind.to_string(),
             spans: region.spans,
             text,
             cell_count,
+            probe: region.probe,
         });
     }
     regions
@@ -1340,6 +1457,7 @@ struct DetectedRegion {
     spans: Vec<CellSpan>,
     text: String,
     cell_count: usize,
+    probe: Option<PathProbe>,
 }
 
 impl DetectedRegion {
@@ -1350,9 +1468,25 @@ impl DetectedRegion {
             spans: self.spans.clone(),
             text: self.text.clone(),
             cell_count: self.cell_count,
-            arrived_at: Instant::now(),
+            // Pre-scanned regions exist from the first frame; only regions
+            // that arrive later from the model flash.
+            arrived_at: Instant::now()
+                .checked_sub(ARRIVAL_FLASH_DURATION)
+                .unwrap_or_else(Instant::now),
         }
     }
+}
+
+/// Character index just after a shell or agent prompt marker, if the line
+/// starts with one followed by a command.
+fn is_command_prefix_end(text: &str) -> Option<usize> {
+    let trimmed = text.trim_start();
+    let indent = text.chars().count() - trimmed.chars().count();
+    let marker = ["$ ", "❯ ", "› ", "> ", "# "]
+        .iter()
+        .find(|marker| trimmed.starts_with(**marker))?;
+    let end = indent + marker.chars().count();
+    (trimmed.chars().count() > marker.chars().count()).then_some(end)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1373,25 +1507,60 @@ pub struct SmartCopySession {
     pub exact_output_tokens: Option<u64>,
     pub invalid_lines: usize,
     pub started_at: Instant,
+    /// Smart Copy light: no model call, detected regions only.
+    pub is_light: bool,
     hovered_cell: Option<(u16, u16)>,
     overlap_index: usize,
     geometries: HashSet<Vec<CellSpan>>,
     /// Indices into `candidates` the user clicked, in click order. Candidates
     /// are only ever appended, so an index stays valid for the whole session.
     selected: Vec<usize>,
+    pub(crate) output_retention: Option<ilium_execution::Retention>,
 }
 
 impl SmartCopySession {
     pub fn new(generation: u64, pane_id: NodeId, snapshot: SmartCopySnapshot) -> Self {
-        let geometries = snapshot
-            .detected
-            .iter()
-            .map(|region| region.spans.clone())
-            .collect();
+        Self::with_path_context(generation, pane_id, snapshot, &PathContext::default())
+    }
+
+    /// Builds a session whose path-shaped regions are checked against the
+    /// filesystem: existing files and directories are labelled as such, and
+    /// path-like text that is neither plausible nor present is dropped.
+    pub fn with_path_context(
+        generation: u64,
+        pane_id: NodeId,
+        snapshot: SmartCopySnapshot,
+        paths: &PathContext,
+    ) -> Self {
         let candidates = snapshot
             .detected
             .iter()
-            .map(DetectedRegion::candidate)
+            .filter_map(|region| {
+                let mut candidate = region.candidate();
+                if let Some(probe) = &region.probe {
+                    match paths.resolve(&probe.path) {
+                        Some(PathKind::File) => {
+                            candidate.kind = if region.kind == "file-location" {
+                                "file-location".to_string()
+                            } else {
+                                "file".to_string()
+                            };
+                            candidate.label = format!("existing file {}", probe.path);
+                        }
+                        Some(PathKind::Directory) => {
+                            candidate.kind = "directory".to_string();
+                            candidate.label = format!("existing directory {}", probe.path);
+                        }
+                        None if probe.plausible_unverified => {}
+                        None => return None,
+                    }
+                }
+                Some(candidate)
+            })
+            .collect::<Vec<_>>();
+        let geometries = candidates
+            .iter()
+            .map(|candidate| candidate.spans.clone())
             .collect();
         Self {
             generation,
@@ -1403,10 +1572,12 @@ impl SmartCopySession {
             exact_output_tokens: None,
             invalid_lines: 0,
             started_at: Instant::now(),
+            is_light: false,
             hovered_cell: None,
             overlap_index: 0,
             geometries,
             selected: Vec::new(),
+            output_retention: None,
         }
     }
 
@@ -1430,6 +1601,25 @@ impl SmartCopySession {
         let candidate = self.snapshot.resolve_candidate(spec).inspect_err(|_| {
             self.invalid_lines += 1;
         })?;
+        let candidate_bytes = |candidate: &SmartCopyCandidate| {
+            candidate
+                .label
+                .capacity()
+                .saturating_add(candidate.kind.capacity())
+                .saturating_add(candidate.text.capacity())
+                .saturating_add(
+                    candidate
+                        .spans
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<CellSpan>()),
+                )
+        };
+        let retained = self.candidates.iter().fold(0usize, |sum, item| {
+            sum.saturating_add(candidate_bytes(item))
+        });
+        if retained.saturating_add(candidate_bytes(&candidate)) > 32 * 1024 * 1024 {
+            return Err("Smart Copy retained candidate byte bound exceeded".into());
+        }
         if !self.geometries.insert(candidate.spans.clone()) {
             return Ok(false);
         }
@@ -1600,7 +1790,7 @@ mod tests {
     use super::*;
 
     fn snapshot(lines: &[&str]) -> SmartCopySnapshot {
-        let mut parser = vt100::Parser::new(lines.len() as u16, 40, 0);
+        let mut parser = vt100::Parser::new(lines.len() as u16, 120, 0);
         parser.process(lines.join("\r\n").as_bytes());
         SmartCopySnapshot::capture(parser.screen())
     }
@@ -1666,6 +1856,141 @@ mod tests {
         assert_eq!(session.selected_count(), 1);
         session.set_hover(area, Position::new(50, 5));
         assert_eq!(session.toggle_current_selection(), None);
+    }
+
+    fn hover(session: &mut SmartCopySession, column: u16, row: u16) -> (String, String) {
+        session.set_hover(
+            ratatui::layout::Rect::new(0, 0, 80, 20),
+            Position::new(column, row),
+        );
+        let candidate = session
+            .current_candidate()
+            .expect("candidate under pointer");
+        (candidate.kind.clone(), candidate.text.clone())
+    }
+
+    #[test]
+    fn url_inside_a_line_is_picked_over_the_line_and_the_line_elsewhere() {
+        let mut session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&["see https://example.test/x for details"]),
+        );
+        let (kind, text) = hover(&mut session, 10, 0);
+        assert_eq!(
+            (kind.as_str(), text.as_str()),
+            ("url", "https://example.test/x")
+        );
+        let (kind, text) = hover(&mut session, 1, 0);
+        assert_eq!(text, "see https://example.test/x for details");
+        assert!(matches!(kind.as_str(), "line" | "paragraph"));
+        let (_, text) = hover(&mut session, 33, 0);
+        assert_eq!(text, "see https://example.test/x for details");
+    }
+
+    #[test]
+    fn file_locations_and_qualified_names_nest_and_cycle() {
+        let mut session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&["error ilium_execution::JobOutcome at app.rs:6004"]),
+        );
+        let (kind, text) = hover(&mut session, 30, 0);
+        assert_eq!((kind.as_str(), text.as_str()), ("type-name", "JobOutcome"));
+        session.cycle_overlap(1);
+        assert_eq!(
+            session.current_candidate().unwrap().text,
+            "ilium_execution::JobOutcome"
+        );
+        let (kind, text) = hover(&mut session, 39, 0);
+        assert_eq!(text, "app.rs");
+        assert!(matches!(kind.as_str(), "path" | "file"));
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "file-location" && candidate.text == "app.rs:6004"));
+    }
+
+    #[test]
+    fn existing_paths_are_labelled_and_implausible_ones_are_dropped() {
+        let root = std::env::temp_dir().join(format!("ilium-smart-copy-it-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(root.join("notes.zzz"), "x").unwrap();
+        let context = PathContext::new(Some(&root), &root, None);
+        let session = SmartCopySession::with_path_context(
+            1,
+            NodeId(1),
+            snapshot(&["open src/main.rs, notes.zzz and unknown/dir/it"]),
+            &context,
+        );
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "file" && candidate.text == "src/main.rs"));
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "directory" && candidate.text == "src"));
+        assert!(!session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.text == "unknown/dir/it"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn coloured_and_bold_runs_become_candidates() {
+        let session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&["ran \u{1b}[34mcargo test\u{1b}[0m in \u{1b}[1mcrates\u{1b}[0m"]),
+        );
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "colored" && candidate.text == "cargo test"));
+        assert!(session
+            .candidates
+            .iter()
+            .any(|candidate| candidate.kind == "bold" && candidate.text == "crates"));
+    }
+
+    #[test]
+    fn network_values_and_addresses_are_candidates() {
+        let session = SmartCopySession::new(
+            1,
+            NodeId(1),
+            snapshot(&[
+                "serve localhost:4005 via 10.0.0.7 mail a@b.example",
+                "",
+                "10 rue de la Paix",
+                "75002 Paris",
+            ]),
+        );
+        for (kind, text) in [
+            ("host-port", "localhost:4005"),
+            ("ip-address", "10.0.0.7"),
+            ("email", "a@b.example"),
+            ("postal-address", "10 rue de la Paix\n75002 Paris"),
+        ] {
+            assert!(
+                session
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.kind == kind && candidate.text == text),
+                "missing {kind} {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn pre_scanned_regions_do_not_flash_on_arrival() {
+        let session = SmartCopySession::new(1, NodeId(1), snapshot(&["see https://example.test"]));
+        assert!(session
+            .candidates
+            .iter()
+            .all(|candidate| candidate.arrived_at.elapsed() >= ARRIVAL_FLASH_DURATION));
     }
 
     #[test]
@@ -1976,7 +2301,7 @@ mod tests {
             .iter()
             .any(|candidate| candidate.kind == "fenced-code"));
         let mut many_lines = Vec::new();
-        for index in 0..600 {
+        for index in 0..1100 {
             many_lines.push(format!("$ item {index}"));
             many_lines.push(String::new());
         }

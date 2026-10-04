@@ -30,6 +30,7 @@ mod tests {
                 status,
                 percent: 100.0,
                 message: "retained result".into(),
+                details: String::new(),
                 error: (status == ProgressTaskStatus::Error).then(|| "task failed".into()),
             },
             1000,

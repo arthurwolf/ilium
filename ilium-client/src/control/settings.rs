@@ -42,7 +42,11 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             let value = command
                 .value
                 .ok_or(ilium_prompts::voice::VOICE_SETTINGS_VALUE_IS_REQUIRED)?;
+            let checkpoint = configuration_checkpoint(app);
             set_setting(app, path, value)?;
+            if let Some(receipt) = configuration_receipt(app, checkpoint, path)? {
+                return Ok(receipt);
+            }
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/settings/updated",
                 &serde_json::json!({"v0": (path).to_string()}),
@@ -57,7 +61,11 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
                 .direction
                 .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_DIRECTION_IS_REQUIRED)?
                 .sign();
+            let checkpoint = configuration_checkpoint(app);
             adjust_setting(app, path, direction)?;
+            if let Some(receipt) = configuration_receipt(app, checkpoint, path)? {
+                return Ok(receipt);
+            }
             Ok(ExecutionReceipt::immediate(ilium_prompts::render_value(
                 "voice/settings/adjusted",
                 &serde_json::json!({"v0": (path).to_string()}),
@@ -82,6 +90,31 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             ))
         }
     }
+}
+
+fn configuration_checkpoint(app: &mut App) -> (u64, u64) {
+    app.configuration_admission.rejection = None;
+    (
+        app.configuration_admission.attempts,
+        app.configuration_admission.accepted,
+    )
+}
+fn configuration_receipt(
+    app: &App,
+    before: (u64, u64),
+    path: &str,
+) -> Result<Option<ExecutionReceipt>, String> {
+    if app.configuration_admission.attempts == before.0 {
+        return Ok(None);
+    }
+    if let Some(error) = &app.configuration_admission.rejection {
+        return Err(format!("Settings change has unaccepted writes: {error}; any earlier admitted writes remain pending"));
+    }
+    Ok(Some(ExecutionReceipt::local_write_pending(
+        "Settings",
+        serde_json::json!({"path":path,"accepted_writes":app.configuration_admission.accepted.saturating_sub(before.1)}),
+        app.configuration_admission.accepted,
+    )))
 }
 
 fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
@@ -269,6 +302,32 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 app.settings_adjust_terminal_row(TerminalRow::NewPaneDirectory, 1);
             }
             ensure_reached(app.terminal_settings.new_pane_directory == target)?;
+        }
+        "terminal.smart_copy_light" => {
+            let target = boolean(&value)?;
+            if app.terminal_settings.smart_copy_light != target {
+                app.settings_adjust_terminal_row(TerminalRow::SmartCopyLight, 1);
+            }
+            ensure_reached(app.terminal_settings.smart_copy_light == target)?;
+        }
+        "terminal.smart_copy_light_key" => {
+            let target = match string(&value)?.to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => crate::config::SmartCopyLightKey::Control,
+                "alt" | "option" => crate::config::SmartCopyLightKey::Alt,
+                "shift" => crate::config::SmartCopyLightKey::Shift,
+                other => {
+                    return Err(format!(
+                        "terminal.smart_copy_light_key {other:?} must be ctrl, alt or shift"
+                    ))
+                }
+            };
+            for _ in 0..crate::config::SmartCopyLightKey::ALL.len() {
+                if app.terminal_settings.smart_copy_light_key == target {
+                    break;
+                }
+                app.settings_adjust_terminal_row(TerminalRow::SmartCopyLightKey, 1);
+            }
+            ensure_reached(app.terminal_settings.smart_copy_light_key == target)?;
         }
         "editor.line_numbers" => set_editor_toggle(
             app,
@@ -773,6 +832,12 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         }
         "terminal.new_pane_directory" => {
             app.settings_adjust_terminal_row(TerminalRow::NewPaneDirectory, direction)
+        }
+        "terminal.smart_copy_light" => {
+            app.settings_adjust_terminal_row(TerminalRow::SmartCopyLight, direction)
+        }
+        "terminal.smart_copy_light_key" => {
+            app.settings_adjust_terminal_row(TerminalRow::SmartCopyLightKey, direction)
         }
         "editor.autosave_delay_ms" => {
             app.settings_adjust_editor_row(EditorRow::AutosaveDelay, direction)

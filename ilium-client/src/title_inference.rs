@@ -131,6 +131,7 @@ pub fn session_title_input(
     let (parent_group, nearby_titles) = nearby_title_context(app, pane_id);
     Some(crate::session_naming::SessionTitleInput {
         pane_id,
+        presentation_revision: node.presentation_revision,
         project_name,
         project_path: app
             .tree

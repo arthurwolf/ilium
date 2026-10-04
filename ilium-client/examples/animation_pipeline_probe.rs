@@ -1,7 +1,12 @@
 //! Synthetic, deterministic animation stage benchmark. JSONL only; no real project data.
+#[path = "../../ilium-ambient/tests/support/mod.rs"]
+mod ambient_fixture;
+
 use ilium_client::{
     app::App,
-    background_animation::{AnimationFrame, AnimationKind, AnimationSettings, ShorelineStyle},
+    background_animation::{
+        AnimationFrame, AnimationKind, AnimationLoopCache, AnimationSettings, ShorelineStyle,
+    },
     background_composition,
     config::MotionLevel,
 };
@@ -85,6 +90,7 @@ fn foreground_fixture(area: Rect, selected: &str) -> Buffer {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let resources = ambient_fixture::ResourcesFixture::new()?;
     let (mut width, mut height, mut frames, mut selected) =
         (160_u16, 50_u16, 300_u32, String::from("shoreline"));
     let mut density = 60_u16;
@@ -157,6 +163,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ShorelineStyle::Rich
         };
         let mut field = AnimationFrame::default();
+        field.configure_resources(resources.resources.clone());
         let cold = Instant::now();
         field.render(&settings, width, height, Duration::ZERO);
         println!(
@@ -210,18 +217,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "synthetic-benchmark".into(),
             PathBuf::from("/synthetic-animation-benchmark"),
         );
+        app.animation_frame
+            .configure_resources(resources.resources.clone());
         app.animation_settings = settings.clone();
         app.ui_settings.motion_level = MotionLevel::Full;
         let area = Rect::new(0, 0, width, height);
         let foreground_template = foreground_fixture(area, &foreground);
         app.layout.screen_area = area;
         app.layout.pane_area = area;
+        // This component benchmark has its own cache; it does not expose or
+        // mutate the application's worker-owned scene state.
+        let mut cache = AnimationLoopCache::new(resources.resources.clone());
         let build = Instant::now();
-        while !app
-            .animation_cache
-            .borrow_mut()
-            .step(&settings, width, height, 8)
-        {
+        while !cache.step(&settings, width, height, 8) {
             if build.elapsed() > Duration::from_secs(120) {
                 return Err("cache build exceeded120seconds".into());
             }
@@ -229,12 +237,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!(
             "{}",
-            serde_json::json!({"type":"result","stage":"cache_build","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"shoreline_style":shoreline_style,"loop_seconds":1,"us":build.elapsed().as_secs_f64()*1e6,"resident_bytes":app.animation_cache.borrow().status().resident_bytes})
+            serde_json::json!({"type":"result","stage":"cache_build","scene":kind,"width":width,"height":height,"density_percent":density,"foreground":foreground,"shoreline_style":shoreline_style,"loop_seconds":1,"us":build.elapsed().as_secs_f64()*1e6,"resident_bytes":cache.status().resident_bytes,"scope":"isolated cache component"})
         );
         let mut samples = Vec::new();
         for n in 0..frames {
             let start = Instant::now();
-            std::hint::black_box(app.animation_cache.borrow().copy_frame_into(
+            std::hint::black_box(cache.copy_frame_into(
                 Duration::from_nanos(u64::from(n) * 1_000_000_000 / 30),
                 &mut field,
             ));
@@ -248,8 +256,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             height,
             density,
             samples,
-            serde_json::json!({}),
+            serde_json::json!({"scope":"isolated cache component"}),
         );
+        drop(cache);
         let counter = OutputCount::default();
         let mut terminal = Terminal::with_options(
             CrosstermBackend::new(counter.clone()),
@@ -260,6 +269,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let (mut compose, mut display, mut buffer_setup, mut pipeline) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for n in 0..frames {
+            let elapsed = Duration::from_nanos(u64::from(n) * 1_000_000_000 / 30);
+            let preparation = Instant::now();
+            app.animation_frame
+                .request(&settings, width, height, elapsed, None)
+                .map_err(|error| format!("animation worker rejected request: {error:?}"))?;
+            // Only this synthetic harness waits. Production composition must
+            // remain nonblocking and may use the latest completed frame.
+            while !app.animation_frame.collect() {
+                if preparation.elapsed() > Duration::from_secs(120) {
+                    return Err("animation worker completion exceeded120seconds".into());
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            println!(
+                "{}",
+                serde_json::json!({"type":"result","stage":"worker_completion","scene":kind,"frame":n,"us":preparation.elapsed().as_secs_f64()*1e6,"scope":"request to collected worker result; 1ms harness polling"})
+            );
             let pipeline_start = Instant::now();
             let mut buffer = if foreground == "empty" {
                 Buffer::empty(area)
@@ -267,11 +293,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 foreground_template.clone()
             };
             let start = Instant::now();
-            background_composition::compose(
-                &mut buffer,
-                &mut app,
-                Duration::from_nanos(u64::from(n) * 1_000_000_000 / 30),
-            );
+            background_composition::compose(&mut buffer, &mut app, elapsed);
+            let presentation = background_composition::capture_final(&buffer, area, &mut app);
             let composition_elapsed = start.elapsed();
             let start = Instant::now();
             let mut setup = Duration::ZERO;
@@ -280,6 +303,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 frame.buffer_mut().clone_from(&buffer);
                 setup = t.elapsed();
             })?;
+            if let Some(presentation) = presentation {
+                app.animation_frame.acknowledge(presentation);
+            }
             let total = start.elapsed();
             let pipeline_elapsed = pipeline_start.elapsed();
             if n == 0 {

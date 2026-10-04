@@ -40,11 +40,14 @@ pub enum ManagerView {
 
 pub struct WorktreeManagerState {
     pub project: NodeId,
+    pub(crate) confirmation_identity: std::sync::Arc<()>,
     pub selected: usize,
     pub inventory: Option<WorkspaceInventory>,
     pub view: ManagerView,
     pending_inventory_request: Option<u64>,
     pending_prune: Option<(u64, WorkspacePruneTarget)>,
+    pub(crate) inventory_retention: Option<crate::connection::EventRetention>,
+    pub(crate) view_retention: Option<crate::connection::EventRetention>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,11 +111,14 @@ impl WorktreeManagerState {
     pub fn new(project: NodeId, request_id: u64) -> Self {
         Self {
             project,
+            confirmation_identity: std::sync::Arc::new(()),
             selected: 0,
             inventory: None,
             view: ManagerView::Loading,
             pending_inventory_request: Some(request_id),
             pending_prune: None,
+            inventory_retention: None,
+            view_retention: None,
         }
     }
 
@@ -120,6 +126,7 @@ impl WorktreeManagerState {
         self.pending_inventory_request = Some(request_id);
         self.pending_prune = None;
         self.view = ManagerView::Loading;
+        self.view_retention = None;
     }
 
     pub fn receive_inventory(
@@ -136,10 +143,12 @@ impl WorktreeManagerState {
             Ok(inventory) => {
                 self.selected = self.selected.min(inventory.entries.len().saturating_sub(1));
                 self.inventory = Some(inventory);
+                self.inventory_retention = None;
                 self.view = ManagerView::Browsing;
             }
             Err(error) => self.view = ManagerView::Error(error),
         }
+        self.view_retention = None;
         true
     }
 
@@ -181,6 +190,7 @@ impl WorktreeManagerState {
             return Err(row.safe_blockers.join("; "));
         }
         let target = row.target.clone().ok_or("worktree target is unavailable")?;
+        self.confirmation_identity = std::sync::Arc::new(());
         self.view = ManagerView::ConfirmSafe {
             target,
             branch_policy: WorkspacePruneBranchPolicy::Keep,
@@ -206,6 +216,7 @@ impl WorktreeManagerState {
             .filter(|path| !path.chars().any(char::is_control))
             .ok_or("this path cannot be confirmed as UTF-8 text")?
             .to_owned();
+        self.confirmation_identity = std::sync::Arc::new(());
         self.view = ManagerView::ConfirmDiscard {
             target,
             exact_path,
@@ -213,6 +224,37 @@ impl WorktreeManagerState {
             branch_policy: WorkspacePruneBranchPolicy::Keep,
         };
         Ok(())
+    }
+
+    pub(crate) fn confirmation_branch(
+        &self,
+    ) -> Option<(&WorkspacePruneTarget, WorkspacePruneBranchPolicy)> {
+        match &self.view {
+            ManagerView::ConfirmSafe {
+                target,
+                branch_policy,
+            }
+            | ManagerView::ConfirmDiscard {
+                target,
+                branch_policy,
+                ..
+            } => Some((target, *branch_policy)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_confirmation_branch(
+        &mut self,
+        policy: WorkspacePruneBranchPolicy,
+    ) -> Result<(), String> {
+        match &mut self.view {
+            ManagerView::ConfirmSafe { branch_policy, .. }
+            | ManagerView::ConfirmDiscard { branch_policy, .. } => {
+                *branch_policy = policy;
+                Ok(())
+            }
+            _ => Err("The removal confirmation changed; reopen branch choices".into()),
+        }
     }
 
     pub fn toggle_branch_policy(&mut self) {
@@ -295,12 +337,18 @@ impl WorktreeManagerState {
         result: WorkspacePruneResult,
     ) -> bool {
         if self.project != project
-            || self.pending_prune.as_ref() != Some(&(request_id, target.clone()))
+            || !self
+                .pending_prune
+                .as_ref()
+                .is_some_and(|(pending_id, pending_target)| {
+                    *pending_id == request_id && pending_target == &target
+                })
         {
             return false;
         }
         self.pending_prune = None;
         self.view = ManagerView::Result { result };
+        self.view_retention = None;
         true
     }
 
@@ -360,6 +408,35 @@ fn row_label(row: &WorkspaceInventoryEntry) -> String {
     };
     let branch = row.branch.as_deref().unwrap_or("detached");
     format!("[{owner}] {branch}  {}", row.path.display())
+}
+
+pub(crate) fn branch_control(
+    screen: Rect,
+    state: &WorktreeManagerState,
+) -> Option<crate::value_control::ValueControl> {
+    let (_, policy) = state.confirmation_branch()?;
+    let areas = layout(screen);
+    let area = Rect::new(
+        areas.list.x,
+        areas.list.y.saturating_sub(1),
+        areas.list.width,
+        1,
+    );
+    if area.height == 0 {
+        return None;
+    }
+    Some(crate::value_control::ValueControl::new(
+        Rect::new(area.x, area.bottom() - 1, area.width, 1),
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: "Branch",
+            value: branch_label(policy),
+            label_width: 8,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    ))
 }
 
 fn branch_label(policy: WorkspacePruneBranchPolicy) -> &'static str {
@@ -479,6 +556,16 @@ pub fn render(frame: &mut Frame, screen: Rect, state: &WorktreeManagerState) {
         Paragraph::new(detail).wrap(Wrap { trim: false }),
         areas.detail,
     );
+    if let Some(control) = branch_control(screen, state) {
+        control.render(
+            frame,
+            crate::value_control::ControlStyles {
+                value: theme::selected_style(),
+                button: theme::selected_style(),
+                ..Default::default()
+            },
+        );
+    }
     let actions = match &state.view {
         ManagerView::Browsing => "[S] Safe remove  [D] Discard files  [R] Refresh  [Esc] Close",
         ManagerView::ConfirmSafe { .. } => "[B] Branch choice  [Y] Confirm  [Esc] Cancel",
@@ -603,5 +690,85 @@ mod tests {
         assert_eq!(hit(20), Some(ManagerHit::ToggleBranch));
         assert_eq!(hit(21), Some(ManagerHit::Confirm));
         assert_eq!(hit(38), Some(ManagerHit::Cancel));
+    }
+    #[test]
+    fn branch_catalog_changes_only_policy_and_rejects_reopened_confirmation() {
+        use crate::value_dialog::ValueDialogState;
+        use crate::value_dialog_host::ValueDialogHost;
+        let mut state = ready();
+        state.begin_discard_confirmation().unwrap();
+        for character in "/tmp/repo.agent".chars() {
+            state.edit_discard_path(KeyCode::Char(character));
+        }
+        let before = state.view.clone();
+        let host = ValueDialogHost::prune_branch(&state).unwrap();
+        let ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("full branch catalog")
+        };
+        assert_eq!(dialog.options().len(), 2);
+        host.apply_prune_branch_choice(&mut state, "delete-if-safe")
+            .unwrap();
+        let ManagerView::ConfirmDiscard {
+            branch_policy,
+            typed_path,
+            target: current,
+            ..
+        } = &state.view
+        else {
+            panic!("confirmation retained")
+        };
+        assert_eq!(*branch_policy, WorkspacePruneBranchPolicy::DeleteIfSafe);
+        assert_eq!(typed_path, "/tmp/repo.agent");
+        assert_eq!(*current, target());
+        assert!(state.pending_prune.is_none());
+        assert!(host
+            .apply_prune_branch_choice(&mut state, "invented")
+            .is_err());
+        state.cancel_confirmation();
+        state.begin_discard_confirmation().unwrap();
+        assert!(host
+            .apply_prune_branch_choice(&mut state, "delete-if-safe")
+            .is_err());
+        let ManagerView::ConfirmDiscard { branch_policy, .. } = &state.view else {
+            panic!("reopened")
+        };
+        assert_eq!(*branch_policy, WorkspacePruneBranchPolicy::Keep);
+        assert_ne!(state.view, before);
+    }
+
+    #[test]
+    fn branch_chrome_matches_actual_render_without_reducing_path_detail() {
+        use crate::value_control::{ControlAction, PointerButton};
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut state = ready();
+        state.begin_safe_confirmation().unwrap();
+        for width in [40, 80, 120] {
+            let screen = Rect::new(0, 0, width, 35);
+            let control = branch_control(screen, &state).unwrap();
+            let g = control.geometry();
+            let mut terminal = Terminal::new(TestBackend::new(width, 35)).unwrap();
+            terminal
+                .draw(|frame| render(frame, screen, &state))
+                .unwrap();
+            for (rect, glyph) in [(g.previous, "←"), (g.open, "+"), (g.next, "→")] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph
+                );
+            }
+            assert_eq!(
+                control.hit(Position::new(g.value.x, g.value.y), PointerButton::Left),
+                Some(ControlAction::NextChoice)
+            );
+            assert_eq!(
+                control.hit(Position::new(g.value.x, g.value.y), PointerButton::Right),
+                Some(ControlAction::PreviousChoice)
+            );
+            assert_eq!(
+                control.hit(Position::new(g.label.x, g.label.y), PointerButton::Left),
+                None
+            );
+            assert!(g.row.y < layout(screen).list.y);
+        }
     }
 }

@@ -325,3 +325,158 @@ mod tests {
         assert!(small_layout.popup.height <= small.height);
     }
 }
+
+impl ScheduledInputDialogState {
+    fn duration_prompt(&self, focus: ScheduledInputFocus) -> Option<&TextPromptState> {
+        match focus {
+            ScheduledInputFocus::Hours => Some(&self.hours),
+            ScheduledInputFocus::Minutes => Some(&self.minutes),
+            ScheduledInputFocus::Seconds => Some(&self.seconds),
+            _ => None,
+        }
+    }
+
+    fn duration_bounds(&self, focus: ScheduledInputFocus) -> Result<(u64, u64), String> {
+        let hours = parse_duration_field(&self.hours.buf, "Hours")?;
+        let minutes = parse_duration_field(&self.minutes.buf, "Minutes")?;
+        let seconds = parse_duration_field(&self.seconds.buf, "Seconds")?;
+        if minutes > 59 || seconds > 59 {
+            return Err("Minutes and seconds must be between 0 and 59".into());
+        }
+        let total = hours
+            .checked_mul(3600)
+            .and_then(|value| value.checked_add(minutes * 60))
+            .and_then(|value| value.checked_add(seconds))
+            .ok_or_else(|| "The duration is too large".to_string())?;
+        match focus {
+            ScheduledInputFocus::Hours => Ok((hours, (u64::MAX - minutes * 60 - seconds) / 3600)),
+            ScheduledInputFocus::Minutes => {
+                Ok((minutes, ((u64::MAX - (total - minutes * 60)) / 60).min(59)))
+            }
+            ScheduledInputFocus::Seconds => Ok((seconds, (u64::MAX - (total - seconds)).min(59))),
+            _ => Err("Select a duration field".into()),
+        }
+    }
+
+    pub fn duration_control(
+        &self,
+        focus: ScheduledInputFocus,
+        area: Rect,
+    ) -> crate::value_control::ValueControl {
+        use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+        let prompt = self.duration_prompt(focus);
+        let bounds = self.duration_bounds(focus).ok();
+        ValueControl::new(
+            ratatui::widgets::Block::bordered().inner(area),
+            ControlSpec {
+                kind: ControlKind::Number,
+                label: "",
+                value: prompt.map_or("", |prompt| prompt.buf.as_str()),
+                label_width: 0,
+                previous_enabled: bounds.is_some_and(|(value, _)| value > 0),
+                next_enabled: bounds.is_some_and(|(value, maximum)| value < maximum),
+                open_enabled: prompt.is_some(),
+            },
+        )
+    }
+
+    /// Only edits the draft; the separate scheduling action validates and submits it.
+    pub fn apply_duration_control(
+        &mut self,
+        focus: ScheduledInputFocus,
+        action: crate::value_control::ControlAction,
+    ) -> Result<(), String> {
+        use crate::value_control::ControlAction;
+        if self.duration_prompt(focus).is_none() {
+            return Err("Select a duration field".into());
+        }
+        if action == ControlAction::EditNumber {
+            self.focus = focus;
+            return Ok(());
+        }
+        let (value, maximum) = self.duration_bounds(focus)?;
+        let next = match action {
+            ControlAction::Decrement => value.saturating_sub(1),
+            ControlAction::Increment => value.saturating_add(1).min(maximum),
+            _ => return Err("Unsupported duration action".into()),
+        };
+        let prompt = match focus {
+            ScheduledInputFocus::Hours => &mut self.hours,
+            ScheduledInputFocus::Minutes => &mut self.minutes,
+            ScheduledInputFocus::Seconds => &mut self.seconds,
+            _ => return Err("Select a duration field".into()),
+        };
+        *prompt = TextPromptState::new(next.to_string());
+        self.focus = focus;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use super::*;
+    use crate::value_control::ControlAction;
+    #[test]
+    fn clock_steps_saturate_and_empty_is_zero() {
+        let mut s = ScheduledInputDialogState::new(NodeId(1));
+        s.apply_duration_control(ScheduledInputFocus::Minutes, ControlAction::Decrement)
+            .unwrap();
+        assert_eq!(s.minutes.buf, "0");
+        s.apply_duration_control(ScheduledInputFocus::Minutes, ControlAction::Increment)
+            .unwrap();
+        assert_eq!(s.minutes.buf, "1");
+        s.seconds = TextPromptState::new("59");
+        s.apply_duration_control(ScheduledInputFocus::Seconds, ControlAction::Increment)
+            .unwrap();
+        assert_eq!(s.seconds.buf, "59");
+    }
+    #[test]
+    fn star_keeps_invalid_draft_and_step_rejects_it() {
+        let mut s = ScheduledInputDialogState::new(NodeId(1));
+        s.hours = TextPromptState::new("bad");
+        s.apply_duration_control(ScheduledInputFocus::Hours, ControlAction::EditNumber)
+            .unwrap();
+        assert_eq!(s.focus, ScheduledInputFocus::Hours);
+        assert_eq!(s.hours.buf, "bad");
+        assert!(s
+            .apply_duration_control(ScheduledInputFocus::Hours, ControlAction::Increment)
+            .is_err());
+        assert_eq!(s.hours.buf, "bad");
+    }
+    #[test]
+    fn aggregate_overflow_does_not_mutate_any_draft() {
+        let mut s = ScheduledInputDialogState::new(NodeId(1));
+        s.hours = TextPromptState::new((u64::MAX / 3600).to_string());
+        s.minutes = TextPromptState::new("0");
+        s.seconds = TextPromptState::new("0");
+        s.apply_duration_control(ScheduledInputFocus::Hours, ControlAction::Increment)
+            .unwrap();
+        assert_eq!(s.hours.buf, (u64::MAX / 3600).to_string());
+        s.minutes = TextPromptState::new("59");
+        let before = s.seconds.buf.clone();
+        assert!(s
+            .apply_duration_control(ScheduledInputFocus::Seconds, ControlAction::Increment)
+            .is_err());
+        assert_eq!(s.seconds.buf, before);
+    }
+}
+
+#[cfg(test)]
+mod duration_geometry_tests {
+    use super::*;
+    use crate::value_control::{ControlAction, PointerButton};
+    use ratatui::layout::Position;
+    #[test]
+    fn numeric_fields_share_inner_row_and_preserve_empty_keyboard_draft() {
+        let s = ScheduledInputDialogState::new(NodeId(1));
+        let c = s.duration_control(ScheduledInputFocus::Hours, Rect::new(10, 3, 18, 3));
+        assert_eq!(c.geometry().row, Rect::new(11, 4, 16, 1));
+        assert_eq!(
+            c.hit(Position::new(26, 4), PointerButton::Left),
+            Some(ControlAction::EditNumber)
+        );
+        assert_eq!(c.hit(Position::new(12, 4), PointerButton::Left), None);
+        assert_eq!(c.hit(Position::new(11, 4), PointerButton::Left), None);
+        assert!(s.hours.buf.is_empty());
+    }
+}

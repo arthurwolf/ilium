@@ -3,6 +3,24 @@ use super::super::{AnimationFrame, AnimationKind, AnimationSettings};
 use std::time::{Duration, Instant};
 
 #[test]
+fn openstreetmap_exposes_world_map_and_address_location_picker() {
+    let settings = AnimationSettings {
+        kind: AnimationKind::OpenStreetMap,
+        ..Default::default()
+    };
+    let model = crate::animation_rows::RowModel::new(
+        &settings,
+        &crate::animation_rows::RowContext::default(),
+    );
+    assert!(
+        model
+            .rows()
+            .contains(&crate::animation_rows::AnimationRow::Location),
+        "OSM must expose the world-map and city/address picker"
+    );
+}
+
+#[test]
 fn openstreetmap_attribution_reaches_client_glyphs_and_leaves_with_the_scene() {
     let mut settings = AnimationSettings {
         kind: AnimationKind::OpenStreetMap,
@@ -38,7 +56,8 @@ fn openstreetmap_shared_palette_and_density_reuse_map_and_zero_brightness_clears
         frame.render(&settings, 80, 24, began.elapsed());
         if frame
             .status()
-            .is_some_and(|status| status.contains("Paris ·"))
+            .is_some_and(|status| status.starts_with("Paris ·"))
+            && frame.packed_cells().iter().any(|bits| *bits != 0)
         {
             break;
         }

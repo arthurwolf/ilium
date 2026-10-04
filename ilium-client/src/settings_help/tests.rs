@@ -108,7 +108,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
-    add_range(&mut ids, "AP", 1, 25);
+    add_range(&mut ids, "AP", 1, 26);
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }
@@ -201,6 +201,42 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-62".to_owned()
         } else if kind == AnimationKind::Carpet {
             "AN-63".to_owned()
+        } else if kind == AnimationKind::Wind {
+            "AN-66".to_owned()
+        } else if kind == AnimationKind::Aurora {
+            "AN-67".to_owned()
+        } else if kind == AnimationKind::Pollen {
+            "AN-68".to_owned()
+        } else if kind == AnimationKind::Fireflies {
+            "AN-69".to_owned()
+        } else if kind == AnimationKind::WindowSunlight {
+            "AN-70".to_owned()
+        } else if kind == AnimationKind::Frost {
+            "AN-71".to_owned()
+        } else if kind == AnimationKind::Lighthouse {
+            "AN-72".to_owned()
+        } else if kind == AnimationKind::PaperFold {
+            "AN-73".to_owned()
+        } else if kind == AnimationKind::Embroidery {
+            "AN-74".to_owned()
+        } else if kind == AnimationKind::PrimeConstellations {
+            "AN-75".to_owned()
+        } else if kind == AnimationKind::Wallpaper {
+            "AN-76".to_owned()
+        } else if kind == AnimationKind::UnfinishedCircle {
+            "AN-77".to_owned()
+        } else if kind == AnimationKind::NeedleThreads {
+            "AN-78".to_owned()
+        } else if kind == AnimationKind::HesitatingInk {
+            "AN-79".to_owned()
+        } else if kind == AnimationKind::CropCircles {
+            "AN-80".to_owned()
+        } else if kind == AnimationKind::DelayedReflection {
+            "AN-81".to_owned()
+        } else if kind == AnimationKind::AlmostTouching {
+            "AN-82".to_owned()
+        } else if kind == AnimationKind::HiddenWheel {
+            "AN-83".to_owned()
         } else if kind == AnimationKind::Semantic {
             "AN-64".to_owned()
         } else if kind == AnimationKind::SolarSystem {
@@ -328,11 +364,8 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         *app.animation_frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
             Box::new(ReportScene(supplied.clone()))
         }));
-        app.animation_frame.host_mut().sync(
-            ilium_ambient::AmbientKind::Graph,
-            &app.animation_settings.ambient,
-            Duration::ZERO,
-        );
+        app.animation_frame
+            .render(&app.animation_settings, width, height, Duration::ZERO);
         let before = app.animation_settings.clone();
         app.push_modal_over(
             Mode::Settings(SettingsState {
@@ -346,7 +379,8 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
             )),
         );
         app.animation_frame.release_hosts();
-        assert!(!app.animation_frame.host().is_hosted());
+        app.animation_frame.settle_for_test();
+        assert!(app.animation_frame.status().is_none());
         let Mode::SettingsHelp(state) = &mut app.mode else {
             panic!("help must open")
         };

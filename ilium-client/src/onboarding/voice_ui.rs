@@ -11,6 +11,7 @@ use ratatui::{
     widgets::{Block, Paragraph, Wrap},
     Frame,
 };
+use std::borrow::Cow;
 
 const CANVAS: Color = Color::Rgb(13, 16, 23);
 const PANEL: Color = Color::Rgb(24, 29, 40);
@@ -216,6 +217,16 @@ impl Geometry {
     }
 }
 
+pub(crate) fn config_row_area(
+    area: Rect,
+    ui: &VoiceUiState,
+    state: &VoiceDemoState,
+    index: usize,
+) -> Option<Rect> {
+    let geometry = Geometry::new(area, state);
+    geometry.config_rect(index, ui.scroll.min(geometry.max_scroll()))
+}
+
 pub fn focus_at(
     area: Rect,
     ui: &VoiceUiState,
@@ -255,16 +266,16 @@ fn action(index: usize, state: &VoiceDemoState, settings: &VoiceSettings) -> Opt
     }
     match index.checked_sub(CONFIG_ROWS.len())? {
         0 => Some(VoiceAction::Test),
-        1 if state.is_running => Some(VoiceAction::Stop),
+        1 if state.can_stop || state.is_running => Some(VoiceAction::Stop),
         2 if state.is_running
             && settings.input_mode == VoiceInputMode::PushToTalk
             && matches!(
-                state.connection,
+                state.connection.as_ref(),
                 VoiceConnectionState::Listening | VoiceConnectionState::Recording
             ) =>
         {
             Some(
-                if matches!(state.connection, VoiceConnectionState::Recording) {
+                if matches!(state.connection.as_ref(), VoiceConnectionState::Recording) {
                     VoiceAction::StopPushToTalk
                 } else {
                     VoiceAction::StartPushToTalk
@@ -275,7 +286,7 @@ fn action(index: usize, state: &VoiceDemoState, settings: &VoiceSettings) -> Opt
     }
 }
 
-pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, String, String)> {
+pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, &'static str, Cow<'_, str>)> {
     CONFIG_ROWS
         .into_iter()
         .map(|row| {
@@ -299,19 +310,21 @@ pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, String, String)> 
                     "Microphone",
                     settings
                         .input_device_name
-                        .clone()
-                        .unwrap_or_else(|| "System default".into()),
+                        .as_deref()
+                        .unwrap_or("System default")
+                        .into(),
                 ),
                 VoiceRow::OutputDevice => (
                     "Speaker",
                     settings
                         .output_device_name
-                        .clone()
-                        .unwrap_or_else(|| "System default".into()),
+                        .as_deref()
+                        .unwrap_or("System default")
+                        .into(),
                 ),
                 VoiceRow::OutputVolume => (
                     "Output volume",
-                    format!("{}%", settings.output_volume_percent),
+                    format!("{}%", settings.output_volume_percent).into(),
                 ),
                 VoiceRow::ReasoningEffort => {
                     ("Reasoning", settings.reasoning_effort.label().into())
@@ -330,7 +343,7 @@ pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, String, String)> 
                 ),
                 _ => unreachable!("CONFIG_ROWS contains only demo configuration fields"),
             };
-            (row, label.into(), value)
+            (row, label, value)
         })
         .collect()
 }
@@ -384,13 +397,16 @@ pub fn render(
             Rect::new(rect.x, rect.y, rect.width, 1),
         );
         frame.render_widget(
-            Paragraph::new(format!("   {value}  ›")).style(
-                if index == ui.focus || ui.hovered == Some(index) {
-                    style
-                } else {
-                    style.fg(MUTED)
-                },
-            ),
+            Paragraph::new(Line::from(vec![
+                Span::raw("   "),
+                Span::raw(value),
+                Span::raw("  ›"),
+            ]))
+            .style(if index == ui.focus || ui.hovered == Some(index) {
+                style
+            } else {
+                style.fg(MUTED)
+            }),
             Rect::new(rect.x, rect.y + 1, rect.width, 1),
         );
     }
@@ -405,7 +421,9 @@ pub fn render(
             0 => "▷ Test voice",
             1 => "□ Stop",
             _ if settings.input_mode != VoiceInputMode::PushToTalk => "Auto listening",
-            _ if matches!(state.connection, VoiceConnectionState::Recording) => "↑ Send turn",
+            _ if matches!(state.connection.as_ref(), VoiceConnectionState::Recording) => {
+                "↑ Send turn"
+            }
             _ => "● Record",
         };
         frame.render_widget(
@@ -463,7 +481,7 @@ fn render_scene(frame: &mut Frame, rect: Rect, state: &VoiceDemoState, clipped: 
 
 /// Measurement and paint use the same paragraph, including Unicode cell
 /// widths, newlines, whitespace-preserving wrapping and provider errors.
-fn scene_paragraph(state: &VoiceDemoState) -> Paragraph<'static> {
+fn scene_paragraph(state: &VoiceDemoState) -> Paragraph<'_> {
     let bulb = if state.bulb_on {
         "       \\  |  /\n     -- .---. --\n       /     \\\n      |  /\\/ |\n       \\  |  /\n        '==='\n         |_|"
     } else {
@@ -476,7 +494,7 @@ fn scene_paragraph(state: &VoiceDemoState) -> Paragraph<'static> {
     )];
     lines.extend(
         bulb.lines()
-            .map(|line| Line::styled(line.to_owned(), Style::new().fg(color))),
+            .map(|line| Line::styled(line, Style::new().fg(color))),
     );
     lines.push(Line::styled(
         format!(
@@ -486,18 +504,18 @@ fn scene_paragraph(state: &VoiceDemoState) -> Paragraph<'static> {
         ),
         Style::new().fg(if state.bulb_on { SUCCESS } else { MUTED }),
     ));
-    if let VoiceConnectionState::Failed(error) = &state.connection {
+    if let VoiceConnectionState::Failed(error) = state.connection.as_ref() {
         lines.extend(
             error
                 .split('\n')
-                .map(|line| Line::styled(line.to_owned(), Style::new().fg(ACCENT))),
+                .map(|line| Line::styled(line, Style::new().fg(ACCENT))),
         );
     } else {
         lines.push(Line::styled(
             state
                 .last_tool_status
-                .clone()
-                .unwrap_or_else(|| "Test opens your microphone and Realtime".into()),
+                .as_deref()
+                .unwrap_or("Test opens your microphone and Realtime"),
             Style::new().fg(MUTED),
         ));
     }
@@ -509,7 +527,12 @@ fn scene_paragraph(state: &VoiceDemoState) -> Paragraph<'static> {
         .wrap(Wrap { trim: false })
 }
 
-fn append_transcript(lines: &mut Vec<Line<'static>>, label: &str, color: Color, transcript: &str) {
+fn append_transcript<'a>(
+    lines: &mut Vec<Line<'a>>,
+    label: &'static str,
+    color: Color,
+    transcript: &'a str,
+) {
     let transcript = if transcript.is_empty() {
         "—"
     } else {
@@ -518,8 +541,8 @@ fn append_transcript(lines: &mut Vec<Line<'static>>, label: &str, color: Color, 
     for (index, line) in transcript.split('\n').enumerate() {
         let prefix = if index == 0 { label } else { "" };
         lines.push(Line::from(vec![
-            Span::styled(prefix.to_owned(), Style::new().fg(color)),
-            Span::raw(line.to_owned()),
+            Span::styled(prefix, Style::new().fg(color)),
+            Span::raw(line),
         ]));
     }
 }
@@ -537,7 +560,7 @@ mod tests {
         };
         let state = VoiceDemoState {
             is_running: true,
-            connection: VoiceConnectionState::Listening,
+            connection: VoiceConnectionState::Listening.into(),
             ..VoiceDemoState::default()
         };
         for area in [Rect::new(0, 0, 38, 9), Rect::new(0, 0, 118, 33)] {
@@ -599,12 +622,12 @@ mod tests {
         };
         assert_eq!(action(CONFIG_ROWS.len() + 2, &state, &settings), None);
         state.is_running = true;
-        state.connection = VoiceConnectionState::Listening;
+        state.connection = VoiceConnectionState::Listening.into();
         assert_eq!(
             action(CONFIG_ROWS.len() + 2, &state, &settings),
             Some(VoiceAction::StartPushToTalk)
         );
-        state.connection = VoiceConnectionState::Recording;
+        state.connection = VoiceConnectionState::Recording.into();
         assert_eq!(
             action(CONFIG_ROWS.len() + 2, &state, &settings),
             Some(VoiceAction::StopPushToTalk)
@@ -650,12 +673,14 @@ mod tests {
     fn long_user_assistant_and_errors_are_fully_reachable_in_stacked_and_wide_layouts() {
         let settings = VoiceSettings::default();
         let state = VoiceDemoState {
-            user_transcript: format!("{}\nUSER_TAIL", "user 灯 words ".repeat(150)),
-            assistant_transcript: format!("{}\nASSISTANT_TAIL", "assistant é words ".repeat(120)),
+            user_transcript: format!("{}\nUSER_TAIL", "user 灯 words ".repeat(150)).into(),
+            assistant_transcript: format!("{}\nASSISTANT_TAIL", "assistant é words ".repeat(120))
+                .into(),
             connection: VoiceConnectionState::Failed(format!(
                 "{}\nERROR_TAIL",
                 "provider detail ".repeat(130)
-            )),
+            ))
+            .into(),
             ..VoiceDemoState::default()
         };
         for area in [
@@ -704,7 +729,7 @@ mod tests {
     fn wide_mouse_scroll_and_focus_reveal_preserve_independent_reading_offsets() {
         let area = Rect::new(0, 0, 120, 16);
         let state = VoiceDemoState {
-            assistant_transcript: "long response ".repeat(160),
+            assistant_transcript: "long response ".repeat(160).into(),
             ..VoiceDemoState::default()
         };
         let geometry = Geometry::new(area, &state);

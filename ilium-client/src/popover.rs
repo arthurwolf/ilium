@@ -34,7 +34,7 @@ pub enum PopoverHit {
 
 /// A pending hover, visible preview, or pinned menu for one footer button.
 /// The parent owns switching buttons and opening the selected creation dialog.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AgentPopover {
     pub provider: BuiltinAgentProvider,
     pub anchor: Rect,
@@ -44,6 +44,7 @@ pub struct AgentPopover {
     pub unavailable_reason: Option<String>,
     entered_at: Instant,
     left_at: Option<Instant>,
+    pub(crate) unavailable_retention: Option<crate::connection::EventRetention>,
 }
 
 impl AgentPopover {
@@ -63,6 +64,7 @@ impl AgentPopover {
             unavailable_reason,
             entered_at: now,
             left_at: None,
+            unavailable_retention: None,
         }
     }
 

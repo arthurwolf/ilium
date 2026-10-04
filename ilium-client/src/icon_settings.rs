@@ -6,7 +6,7 @@
 //! release for each new choice.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Every independently configurable semantic icon rendered by the sidebar,
 /// including its creation toolbar and per-row action controls.
@@ -854,11 +854,30 @@ pub struct IconPickerChapter {
 /// Cached search result owned by an open picker. Filtering 12,000 choices is
 /// intentionally done only when the query changes, never while a user moves
 /// through the viewport or the terminal redraws an animation frame.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct IconPickerSearchResults {
+    data: Arc<IconPickerSearchData>,
+}
+
+#[derive(Debug, Default)]
+pub struct IconPickerSearchData {
     pub chapters: Vec<IconPickerChapter>,
     pub entry_count: usize,
+    // Immutable picker clones share both the allocation and its admission.
+    _storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
+impl std::ops::Deref for IconPickerSearchResults {
+    type Target = IconPickerSearchData;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+impl PartialEq for IconPickerSearchResults {
+    fn eq(&self, other: &Self) -> bool {
+        self.chapters == other.chapters && self.entry_count == other.entry_count
+    }
+}
+impl Eq for IconPickerSearchResults {}
 
 /// One ranked result from the dense-vector index. The score itself remains an
 /// implementation detail of the worker; ordering is already semantic when
@@ -871,6 +890,16 @@ pub struct IconSemanticSearchHit {
 }
 
 impl IconPickerSearchResults {
+    pub(crate) fn retain_storage(
+        mut self,
+        storage: Arc<ilium_execution::StorageAdmission>,
+    ) -> Result<Self, Self> {
+        let Some(data) = Arc::get_mut(&mut self.data) else {
+            return Err(self);
+        };
+        data._storage = Some(storage);
+        Ok(self)
+    }
     pub fn entry(&self, selected_entry: usize) -> Option<IconCatalogEntry> {
         self.chapters
             .iter()
@@ -883,6 +912,10 @@ impl IconPickerSearchResults {
 /// Non-empty queries never flow through this function: they are ranked by
 /// `icon_search_workers`' CPU dense-vector index instead.
 pub fn all_picker_search_results() -> IconPickerSearchResults {
+    static RESULTS: OnceLock<IconPickerSearchResults> = OnceLock::new();
+    RESULTS.get_or_init(build_all_picker_search_results).clone()
+}
+fn build_all_picker_search_results() -> IconPickerSearchResults {
     let chapters = icon_categories()
         .iter()
         .map(|category| IconPickerChapter {
@@ -893,8 +926,11 @@ pub fn all_picker_search_results() -> IconPickerSearchResults {
         .collect::<Vec<_>>();
     let entry_count = chapters.iter().map(|chapter| chapter.entries.len()).sum();
     IconPickerSearchResults {
-        chapters,
-        entry_count,
+        data: Arc::new(IconPickerSearchData {
+            chapters,
+            entry_count,
+            _storage: None,
+        }),
     }
 }
 
@@ -919,8 +955,11 @@ pub fn semantic_picker_search_results(hits: Vec<IconSemanticSearchHit>) -> IconP
     }
     let entry_count = chapters.iter().map(|chapter| chapter.entries.len()).sum();
     IconPickerSearchResults {
-        chapters,
-        entry_count,
+        data: Arc::new(IconPickerSearchData {
+            chapters,
+            entry_count,
+            _storage: None,
+        }),
     }
 }
 
@@ -1165,7 +1204,8 @@ mod tests {
 
     #[test]
     fn full_browse_document_preserves_family_order() {
-        let all_chapters = all_picker_search_results().chapters;
+        let results = all_picker_search_results();
+        let all_chapters = &results.chapters;
         let first_nerd_font = all_chapters
             .iter()
             .position(|chapter| chapter.family == IconCatalogFamily::NerdFont)

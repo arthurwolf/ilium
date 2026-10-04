@@ -5,7 +5,7 @@
 //! contains durable project metadata that must survive a fresh session.
 
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use ilium_platform::file_lock::ExclusiveFileLock;
@@ -130,13 +130,25 @@ pub fn set_animation(
 }
 
 /// Reads the project configuration. An absent file is a clean, empty config.
+fn read_project_text(path: &Path) -> std::io::Result<String> {
+    let file = ilium_platform::secure_fs::open_regular_file(path)?;
+    let mut contents = String::new();
+    file.take(256 * 1024 + 1).read_to_string(&mut contents)?;
+    if contents.len() > 256 * 1024 {
+        return Err(std::io::Error::other(
+            "Project configuration exceeds 256 KiB",
+        ));
+    }
+    Ok(contents)
+}
+
 pub fn load(cwd: &Path) -> anyhow::Result<ProjectConfig> {
     let path = cwd.join(RELATIVE_PATH);
     // Read directly instead of checking `path.exists()` first: a separate
     // exists-then-read pair races against concurrent deletion/rename of the
     // file and would surface as a spurious error instead of the documented
     // "absent file is a clean, empty config" behavior.
-    let contents = match std::fs::read_to_string(path) {
+    let contents = match read_project_text(&path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ProjectConfig::default());
@@ -201,9 +213,9 @@ fn save_unlocked(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
         let _ = std::fs::remove_file(&temporary_path);
         return Err(err);
     }
-    if let Err(err) = std::fs::rename(&temporary_path, path) {
-        // Rename failed after the temp file was fully written; clean it up
-        // so a failed save doesn't leave a stray file behind in `.ilium/`.
+    if let Err(err) = ilium_platform::secure_fs::replace_file_durably(&temporary_path, &path) {
+        // A directory-flush failure may follow publication. The worker
+        // reports uncertainty/readback; never claim durable save from rename.
         let _ = std::fs::remove_file(&temporary_path);
         return Err(err.into());
     }
@@ -375,6 +387,27 @@ animation:
         })
         .unwrap();
         assert_eq!(load(first.path()).unwrap().animation, settings);
+    }
+
+    #[test]
+    fn plugin_source_mode_and_remembered_values_survive_project_reload() {
+        use crate::animation_plugins::{AnimationSourceTab, PluginPreferences, PluginSelection};
+        let project = tempfile::tempdir().unwrap();
+        let selection = PluginSelection {
+            package_id: "beach".into(),
+            mode: ilium_animation_js::manifest::AnimationMode::PreRendered,
+            settings: serde_json::json!({"cycle_seconds": 20}),
+        };
+        let settings = crate::background_animation::AnimationSettings {
+            source: AnimationSourceTab::Plugin,
+            plugin: PluginPreferences {
+                selected: Some(selection.clone()),
+                remembered: BTreeMap::from([("beach".into(), selection)]),
+            },
+            ..Default::default()
+        };
+        set_animation(project.path(), settings.clone()).unwrap();
+        assert_eq!(load(project.path()).unwrap().animation, settings);
     }
 
     fn scratch_dir() -> std::path::PathBuf {
@@ -607,6 +640,66 @@ animation:
         let reloaded = load(project.path()).unwrap().animation;
         assert_eq!(reloaded, settings);
         assert!((reloaded.ambient.location.latitude - 69.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn all_seventeen_quiet_scenes_preserve_independent_controls_across_project_reload() {
+        use crate::background_animation::{AnimationKind, AnimationSettings};
+
+        let kinds = [
+            AnimationKind::Aurora,
+            AnimationKind::Pollen,
+            AnimationKind::Fireflies,
+            AnimationKind::WindowSunlight,
+            AnimationKind::Frost,
+            AnimationKind::Lighthouse,
+            AnimationKind::PaperFold,
+            AnimationKind::Embroidery,
+            AnimationKind::PrimeConstellations,
+            AnimationKind::Wallpaper,
+            AnimationKind::UnfinishedCircle,
+            AnimationKind::NeedleThreads,
+            AnimationKind::HesitatingInk,
+            AnimationKind::CropCircles,
+            AnimationKind::DelayedReflection,
+            AnimationKind::AlmostTouching,
+            AnimationKind::HiddenWheel,
+        ];
+        let project = tempfile::tempdir().unwrap();
+        let mut settings = AnimationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        // Change every scene before selecting any: switching the selection must
+        // not silently reset the independently retained blocks.
+        for kind in kinds {
+            let ambient_kind = kind.ambient().unwrap();
+            let before = settings.ambient.scene_key(ambient_kind);
+            let control = settings
+                .ambient
+                .controls(ambient_kind)
+                .into_iter()
+                .find(|control| control.stepped(1).is_some())
+                .unwrap();
+            assert!(settings
+                .ambient
+                .set_control(ambient_kind, control.id, control.stepped(1).unwrap())
+                .unwrap());
+            assert_ne!(settings.ambient.scene_key(ambient_kind), before, "{kind:?}");
+        }
+        let expected = settings.ambient.clone();
+        for kind in kinds {
+            settings.kind = kind;
+            set_animation(project.path(), settings.clone()).unwrap();
+            update(project.path(), |config| {
+                config.project_name = Some("Quiet scenes".to_owned())
+            })
+            .unwrap();
+            let reloaded = load(project.path()).unwrap();
+            assert_eq!(reloaded.animation.kind, kind);
+            assert_eq!(reloaded.animation.ambient, expected, "{kind:?}");
+            assert_eq!(reloaded.project_name.as_deref(), Some("Quiet scenes"));
+        }
     }
 
     #[test]

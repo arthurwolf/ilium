@@ -1194,6 +1194,19 @@
     "caveat": "A separator is a decorative, non-selectable line after a complete visible subtree, not a tree row. The last project has no separator."
   },
   {
+    "id": "AP-26",
+    "title": "Auto-remove empty groups",
+    "explanation": "Close a group or folder automatically when its last remaining item is closed.",
+    "specimen": "ON\n▾ Group\n  └─ build   (close)\n-> Group disappears\n\nOFF\n▾ Group\n  └─ build   (close)\n-> empty Group stays",
+    "states": "On closes the emptied group right after its last item, repeating upward through ancestor groups that become empty. Off leaves empty groups in place.",
+    "frames": [
+      "ON\n▾ Group\n  └─ build\n\nclose build ->\n(Group removed)",
+      "OFF\n▾ Group\n  └─ build\n\nclose build ->\n▾ Group (empty)"
+    ],
+    "motion": "Static before/after stills.",
+    "caveat": "Projects and split views are never removed automatically, and only closing the last item triggers it; an already-empty group is left alone."
+  },
+  {
     "id": "API-01",
     "title": "HTTP API port",
     "explanation": "“Choose the port for the loopback-only `/create_agent` API on the detached server’s next start.”",
@@ -3097,11 +3110,11 @@
   {
     "id": "TEXTTRIGGER-01",
     "title": "Text triggers",
-    "explanation": "“An enabled regex can match a completed output line and send a configured literal message plus Enter to its selected target.”",
-    "specimen": "Targets: [Agents] [Terminals] [Both]\n^READY$ → would send configured literal text + Enter",
+    "explanation": "“An enabled regex can match a completed output line and send a configured literal message plus Enter to its selected target after the rule's delay (60 seconds by default, 0 sends immediately).”",
+    "specimen": "Targets: [Agents] [Terminals] [Both]\nDelay (seconds): 60\n^READY$ → would send configured literal text + Enter",
     "states": "enabled/disabled, match/no match, target and literal output are distinct.",
     "motion": "static.",
-    "caveat": "Target values come from TextTriggerTarget. Help neither matches live output nor sends text.",
+    "caveat": "Target values come from TextTriggerTarget. Delay is whole seconds (0 to 86400); rules saved before the setting existed use 60. Help neither matches live output nor sends text.",
     "frames": [
       "OUTPUT LINE: READY\nRegex: ^DONE$\nmatch: no → no message\n",
       "OUTPUT LINE: DONE\nRegex: ^DONE$\nmatch: yes → would send literal + Enter\n"
@@ -3536,6 +3549,18 @@
     ]
   },
   {
+    "id": "AN-66",
+    "title": "Wind",
+    "explanation": "Dots blown across the empty parts of your screen by a fixed or rotating wind, with gusts, drag and optional gravity. Dots live only in cells that show no text and bounce off everything else. Scrolling text pushes nearby dots the way it moves; text that appears from nowhere pushes them away more gently. Its own controls appear below the Background row.",
+    "specimen": "Dots · Dot weight · Weight variation · Air drag · Wind strength · Wind direction · Wind mode · Gusts · Gravity · Bounce · Screen edges · Scroll push · Appear push · Push reach · Scroll detection · Merge dots",
+    "states": "Fixed wind blows one way; Rotating turns steadily at the chosen speed. Gravity and Merge dots reveal their strength rows when switched on. Merged dots draw a larger dot character where several dots pile into one cell.",
+    "motion": "Light dots follow the wind closely and are pushed hard; heavy dots resist both and fall faster. The workspace is sampled every frame, so the dots react to scrolling and typing as they happen. Motion Off freezes the dots.",
+    "caveat": "Wind reads only which cells are blank, never their content. Text that looks like a block moved is recognised as scrolling; unusual redraws count as text appearing. Dots draw in the shared dot color. Live only: never precomputed into the loop cache.",
+    "frames": [
+      "Wind — dots drift through blank cells and are pushed by scrolling text"
+    ]
+  },
+  {
     "id": "AN-C01",
     "title": "Style preset",
     "explanation": "Apply a ready-made look in one step: color mode, palette, brightness, contrast, edge fade and sometimes a dither. Presets range from Whisper (barely visible) and Subtle to Neon night, Matrix, Amber terminal, Blueprint and Paper and ink.",
@@ -3776,6 +3801,30 @@
     ]
   },
   {
+    "id": "AN-C21",
+    "title": "Color filter",
+    "explanation": "A color transform applied on top of the palette and tone settings. Choose tinted gels (red, amber, cyan...), film looks (sepia, faded, cross process, polaroid), duotones, thermal camera, night vision, channel swaps, inversion and many more. Style presets can select a filter too. It applies to every animation.",
+    "specimen": "Color filter ‹ Sepia ›",
+    "states": "None leaves the colors alone. Any filter is blended in by the Filter strength row.",
+    "motion": "The change shows at once on the preview and the live workspace.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Color filter ‹ Sepia ›"
+    ]
+  },
+  {
+    "id": "AN-C22",
+    "title": "Filter strength",
+    "explanation": "How much of the chosen color filter shows. 0% leaves the original colors, 100% is the full filter, and values between blend the two.",
+    "specimen": "Filter strength ‹ 60% ›",
+    "states": "Has no visible effect while the filter is None.",
+    "motion": "The change shows at once on the preview and the live workspace.",
+    "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. This look is shared by all animations: changing it for one changes it for all.",
+    "frames": [
+      "Filter strength ‹ 60% ›"
+    ]
+  },
+  {
     "id": "AN-64",
     "title": "Semantic",
     "explanation": "Use the animation recommended by AI tree reorganization for the selected project or entry. Choose Semantic here and enable Background to show it in the workspace.",
@@ -3810,6 +3859,227 @@
     "caveat": "Estimate rounds up Unicode character count divided by four; provider context limits still apply.",
     "frames": [
       "200000 estimated tokens"
+    ]
+  },
+  {
+    "id": "AN-67",
+    "title": "Northern lights",
+    "explanation": "Luminous curtains sway above a dark horizon with adjustable hills and optional seeded trees. Horizon height and roughness change the dark cutout. Optional seeded trees add a skyline without imported assets.",
+    "specimen": "Scene ‹ Northern lights ›\nScene settings apply to this animation only.",
+    "states": "Horizon height and roughness change the dark cutout. Optional seeded trees add a skyline without imported assets. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Northern lights ›\nEarly phase",
+      "Scene ‹ Northern lights ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-68",
+    "title": "Pollen in a sunbeam",
+    "explanation": "Small drifting specks brighten only inside a slowly swaying shaft of sunlight. Beam angle, width, location and motion define the light mask. Count zero removes pollen while retaining the beam.",
+    "specimen": "Scene ‹ Pollen in a sunbeam ›\nScene settings apply to this animation only.",
+    "states": "Beam angle, width, location and motion define the light mask. Count zero removes pollen while retaining the beam. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Pollen in a sunbeam ›\nEarly phase",
+      "Scene ‹ Pollen in a sunbeam ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-69",
+    "title": "Fireflies finding a rhythm",
+    "explanation": "Seeded wandering lights gradually gather into a common pulse and drift out of agreement. Population, drift, pulse period and synchronization adjust the wandering lights and their shared rhythm.",
+    "specimen": "Scene ‹ Fireflies finding a rhythm ›\nScene settings apply to this animation only.",
+    "states": "Population, drift, pulse period and synchronization adjust the wandering lights and their shared rhythm. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Fireflies finding a rhythm ›\nEarly phase",
+      "Scene ‹ Fireflies finding a rhythm ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-70",
+    "title": "Window sunlight",
+    "explanation": "One or several sheared window projections move across the field, with separate 2 x 2 or 2 x 3 panes and optional pollen. Choose one to four windows and a 2 x 2 or 2 x 3 pane grid. Pane gaps stay dark, including when pollen is enabled.",
+    "specimen": "Scene ‹ Window sunlight ›\nScene settings apply to this animation only.",
+    "states": "Choose one to four windows and a 2 x 2 or 2 x 3 pane grid. Pane gaps stay dark, including when pollen is enabled. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Window sunlight ›\nEarly phase",
+      "Scene ‹ Window sunlight ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-71",
+    "title": "Frost",
+    "explanation": "Fine branching ice grows and retreats around the screen edges or around the foreground character mask. Frame mode follows the border; character mode follows the host foreground occupancy mask. Frost never reads or edits terminal text.",
+    "specimen": "Scene ‹ Frost ›\nScene settings apply to this animation only.",
+    "states": "Frame mode follows the border; character mode follows the host foreground occupancy mask. Frost never reads or edits terminal text. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Frost ›\nEarly phase",
+      "Scene ‹ Frost ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-72",
+    "title": "Distant lighthouse",
+    "explanation": "A small dark lighthouse sweeps its light over short shimmering marks on the sea. Horizon, beam spread, sweep, speed and water glints control the simple coast and sea.",
+    "specimen": "Scene ‹ Distant lighthouse ›\nScene settings apply to this animation only.",
+    "states": "Horizon, beam spread, sweep, speed and water glints control the simple coast and sea. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Distant lighthouse ›\nEarly phase",
+      "Scene ‹ Distant lighthouse ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-73",
+    "title": "Paper-fold trace",
+    "explanation": "An angular dragon-curve trace gradually folds and opens, pausing between movements. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Paper-fold trace ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Paper-fold trace ›\nEarly phase",
+      "Scene ‹ Paper-fold trace ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-74",
+    "title": "Embroidery orbit",
+    "explanation": "A moving stitch progressively reveals a delicate geometric flower. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Embroidery orbit ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Embroidery orbit ›\nEarly phase",
+      "Scene ‹ Embroidery orbit ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-75",
+    "title": "Prime constellations",
+    "explanation": "A slow illumination sweep reveals prime-number alignments on an Ulam spiral. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Prime constellations ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Prime constellations ›\nEarly phase",
+      "Scene ‹ Prime constellations ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-76",
+    "title": "Turning wallpaper",
+    "explanation": "Repeated geometric motifs rotate into temporary larger shapes. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Turning wallpaper ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Turning wallpaper ›\nEarly phase",
+      "Scene ‹ Turning wallpaper ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-77",
+    "title": "Unfinished circle",
+    "explanation": "Imperfect concentric arcs slowly turn and occasionally align their wandering gaps. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Unfinished circle ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Unfinished circle ›\nEarly phase",
+      "Scene ‹ Unfinished circle ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-78",
+    "title": "Threads through a needle",
+    "explanation": "Drifting curved threads gather through one narrow opening before fanning apart. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Threads through a needle ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Threads through a needle ›\nEarly phase",
+      "Scene ‹ Threads through a needle ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-79",
+    "title": "Ink that hesitates",
+    "explanation": "A gently curling stroke pauses, resumes, fades and begins again. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Ink that hesitates ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Ink that hesitates ›\nEarly phase",
+      "Scene ‹ Ink that hesitates ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-80",
+    "title": "Crop circles",
+    "explanation": "Several visible drawers progressively trace bounded geometric formations across a textured field. Preset adaptations and procedural variations use geometric strokes. Multiple drawers trace them simultaneously; the field is synthetic.",
+    "specimen": "Scene ‹ Crop circles ›\nScene settings apply to this animation only.",
+    "states": "Preset adaptations and procedural variations use geometric strokes. Multiple drawers trace them simultaneously; the field is synthetic. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Crop circles ›\nEarly phase",
+      "Scene ‹ Crop circles ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-81",
+    "title": "Delayed reflection",
+    "explanation": "A swaying curve has a reflected partner that follows slightly behind, with gentle distortion. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Delayed reflection ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Delayed reflection ›\nEarly phase",
+      "Scene ‹ Delayed reflection ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-82",
+    "title": "Almost touching",
+    "explanation": "Two arcs approach, linger near one another and retreat without meeting. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Almost touching ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Almost touching ›\nEarly phase",
+      "Scene ‹ Almost touching ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-83",
+    "title": "Hidden wheel",
+    "explanation": "Orbiting dashes briefly light up to imply a wheel whose rim is never drawn. Scene controls adjust its bounded procedural geometry and motion independently of every other animation.",
+    "specimen": "Scene ‹ Hidden wheel ›\nScene settings apply to this animation only.",
+    "states": "Scene controls adjust its bounded procedural geometry and motion independently of every other animation. Shared color and brightness controls still apply.",
+    "motion": "Slow procedural movement follows the shared Speed and frame-rate cap. An explicitly opened preview remains live.",
+    "caveat": "Animation is decoration only: it never changes terminal history or copy sources. Geometry is procedural; no external artwork is required.",
+    "frames": [
+      "Scene ‹ Hidden wheel ›\nEarly phase",
+      "Scene ‹ Hidden wheel ›\nLater phase"
     ]
   }
 ]

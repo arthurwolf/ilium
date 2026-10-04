@@ -21,8 +21,9 @@ use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ascii_chart::{self, CellKind, ChartConfig, Downsample, LabelFormatter};
-use crate::session_stats::{SessionStats, TokenTotals};
+use crate::session_stats::{ProgressOutcome, SessionStats, TimelineBucket, TokenTotals, WorkKind};
 use crate::session_stats_store::LoadState;
+use crate::session_stats_timeline::{work_ribbon, StatsScale};
 use crate::theme::{self, ColorScheme};
 
 const POPOVER_MIN_WIDTH: u16 = 56;
@@ -69,6 +70,8 @@ impl StatsTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatsHit {
     Tab(StatsTab),
+    /// One of the timescale buttons above a chart.
+    Scale(StatsScale),
     Close,
     Body,
 }
@@ -88,6 +91,10 @@ pub struct StatsPopover {
     /// from the last render so wheel scrolling can clamp without re-laying out.
     pub content_rows: u16,
     pub body_rows: u16,
+    /// How much of the session every time chart shows.
+    pub scale: StatsScale,
+    /// Timescale buttons of the last render, in canvas coordinates.
+    pub scale_buttons: Vec<(Rect, StatsScale)>,
 }
 
 impl StatsPopover {
@@ -102,7 +109,22 @@ impl StatsPopover {
             last_clock_redraw: now,
             content_rows: 0,
             body_rows: 0,
+            scale: StatsScale::default(),
+            scale_buttons: Vec::new(),
         }
+    }
+
+    /// The timescale button under `position`, given the body rectangle the
+    /// canvas was last copied into.
+    pub fn scale_at(&self, body: Rect, position: Position) -> Option<StatsScale> {
+        if !body.contains(position) {
+            return None;
+        }
+        let canvas_position = Position::new(position.x - body.x, position.y - body.y + self.scroll);
+        self.scale_buttons
+            .iter()
+            .find(|(rect, _)| rect.contains(canvas_position))
+            .map(|(_, scale)| *scale)
     }
 
     pub fn max_scroll(&self) -> u16 {
@@ -365,10 +387,20 @@ struct Canvas {
     width: u16,
     y: u16,
     palette: Palette,
+    /// Timescale shared by every time chart, and the button under the pointer.
+    scale: StatsScale,
+    hovered_scale: Option<StatsScale>,
+    scale_buttons: Vec<(Rect, StatsScale)>,
 }
 
 impl Canvas {
-    fn new(width: u16, background: Style, palette: Palette) -> Self {
+    fn new(
+        width: u16,
+        background: Style,
+        palette: Palette,
+        scale: StatsScale,
+        hovered_scale: Option<StatsScale>,
+    ) -> Self {
         let area = Rect::new(0, 0, width, CANVAS_ROWS);
         let mut buffer = Buffer::empty(area);
         buffer.set_style(area, background);
@@ -377,6 +409,9 @@ impl Canvas {
             width,
             y: 0,
             palette,
+            scale,
+            hovered_scale,
+            scale_buttons: Vec::new(),
         }
     }
 
@@ -414,6 +449,55 @@ impl Canvas {
             ));
         }
         self.line(Line::from(spans));
+    }
+
+    /// The row of timescale buttons that sits under a time chart's heading.
+    /// All charts share one scale, so any button changes every chart.
+    fn scale_bar(&mut self) {
+        if !self.room(1) {
+            return;
+        }
+        let row = self.y;
+        let mut spans = vec![Span::styled(
+            "timescale ",
+            Style::new().fg(self.palette.dim),
+        )];
+        let mut x = UnicodeWidthStr::width("timescale ") as u16;
+        for scale in StatsScale::ALL {
+            let text = format!(" {} ", scale.label());
+            let width = UnicodeWidthStr::width(text.as_str()) as u16;
+            let style = if scale == self.scale {
+                Style::new()
+                    .fg(theme::accent_fg())
+                    .bg(theme::accent_bg())
+                    .add_modifier(Modifier::BOLD)
+            } else if self.hovered_scale == Some(scale) {
+                Style::new()
+                    .fg(self.palette.label)
+                    .add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
+            } else {
+                Style::new().fg(self.palette.label)
+            };
+            self.scale_buttons
+                .push((Rect::new(x, row, width, 1), scale));
+            spans.push(Span::styled(text, style));
+            spans.push(Span::raw(" "));
+            x = x.saturating_add(width + 1);
+        }
+        self.line(Line::from(spans));
+    }
+
+    /// First and last millisecond the time charts show at the current scale.
+    fn window(&self, stats: &SessionStats) -> Option<(i64, i64)> {
+        self.scale.window(stats)
+    }
+
+    /// The session timeline restricted to the current scale.
+    fn timeline(&self, stats: &SessionStats) -> Vec<TimelineBucket> {
+        let Some((start, end)) = self.window(stats) else {
+            return Vec::new();
+        };
+        stats.timeline_between(slice_count(self.width, stats), start, end)
     }
 
     /// A grid of label-over-value tiles, `columns` across.
@@ -478,7 +562,7 @@ impl Canvas {
 
     /// An asciichart-style line chart: numeric y-axis, connected box-drawing
     /// lines, one colour per series, an optional legend and time axis.
-    fn line_chart(&mut self, chart: &LineChart) {
+    fn line_chart(&mut self, chart: &LineChart<'_>) {
         let columns = usize::from(self.width);
         let dim = Style::new().fg(self.palette.dim);
         let values: Vec<Vec<f64>> = chart.series.iter().map(|s| s.values.clone()).collect();
@@ -533,6 +617,10 @@ impl Canvas {
             self.line(Line::from(spans));
         }
 
+        if let Some(work) = &chart.work {
+            self.work_ribbon_rows(work, rendered.gutter, rendered.width());
+        }
+
         if let Some((first_ms, last_ms)) = chart.time_span {
             let with_date = last_ms - first_ms > 20 * 3_600_000;
             let start = clock_label(first_ms, with_date);
@@ -561,6 +649,142 @@ impl Canvas {
         }
         if let Some(note) = chart.note {
             self.text(note, dim);
+        }
+    }
+
+    /// The ribbon under a chart's axis: a one-dot-thick braille line coloured
+    /// by what the agent was doing (bold dots while a progress bar runs), a
+    /// row of success/failure icons for finished progress bars, and a flexing
+    /// legend. Columns line up with the chart's data columns.
+    fn work_ribbon_rows(&mut self, work: &WorkContext<'_>, gutter: usize, chart_width: usize) {
+        let columns = chart_width.saturating_sub(gutter);
+        let ribbon = work_ribbon(work.stats, work.start_ms, work.end_ms, columns);
+        if !ribbon.has_data() {
+            return;
+        }
+        let dim = Style::new().fg(self.palette.dim);
+        let label = if gutter >= 6 { "work" } else { "" };
+        let dim_color = self.palette.dim;
+        let prefix = |text: &str| {
+            Span::styled(
+                format!("{text:>width$}", width = gutter),
+                Style::new().fg(dim_color),
+            )
+        };
+
+        let mut line = vec![prefix(label)];
+        for cell in &ribbon.cells {
+            line.push(match cell {
+                Some(cell) => {
+                    let color = self.work_color(cell.kind);
+                    if cell.progress_running {
+                        // Two dots thick: the "bold" line of a running progress bar.
+                        Span::styled("⣤", Style::new().fg(color).add_modifier(Modifier::BOLD))
+                    } else {
+                        Span::styled("⠤", Style::new().fg(color))
+                    }
+                }
+                None => Span::raw(" "),
+            });
+        }
+        self.line(Line::from(line));
+
+        if ribbon.outcomes.iter().any(Option::is_some) {
+            let mut line = vec![prefix("")];
+            for outcome in &ribbon.outcomes {
+                line.push(match outcome {
+                    Some(outcome) => {
+                        let (icon, color) = self.outcome_icon(*outcome);
+                        Span::styled(icon, Style::new().fg(color).add_modifier(Modifier::BOLD))
+                    }
+                    None => Span::raw(" "),
+                });
+            }
+            self.line(Line::from(line));
+        }
+
+        let mut entries: Vec<Vec<Span<'static>>> = Vec::new();
+        for kind in ribbon.kinds_present() {
+            entries.push(vec![
+                Span::styled("⠤⠤ ", Style::new().fg(self.work_color(kind))),
+                Span::styled(work_label(kind), dim),
+            ]);
+        }
+        if ribbon.has_running_progress() {
+            entries.push(vec![
+                Span::styled(
+                    "⣤⣤ ",
+                    Style::new()
+                        .fg(self.palette.label)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("progress bar running", dim),
+            ]);
+        }
+        for (outcome, text) in [
+            (ProgressOutcome::Success, "progress done"),
+            (ProgressOutcome::Failure, "progress failed"),
+            (ProgressOutcome::Unknown, "progress lost"),
+        ] {
+            if ribbon.has_outcome(outcome) {
+                let (icon, color) = self.outcome_icon(outcome);
+                entries.push(vec![
+                    Span::styled(
+                        format!("{icon} "),
+                        Style::new().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(text, dim),
+                ]);
+            }
+        }
+        self.flowing_legend(entries, gutter);
+    }
+
+    /// Lays legend entries out left to right, wrapping to the next row only
+    /// when the width runs out.
+    fn flowing_legend(&mut self, entries: Vec<Vec<Span<'static>>>, indent: usize) {
+        let limit = usize::from(self.width);
+        let mut line: Vec<Span<'static>> = vec![Span::raw(" ".repeat(indent))];
+        let mut used = indent;
+        for entry in entries {
+            let entry_width: usize = entry
+                .iter()
+                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                .sum::<usize>()
+                + 2;
+            if used + entry_width > limit && used > indent {
+                self.line(Line::from(std::mem::take(&mut line)));
+                line = vec![Span::raw(" ".repeat(indent))];
+                used = indent;
+            }
+            line.extend(entry);
+            line.push(Span::raw("  "));
+            used += entry_width;
+        }
+        if used > indent {
+            self.line(Line::from(line));
+        }
+    }
+
+    fn work_color(&self, kind: WorkKind) -> Color {
+        let palette = &self.palette;
+        match kind {
+            WorkKind::Idle => palette.dim,
+            WorkKind::Model => palette.output,
+            WorkKind::Shell => palette.warn,
+            WorkKind::Edit => palette.good,
+            WorkKind::Read => palette.input,
+            WorkKind::Agent => palette.reasoning,
+            WorkKind::Web => palette.cache_read,
+            WorkKind::Other => palette.label,
+        }
+    }
+
+    fn outcome_icon(&self, outcome: ProgressOutcome) -> (&'static str, Color) {
+        match outcome {
+            ProgressOutcome::Success => ("✓", self.palette.good),
+            ProgressOutcome::Failure => ("✗", self.palette.bad),
+            _ => ("?", self.palette.warn),
         }
     }
 
@@ -603,7 +827,7 @@ struct LineSeries {
 }
 
 /// What to plot and how, for [`Canvas::line_chart`].
-struct LineChart {
+struct LineChart<'a> {
     series: Vec<LineSeries>,
     /// Rows the value range is divided into.
     height: u16,
@@ -612,6 +836,38 @@ struct LineChart {
     /// First and last timestamp (ms) to print under the chart.
     time_span: Option<(i64, i64)>,
     note: Option<&'static str>,
+    /// Draws the work ribbon under the axis when set.
+    work: Option<WorkContext<'a>>,
+}
+
+/// What the work ribbon under a chart is built from.
+struct WorkContext<'a> {
+    stats: &'a SessionStats,
+    start_ms: i64,
+    end_ms: i64,
+}
+
+fn work_label(kind: WorkKind) -> &'static str {
+    match kind {
+        WorkKind::Idle => "idle",
+        WorkKind::Model => "thinking",
+        WorkKind::Shell => "shell",
+        WorkKind::Edit => "editing",
+        WorkKind::Read => "reading",
+        WorkKind::Agent => "sub-agent",
+        WorkKind::Web => "web",
+        WorkKind::Other => "other tools",
+    }
+}
+
+/// The ribbon input for a chart over the canvas's current window.
+fn work_context<'a>(canvas: &Canvas, stats: &'a SessionStats) -> Option<WorkContext<'a>> {
+    let (start_ms, end_ms) = canvas.window(stats)?;
+    Some(WorkContext {
+        stats,
+        start_ms,
+        end_ms,
+    })
 }
 
 fn pad(text: &str, width: usize) -> String {
@@ -739,8 +995,19 @@ pub fn render(
     );
 
     let content_width = layout.body.width.saturating_sub(1);
-    let mut canvas = Canvas::new(content_width, background, colors);
+    let hovered_scale = match popover.hovered {
+        Some(StatsHit::Scale(scale)) => Some(scale),
+        _ => None,
+    };
+    let mut canvas = Canvas::new(
+        content_width,
+        background,
+        colors,
+        popover.scale,
+        hovered_scale,
+    );
     draw_tab(&mut canvas, popover.tab, view);
+    popover.scale_buttons = std::mem::take(&mut canvas.scale_buttons);
     popover.content_rows = canvas.y;
     popover.body_rows = layout.body.height;
     popover.scroll = popover.scroll.min(popover.max_scroll());
@@ -854,6 +1121,14 @@ fn draw_tab(canvas: &mut Canvas, tab: StatsTab, view: &StatsView) {
         draw_placeholder(canvas, view);
         return;
     };
+    if let LoadState::Unavailable(reason) = view.load {
+        canvas.text(
+            "Statistics may be incomplete",
+            Style::new().add_modifier(Modifier::BOLD),
+        );
+        canvas.wrapped(reason, 0, Style::new().fg(canvas.palette.dim), 6);
+        canvas.gap(1);
+    }
     match tab {
         StatsTab::Overview => draw_overview(canvas, stats, view),
         StatsTab::Tokens => draw_tokens(canvas, stats),
@@ -1077,9 +1352,10 @@ fn draw_overview(canvas: &mut Canvas, stats: &SessionStats, view: &StatsView) {
     draw_cost(canvas, stats);
     draw_rate_limits(canvas, stats, view);
 
-    let buckets = stats.timeline(slice_count(canvas.width, stats));
-    if buckets.iter().any(|bucket| bucket.tokens.output > 0) {
+    let buckets = canvas.timeline(stats);
+    if stats.samples.iter().any(|sample| sample.tokens.output > 0) {
         canvas.heading("Output over time", "tokens per slice");
+        canvas.scale_bar();
         canvas.line_chart(&LineChart {
             series: vec![LineSeries {
                 name: "output tokens",
@@ -1089,8 +1365,9 @@ fn draw_overview(canvas: &mut Canvas, stats: &SessionStats, view: &StatsView) {
             height: 7,
             include_zero: true,
             label_formatter: Some(compact_axis),
-            time_span: time_span(stats),
+            time_span: canvas.window(stats),
             note: None,
+            work: work_context(canvas, stats),
         });
     }
 }
@@ -1306,10 +1583,6 @@ fn short_model(model: &str) -> String {
     }
 }
 
-fn time_span(stats: &SessionStats) -> Option<(i64, i64)> {
-    Some((stats.first_at_ms?, stats.last_at_ms?))
-}
-
 /// Y-axis label for token counts: `137.0k`, `4.56M`.
 fn compact_axis(value: f64) -> String {
     compact_count(value.max(0.0).round() as u64)
@@ -1436,9 +1709,10 @@ fn draw_tokens(canvas: &mut Canvas, stats: &SessionStats) {
 
     draw_context_chart(canvas, stats);
 
-    let buckets = stats.timeline(slice_count(canvas.width, stats));
-    if buckets.iter().any(|bucket| bucket.tokens.total() > 0) {
+    let buckets = canvas.timeline(stats);
+    if stats.tokens.total() > 0 {
         canvas.heading("Prompt-side tokens over time", "per slice");
+        canvas.scale_bar();
         canvas.line_chart(&LineChart {
             series: vec![
                 LineSeries {
@@ -1458,11 +1732,13 @@ fn draw_tokens(canvas: &mut Canvas, stats: &SessionStats) {
             height: 9,
             include_zero: true,
             label_formatter: Some(compact_axis),
-            time_span: time_span(stats),
+            time_span: canvas.window(stats),
             note: None,
+            work: work_context(canvas, stats),
         });
         canvas.gap(1);
         canvas.heading("Output tokens over time", "per slice");
+        canvas.scale_bar();
         canvas.line_chart(&LineChart {
             series: vec![
                 LineSeries {
@@ -1479,14 +1755,15 @@ fn draw_tokens(canvas: &mut Canvas, stats: &SessionStats) {
             height: 8,
             include_zero: true,
             label_formatter: Some(compact_axis),
-            time_span: time_span(stats),
+            time_span: canvas.window(stats),
             note: None,
+            work: work_context(canvas, stats),
         });
     }
 }
 
 fn draw_context_chart(canvas: &mut Canvas, stats: &SessionStats) {
-    let buckets = stats.timeline(slice_count(canvas.width, stats));
+    let buckets = canvas.timeline(stats);
     // A bucket with no call carries the previous prompt size forward, so the
     // line shows how full the window stayed rather than dropping to zero.
     let mut carried = f64::NAN;
@@ -1499,10 +1776,17 @@ fn draw_context_chart(canvas: &mut Canvas, stats: &SessionStats) {
             carried
         })
         .collect();
-    if context.iter().filter(|value| !value.is_nan()).count() < 2 {
+    if stats
+        .samples
+        .iter()
+        .filter(|sample| sample.context.is_some())
+        .count()
+        < 2
+    {
         return;
     }
     canvas.heading("Context window over time", "prompt size per call");
+    canvas.scale_bar();
     let peak = context.iter().copied().fold(0.0_f64, f64::max);
     let mut series = vec![LineSeries {
         name: "prompt size",
@@ -1528,8 +1812,9 @@ fn draw_context_chart(canvas: &mut Canvas, stats: &SessionStats) {
         height: 10,
         include_zero: true,
         label_formatter: Some(compact_axis),
-        time_span: time_span(stats),
+        time_span: canvas.window(stats),
         note,
+        work: work_context(canvas, stats),
     });
     canvas.gap(1);
 }
@@ -1543,12 +1828,13 @@ fn draw_activity(canvas: &mut Canvas, stats: &SessionStats, view: &StatsView) {
         canvas.palette.good,
         canvas.palette.warn,
     );
-    let buckets = stats.timeline(slice_count(canvas.width, stats));
+    let buckets = canvas.timeline(stats);
     canvas.heading(
         "Activity",
         "events per slice · prompts, model calls, tool calls",
     );
-    if buckets.iter().any(|bucket| bucket.events > 0) {
+    canvas.scale_bar();
+    if !stats.activity_ms.is_empty() {
         // Whole-number axis: never more rows than distinct integer levels, so
         // two rows cannot both be labelled "1".
         let values: Vec<f64> = buckets.iter().map(|b| f64::from(b.events)).collect();
@@ -1566,8 +1852,9 @@ fn draw_activity(canvas: &mut Canvas, stats: &SessionStats, view: &StatsView) {
             },
             include_zero: true,
             label_formatter: Some(count_axis),
-            time_span: time_span(stats),
+            time_span: canvas.window(stats),
             note: None,
+            work: work_context(canvas, stats),
         });
     } else {
         canvas.text("no timestamped events yet", Style::new().fg(dim));
@@ -1616,6 +1903,7 @@ fn draw_activity(canvas: &mut Canvas, stats: &SessionStats, view: &StatsView) {
             label_formatter: Some(duration_axis),
             time_span: None,
             note: Some("last turns, oldest to newest"),
+            work: None,
         });
     }
     canvas.gap(1);
@@ -1725,7 +2013,8 @@ mod tests {
 
     use super::*;
     use crate::session_stats::{
-        ModelUsage, PromptRecord, RateLimitWindow, ReportedCost, TokenSample,
+        ModelUsage, ProgressSpan, PromptRecord, RateLimitWindow, ReportedCost, TokenSample,
+        WorkMark,
     };
 
     fn sample_stats() -> SessionStats {
@@ -1817,6 +2106,36 @@ mod tests {
             )],
             samples,
             activity_ms: (0..40).map(|i| start + i * 60_000).collect(),
+            work_marks: vec![
+                WorkMark {
+                    at_ms: start,
+                    kind: WorkKind::Model,
+                },
+                WorkMark {
+                    at_ms: start + 10 * 60_000,
+                    kind: WorkKind::Shell,
+                },
+                WorkMark {
+                    at_ms: start + 25 * 60_000,
+                    kind: WorkKind::Edit,
+                },
+                WorkMark {
+                    at_ms: start + 32 * 60_000,
+                    kind: WorkKind::Idle,
+                },
+            ],
+            progress_spans: vec![
+                ProgressSpan {
+                    start_ms: start + 11 * 60_000,
+                    end_ms: Some(start + 20 * 60_000),
+                    outcome: ProgressOutcome::Success,
+                },
+                ProgressSpan {
+                    start_ms: start + 26 * 60_000,
+                    end_ms: Some(start + 30 * 60_000),
+                    outcome: ProgressOutcome::Failure,
+                },
+            ],
             bytes_read: 1_147_269,
             ..SessionStats::default()
         }
@@ -1961,6 +2280,51 @@ mod tests {
         let screen = Rect::new(0, 0, 100, 40);
         let layout = geometry(screen, Position::new(98, 0)).unwrap();
         assert!(layout.area.right() <= screen.right());
+    }
+
+    #[test]
+    fn output_chart_has_work_ribbon_outcome_icons_legend_and_scale_buttons() {
+        let (rows, popover) = render_tab(StatsTab::Overview, 0, (120, 120));
+        let heading = rows
+            .iter()
+            .position(|row| row.contains("OUTPUT OVER TIME"))
+            .expect("output heading");
+        assert!(rows[heading + 1].contains("timescale"));
+        for label in ["all", "24h", "6h", "1h", "15m", "5m"] {
+            assert!(rows[heading + 1].contains(label), "{label}");
+        }
+        let ribbon = rows[heading + 2..]
+            .iter()
+            .position(|row| row.contains('⠤') && row.contains('⣤'))
+            .map(|offset| heading + 2 + offset)
+            .expect("ribbon row with thin and bold dots");
+        assert!(rows[ribbon + 1].contains('✓') && rows[ribbon + 1].contains('✗'));
+        assert!(rows[ribbon + 2].contains("progress bar running"));
+        assert!(rows[ribbon + 2].contains("thinking"));
+        // Time labels come after the ribbon, under the axis.
+        assert!(rows[ribbon + 3].contains(':'));
+        assert!(popover.scale_buttons.len() >= StatsScale::ALL.len());
+    }
+
+    #[test]
+    fn scale_buttons_hit_test_and_narrow_the_window() {
+        let (_, popover) = render_tab(StatsTab::Overview, 0, (120, 120));
+        let layout = geometry(Rect::new(0, 0, 120, 120), Position::new(5, 0)).unwrap();
+        let (rect, scale) = popover.scale_buttons[3];
+        let position = Position::new(layout.body.x + rect.x + 1, layout.body.y + rect.y);
+        assert_eq!(popover.scale_at(layout.body, position), Some(scale));
+        assert_eq!(popover.scale_at(layout.body, Position::new(0, 0)), None);
+        let stats = sample_stats();
+        let (start, end) = StatsScale::FiveMinutes.window(&stats).unwrap();
+        assert_eq!(end - start, 5 * 60_000);
+        assert!(
+            stats
+                .timeline_between(10, start, end)
+                .iter()
+                .map(|b| b.calls)
+                .sum::<u32>()
+                <= 6
+        );
     }
 
     #[test]
@@ -2129,6 +2493,64 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(text.contains(expected), "{expected}: {text}");
+        }
+    }
+
+    #[test]
+    fn failed_refresh_keeps_retained_metrics_and_explains_incomplete_statistics() {
+        // Synthetic retained transcript statistics, rendered by the real popover.
+        // A failed refresh must not make these totals look current or erase them.
+        let stats = sample_stats();
+        let load = LoadState::Unavailable("Transcript scan safety limit reached".into());
+        for tab in StatsTab::ALL {
+            let view = StatsView {
+                stats: Some(&stats),
+                load: &load,
+                supported: true,
+                has_session: true,
+                now_ms: 1_790_000_000_000 + 45 * 60_000,
+                animation_ms: 0,
+                scheme: ColorScheme::Dark,
+            };
+            let mut popover = StatsPopover::new(NodeId(1), true, Instant::now());
+            popover.tab = tab;
+            let mut terminal = Terminal::new(TestBackend::new(120, 44)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render(
+                        frame,
+                        frame.area(),
+                        Position::new(5, 0),
+                        &mut popover,
+                        &view,
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let text = (0..44)
+                .map(|y| {
+                    (0..120)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                text.contains("Statistics may be incomplete"),
+                "{tab:?} must disclose the failed refresh alongside retained totals: {text}"
+            );
+            assert!(
+                text.contains("Transcript scan safety limit reached"),
+                "{text}"
+            );
+            assert!(!text.contains("No statistics available"), "{text}");
+            if tab == StatsTab::Overview {
+                assert!(
+                    text.contains("$12.50"),
+                    "retained cost must remain visible: {text}"
+                );
+                assert!(text.contains("claude-sonnet-5"), "{text}");
+            }
         }
     }
 

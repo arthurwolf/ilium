@@ -639,11 +639,17 @@ pub fn workspace_explanation(
         ),
         format!(
             "Worktree: {}",
-            safe_tooltip_text(&workspace.worktree_root.to_string_lossy())
+            safe_tooltip_text(&ilium_platform::paths::bounded_path_display(
+                &workspace.worktree_root,
+                240
+            ))
         ),
         format!(
             "Repository Git dir: {}",
-            safe_tooltip_text(&workspace.repo_common_dir.to_string_lossy())
+            safe_tooltip_text(&ilium_platform::paths::bounded_path_display(
+                &workspace.repo_common_dir,
+                240
+            ))
         ),
         format!(
             "Created: {}",
@@ -716,7 +722,7 @@ pub fn workspace_explanation(
         reason: Some(format!(
             "Why: this pane's saved workspace record binds branch «{}» to worktree «{}»; live Git facts above are shown only when a current observation exists.",
             safe_tooltip_text(&workspace.branch),
-            safe_tooltip_text(&workspace.worktree_root.to_string_lossy()),
+            safe_tooltip_text(&ilium_platform::paths::bounded_path_display(&workspace.worktree_root, 240)),
         )),
     }
 }

@@ -17,6 +17,11 @@ fn test_app(width: u16, height: u16) -> (App, tempfile::TempDir) {
 }
 
 fn draw_buffer(terminal: &mut Terminal<TestBackend>, app: &mut App) {
+    app.animation_frame.settle_for_test();
+    terminal
+        .draw(|frame| draw_at(frame, app, Duration::ZERO))
+        .expect("request async animation");
+    app.animation_frame.settle_for_test();
     terminal
         .draw(|frame| draw_at(frame, app, Duration::ZERO))
         .expect("final UI render");
@@ -25,6 +30,7 @@ fn draw_buffer(terminal: &mut Terminal<TestBackend>, app: &mut App) {
 fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
     let started = Instant::now();
     loop {
+        app.animation_frame.settle_for_test();
         terminal
             .draw(|frame| draw_at(frame, app, started.elapsed()))
             .expect("loaded map render");
@@ -212,6 +218,7 @@ fn disabled_or_switched_scene_clears_credit_and_restores_workspace_height() {
         .expect("background control");
     app.take_outbound_requests();
     app.settings_adjust_animation_row(background_row, 1);
+    app.settle_filesystem_for_test();
     assert!(!app.animation_settings.enabled);
     assert!(
         !crate::project_config::load(project.path())
@@ -236,6 +243,7 @@ fn disabled_or_switched_scene_clears_credit_and_restores_workspace_height() {
     app.settings_adjust_animation_row(background_row, 1);
     assert!(app.animation_settings.enabled);
     app.settings_select_animation_scene(AnimationKind::QuietPond);
+    app.settle_filesystem_for_test();
     assert_eq!(
         crate::project_config::load(project.path())
             .unwrap()

@@ -277,6 +277,10 @@ impl CostSettings {
         }
     }
 
+    pub fn set_visibility(&mut self, display: CostDisplay, visibility: CostVisibility) {
+        self.option_mut(display).visibility = visibility;
+    }
+
     fn option_mut(&mut self, display: CostDisplay) -> &mut DisplayOption {
         match display {
             CostDisplay::LevelGlyph => &mut self.level_glyph,
@@ -449,14 +453,14 @@ fn step_ladder<T: Copy + PartialOrd>(ladder: &[T], current: T, direction: i32) -
             .iter()
             .copied()
             .find(|value| *value > current)
-            .unwrap_or(ladder[0])
+            .unwrap_or(current)
     } else {
         ladder
             .iter()
             .rev()
             .copied()
             .find(|value| *value < current)
-            .unwrap_or(ladder[ladder.len() - 1])
+            .unwrap_or(current)
     }
 }
 
@@ -556,6 +560,115 @@ impl CostRow {
     }
 }
 
+impl CostSettings {
+    pub fn number_spec(&self, row: CostRow) -> Option<crate::value_number::NumberSpec> {
+        use crate::value_number::NumberSpec;
+        match row {
+            CostRow::Budget => Some(NumberSpec::Decimal {
+                minimum: if self.metric == CostMetric::Dollars {
+                    0.01
+                } else {
+                    0.1
+                },
+                maximum: f64::MAX,
+            }),
+            CostRow::HistoryDays => Some(NumberSpec::Integer {
+                minimum: 1,
+                maximum: i128::from(MAX_HISTORY_DAYS),
+            }),
+            CostRow::SparklineWindow => Some(NumberSpec::Integer {
+                minimum: 1,
+                maximum: i128::from(MAX_WINDOW_MINUTES),
+            }),
+            CostRow::SparklineCells => Some(NumberSpec::Integer {
+                minimum: i128::from(SPARKLINE_CELL_RANGE.0),
+                maximum: i128::from(SPARKLINE_CELL_RANGE.1),
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn number_text(&self, row: CostRow) -> Option<String> {
+        match row {
+            CostRow::Budget => Some(self.active_budget().to_string()),
+            CostRow::HistoryDays => Some(self.history_days.to_string()),
+            CostRow::SparklineWindow => Some(self.sparkline_window_minutes.to_string()),
+            CostRow::SparklineCells => Some(self.sparkline_cells.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn stepped_number_text(&self, row: CostRow, direction: i32) -> Option<String> {
+        Some(match row {
+            CostRow::Budget => match self.metric {
+                CostMetric::Dollars => {
+                    step_ladder(&BUDGET_STEPS, self.budget_usd, direction).to_string()
+                }
+                CostMetric::Quota => {
+                    step_ladder(&QUOTA_BUDGET_STEPS, self.quota_budget_percent, direction)
+                        .to_string()
+                }
+            },
+            CostRow::HistoryDays => {
+                step_ladder(&HISTORY_DAY_STEPS, self.history_days, direction).to_string()
+            }
+            CostRow::SparklineWindow => step_ladder(
+                &WINDOW_MINUTE_STEPS,
+                self.sparkline_window_minutes,
+                direction,
+            )
+            .to_string(),
+            CostRow::SparklineCells => (i16::from(self.sparkline_cells)
+                + if direction < 0 { -1 } else { 1 })
+            .clamp(
+                i16::from(SPARKLINE_CELL_RANGE.0),
+                i16::from(SPARKLINE_CELL_RANGE.1),
+            )
+            .to_string(),
+            _ => return None,
+        })
+    }
+
+    /// Validates exact typed values before assigning; callers retain persistence ownership.
+    pub fn set_number(&mut self, row: CostRow, text: &str) -> Result<(), String> {
+        use crate::value_number::NumberValue;
+        let spec = self
+            .number_spec(row)
+            .ok_or_else(|| "Select a numeric cost setting".to_string())?;
+        // The native sparkline editor accepts durations as well as bare minutes.
+        // Keep that grammar when the shared star dialog submits the same field.
+        let value = if row == CostRow::SparklineWindow {
+            let minutes = crate::cost_model::parse_window_minutes(text)
+                .ok_or("Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).")?;
+            let value = NumberValue::Integer(i128::from(minutes));
+            spec.validate(value)?;
+            value
+        } else {
+            spec.parse(text)?
+        };
+        match (row, value) {
+            (CostRow::Budget, NumberValue::Decimal(value)) => match self.metric {
+                CostMetric::Dollars => self.budget_usd = value,
+                CostMetric::Quota => self.quota_budget_percent = value,
+            },
+            (CostRow::HistoryDays, NumberValue::Integer(value)) => {
+                self.history_days =
+                    u16::try_from(value).map_err(|_| "Invalid history days".to_string())?
+            }
+            (CostRow::SparklineWindow, NumberValue::Integer(value)) => {
+                self.sparkline_window_minutes =
+                    u32::try_from(value).map_err(|_| "Invalid sparkline window".to_string())?
+            }
+            (CostRow::SparklineCells, NumberValue::Integer(value)) => {
+                self.sparkline_cells =
+                    u8::try_from(value).map_err(|_| "Invalid sparkline width".to_string())?
+            }
+            _ => return Err("Numeric value does not match this cost setting".into()),
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,8 +746,25 @@ mod tests {
         settings.adjust(CostRow::SparklineWindow, -1);
         assert_eq!(settings.sparkline_window_minutes, 90);
         settings.sparkline_window_minutes = 43_200;
-        settings.adjust(CostRow::SparklineWindow, 1);
-        assert_eq!(settings.sparkline_window_minutes, 5);
+        assert!(!settings.adjust(CostRow::SparklineWindow, 1));
+        assert_eq!(settings.sparkline_window_minutes, 43_200);
+    }
+
+    #[test]
+    fn numeric_ladders_preserve_endpoints_and_values_outside_presets() {
+        for (ladder, current, direction, expected) in [
+            (&HISTORY_DAY_STEPS[..], 730, 1, 730),
+            (&HISTORY_DAY_STEPS[..], 7, -1, 7),
+            (&HISTORY_DAY_STEPS[..], 1000, 1, 1000),
+            (&HISTORY_DAY_STEPS[..], 1, -1, 1),
+            (&HISTORY_DAY_STEPS[..], 17, 1, 30),
+            (&HISTORY_DAY_STEPS[..], 17, -1, 14),
+        ] {
+            assert_eq!(step_ladder(ladder, current, direction), expected);
+        }
+        assert_eq!(step_ladder(&BUDGET_STEPS, 1500.5, 1), 1500.5);
+        assert_eq!(step_ladder(&QUOTA_BUDGET_STEPS, 0.1, -1), 0.1);
+        assert_eq!(step_ladder::<u32>(&[], 7, 1), 7);
     }
 
     #[test]
@@ -773,5 +903,64 @@ mod tests {
         assert_eq!(settings.quota_fixed_cuts, defaults.quota_fixed_cuts);
         assert_eq!(settings.quota_burn_cuts, defaults.quota_burn_cuts);
         assert_eq!(settings.quota_budget_percent, 10.0);
+    }
+}
+
+#[cfg(test)]
+mod direct_number_tests {
+    use super::*;
+    #[test]
+    fn direct_sparkline_window_preserves_native_duration_entry_and_rejects_invalid_drafts() {
+        let mut settings = CostSettings::default();
+        for (text, minutes) in [("10h", 600), ("45m", 45), ("3d", 4320), ("1.5 h", 90)] {
+            settings.set_number(CostRow::SparklineWindow, text).unwrap();
+            assert_eq!(settings.sparkline_window_minutes, minutes, "{text}");
+        }
+        for text in ["5x", "0m", "366d", "NaN", ""] {
+            let before = settings.clone();
+            assert!(
+                settings.set_number(CostRow::SparklineWindow, text).is_err(),
+                "{text}"
+            );
+            assert_eq!(
+                settings, before,
+                "invalid duration must retain the prior value"
+            );
+        }
+    }
+    #[test]
+    fn direct_numbers_accept_valid_intermediates_without_ladder_quantization() {
+        let mut s = CostSettings::default();
+        s.set_number(CostRow::Budget, "17.125").unwrap();
+        assert_eq!(s.budget_usd, 17.125);
+        s.set_number(CostRow::HistoryDays, "17").unwrap();
+        assert_eq!(s.history_days, 17);
+        s.set_number(CostRow::SparklineWindow, "101").unwrap();
+        assert_eq!(s.sparkline_window_minutes, 101);
+        s.set_number(CostRow::SparklineCells, "13").unwrap();
+        assert_eq!(s.sparkline_cells, 13);
+        s.metric = CostMetric::Quota;
+        s.set_number(CostRow::Budget, "125.5").unwrap();
+        assert_eq!(s.quota_budget_percent, 125.5);
+        assert_eq!(s.budget_usd, 17.125);
+    }
+    #[test]
+    fn invalid_direct_number_never_changes_settings() {
+        let mut s = CostSettings::default();
+        for (row, text) in [
+            (CostRow::Budget, "NaN"),
+            (CostRow::Budget, "0"),
+            (CostRow::Budget, "1e400"),
+            (CostRow::HistoryDays, "3651"),
+            (CostRow::HistoryDays, "1.5"),
+            (CostRow::SparklineWindow, "525601"),
+            (CostRow::SparklineCells, "25"),
+            (CostRow::SparklineCells, "3"),
+            (CostRow::SortByCost, "1"),
+        ] {
+            let before = s.clone();
+            assert!(s.set_number(row, text).is_err(), "{row:?}: {text}");
+            assert_eq!(s, before);
+        }
     }
 }

@@ -138,4 +138,7 @@ pub struct TerminalPaneContextMenu {
     pub area: Rect,
     pub actions: Vec<TerminalContextAction>,
     pub selected_index: usize,
+    pub(crate) preparation_generation: u64,
+    pub(crate) _preparation_hold:
+        Option<ilium_execution::Retained<Option<ilium_execution::Retained<()>>>>,
 }

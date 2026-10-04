@@ -1,0 +1,141 @@
+//! Real App/input/persistence/widget contracts; these do not assert V8 output.
+use super::*;
+use crate::app::{App, Mode, SettingsState, SettingsTab};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::{backend::TestBackend, Terminal};
+use serde_json::json;
+
+fn app() -> (App, tempfile::TempDir) {
+    let project = tempfile::tempdir().expect("test project");
+    let mut app = App::new("plugin-settings-contract".into(), project.path().into());
+    app.set_screen_area(Rect::new(0, 0, 120, 40));
+    app.mode = Mode::Settings(SettingsState {
+        tab: SettingsTab::Animations,
+        ..Default::default()
+    });
+    (app, project)
+}
+
+fn install_metadata(app: &mut App) {
+    let manifest: Manifest = serde_json::from_value(json!({
+        "api_version":1,"id":"carpet","name":"Carpet","version":"1.0.0",
+        "entry":"entry.mjs","modes":["live","pre_rendered"],"files":[],
+        "settings":{"type":"object","properties":{"speed":{"type":"integer","minimum":1,"maximum":10,"default":3}}}
+    })).expect("manifest");
+    let catalogue = PluginCatalogue {
+        entries: vec![PluginDescriptor {
+            archive_path: PathBuf::from("not-an-installed-runtime-package.iliumanim"),
+            manifest,
+        }],
+        issues: vec![],
+    };
+    app.plugin_catalogue = Some(
+        crate::execution::test_client()
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 4096,
+                result_bytes: 1024 * 1024,
+            })
+            .expect("test admission")
+            .retain(catalogue)
+            .expect("retained catalogue"),
+    );
+}
+
+#[test]
+fn actual_keyboard_and_pointer_subtabs_browse_without_changing_source() {
+    let (mut app, _project) = app();
+    install_metadata(&mut app);
+    let before = app.animation_settings.clone();
+    crate::keys::handle_event(
+        &mut app,
+        Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)),
+    );
+    let Mode::Settings(state) = &app.mode else {
+        panic!("settings");
+    };
+    assert_eq!(state.animation_source_tab, AnimationSourceTab::Plugin);
+    assert_eq!(app.animation_settings, before);
+    crate::keys::handle_event(
+        &mut app,
+        Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+    );
+    assert_eq!(app.animation_settings, before);
+    let Mode::Settings(state) = &app.mode else {
+        panic!("settings");
+    };
+    let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+        .content_area;
+    let tabs = source_tabs(crate::animation_settings_ui::source_tab_area(area));
+    crate::mouse::handle_mouse_event(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: tabs.native.x,
+            row: tabs.native.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    let Mode::Settings(state) = &app.mode else {
+        panic!("settings");
+    };
+    assert_eq!(state.animation_source_tab, AnimationSourceTab::Native);
+    assert_eq!(app.animation_settings, before);
+}
+
+#[test]
+fn actual_plugin_panel_renders_catalogue_and_shared_controls_at_terminal_sizes() {
+    for (width, height) in [(40, 16), (80, 24), (120, 40)] {
+        let (mut app, _project) = app();
+        install_metadata(&mut app);
+        app.set_screen_area(Rect::new(0, 0, width, height));
+        let Mode::Settings(state) = &mut app.mode else {
+            panic!("settings");
+        };
+        state.animation_source_tab = AnimationSourceTab::Plugin;
+        let model = app.plugin_panel_model();
+        assert!(model
+            .rows
+            .iter()
+            .any(|row| matches!(row, PluginPanelRow::Common(_))));
+        assert!(model
+            .rows
+            .iter()
+            .any(|row| row == &PluginPanelRow::Package("carpet".into())));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let Mode::Settings(state) = &app.mode else {
+                    panic!("settings");
+                };
+                crate::animation_settings_ui::render(frame, frame.area(), &app, state);
+            })
+            .expect("real plugin panel");
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Native"));
+        assert!(text.contains("Plugin"));
+        assert!(text.contains("Carpet"));
+        assert_eq!(app.animation_settings.source, AnimationSourceTab::Native);
+    }
+}
+
+#[test]
+fn selecting_native_even_with_same_kind_persists_explicit_native_source() {
+    let (mut app, project) = app();
+    app.animation_settings.source = AnimationSourceTab::Plugin;
+    let kind = app.animation_settings.kind;
+    app.settings_select_animation_scene(kind);
+    app.settle_filesystem_for_test();
+    let saved = crate::project_config::load(project.path())
+        .expect("authoritative saved settings")
+        .animation;
+    assert_eq!(saved.source, AnimationSourceTab::Native);
+    assert_eq!(saved.kind, kind);
+}

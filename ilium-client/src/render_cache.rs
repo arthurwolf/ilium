@@ -8,8 +8,6 @@ use ilium_core::{NodeId, NodeKind, PaneContentKind, PaneStatus};
 use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 
 use crate::app::{App, PaneRuntime};
-use crate::board::BoardPane;
-use crate::editor_pane::EditorPane;
 use crate::terminal_view::TerminalView;
 use crate::trigger_settings::{event_for_sound, TriggerEvent, TriggerOccurrence};
 
@@ -35,8 +33,12 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
             None
         }
-        ServerEvent::AgentDetectionSettingsChanged { result } => {
-            app.apply_agent_detection_settings_result(result);
+        ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {
+            if let Some(request_id) = request_id {
+                app.receive_detection_number_reply(request_id, result);
+            } else {
+                app.apply_agent_detection_settings_result(result);
+            }
             None
         }
         ServerEvent::TreeSnapshot(tree) => {
@@ -60,47 +62,77 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.apply_pane_process_terminated(pane_id, result);
             None
         }
-        ServerEvent::ScreenUpdate {
-            pane_id,
-            first_sequence,
-            sequence,
-            bytes,
-        } => {
-            // A pane being converted keeps its last screen on display.
+        event @ ServerEvent::ScreenUpdate { pane_id, .. } => {
             if app.frozen_panes.contains(&pane_id) {
                 return None;
             }
-            let should_track_visible_text_change = app.tree.get(pane_id).is_some_and(|node| {
-                matches!(
-                    node.kind,
-                    NodeKind::Pane {
-                        content: PaneContentKind::Terminal,
-                        status: PaneStatus::PlainShell,
-                        ..
-                    }
-                )
-            });
-            let evidence = if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                view.apply_live_output_with_evidence(
+            #[cfg(test)]
+            if app.terminal_parsing.is_none() {
+                if let ServerEvent::ScreenUpdate {
                     first_sequence,
                     sequence,
-                    &bytes,
-                    should_track_visible_text_change,
-                )
-            } else {
-                None
-            };
-            app.record_terminal_screen_change(pane_id, evidence);
+                    bytes,
+                    ..
+                } = event
+                {
+                    let track = app.tree.get(pane_id).is_some_and(|node| {
+                        matches!(
+                            node.kind,
+                            NodeKind::Pane {
+                                content: PaneContentKind::Terminal,
+                                status: PaneStatus::PlainShell,
+                                ..
+                            }
+                        )
+                    });
+                    let evidence =
+                        if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                            view.apply_live_output_with_evidence(
+                                first_sequence,
+                                sequence,
+                                &bytes,
+                                track,
+                            )
+                        } else {
+                            None
+                        };
+                    app.record_terminal_screen_change(pane_id, evidence);
+                }
+                return None;
+            }
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
+            }
             None
         }
-        ServerEvent::TerminalReplay {
-            pane_id,
-            through_sequence,
-            bytes,
-            is_complete,
-        } => {
-            if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
-                view.apply_replay(&bytes, through_sequence, is_complete);
+        event @ ServerEvent::TerminalReplay { .. } => {
+            #[cfg(test)]
+            if app.terminal_parsing.is_none() {
+                if let ServerEvent::TerminalReplay {
+                    pane_id,
+                    through_sequence,
+                    bytes,
+                    is_complete,
+                } = event
+                {
+                    if let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) {
+                        view.apply_replay(&bytes, through_sequence, is_complete);
+                    }
+                }
+                return None;
+            }
+            if let Err(event) = app.submit_terminal_event(event) {
+                app.pending_terminal_events.push_front(
+                    crate::connection::Received::with_retention(
+                        *event,
+                        app.processing_event_retention.clone(),
+                    ),
+                );
             }
             None
         }
@@ -133,11 +165,13 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             // isn't actually a transition, should that server invariant
             // ever be violated by a future code path.
             let previous_status = app.tree.get(pane_id).and_then(|node| match &node.kind {
-                NodeKind::Pane { status, .. } => Some(status.clone()),
+                NodeKind::Pane { status, .. } => Some(status),
                 NodeKind::Container(_) | NodeKind::Folder { .. } => None,
             });
             let became_agent = matches!(status, PaneStatus::Agent(..))
-                && !matches!(previous_status.as_ref(), Some(PaneStatus::Agent(..)));
+                && !matches!(previous_status, Some(PaneStatus::Agent(..)));
+            let transition_event = ilium_sound::event_for_transition(previous_status, &status)
+                .and_then(event_for_sound);
             // Only report `PaneBecameDone` -- and thus trigger a title
             // inference attempt -- if the status actually landed in the
             // tree. If `pane_id` doesn't resolve to a pane here (a status
@@ -177,17 +211,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
                     app.bump_tree_version();
-                    let lifecycle_event = app
-                        .tree
-                        .get(pane_id)
-                        .and_then(|node| match &node.kind {
-                            NodeKind::Pane { status, .. } => {
-                                ilium_sound::event_for_transition(previous_status.as_ref(), status)
-                            }
-                            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
-                        })
-                        .and_then(event_for_sound);
-                    lifecycle_event
+                    transition_event
                         .or_else(|| {
                             (became_agent && app.agent_session_ids.contains_key(&pane_id))
                                 .then_some(TriggerEvent::AgentSessionReady)
@@ -200,9 +224,22 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
         }
+        ServerEvent::PaneResizeRejected {
+            pane_id,
+            rows,
+            cols,
+            message,
+        } => {
+            app.reject_requested_pane_resize(pane_id, rows, cols);
+            tracing::error!(?pane_id, rows, cols, %message, "server rejected a pane resize");
+            app.status_message = Some(format!("Server error: {message}"));
+            app.status_message_retention = app.processing_derivation_retention.clone();
+            None
+        }
         ServerEvent::Error { message } => {
             tracing::error!(%message, "server reported a request error");
             app.status_message = Some(format!("Server error: {message}"));
+            app.status_message_retention = app.processing_derivation_retention.clone();
             None
         }
         ServerEvent::PaneSessionIdResolved {
@@ -221,8 +258,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                     app.agent_process_ids.remove(&pane_id);
                 }
             }
-            let previous_session_id = app.agent_session_ids.insert(pane_id, session_id.clone());
-            let changed = previous_session_id.as_ref() != Some(&session_id);
+            let changed = app.agent_session_ids.get(&pane_id) != Some(&session_id);
+            let previous_session_id = app.agent_session_ids.insert(pane_id, session_id);
             if changed {
                 // A `/resume` can replace the agent session inside the same
                 // terminal pane. The old title describes another transcript.
@@ -285,7 +322,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 .insert(pane_id, title_generation);
             if let Some(session_id) = app.agent_session_ids.get(&pane_id) {
                 app.title_inference_attempts
-                    .remove(&(pane_id, session_id.clone()));
+                    .retain(|(candidate_pane, candidate_session), _| {
+                        *candidate_pane != pane_id || candidate_session != session_id
+                    });
             }
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
@@ -296,7 +335,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 app.status_message = Some("Restored editor has no file path".to_string());
                 return None;
             };
-            app.restored_editor_paths.insert(pane_id, path);
+            if let Err(error) = app.remember_editor_path(pane_id, path) {
+                app.status_message = Some(error);
+                return None;
+            }
             load_restored_editor(app, pane_id);
             None
         }
@@ -502,6 +544,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
             app.status_message = Some(format!("Worktree retained: {}", reasons.join("; ")));
+            app.status_message_retention = app.processing_derivation_retention.clone();
             None
         }
         ServerEvent::WorkspaceInventoryReported {
@@ -554,7 +597,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
 /// it only knows the node exists and its display name (the tree carries
 /// no file path at all). A new editor node this client itself just asked
 /// the server to create is loaded from disk here via
-/// `App::take_matching_pending_editor_open` (matched by basename -- see
+/// `App::take_matching_pending_editor_open_from_node` (matched by basename -- see
 /// that field's doc comment) and focused, the same "open and jump to the
 /// new pane" behavior the pre-client/server design had. An editor node
 /// this client did *not* request (another attached client created it, or
@@ -632,6 +675,12 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.restored_editor_paths
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.editor_path_holds
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.editor_path_event_holds
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.editor_load_retry_positions
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.title_inference_attempts
         .retain(|(pane_id, _), _| live_pane_ids.contains(pane_id));
     app.inferred_title_session_ids
@@ -707,16 +756,18 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     // presented. Terminal/agent panes now use the same focus path once this
     // client confirms it requested that exact new node.
     let mut newly_opened_pane: Option<NodeId> = None;
-    let new_pane_nodes: Vec<_> = app
+    let new_pane_ids: Vec<_> = app
         .tree
         .panes()
         .filter(|node| !app.panes.contains_key(&node.id))
-        .map(|node| (node.id, node.name.clone(), node.kind.clone()))
+        .map(|node| node.id)
         .collect();
-    for (pane_id, name, kind) in new_pane_nodes {
-        let NodeKind::Pane { content, .. } = kind else {
+    for pane_id in new_pane_ids {
+        let Some(NodeKind::Pane { content, .. }) = app.tree.get(pane_id).map(|node| &node.kind)
+        else {
             continue;
         };
+        let content = *content;
         match content {
             PaneContentKind::Terminal => {
                 app.panes.insert(
@@ -727,63 +778,29 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                         app.terminal_settings.scrollback_budget_mib,
                     ))),
                 );
-                if app.take_matching_pending_pane_focus(pane_id, PaneContentKind::Terminal, &name) {
+                if app.take_matching_pending_terminal_focus_from_node(pane_id) {
                     newly_opened_pane = Some(pane_id);
                 }
             }
             PaneContentKind::Editor => {
                 let pending_open = app
                     .restored_editor_paths
-                    .get(&pane_id)
-                    .cloned()
+                    .remove(&pane_id)
                     .map(|path| (path, None, None))
                     .or_else(|| {
-                        app.take_matching_pending_editor_open(&name)
+                        app.take_matching_pending_editor_open_from_node(pane_id)
                             .map(|pending| (pending.path, pending.line, pending.column))
                     });
                 let Some((path, line, column)) = pending_open else {
                     continue;
                 };
-                match EditorPane::load(path) {
-                    Ok(mut editor) => {
-                        editor.apply_defaults(&app.editor_settings);
-                        if let Some(line) = line {
-                            editor.jump_to_location(
-                                line.saturating_sub(1) as usize,
-                                column.unwrap_or(1_u32).saturating_sub(1) as usize,
-                            );
-                        }
-                        app.panes
-                            .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
-                        newly_opened_pane = Some(pane_id);
-                    }
-                    Err(error) => {
-                        app.status_message = Some(format!("Failed to open file: {error}"));
-                    }
+                if app.request_editor_load(pane_id, path, line, column) {
+                    newly_opened_pane = Some(pane_id);
                 }
             }
             PaneContentKind::Board => {
-                let Some(NodeKind::Pane {
-                    board_storage: Some(storage),
-                    ..
-                }) = app.tree.get(pane_id).map(|node| &node.kind)
-                else {
-                    continue;
-                };
-                let board_result = if storage.path().exists() {
-                    BoardPane::load(storage.clone())
-                } else {
-                    BoardPane::create(storage.clone())
-                };
-                match board_result {
-                    Ok(board) => {
-                        app.panes
-                            .insert(pane_id, PaneRuntime::Board(Box::new(board)));
-                        newly_opened_pane = Some(pane_id);
-                    }
-                    Err(error) => {
-                        app.status_message = Some(format!("Failed to open board: {error}"))
-                    }
+                if app.request_board_load_from_tree(pane_id) {
+                    newly_opened_pane = Some(pane_id);
                 }
             }
         }
@@ -858,24 +875,13 @@ fn load_restored_editor(app: &mut App, pane_id: NodeId) {
     {
         return;
     }
+    if !app.editor_path_holds.contains_key(&pane_id) {
+        return;
+    }
     let Some(path) = app.restored_editor_paths.get(&pane_id).cloned() else {
         return;
     };
-    match EditorPane::load(path) {
-        Ok(mut editor) => {
-            // `EditorPane::load` only sets hard-coded defaults; without this
-            // call a restored editor's line numbers/minimap/autosave/markdown
-            // rendering would silently depend on whether `TreeSnapshot` or
-            // `PaneEditorPathResolved` arrived first, since the snapshot-arm
-            // sibling in `apply_tree_snapshot` always applies it.
-            editor.apply_defaults(&app.editor_settings);
-            app.panes
-                .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
-        }
-        Err(error) => {
-            app.status_message = Some(format!("Failed to open restored editor: {error}"));
-        }
-    }
+    app.request_editor_load(pane_id, path, None, None);
 }
 
 #[cfg(test)]
@@ -908,6 +914,7 @@ mod tests {
         apply(
             &mut app,
             ServerEvent::AgentDetectionSettingsChanged {
+                request_id: None,
                 result: Ok(accepted.clone()),
             },
         );
@@ -918,6 +925,7 @@ mod tests {
         apply(
             &mut app,
             ServerEvent::AgentDetectionSettingsChanged {
+                request_id: None,
                 result: Err(ilium_ipc::AgentDetectionSettingsError {
                     message: "poll interval rejected".to_string(),
                 }),
@@ -1815,6 +1823,7 @@ mod tests {
 
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
 
+        app.settle_filesystem_for_test();
         let Some(PaneRuntime::Board(board)) = app.panes.get(&board_id) else {
             panic!("existing Markdown storage should hydrate a board runtime");
         };
@@ -2379,6 +2388,7 @@ mod tests {
             ServerEvent::SessionRecoveryAvailable { pane_count: 2 },
         );
         apply(&mut app, ServerEvent::InitialStateSyncComplete);
+        app.settle_filesystem_for_test();
         assert!(matches!(
             app.mode,
             crate::app::Mode::ConfirmSessionRecovery { pane_count: 2 }

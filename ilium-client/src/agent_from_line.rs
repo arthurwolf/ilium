@@ -7,10 +7,9 @@
 use std::path::{Path, PathBuf};
 
 use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
-use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
-use unicode_width::UnicodeWidthStr;
 
 /// The shared provider registry drives every launch control. This local alias
 /// preserves the dialog's focused intent while ensuring it cannot drift from
@@ -210,22 +209,23 @@ pub fn dialog_layout_for_size(width: u16, height: u16) -> CreateAgentFromLineLay
     dialog_layout(Rect::new(0, 0, width, height))
 }
 
-/// Maps a selector-row click to its agent registry entry.
-pub fn agent_type_at(area: Rect, position: Position) -> Option<AgentLaunchType> {
-    if !area.contains(position) {
-        return None;
-    }
-    let mut column = usize::from(area.x) + 7;
-    let position_column = usize::from(position.x);
-    for agent_type in AgentLaunchType::ALL {
-        // Compute width without allocation: "( ) " prefix + label width.
-        let option_width = "( ) ".width() + agent_type.label().width();
-        if (column..column.saturating_add(option_width)).contains(&position_column) {
-            return Some(agent_type);
-        }
-        column = column.saturating_add(option_width + 3);
-    }
-    None
+/// Prepared provider selector used unchanged for painting and pointer hits.
+pub fn provider_control(
+    screen_area: Rect,
+    state: &CreateAgentFromLineState,
+) -> crate::value_control::ValueControl {
+    crate::value_control::ValueControl::new(
+        dialog_layout(screen_area).agent_row,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: "Agent",
+            value: state.agent_type.label(),
+            label_width: 8,
+            previous_enabled: AgentLaunchType::ALL.len() > 1,
+            next_enabled: AgentLaunchType::ALL.len() > 1,
+            open_enabled: true,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -271,6 +271,61 @@ mod tests {
             AgentLaunchType::Claude.stepped(-1),
             AgentLaunchType::Antigravity
         );
+    }
+
+    #[test]
+    fn provider_control_paints_and_hits_exact_buttons_on_responsive_rows() {
+        use crate::value_control::{ControlAction, ControlStyles, PointerButton};
+        use ratatui::{backend::TestBackend, layout::Position, Terminal};
+        let state = CreateAgentFromLineState::new(
+            EditorSourceLine {
+                pane_id: NodeId(8),
+                path: "/tmp/source.rs".into(),
+                line_number: 2,
+                text: "source".into(),
+            },
+            NodeId(9),
+        );
+        for width in [24, 80, 140] {
+            let area = Rect::new(0, 0, width, 30);
+            let control = provider_control(area, &state);
+            let geometry = control.geometry();
+            let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+            terminal
+                .draw(|frame| control.render(frame, ControlStyles::default()))
+                .unwrap();
+            for (rect, glyph) in [
+                (geometry.previous, "←"),
+                (geometry.open, "+"),
+                (geometry.next, "→"),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph
+                );
+            }
+            assert_eq!(
+                control.hit(
+                    Position::new(geometry.value.x, geometry.value.y),
+                    PointerButton::Left
+                ),
+                Some(ControlAction::NextChoice)
+            );
+            assert_eq!(
+                control.hit(
+                    Position::new(geometry.value.x, geometry.value.y),
+                    PointerButton::Right
+                ),
+                Some(ControlAction::PreviousChoice)
+            );
+            assert_eq!(
+                control.hit(
+                    Position::new(geometry.open.x, geometry.open.y),
+                    PointerButton::Left
+                ),
+                Some(ControlAction::OpenChoices)
+            );
+        }
     }
 
     #[test]

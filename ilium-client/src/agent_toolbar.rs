@@ -201,7 +201,7 @@ pub enum EffortLevel {
 }
 
 impl EffortLevel {
-    const ALL: [Self; 7] = [
+    pub const ALL: [Self; 7] = [
         Self::Auto,
         Self::Low,
         Self::Medium,
@@ -217,6 +217,14 @@ impl EffortLevel {
             .position(|level| *level == self)
             .unwrap_or(0);
         Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|level| *level == self)
+            .unwrap_or(0);
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
     /// Short in-toolbar label, kept to a handful of cells so the button row
@@ -422,7 +430,7 @@ pub fn tooltip_for(
         AgentToolbarAction::Fast => "Toggle fast mode (sends /fast)".to_string(),
         AgentToolbarAction::CycleEffort => {
             format!(
-                "Reasoning effort: {} -- click to cycle",
+                "Requested effort: {} · left/right click cycles · + opens all choices",
                 effort.short_label()
             )
         }
@@ -609,7 +617,7 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         buttons.push(Button {
             action: AgentToolbarAction::CycleEffort,
             text: format!(
-                "{}{}",
+                "{} ← {:<5} + →",
                 icons.glyph(IconTarget::AgentToolbarEffort),
                 effort.short_label()
             ),
@@ -712,6 +720,26 @@ pub fn button_rect_for(
         .map(|(_, rect, _)| rect)
 }
 
+pub(crate) fn effort_control(
+    area: Rect,
+    ctx: ToolbarContext,
+) -> Option<crate::value_control::ValueControl> {
+    let rect = button_rect_for(area, ctx, AgentToolbarAction::CycleEffort)?;
+    let icon = ctx.icons.glyph(IconTarget::AgentToolbarEffort);
+    Some(crate::value_control::ValueControl::new(
+        rect,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: icon,
+            value: ctx.effort.short_label(),
+            label_width: cell_width(icon),
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    ))
+}
+
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn action_at(
     area: Rect,
@@ -766,7 +794,21 @@ pub fn render(
         } else {
             Style::new()
         };
-        frame.render_widget(Paragraph::new(Span::styled(text.as_str(), style)), *rect);
+        if *action == AgentToolbarAction::CycleEffort {
+            if let Some(control) = effort_control(area, ctx) {
+                control.render(
+                    frame,
+                    crate::value_control::ControlStyles {
+                        label: style,
+                        value: style,
+                        button: style,
+                        ..Default::default()
+                    },
+                );
+            }
+        } else {
+            frame.render_widget(Paragraph::new(Span::styled(text.as_str(), style)), *rect);
+        }
     }
 
     let Some(hovered_action) = hovered else {
@@ -1205,5 +1247,61 @@ mod tests {
             !below_row_text.contains(tooltip.as_str()),
             "tooltip should fit beside the buttons, not fall through to below_row"
         );
+    }
+    #[test]
+    fn effort_chrome_paints_and_hits_full_native_values_with_provider_gating() {
+        use crate::value_control::{ControlAction, PointerButton};
+        use ratatui::{backend::TestBackend, Terminal};
+        let icons = IconSettings::default();
+        for width in [180, 260] {
+            for level in EffortLevel::ALL {
+                let area = Rect::new(0, 0, width, 1);
+                let context = ctx(Some(BuiltinAgentProvider::Claude), &icons, level, false);
+                let control =
+                    effort_control(area, context).expect("wide Claude toolbar retains effort");
+                let g = control.geometry();
+                let mut terminal = Terminal::new(TestBackend::new(width, 2)).unwrap();
+                terminal
+                    .draw(|frame| render(frame, area, Rect::new(0, 1, width, 1), context, None))
+                    .unwrap();
+                for (rect, glyph) in [(g.previous, "←"), (g.open, "+"), (g.next, "→")] {
+                    assert_eq!(
+                        terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                        glyph
+                    );
+                }
+                let value: String = (g.value.x..g.value.right())
+                    .map(|x| terminal.backend().buffer()[(x, g.value.y)].symbol())
+                    .collect();
+                assert_eq!(value, level.short_label());
+                assert_eq!(
+                    control.hit(Position::new(g.value.x, g.value.y), PointerButton::Left),
+                    Some(ControlAction::NextChoice)
+                );
+                assert_eq!(
+                    control.hit(Position::new(g.value.x, g.value.y), PointerButton::Right),
+                    Some(ControlAction::PreviousChoice)
+                );
+                assert_eq!(
+                    control.hit(Position::new(g.open.x, g.open.y), PointerButton::Left),
+                    Some(ControlAction::OpenChoices)
+                );
+                assert_eq!(
+                    control.hit(Position::new(g.label.x, g.label.y), PointerButton::Left),
+                    None
+                );
+            }
+        }
+        for provider in [
+            None,
+            Some(BuiltinAgentProvider::Codex),
+            Some(BuiltinAgentProvider::Antigravity),
+        ] {
+            assert!(effort_control(
+                Rect::new(0, 0, 260, 1),
+                ctx(provider, &icons, EffortLevel::Auto, false)
+            )
+            .is_none());
+        }
     }
 }

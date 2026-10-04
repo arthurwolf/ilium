@@ -67,7 +67,16 @@ impl App {
         let is_left_press = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left));
 
         if let Some(layout) = self.stats_popover_geometry() {
-            if let Some(hit) = layout.hit(position) {
+            if let Some(mut hit) = layout.hit(position) {
+                if hit == StatsHit::Body {
+                    let scale = self
+                        .stats_popover
+                        .as_ref()
+                        .and_then(|popover| popover.scale_at(layout.body, position));
+                    if let Some(scale) = scale {
+                        hit = StatsHit::Scale(scale);
+                    }
+                }
                 self.route_popover_hit(mouse.kind, hit);
                 return true;
             }
@@ -119,6 +128,10 @@ impl App {
                 StatsHit::Tab(tab) => {
                     popover.pinned = true;
                     popover.select_tab(tab);
+                }
+                StatsHit::Scale(scale) => {
+                    popover.pinned = true;
+                    popover.scale = scale;
                 }
                 // Clicking a hover preview keeps it, as a pinned window.
                 StatsHit::Body => popover.pinned = true,

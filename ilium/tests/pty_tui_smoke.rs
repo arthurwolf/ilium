@@ -640,11 +640,15 @@ async fn isolated_server_identity(xdg: &IsolatedXdgDirs, project_dir: &Path) -> 
 /// connection. The PTY client remains the UI under test; this second client
 /// exists only to submit a deterministic restructure request and inspect the
 /// same broadcast snapshot every real attached client receives.
-async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tree {
+async fn receive_tree_snapshot(
+    connection: &mut Connection,
+    context: &str,
+) -> ilium_client::connection::Received<Tree> {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             if let ServerEvent::TreeSnapshot(tree) = event {
-                return tree;
+                return ilium_client::connection::Received::with_retention(tree, _event_retention);
             }
         }
         panic!("{context}: server closed the control connection before a tree snapshot");
@@ -654,13 +658,27 @@ async fn receive_tree_snapshot(connection: &mut Connection, context: &str) -> Tr
 }
 
 /// Completes the attach stream before reading mutation broadcasts.
-async fn receive_initial_tree(connection: &mut Connection, context: &str) -> Tree {
+async fn receive_initial_tree(
+    connection: &mut Connection,
+    context: &str,
+) -> ilium_client::connection::Received<Tree> {
     let mut tree = None;
     tokio::time::timeout(WAIT_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
-                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => tree = Some(snapshot),
-                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => tree = Some(snapshot),
+                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        snapshot,
+                        _event_retention,
+                    ))
+                }
+                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        snapshot,
+                        _event_retention,
+                    ))
+                }
                 ServerEvent::InitialStateSyncComplete => {
                     return tree.expect("initial state includes a tree");
                 }
@@ -1026,6 +1044,20 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
         ui.progress_monitor_enabled = true;
         ui.completed_progress_hide_after_seconds = 3;
     });
+    // Keep this isolated server off the user's HTTP listener.
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let http_port = listener.local_addr().unwrap().port();
+    assert_ne!(http_port, 8872);
+    drop(listener);
+    let config_path = xdg.ilium_config_dir.join("config.toml");
+    let existing = std::fs::read_to_string(&config_path).unwrap();
+    assert!(!existing.contains("[api]"));
+    std::fs::write(
+        &config_path,
+        format!("{existing}\n[api]\nport = {http_port}\n"),
+    )
+    .unwrap();
+    eprintln!("isolated expiry HTTP port: {http_port}");
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -1089,6 +1121,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
         &ilium_test_fixtures::FixtureBehavior::PrintFile { path: report_path },
     )
     .path;
+    let registration_started_at = std::time::Instant::now();
     control
         .requests
         .send(ClientRequest::SetPaneProgressMonitor {
@@ -1106,28 +1139,57 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
     let (accepted, footer_rendered) = tokio::join!(
         tokio::time::timeout(WAIT_TIMEOUT, async {
             while let Some(event) = control.events.recv().await {
+                let (event, _event_retention) = event.into_parts();
                 if let ServerEvent::ProgressMonitorSetCompleted {
                     request_id: 9871,
                     result,
                     ..
                 } = event
                 {
-                    return result.expect("monitor accepted");
+                    let accepted_at_unix_millis = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    return (
+                        result.expect("monitor accepted"),
+                        accepted_at_unix_millis,
+                        registration_started_at.elapsed(),
+                    );
                 }
             }
             panic!("server closed before acceptance");
         }),
         wait_for_transient_frame(
             || tui
-                .screen_text()
-                .contains("unique completed footer evidence"),
+                .try_with_screen(|screen| {
+                    screen
+                        .contents()
+                        .contains("unique completed footer evidence")
+                })
+                .unwrap_or(false),
             WAIT_TIMEOUT,
         )
     );
-    let accepted = accepted.unwrap();
+    let (accepted, accepted_at_unix_millis, acceptance_delay) = accepted.unwrap();
+    let report_age_at_acceptance =
+        accepted_at_unix_millis.saturating_sub(accepted.progress.last_observed_unix_millis);
+    if !footer_rendered {
+        let saved_ui = ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read retained expiry configuration")
+            .ui;
+        eprintln!(
+            "appearance diagnostic: saved_hide_seconds={}, child_exit={:?}, current_screen={:?}",
+            saved_ui.completed_progress_hide_after_seconds,
+            tui.child_exit(),
+            tui.try_with_screen(|screen| screen.contents()),
+        );
+        for (path, contents) in walk_log_files(&xdg.debug_log_dir) {
+            eprintln!("isolated log {path:?}: {contents}");
+        }
+    }
     assert!(
         footer_rendered,
-        "footer never rendered: {}",
+        "footer never rendered; registration took {acceptance_delay:?}, report age at acceptance {report_age_at_acceptance}ms, hide deadline 3000ms: {}",
         tui.screen_text()
     );
     let counter = |screen: String| {
@@ -1142,14 +1204,36 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
             .unwrap()
     };
     let busy_before = counter(tui.screen_text());
+    let footer_expired = wait_until(
+        // A retained pre-resize frame is presentation fallback, not proof
+        // that the live client's footer has actually disappeared.
+        || {
+            tui.try_with_screen(|screen| {
+                let text = screen.contents();
+                text.contains("busy-expiry-output-")
+                    && !text.contains("unique completed footer evidence")
+            })
+            .unwrap_or(false)
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    if !footer_expired {
+        let saved_ui = ilium_client::config::load(&xdg.ilium_config_dir)
+            .expect("read retained expiry configuration")
+            .ui;
+        eprintln!(
+            "expiry diagnostic: registration={acceptance_delay:?}, report_age_at_acceptance={report_age_at_acceptance}ms, saved_hide_seconds={}, busy_before={busy_before}, child_exit={:?}, current_screen={:?}",
+            saved_ui.completed_progress_hide_after_seconds,
+            tui.child_exit(),
+            tui.try_with_screen(|screen| screen.contents()),
+        );
+        for (path, contents) in walk_log_files(&xdg.debug_log_dir) {
+            eprintln!("isolated log {path:?}: {contents}");
+        }
+    }
     assert!(
-        wait_until(
-            || !tui
-                .screen_text()
-                .contains("unique completed footer evidence"),
-            WAIT_TIMEOUT
-        )
-        .await,
+        footer_expired,
         "footer did not expire during output: {}",
         tui.screen_text()
     );
@@ -1168,6 +1252,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
         .unwrap();
     let retained = tokio::time::timeout(WAIT_TIMEOUT, async {
         while let Some(event) = control.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             if let ServerEvent::ProgressMonitorStatusReported {
                 request_id: 9872,
                 result,
@@ -2695,7 +2780,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         .expect("split view should expose its children")
         .to_vec();
 
-    // Model output may rebuild ordinary groups and retitle panes, but it can
+    // Model output may rebuild ordinary groups and propose titles, but it can
     // represent the user-owned split only by its existing id and exact child
     // order. Submitting this over IPC exercises the production server path.
     let retitled_split_children = original_split_children
@@ -2725,6 +2810,7 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     control_connection
         .requests
         .send(ClientRequest::ApplyProjectRestructurePlan {
+            title_observations: Vec::new(),
             project_id,
             plan: restructure_plan,
             inference_activity_revisions,
@@ -2763,30 +2849,32 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
         original_split_children,
         "split membership and order should survive"
     );
-    assert_eq!(
-        tree_after_restructure
-            .get(pane_ids[0])
-            .expect("first pane should survive")
-            .name,
-        "AI pane 1"
-    );
-    assert_eq!(
-        tree_after_restructure
-            .get(pane_ids[1])
-            .expect("second pane should survive")
-            .name,
-        "AI pane 2"
-    );
+    // An unobserved proposal may regroup panes, but cannot authorize titles.
+    // Preserve the complete presentation bundle, not only the visible label.
+    for pane_id in &pane_ids {
+        let before = tree_before_restructure.get(*pane_id).unwrap();
+        let after = tree_after_restructure.get(*pane_id).unwrap();
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.short_name, before.short_name);
+        assert_eq!(after.inferred_icon, before.inferred_icon);
+        assert_eq!(after.is_name_fixed, before.is_name_fixed);
+        assert_eq!(after.presentation_revision, before.presentation_revision);
+        let title_source = |node: &ilium_core::Node| match node.kind {
+            ilium_core::NodeKind::Pane { title_source, .. } => title_source,
+            _ => panic!("expected split child pane"),
+        };
+        assert_eq!(title_source(after), title_source(before));
+    }
 
-    // Seeing both old terminal streams under the new titles proves the PTY
+    // Seeing both old terminal streams under the preserved titles proves the PTY
     // client consumed the snapshot without losing the displayed split. A new
     // marker then proves pane focus/input routing also survived rather than
     // being kicked to an empty right panel.
     let preserved_split_rendered = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("AI pane 1")
-                && screen.contains("AI pane 2")
+            screen.contains(&tree_before_restructure.get(pane_ids[0]).unwrap().name)
+                && screen.contains(&tree_before_restructure.get(pane_ids[1]).unwrap().name)
                 && screen.contains("left-route")
                 && screen.contains("right-route")
         },
@@ -6239,4 +6327,134 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         tui.kill().expect("force-kill isolated worktree TUI");
     }
     assert!(exited, "worktree TUI did not exit after cleanup");
+}
+
+/// A terminal that stays silent, or answers after an early keystroke, must not
+/// leave a second native stdin reader behind. On Unix, the first leader keys
+/// arrive while the keyboard query owns input, before the image query starts.
+/// The answering case also proves the conditional keyboard Push/Pop custody.
+#[tokio::test]
+async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_terminals() {
+    for terminal_answers in [false, true] {
+        let temp_root = tempfile::tempdir().expect("create isolated image-probe root");
+        let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
+        seed_keyboard_config(&xdg);
+        let project_dir = temp_root.path().join("project");
+        std::fs::create_dir_all(&project_dir).expect("create project dir");
+        seed_project_config(&xdg, &project_dir);
+        let mut cleanup_guard = KillSessionOnDrop {
+            xdg: &xdg,
+            cwd: project_dir.clone(),
+            session_name: SESSION_NAME,
+            already_cleaned_up: false,
+        };
+        let pane = run_one_shot(&xdg, &project_dir, &new_idle_pane_arguments()).await;
+        assert!(pane.status.success(), "create isolated pane: {pane:?}");
+
+        let attach = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
+            .arg("--restart-server")
+            .arg("--cwd")
+            .arg(project_dir.to_string_lossy().to_string())
+            .env("TERM", "xterm-256color");
+        let attach = xdg
+            .as_pairs()
+            .into_iter()
+            .fold(attach, |command, (key, value)| {
+                command.env(key, value.to_string_lossy().to_string())
+            });
+        let mut tui = PtySession::spawn(attach).expect("attach actual client under PTY");
+        if cfg!(unix) {
+            assert!(
+                wait_until(
+                    || tui
+                        .output_replay()
+                        .bytes
+                        .windows(b"\x1b[?u\x1b[c".len())
+                        .any(|bytes| bytes == b"\x1b[?u\x1b[c"),
+                    WAIT_TIMEOUT,
+                )
+                .await,
+                "the admitted owner did not issue the original keyboard query"
+            );
+            tui.write(b"\x02?")
+                .expect("send first leader and help key during keyboard query");
+            if terminal_answers {
+                tui.write(b"\x1b[?1u\x1b[?64;4c")
+                    .expect("answer keyboard flags and primary device attributes");
+            }
+        }
+        assert!(
+            wait_until(
+                || tui
+                    .output_replay()
+                    .bytes
+                    .windows(b"\x1b[5n".len())
+                    .any(|bytes| bytes == b"\x1b[5n"),
+                WAIT_TIMEOUT,
+            )
+            .await,
+            "the admitted input owner did not issue the expected terminal query"
+        );
+
+        // Windows has no keyboard-support query; its first keys arrive during
+        // the same owned image query. Unix already queued them above.
+        if !cfg!(unix) {
+            tui.write(b"\x02?")
+                .expect("send first actual leader and help key");
+        }
+        if terminal_answers {
+            tui.write(b"\x1b_Gi=31;OK\x1b\\\x1b[?64;4c\x1b[6;7;14t\x1b[0n")
+                .expect("send Kitty, Sixel, font and status replies");
+        }
+        assert!(
+            wait_until(
+                || tui.screen_text().contains("keyboard reference")
+                    && tui.screen_text().contains("Ctrl+B ?"),
+                WAIT_TIMEOUT,
+            )
+            .await,
+            "first keys vanished with terminal_answers={terminal_answers}; screen={:?}",
+            tui.screen_text()
+        );
+        if cfg!(unix) {
+            assert_eq!(
+                tui.output_replay()
+                    .bytes
+                    .windows(b"\x1b[>1u".len())
+                    .any(|bytes| bytes == b"\x1b[>1u"),
+                terminal_answers,
+                "keyboard Push must occur only for an actual supported response"
+            );
+        }
+
+        let kill = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
+        assert!(kill.status.success(), "graceful isolated cleanup: {kill:?}");
+        cleanup_guard.already_cleaned_up = true;
+        let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT * 4).await;
+        if !exited {
+            tui.kill().expect("clean up this test's isolated PTY child");
+        }
+        assert!(exited, "client did not retire after graceful session stop");
+        assert!(
+            matches!(
+                tui.child_exit(),
+                Some(ilium_pty::PtyChildExit {
+                    cause: ilium_pty::PtyExitCause::ExitCode(0),
+                    ..
+                })
+            ),
+            "client returned a shutdown or input-retirement error: {:?}",
+            tui.child_exit()
+        );
+        if cfg!(unix) {
+            assert_eq!(
+                tui.output_replay()
+                    .bytes
+                    .windows(b"\x1b[<1u".len())
+                    .any(|bytes| bytes == b"\x1b[<1u"),
+                terminal_answers,
+                "terminal guard must Pop exactly when the admitted owner pushed"
+            );
+        }
+    }
 }

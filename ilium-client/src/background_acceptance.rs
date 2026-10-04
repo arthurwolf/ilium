@@ -5,6 +5,18 @@ use crate::background_animation::{AnimationKind, AnimationSettings};
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 use std::time::{Duration, Instant};
 
+fn draw_ready(terminal: &mut Terminal<TestBackend>, app: &mut App) {
+    let elapsed = app.started_at.elapsed();
+    app.animation_frame.settle_for_test();
+    terminal
+        .draw(|frame| crate::ui::draw_at(frame, app, elapsed))
+        .unwrap();
+    app.animation_frame.settle_for_test();
+    terminal
+        .draw(|frame| crate::ui::draw_at(frame, app, elapsed))
+        .unwrap();
+}
+
 #[test]
 fn ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_background() {
     use crate::app::{PaneRuntime, RightPanelTarget};
@@ -28,9 +40,7 @@ fn ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_backgr
     app.animation_settings.kind = AnimationKind::TwoRipples;
     app.animation_settings.density_percent = 100;
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-    terminal
-        .draw(|frame| crate::ui::draw(frame, &mut app))
-        .unwrap();
+    draw_ready(&mut terminal, &mut app);
     let buffer = terminal.backend().buffer();
     assert!(
         buffer.content().iter().any(|cell| cell
@@ -117,9 +127,7 @@ fn default_preview_dots_are_discrete_neutral_grey() {
         ..Default::default()
     });
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-    terminal
-        .draw(|frame| crate::ui::draw(frame, &mut app))
-        .unwrap();
+    draw_ready(&mut terminal, &mut app);
     let mut count = 0;
     for cell in terminal.backend().buffer().content() {
         if cell
@@ -154,6 +162,7 @@ fn colour_controls_survive_scene_switch_and_project_reload() {
         .animation;
     app.settings_adjust_animation_row(5, 1);
     app.settings_adjust_animation_row(1, 1);
+    app.settle_filesystem_for_test();
     let saved = crate::project_config::load(project.path())
         .unwrap()
         .animation;
@@ -188,6 +197,7 @@ fn colour_slider_keyboard_changes_saved_lightness_without_changing_scene() {
         &mut app,
         Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
     );
+    app.settle_filesystem_for_test();
     let saved = crate::project_config::load(project.path())
         .unwrap()
         .animation;
@@ -225,6 +235,7 @@ fn colour_slider_adjustment_failure_keeps_effective_ink_and_scene() {
     let prior = app.animation_settings.clone();
     let lightness_row = lightness_row(&app);
     app.settings_adjust_animation_row(lightness_row, 1);
+    app.settle_filesystem_for_test();
     assert_eq!(app.animation_settings, prior);
     assert!(app
         .status_message

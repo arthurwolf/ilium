@@ -1,13 +1,17 @@
 //! CPAL audio ownership and deterministic streaming sample conversion.
 
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use ilium_execution::{QuotaGroup, RejectReason, StorageAdmission, WorkerAdmission};
+use ilium_platform::owned_worker::{
+    spawn_owned, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
+};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 use tokio::sync::mpsc;
 
+use crate::audio_preparation::{CapturePreparation, OutputPreparation};
 use crate::{VoiceError, VoiceInputMode};
 
 pub(crate) const REALTIME_SAMPLE_RATE: u32 = 24_000;
@@ -16,41 +20,605 @@ pub(crate) const REALTIME_SAMPLE_RATE: u32 = 24_000;
 /// pipeline on a machine with no microphone or speaker (CI, containers).
 const AUDIO_OVERRIDE_ENV: &str = "ILIUM_VOICE_AUDIO";
 const CAPTURE_CHANNEL_CAPACITY: usize = 32;
-const MAX_BUFFERED_PLAYBACK_SECONDS: usize = 30;
+const MAX_CAPTURE_TAIL_FRAMES: usize = 2 * CAPTURE_CHANNEL_CAPACITY + 1;
+pub(super) const MAX_BUFFERED_PLAYBACK_SECONDS: usize = 30;
+pub(super) const MAX_CAPTURE_DEVICE_SAMPLES: usize = 262_144;
+const MAX_CAPTURE_PCM_SAMPLES: usize = 32_768;
+pub(crate) const MAX_PROVIDER_PCM_BYTES: usize = 256 * 1024;
+const MAX_DEVICE_SAMPLE_RATE: u32 = 384_000;
+const MAX_DEVICE_CHANNELS: u16 = 32;
+
+const DEVICE_OWNER_BYTES: usize = 2 * 1024 * 1024;
+const NATIVE_AUDIO_BYTES: usize = 64 * 1024 * 1024;
+const HEADLESS_AUDIO_BYTES: usize = 128 * 1024;
+
+// Callback cells are preallocated on the admitted device owner. Safe atomics
+// avoid a callback lock and ensure a reset/reuse race cannot create a Rust data
+// race. These are audio-specific SPSC channels, not a second execution pool.
+const RAW_SAMPLE_CAPACITY: usize = 1024 * 1024;
+const PLAYBACK_SAMPLE_CAPACITY: usize = 6 * 1024 * 1024;
+const CALLBACK_CLOSED: usize = 1usize << (usize::BITS - 1);
+
+#[derive(Default)]
+pub(super) struct CallbackGate {
+    state: AtomicUsize,
+    changed: tokio::sync::Notify,
+}
+struct ActiveCallback<'a>(&'a CallbackGate);
+#[derive(Debug, PartialEq, Eq)]
+enum CallbackRefusal {
+    Closed,
+    Contended,
+}
+impl CallbackGate {
+    fn new(open: bool) -> Self {
+        Self {
+            state: AtomicUsize::new(if open { 0 } else { CALLBACK_CLOSED }),
+            changed: tokio::sync::Notify::new(),
+        }
+    }
+    fn enter(&self) -> Result<ActiveCallback<'_>, CallbackRefusal> {
+        let mut state = self.state.load(Ordering::Acquire);
+        // Native streams have one FnMut callback owner. Bound control races;
+        // refusal is before sample admission, never a wait in the callback.
+        for _ in 0..8 {
+            if state & CALLBACK_CLOSED != 0 {
+                return Err(CallbackRefusal::Closed);
+            }
+            match self
+                .state
+                .compare_exchange(state, state + 1, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return Ok(ActiveCallback(self)),
+                Err(actual) => state = actual,
+            }
+        }
+        Err(CallbackRefusal::Contended)
+    }
+    pub(super) async fn close(&self) {
+        self.state.fetch_or(CALLBACK_CLOSED, Ordering::AcqRel);
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.state.load(Ordering::Acquire) & !CALLBACK_CLOSED == 0 {
+                return;
+            }
+            changed.await;
+        }
+    }
+    fn open(&self) {
+        self.state.fetch_and(!CALLBACK_CLOSED, Ordering::Release);
+    }
+}
+impl Drop for ActiveCallback<'_> {
+    fn drop(&mut self) {
+        let previous = self.0.state.fetch_sub(1, Ordering::AcqRel);
+        if previous == CALLBACK_CLOSED + 1 {
+            self.0.changed.notify_one();
+        }
+    }
+}
+struct RawHeader {
+    start: AtomicU64,
+    length: AtomicUsize,
+}
+pub(super) struct RawCapture {
+    cells: Box<[AtomicU32]>,
+    headers: Box<[RawHeader]>,
+    written: AtomicU64,
+    read: AtomicU64,
+    samples_written: AtomicU64,
+    samples_read: AtomicU64,
+    pub(super) processed: AtomicU64,
+    pub(super) changed: tokio::sync::Notify,
+    pub(super) wake: Arc<OnceLock<std::thread::Thread>>,
+}
+impl RawCapture {
+    pub(super) fn new() -> Self {
+        Self {
+            cells: (0..RAW_SAMPLE_CAPACITY)
+                .map(|_| AtomicU32::new(0))
+                .collect(),
+            headers: (0..CAPTURE_CHANNEL_CAPACITY)
+                .map(|_| RawHeader {
+                    start: AtomicU64::new(0),
+                    length: AtomicUsize::new(0),
+                })
+                .collect(),
+            written: AtomicU64::new(0),
+            read: AtomicU64::new(0),
+            samples_written: AtomicU64::new(0),
+            samples_read: AtomicU64::new(0),
+            processed: AtomicU64::new(0),
+            changed: tokio::sync::Notify::new(),
+            wake: Arc::new(OnceLock::new()),
+        }
+    }
+    pub(super) fn push<T>(&self, data: &[T], channels: usize) -> bool
+    where
+        T: SizedSample,
+        f32: FromSample<T>,
+    {
+        let written = self.written.load(Ordering::Relaxed);
+        let sample_start = self.samples_written.load(Ordering::Relaxed);
+        let count = data.len().div_ceil(channels);
+        if written == u64::MAX
+            || sample_start.checked_add(count as u64).is_none()
+            || written - self.read.load(Ordering::Acquire) >= CAPTURE_CHANNEL_CAPACITY as u64
+            || sample_start - self.samples_read.load(Ordering::Acquire) + count as u64
+                > RAW_SAMPLE_CAPACITY as u64
+        {
+            return false;
+        }
+        for (index, frame) in data.chunks(channels).enumerate() {
+            let sample = frame
+                .iter()
+                .map(|sample| sample.to_sample::<f32>())
+                .sum::<f32>()
+                / channels as f32;
+            self.cells[(sample_start as usize + index) % RAW_SAMPLE_CAPACITY]
+                .store(sample.to_bits(), Ordering::Relaxed);
+        }
+        let header = &self.headers[written as usize % CAPTURE_CHANNEL_CAPACITY];
+        header.start.store(sample_start, Ordering::Relaxed);
+        header.length.store(count, Ordering::Relaxed);
+        self.samples_written
+            .store(sample_start + count as u64, Ordering::Relaxed);
+        self.written.store(written + 1, Ordering::Release);
+        if let Some(thread) = self.wake.get() {
+            thread.unpark();
+        }
+        true
+    }
+    pub(super) fn pop_into(&self, target: &mut Vec<f32>) -> Option<u64> {
+        let read = self.read.load(Ordering::Relaxed);
+        if read == self.written.load(Ordering::Acquire) {
+            return None;
+        }
+        let header = &self.headers[read as usize % CAPTURE_CHANNEL_CAPACITY];
+        let start = header.start.load(Ordering::Relaxed);
+        let count = header.length.load(Ordering::Relaxed);
+        target.clear();
+        for index in 0..count {
+            target.push(f32::from_bits(
+                self.cells[(start as usize + index) % RAW_SAMPLE_CAPACITY].load(Ordering::Relaxed),
+            ));
+        }
+        self.samples_read
+            .store(start + count as u64, Ordering::Release);
+        self.read.store(read + 1, Ordering::Release);
+        Some(read + 1)
+    }
+    fn admitted_sequence(&self) -> u64 {
+        self.written.load(Ordering::Acquire)
+    }
+}
+
+pub(super) struct PlaybackRing {
+    cells: Box<[AtomicU64]>,
+    write: AtomicU64,
+    read: AtomicU64,
+    discard_before: AtomicU64,
+    pub(super) generation: Arc<AtomicU64>,
+    pub(super) played: AtomicU64,
+    pub(super) gate: CallbackGate,
+    pub(super) wake: Arc<OnceLock<std::thread::Thread>>,
+}
+impl PlaybackRing {
+    pub(super) fn new(
+        sample_rate: u32,
+        generation: Arc<AtomicU64>,
+        wake: Arc<OnceLock<std::thread::Thread>>,
+    ) -> Self {
+        let capacity = (sample_rate as usize * MAX_BUFFERED_PLAYBACK_SECONDS)
+            .clamp(1, PLAYBACK_SAMPLE_CAPACITY);
+        Self {
+            cells: (0..capacity).map(|_| AtomicU64::new(0)).collect(),
+            write: AtomicU64::new(0),
+            read: AtomicU64::new(0),
+            discard_before: AtomicU64::new(0),
+            generation,
+            played: AtomicU64::new(0),
+            gate: CallbackGate::new(true),
+            wake,
+        }
+    }
+    pub(super) fn push(&self, generation: u64, values: &[f32]) -> usize {
+        let Ok(epoch) = u32::try_from(generation) else {
+            return 0;
+        };
+        if self.generation.load(Ordering::Acquire) != generation {
+            return 0;
+        }
+        let write = self.write.load(Ordering::Relaxed);
+        let read = self
+            .read
+            .load(Ordering::Acquire)
+            .max(self.discard_before.load(Ordering::Acquire));
+        let free = self.cells.len().saturating_sub((write - read) as usize);
+        let count = values.len().min(free).min(512);
+        for (index, value) in values[..count].iter().enumerate() {
+            self.cells[(write as usize + index) % self.cells.len()].store(
+                (u64::from(epoch) << 32) | u64::from(value.to_bits()),
+                Ordering::Relaxed,
+            );
+        }
+        if self.generation.load(Ordering::Acquire) != generation {
+            return 0;
+        }
+        self.write.store(write + count as u64, Ordering::Release);
+        count
+    }
+    fn pop(&self, generation: u64) -> Option<f32> {
+        for _ in 0..513 {
+            let read = self
+                .read
+                .load(Ordering::Relaxed)
+                .max(self.discard_before.load(Ordering::Acquire));
+            if read == self.write.load(Ordering::Acquire) {
+                self.read.store(read, Ordering::Release);
+                return None;
+            }
+            let value = self.cells[read as usize % self.cells.len()].load(Ordering::Relaxed);
+            self.read.store(read + 1, Ordering::Release);
+            if value >> 32 == generation {
+                return Some(f32::from_bits(value as u32));
+            }
+        }
+        None
+    }
+    pub(super) async fn invalidate(&self) -> Result<u64, VoiceError> {
+        self.gate.close().await;
+        let generation = self.generation.load(Ordering::Acquire);
+        if generation >= u64::from(u32::MAX) {
+            return Err(VoiceError::AudioPreparation(
+                "audio response generation limit reached".into(),
+            ));
+        }
+        self.generation.store(generation + 1, Ordering::Release);
+        self.discard_before
+            .store(self.write.load(Ordering::Acquire), Ordering::Release);
+        let played = self.played.swap(0, Ordering::AcqRel);
+        self.gate.open();
+        if let Some(thread) = self.wake.get() {
+            thread.unpark();
+        }
+        Ok(played)
+    }
+}
+
+/// Actual audio OS-owner receipts, separate from provider/actor completion.
+/// `join_until` is blocking: use a dedicated lifecycle observer, never the UI
+/// or a Tokio coordination thread. A timeout keeps every unjoined receipt.
+#[derive(Clone)]
+pub struct AudioCustody {
+    inner: Arc<AudioCustodyInner>,
+}
+struct AudioCustodyInner {
+    tickets: Mutex<Vec<WorkerTicket>>,
+    // Actor/channel/receipt metadata survives its last logical consumer.
+    startup_allocation: Mutex<Option<Arc<dyn crate::VoiceTextAllocation>>>,
+    _metadata: StorageAdmission,
+}
+impl AudioCustody {
+    #[cfg(test)]
+    pub(crate) fn new(quota: &QuotaGroup) -> Result<Self, VoiceError> {
+        Self::try_new(quota).map_err(|reason| {
+            VoiceError::AudioPreparation(format!("audio actor metadata admission: {reason:?}"))
+        })
+    }
+    pub(crate) fn try_new(quota: &QuotaGroup) -> Result<Self, RejectReason> {
+        // Reserve metadata before constructing the actor/owner receipt storage.
+        let metadata = quota.reserve_external_storage(128 * 1024)?;
+        Ok(Self {
+            inner: Arc::new(AudioCustodyInner {
+                tickets: Mutex::new(Vec::with_capacity(2)),
+                _metadata: metadata,
+                startup_allocation: Mutex::new(None),
+            }),
+        })
+    }
+    pub(crate) fn retain_startup(&self, allocation: Arc<dyn crate::VoiceTextAllocation>) {
+        // Set exactly once, before spawning the actor or either native owner.
+        *lock_recovering_poison(&self.inner.startup_allocation) = Some(allocation);
+    }
+    pub(crate) fn startup_allocation(&self) -> Option<Arc<dyn crate::VoiceTextAllocation>> {
+        lock_recovering_poison(&self.inner.startup_allocation).clone()
+    }
+    pub(crate) fn register(&self, ticket: WorkerTicket) -> Result<(), VoiceError> {
+        let mut tickets = lock_recovering_poison(&self.inner.tickets);
+        if tickets.len() >= 2 {
+            return Err(VoiceError::AudioPreparation(
+                "audio owner receipt capacity exceeded".into(),
+            ));
+        }
+        tickets.push(ticket);
+        Ok(())
+    }
+    pub fn pending_owners(&self) -> usize {
+        lock_recovering_poison(&self.inner.tickets)
+            .iter()
+            .filter(|ticket| ticket.exit().is_none())
+            .count()
+    }
+    pub fn join_until(&self, deadline: std::time::Instant) -> std::io::Result<()> {
+        let mut panicked = false;
+        loop {
+            let tickets = lock_recovering_poison(&self.inner.tickets).clone();
+            if tickets.is_empty() {
+                break;
+            }
+            let mut joined = Vec::with_capacity(2);
+            let mut expired = None;
+            for ticket in &tickets {
+                match ticket.join_until(deadline) {
+                    Ok(exit) => {
+                        panicked |= exit == WorkerExit::Panicked;
+                        joined.push(ticket.id());
+                    }
+                    Err(error) => {
+                        expired = Some(error.worker_id);
+                        break;
+                    }
+                }
+            }
+            lock_recovering_poison(&self.inner.tickets)
+                .retain(|ticket| !joined.contains(&ticket.id()));
+            // The device builder can register DSP while shutdown is pending.
+            // Re-read after actual device join rather than treating an earlier
+            // one-ticket snapshot as a complete retirement receipt.
+            if let Some(worker_id) = expired {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("audio OS owner {worker_id} has not joined"),
+                ));
+            }
+        }
+        if panicked {
+            return Err(std::io::Error::other(
+                "audio OS owner panicked during retirement",
+            ));
+        }
+        Ok(())
+    }
+}
+
+enum NativeDebit {
+    Worker(WorkerAdmission),
+    Storage(StorageAdmission),
+}
+/// Source-qualified native declaration. Opaque backend credit is never
+/// released on an unproved join: after native creation is attempted it stays
+/// charged until process exit. No callback or provider change is hidden here.
+pub(super) struct NativeAudioAdmission {
+    debit: Option<NativeDebit>,
+    retain_until_process_exit: bool,
+    attempted: AtomicBool,
+}
+impl NativeAudioAdmission {
+    fn reserve(quota: &QuotaGroup) -> Result<Arc<Self>, VoiceError> {
+        let policy = ilium_platform::audio_backend::native_stream_custody();
+        let debit = if policy.declared_threads == 0 {
+            NativeDebit::Storage(quota.reserve_external_storage(NATIVE_AUDIO_BYTES).map_err(
+                |reason| {
+                    VoiceError::AudioPreparation(format!(
+                        "opaque native audio storage admission: {reason:?}"
+                    ))
+                },
+            )?)
+        } else {
+            NativeDebit::Worker(
+                quota
+                    .reserve_external_worker(policy.declared_threads, NATIVE_AUDIO_BYTES)
+                    .map_err(|reason| {
+                        VoiceError::AudioPreparation(format!("native audio admission: {reason:?}"))
+                    })?,
+            )
+        };
+        if !policy.stream_drop_joins {
+            tracing::warn!(backend=policy.backend, declared_threads=policy.declared_threads,
+                "native audio join/TLS custody is opaque; attempted native ownership remains process-charged");
+        }
+        Ok(Arc::new(Self {
+            debit: Some(debit),
+            retain_until_process_exit: !policy.stream_drop_joins,
+            attempted: AtomicBool::new(false),
+        }))
+    }
+}
+impl Drop for NativeAudioAdmission {
+    fn drop(&mut self) {
+        if self.retain_until_process_exit && self.attempted.load(Ordering::Acquire) {
+            // CPAL exposes no native join receipt on this backend. Deliberately
+            // retain the bounded declaration; releasing it would fabricate
+            // exit proof. Future starts see truthful shared resource pressure.
+            if let Some(debit) = self.debit.take() {
+                match debit {
+                    NativeDebit::Worker(lease) => std::mem::forget(lease),
+                    NativeDebit::Storage(lease) => std::mem::forget(lease),
+                }
+            }
+        }
+    }
+}
+
+async fn start_device_owner<R: 'static, T: Send + 'static>(
+    quota: &QuotaGroup,
+    custody: &AudioCustody,
+    native: Arc<NativeAudioAdmission>,
+    create: impl FnOnce() -> Result<(R, T), VoiceError> + Send + 'static,
+) -> Result<(OwnedWorker, T), VoiceError> {
+    let owner_admission = Arc::new(
+        quota
+            .reserve_external_worker(1, DEVICE_OWNER_BYTES)
+            .map_err(|reason| {
+                VoiceError::AudioPreparation(format!("audio device owner admission: {reason:?}"))
+            })?,
+    );
+    let startup_allocation = custody.startup_allocation();
+    let thread = Arc::new(OnceLock::<std::thread::Thread>::new());
+    let wake_thread = thread.clone();
+    let (ready, receiver) = tokio::sync::oneshot::channel();
+    let owner = spawn_owned(
+        "ilium-audio-devices",
+        WorkerKind::Cooperative,
+        StopToken::default(),
+        move || {
+            // Wake is nonblocking; these leases outlive actual stream destruction
+            // AND the platform supervisor's OS join/TLS observation.
+            let _owner_admission = &owner_admission;
+            let _native = &native;
+            let _startup = &startup_allocation;
+            if let Some(thread) = wake_thread.get() {
+                thread.unpark();
+            }
+        },
+        move |stop| {
+            let _ = thread.set(std::thread::current());
+            if stop.is_stopped() {
+                return;
+            }
+            match create() {
+                Ok((resource, value)) => {
+                    let delivered = ready.send(Ok(value)).is_ok();
+                    while delivered && !stop.is_stopped() {
+                        std::thread::park();
+                    }
+                    // R need not be Send: native streams stay on their creator OS
+                    // owner, including blocking Stream::drop and its native joins.
+                    drop(resource);
+                }
+                Err(error) => {
+                    let _ = ready.send(Err(error));
+                }
+            }
+        },
+    )
+    .map_err(|error| VoiceError::AudioPreparation(format!("audio device owner spawn: {error}")))?;
+    custody.register(owner.ticket())?;
+    let value = receiver.await.map_err(|_| {
+        VoiceError::AudioPreparation(
+            "audio device initialization owner ended without a result".into(),
+        )
+    })??;
+    Ok((owner, value))
+}
 
 /// One mono, signed 16-bit, 24 kHz frame ready for the Realtime API.
-#[derive(Debug)]
 pub(crate) struct CapturedAudio {
     pub pcm16_le: Vec<u8>,
+    pub(super) _allocation: Option<Arc<NativeAudioAdmission>>,
+}
+impl std::fmt::Debug for CapturedAudio {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CapturedAudio")
+            .field("pcm_bytes", &self.pcm16_le.len())
+            .finish()
+    }
+}
+
+#[derive(Default)]
+struct CaptureHealth {
+    oversized: AtomicU64,
+    consumer_stalled: AtomicU64,
+    device_failed: AtomicU64,
+    changed: tokio::sync::Notify,
+}
+
+impl CaptureHealth {
+    fn failure(&self) -> Option<VoiceError> {
+        if self.oversized.load(Ordering::Acquire) != 0
+            || self.consumer_stalled.load(Ordering::Acquire) != 0
+        {
+            Some(VoiceError::AudioPreparation(
+                "native capture overrun; utterance is incomplete".into(),
+            ))
+        } else if self.device_failed.load(Ordering::Acquire) != 0 {
+            Some(VoiceError::AudioPreparation(
+                "native audio stream reported a failure".into(),
+            ))
+        } else {
+            None
+        }
+    }
+    fn report_drops(&self) {
+        let oversized = self.oversized.swap(0, Ordering::Relaxed);
+        let consumer_stalled = self.consumer_stalled.swap(0, Ordering::Relaxed);
+        if oversized != 0 || consumer_stalled != 0 {
+            tracing::warn!(
+                oversized,
+                consumer_stalled,
+                "voice capture frames dropped by realtime admission"
+            );
+        }
+    }
 }
 
 /// Owns both device streams. Dropping this object stops capture and playback.
 pub(crate) struct AudioEngine {
     /// `None` only for the headless test seam (see `AUDIO_OVERRIDE_ENV`).
-    _streams: Option<(cpal::Stream, cpal::Stream)>,
+    _device_owner: Option<OwnedWorker>,
     /// Keeps a headless engine's capture channel open: a dropped sender would
     /// make `next_capture` report the session as ended instead of idle.
     _headless_capture_sender: Option<mpsc::Sender<CapturedAudio>>,
     capture_receiver: mpsc::Receiver<CapturedAudio>,
-    capture_enabled: Arc<AtomicBool>,
-    playback_samples: Arc<Mutex<VecDeque<f32>>>,
-    played_output_frames: Arc<AtomicU64>,
+    capture_gate: Arc<CallbackGate>,
+    raw_capture: Option<Arc<RawCapture>>,
+    capture_health: Arc<CaptureHealth>,
+    playback_samples: Arc<PlaybackRing>,
     output_sample_rate: u32,
-    output_sample_aligner: Pcm16SampleAligner,
-    output_resampler: StreamingLinearResampler,
-    output_volume: f32,
+    output_preparation: Option<OutputPreparation>,
+    output_generation: Arc<AtomicU64>,
+    // Shared playback/capture allocations can outlive either OS owner.
+    _native_admission: Option<Arc<NativeAudioAdmission>>,
+    _headless_admission: Option<StorageAdmission>,
 }
 
 impl AudioEngine {
-    pub(crate) fn start(
+    pub(crate) async fn start(
         input_device_name: Option<&str>,
         output_device_name: Option<&str>,
         input_mode: VoiceInputMode,
         output_volume_percent: u8,
+        quota: &QuotaGroup,
+        custody: &AudioCustody,
     ) -> Result<Self, VoiceError> {
         if is_headless_requested() {
-            return Ok(Self::headless(output_volume_percent));
+            return Self::headless(output_volume_percent, quota);
         }
+        let native = NativeAudioAdmission::reserve(quota)?;
+        let input_device_name = input_device_name.map(str::to_owned);
+        let output_device_name = output_device_name.map(str::to_owned);
+        let builder_native = native.clone();
+        let builder_quota = quota.clone();
+        let builder_custody = custody.clone();
+        let (owner, mut engine) = start_device_owner(quota, custody, native, move || {
+            Self::build(
+                input_device_name.as_deref(),
+                output_device_name.as_deref(),
+                input_mode,
+                output_volume_percent,
+                &builder_quota,
+                &builder_custody,
+                builder_native,
+            )
+        })
+        .await?;
+        engine._device_owner = Some(owner);
+        Ok(engine)
+    }
+
+    fn build(
+        input_device_name: Option<&str>,
+        output_device_name: Option<&str>,
+        input_mode: VoiceInputMode,
+        output_volume_percent: u8,
+        quota: &QuotaGroup,
+        custody: &AudioCustody,
+        native: Arc<NativeAudioAdmission>,
+    ) -> Result<((cpal::Stream, cpal::Stream), Self), VoiceError> {
         let host = cpal::default_host();
         let input_device = find_device(&host, input_device_name, true)?;
         let output_device = find_device(&host, output_device_name, false)?;
@@ -67,30 +635,42 @@ impl AudioEngine {
             }
         })?;
 
-        let capture_enabled = Arc::new(AtomicBool::new(matches!(
+        let capture_gate = Arc::new(CallbackGate::new(matches!(
             input_mode,
             VoiceInputMode::SemanticVad
         )));
+        let raw_capture = Arc::new(RawCapture::new());
         let (capture_sender, capture_receiver) = mpsc::channel(CAPTURE_CHANNEL_CAPACITY);
-        let input_resampler = Arc::new(Mutex::new(StreamingLinearResampler::new(
-            input_supported_config.sample_rate(),
-            REALTIME_SAMPLE_RATE,
-        )));
+        let capture_health = Arc::new(CaptureHealth::default());
+        for config in [&input_supported_config, &output_supported_config] {
+            if !(1..=MAX_DEVICE_SAMPLE_RATE).contains(&config.sample_rate())
+                || !(1..=MAX_DEVICE_CHANNELS).contains(&config.channels())
+            {
+                return Err(VoiceError::InvalidConfiguration(
+                    "audio devices require 1–384000 Hz and 1–32 channels".into(),
+                ));
+            }
+        }
+        native.attempted.store(true, Ordering::Release);
         let input_stream = build_input_stream(
             &input_device,
             &input_supported_config,
-            capture_sender,
-            capture_enabled.clone(),
-            input_resampler,
+            raw_capture.clone(),
+            capture_gate.clone(),
+            capture_health.clone(),
         )?;
 
-        let playback_samples = Arc::new(Mutex::new(VecDeque::new()));
-        let played_output_frames = Arc::new(AtomicU64::new(0));
+        let output_generation = Arc::new(AtomicU64::new(0));
+        let playback_samples = Arc::new(PlaybackRing::new(
+            output_supported_config.sample_rate(),
+            output_generation.clone(),
+            raw_capture.wake.clone(),
+        ));
         let output_stream = build_output_stream(
             &output_device,
             &output_supported_config,
             playback_samples.clone(),
-            played_output_frames.clone(),
+            capture_health.clone(),
         )?;
 
         input_stream
@@ -107,116 +687,232 @@ impl AudioEngine {
             })?;
 
         let output_sample_rate = output_supported_config.sample_rate();
-        Ok(Self {
-            _streams: Some((input_stream, output_stream)),
-            _headless_capture_sender: None,
-            capture_receiver,
-            capture_enabled,
-            playback_samples,
-            played_output_frames,
+        let output_preparation = OutputPreparation::start(
             output_sample_rate,
-            output_sample_aligner: Pcm16SampleAligner::default(),
-            output_resampler: StreamingLinearResampler::new(
-                REALTIME_SAMPLE_RATE,
+            f32::from(output_volume_percent) / 100.0,
+            playback_samples.clone(),
+            CapturePreparation {
+                raw: raw_capture.clone(),
+                sender: capture_sender,
+                sample_rate: input_supported_config.sample_rate(),
+            },
+            quota,
+            custody,
+            Some(native.clone()),
+        )?;
+        Ok((
+            (input_stream, output_stream),
+            Self {
+                _device_owner: None,
+                _headless_capture_sender: None,
+                capture_receiver,
+                capture_gate,
+                raw_capture: Some(raw_capture),
+                capture_health,
+                playback_samples,
                 output_sample_rate,
-            ),
-            output_volume: f32::from(output_volume_percent) / 100.0,
-        })
+                output_preparation: Some(output_preparation),
+                output_generation,
+                _native_admission: Some(native),
+                _headless_admission: None,
+            },
+        ))
     }
 
     /// An engine with no devices: capture never yields and playback is
     /// discarded. Used only through `AUDIO_OVERRIDE_ENV`.
-    fn headless(output_volume_percent: u8) -> Self {
+    fn headless(_output_volume_percent: u8, quota: &QuotaGroup) -> Result<Self, VoiceError> {
+        let admission = quota
+            .reserve_external_storage(HEADLESS_AUDIO_BYTES)
+            .map_err(|reason| {
+                VoiceError::AudioPreparation(format!(
+                    "headless audio storage admission: {reason:?}"
+                ))
+            })?;
         let (capture_sender, capture_receiver) = mpsc::channel(1);
-        Self {
-            _streams: None,
+        let generation = Arc::new(AtomicU64::new(0));
+        let playback = Arc::new(PlaybackRing::new(
+            1,
+            generation.clone(),
+            Arc::new(OnceLock::new()),
+        ));
+        Ok(Self {
+            _device_owner: None,
             _headless_capture_sender: Some(capture_sender),
             capture_receiver,
-            capture_enabled: Arc::new(AtomicBool::new(false)),
-            playback_samples: Arc::new(Mutex::new(VecDeque::new())),
-            played_output_frames: Arc::new(AtomicU64::new(0)),
+            capture_gate: Arc::new(CallbackGate::new(false)),
+            raw_capture: None,
+            capture_health: Arc::new(CaptureHealth::default()),
+            playback_samples: playback,
             output_sample_rate: REALTIME_SAMPLE_RATE,
-            output_sample_aligner: Pcm16SampleAligner::default(),
-            output_resampler: StreamingLinearResampler::new(
-                REALTIME_SAMPLE_RATE,
-                REALTIME_SAMPLE_RATE,
-            ),
-            output_volume: f32::from(output_volume_percent) / 100.0,
+            output_preparation: None,
+            output_generation: generation,
+            _native_admission: None,
+            _headless_admission: Some(admission),
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn backpressure_fixture(
+        quota: &QuotaGroup,
+        custody: &AudioCustody,
+    ) -> Result<(Self, impl Fn() -> bool + 'static), VoiceError> {
+        // Test-only native-equivalent storage: the startup holder and DSP wake
+        // retain it through actual join. No CPAL device/backend is created.
+        #[derive(Debug)]
+        struct FixtureAllocation {
+            _storage: StorageAdmission,
+        }
+        impl crate::VoiceTextAllocation for FixtureAllocation {}
+        let storage = quota
+            .reserve_external_storage(NATIVE_AUDIO_BYTES)
+            .map_err(|reason| {
+                VoiceError::AudioPreparation(format!("fixture ring storage admission: {reason:?}"))
+            })?;
+        custody.retain_startup(Arc::new(FixtureAllocation { _storage: storage }));
+        let mut audio = Self::headless(100, quota)?;
+        let raw = Arc::new(RawCapture::new());
+        let playback = Arc::new(PlaybackRing::new(
+            1,
+            audio.output_generation.clone(),
+            raw.wake.clone(),
+        ));
+        let (sender, receiver) = mpsc::channel(CAPTURE_CHANNEL_CAPACITY);
+        let preparation = OutputPreparation::start(
+            REALTIME_SAMPLE_RATE,
+            1.,
+            playback.clone(),
+            CapturePreparation {
+                raw: raw.clone(),
+                sender,
+                sample_rate: REALTIME_SAMPLE_RATE,
+            },
+            quota,
+            custody,
+            None,
+        )?;
+        let capacity = preparation.mailbox_capacity_probe();
+        let probe_ring = playback.clone();
+        let probe = move || {
+            capacity() == 0
+                && probe_ring
+                    .write
+                    .load(Ordering::Acquire)
+                    .saturating_sub(probe_ring.read.load(Ordering::Acquire))
+                    >= probe_ring.cells.len() as u64
+        };
+        audio.capture_receiver = receiver;
+        audio.raw_capture = Some(raw);
+        audio.playback_samples = playback;
+        audio.output_preparation = Some(preparation);
+        Ok((audio, probe))
+    }
+
+    pub(crate) async fn next_capture(&mut self) -> Result<Option<CapturedAudio>, VoiceError> {
+        loop {
+            if let Some(error) = self.capture_health.failure() {
+                self.capture_health.report_drops();
+                return Err(error);
+            }
+            tokio::select! {
+                capture=self.capture_receiver.recv()=> {
+                    if let Some(raw)=&self.raw_capture {if let Some(thread)=raw.wake.get() {thread.unpark();}}
+                    return Ok(capture);
+                }
+                _=self.capture_health.changed.notified()=>{}
+            }
         }
     }
-
-    pub(crate) async fn next_capture(&mut self) -> Option<CapturedAudio> {
-        self.capture_receiver.recv().await
-    }
-
-    /// Returns every capture frame already queued by the device callback
-    /// without waiting for more. Push-to-talk release must flush these tail
-    /// frames to the provider before committing the input buffer; otherwise
-    /// the end of the utterance is dropped from the committed turn and the
-    /// stale frames leak into the next turn's buffer instead.
-    pub(crate) fn drain_pending_captures(&mut self) -> Vec<CapturedAudio> {
-        let mut pending = Vec::new();
-        while let Ok(capture) = self.capture_receiver.try_recv() {
-            pending.push(capture);
+    /// Close admission, settle all already-entered native callbacks, then
+    /// consume PCM through the highest raw ordinal before provider commit.
+    pub(crate) async fn pause_capture_and_drain(
+        &mut self,
+    ) -> Result<Vec<CapturedAudio>, VoiceError> {
+        self.capture_gate.close().await;
+        let Some(raw) = &self.raw_capture else {
+            return Ok(Vec::new());
+        };
+        let target = raw.admitted_sequence();
+        let mut pending = Vec::with_capacity(MAX_CAPTURE_TAIL_FRAMES);
+        loop {
+            let changed = raw.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            while pending.len() < MAX_CAPTURE_TAIL_FRAMES {
+                match self.capture_receiver.try_recv() {
+                    Ok(capture) => pending.push(capture),
+                    Err(_) => break,
+                }
+            }
+            if pending.len() == MAX_CAPTURE_TAIL_FRAMES && !self.capture_receiver.is_empty() {
+                return Err(VoiceError::AudioPreparation(
+                    "capture tail accounting limit exceeded; utterance cancelled".into(),
+                ));
+            }
+            if let Some(thread) = raw.wake.get() {
+                thread.unpark();
+            }
+            if raw.processed.load(Ordering::Acquire) >= target {
+                break;
+            }
+            if let Some(error) = self.capture_health.failure() {
+                return Err(error);
+            }
+            tokio::select! {
+                capture=self.capture_receiver.recv(),if pending.len()<MAX_CAPTURE_TAIL_FRAMES=> {let Some(capture)=capture else {return Err(VoiceError::SessionEnded);};pending.push(capture);}
+                _=&mut changed=>{}
+            }
         }
-        pending
+        while pending.len() < MAX_CAPTURE_TAIL_FRAMES {
+            match self.capture_receiver.try_recv() {
+                Ok(capture) => pending.push(capture),
+                Err(_) => break,
+            }
+        }
+        if !self.capture_receiver.is_empty() {
+            return Err(VoiceError::AudioPreparation(
+                "capture tail accounting limit exceeded; utterance cancelled".into(),
+            ));
+        }
+        if let Some(error) = self.capture_health.failure() {
+            return Err(error);
+        }
+        Ok(pending)
     }
-
     pub(crate) fn set_capture_enabled(&self, is_enabled: bool) {
-        self.capture_enabled.store(is_enabled, Ordering::Release);
-    }
-
-    /// Marks the start of a new response item's audio. Also drops any
-    /// samples still queued from a previous item: `response.created`/new
-    /// `item_id` deltas can arrive before the device has finished draining
-    /// the prior item's tail, and without clearing here those leftover
-    /// samples would keep incrementing `played_output_frames` after the
-    /// reset below, misattributing the old item's playback time to the new
-    /// item's `audio_end_ms` on a later `conversation.item.truncate`.
-    pub(crate) fn begin_response_audio(&mut self) {
-        lock_recovering_poison(&self.playback_samples).clear();
-        self.played_output_frames.store(0, Ordering::Release);
-        self.reset_output_pipeline();
-    }
-
-    /// Discards the previous item's in-flight conversion state: a dangling
-    /// half-sample byte and the resampler's buffered tail both belong to the
-    /// item that just ended, and letting either bleed into the next item
-    /// would corrupt (byte-shift) or prepend stale audio to its first delta.
-    fn reset_output_pipeline(&mut self) {
-        self.output_sample_aligner.reset();
-        self.output_resampler =
-            StreamingLinearResampler::new(REALTIME_SAMPLE_RATE, self.output_sample_rate);
-    }
-
-    pub(crate) fn enqueue_realtime_pcm16(&mut self, bytes: &[u8]) {
-        if self._streams.is_none() {
-            return;
+        if is_enabled {
+            self.capture_gate.open();
+        } else {
+            self.capture_gate
+                .state
+                .fetch_or(CALLBACK_CLOSED, Ordering::AcqRel);
         }
-        let input_samples = self.output_sample_aligner.process(bytes);
-        let mut output_samples = self.output_resampler.process(&input_samples);
-        for sample in &mut output_samples {
-            *sample *= self.output_volume;
-        }
+    }
+    pub(crate) async fn begin_response_audio(&mut self) -> Result<(), VoiceError> {
+        self.playback_samples.invalidate().await.map(|_| ())
+    }
 
-        let maximum_samples = self.output_sample_rate as usize * MAX_BUFFERED_PLAYBACK_SECONDS;
-        let mut queue = lock_recovering_poison(&self.playback_samples);
-        let excess = queue
-            .len()
-            .saturating_add(output_samples.len())
-            .saturating_sub(maximum_samples);
-        let drain_count = excess.min(queue.len());
-        queue.drain(..drain_count);
-        queue.extend(output_samples);
+    /// Admission is ordered and lossless. Only bounded chunks cross into the
+    /// CPU owner; a stalled consumer applies asynchronous backpressure.
+    pub(crate) async fn enqueue_realtime_pcm16(&mut self, bytes: &[u8]) -> Result<(), VoiceError> {
+        if bytes.len() > MAX_PROVIDER_PCM_BYTES {
+            return Err(VoiceError::AudioPreparation(
+                "provider PCM delta exceeds 256 KiB admission limit".into(),
+            ));
+        }
+        if let Some(preparation) = &self.output_preparation {
+            preparation
+                .enqueue(self.output_generation.load(Ordering::Acquire), bytes)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Stops pending playback and returns how many milliseconds were actually
     /// emitted to the device for the current response item.
-    pub(crate) fn interrupt_playback(&mut self) -> u64 {
-        lock_recovering_poison(&self.playback_samples).clear();
-        let played_frames = self.played_output_frames.swap(0, Ordering::AcqRel);
-        self.reset_output_pipeline();
-        played_frames.saturating_mul(1_000) / u64::from(self.output_sample_rate)
+    pub(crate) async fn interrupt_playback(&mut self) -> Result<u64, VoiceError> {
+        let played = self.playback_samples.invalidate().await?;
+        Ok(played.saturating_mul(1000) / u64::from(self.output_sample_rate))
     }
 }
 
@@ -286,26 +982,17 @@ fn find_device(
 fn build_input_stream(
     device: &cpal::Device,
     supported_config: &cpal::SupportedStreamConfig,
-    capture_sender: mpsc::Sender<CapturedAudio>,
-    capture_enabled: Arc<AtomicBool>,
-    resampler: Arc<Mutex<StreamingLinearResampler>>,
+    raw: Arc<RawCapture>,
+    gate: Arc<CallbackGate>,
+    health: Arc<CaptureHealth>,
 ) -> Result<cpal::Stream, VoiceError> {
     let channels = usize::from(supported_config.channels());
     let config = supported_config.config();
-
     macro_rules! build {
         ($sample_type:ty) => {
-            build_typed_input_stream::<$sample_type>(
-                device,
-                &config,
-                channels,
-                capture_sender,
-                capture_enabled,
-                resampler,
-            )
+            build_typed_input_stream::<$sample_type>(device, &config, channels, raw, gate, health)
         };
     }
-
     match supported_config.sample_format() {
         cpal::SampleFormat::I8 => build!(i8),
         cpal::SampleFormat::I16 => build!(i16),
@@ -323,53 +1010,49 @@ fn build_input_stream(
         }),
     }
 }
-
 fn build_typed_input_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     channels: usize,
-    capture_sender: mpsc::Sender<CapturedAudio>,
-    capture_enabled: Arc<AtomicBool>,
-    resampler: Arc<Mutex<StreamingLinearResampler>>,
+    raw: Arc<RawCapture>,
+    gate: Arc<CallbackGate>,
+    health: Arc<CaptureHealth>,
 ) -> Result<cpal::Stream, VoiceError>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let input_sample_rate = config.sample_rate;
+    let error_health = health.clone();
     device
         .build_input_stream(
             *config,
             move |data: &[T], _| {
-                if !capture_enabled.load(Ordering::Acquire) || channels == 0 {
+                let _active = match gate.enter() {
+                    Ok(active) => active,
+                    Err(CallbackRefusal::Closed) => return,
+                    Err(CallbackRefusal::Contended) => {
+                        // Explicit incomplete-utterance failure: bounded gate
+                        // contention never silently removes microphone samples.
+                        health.consumer_stalled.fetch_add(1, Ordering::Release);
+                        health.changed.notify_one();
+                        return;
+                    }
+                };
+                if !capture_fits_budget(data.len(), channels, input_sample_rate) {
+                    health.oversized.fetch_add(1, Ordering::Release);
+                    health.changed.notify_one();
                     return;
                 }
-
-                let mono = data
-                    .chunks(channels)
-                    .map(|frame| {
-                        frame
-                            .iter()
-                            .map(|sample| sample.to_sample::<f32>())
-                            .sum::<f32>()
-                            / channels as f32
-                    })
-                    .collect::<Vec<_>>();
-                let converted = lock_recovering_poison(&resampler).process(&mono);
-                if converted.is_empty() {
-                    return;
+                if !raw.push(data, channels) {
+                    health.consumer_stalled.fetch_add(1, Ordering::Release);
+                    health.changed.notify_one();
                 }
-
-                // Dropping on a full channel is deliberate realtime behavior:
-                // the device callback must never block, and losing the newest
-                // frame under consumer stall beats stalling capture. A closed
-                // channel means the session is shutting down and this stream
-                // is about to be dropped, so that error carries no signal
-                // either.
-                let _ = capture_sender.try_send(CapturedAudio {
-                    pcm16_le: f32_to_pcm16_le(&converted),
-                });
             },
-            |error| tracing::warn!(%error, "voice input stream error"),
+            move |_error| {
+                error_health.device_failed.fetch_add(1, Ordering::Release);
+                error_health.changed.notify_one();
+            },
             None,
         )
         .map_err(|source| VoiceError::BuildAudioStream {
@@ -377,28 +1060,19 @@ where
             source,
         })
 }
-
 fn build_output_stream(
     device: &cpal::Device,
     supported_config: &cpal::SupportedStreamConfig,
-    playback_samples: Arc<Mutex<VecDeque<f32>>>,
-    played_output_frames: Arc<AtomicU64>,
+    playback: Arc<PlaybackRing>,
+    health: Arc<CaptureHealth>,
 ) -> Result<cpal::Stream, VoiceError> {
     let channels = usize::from(supported_config.channels());
     let config = supported_config.config();
-
     macro_rules! build {
         ($sample_type:ty) => {
-            build_typed_output_stream::<$sample_type>(
-                device,
-                &config,
-                channels,
-                playback_samples,
-                played_output_frames,
-            )
+            build_typed_output_stream::<$sample_type>(device, &config, channels, playback, health)
         };
     }
-
     match supported_config.sample_format() {
         cpal::SampleFormat::I8 => build!(i8),
         cpal::SampleFormat::I16 => build!(i16),
@@ -416,13 +1090,43 @@ fn build_output_stream(
         }),
     }
 }
-
+pub(super) fn render_output<T>(output: &mut [T], channels: usize, playback: &PlaybackRing)
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let active = playback.gate.enter();
+    let generation = playback.generation.load(Ordering::Acquire);
+    let mut emitted = 0u64;
+    for frame in output.chunks_mut(channels.max(1)) {
+        let sample = if active.is_ok() {
+            match playback.pop(generation) {
+                Some(sample) => {
+                    emitted = emitted.saturating_add(1);
+                    sample
+                }
+                None => 0.0,
+            }
+        } else {
+            0.0
+        };
+        for channel in frame {
+            *channel = T::from_sample(sample);
+        }
+    }
+    if active.is_ok() {
+        playback.played.fetch_add(emitted, Ordering::Relaxed);
+    }
+    drop(active);
+    if let Some(thread) = playback.wake.get() {
+        thread.unpark();
+    }
+}
 fn build_typed_output_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     channels: usize,
-    playback_samples: Arc<Mutex<VecDeque<f32>>>,
-    played_output_frames: Arc<AtomicU64>,
+    playback: Arc<PlaybackRing>,
+    health: Arc<CaptureHealth>,
 ) -> Result<cpal::Stream, VoiceError>
 where
     T: SizedSample + FromSample<f32>,
@@ -430,38 +1134,30 @@ where
     device
         .build_output_stream(
             *config,
-            move |output: &mut [T], _| {
-                let mut queue = lock_recovering_poison(&playback_samples);
-                let mut emitted_frames = 0_u64;
-                for frame in output.chunks_mut(channels.max(1)) {
-                    // Distinguish "real (possibly silent) queued sample" from
-                    // "underrun padding" using `pop_front`'s `Option` itself,
-                    // not the sample's value -- a value-based check (e.g.
-                    // `sample != 0.0`) misclassifies a genuine trailing
-                    // silent sample or a fully muted (volume 0) response as
-                    // underrun, undercounting `played_output_frames` and
-                    // skewing the elapsed-ms calculation in
-                    // `interrupt_playback`.
-                    let sample = match queue.pop_front() {
-                        Some(sample) => {
-                            emitted_frames = emitted_frames.saturating_add(1);
-                            sample
-                        }
-                        None => 0.0,
-                    };
-                    for channel in frame {
-                        *channel = T::from_sample(sample);
-                    }
-                }
-                played_output_frames.fetch_add(emitted_frames, Ordering::Relaxed);
+            move |output: &mut [T], _| render_output(output, channels, &playback),
+            move |_error| {
+                health.device_failed.fetch_add(1, Ordering::Release);
+                health.changed.notify_one();
             },
-            |error| tracing::warn!(%error, "voice output stream error"),
             None,
         )
         .map_err(|source| VoiceError::BuildAudioStream {
             direction: "output",
             source,
         })
+}
+
+fn capture_fits_budget(device_samples: usize, channels: usize, input_sample_rate: u32) -> bool {
+    if channels == 0 || input_sample_rate == 0 || device_samples > MAX_CAPTURE_DEVICE_SAMPLES {
+        return false;
+    }
+    // Include the interpolation tail. Every retained callback and all thirty-
+    // two PCM slots have a finite sample and byte bound, even for odd buffers.
+    let frame_count = device_samples.div_ceil(channels);
+    let projected_samples = (frame_count as u64 + 2)
+        .saturating_mul(u64::from(REALTIME_SAMPLE_RATE))
+        / u64::from(input_sample_rate);
+    projected_samples <= MAX_CAPTURE_PCM_SAMPLES as u64
 }
 
 fn lock_recovering_poison<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -492,14 +1188,14 @@ pub(crate) fn pcm16_le_to_f32(bytes: &[u8]) -> Vec<f32> {
 /// chunk, `chunks_exact(2)` would silently drop it and decode the entire
 /// following chunk one byte out of phase, which plays as loud noise.
 #[derive(Debug, Default)]
-struct Pcm16SampleAligner {
+pub(super) struct Pcm16SampleAligner {
     pending_byte: Option<u8>,
 }
 
 impl Pcm16SampleAligner {
     /// Decodes every complete sample available once `bytes` is appended to
     /// the carried remainder, keeping any new dangling byte for the next call.
-    fn process(&mut self, bytes: &[u8]) -> Vec<f32> {
+    pub(super) fn process(&mut self, bytes: &[u8]) -> Vec<f32> {
         // Only allocate a joined buffer when a byte was actually carried.
         let joined_storage;
         let aligned_bytes = match self.pending_byte.take() {
@@ -523,7 +1219,7 @@ impl Pcm16SampleAligner {
     }
 
     /// Drops any carried byte; the stream it belonged to has ended.
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.pending_byte = None;
     }
 }
@@ -532,14 +1228,14 @@ impl Pcm16SampleAligner {
 /// source sample between calls, preventing clicks and drift between CPAL
 /// callbacks without coupling the API to a particular DSP library.
 #[derive(Debug)]
-struct StreamingLinearResampler {
+pub(super) struct StreamingLinearResampler {
     step: f64,
     source_position: f64,
     buffered_samples: Vec<f32>,
 }
 
 impl StreamingLinearResampler {
-    fn new(input_sample_rate: u32, output_sample_rate: u32) -> Self {
+    pub(super) fn new(input_sample_rate: u32, output_sample_rate: u32) -> Self {
         Self {
             step: f64::from(input_sample_rate) / f64::from(output_sample_rate),
             source_position: 0.0,
@@ -547,7 +1243,7 @@ impl StreamingLinearResampler {
         }
     }
 
-    fn process(&mut self, samples: &[f32]) -> Vec<f32> {
+    pub(super) fn process(&mut self, samples: &[f32]) -> Vec<f32> {
         self.buffered_samples.extend_from_slice(samples);
         let mut output = Vec::new();
 
@@ -584,6 +1280,68 @@ impl StreamingLinearResampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actor_metadata_admission_refuses_typed_before_constructing_custody() {
+        let mut limits = crate::test_quota().snapshot().limits;
+        limits.worker_bytes = 128 * 1024 - 1;
+        let quota = QuotaGroup::new(limits);
+        assert!(matches!(
+            AudioCustody::try_new(&quota),
+            Err(RejectReason::WorkerBytes)
+        ));
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+    }
+
+    #[test]
+    fn capture_admission_bounds_samples_before_allocation() {
+        assert!(capture_fits_budget(960, 2, 48_000));
+        assert!(!capture_fits_budget(
+            MAX_CAPTURE_DEVICE_SAMPLES + 1,
+            2,
+            48_000
+        ));
+        assert!(!capture_fits_budget(0, 0, 48_000));
+        assert!(!capture_fits_budget(0, 2, 0));
+        assert!(!capture_fits_budget(100_000, 1, 8_000));
+        assert!(capture_fits_budget(10_000, 1, 8_000));
+    }
+
+    #[tokio::test]
+    async fn oversized_provider_delta_reports_overload_without_admitting_a_prefix() {
+        let mut audio = AudioEngine::headless(100, &crate::test_quota()).unwrap();
+        assert!(matches!(
+            audio
+                .enqueue_realtime_pcm16(&vec![0; MAX_PROVIDER_PCM_BYTES + 1])
+                .await,
+            Err(VoiceError::AudioPreparation(_))
+        ));
+        assert!(audio
+            .playback_samples
+            .pop(audio.output_generation.load(Ordering::Acquire))
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn interruption_fences_generation_and_preserves_emitted_silent_frames() {
+        let mut audio = AudioEngine::headless(0, &crate::test_quota()).unwrap();
+        assert_eq!(audio.playback_samples.push(0, &[0., 0., 0.]), 3);
+        audio
+            .playback_samples
+            .played
+            .store(24_000, Ordering::Relaxed);
+        assert_eq!(audio.interrupt_playback().await.unwrap(), 1_000);
+        assert_eq!(audio.output_generation.load(Ordering::Acquire), 1);
+        assert!(audio
+            .playback_samples
+            .pop(audio.output_generation.load(Ordering::Acquire))
+            .is_none());
+        audio.playback_samples.played.store(48, Ordering::Relaxed);
+        audio.begin_response_audio().await.unwrap();
+        assert_eq!(audio.playback_samples.played.load(Ordering::Acquire), 0);
+        assert_eq!(audio.output_generation.load(Ordering::Acquire), 2);
+    }
 
     #[test]
     fn pcm16_conversion_clamps_and_round_trips() {
@@ -680,5 +1438,327 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod custody_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    struct CreatorOnlyResource {
+        // Constructed inside the owner: native handles need not be Send.
+        _not_send: std::rc::Rc<()>,
+        dropped: std::sync::mpsc::Sender<std::thread::ThreadId>,
+    }
+    impl Drop for CreatorOnlyResource {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(std::thread::current().id());
+        }
+    }
+
+    #[tokio::test]
+    async fn device_creation_and_non_send_destruction_stay_on_actual_os_owner() {
+        let quota = crate::test_quota();
+        let custody = AudioCustody::new(&quota).unwrap();
+        let native = NativeAudioAdmission::reserve(&quota).unwrap();
+        let (dropped, destruction) = std::sync::mpsc::channel();
+        let (owner, creator) = start_device_owner(&quota, &custody, native, move || {
+            Ok((
+                CreatorOnlyResource {
+                    _not_send: std::rc::Rc::new(()),
+                    dropped,
+                },
+                std::thread::current().id(),
+            ))
+        })
+        .await
+        .unwrap();
+        assert_ne!(creator, std::thread::current().id());
+        assert!(quota.snapshot().worker_threads >= 1);
+        drop(owner);
+        custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            destruction.recv_timeout(Duration::from_secs(1)).unwrap(),
+            creator
+        );
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 128 * 1024);
+        drop(custody);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn canceled_initialization_keeps_blocked_owner_charged_until_actual_join() {
+        let quota = crate::test_quota();
+        let custody = AudioCustody::new(&quota).unwrap();
+        let native = NativeAudioAdmission::reserve(&quota).unwrap();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (entered, admission) = tokio::sync::oneshot::channel();
+        let mut initialization =
+            Box::pin(start_device_owner(&quota, &custody, native, move || {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(((), ()))
+            }));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(initialization.as_mut(), &mut context).is_pending());
+        admission.await.unwrap();
+        drop(initialization);
+        assert_eq!(custody.pending_owners(), 1);
+        assert!(custody.join_until(Instant::now()).is_err());
+        assert!(quota.snapshot().worker_bytes >= NATIVE_AUDIO_BYTES + DEVICE_OWNER_BYTES);
+        release.send(()).unwrap();
+        custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 128 * 1024);
+    }
+
+    #[tokio::test]
+    async fn initialization_failure_has_a_real_retirement_receipt() {
+        let quota = crate::test_quota();
+        let custody = AudioCustody::new(&quota).unwrap();
+        let native = NativeAudioAdmission::reserve(&quota).unwrap();
+        let result = start_device_owner::<(), ()>(&quota, &custody, native, || {
+            Err(VoiceError::AudioPreparation(
+                "forced device initialization failure".into(),
+            ))
+        })
+        .await;
+        assert!(result.is_err());
+        custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 128 * 1024);
+    }
+
+    #[test]
+    fn native_admission_refuses_before_any_creation_attempt() {
+        let mut limits = crate::test_quota().snapshot().limits;
+        limits.worker_bytes = NATIVE_AUDIO_BYTES - 1;
+        let quota = QuotaGroup::new(limits);
+        assert!(NativeAudioAdmission::reserve(&quota).is_err());
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn headless_storage_follows_engine_lifetime() {
+        let quota = crate::test_quota();
+        let engine = AudioEngine::headless(100, &quota).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, HEADLESS_AUDIO_BYTES);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        drop(engine);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+    #[test]
+    fn opaque_backend_releases_unattempted_credit_but_never_fabricates_native_exit() {
+        let quota = crate::test_quota();
+        let lease = NativeAudioAdmission {
+            debit: Some(NativeDebit::Worker(
+                quota.reserve_external_worker(1, 1024).unwrap(),
+            )),
+            retain_until_process_exit: true,
+            attempted: AtomicBool::new(false),
+        };
+        drop(lease);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        let lease = NativeAudioAdmission {
+            debit: Some(NativeDebit::Worker(
+                quota.reserve_external_worker(1, 1024).unwrap(),
+            )),
+            retain_until_process_exit: true,
+            attempted: AtomicBool::new(true),
+        };
+        drop(lease);
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert_eq!(quota.snapshot().worker_bytes, 1024);
+        // Isolated test quota only: intentional process-held declaration,
+        // never a root/global worker or a fabricated native exit receipt.
+    }
+    #[test]
+    fn actual_panicked_owner_join_is_terminal_and_metadata_survives_last_custody_clone() {
+        use std::time::{Duration, Instant};
+        let quota = crate::test_quota();
+        let custody = AudioCustody::new(&quota).unwrap();
+        let last = custody.clone();
+        let admission = quota.reserve_external_worker(1, 4096).unwrap();
+        let owner = spawn_owned(
+            "ilium-audio-forced-native-panic",
+            WorkerKind::Cooperative,
+            StopToken::default(),
+            move || {
+                let _lease = &admission;
+            },
+            |_| {
+                panic!("synthetic no-device OS audio owner failure");
+            },
+        )
+        .unwrap();
+        custody.register(owner.ticket()).unwrap();
+        drop(owner);
+        let error = custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap_err();
+        assert_ne!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(custody.pending_owners(), 0);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 128 * 1024);
+        drop(custody);
+        assert_eq!(quota.snapshot().worker_bytes, 128 * 1024);
+        drop(last);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+    #[test]
+    fn callback_raw_admission_preserves_downmix_order_without_reallocation_and_refuses_original_tail(
+    ) {
+        let raw = RawCapture::new();
+        assert!(raw.push(&[1f32, 0., 0.5, -0.5, 0.25, 0.75], 2));
+        let mut scratch = Vec::with_capacity(MAX_CAPTURE_DEVICE_SAMPLES);
+        let capacity = scratch.capacity();
+        assert_eq!(raw.pop_into(&mut scratch), Some(1));
+        assert_eq!(scratch, vec![0.5, 0., 0.5]);
+        assert_eq!(scratch.capacity(), capacity);
+        for _ in 0..CAPTURE_CHANNEL_CAPACITY {
+            assert!(raw.push(&[0.25f32], 1));
+        }
+        let admitted = raw.admitted_sequence();
+        assert!(!raw.push(&[0.75f32], 1));
+        assert_eq!(raw.admitted_sequence(), admitted);
+        for _ in 0..CAPTURE_CHANNEL_CAPACITY {
+            assert!(raw.pop_into(&mut scratch).is_some());
+            assert_eq!(scratch, [0.25]);
+        }
+        assert!(raw.pop_into(&mut scratch).is_none());
+    }
+    #[tokio::test]
+    async fn output_barrier_waits_inflight_callback_and_counts_silent_samples() {
+        let ring = PlaybackRing::new(1, Arc::new(AtomicU64::new(0)), Arc::new(OnceLock::new()));
+        assert_eq!(ring.push(0, &[0., 0.5]), 2);
+        let active = ring.gate.enter().unwrap();
+        let mut barrier = Box::pin(ring.invalidate());
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(barrier.as_mut(), &mut context).is_pending());
+        ring.played.fetch_add(2, Ordering::Relaxed);
+        drop(active);
+        assert_eq!(barrier.await.unwrap(), 2);
+        assert_eq!(ring.generation.load(Ordering::Acquire), 1);
+        let mut silence = [1f32; 2];
+        render_output(&mut silence, 1, &ring);
+        assert_eq!(silence, [0., 0.]);
+        assert_eq!(ring.played.load(Ordering::Acquire), 0);
+        assert_eq!(ring.push(1, &[0., 0.25]), 2);
+        render_output(&mut silence, 1, &ring);
+        assert_eq!(silence, [0., 0.25]);
+        assert_eq!(ring.played.load(Ordering::Acquire), 2);
+    }
+    #[tokio::test]
+    async fn capture_close_barrier_waits_every_entered_callback_before_highest_ordinal() {
+        let gate = CallbackGate::new(true);
+        let raw = RawCapture::new();
+        let active = gate.enter().unwrap();
+        gate.open(); // idempotent start must not reset active custody
+        let mut barrier = Box::pin(gate.close());
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(barrier.as_mut(), &mut context).is_pending());
+        assert!(gate.enter().is_err());
+        assert!(raw.push(&[0.125f32, 0.25], 1));
+        drop(active);
+        barrier.await;
+        assert_eq!(raw.admitted_sequence(), 1);
+        assert!(gate.enter().is_err());
+    }
+    #[test]
+    fn packed_playback_byte_cap_is_explicit_and_oldest_samples_never_evict_on_full() {
+        let ring = PlaybackRing::new(1, Arc::new(AtomicU64::new(0)), Arc::new(OnceLock::new()));
+        assert_eq!(ring.cells.len(), 30);
+        assert_eq!(ring.push(0, &[0.25; 30]), 30);
+        assert_eq!(ring.push(0, &[0.5]), 0);
+        let mut output = [0f32; 30];
+        render_output(&mut output, 1, &ring);
+        assert_eq!(output, [0.25; 30]);
+    }
+    #[tokio::test]
+    async fn capture_tail_barrier_drains_both_full_pcm_and_raw_queues_at_upsample_ratio() {
+        let quota = crate::test_quota();
+        let _storage = quota.reserve_external_storage(64 * 1024 * 1024).unwrap();
+        let custody = AudioCustody::new(&quota).unwrap();
+        let mut audio = AudioEngine::headless(100, &quota).unwrap();
+        let raw = Arc::new(RawCapture::new());
+        let (sender, receiver) = mpsc::channel(CAPTURE_CHANNEL_CAPACITY);
+        let playback = Arc::new(PlaybackRing::new(
+            1,
+            audio.output_generation.clone(),
+            raw.wake.clone(),
+        ));
+        audio.output_preparation = Some(
+            OutputPreparation::start(
+                1,
+                1.,
+                playback.clone(),
+                CapturePreparation {
+                    raw: raw.clone(),
+                    sender,
+                    sample_rate: 8000,
+                },
+                &quota,
+                &custody,
+                None,
+            )
+            .unwrap(),
+        );
+        audio.raw_capture = Some(raw.clone());
+        audio.capture_receiver = receiver;
+        audio.playback_samples = playback;
+        audio.set_capture_enabled(true);
+        let packet = vec![0.25f32; 10000];
+        assert!(capture_fits_budget(packet.len(), 1, 8000));
+        for _ in 0..CAPTURE_CHANNEL_CAPACITY {
+            assert!(raw.push(&packet, 1));
+        }
+        loop {
+            let changed = raw.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if raw.processed.load(Ordering::Acquire) == CAPTURE_CHANNEL_CAPACITY as u64 {
+                break;
+            }
+            tokio::time::timeout(Duration::from_secs(2), changed)
+                .await
+                .unwrap();
+        }
+        assert_eq!(audio.capture_receiver.len(), CAPTURE_CHANNEL_CAPACITY);
+        for _ in 0..CAPTURE_CHANNEL_CAPACITY {
+            assert!(raw.push(&packet, 1));
+        }
+        let pending = tokio::time::timeout(Duration::from_secs(2), audio.pause_capture_and_drain())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.len(), 2 * CAPTURE_CHANNEL_CAPACITY);
+        assert_eq!(pending.capacity(), MAX_CAPTURE_TAIL_FRAMES);
+        let bytes = pending
+            .iter()
+            .map(|capture| capture.pcm16_le.len())
+            .sum::<usize>();
+        assert_eq!(
+            bytes,
+            (2 * CAPTURE_CHANNEL_CAPACITY * packet.len() - 1) * 3 * 2
+        );
+        assert!(audio.capture_receiver.is_empty());
+        assert_eq!(
+            raw.processed.load(Ordering::Acquire),
+            raw.admitted_sequence()
+        );
+        assert!(audio.capture_gate.enter().is_err());
+        drop(audio);
+        custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
     }
 }

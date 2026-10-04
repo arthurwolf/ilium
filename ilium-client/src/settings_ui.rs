@@ -89,7 +89,7 @@ const DECREMENT_ZONE_WIDTH: u16 = 2;
 /// The compact fallback preserves the existing table at widths where every
 /// title cannot fit. Wider tables replace this with the longest title width.
 const ICON_TABLE_LABEL_WIDTH: usize = 18;
-const ICON_TABLE_CURRENT_WIDTH: usize = 7;
+const ICON_TABLE_CURRENT_WIDTH: usize = 13;
 const ICON_TABLE_CHOICE_WIDTH: usize = 4;
 const ICON_TABLE_CHOICE_COUNT: usize = 4;
 const ICON_TABLE_PICKER_LABEL: &str = "[+]";
@@ -326,9 +326,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 app.inference_test_result.as_ref(),
                 &app.inference_test_state,
                 &app.model_discovery,
-                &app.ollama_models,
-                &app.kilo_gateway_models,
-                &app.openai_models,
+                InferenceModelCatalogs {
+                    ollama: &app.ollama_models,
+                    kilo_gateway: &app.kilo_gateway_models,
+                    openai: &app.openai_models,
+                },
                 state.selected_row,
             );
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -457,6 +459,29 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             render_scrollable(frame, layout.content_area, about_lines(), state.scroll);
         }
         SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
+    }
+    render_number_controls(frame, layout.content_area, app, state);
+    if state.tab == SettingsTab::Keyboard {
+        for field in crate::value_keyboard::KeyboardPrefix::ALL {
+            if let Some(control) =
+                field.settings_control(layout.content_area, state.scroll, app.keyboard_settings)
+            {
+                let style = if state.selected_row == field.row() {
+                    theme::selected_style()
+                } else {
+                    Style::new()
+                };
+                control.render(
+                    frame,
+                    crate::value_control::ControlStyles {
+                        label: style,
+                        value: style,
+                        button: style,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
     }
     render_settings_help_anchors(frame, &layout, app, state);
     if state.tab == SettingsTab::Animations {
@@ -768,6 +793,7 @@ pub fn settings_help_anchors(
                     AppearanceRow::TerminalTextSelection => "AP-23",
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
+                    AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
                 };
                 let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
                     .get(state.selected_row)
@@ -1215,9 +1241,11 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             app.inference_test_result.as_ref(),
             &app.inference_test_state,
             &app.model_discovery,
-            &app.ollama_models,
-            &app.kilo_gateway_models,
-            &app.openai_models,
+            InferenceModelCatalogs {
+                ollama: &app.ollama_models,
+                kilo_gateway: &app.kilo_gateway_models,
+                openai: &app.openai_models,
+            },
             selected_row,
         )
         .len() as u16,
@@ -1515,6 +1543,32 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
             .title(" Icon assignments "),
     );
     frame.render_widget(table, left);
+    for (index, target) in crate::agent_monitoring::general_icon_targets()
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(control) = icon_assignment_control(
+            area,
+            state.scroll,
+            index,
+            app.ui_settings.icons.glyph(target),
+        ) {
+            let style = if index == state.selected_row {
+                theme::selected_style().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            };
+            control.render(
+                frame,
+                crate::value_control::ControlStyles {
+                    label: style,
+                    value: style,
+                    button: style,
+                    ..Default::default()
+                },
+            );
+        }
+    }
 
     let mode = format!(
         "{}  {}",
@@ -1573,6 +1627,8 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
                 cost: None,
                 hover: crate::tree_ui::TreeHoverState::default(),
+                sidebar_files: &Default::default(),
+                chatroom_projects: &Default::default(),
                 panes: &app.panes,
             },
         );
@@ -1792,7 +1848,7 @@ pub fn icon_picker_layout(area: Rect) -> IconPickerLayout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconPickerHit {
     Close,
-    ToggleColumnMode,
+    ColumnMode(crate::value_control::ControlAction),
     ActivateSearch,
     Entry(usize),
     ScrollTo(usize),
@@ -1996,17 +2052,15 @@ fn render_icon_picker(frame: &mut Frame, area: Rect, picker: &crate::app::IconPi
         ]),
         layout.search_area,
     );
-    let view_switch = match picker.column_mode {
-        IconPickerColumnMode::MultiColumn => "[● Multi-column]  [ Single column ]",
-        IconPickerColumnMode::SingleColumn => "[ Multi-column ]  [● Single column]",
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            view_switch,
-            theme::selected_style().add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Right),
-        layout.view_switch_area,
+    crate::value_icon::column_control(area, picker).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: icon_picker_canvas_style(picker.column_mode),
+            label: theme::selected_style(),
+            value: theme::selected_style(),
+            button: theme::selected_style(),
+            ..Default::default()
+        },
     );
 
     let cell_width = usize::from(layout.document_area.width)
@@ -2104,7 +2158,9 @@ pub fn icon_picker_hit(
         return Some(IconPickerHit::Close);
     }
     if layout.view_switch_area.contains(position) {
-        return Some(IconPickerHit::ToggleColumnMode);
+        return crate::value_icon::column_control(area, picker)
+            .hit(position, crate::value_control::PointerButton::Left)
+            .map(IconPickerHit::ColumnMode);
     }
     if layout.search_area.contains(position) {
         return Some(IconPickerHit::ActivateSearch);
@@ -2143,6 +2199,45 @@ pub fn icon_picker_hit(
     None
 }
 
+/// Shared geometry keeps assignment chrome before the retained quick glyph slots.
+pub(crate) fn icon_assignment_control(
+    area: Rect,
+    scroll: u16,
+    index: usize,
+    glyph: &str,
+) -> Option<crate::value_control::ValueControl> {
+    let (table, _) = icon_tab_columns(area);
+    let geometry = IconTableGeometry::for_outer_width(table.width);
+    let inner = table.inner(ratatui::layout::Margin::new(1, 1));
+    let visible_index = index.checked_sub(usize::from(scroll))?;
+    let row_y = usize::from(inner.y).checked_add(1 + visible_index.checked_mul(2)?)?;
+    if row_y >= usize::from(inner.bottom()) || row_y > usize::from(u16::MAX) {
+        return None;
+    }
+    let target = crate::agent_monitoring::general_icon_targets()
+        .get(index)
+        .copied()?;
+    let width = (geometry.label_width + geometry.column_gap + ICON_TABLE_CURRENT_WIDTH) as u16;
+    let row = Rect::new(
+        inner.x.saturating_add(1),
+        row_y as u16,
+        width.min(inner.width.saturating_sub(1)),
+        1,
+    );
+    Some(crate::value_control::ValueControl::new(
+        row,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: target.label(),
+            value: glyph,
+            label_width: (geometry.label_width + geometry.column_gap - 1) as u16,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    ))
+}
+
 pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<IconTableHit> {
     let (table, _) = icon_tab_columns(area);
     let table_geometry = IconTableGeometry::for_outer_width(table.width);
@@ -2166,6 +2261,20 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     let action = if position.x >= picker_start && position.x < picker_end {
         IconTableAction::OpenCatalogue
     } else {
+        let choices_start = table_inner.x.saturating_add(
+            (ICON_TABLE_LEFT_INSET
+                + table_geometry.label_width
+                + table_geometry.column_gap
+                + ICON_TABLE_CURRENT_WIDTH
+                + table_geometry.column_gap) as u16,
+        );
+        let choices_end = choices_start.saturating_add(
+            (ICON_TABLE_CHOICE_WIDTH * ICON_TABLE_CHOICE_COUNT + ICON_TABLE_CHOICE_COUNT - 1)
+                as u16,
+        );
+        if position.x < choices_start || position.x >= choices_end {
+            return None;
+        }
         IconTableAction::CycleSuggestion
     };
     Some(IconTableHit { target, action })
@@ -2454,14 +2563,20 @@ fn inference_label(row: InferenceRow) -> &'static str {
         InferenceRow::Test => "Test",
     }
 }
+/// Borrowed provider catalogs kept together for the Settings renderer.
+#[derive(Clone, Copy)]
+struct InferenceModelCatalogs<'a> {
+    ollama: &'a [String],
+    kilo_gateway: &'a [String],
+    openai: &'a [String],
+}
+
 fn inference_lines(
     settings: &ilium_inference::InferenceSettings,
     test_result: Option<&crate::inference_test::InferenceTestResult>,
     test_state: &InferenceTestState,
     model_discovery: &ModelDiscoveryState,
-    ollama_models: &[String],
-    kilo_gateway_models: &[String],
-    openai_models: &[String],
+    catalogs: InferenceModelCatalogs<'_>,
     selected_row: usize,
 ) -> Vec<Line<'static>> {
     let rows = inference_rows(settings);
@@ -2500,7 +2615,7 @@ fn inference_lines(
                 "Choose the backend used by background title and organization inference."
             }
             InferenceRow::Field(InferenceSettingField::OllamaModel | InferenceSettingField::OpenAiModel) => {
-                "Use left/right to select a loaded model, or Enter to type a model name."
+                "Left/right cycles; + or Enter opens all models; E types a model name."
             }
             InferenceRow::KiloGatewayModel => {
                 "Use left/right to choose a free model from Kilo Gateway's live catalog."
@@ -2530,9 +2645,9 @@ fn inference_lines(
         )
     {
         let models = match settings.selected_provider {
-            ilium_inference::InferenceProviderKind::KiloGateway => kilo_gateway_models,
-            ilium_inference::InferenceProviderKind::OpenAi => openai_models,
-            _ => ollama_models,
+            ilium_inference::InferenceProviderKind::KiloGateway => catalogs.kilo_gateway,
+            ilium_inference::InferenceProviderKind::OpenAi => catalogs.openai,
+            _ => catalogs.ollama,
         };
         lines.extend(model_discovery_lines(settings, model_discovery, models));
     }
@@ -3682,6 +3797,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ProgressFillStyle => "Progress fill style",
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
         AppearanceRow::LockClosedEnabled => "Lock-closed items",
+        AppearanceRow::AutoRemoveEmptyGroups => "Auto-remove empty groups",
     }
 }
 
@@ -3754,6 +3870,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::TerminalTextSelection => {
             "Claim left-button drag over a terminal pane's content as a local text selection you can copy, instead of forwarding raw mouse events to the pane. Turn off to let a foreground app (e.g. an agent CLI's own menu) handle clicks and drags itself."
+        }
+        AppearanceRow::AutoRemoveEmptyGroups => {
+            "When you close the last remaining item in a group or folder, close that now-empty group too (repeating up through ancestor groups). Projects and split views are never removed. Turn off to keep empty groups."
         }
         AppearanceRow::LockClosedEnabled => {
             "Double-click a project, group, or folder row (or use its right-click menu) to lock it closed, showing a lock icon and blocking expansion until unlocked. Disabling this only hides the gesture and menu action -- an already-locked entry stays locked."
@@ -3883,6 +4002,305 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "Off".to_string()
             }
         }
+        AppearanceRow::AutoRemoveEmptyGroups => {
+            if ui.auto_remove_empty_groups {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+    }
+}
+
+fn settings_control_row(
+    area: Rect,
+    app: &App,
+    state: &SettingsState,
+    row: usize,
+) -> Option<(Rect, String, u16)> {
+    use crate::value_config::BoardNumber;
+    let (virtual_y, label, label_width) = match state.tab {
+        SettingsTab::Appearance => {
+            let current_row =
+                *AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row)?;
+            let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            let (_, line) = view
+                .row_lines
+                .iter()
+                .find(|(candidate, _)| *candidate == current_row)?;
+            let label = appearance_row_label(current_row).to_owned();
+            let width = appearance_control_label_width(area.width)
+                .max(UnicodeWidthStr::width(label.as_str()) as u16);
+            (usize::from(*line), label, width.saturating_sub(1))
+        }
+        SettingsTab::AgentMonitoring => {
+            let current_row = *agent_monitoring_rows(app).get(row)?;
+            let view = agent_monitoring_view(app, state.selected_row, area.width);
+            let (_, line) = view
+                .row_lines
+                .iter()
+                .find(|(candidate, _)| *candidate == current_row)?;
+            let label = monitoring_row_label(current_row);
+            let width = (area.width.saturating_sub(ROW_LEFT_INSET + 4) / 2)
+                .max((UnicodeWidthStr::width(label.as_str()) as u16).saturating_add(2));
+            (usize::from(*line), label, width.saturating_sub(1))
+        }
+        SettingsTab::Inference => {
+            let current = *inference_rows(&app.inference_settings).get(row)?;
+            let warning = if app.inference_settings.selected_provider
+                == ilium_inference::InferenceProviderKind::KiloGateway
+            {
+                2
+            } else {
+                0
+            };
+            let logs = inference_operation_log_lines(
+                &app.inference_settings,
+                &app.inference_test_state,
+                &app.model_discovery,
+            )
+            .len();
+            let y = usize::from(APPEARANCE_TOP_PADDING)
+                .checked_add(warning)?
+                .checked_add(logs)?
+                .checked_add(row.checked_mul(usize::from(APPEARANCE_ROW_HEIGHT))?)?;
+            (
+                y,
+                inference_label(current).into(),
+                LABEL_COLUMN_WIDTH.saturating_sub(1),
+            )
+        }
+        _ => {
+            let virtual_y = usize::from(APPEARANCE_TOP_PADDING)
+                .checked_add(row.checked_mul(usize::from(APPEARANCE_ROW_HEIGHT))?)?;
+            let label = match crate::value_settings::SettingsNumber::at(app, state.tab, row) {
+                Some(crate::value_settings::SettingsNumber::VoiceVolume) => "Output volume",
+                Some(crate::value_settings::SettingsNumber::NotificationCoalesce) => {
+                    sound_row_label(SoundRow::NotifyCoalesce)
+                }
+                Some(crate::value_settings::SettingsNumber::TerminalScrollback) => {
+                    "Scrollback budget"
+                }
+                Some(crate::value_settings::SettingsNumber::EditorAutosaveDelay) => {
+                    "Autosave delay"
+                }
+                Some(crate::value_settings::SettingsNumber::Board(
+                    BoardNumber::CardPreviewLines,
+                )) => "Card preview lines",
+                Some(crate::value_settings::SettingsNumber::Board(
+                    BoardNumber::MinimumColumnWidth,
+                )) => "Minimum column width",
+                Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
+                _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
+            };
+            (
+                virtual_y,
+                label.to_owned(),
+                LABEL_COLUMN_WIDTH.saturating_sub(1),
+            )
+        }
+    };
+    let screen_offset = virtual_y.checked_sub(usize::from(state.scroll))?;
+    if screen_offset >= usize::from(area.height) {
+        return None;
+    }
+    let inset = ROW_LEFT_INSET.min(area.width);
+    let row_area = Rect::new(
+        area.x.saturating_add(inset),
+        area.y.saturating_add(screen_offset as u16),
+        area.width - inset,
+        1,
+    );
+    Some((row_area, label, label_width))
+}
+
+/// Paint and pointer dispatch share the exact clipped numeric row geometry.
+pub(crate) fn settings_number_control(
+    area: Rect,
+    app: &App,
+    state: &SettingsState,
+    row: usize,
+) -> Option<(
+    crate::value_settings::SettingsNumber,
+    crate::value_control::ValueControl,
+)> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+    let field = crate::value_settings::SettingsNumber::at(app, state.tab, row)?;
+    let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
+    let (spec, text) = field.snapshot(app);
+    let value = match field {
+        crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
+        crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
+        crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
+        crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
+        crate::value_settings::SettingsNumber::Ui(
+            crate::value_settings::UiNumber::CompletedProgressHideAfter,
+        ) => format!("{text} s"),
+        _ => text.clone(),
+    };
+    let parsed = spec.parse(&text).ok()?;
+    let crate::value_number::NumberValue::Integer(current) = parsed else {
+        return None;
+    };
+    let crate::value_number::NumberSpec::Integer { minimum, maximum } = spec else {
+        return None;
+    };
+    Some((
+        field,
+        ValueControl::new(
+            row_area,
+            ControlSpec {
+                kind: ControlKind::Number,
+                label: &label,
+                value: &value,
+                label_width,
+                previous_enabled: current > minimum,
+                next_enabled: current < maximum,
+                open_enabled: true,
+            },
+        ),
+    ))
+}
+
+pub(crate) fn settings_choice_control(
+    area: Rect,
+    app: &App,
+    state: &SettingsState,
+    row: usize,
+) -> Option<(
+    crate::value_settings_choice::SettingsChoice,
+    crate::value_control::ValueControl,
+)> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+    let field = crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?;
+    let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
+    if matches!(
+        field,
+        crate::value_settings_choice::SettingsChoice::KiloModel
+            | crate::value_settings_choice::SettingsChoice::OllamaModel
+            | crate::value_settings_choice::SettingsChoice::OpenAiModel
+    ) {
+        let (models, value, fallback) = match field {
+            crate::value_settings_choice::SettingsChoice::KiloModel => (
+                &app.kilo_gateway_models,
+                &app.inference_settings.kilo_gateway.model,
+                app.kilo_gateway_models.is_empty(),
+            ),
+            crate::value_settings_choice::SettingsChoice::OllamaModel => (
+                &app.ollama_models,
+                &app.inference_settings.ollama.model,
+                false,
+            ),
+            _ => (
+                &app.openai_models,
+                &app.inference_settings.openai.model,
+                false,
+            ),
+        };
+        let first = models.iter().find(|model| !model.trim().is_empty());
+        let can_step = fallback
+            || if value.trim().is_empty() {
+                first.is_some_and(|first| {
+                    models
+                        .iter()
+                        .any(|model| !model.trim().is_empty() && model != first)
+                })
+            } else {
+                models
+                    .iter()
+                    .any(|model| !model.trim().is_empty() && model != value)
+            };
+        return Some((
+            field,
+            ValueControl::new(
+                row_area,
+                ControlSpec {
+                    kind: ControlKind::Choice,
+                    label: &label,
+                    value: if value.trim().is_empty() {
+                        "Not configured"
+                    } else {
+                        value
+                    },
+                    label_width,
+                    previous_enabled: can_step,
+                    next_enabled: can_step,
+                    open_enabled: true,
+                },
+            ),
+        ));
+    }
+    let (options, selected) = field.options(app);
+    let value = &options.iter().find(|option| option.id == selected)?.label;
+    let can_step = options
+        .iter()
+        .filter(|option| option.disabled_reason.is_none())
+        .count()
+        > 1;
+    Some((
+        field,
+        ValueControl::new(
+            row_area,
+            ControlSpec {
+                kind: ControlKind::Choice,
+                label: &label,
+                value,
+                label_width,
+                previous_enabled: can_step,
+                next_enabled: can_step,
+                open_enabled: true,
+            },
+        ),
+    ))
+}
+
+pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
+    match tab {
+        SettingsTab::Inference => inference_rows(&app.inference_settings).len(),
+        SettingsTab::VoiceControl => crate::voice_settings::VoiceRow::ALL.len(),
+        SettingsTab::Sound => SoundRow::ALL.len(),
+        SettingsTab::ResetPlanning => 3,
+        SettingsTab::Appearance => {
+            AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).len()
+        }
+        SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
+        SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
+        SettingsTab::Session => crate::app::SessionRow::ALL.len(),
+        SettingsTab::Git => crate::app::GitRow::ALL.len(),
+        SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
+        SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
+        SettingsTab::Api => crate::app::ApiRow::ALL.len(),
+        _ => 0,
+    }
+}
+
+fn render_number_controls(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
+    let row_count = settings_number_row_count(app, state.tab);
+    for row in 0..row_count {
+        if let Some(control) = settings_number_control(area, app, state, row)
+            .map(|(_, control)| control)
+            .or_else(|| settings_choice_control(area, app, state, row).map(|(_, control)| control))
+        {
+            let style = if row == state.selected_row {
+                theme::selected_style()
+            } else {
+                Style::new().fg(theme::accent_bg())
+            };
+            control.render(
+                frame,
+                crate::value_control::ControlStyles {
+                    background: Style::new(),
+                    label: if row == state.selected_row {
+                        Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                    } else {
+                        Style::new()
+                    },
+                    value: style,
+                    button: style,
+                    disabled: Style::new().add_modifier(Modifier::DIM),
+                },
+            );
+        }
     }
 }
 
@@ -3926,6 +4344,16 @@ fn terminal_lines(settings: &TerminalSettings, selected: usize) -> Vec<Line<'sta
                 "New pane directory",
                 settings.new_pane_directory.label().to_string(),
                 "Choose the initial directory for a terminal pane.",
+            ),
+            (
+                "Smart Copy light",
+                on_off(settings.smart_copy_light),
+                "Hold the key below over a terminal and click regions to select them; releasing the key copies them and shows a Preview. Terminals that cannot report key release finish on the next mouse move or after a short pause.",
+            ),
+            (
+                "Smart Copy light key",
+                settings.smart_copy_light_key.label().to_string(),
+                "The modifier key that starts Smart Copy light while held.",
             ),
         ],
         selected,
@@ -4999,6 +5427,261 @@ fn about_lines() -> Vec<Line<'static>> {
 }
 
 #[cfg(test)]
+mod number_control_tests {
+    use super::*;
+    use crate::value_control::{ControlAction, PointerButton};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn numeric_settings_paint_and_hits_match_for_every_bound_tab_and_policy() {
+        let app_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("numeric-chrome".into(), app_directory.path().into());
+        app.agent_detection_settings = Some(ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 0,
+            idle_poll_seconds: 45,
+            custom_signatures: Vec::new(),
+        });
+        for policy in [
+            LeftPanelSizingMode::Fixed,
+            LeftPanelSizingMode::FocusDependent,
+            LeftPanelSizingMode::TerminalWidthDependent,
+        ] {
+            app.ui_settings.left_panel_sizing.mode = policy;
+            for tab in [
+                SettingsTab::Appearance,
+                SettingsTab::AgentMonitoring,
+                SettingsTab::Terminal,
+                SettingsTab::Editor,
+                SettingsTab::KanbanBoard,
+                SettingsTab::Api,
+                SettingsTab::Inference,
+                SettingsTab::Sound,
+                SettingsTab::VoiceControl,
+            ] {
+                let state = SettingsState {
+                    tab,
+                    ..SettingsState::default()
+                };
+                let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
+                let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
+                let instructions =
+                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                layout.content_area.y += instructions;
+                layout.content_area.height =
+                    layout.content_area.height.saturating_sub(instructions);
+                terminal
+                    .draw(|frame| render(frame, frame.area(), &app, &state))
+                    .unwrap();
+                let mut count = 0;
+                for row in 0..settings_number_row_count(&app, tab) {
+                    let Some((_, control)) =
+                        settings_number_control(layout.content_area, &app, &state, row)
+                    else {
+                        continue;
+                    };
+                    count += 1;
+                    let geometry = control.geometry();
+                    for (rectangle, symbol) in [
+                        (geometry.previous, "−"),
+                        (geometry.next, "+"),
+                        (geometry.open, "*"),
+                    ] {
+                        assert_eq!(
+                            terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                            symbol,
+                            "{tab:?}/{row}"
+                        );
+                    }
+                    assert_eq!(
+                        control.hit(
+                            Position::new(geometry.open.x, geometry.open.y),
+                            PointerButton::Left
+                        ),
+                        Some(ControlAction::EditNumber)
+                    );
+                    assert_eq!(
+                        geometry.value.x - geometry.value_slot.x,
+                        (geometry.value_slot.width - geometry.value.width) / 2
+                    );
+                    let mut scrolled = SettingsState {
+                        tab,
+                        scroll: geometry.row.y - layout.content_area.y + 1,
+                        ..SettingsState::default()
+                    };
+                    assert!(
+                        settings_number_control(layout.content_area, &app, &scrolled, row)
+                            .is_none()
+                    );
+                    scrolled.scroll -= 1;
+                    let (_, top) =
+                        settings_number_control(layout.content_area, &app, &scrolled, row).unwrap();
+                    assert_eq!(top.geometry().row.y, layout.content_area.y);
+                }
+                assert!(count > 0, "{tab:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("synthetic-single-model".into(), directory.path().into());
+        app.inference_settings.selected_provider = ilium_inference::InferenceProviderKind::Ollama;
+        app.inference_settings.ollama.model.clear();
+        app.ollama_models = vec![
+            "synthetic-only-model".into(),
+            "synthetic-only-model".into(),
+            "".into(),
+        ];
+        let row = inference_rows(&app.inference_settings)
+            .iter()
+            .position(|row| *row == InferenceRow::Field(InferenceSettingField::OllamaModel))
+            .unwrap();
+        let state = SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row: row,
+            ..SettingsState::default()
+        };
+        let (_, control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let geometry = control.geometry();
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.previous.x, geometry.previous.y),
+                PointerButton::Left
+            ),
+            None
+        );
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.next.x, geometry.next.y),
+                PointerButton::Left
+            ),
+            None
+        );
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.open.x, geometry.open.y),
+                PointerButton::Left
+            ),
+            Some(ControlAction::OpenChoices)
+        );
+        app.ollama_models.push("synthetic-second-model".into());
+        let (_, control) =
+            settings_choice_control(Rect::new(0, 0, 140, 80), &app, &state, row).unwrap();
+        let next = control.geometry().next;
+        assert_eq!(
+            control.hit(Position::new(next.x, next.y), PointerButton::Left),
+            Some(ControlAction::NextChoice)
+        );
+    }
+
+    #[test]
+    fn settings_choice_chrome_paints_and_hits_every_bound_catalog() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("choice-chrome".into(), directory.path().into());
+        // This broad chrome case exercises cycling with multiple options;
+        // the neighboring test covers an empty/single discovered catalog.
+        app.ollama_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
+        app.openai_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
+        app.voice_input_devices = vec!["Test microphone".into()];
+        app.voice_output_devices = vec!["Test speaker".into()];
+        app.sound_discovery.sounds = vec![ilium_sound::SystemSound {
+            path: directory.path().join("test-chime.wav"),
+            display_name: "Test chime".into(),
+            collection: "Synthetic test catalog".into(),
+        }];
+        let mut found = Vec::new();
+        let mut cases: Vec<_> = [
+            SettingsTab::Git,
+            SettingsTab::Session,
+            SettingsTab::Appearance,
+            SettingsTab::AgentMonitoring,
+            SettingsTab::Terminal,
+            SettingsTab::Editor,
+            SettingsTab::VoiceControl,
+            SettingsTab::Sound,
+            SettingsTab::ResetPlanning,
+        ]
+        .into_iter()
+        .map(|tab| (tab, app.inference_settings.selected_provider))
+        .collect();
+        cases.extend(
+            ilium_inference::InferenceProviderKind::ALL
+                .into_iter()
+                .map(|provider| (SettingsTab::Inference, provider)),
+        );
+        for (tab, provider) in cases {
+            app.inference_settings.selected_provider = provider;
+            let state = SettingsState {
+                tab,
+                ..SettingsState::default()
+            };
+            let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
+            let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
+            let instructions =
+                crate::instruction_settings::panel_height(state.tab, layout.content_area);
+            layout.content_area.y += instructions;
+            layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
+            terminal
+                .draw(|frame| render(frame, frame.area(), &app, &state))
+                .unwrap();
+            for row in 0..settings_number_row_count(&app, tab) {
+                let Some((field, control)) =
+                    settings_choice_control(layout.content_area, &app, &state, row)
+                else {
+                    continue;
+                };
+                if !found.contains(&field) {
+                    found.push(field);
+                }
+                let geometry = control.geometry();
+                for (rectangle, symbol) in [
+                    (geometry.previous, "←"),
+                    (geometry.open, "+"),
+                    (geometry.next, "→"),
+                ] {
+                    assert_eq!(
+                        terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                        symbol,
+                        "{field:?}"
+                    );
+                }
+                let value = Position::new(geometry.value.x, geometry.value.y);
+                assert_eq!(
+                    control.hit(value, PointerButton::Left),
+                    Some(ControlAction::NextChoice)
+                );
+                assert_eq!(
+                    control.hit(value, PointerButton::Right),
+                    Some(ControlAction::PreviousChoice)
+                );
+                assert_eq!(
+                    control.hit(
+                        Position::new(geometry.open.x, geometry.open.y),
+                        PointerButton::Left
+                    ),
+                    Some(ControlAction::OpenChoices)
+                );
+            }
+        }
+        assert_eq!(
+            found.len(),
+            crate::value_settings_choice::SettingsChoice::ALL.len()
+        );
+        for field in crate::value_settings_choice::SettingsChoice::ALL {
+            assert_eq!(
+                found
+                    .iter()
+                    .filter(|candidate| **candidate == field)
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -5448,7 +6131,19 @@ mod tests {
         // The first inner line is the table heading. The first target starts
         // one row below it, and must not be interpreted as the second target.
         assert_eq!(
-            icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 1)),
+            icons_table_hit(
+                area,
+                0,
+                Position::new(
+                    inner.x
+                        + (ICON_TABLE_LEFT_INSET
+                            + table_geometry.label_width
+                            + table_geometry.column_gap
+                            + ICON_TABLE_CURRENT_WIDTH
+                            + table_geometry.column_gap) as u16,
+                    inner.y + 1
+                )
+            ),
             Some(IconTableHit {
                 target: IconTarget::Group,
                 action: IconTableAction::CycleSuggestion,
@@ -5460,7 +6155,19 @@ mod tests {
             "the spacer below an assignment is deliberately not interactive"
         );
         assert_eq!(
-            icons_table_hit(area, 0, Position::new(inner.x + 1, inner.y + 3)),
+            icons_table_hit(
+                area,
+                0,
+                Position::new(
+                    inner.x
+                        + (ICON_TABLE_LEFT_INSET
+                            + table_geometry.label_width
+                            + table_geometry.column_gap
+                            + ICON_TABLE_CURRENT_WIDTH
+                            + table_geometry.column_gap) as u16,
+                    inner.y + 3
+                )
+            ),
             Some(IconTableHit {
                 target: IconTarget::TopLevel,
                 action: IconTableAction::CycleSuggestion,
@@ -5539,8 +6246,9 @@ mod tests {
 
     #[test]
     fn roomy_icons_table_aligns_later_columns_after_short_and_long_titles() {
-        // The reserved Settings help rail now uses three terminal cells.
-        let content_area = compute_layout(Rect::new(0, 0, 170, 45)).content_area;
+        // The expanded table needs 80 cells for the longest label; 180 columns
+        // leave 84 table cells after the tabs, gaps, and Settings help rail.
+        let content_area = compute_layout(Rect::new(0, 0, 180, 45)).content_area;
         let (table, _) = icon_tab_columns(content_area);
         let geometry = IconTableGeometry::for_outer_width(table.width);
         let choices = IconTarget::Folder
@@ -5635,9 +6343,11 @@ mod tests {
             None,
             &InferenceTestState::Idle,
             &ModelDiscoveryState::Idle,
-            &[],
-            &kilo_models,
-            &[],
+            InferenceModelCatalogs {
+                ollama: &[],
+                kilo_gateway: &kilo_models,
+                openai: &[],
+            },
             0,
         )
         .into_iter()
@@ -5661,9 +6371,11 @@ mod tests {
                 endpoint: "http://127.0.0.1:11434/api/tags".to_string(),
                 started_at: std::time::Instant::now(),
             },
-            &discovered_models,
-            &[],
-            &[],
+            InferenceModelCatalogs {
+                ollama: &discovered_models,
+                kilo_gateway: &[],
+                openai: &[],
+            },
             0,
         )
         .into_iter()
@@ -5672,7 +6384,7 @@ mod tests {
         assert!(loading_text.contains("Discovering models"));
         assert!(loading_text.contains("Ollama (local) model discovery log"));
         assert!(loading_text.contains("Request GET http://127.0.0.1:11434/api/tags"));
-        assert!(loading_text.contains("qwen3.6:latest"));
+        assert_eq!(loading_text.matches("Request GET").count(), 1);
     }
 
     #[test]
@@ -5709,9 +6421,11 @@ mod tests {
                 started_at: std::time::Instant::now(),
             },
             &ModelDiscoveryState::Idle,
-            &[],
-            &[],
-            &[],
+            InferenceModelCatalogs {
+                ollama: &[],
+                kilo_gateway: &[],
+                openai: &[],
+            },
             0,
         )
         .into_iter()
@@ -5775,9 +6489,11 @@ mod tests {
             None,
             &app.inference_test_state,
             &app.model_discovery,
-            &[],
-            &[],
-            &[],
+            InferenceModelCatalogs {
+                ollama: &[],
+                kilo_gateway: &[],
+                openai: &[],
+            },
             0,
         );
         let row_line = lines
@@ -6501,9 +7217,17 @@ mod tests {
             icon_picker_hit(
                 area,
                 &picker,
-                Position::new(layout.view_switch_area.x, layout.view_switch_area.y),
+                Position::new(
+                    crate::value_icon::column_control(area, &picker)
+                        .geometry()
+                        .open
+                        .x,
+                    layout.view_switch_area.y
+                ),
             ),
-            Some(IconPickerHit::ToggleColumnMode),
+            Some(IconPickerHit::ColumnMode(
+                crate::value_control::ControlAction::OpenChoices
+            )),
         );
         assert_eq!(
             icon_picker_hit(
@@ -6743,9 +7467,11 @@ mod tests {
             None,
             &InferenceTestState::Idle,
             &ModelDiscoveryState::Idle,
-            &[],
-            &[],
-            &models,
+            InferenceModelCatalogs {
+                ollama: &[],
+                kilo_gateway: &[],
+                openai: &models,
+            },
             4,
         )
         .into_iter()
@@ -6753,8 +7479,9 @@ mod tests {
         .collect::<String>();
         assert!(text.contains("Available models"));
         assert!(text.contains("gpt-6-luna"));
-        assert!(text.contains("Use left/right"));
-        assert!(text.contains("Enter to type a model name"));
+        assert!(text.contains("Left/right cycles"));
+        assert!(text.contains("+ or Enter opens all models"));
+        assert!(text.contains("E types a model name"));
         assert!(text.contains("https://api.openai.com/v1/models"));
     }
 }

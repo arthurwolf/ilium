@@ -51,11 +51,68 @@ impl Drop for EditorFixture {
     }
 }
 
+/// Uses the production capture, finite jobs and completion installer. The
+/// editor and its immutable window drop before their execution owner.
+struct PreparedEditor {
+    app: App,
+    pane_id: ilium_core::NodeId,
+    _execution: ilium_client::execution::ClientExecution,
+}
+impl PreparedEditor {
+    fn new(editor: EditorPane) -> Self {
+        let execution = ilium_client::execution::ClientExecution::start().expect("document bank");
+        let mut app = App::new("navigation".into(), std::env::temp_dir());
+        let group_id = app
+            .tree
+            .add_group(ROOT_ID, "editors")
+            .expect("editor group");
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "notes.txt", PaneContentKind::Editor)
+            .expect("editor pane");
+        app.panes
+            .insert(pane_id, PaneRuntime::Editor(Box::new(editor)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 120, 30));
+        app.configure_document_preparation(execution.documents().expect("document admission"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            app.begin_editor_capture_turn();
+            app.rebuild_rendered_markdown(pane_id);
+            app.collect_document_preparation();
+            let width = app.editor_content_area(pane_id).width;
+            let ready = matches!(app.panes.get(&pane_id), Some(PaneRuntime::Editor(editor))
+                if editor.source_visual_row_at(width, 9).is_some());
+            if ready {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "production source preparation timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        Self {
+            app,
+            pane_id,
+            _execution: execution,
+        }
+    }
+    fn editor_mut(&mut self) -> &mut EditorPane {
+        match self.app.panes.get_mut(&self.pane_id) {
+            Some(PaneRuntime::Editor(editor)) => editor,
+            _ => panic!("prepared editor remains owned"),
+        }
+    }
+}
+
 #[test]
 fn wheel_navigation_moves_the_source_viewport_and_keeps_it_until_cursor_navigation() {
     let fixture = EditorFixture::create();
     let mut editor = EditorPane::load(fixture.clone()).expect("load editor fixture");
     editor.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
+    let mut prepared = PreparedEditor::new(editor);
+    let editor = prepared.editor_mut();
 
     editor.scroll_source_view(3, 4, 80);
     editor.update_source_scroll_mirror(4, 80);

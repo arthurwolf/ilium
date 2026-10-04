@@ -113,6 +113,26 @@ pub fn render(
     );
 }
 
+/// Hover content for a report's long description: the compact message as the
+/// header, the multi-line details as the body, and the machine identity as
+/// the dim reason line.
+pub fn details_tooltip(progress: &PaneProgress) -> crate::status_icons::TooltipContent {
+    let (_, status_label, _) = status_presentation(progress);
+    let title = if progress.report.message.is_empty() {
+        format!("{status_label}  {:.0}%", progress.report.percent)
+    } else {
+        progress.report.message.clone()
+    };
+    crate::status_icons::TooltipContent {
+        title,
+        body: progress.report.details.clone(),
+        reason: Some(format!(
+            "{status_label} {:.0}% · job {} · monitor #{}",
+            progress.report.percent, progress.report.job_id, progress.monitor_id
+        )),
+    }
+}
+
 fn status_presentation(progress: &PaneProgress) -> (&'static str, &'static str, DetailTone) {
     match &progress.monitor_health {
         ProgressMonitorHealth::Failed { .. } => ("⚠", "MONITOR FAILED", DetailTone::Warning),
@@ -141,9 +161,16 @@ fn detail_rows(progress: &PaneProgress, width: u16, maximum_rows: u16) -> Vec<De
         );
     }
     if !progress.report.message.is_empty() {
+        // The compact description is one logical line; the long one lives in
+        // the hover tooltip and is advertised by a trailing marker.
+        let marker = if progress.report.details.is_empty() {
+            ""
+        } else {
+            " ⓘ hover for details"
+        };
         push_wrapped(
             &mut critical,
-            progress.report.message.clone(),
+            format!("{}{marker}", progress.report.message),
             DetailTone::Normal,
             width,
         );
@@ -256,6 +283,7 @@ mod tests {
                 status,
                 percent,
                 message.to_string(),
+                String::new(),
                 error.map(str::to_string),
             )?,
             123,
@@ -389,6 +417,62 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| row.text.contains("Observation degraded")));
+    }
+
+    fn progress_with_details(message: &str, details: &str) -> PaneProgress {
+        PaneProgress::new(
+            17,
+            ProgressTaskReport::new(
+                "render-42".to_string(),
+                ProgressTaskStatus::Running,
+                40.0,
+                message.to_string(),
+                details.to_string(),
+                None,
+            )
+            .unwrap(),
+            123,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn footer_advertises_hover_details_only_when_details_exist() {
+        let with = progress_with_details("Building the app - crate 4 of 10", "What: build");
+        let without = progress_with_details("Building the app - crate 4 of 10", "");
+        assert!(rendered_rows(&with, 80, 3)
+            .iter()
+            .any(|row| row.contains("Building the app - crate 4 of 10 ⓘ hover for details")));
+        assert!(!rendered_rows(&without, 80, 3)
+            .iter()
+            .any(|row| row.contains("hover for details")));
+    }
+
+    #[test]
+    fn footer_never_prints_the_long_description() {
+        let progress = progress_with_details("Short line", "What: SECRET-LONG-TEXT\nWhy: more");
+        assert!(!rendered_rows(&progress, 80, 6)
+            .iter()
+            .any(|row| row.contains("SECRET-LONG-TEXT")));
+    }
+
+    #[test]
+    fn hover_tooltip_carries_message_details_and_identity() {
+        let progress = progress_with_details(
+            "Building the app - crate 4 of 10",
+            "What: build\nWhy: release\nNow: crate 4 of 10",
+        );
+        let tooltip = details_tooltip(&progress);
+        assert_eq!(tooltip.title, "Building the app - crate 4 of 10");
+        assert_eq!(
+            tooltip.body,
+            "What: build\nWhy: release\nNow: crate 4 of 10"
+        );
+        let reason = tooltip.reason.unwrap();
+        assert!(reason.contains("job render-42") && reason.contains("monitor #17"));
+
+        let empty = progress_with_details("", "What: x");
+        assert!(details_tooltip(&empty).title.contains("RUNNING"));
     }
 
     #[test]

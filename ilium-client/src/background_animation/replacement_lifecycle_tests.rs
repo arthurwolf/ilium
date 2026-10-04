@@ -106,7 +106,9 @@ fn replacements_pause_then_build_exact_new_generation_and_ready_copies() {
             loop_seconds: 120,
             ..Default::default()
         };
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         cache.begin(&old, 80, 24);
         // Never poll the old receiver: whether it has started, is rendering, or
         // has already sent, pause must detach it from all future publication.
@@ -160,7 +162,9 @@ fn replacements_discard_a_completed_but_unpolled_old_generation() {
             loop_seconds: 1,
             ..Default::default()
         };
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         let deadline = Instant::now() + Duration::from_secs(20);
         // start_build retries admission without consuming the generation receiver.
         cache.begin(&old, 8, 4);

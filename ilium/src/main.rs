@@ -79,6 +79,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Internal native clipboard owner; never opens a session or runtime.
+    #[command(hide = true)]
+    ClipboardHelper,
     /// Internal offline release qualification; opens no terminal or session.
     #[command(hide = true)]
     ReleaseEmbeddingProbe {
@@ -89,6 +92,9 @@ enum Command {
         #[arg(long)]
         hold_for_native_audit: bool,
     },
+    /// Internal installed animation qualification through this shipped binary.
+    #[command(hide = true)]
+    ReleaseAnimationProbe,
     /// Create (if not already running) and attach to a named session.
     NewSession { name: String },
     /// List this project's known sessions and whether each is currently running.
@@ -238,21 +244,100 @@ impl ProgressCommand {
     }
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
-    let cli = Cli::parse();
-    match dispatch(cli).await {
-        Ok(()) => ExitCode::SUCCESS,
+fn main() -> ExitCode {
+    // A Flatpak package is a distribution wrapper for the trusted host CLI.
+    // This runs before parsing, quota registration, threads, or session state.
+    match ilium_platform::flatpak_host::maybe_handoff() {
+        Ok(Some(status)) => {
+            return status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .map(ExitCode::from)
+                .unwrap_or(ExitCode::FAILURE);
+        }
+        Ok(None) => {}
         Err(error) => {
-            tracing::error!(%error, error_debug = ?error, "ilium CLI action failed");
-            eprintln!("ilium: {error}");
-            ExitCode::FAILURE
+            eprintln!("ilium: Flatpak host handoff: {error}");
+            return ExitCode::FAILURE;
         }
     }
+    let cli = Cli::parse();
+    if matches!(&cli.command, Some(Command::ClipboardHelper)) {
+        return match ilium_client::terminal_clipboard::run_helper() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("ilium clipboard helper: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Err(error) = ilium_client::bootstrap_process_quota() {
+        eprintln!("ilium: process resource startup: {error}");
+        return ExitCode::FAILURE;
+    }
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(4)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("ilium: runtime startup: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run_main(cli))
+}
+
+async fn run_main(cli: Cli) -> ExitCode {
+    let outcome = dispatch(cli).await;
+    if let Err(error) = &outcome {
+        tracing::error!(%error, error_debug = ?error, "ilium CLI action failed");
+        eprintln!("ilium: {error}");
+    }
+    // The final CLI event must precede the ordered drain. Errors after this
+    // point go to stderr, because the process logging owner is being closed.
+    let logging = process_logging_barrier(true).await;
+    if let Err(error) = &logging {
+        eprintln!("ilium: final logging drain failed: {error}");
+    }
+    if outcome.is_ok() && logging.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Process-boundary adapter, never an interactive-loop wait. Admission and
+/// completion share one deadline; timeout reports unknown completion honestly.
+async fn process_logging_barrier(shutdown: bool) -> Result<(), ilium_logging::LoggingError> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let receipt = if shutdown {
+                ilium_logging::request_shutdown()
+            } else {
+                ilium_logging::request_flush()
+            };
+            match receipt {
+                Ok(receipt) => return receipt.await,
+                Err(ilium_logging::LoggingError::NotInitialized) => return Ok(()),
+                Err(ilium_logging::LoggingError::AdmissionBusy) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    })
+    .await
+    .map_err(|_| ilium_logging::LoggingError::Deadline)?
 }
 
 async fn dispatch(cli: Cli) -> Result<(), CliError> {
     match cli.command {
+        Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
+            "Clipboard helper must run before runtime startup".into(),
+        )),
         Some(Command::ReleaseEmbeddingProbe {
             model_directory,
             text,
@@ -262,6 +347,11 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
                 .map_err(|error| {
                     CliError::ServerReportedError(format!("release embedding probe: {error:#}"))
                 })
+        }
+        Some(Command::ReleaseAnimationProbe) => {
+            ilium_client::release_animation::probe().map_err(|error| {
+                CliError::ServerReportedError(format!("release animation probe: {error:#}"))
+            })
         }
         None => {
             attach_or_create(
@@ -574,9 +664,10 @@ async fn wait_for_progress_response(
     connection: &mut ilium_client::connection::Connection,
     request_id: u64,
     expected: ExpectedProgressResponse,
-) -> Result<ProgressResponse, CliError> {
+) -> Result<ilium_client::connection::Received<ProgressResponse>, CliError> {
     tokio::time::timeout(PROGRESS_REQUEST_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             let matched = match (expected, event) {
                 (
                     ExpectedProgressResponse::Check,
@@ -615,7 +706,10 @@ async fn wait_for_progress_response(
                 _ => None,
             };
             if let Some(response) = matched {
-                return Ok(response);
+                return Ok(ilium_client::connection::Received::with_retention(
+                    response,
+                    _event_retention,
+                ));
             }
         }
         Err(CliError::ServerReportedError(
@@ -630,7 +724,11 @@ async fn wait_for_progress_response(
     })?
 }
 
-fn print_progress_response(request_id: u64, response: ProgressResponse) -> Result<(), CliError> {
+fn print_progress_response(
+    request_id: u64,
+    response: ilium_client::connection::Received<ProgressResponse>,
+) -> Result<(), CliError> {
+    let (response, _retention) = response.into_parts();
     match response {
         ProgressResponse::Check { pane_id, result } => match result {
             Ok(preflight) => {
@@ -642,7 +740,12 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
                 );
                 Ok(())
             }
-            Err(rejection) => print_progress_rejection(request_id, pane_id, "check", rejection),
+            Err(rejection) => print_progress_rejection(
+                request_id,
+                pane_id,
+                "check",
+                ilium_client::connection::Received::with_retention(rejection, _retention),
+            ),
         },
         ProgressResponse::Set { pane_id, result } => match result {
             Ok(accepted) => {
@@ -654,7 +757,12 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
                 );
                 Ok(())
             }
-            Err(rejection) => print_progress_rejection(request_id, pane_id, "set", rejection),
+            Err(rejection) => print_progress_rejection(
+                request_id,
+                pane_id,
+                "set",
+                ilium_client::connection::Received::with_retention(rejection, _retention),
+            ),
         },
         ProgressResponse::Status { pane_id, result } => match result {
             Ok(status) => {
@@ -669,7 +777,12 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
                 );
                 Ok(())
             }
-            Err(rejection) => print_progress_rejection(request_id, pane_id, "status", rejection),
+            Err(rejection) => print_progress_rejection(
+                request_id,
+                pane_id,
+                "status",
+                ilium_client::connection::Received::with_retention(rejection, _retention),
+            ),
         },
         ProgressResponse::Clear { pane_id, result } => match result {
             Ok(cleared_monitor_id) => {
@@ -682,7 +795,12 @@ fn print_progress_response(request_id: u64, response: ProgressResponse) -> Resul
                 );
                 Ok(())
             }
-            Err(rejection) => print_progress_rejection(request_id, pane_id, "clear", rejection),
+            Err(rejection) => print_progress_rejection(
+                request_id,
+                pane_id,
+                "clear",
+                ilium_client::connection::Received::with_retention(rejection, _retention),
+            ),
         },
     }
 }
@@ -691,8 +809,9 @@ fn print_progress_rejection(
     request_id: u64,
     pane_id: ilium_core::NodeId,
     operation: &str,
-    rejection: ilium_ipc::ProgressMonitorRejection,
+    rejection: ilium_client::connection::Received<ilium_ipc::ProgressMonitorRejection>,
 ) -> Result<(), CliError> {
+    let (rejection, retention) = rejection.into_parts();
     println!(
         "{{\"type\":\"progress_rejected\",\"operation\":{},\"request_id\":{request_id},\"pane_id\":{},\"code\":{},\"message\":{}}}",
         json_string(operation),
@@ -700,7 +819,10 @@ fn print_progress_rejection(
         json_string(progress_rejection_code_name(rejection.code)),
         json_string(&rejection.message)
     );
-    Err(CliError::ServerReportedError(rejection.message))
+    Err(CliError::received_server_error(
+        rejection.message,
+        retention,
+    ))
 }
 
 fn pane_progress_json(progress: &ilium_core::PaneProgress) -> String {
@@ -719,11 +841,12 @@ fn progress_report_json(report: &ilium_core::ProgressTaskReport) -> String {
         .as_deref()
         .map_or_else(|| "null".to_string(), json_string);
     format!(
-        "{{\"job_id\":{},\"status\":{},\"percent\":{},\"message\":{},\"error\":{error}}}",
+        "{{\"job_id\":{},\"status\":{},\"percent\":{},\"message\":{},\"details\":{},\"error\":{error}}}",
         json_string(&report.job_id),
         json_string(progress_task_status_name(report.status)),
         report.percent,
-        json_string(&report.message)
+        json_string(&report.message),
+        json_string(&report.details)
     )
 }
 
@@ -836,7 +959,7 @@ async fn attach_or_create(
     match exit_reason {
         ilium_client::ClientExitReason::Quit => Ok(()),
         ilium_client::ClientExitReason::RestartRequested => {
-            restart_client_process(&client_executable, &project_session)
+            restart_client_process(&client_executable, &project_session).await
         }
     }
 }
@@ -844,10 +967,12 @@ async fn attach_or_create(
 /// Replaces this client process with the executable captured before the TUI
 /// started. The reconstructed invocation carries only project/session identity,
 /// so `--restart-server` and `--reset-session` can never leak into this path.
-fn restart_client_process(
+async fn restart_client_process(
     executable_path: &Path,
     project_session: &session::ProjectSession,
 ) -> Result<(), CliError> {
+    tracing::info!("client process replacement requested");
+    process_logging_barrier(false).await?;
     let source = ilium_platform::process_control::replace_current_process(
         ProcessCommand::new(executable_path)
             .args(client_restart_args(project_session))
@@ -918,9 +1043,12 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     // failed).
     let initial_attach_reply = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ilium_ipc::ServerEvent::TreeSnapshot(_) => return Ok(()),
-                ilium_ipc::ServerEvent::Error { message } => return Err(message),
+                ilium_ipc::ServerEvent::Error { message } => {
+                    return Err(CliError::received_server_error(message, _event_retention))
+                }
                 _ => {}
             }
         }
@@ -928,7 +1056,7 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     })
     .await;
     if let Ok(Err(message)) = initial_attach_reply {
-        return Err(CliError::ServerReportedError(message));
+        return Err(message);
     }
 
     connection
@@ -950,15 +1078,16 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
     // this connection failed -- surface it rather than reporting success.
     let drain_result = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             if let ilium_ipc::ServerEvent::Error { message } = event {
-                return Err(message);
+                return Err(CliError::received_server_error(message, _event_retention));
             }
         }
         Ok(())
     })
     .await;
     if let Ok(Err(message)) = drain_result {
-        return Err(CliError::ServerReportedError(message));
+        return Err(message);
     }
 
     println!("session {session_name:?} killed");
@@ -1018,24 +1147,39 @@ async fn run_new_workspace_pane(
     let attach = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         let mut initial_tree = None;
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
-                ServerEvent::PaneStateSnapshot { tree, .. } => initial_tree = Some(tree),
+                ServerEvent::PaneStateSnapshot { tree, .. } => {
+                    initial_tree = Some(ilium_client::connection::Received::with_retention(
+                        tree,
+                        _event_retention,
+                    ))
+                }
                 ServerEvent::TreeSnapshot(tree) if initial_tree.is_none() => {
-                    initial_tree = Some(tree)
+                    initial_tree = Some(ilium_client::connection::Received::with_retention(
+                        tree,
+                        _event_retention,
+                    ))
                 }
                 ServerEvent::InitialStateSyncComplete => {
-                    return initial_tree
-                        .ok_or_else(|| "session attach completed without a tree".to_string());
+                    return initial_tree.ok_or_else(|| {
+                        CliError::ServerReportedError(
+                            "session attach completed without a tree".into(),
+                        )
+                    });
                 }
-                ServerEvent::Error { message } => return Err(message),
+                ServerEvent::Error { message } => {
+                    return Err(CliError::received_server_error(message, _event_retention))
+                }
                 _ => {}
             }
         }
-        Err("connection closed before the session attach completed".to_string())
+        Err(CliError::ServerReportedError(
+            "connection closed before the session attach completed".into(),
+        ))
     })
     .await
-    .map_err(|_| CliError::ServerReportedError("session attach timed out".into()))?
-    .map_err(CliError::ServerReportedError);
+    .map_err(|_| CliError::ServerReportedError("session attach timed out".into()))?;
     let _initial_tree = attach?;
 
     println!(
@@ -1055,21 +1199,36 @@ async fn run_new_workspace_pane(
         })?;
     let facts = tokio::time::timeout(WORKSPACE_FACTS_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ServerEvent::RepoFactsReported {
                     request_id: response_id,
                     result,
                     ..
-                } if response_id == request_id => return result,
-                ServerEvent::Error { message } => return Err(message),
+                } if response_id == request_id => {
+                    return result
+                        .map_err(|message| {
+                            CliError::received_server_error(message, _event_retention.clone())
+                        })
+                        .map(|facts| {
+                            ilium_client::connection::Received::with_retention(
+                                facts,
+                                _event_retention,
+                            )
+                        })
+                }
+                ServerEvent::Error { message } => {
+                    return Err(CliError::received_server_error(message, _event_retention))
+                }
                 _ => {}
             }
         }
-        Err("connection closed before repository facts arrived".to_string())
+        Err(CliError::ServerReportedError(
+            "connection closed before repository facts arrived".into(),
+        ))
     })
     .await
-    .map_err(|_| CliError::ServerReportedError("repository query timed out".into()))?
-    .map_err(CliError::ServerReportedError)?;
+    .map_err(|_| CliError::ServerReportedError("repository query timed out".into()))??;
 
     let path = default_workspace_path(&facts, branch)?;
     let base_ref = base.unwrap_or(&facts.default_base_ref);
@@ -1104,6 +1263,7 @@ async fn run_new_workspace_pane(
         })?;
     let result = tokio::time::timeout(WORKSPACE_CREATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ServerEvent::WorkspaceCreateProgress {
                     request_id: response_id,
@@ -1121,20 +1281,19 @@ async fn run_new_workspace_pane(
                 ServerEvent::WorkspaceCreateFailed {
                     request_id: response_id,
                     error,
-                } if response_id == request_id => return Err(error),
-                ServerEvent::Error { message } => return Err(message),
+                } if response_id == request_id => return Err(CliError::received_server_error(error,_event_retention)),
+                ServerEvent::Error { message } => return Err(CliError::received_server_error(message,_event_retention)),
                 _ => {}
             }
         }
-        Err("connection closed before workspace creation was confirmed".to_string())
+        Err(CliError::ServerReportedError("connection closed before workspace creation was confirmed".into()))
     })
     .await
     .map_err(|_| {
         CliError::ServerReportedError(
             "workspace confirmation timed out; creation may still have completed, so inspect the session and Git worktrees before retrying".into(),
         )
-    })?
-    .map_err(CliError::ServerReportedError);
+    })?;
     let _ = connection.requests.send(ClientRequest::Detach).await;
     let pane_id = result?;
     println!(
@@ -1229,11 +1388,14 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
     // attach already failed.
     let baseline_wait = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
                     return Ok(Some(tree.panes().count()));
                 }
-                ilium_ipc::ServerEvent::Error { message } => return Err(message),
+                ilium_ipc::ServerEvent::Error { message } => {
+                    return Err(CliError::received_server_error(message, _event_retention))
+                }
                 _ => {}
             }
         }
@@ -1242,7 +1404,7 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
     .await;
     let baseline_pane_count = match baseline_wait {
         Ok(Ok(count)) => count,
-        Ok(Err(message)) => return Err(CliError::ServerReportedError(message)),
+        Ok(Err(message)) => return Err(message),
         Err(_elapsed) => None,
     };
 
@@ -1264,8 +1426,14 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
 
     let outcome = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
-                ilium_ipc::ServerEvent::Error { message } => return Some(Err(message)),
+                ilium_ipc::ServerEvent::Error { message } => {
+                    return Some(Err(CliError::received_server_error(
+                        message,
+                        _event_retention,
+                    )))
+                }
                 ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
                     let grew =
                         baseline_pane_count.is_none_or(|baseline| tree.panes().count() > baseline);
@@ -1293,7 +1461,7 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
             println!("pane created in project session {session_name:?}");
             Ok(())
         }
-        Ok(Some(Err(message))) => Err(CliError::ServerReportedError(message)),
+        Ok(Some(Err(message))) => Err(message),
         Ok(None) | Err(_) => Err(CliError::ServerReportedError(
             "no confirmation received from the server".to_string(),
         )),
@@ -1312,7 +1480,8 @@ fn initialize_cli_logging(log_path: &Path) -> Result<(), CliError> {
                 .flatten()
         })
         .unwrap_or(false);
-    ilium_logging::initialize(log_path, enabled, "cli")?;
+    let quota = ilium_client::bootstrap_process_quota().map_err(ilium_logging::LoggingError::Io)?;
+    ilium_logging::initialize(log_path, enabled, "cli", &quota)?;
     Ok(())
 }
 
@@ -1717,6 +1886,7 @@ mod tests {
             ilium_core::ProgressTaskStatus::Error,
             73.5,
             "encoder stopped after frame 735".to_string(),
+            String::new(),
             Some("exit status 9: bad \"frame\"".to_string()),
         )
         .unwrap();
@@ -1737,6 +1907,7 @@ mod tests {
             ilium_core::ProgressTaskStatus::Running,
             73.5,
             "frame 735/1000".to_string(),
+            String::new(),
             None,
         )
         .unwrap();

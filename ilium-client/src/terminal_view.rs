@@ -209,11 +209,17 @@ struct HistorySegment {
 /// clones the complete retained journal while this snapshot is alive.
 #[derive(Clone, Debug)]
 pub struct TerminalHistorySnapshot {
-    segments: Vec<(Arc<Vec<u8>>, usize)>,
+    segments: Arc<Vec<(Arc<Vec<u8>>, usize)>>,
     retained_len: usize,
+    pub(crate) origin: Arc<()>,
+    _allocation_charge: Option<Arc<crate::terminal_parsing::SnapshotCharge>>,
+    _pin_charge: Option<Arc<crate::terminal_parsing::SnapshotPin>>,
 }
 
 impl TerminalHistorySnapshot {
+    pub(crate) fn retain_charge(&mut self, charge: Arc<crate::terminal_parsing::SnapshotCharge>) {
+        self._allocation_charge = Some(charge);
+    }
     pub fn len(&self) -> usize {
         self.retained_len
     }
@@ -224,7 +230,7 @@ impl TerminalHistorySnapshot {
 
     pub fn to_vec(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(self.retained_len);
-        for (segment, start) in &self.segments {
+        for (segment, start) in self.segments.iter() {
             bytes.extend_from_slice(&segment[*start..]);
         }
         bytes
@@ -245,10 +251,70 @@ fn history_budget_bytes(budget_mib: u16) -> usize {
         .max(1024 * 1024)
 }
 
-pub struct TerminalView {
+/// Admission shadow of private vte std OSC allocation, including retained
+/// capacity after termination. State changes only alongside exact parser bytes.
+#[derive(Default, Clone, Copy)]
+struct OscAllocation {
+    escaped: bool,
+    active: bool,
+    length: usize,
+    highwater: usize,
+}
+impl OscAllocation {
+    fn advance(mut self, bytes: &[u8]) -> Self {
+        for &byte in bytes {
+            if self.active {
+                match byte {
+                    7 | 0x18 | 0x1a => {
+                        self.active = false;
+                        self.length = 0;
+                    }
+                    0x1b => {
+                        self.active = false;
+                        self.length = 0;
+                        self.escaped = true;
+                    }
+                    0..=6 | 8..=0x17 | 0x19 | 0x1c..=0x1f | b';' => {}
+                    _ => {
+                        self.length = self.length.saturating_add(1);
+                        self.highwater = self.highwater.max(self.length);
+                    }
+                }
+            } else if self.escaped {
+                match byte {
+                    b']' => {
+                        self.active = true;
+                        self.length = 0;
+                        self.escaped = false;
+                    }
+                    0x1b => {}
+                    0x18 | 0x1a => self.escaped = false,
+                    0..=0x1f | 0x7f..=0xff => {}
+                    _ => self.escaped = false,
+                }
+            } else if byte == 0x1b {
+                self.escaped = true;
+            }
+        }
+        self
+    }
+    fn retained_bytes(self) -> usize {
+        self.highwater.saturating_mul(2).max(8)
+    }
+}
+#[derive(Default)]
+pub(crate) struct OrderedOutputCursor {
+    pub consumed: usize,
+    pub replay_started: bool,
+}
+
+pub(crate) struct TerminalState {
     /// Authoritative live terminal state. Its scrollback offset stays at zero;
     /// historical navigation happens only through `historical_viewport`.
     parser: vt100::Parser,
+    osc_allocation: OscAllocation,
+    allocated_max_columns: u16,
+    allocated_max_rows: u16,
     // `vt100::Screen` exposes the current scroll *offset*
     // (`Screen::scrollback`) but no direct "how many rows have
     // accumulated" accessor -- only `Screen::set_scrollback`'s internal
@@ -274,6 +340,7 @@ pub struct TerminalView {
     /// is raw bytes with no per-row estimation, so the cap is exact.
     history_segments: VecDeque<HistorySegment>,
     history_retained_len: usize,
+    history_origin: Arc<()>,
     /// Current raw-history retention cap in bytes, derived from the
     /// configured MiB budget via `history_budget_bytes`. Stored so
     /// `set_scrollback_budget_mib` can re-trim retained segments in place
@@ -299,14 +366,16 @@ pub struct TerminalView {
     render_revision: u64,
     /// Presentation cache uses interior mutability because drawing is a
     /// logically read-only operation on terminal state.
+    #[cfg(test)]
     render_cache: RefCell<Option<TerminalRenderCache>>,
 }
 
-impl TerminalView {
+impl TerminalState {
     /// Starts a fresh, blank screen at `rows`x`cols` -- the caller should
     /// send `ClientRequest::ResizePane` promptly after creating a pane so
     /// the server-side PTY matches, and this view's own `resize` keeps the
     /// local parser matching whatever the client's own layout computed.
+    #[cfg(test)]
     pub fn new(rows: u16, cols: u16) -> Self {
         Self::with_scrollback_budget_mib(rows, cols, 32)
     }
@@ -319,6 +388,9 @@ impl TerminalView {
 
         Self {
             parser,
+            osc_allocation: OscAllocation::default(),
+            allocated_max_columns: cols,
+            allocated_max_rows: rows,
             scrollback_total: 0,
             historical_viewport: None,
             last_output_sequence: 0,
@@ -327,6 +399,7 @@ impl TerminalView {
                 start: 0,
             }]),
             history_retained_len: 0,
+            history_origin: Arc::new(()),
             history_budget_bytes: history_budget_bytes(budget_mib),
             osc8_links: VecDeque::new(),
             osc8_stream: Vec::new(),
@@ -334,6 +407,7 @@ impl TerminalView {
             visible_row_fingerprints,
             visible_text_dimensions,
             render_revision: 0,
+            #[cfg(test)]
             render_cache: RefCell::new(None),
         }
     }
@@ -352,9 +426,11 @@ impl TerminalView {
     /// historical viewport is intentionally untouched, so streaming output
     /// cannot move the rows the user is reading or lengthen their route back
     /// to the live tail.
+    #[cfg(test)]
     pub fn feed(&mut self, bytes: &[u8]) {
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
+        self.osc_allocation = self.osc_allocation.advance(bytes);
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -365,6 +441,7 @@ impl TerminalView {
     /// Attach starts from a blank view; lag repair leaves a detached
     /// historical snapshot untouched and ignores stale replays so recovery
     /// cannot move the visible viewport or roll the live screen backward.
+    #[cfg(test)]
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
         if through_sequence <= self.last_output_sequence {
             return;
@@ -377,6 +454,7 @@ impl TerminalView {
             start: 0,
         });
         self.history_retained_len = 0;
+        self.history_origin = Arc::new(());
         self.osc8_links.clear();
         self.osc8_stream.clear();
         self.observe_osc8_links(bytes);
@@ -384,7 +462,9 @@ impl TerminalView {
         self.last_output_sequence = through_sequence;
 
         self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        self.osc_allocation = OscAllocation::default();
         self.scrollback_total = 0;
+        self.osc_allocation = self.osc_allocation.advance(bytes);
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -398,6 +478,7 @@ impl TerminalView {
     /// caller requested ordinary-terminal activity tracking. The fingerprint
     /// check is allocation-free; changed updates capture bounded row evidence.
     /// Known agent panes skip the O(visible cells) fingerprint entirely.
+    #[cfg(test)]
     pub fn apply_live_output(
         &mut self,
         first_sequence: u64,
@@ -416,6 +497,7 @@ impl TerminalView {
 
     /// Applies one accepted output batch and returns bounded parsed-screen
     /// evidence only when tracked visible text actually changed.
+    #[cfg(test)]
     pub(crate) fn apply_live_output_with_evidence(
         &mut self,
         first_sequence: u64,
@@ -438,6 +520,7 @@ impl TerminalView {
         }
         self.append_history(bytes);
         self.observe_osc8_links(bytes);
+        self.osc_allocation = self.osc_allocation.advance(bytes);
         self.parser.process(bytes);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -509,6 +592,7 @@ impl TerminalView {
         })
     }
 
+    #[cfg(test)]
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
         // `column` is a terminal *cell* index (as reported by the mouse
         // event), while `label.len()`/`line.find` operate in bytes. Agent
@@ -633,6 +717,8 @@ impl TerminalView {
     /// application may redraw the live parser at the new geometry without
     /// corrupting that frozen view.
     pub fn resize(&mut self, rows: u16, cols: u16) {
+        self.allocated_max_columns = self.allocated_max_columns.max(cols);
+        self.allocated_max_rows = self.allocated_max_rows.max(rows);
         self.parser.screen_mut().set_size(rows, cols);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
@@ -650,6 +736,7 @@ impl TerminalView {
 
     /// Copies cached terminal cells into the frame, rebuilding the cache only
     /// after visible terminal state or geometry changes.
+    #[cfg(test)]
     pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
         if area.is_empty() {
             return;
@@ -769,14 +856,9 @@ impl TerminalView {
             .map_or(self.scrollback_total, |viewport| viewport.scrollback_total)
     }
 
-    /// Number of rows in the currently visible terminal screen, used as the
-    /// scrollbar's viewport length rather than its default one-row thumb.
-    pub fn viewport_rows(&self) -> u16 {
-        self.with_screen(|screen| screen.size().0)
-    }
-
     /// Returns all output retained for workspace search, including bytes the
     /// visible parser has already rotated out of its render scrollback.
+    #[cfg(test)]
     pub fn searchable_history(&self) -> Vec<u8> {
         self.collect_retained_history()
     }
@@ -785,6 +867,7 @@ impl TerminalView {
     /// Escape sequences control the terminal display rather than representing
     /// user-visible history, so copying them would leak cursor and color
     /// commands into the destination application.
+    #[cfg(test)]
     pub fn copyable_history(&self) -> String {
         let retained_history = self.collect_retained_history();
         String::from_utf8_lossy(&strip_ansi_escapes::strip(&retained_history)).into_owned()
@@ -793,15 +876,23 @@ impl TerminalView {
     /// Produces an O(1) immutable view of retained output for the search
     /// worker. Later PTY output uses `Arc::make_mut`, so a worker can scan a
     /// stable history snapshot without blocking the interactive event loop.
+    pub(crate) fn history_origin_matches(&self, origin: &Arc<()>) -> bool {
+        Arc::ptr_eq(origin, &self.history_origin)
+    }
+
     pub fn searchable_history_snapshot(&self) -> TerminalHistorySnapshot {
         TerminalHistorySnapshot {
-            segments: self
-                .history_segments
-                .iter()
-                .filter(|segment| segment.start < segment.bytes.len())
-                .map(|segment| (Arc::clone(&segment.bytes), segment.start))
-                .collect(),
+            segments: Arc::new(
+                self.history_segments
+                    .iter()
+                    .filter(|segment| segment.start < segment.bytes.len())
+                    .map(|segment| (Arc::clone(&segment.bytes), segment.start))
+                    .collect(),
+            ),
             retained_len: self.history_retained_len,
+            origin: Arc::clone(&self.history_origin),
+            _allocation_charge: None,
+            _pin_charge: None,
         }
     }
 
@@ -811,6 +902,30 @@ impl TerminalView {
     /// correct pane. The authoritative live parser keeps processing output;
     /// the ordinary live view returns on the next input or wheel journey to
     /// the bottom.
+    pub(crate) fn history_rebuild_peak_bytes(&self, end_byte: usize) -> usize {
+        let mut remaining = end_byte.min(self.history_retained_len);
+        let mut osc = OscAllocation::default();
+        for segment in &self.history_segments {
+            let bytes = &segment.bytes[segment.start..];
+            let take = remaining.min(bytes.len());
+            osc = osc.advance(&bytes[..take]);
+            remaining -= take;
+            if remaining == 0 {
+                break;
+            }
+        }
+        let (rows, columns) = self.parser.screen().size();
+        let rows = usize::from(rows)
+            .saturating_mul(2)
+            .saturating_add(RENDER_SCROLLBACK_ROWS);
+        self.retained_allocation_bytes()
+            .saturating_add(
+                rows.saturating_mul(usize::from(columns))
+                    .saturating_mul(128),
+            )
+            .saturating_add(rows.saturating_mul(256))
+            .saturating_add(osc.retained_bytes())
+    }
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let mut remaining_bytes = end_byte.min(self.history_retained_len);
@@ -877,6 +992,14 @@ impl TerminalView {
     }
 
     fn append_history(&mut self, bytes: &[u8]) {
+        if self.history_segments.len() >= 4096 {
+            let retained = self.collect_retained_history();
+            self.history_segments.clear();
+            self.history_segments.push_back(HistorySegment {
+                bytes: Arc::new(retained),
+                start: 0,
+            });
+        }
         let needs_fresh_segment = self
             .history_segments
             .back()
@@ -915,6 +1038,9 @@ impl TerminalView {
         let mut excess = self
             .history_retained_len
             .saturating_sub(self.history_budget_bytes);
+        if excess > 0 {
+            self.history_origin = Arc::new(());
+        }
         while excess > 0 {
             let Some(oldest_segment) = self.history_segments.front_mut() else {
                 break;
@@ -945,10 +1071,428 @@ impl TerminalView {
     }
 }
 
+/// Published state contains no mutable parser. Large clones are made only by
+/// the persistent parsing owner; readers share its immutable allocation.
+pub(crate) struct TerminalSnapshot {
+    pub visible: Arc<vt100::Screen>,
+    pub history: TerminalHistorySnapshot,
+    pub links: VecDeque<(String, String)>,
+    pub scrollback_total: usize,
+    pub scrollback_position: usize,
+    pub scrolled_back: bool,
+    pub sequence: u64,
+    pub revision: u64,
+    pub mouse: bool,
+    pub paste: bool,
+    pub allocation_charge: Option<Arc<crate::terminal_parsing::SnapshotCharge>>,
+}
+#[derive(Clone)]
+pub(crate) struct PreparationSnapshot {
+    snapshot: Arc<TerminalSnapshot>,
+    _pin: Option<Arc<crate::terminal_parsing::SnapshotPin>>,
+}
+/// Exact terminal source retained with one composed frame and installed only
+/// after actual output acknowledgement. Clones share its existing allocation.
+#[derive(Clone)]
+pub(crate) struct PaintedTerminal {
+    pub identity: Arc<()>,
+    pub ordinal: u64,
+    snapshot: Arc<TerminalSnapshot>,
+    _live: Option<Arc<crate::terminal_parsing::SnapshotLiveLease>>,
+    _pin: Option<Arc<crate::terminal_parsing::SnapshotPin>>,
+}
+impl PaintedTerminal {
+    pub(crate) fn with_screen<R>(&self, read: impl FnOnce(&vt100::Screen) -> R) -> R {
+        read(&self.snapshot.visible)
+    }
+    /// Long-lived interactions leave the live/replacement category and obtain
+    /// a bounded history pin before retaining the original allocation.
+    pub(crate) fn pinned(&self) -> Result<Self, String> {
+        let prepared = self.preparation_snapshot()?;
+        Ok(Self {
+            identity: self.identity.clone(),
+            ordinal: self.ordinal,
+            snapshot: prepared.snapshot,
+            _live: None,
+            _pin: prepared._pin,
+        })
+    }
+    pub(crate) fn scrollback_metrics(&self) -> (usize, usize, u16) {
+        (
+            self.snapshot.scrollback_total,
+            self.snapshot.scrollback_position,
+            self.snapshot.visible.size().0,
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
+        let column = crate::terminal_links::cell_column_to_byte_offset(line, column);
+        self.snapshot
+            .links
+            .iter()
+            .rev()
+            .find_map(|(label, target)| {
+                let start = line.find(label)?;
+                (start..start + label.len())
+                    .contains(&column)
+                    .then(|| target.clone())
+            })
+    }
+    pub(crate) fn capture_cost(&self) -> Result<ilium_execution::JobCost, String> {
+        let (rows, columns) = self.snapshot.visible.size();
+        // vt100's native screen includes its retained scrollback; words,
+        // detected regions, escaped JSON and serialization scratch coexist.
+        let bytes = (usize::from(rows) * 2 + RENDER_SCROLLBACK_ROWS)
+            .saturating_mul(usize::from(columns))
+            .saturating_mul(128)
+            .saturating_add(
+                usize::from(rows)
+                    .saturating_mul(usize::from(columns))
+                    .saturating_mul(1024),
+            )
+            .saturating_add(128 * 1024);
+        if bytes > 128 * 1024 * 1024 {
+            return Err(format!("Smart Copy capture exceeds its128MiB single-capture limit ({bytes} bytes required)"));
+        }
+        Ok(ilium_execution::JobCost {
+            input_bytes: bytes,
+            result_bytes: bytes,
+        })
+    }
+    pub(crate) fn capture_charge(
+        &self,
+        bytes: usize,
+    ) -> Result<Option<Arc<crate::terminal_parsing::SnapshotCharge>>, String> {
+        self.snapshot
+            .allocation_charge
+            .as_ref()
+            .map(|charge| charge.reserve_capture(bytes))
+            .transpose()
+    }
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        self.snapshot
+            .allocation_charge
+            .as_ref()
+            .map_or(128 * 1024, |charge| charge.bytes())
+    }
+    pub(crate) fn preparation_cost(&self) -> Result<ilium_execution::JobCost, String> {
+        context_cost(&self.snapshot)
+    }
+    pub(crate) fn preparation_snapshot(&self) -> Result<PreparationSnapshot, String> {
+        let pin = self
+            .snapshot
+            .allocation_charge
+            .as_ref()
+            .map(|charge| charge.pin())
+            .transpose()?;
+        Ok(PreparationSnapshot {
+            snapshot: self.snapshot.clone(),
+            _pin: pin,
+        })
+    }
+}
+impl PreparationSnapshot {
+    pub(crate) fn painted(self, identity: Arc<()>, ordinal: u64) -> PaintedTerminal {
+        PaintedTerminal {
+            identity,
+            ordinal,
+            snapshot: self.snapshot,
+            _live: None,
+            _pin: self._pin,
+        }
+    }
+}
+impl std::ops::Deref for PreparationSnapshot {
+    type Target = TerminalSnapshot;
+    fn deref(&self) -> &TerminalSnapshot {
+        &self.snapshot
+    }
+}
+impl TerminalState {
+    pub(crate) fn publish(&self) -> TerminalSnapshot {
+        TerminalSnapshot {
+            visible: Arc::new(self.with_screen(Clone::clone)),
+            history: self.searchable_history_snapshot(),
+            links: self.osc8_links.clone(),
+            scrollback_total: self.scrollback_total(),
+            scrollback_position: self.scrollback_position(),
+            scrolled_back: self.is_scrolled_back(),
+            sequence: self.last_output_sequence,
+            revision: self.render_revision,
+            mouse: self.wants_mouse_protocol(),
+            paste: self.wants_bracketed_paste(),
+            allocation_charge: None,
+        }
+    }
+    pub(crate) fn output_sequence(&self) -> u64 {
+        self.last_output_sequence
+    }
+    pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
+        let chunk = bytes.len();
+        let columns = usize::from(self.parser.screen().size().1);
+        let rows = RENDER_SCROLLBACK_ROWS
+            .saturating_sub(self.scrollback_total)
+            .min(chunk);
+        let history_extra = self.history_segments.back().map_or(chunk, |segment| {
+            if Arc::strong_count(&segment.bytes) > 1 {
+                chunk.saturating_mul(2)
+            } else if segment.bytes.len().saturating_add(chunk) > segment.bytes.capacity() {
+                segment.bytes.capacity().max(chunk).saturating_mul(2)
+            } else {
+                0
+            }
+        });
+        self.retained_allocation_bytes()
+            .saturating_add(
+                self.osc_allocation
+                    .advance(bytes)
+                    .retained_bytes()
+                    .saturating_sub(self.osc_allocation.retained_bytes()),
+            )
+            .saturating_add(
+                self.osc8_stream
+                    .len()
+                    .saturating_add(chunk)
+                    .saturating_mul(2)
+                    .saturating_sub(self.osc8_stream.capacity()),
+            )
+            .saturating_add(if self.osc8_stream.is_empty() && !bytes.contains(&0x1b) {
+                0
+            } else {
+                // Existing OSC8 observer caps source scratch at64KiB. Account
+                // lossy UTF-8 conversion, label/URI clones and deque growth.
+                64 * 1024 * 8 + self.osc8_links.capacity() * std::mem::size_of::<(String, String)>()
+            })
+            .saturating_add(rows.saturating_mul(columns).saturating_mul(64))
+            .saturating_add(history_extra)
+            .saturating_add(if self.history_segments.len() >= 4096 {
+                self.history_retained_len
+            } else {
+                0
+            })
+            .saturating_add(4096)
+    }
+    pub(crate) fn apply_ordered_output(
+        &mut self,
+        first: u64,
+        sequence: u64,
+        bytes: &[u8],
+        track: bool,
+        cursor: &mut OrderedOutputCursor,
+        mut before: impl FnMut(&Self, &[u8]) -> Result<(), String>,
+    ) -> Result<Option<VisibleTextEvidence>, String> {
+        if sequence <= self.last_output_sequence {
+            return Ok(None);
+        }
+        if first != self.last_output_sequence.saturating_add(1) {
+            return Err("non-contiguous terminal output requires replay".into());
+        }
+        while cursor.consumed < bytes.len() {
+            let end = cursor.consumed.saturating_add(64).min(bytes.len());
+            let chunk = &bytes[cursor.consumed..end];
+            before(self, chunk)?;
+            self.append_history(chunk);
+            self.observe_osc8_links(chunk);
+            self.osc_allocation = self.osc_allocation.advance(chunk);
+            self.parser.process(chunk);
+            cursor.consumed = end;
+            self.invalidate_live_render_if_visible();
+            self.refresh_scrollback_total();
+        }
+        self.last_output_sequence = sequence;
+        Ok(if track {
+            self.capture_visible_text_change(first, sequence)
+        } else {
+            None
+        })
+    }
+    pub(crate) fn apply_ordered_replay(
+        &mut self,
+        bytes: &[u8],
+        sequence: u64,
+        cursor: &mut OrderedOutputCursor,
+        mut before: impl FnMut(&Self, &[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if sequence <= self.last_output_sequence {
+            return Ok(());
+        }
+        if !cursor.replay_started {
+            let (rows, cols) = self.parser.screen().size();
+            self.history_segments.clear();
+            self.history_segments.push_back(HistorySegment {
+                bytes: Arc::new(Vec::new()),
+                start: 0,
+            });
+            self.history_retained_len = 0;
+            self.history_origin = Arc::new(());
+            self.osc8_links.clear();
+            self.osc8_stream.clear();
+            self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+            self.osc_allocation = OscAllocation::default();
+            self.scrollback_total = 0;
+            cursor.replay_started = true;
+        }
+        while cursor.consumed < bytes.len() {
+            let end = cursor.consumed.saturating_add(64).min(bytes.len());
+            let chunk = &bytes[cursor.consumed..end];
+            before(self, chunk)?;
+            self.append_history(chunk);
+            self.observe_osc8_links(chunk);
+            self.osc_allocation = self.osc_allocation.advance(chunk);
+            self.parser.process(chunk);
+            cursor.consumed = end;
+            self.refresh_scrollback_total();
+        }
+        self.last_output_sequence = sequence;
+        self.invalidate_live_render_if_visible();
+        self.refresh_visible_text_fingerprint();
+        Ok(())
+    }
+    pub(crate) fn retained_allocation_bytes(&self) -> usize {
+        // Installed vt100 0.16.2 cells are fixed 32 bytes. Charge twice that
+        // for retained Vec growth, plus row/deque metadata and parser scratch.
+        let rows = usize::from(self.allocated_max_rows) * 2 + self.scrollback_total;
+        let historic = self.historical_viewport.as_ref().map_or(0, |view| {
+            usize::from(view.screen.size().0) * 2 + view.scrollback_total
+        });
+        let screen_rows = rows.saturating_add(historic);
+        let history = self
+            .history_segments
+            .iter()
+            .map(|segment| segment.bytes.capacity())
+            .sum::<usize>();
+        let links = self
+            .osc8_links
+            .iter()
+            .map(|(label, target)| label.capacity().saturating_add(target.capacity()))
+            .sum::<usize>();
+        history
+            .saturating_add(self.osc_allocation.retained_bytes())
+            .saturating_add(
+                screen_rows
+                    .saturating_mul(usize::from(self.allocated_max_columns))
+                    .saturating_mul(64),
+            )
+            .saturating_add(screen_rows.saturating_mul(128))
+            .saturating_add(
+                self.history_segments
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<HistorySegment>() + 32),
+            )
+            .saturating_add(
+                self.osc8_links
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(String, String)>()),
+            )
+            .saturating_add(links)
+            .saturating_add(self.osc8_stream.capacity())
+            .saturating_add(self.visible_row_fingerprints.capacity().saturating_mul(8))
+            .saturating_add(128 * 1024)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::TerminalState as TerminalView;
     use super::*;
 
+    #[test]
+    fn private_osc_highwater_survives_termination_and_split_openers() {
+        let mut allocation = OscAllocation::default();
+        for byte in b"\x1b\0]0;"
+            .iter()
+            .copied()
+            .chain(std::iter::repeat_n(b'x', 4096))
+        {
+            allocation = allocation.advance(&[byte]);
+        }
+        assert!(allocation.active);
+        assert_eq!(allocation.highwater, 4097);
+        let retained = allocation.retained_bytes();
+        allocation = allocation.advance(b"\0;\x07plain text");
+        assert!(!allocation.active);
+        assert_eq!(allocation.retained_bytes(), retained);
+        let interrupted = OscAllocation::default().advance(b"\x1b]52;payload\x1b]0;new\x1a");
+        assert!(!interrupted.active);
+        assert!(interrupted.highwater >= 9);
+    }
+    #[test]
+    fn ordered_output_resumes_exact_remaining_bytes_after_admission_refusal() {
+        let mut bytes = vec![b'a'; 63];
+        bytes.extend_from_slice(b"\x1b]0;");
+        bytes.extend(std::iter::repeat_n(b'x', 512));
+        bytes.extend_from_slice(b"\x07\r\nlast line");
+        let mut expected = TerminalState::new(4, 40);
+        expected
+            .apply_ordered_output(
+                1,
+                1,
+                &bytes,
+                true,
+                &mut OrderedOutputCursor::default(),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        let mut state = TerminalState::new(4, 40);
+        let mut cursor = OrderedOutputCursor::default();
+        let mut chunks = 0;
+        assert!(state
+            .apply_ordered_output(1, 1, &bytes, true, &mut cursor, |_, _| {
+                chunks += 1;
+                if chunks > 2 {
+                    Err("synthetic admission pressure".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .is_err());
+        assert_eq!(cursor.consumed, 128);
+        assert_eq!(state.last_output_sequence, 0);
+        assert_eq!(state.collect_retained_history(), bytes[..128]);
+        let private_before = state.osc_allocation.retained_bytes();
+        state
+            .apply_ordered_output(1, 1, &bytes, true, &mut cursor, |state, chunk| {
+                assert!(state.input_peak_bytes(chunk) >= state.retained_allocation_bytes());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(state.collect_retained_history(), bytes);
+        assert_eq!(state.last_output_sequence, 1);
+        assert_eq!(
+            state.parser.screen().contents(),
+            expected.parser.screen().contents()
+        );
+        assert!(state.osc_allocation.retained_bytes() >= private_before);
+    }
+    #[test]
+    fn partial_replay_retains_origin_and_does_not_reset_processed_prefix_on_retry() {
+        let mut state = TerminalState::new(4, 40);
+        state.feed(b"old live history");
+        let mut bytes = b"\x1b]0;".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', 256));
+        bytes.extend_from_slice(b"\x07replacement");
+        let mut cursor = OrderedOutputCursor::default();
+        let mut chunks = 0;
+        assert!(state
+            .apply_ordered_replay(&bytes, 7, &mut cursor, |_, _| {
+                chunks += 1;
+                if chunks > 1 {
+                    Err("synthetic replay pressure".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .is_err());
+        assert_eq!(cursor.consumed, 64);
+        assert!(cursor.replay_started);
+        let origin = state.history_origin.clone();
+        state
+            .apply_ordered_replay(&bytes, 7, &mut cursor, |_, _| Ok(()))
+            .unwrap();
+        assert!(Arc::ptr_eq(&state.history_origin, &origin));
+        assert_eq!(state.collect_retained_history(), bytes);
+        assert_eq!(state.last_output_sequence, 7);
+    }
     #[test]
     fn osc8_links_survive_split_output_chunks() {
         let mut view = TerminalView::new(4, 40);
@@ -1503,5 +2047,477 @@ mod tests {
         assert!(view
             .with_screen(|screen| screen.contents())
             .contains("needle"));
+    }
+}
+
+/// Interactive facade: reads immutable published state and submits ordered
+/// semantic commands. Standalone mutable engines exist only in test fixtures.
+pub struct TerminalView {
+    snapshot: Arc<TerminalSnapshot>,
+    pub(crate) frontend: Option<crate::terminal_parsing::PaneFrontend>,
+    pub(crate) identity: Arc<()>,
+    pub(crate) desired_size: (u16, u16),
+    pub(crate) budget_mib: u16,
+    pub(crate) admission_error: Option<String>,
+    pub(crate) applied_ordinal: u64,
+    render_cache: RefCell<Option<TerminalRenderCache>>,
+    #[cfg(test)]
+    standalone: Option<TerminalState>,
+}
+impl TerminalView {
+    pub fn new(rows: u16, cols: u16) -> Self {
+        Self::with_scrollback_budget_mib(rows, cols, 32)
+    }
+    pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
+        // Bootstrap-sized blank placeholder only; user geometry is allocated by
+        // the OS owner after admission. No input byte is parsed on this path.
+        let blank =
+            TerminalState::with_scrollback_budget_mib(DEFAULT_ROWS, DEFAULT_COLS, 0).publish();
+        Self {
+            snapshot: Arc::new(blank),
+            frontend: None,
+            identity: Arc::new(()),
+            desired_size: (rows, cols),
+            budget_mib,
+            admission_error: None,
+            applied_ordinal: 0,
+            render_cache: RefCell::new(None),
+            #[cfg(test)]
+            standalone: Some(TerminalState::with_scrollback_budget_mib(
+                rows, cols, budget_mib,
+            )),
+        }
+    }
+    pub(crate) fn painted_source(&self) -> PaintedTerminal {
+        #[cfg(test)]
+        let snapshot = self
+            .standalone
+            .as_ref()
+            .map(|state| Arc::new(state.publish()))
+            .unwrap_or_else(|| self.snapshot.clone());
+        #[cfg(not(test))]
+        let snapshot = self.snapshot.clone();
+        let live = snapshot
+            .allocation_charge
+            .as_ref()
+            .map(|charge| charge.lease_live());
+        PaintedTerminal {
+            identity: self.identity.clone(),
+            ordinal: self.applied_ordinal,
+            snapshot,
+            _live: live,
+            _pin: None,
+        }
+    }
+    pub(crate) fn is_confirmed_removed(&self) -> bool {
+        self.frontend
+            .as_ref()
+            .is_some_and(|frontend| frontend.is_confirmed_removed())
+    }
+    pub(crate) fn has_suspended_output(&self) -> bool {
+        self.frontend
+            .as_ref()
+            .is_some_and(|frontend| frontend.has_suspended_output())
+    }
+    pub(crate) fn confirm_removed(&mut self, identity: &Arc<()>) -> bool {
+        if !Arc::ptr_eq(identity, &self.identity) {
+            return false;
+        }
+        self.frontend
+            .as_mut()
+            .is_some_and(|frontend| frontend.confirm_removed(identity))
+    }
+    pub(crate) fn try_preparation_snapshot(&self) -> Result<PreparationSnapshot, String> {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return Ok(PreparationSnapshot {
+                snapshot: Arc::new(state.publish()),
+                _pin: None,
+            });
+        }
+        let pin = self
+            .snapshot
+            .allocation_charge
+            .as_ref()
+            .map(|charge| charge.pin())
+            .transpose()?;
+        Ok(PreparationSnapshot {
+            snapshot: self.snapshot.clone(),
+            _pin: pin,
+        })
+    }
+    pub(crate) fn install(&mut self, snapshot: Arc<TerminalSnapshot>, ordinal: u64) {
+        self.applied_ordinal = ordinal;
+        if !Arc::ptr_eq(&self.snapshot, &snapshot) {
+            if let Some(charge) = &self.snapshot.allocation_charge {
+                charge.retire_live();
+            }
+        }
+        self.snapshot = snapshot;
+        *self.render_cache.get_mut() = None;
+        self.admission_error = None;
+    }
+    fn command(&mut self, command: crate::terminal_parsing::PaneCommand) {
+        if let Some(frontend) = &mut self.frontend {
+            if let Err(error) = frontend.submit_intent(command) {
+                self.admission_error = Some(error);
+            }
+        } else {
+            self.admission_error = Some("terminal parser is awaiting registration".into());
+        }
+    }
+    pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.with_screen(f);
+        }
+        f(&self.snapshot.visible)
+    }
+    pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            state.render_screen(area, destination);
+            return;
+        }
+        if area.is_empty() {
+            return;
+        }
+        let mut cache = self.render_cache.borrow_mut();
+        if cache
+            .as_ref()
+            .is_none_or(|cache| cache.revision != self.snapshot.revision || cache.area != area)
+        {
+            let mut buffer = Buffer::empty(area);
+            render_frozen_screen(&self.snapshot.visible, area, &mut buffer);
+            *cache = Some(TerminalRenderCache {
+                revision: self.snapshot.revision,
+                area,
+                buffer,
+            });
+        }
+        if let Some(cache) = cache.as_ref() {
+            for row in area.y..area.bottom() {
+                let source = cache.buffer.index_of(area.x, row);
+                let target = destination.index_of(area.x, row);
+                let width = usize::from(area.width);
+                destination.content[target..target + width]
+                    .clone_from_slice(&cache.buffer.content[source..source + width]);
+            }
+        }
+    }
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        self.admit_resize(rows, cols);
+    }
+    /// Reject permanently unsupported geometry before sending a server resize.
+    pub(crate) fn admit_resize(&mut self, rows: u16, cols: u16) -> bool {
+        if let Err(error) = crate::terminal_parsing::validate_geometry(rows, cols) {
+            self.admission_error = Some(error);
+            return false;
+        }
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.resize(rows, cols);
+            self.desired_size = (rows, cols);
+            return true;
+        }
+        if self.desired_size == (rows, cols) {
+            return true;
+        }
+        let Some(frontend) = &mut self.frontend else {
+            // Registration uses this desired geometry before accepting any bytes.
+            self.desired_size = (rows, cols);
+            return true;
+        };
+        if let Err(error) =
+            frontend.submit_intent(crate::terminal_parsing::PaneCommand::Resize(rows, cols))
+        {
+            self.admission_error = Some(error);
+            return false;
+        }
+        self.desired_size = (rows, cols);
+        true
+    }
+    pub fn set_scrollback_budget_mib(&mut self, budget: u16) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.set_scrollback_budget_mib(budget);
+            self.budget_mib = budget;
+            return;
+        }
+        if self.budget_mib == budget {
+            return;
+        }
+        self.budget_mib = budget;
+        self.command(crate::terminal_parsing::PaneCommand::Budget(budget));
+    }
+    pub fn scroll_up(&mut self, lines: u16) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.scroll_up(lines);
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::ScrollUp(lines));
+    }
+    pub fn scroll_down(&mut self, lines: u16) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.scroll_down(lines);
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::ScrollDown(lines));
+    }
+    pub fn scroll_to_bottom(&mut self) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.scroll_to_bottom();
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::Bottom);
+    }
+    pub(crate) fn jump_to_search_history(&mut self, byte: usize, origin: Arc<()>) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            if state.history_origin_matches(&origin) {
+                state.jump_to_history_byte(byte);
+            } else {
+                self.admission_error =
+                    Some("Search history origin changed before navigation".into());
+            }
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::HistoryFenced { byte, origin });
+    }
+    pub fn jump_to_history_byte(&mut self, byte: usize) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.jump_to_history_byte(byte);
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::History(byte));
+    }
+    pub fn synchronize_visible_text_fingerprint(&mut self) {
+        #[cfg(test)]
+        if let Some(state) = &mut self.standalone {
+            state.synchronize_visible_text_fingerprint();
+            return;
+        }
+        self.command(crate::terminal_parsing::PaneCommand::Fingerprint);
+    }
+    pub fn is_scrolled_back(&self) -> bool {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.is_scrolled_back();
+        }
+        self.snapshot.scrolled_back
+    }
+    pub fn scrollback_position(&self) -> usize {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.scrollback_position();
+        }
+        self.snapshot.scrollback_position
+    }
+    pub fn scrollback_total(&self) -> usize {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.scrollback_total();
+        }
+        self.snapshot.scrollback_total
+    }
+    pub fn viewport_rows(&self) -> u16 {
+        self.with_screen(|screen| screen.size().0)
+    }
+    pub fn wants_mouse_protocol(&self) -> bool {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.wants_mouse_protocol();
+        }
+        self.snapshot.mouse
+    }
+    pub fn wants_bracketed_paste(&self) -> bool {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.wants_bracketed_paste();
+        }
+        self.snapshot.paste
+    }
+    pub(crate) fn search_history_origin(&self) -> Arc<()> {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return Arc::clone(&state.history_origin);
+        }
+        Arc::clone(&self.snapshot.history.origin)
+    }
+    pub(crate) fn search_history_len(&self) -> usize {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.history_retained_len;
+        }
+        self.snapshot.history.len()
+    }
+    pub(crate) fn try_searchable_history_snapshot(
+        &self,
+    ) -> Result<TerminalHistorySnapshot, String> {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return Ok(state.searchable_history_snapshot());
+        }
+        let pin = self
+            .snapshot
+            .allocation_charge
+            .as_ref()
+            .map(|charge| charge.pin())
+            .transpose()?;
+        let mut history = self.snapshot.history.clone();
+        history._pin_charge = pin;
+        Ok(history)
+    }
+    #[cfg(test)]
+    pub fn searchable_history_snapshot(&self) -> TerminalHistorySnapshot {
+        self.try_searchable_history_snapshot()
+            .expect("test history pin admission")
+    }
+    #[cfg(test)]
+    pub fn searchable_history(&self) -> Vec<u8> {
+        self.searchable_history_snapshot().to_vec()
+    }
+    #[cfg(test)]
+    pub fn copyable_history(&self) -> String {
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(self.searchable_history())).into_owned()
+    }
+    #[cfg(test)]
+    pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.osc8_link_at(line, column);
+        }
+        let column = crate::terminal_links::cell_column_to_byte_offset(line, column);
+        self.snapshot
+            .links
+            .iter()
+            .rev()
+            .find_map(|(label, target)| {
+                let start = line.find(label)?;
+                (start..start + label.len())
+                    .contains(&column)
+                    .then(|| target.clone())
+            })
+    }
+    #[cfg(test)]
+    pub(crate) fn observe_osc8_for_benchmark(&mut self, bytes: &[u8]) {
+        if let Some(state) = &mut self.standalone {
+            state.observe_osc8_for_benchmark(bytes);
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn append_history_for_benchmark(&mut self, bytes: &[u8]) {
+        if let Some(state) = &mut self.standalone {
+            state.append_history_for_benchmark(bytes);
+        }
+    }
+    #[cfg(test)]
+    pub fn feed(&mut self, bytes: &[u8]) {
+        if let Some(state) = &mut self.standalone {
+            state.feed(bytes);
+        }
+    }
+    #[cfg(test)]
+    pub fn apply_replay(&mut self, bytes: &[u8], sequence: u64, complete: bool) {
+        if let Some(state) = &mut self.standalone {
+            state.apply_replay(bytes, sequence, complete);
+        }
+    }
+    #[cfg(test)]
+    pub fn apply_live_output(
+        &mut self,
+        first: u64,
+        sequence: u64,
+        bytes: &[u8],
+        track: bool,
+    ) -> bool {
+        self.apply_live_output_with_evidence(first, sequence, bytes, track)
+            .is_some()
+    }
+    #[cfg(test)]
+    pub(crate) fn apply_live_output_with_evidence(
+        &mut self,
+        first: u64,
+        sequence: u64,
+        bytes: &[u8],
+        track: bool,
+    ) -> Option<VisibleTextEvidence> {
+        self.standalone
+            .as_mut()
+            .and_then(|state| state.apply_live_output_with_evidence(first, sequence, bytes, track))
+    }
+    pub fn last_output_sequence(&self) -> u64 {
+        #[cfg(test)]
+        if let Some(state) = &self.standalone {
+            return state.last_output_sequence;
+        }
+        self.snapshot.sequence
+    }
+    #[cfg(test)]
+    pub(crate) fn attach_frontend(&mut self, frontend: crate::terminal_parsing::PaneFrontend) {
+        self.standalone = None;
+        self.frontend = Some(frontend);
+    }
+    #[cfg(not(test))]
+    pub(crate) fn attach_frontend(&mut self, frontend: crate::terminal_parsing::PaneFrontend) {
+        self.frontend = Some(frontend);
+    }
+}
+
+impl Drop for TerminalView {
+    fn drop(&mut self) {
+        if let Some(charge) = &self.snapshot.allocation_charge {
+            charge.retire_live();
+        }
+    }
+}
+
+fn context_cost(snapshot: &TerminalSnapshot) -> Result<ilium_execution::JobCost, String> {
+    let (rows, cols) = snapshot.visible.size();
+    let cells = usize::from(rows).saturating_mul(usize::from(cols));
+    let history = snapshot.history.len();
+    let source = snapshot
+        .allocation_charge
+        .as_ref()
+        .map_or(128 * 1024, |charge| charge.bytes());
+    let input_bytes = source
+        .saturating_add(history.saturating_mul(2))
+        .saturating_add(cells.saturating_mul(44))
+        .saturating_add(128 * 1024);
+    let result_bytes = history
+        .saturating_mul(3)
+        .saturating_add(cells.saturating_mul(44))
+        .saturating_add(128 * 1024);
+    if input_bytes > 384 * 1024 * 1024 || result_bytes > 256 * 1024 * 1024 {
+        return Err("Context text exceeds declared preparation admission; reduce retained history or pane geometry".into());
+    }
+    Ok(ilium_execution::JobCost {
+        input_bytes,
+        result_bytes,
+    })
+}
+
+#[cfg(test)]
+mod search_origin_tests {
+    use super::*;
+    #[test]
+    fn retained_search_journal_origin_survives_append_but_changes_on_trim_and_replay() {
+        let mut view = TerminalView::with_scrollback_budget_mib(4, 40, 1);
+        view.feed(b"old needle\r\n");
+        let retained = view.try_searchable_history_snapshot().unwrap();
+        let origin = view.search_history_origin();
+        view.feed(b"new output\r\n");
+        assert!(Arc::ptr_eq(&origin, &view.search_history_origin()));
+        assert_eq!(retained.to_vec(), b"old needle\r\n");
+        view.append_history_for_benchmark(&vec![b'x'; 1024 * 1024]);
+        let trimmed = view.search_history_origin();
+        assert!(!Arc::ptr_eq(&origin, &trimmed));
+        assert_eq!(retained.to_vec(), b"old needle\r\n");
+        view.apply_replay(b"replacement", 100, true);
+        assert!(!Arc::ptr_eq(&trimmed, &view.search_history_origin()));
     }
 }

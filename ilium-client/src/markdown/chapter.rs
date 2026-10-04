@@ -59,6 +59,8 @@ fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
 
     let mut headings = Vec::new();
     let mut container_depth: usize = 0;
+    let mut counted_offset = 0;
+    let mut counted_lines = 0;
 
     for (event, source_range) in Parser::new_ext(markdown, options).into_offset_iter() {
         match event {
@@ -69,9 +71,16 @@ fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
                 container_depth = container_depth.saturating_sub(1);
             }
             Event::Start(Tag::Heading { level, .. }) if container_depth == 0 => {
+                // Accepted headings arrive in source order. Count each source
+                // byte at most once instead of rescanning every earlier chapter.
+                counted_lines += markdown[counted_offset..source_range.start]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count();
+                counted_offset = source_range.start;
                 headings.push(MarkdownHeading {
                     level: heading_level_number(level),
-                    source_line_index: source_line_index_for_offset(markdown, source_range.start),
+                    source_line_index: counted_lines,
                     source_range,
                 });
             }
@@ -80,14 +89,6 @@ fn markdown_headings(markdown: &str) -> Vec<MarkdownHeading> {
     }
 
     headings
-}
-
-/// Converts pulldown-cmark's source byte offset to the editor's line index.
-fn source_line_index_for_offset(markdown: &str, source_offset: usize) -> usize {
-    markdown[..source_offset]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
 }
 
 /// Keeps chapter comparisons independent of pulldown-cmark's enum ordering.

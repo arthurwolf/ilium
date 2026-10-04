@@ -15,21 +15,18 @@ use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, Scroll
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
-use crate::agent_from_line::{
-    AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu,
-};
+use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
-    AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, BoardStorageKind,
-    ContextMenu, CreateBoardState, CreateGroupState, CreateSplitMembersState,
-    CreateSplitOrientationState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
-    SubmenuItemAction,
+    AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, ContextMenu,
+    CreateBoardState, CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState,
+    FocusTarget, Mode, PaneRuntime, RightPanelTarget, SubmenuItemAction,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
-    editor_chrome, editor_highlight, editor_toolbar, explorer_overlay, help, markdown, minimap,
-    modal, search_ui, terminal_selection, terminal_view, theme, tree_ui,
+    editor_chrome, editor_toolbar, explorer_overlay, help, markdown, minimap, modal, search_ui,
+    terminal_selection, terminal_view, theme, tree_ui,
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -43,7 +40,19 @@ mod osm_attribution_tests;
 
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
+    draw_at_with_cursor(frame, app, animation_elapsed);
+}
+
+/// Composition-only entry point returning the last explicit hardware cursor.
+pub(crate) fn draw_at_with_cursor(
+    frame: &mut Frame,
+    app: &mut App,
+    animation_elapsed: Duration,
+) -> Option<Position> {
+    app.composed_tree_rows = None;
+    app.composed_terminal_sources.clear();
     app.reconcile_animation_presentation();
+    app.composed_editor_sources.clear();
     let area = frame.area();
     let layout = app.layout;
 
@@ -52,7 +61,7 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
     if app.onboarding.is_some() {
         app.animation_frame.discard_composed_receipt();
     }
-    draw_base_layer(frame, area, app);
+    let mut cursor = draw_base_layer(frame, area, app);
     if app.onboarding.is_none() {
         crate::background_composition::compose(frame.buffer_mut(), app, animation_elapsed);
         let osm_credit_area = draw_osm_attribution(frame, app);
@@ -70,6 +79,7 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
             .as_ref()
             .is_some_and(|popover| popover.is_visible(Instant::now()));
         if app.hovered_status_slot.is_some()
+            || app.hovered_progress.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
             || popover_visible
@@ -79,6 +89,7 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
             app.animation_frame.discard_composed_receipt();
         }
         draw_status_tooltip(frame, app);
+        draw_progress_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
         if popover_visible {
@@ -94,10 +105,81 @@ pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Durat
     // a rendering concern rather than forcing child modes to clone or embed
     // the state of the screen they temporarily cover.
     for mode in &app.modal_stack {
-        draw_mode_overlay(frame, area, app, mode);
+        cursor = draw_mode_overlay(frame, area, app, mode).or(cursor);
     }
-    draw_mode_overlay(frame, area, app, &app.mode);
+    cursor = draw_mode_overlay(frame, area, app, &app.mode).or(cursor);
+    // Copied text can repaint an identical Braille glyph after composition.
+    // Withhold this draw rather than crediting preview text as scene pixels.
+    if app.smart_copy_preview.is_some() {
+        app.animation_frame.discard_composed_receipt();
+    }
+    draw_smart_copy_preview(frame, area, app);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
+    if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
+        return None;
+    }
+    cursor
+}
+
+/// The "Preview" dialog: what Smart Copy light just put on the clipboard, with
+/// a progress bar that counts down the second before it disappears.
+fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::LineGauge;
+
+    let Some(preview) = &app.smart_copy_preview else {
+        return;
+    };
+    if area.width < 12 || area.height < 7 {
+        return;
+    }
+    let lines = preview.display_lines();
+    let content_width = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .chain(std::iter::once(preview.summary().chars().count()))
+        .max()
+        .unwrap_or(0);
+    // Borders (2) + text rows + summary + gauge.
+    let height = (lines.len() as u16 + 4).min(area.height);
+    let width = (content_width as u16 + 4).clamp(28, area.width);
+    let dialog = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, dialog);
+    let block = theme::block(true).title(theme::chrome_title("Preview"));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+    if inner.height < 2 {
+        return;
+    }
+    let text_height = inner.height - 2;
+    let mut rows: Vec<Line<'static>> = lines
+        .into_iter()
+        .take(usize::from(text_height))
+        .map(Line::from)
+        .collect();
+    rows.resize(usize::from(text_height), Line::from(""));
+    frame.render_widget(
+        Paragraph::new(rows),
+        Rect::new(inner.x, inner.y, inner.width, text_height),
+    );
+    frame.render_widget(
+        Paragraph::new(preview.summary()).style(Style::new().add_modifier(Modifier::DIM)),
+        Rect::new(inner.x, inner.y + text_height, inner.width, 1),
+    );
+    let ratio = preview.remaining_fraction(Instant::now());
+    frame.render_widget(
+        LineGauge::default()
+            .ratio(ratio)
+            .filled_symbol("━")
+            .unfilled_symbol("─")
+            .filled_style(Style::new().add_modifier(Modifier::BOLD))
+            .label(""),
+        Rect::new(inner.x, inner.y + text_height + 1, inner.width, 1),
+    );
 }
 
 /// Client chrome owns the credit. No terminal, animation cache or protected
@@ -224,35 +306,68 @@ mod vs16_diff_tests {
     }
 }
 
+/// Shows a progress footer's multi-line `details` while the pointer rests on
+/// it. The footer itself keeps only the compact one-line `message`.
+fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
+    let Some((pane_id, anchor)) = app.hovered_progress else {
+        return;
+    };
+    let Some(progress) = app.tree.pane_progress(pane_id) else {
+        return;
+    };
+    let content = crate::progress_bar::details_tooltip(progress);
+    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+}
+
 fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
     let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
         return;
     };
-    let Some(workspace) = app.tree.pane_workspace(hit.id) else {
-        return;
-    };
-    let explanation = crate::status_icons::workspace_explanation(
-        workspace,
-        app.workspace_git_statuses.get(&hit.id),
-    );
     let anchor = Position::new(app.layout.tree_area.x.saturating_add(2), hit.row);
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    if app.emitted_geometry.is_some() {
+        if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
+        }
+        return;
+    }
+    #[cfg(test)]
+    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+        let explanation = crate::status_icons::workspace_explanation(
+            workspace,
+            app.workspace_git_statuses.get(&hit.id),
+        );
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    }
 }
 
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
-/// re-projected from the current tree at draw time, so the popover can never
-/// describe a state the row no longer shows.
+/// retained with the actually emitted row; newer server evidence cannot
+/// change its explanation until that row's next frame is acknowledged.
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
+    let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
+        return;
+    };
+    if app.emitted_geometry.is_some() {
+        if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
+        }
+        return;
+    }
+    #[cfg(test)]
+    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+    }
+}
+fn status_tooltip_content(
+    app: &App,
+    node_id: ilium_core::NodeId,
+    slot: crate::status_icons::StatusSlot,
+) -> Option<crate::status_icons::TooltipContent> {
     use crate::status_icons::{
         identity_explanation, now_explanation, objective_explanation, StatusSlot,
     };
 
-    let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
-        return;
-    };
-    let Some(node) = app.tree.get(node_id) else {
-        return;
-    };
+    let node = app.tree.get(node_id)?;
     if slot == StatusSlot::Identity {
         let structural = match &node.kind {
             NodeKind::Container(container) => {
@@ -278,8 +393,7 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
                     "Why: the authoritative tree records this entry as a {kind}."
                 )),
             };
-            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
-            return;
+            return Some(tooltip);
         }
     }
     let NodeKind::Pane {
@@ -289,7 +403,7 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         ..
     } = &node.kind
     else {
-        return;
+        return None;
     };
     let shell_output = app
         .terminal_activity
@@ -404,8 +518,9 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
             body: explanation.body.to_string(),
             reason,
         };
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+        return Some(tooltip);
     }
+    None
 }
 
 /// Draws the costs-and-stats popover of the pane whose second header icon was
@@ -461,29 +576,54 @@ fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::
 
 /// Draws the one full-screen root behind every stacked overlay. Settings and
 /// Search replace the ordinary workspace only when they are the oldest layer.
-fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
+fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Position> {
     if app.onboarding.is_some() {
         crate::onboarding::integration::render(frame, area, app);
-        return;
+        return None;
     }
     let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
     if let Mode::Search(state) = root_mode {
-        search_ui::render(frame, area, state, &app.ui_settings.icons);
-        return;
+        return search_ui::render_cursor(frame, area, state, &app.ui_settings.icons);
     }
     if let Mode::Settings(state) = root_mode {
         crate::settings_ui::render(frame, area, app, state);
-        return;
+        return None;
     }
 
     let layout = app.layout;
     // The pane renders before the tree because `PseudoTerminal` clears its
     // area; the tree then restores the connected shared-border joints.
-    draw_pane(frame, layout.pane_area, app);
+    app.composed_terminal_sources = draw_pane_sources(frame, layout.pane_area, app);
+    app.composed_editor_sources.clear();
+    for viewport in app.pane_viewports() {
+        let Some(crate::app::PaneRuntime::Editor(editor)) = app.panes.get(&viewport.pane_id) else {
+            continue;
+        };
+        if editor.view_mode != EditorViewMode::Source {
+            continue;
+        }
+        let Some(installed) = editor.installed_window() else {
+            continue;
+        };
+        let chrome = editor_chrome::compute(viewport.content_area, editor.show_minimap);
+        if installed.key.width != chrome.content_area.width
+            || installed.key.height != chrome.content_area.height
+        {
+            continue;
+        }
+        app.composed_editor_sources.push((
+            viewport.pane_id,
+            crate::source_window_surface::PaintedWindow {
+                installed: installed.clone(),
+                content_area: chrome.content_area,
+                minimap_area: chrome.minimap_area,
+            },
+        ));
+    }
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
     let focused_pane_id = app.focused_pane_id();
     let tree_order = app.effective_tree_order();
-    tree_ui::render(
+    let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
         &app.tree,
@@ -527,42 +667,73 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) {
                 toolbar_action: app.hovered_tree_toolbar_action,
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
+            sidebar_files: &app.sidebar_snapshot,
+            chatroom_projects: &app.chatroom_projects,
             panes: &app.panes,
         },
     );
+    let values = painted_rows
+        .node_ids()
+        .map(|node_id| {
+            let status = [
+                crate::status_icons::StatusSlot::Identity,
+                crate::status_icons::StatusSlot::Objective,
+                crate::status_icons::StatusSlot::Now,
+            ]
+            .map(|slot| status_tooltip_content(app, node_id, slot));
+            let worktree = app.tree.pane_workspace(node_id).map(|workspace| {
+                crate::status_icons::workspace_explanation(
+                    workspace,
+                    app.workspace_git_statuses.get(&node_id),
+                )
+            });
+            // Only this displayed title prefix can reach the fixed-width card.
+            // The row metadata lease is already held before composing this DTO.
+            let cost_title = app
+                .tree
+                .get(node_id)
+                .map(|node| node.name.chars().take(240).collect())
+                .unwrap_or_default();
+            let cost_card = app.cost_tracker.overlay().prepared_card(node_id);
+            tree_ui::PaintedRowValues {
+                node_id,
+                status,
+                worktree,
+                cost_title,
+                cost_card,
+            }
+        })
+        .collect();
+    painted_rows.retain_values(values);
+    app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
+    None
 }
 
 /// Draws the per-agent cost card beside its tree entry when the detail-card
-/// option makes it visible (see `App::cost_card_target`).
+/// acknowledged row option makes it visible (see `App::emitted_cost_card_target`).
 fn draw_cost_card(frame: &mut Frame, app: &App) {
-    let Some((pane_id, row)) = app.cost_card_target() else {
+    let Some((row, values)) = app.emitted_cost_card_target() else {
         return;
     };
-    let overlay = app.cost_tracker.overlay();
-    let (Some(cost), Some(view)) = (overlay.details.get(&pane_id), overlay.rows.get(&pane_id))
-    else {
+    let Some(card) = values.cost_card.as_ref() else {
         return;
     };
-    let title = app
-        .tree
-        .get(pane_id)
-        .map(|node| node.name.clone())
-        .unwrap_or_default();
     crate::cost_overlay::draw_detail_card(
         frame,
         frame.area(),
         app.layout.tree_area.right(),
         row,
-        &title,
-        crate::cost_overlay::detail_card_lines(cost, view, overlay),
+        &values.cost_title,
+        &card.lines,
     );
 }
 
 /// Draws one non-root layer without deciding which layer owns input. Input
 /// dispatch remains top-only through `App::mode`; this function is read-only.
-fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
+fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> Option<Position> {
+    let mut cursor = None;
     match mode {
         Mode::Explorer(overlay, _)
         | Mode::FolderExplorer(overlay, _)
@@ -602,7 +773,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::SettingsHelp(state) => {
             let Some(topic) = crate::settings_help::catalog::by_id(&state.topic_id) else {
                 crate::settings_help::dialog::render_missing(frame, area, &state.topic_id);
-                return;
+                return None;
             };
             crate::settings_help::dialog::render(
                 frame,
@@ -621,10 +792,27 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
-            modal::render_text_prompt(frame, area, "Save agent debug log", state, "Save");
+            cursor = modal::render_text_prompt_cursor(frame, area, "Save agent debug log", state, "Save").or(cursor);
         }
-        Mode::SchedulePaneInput(state) => draw_scheduled_input_dialog(frame, area, app, state),
+        Mode::SchedulePaneInput(state) => { cursor = draw_scheduled_input_dialog(frame, area, app, state).or(cursor); },
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
+        Mode::ValueDialog(host) => {
+            let ink = match app.ui_settings.color_scheme {
+                crate::theme::ColorScheme::Dark => Style::new().fg(Color::White).bg(Color::Black),
+                crate::theme::ColorScheme::Light => Style::new().fg(Color::Black).bg(Color::White),
+            };
+            crate::value_dialog::PreparedValueDialog::new(area, &host.dialog).render(
+                frame,
+                crate::value_dialog::DialogStyles {
+                    background: ink,
+                    normal: ink,
+                    highlighted: ink.add_modifier(Modifier::REVERSED),
+                    current: ink.add_modifier(Modifier::BOLD),
+                    disabled: ink.add_modifier(Modifier::DIM),
+                    error: ink.fg(Color::Red),
+                },
+            );
+        }
         Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
         Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu, &app.ui_settings),
         Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
@@ -632,24 +820,24 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             crate::worktree_dialog::draw_dialog(frame, area, state);
         }
         Mode::WorktreeManager(state) => crate::worktree_manager::render(frame, area, state),
-        Mode::CreateGroup(state) => draw_create_group(frame, app, state),
+        Mode::CreateGroup(state) => { cursor = draw_create_group(frame, app, state).or(cursor); },
         Mode::CreateSplitOrientation(state) => {
             draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
         }
         Mode::CreateSplitMembers(state) => draw_create_split_members(frame, area, state),
-        Mode::CreateBoard(state) => draw_create_board(frame, area, state),
+        Mode::CreateBoard(state) => { cursor = draw_create_board(frame, area, state).or(cursor); },
         Mode::BoardCardPrompt(_, state) => {
-            modal::render_text_prompt(frame, area, "New card", state, "Create card");
+            cursor = modal::render_text_prompt_cursor(frame, area, "New card", state, "Create card").or(cursor);
         }
         Mode::BoardColumnPrompt(_, state) => {
-            modal::render_text_prompt(frame, area, "New column", state, "Create column");
+            cursor = modal::render_text_prompt_cursor(frame, area, "New column", state, "Create column").or(cursor);
         }
         Mode::BoardRenamePrompt(_, target, state) => {
             let title = match target {
                 BoardRenameTarget::Card => "Rename card",
                 BoardRenameTarget::Column => "Rename column",
             };
-            modal::render_text_prompt(frame, area, title, state, "Rename");
+            cursor = modal::render_text_prompt_cursor(frame, area, title, state, "Rename").or(cursor);
         }
         Mode::BoardDeleteConfirm(_, target) => {
             let (title, message) = match target {
@@ -672,26 +860,30 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
             );
         }
         Mode::Rename(state) => {
-            modal::render_text_prompt(frame, area, "Rename", state, "Rename");
+            cursor = modal::render_text_prompt_cursor(frame, area, "Rename", state, "Rename").or(cursor);
         }
         Mode::CommandPrompt(state) => {
-            modal::render_text_prompt(frame, area, "Run command", state, "Run");
+            cursor = modal::render_text_prompt_cursor(frame, area, "Run command", state, "Run").or(cursor);
         }
         Mode::InferenceSettingPrompt(field, state) => {
-            if matches!(field, crate::app::InferenceSettingField::OpenAiApiKey | crate::app::InferenceSettingField::AnthropicApiKey | crate::app::InferenceSettingField::OpenRouterApiKey) {
-                modal::render_masked_text_prompt(frame, area, field.label(), state, "Apply");
+            if *field == crate::app::InferenceSettingField::RestructurePromptTokenLimit {
+                let (hint, is_error) = app.restructure_budget_input_hint(&state.buf);
+                let style = if is_error { Style::new().fg(Color::Red) } else { Style::new().add_modifier(Modifier::DIM) };
+                cursor = modal::render_text_prompt_with_hint_cursor(frame, area, field.label(), state, "Close", &hint, style).or(cursor);
+            } else if matches!(field, crate::app::InferenceSettingField::OpenAiApiKey | crate::app::InferenceSettingField::AnthropicApiKey | crate::app::InferenceSettingField::OpenRouterApiKey) {
+                cursor = modal::render_masked_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
             } else {
-                modal::render_text_prompt(frame, area, field.label(), state, "Apply");
+                cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
             }
         }
         Mode::VoiceSettingPrompt(field, state) => {
-            modal::render_masked_text_prompt(frame, area, field.label(), state, "Replace");
+            cursor = modal::render_masked_text_prompt_cursor(frame, area, field.label(), state, "Replace").or(cursor);
         }
         Mode::ApiSettingPrompt(state) => {
-            modal::render_text_prompt(frame, area, "HTTP API port", state, "Apply");
+            cursor = modal::render_text_prompt_cursor(frame, area, "HTTP API port", state, "Apply").or(cursor);
         }
         Mode::GitSettingPrompt(field, state) => {
-            modal::render_text_prompt(frame, area, field.label(), state, "Apply");
+            cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
         }
         Mode::AnimationTextPrompt(target, state) => {
             let (hint, style) = match &target.error {
@@ -704,7 +896,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
                     Style::new().add_modifier(Modifier::DIM),
                 ),
             };
-            modal::render_text_prompt_with_hint(
+            cursor = modal::render_text_prompt_with_hint_cursor(
                 frame,
                 area,
                 &target.label,
@@ -712,22 +904,22 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
                 "Apply",
                 &hint,
                 style,
-            );
+            ).or(cursor);
         }
-        Mode::LocationPicker(picker) => crate::location_picker::render(frame, area, picker),
+        Mode::LocationPicker(picker) => { cursor = crate::location_picker::render_cursor(frame, area, picker).or(cursor); },
         Mode::AgentSetupPathPrompt(feature, state) => {
-            modal::render_text_prompt(
+            cursor = modal::render_text_prompt_cursor(
                 frame,
                 area,
                 &format!("{} global instruction file", feature.label()),
                 state,
                 "Use file",
-            );
+            ).or(cursor);
         }
         Mode::AgentSetupPrompt(state) => crate::setup_prompt::render(frame, area, state),
         Mode::VoicePromptEditor(state) => crate::instruction_settings::render_editor(frame,area,state),
         Mode::SaveAs(_, state) => {
-            modal::render_text_prompt(frame, area, "Save As", state, "Save");
+            cursor = modal::render_text_prompt_cursor(frame, area, "Save As", state, "Save").or(cursor);
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
         Mode::ConvertSession => {
@@ -786,6 +978,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) {
         | Mode::Settings(_)
         | Mode::Search(_) => {}
     }
+    cursor
 }
 
 fn draw_text_trigger_dialog(
@@ -827,13 +1020,28 @@ fn draw_text_trigger_dialog(
         ),
         layout.message,
     );
+    let scope_style = if state.focus == TextTriggerFocus::Target {
+        theme::selected_style()
+    } else {
+        Style::new().fg(Color::Cyan)
+    };
+    crate::text_trigger_dialog::target_control(area, state).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: Style::new(),
+            label: scope_style,
+            value: scope_style,
+            button: scope_style,
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
+    );
     frame.render_widget(
         field(
-            "Match",
-            state.target.label(),
-            state.focus == TextTriggerFocus::Target,
+            "Delay (seconds)",
+            &state.delay.buf,
+            state.focus == TextTriggerFocus::Delay,
         ),
-        layout.target,
+        layout.delay,
     );
     frame.render_widget(
         Paragraph::new("SAMPLE TEXT")
@@ -919,45 +1127,40 @@ fn preview_text_trigger_line(regex: &regex::Regex, line: &str) -> String {
     )
 }
 
-fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
+fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) -> Option<Position> {
+    let mut cursor = None;
     let layout = modal::create_board_dialog_layout(area);
     frame.render_widget(Clear, layout.popup);
     let block = theme::block(true).title(theme::chrome_title("New board"));
     frame.render_widget(block, layout.popup);
-    draw_scheduled_input_field(
+    cursor = draw_scheduled_input_field(
         frame,
         layout.name_box,
         "Board name",
         &state.name,
         !state.editing_path,
+    )
+    .or(cursor);
+
+    modal::create_board_storage_control(area, state.storage_kind.label()).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: Style::new(),
+            label: Style::new().fg(Color::Cyan),
+            value: theme::selected_style(),
+            button: Style::new().fg(Color::Cyan),
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
     );
 
-    let selected_storage_style = Style::new()
-        .fg(Color::Black)
-        .bg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
-    let unselected_storage_style = Style::new().fg(Color::Cyan);
-    let (folder_style, markdown_style) = match state.storage_kind {
-        BoardStorageKind::Folder => (selected_storage_style, unselected_storage_style),
-        BoardStorageKind::MarkdownFile => (unselected_storage_style, selected_storage_style),
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Folder columns + Markdown cards ", folder_style),
-            Span::raw("  "),
-            Span::styled(" One Markdown file ", markdown_style),
-        ]))
-        .alignment(Alignment::Center),
-        layout.storage_row,
-    );
-
-    draw_scheduled_input_field(
+    cursor = draw_scheduled_input_field(
         frame,
         layout.path_box,
         "Storage path",
         &state.path,
         state.editing_path,
-    );
+    )
+    .or(cursor);
     frame.render_widget(
         Paragraph::new("[ Browse path… ]")
             .style(
@@ -975,11 +1178,12 @@ fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) {
         modal::DialogActions::form("Cancel", "Create board"),
     );
     frame.render_widget(
-        Paragraph::new("Click a field to edit · Tab switches fields · Ctrl+P browses")
+        Paragraph::new("Tab fields · Ctrl+P browse · Ctrl+Space storage list")
             .style(Style::new().add_modifier(Modifier::DIM))
             .alignment(Alignment::Center),
         layout.hint_row,
     );
+    cursor
 }
 
 fn draw_create_split_orientation(
@@ -1181,12 +1385,61 @@ fn draw_context_menu(
 /// Renders a deliberately spacious form: duration first, then payload, then
 /// the Enter policy and one explicit confirmation button. The same geometry
 /// drives `crate::mouse`, so every visible control has an exact hit target.
+fn draw_scheduled_duration_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    state: &ScheduledInputDialogState,
+    focus: ScheduledInputFocus,
+) -> Option<Position> {
+    let focused = state.focus == focus;
+    let style = if focused {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
+    frame.render_widget(
+        theme::block(focused).title(theme::chrome_title(label)),
+        area,
+    );
+    let control = state.duration_control(focus, area);
+    control.render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: style,
+            label: style,
+            value: style,
+            button: style,
+            disabled: style.add_modifier(Modifier::DIM),
+        },
+    );
+    let geometry = control.geometry();
+    if !focused || geometry.value_slot.width == 0 || geometry.value_slot.height == 0 {
+        return None;
+    }
+    let cursor = match focus {
+        ScheduledInputFocus::Hours => state.hours.cursor,
+        ScheduledInputFocus::Minutes => state.minutes.cursor,
+        ScheduledInputFocus::Seconds => state.seconds.cursor,
+        _ => return None,
+    };
+    Some(Position::new(
+        geometry.value.x.saturating_add(
+            u16::try_from(cursor)
+                .unwrap_or(u16::MAX)
+                .min(geometry.value.width),
+        ),
+        geometry.value.y,
+    ))
+}
+
 fn draw_scheduled_input_dialog(
     frame: &mut Frame,
     screen_area: Rect,
     app: &App,
     state: &ScheduledInputDialogState,
-) {
+) -> Option<Position> {
+    let mut cursor = None;
     let layout = crate::scheduled_input::dialog_layout(screen_area);
     frame.render_widget(Clear, layout.popup);
     frame.render_widget(
@@ -1206,39 +1459,43 @@ fn draw_scheduled_input_dialog(
         Paragraph::new("WHEN").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         layout.duration_label,
     );
-    draw_scheduled_input_field(
+    cursor = draw_scheduled_duration_field(
         frame,
         layout.hours,
         "Hours",
-        &state.hours,
-        state.focus == ScheduledInputFocus::Hours,
-    );
-    draw_scheduled_input_field(
+        state,
+        ScheduledInputFocus::Hours,
+    )
+    .or(cursor);
+    cursor = draw_scheduled_duration_field(
         frame,
         layout.minutes,
         "Minutes",
-        &state.minutes,
-        state.focus == ScheduledInputFocus::Minutes,
-    );
-    draw_scheduled_input_field(
+        state,
+        ScheduledInputFocus::Minutes,
+    )
+    .or(cursor);
+    cursor = draw_scheduled_duration_field(
         frame,
         layout.seconds,
         "Seconds",
-        &state.seconds,
-        state.focus == ScheduledInputFocus::Seconds,
-    );
+        state,
+        ScheduledInputFocus::Seconds,
+    )
+    .or(cursor);
     frame.render_widget(
         Paragraph::new("WHAT TO HIT")
             .style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         layout.payload_label,
     );
-    draw_scheduled_input_field(
+    cursor = draw_scheduled_input_field(
         frame,
         layout.text,
         "Text (optional)",
         &state.text,
         state.focus == ScheduledInputFocus::Text,
-    );
+    )
+    .or(cursor);
 
     let checkbox_style = if state.focus == ScheduledInputFocus::SendEnter {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
@@ -1271,6 +1528,7 @@ fn draw_scheduled_input_dialog(
             .alignment(Alignment::Center),
         layout.hint,
     );
+    cursor
 }
 
 fn draw_prompt_queue_dialog(
@@ -1322,42 +1580,57 @@ fn draw_prompt_queue_dialog(
         Paragraph::new("DELIVERY").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         layout.delivery_label,
     );
-    let delivery_text = match state.delivery_choice {
-        PromptQueueDelivery::Once => "[x] Once    [ ] Run X times    [ ] Enqueue forever (DANGER)",
-        PromptQueueDelivery::Times { .. } => {
-            "[ ] Once    [x] Run X times    [ ] Enqueue forever (DANGER)"
-        }
-        PromptQueueDelivery::Forever => {
-            "[ ] Once    [ ] Run X times    [x] Enqueue forever (DANGER)"
-        }
-    };
     let delivery_style = if state.focus == PromptQueueFocus::Delivery {
         Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     } else {
         Style::new()
     };
-    frame.render_widget(
-        Paragraph::new(delivery_text).style(delivery_style),
-        layout.delivery,
+    state.delivery_control(layout.delivery).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: delivery_style,
+            label: delivery_style,
+            value: delivery_style,
+            button: delivery_style,
+            disabled: delivery_style.add_modifier(Modifier::DIM),
+        },
     );
-    let times_value = match state.delivery_choice {
-        PromptQueueDelivery::Times { .. } => state.times.buf.as_str(),
-        _ => "(only for Run X times)",
-    };
     let times_style = if state.focus == PromptQueueFocus::Times {
         Style::new().fg(Color::Cyan)
     } else {
         Style::new().add_modifier(Modifier::DIM)
     };
     frame.render_widget(
-        Paragraph::new(format!("Runs: {times_value}"))
-            .block(
-                theme::block(state.focus == PromptQueueFocus::Times)
-                    .title(theme::chrome_title("Repeat count")),
-            )
-            .style(times_style),
+        theme::block(state.focus == PromptQueueFocus::Times)
+            .title(theme::chrome_title("Repeat count")),
         layout.times,
     );
+    let repeat_control = state.times_control(layout.times);
+    repeat_control.render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: times_style,
+            label: times_style,
+            value: times_style,
+            button: times_style,
+            disabled: times_style.add_modifier(Modifier::DIM),
+        },
+    );
+    if state.focus == PromptQueueFocus::Times
+        && matches!(state.delivery_choice, PromptQueueDelivery::Times { .. })
+    {
+        let geometry = repeat_control.geometry();
+        if geometry.value_slot.width > 0 && geometry.value_slot.height > 0 {
+            frame.set_cursor_position(Position::new(
+                geometry.value.x.saturating_add(
+                    u16::try_from(state.times.cursor)
+                        .unwrap_or(u16::MAX)
+                        .min(geometry.value.width),
+                ),
+                geometry.value.y,
+            ));
+        }
+    }
     let warning = match state.delivery_choice {
         PromptQueueDelivery::Forever => "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.",
         PromptQueueDelivery::Times { .. } => "The same prompt is sent once per future finish, until the selected count is exhausted.",
@@ -1401,7 +1674,7 @@ fn draw_scheduled_input_field(
     label: &str,
     state: &crate::text_prompt::TextPromptState,
     focused: bool,
-) {
+) -> Option<Position> {
     let border_style = if focused {
         Style::new().fg(Color::Cyan)
     } else {
@@ -1414,17 +1687,19 @@ fn draw_scheduled_input_field(
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(state.buf.as_str()), inner);
     if !focused || inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
     let prefix: String = state.buf.chars().take(state.cursor).collect();
     let cursor_offset = u16::try_from(prefix.width()).unwrap_or(u16::MAX);
-    frame.set_cursor_position(Position::new(
+    let cursor_position = Position::new(
         inner
             .x
             .saturating_add(cursor_offset)
             .min(inner.right().saturating_sub(1)),
         inner.y,
-    ));
+    );
+    frame.set_cursor_position(cursor_position);
+    Some(cursor_position)
 }
 
 /// Draws the line-specific right-click action without implying that its file
@@ -1555,32 +1830,16 @@ fn draw_create_agent_from_line(
     } else {
         Style::new()
     };
-    let agent_option = |agent_type: AgentLaunchType| {
-        let marker = if state.agent_type == agent_type {
-            "(●)"
-        } else {
-            "( )"
-        };
-        Span::styled(
-            format!("{marker} {}", agent_type.label()),
-            if state.agent_type == agent_type {
-                selector_style.add_modifier(Modifier::BOLD)
-            } else {
-                selector_style
-            },
-        )
-    };
-    let mut agent_spans = vec![Span::styled(
-        "Agent: ",
-        Style::new().add_modifier(Modifier::DIM),
-    )];
-    for (index, agent_type) in AgentLaunchType::ALL.into_iter().enumerate() {
-        if index > 0 {
-            agent_spans.push(Span::raw("   "));
-        }
-        agent_spans.push(agent_option(agent_type));
-    }
-    frame.render_widget(Paragraph::new(Line::from(agent_spans)), layout.agent_row);
+    crate::agent_from_line::provider_control(screen_area, state).render(
+        frame,
+        crate::value_control::ControlStyles {
+            background: Style::new(),
+            label: selector_style,
+            value: selector_style,
+            button: selector_style,
+            disabled: Style::new().add_modifier(Modifier::DIM),
+        },
+    );
 
     let prompt_border_style = if state.focus == CreateAgentFocus::Prompt {
         Style::new().fg(Color::Cyan)
@@ -1626,7 +1885,8 @@ const GROUP_ACCENT: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
 /// (optional -- left blank it defaults to "group") plus the flattened list
 /// of every existing group, top level first, with the current selection
 /// highlighted in the same accent used for the real tree's selected row.
-fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
+fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) -> Option<Position> {
+    let mut cursor = None;
     frame.render_widget(Clear, state.area);
     let block = theme::block(true).title(theme::chrome_title("New group"));
     let layout = modal::create_group_layout(state.area);
@@ -1666,10 +1926,12 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
         // so clamping to it directly would let the cursor land one cell past
         // the row's real last cell -- see the identical fix in
         // `modal::render_text_prompt` for the same `Rect::right()` pitfall.
-        frame.set_cursor_position(Position::new(
+        let position = Position::new(
             cursor_x.min(layout.name_row.right().saturating_sub(1)),
             layout.name_row.y,
-        ));
+        );
+        frame.set_cursor_position(position);
+        cursor = Some(position);
     }
 
     frame.render_widget(
@@ -1734,19 +1996,28 @@ fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) {
         )),
         layout.hint_row,
     );
+    cursor
 }
 
 /// Draws the focused pane's live content (terminal screen or editor
 /// buffer), or a placeholder when nothing is focused.
+#[cfg(test)]
 fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
+    let _ = draw_pane_sources(frame, area, app);
+}
+fn draw_pane_sources(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+) -> Vec<(ilium_core::NodeId, terminal_view::PaintedTerminal)> {
     let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
     if let Mode::AgentDebugLog(state) = root_mode {
         crate::agent_debug_ui::render(frame, area, app, state);
-        return;
+        return Vec::new();
     }
     if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
         crate::chatroom_ui::render(frame, area, app, *project_id);
-        return;
+        return Vec::new();
     }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
@@ -1763,13 +2034,15 @@ fn draw_pane(frame: &mut Frame, area: Rect, app: &App) {
         let placeholder =
             Paragraph::new(message).block(theme::block(false).title(theme::chrome_title(title)));
         frame.render_widget(placeholder, area);
-        return;
+        return Vec::new();
     }
 
+    let mut sources = Vec::with_capacity(viewports.len());
     for viewport in viewports {
-        draw_pane_runtime(frame, app, viewport);
+        draw_pane_runtime(frame, app, viewport, &mut sources);
     }
     draw_screen_transfer_controls(frame, app);
+    sources
 }
 
 /// Draws the two directional actions in the middle of every eligible split
@@ -1793,14 +2066,22 @@ fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
     }
 }
 
-fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
+fn draw_pane_runtime(
+    frame: &mut Frame,
+    app: &App,
+    viewport: crate::split_layout::PaneViewport,
+    sources: &mut Vec<(ilium_core::NodeId, terminal_view::PaintedTerminal)>,
+) {
     let pane_focused =
         matches!(app.focus, FocusTarget::Pane) && app.active_pane_id() == Some(viewport.pane_id);
     let pane_title = pane_title(app, viewport.pane_id);
     let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
-        let placeholder = Paragraph::new("pane is loading")
-            .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
+        let placeholder = Paragraph::new(
+            app.editor_load_error(viewport.pane_id)
+                .unwrap_or("pane is loading"),
+        )
+        .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
         if let Some(action) = completed_agent_close_action {
             draw_completed_agent_close_action(frame, action.button_area);
@@ -1825,6 +2106,11 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                     frame.buffer_mut(),
                 );
                 draw_smart_copy_highlights(frame, terminal_area, session);
+            } else if let Some(source) = app.selection_terminal_source(viewport.pane_id) {
+                source.with_screen(|screen| {
+                    terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
+                    draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
+                });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
                 term.with_screen(|screen| {
@@ -1837,7 +2123,27 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                     draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
                 });
             }
-            draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
+            let source = if smart_copy.is_some() {
+                app.smart_copy_terminal_source(viewport.pane_id).cloned()
+            } else {
+                Some(
+                    app.selection_terminal_source(viewport.pane_id)
+                        .cloned()
+                        .unwrap_or_else(|| term.painted_source()),
+                )
+            };
+            if let Some(source) = source {
+                sources.push((viewport.pane_id, source));
+            }
+            if let Some(source) = app.selection_terminal_source(viewport.pane_id) {
+                draw_terminal_scrollbar_metrics(
+                    frame,
+                    viewport.outer_area,
+                    source.scrollback_metrics(),
+                );
+            } else {
+                draw_terminal_scrollbar(frame, viewport.outer_area, term.as_ref());
+            }
         }
         PaneRuntime::Editor(editor) => {
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
@@ -1869,7 +2175,7 @@ fn draw_pane_runtime(frame: &mut Frame, app: &App, viewport: crate::split_layout
                 .filter(|session| session.pane_id == viewport.pane_id)
             {
                 draw_smart_copy_toolbar(frame, toolbar_area, session);
-                if session.candidates.is_empty() {
+                if session.candidates.is_empty() && !session.is_light {
                     draw_smart_copy_progress_dialog(frame, viewport.content_area, session);
                 }
                 return;
@@ -1966,6 +2272,22 @@ fn draw_smart_copy_toolbar(
     let exit = crate::smart_copy::exit_button_rect(area);
     let elapsed = session.started_at.elapsed().as_secs_f32();
     let progress_area = Rect::new(area.x, area.y, exit.x.saturating_sub(area.x), area.height);
+    if session.is_light {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "🧲 Smart copy light · {} selected · click to add, release the key to copy{current}",
+                session.selected_count()
+            )),
+            progress_area,
+        );
+        frame.render_widget(
+            Paragraph::new("[ Exit ]")
+                .alignment(Alignment::Center)
+                .style(Style::new().add_modifier(Modifier::BOLD)),
+            exit,
+        );
+        return;
+    }
     frame.render_widget(
         Paragraph::new(format!(
             "🧲 Smart copy · {phase} · {elapsed:.1}s · {} selections · {usage}{current}",
@@ -2095,13 +2417,27 @@ fn draw_completed_agent_close_action(frame: &mut Frame, area: Rect) {
 /// see `App::handle_pane_key`/`handle_pane_mouse` for Shift+PageUp/
 /// PageDown, Shift+End, and wheel navigation).
 fn draw_terminal_scrollbar(frame: &mut Frame, area: Rect, term: &terminal_view::TerminalView) {
-    let total = term.scrollback_total();
+    draw_terminal_scrollbar_metrics(
+        frame,
+        area,
+        (
+            term.scrollback_total(),
+            term.scrollback_position(),
+            term.viewport_rows(),
+        ),
+    );
+}
+fn draw_terminal_scrollbar_metrics(
+    frame: &mut Frame,
+    area: Rect,
+    (total, position, rows): (usize, usize, u16),
+) {
     if total == 0 {
         return;
     }
     let mut scrollbar_state = ScrollbarState::new(total.saturating_add(1))
-        .position(total.saturating_sub(term.scrollback_position()))
-        .viewport_content_length(usize::from(term.viewport_rows()));
+        .position(total.saturating_sub(position))
+        .viewport_content_length(usize::from(rows));
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
@@ -2138,18 +2474,39 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 
     match editor.view_mode {
         EditorViewMode::Source => {
-            editor
-                .update_source_scroll_mirror(chrome.content_area.height, chrome.content_area.width);
-            match editor.highlighted_lines() {
-                Some(tokens) => {
-                    editor.update_source_scroll_col_mirror(chrome.content_area.width);
-                    editor_highlight::render(frame, chrome.content_area, editor, &tokens);
-                }
-                None => {
-                    frame.render_widget(&editor.textarea, chrome.content_area);
-                }
+            if let Some(window) = editor.installed_window().filter(|window| {
+                window.key.width == chrome.content_area.width
+                    && window.key.height == chrome.content_area.height
+            }) {
+                let current = window.key.revision == editor.content_revision()
+                    && window.key.path.as_path()
+                        == editor.path.as_deref().unwrap_or(std::path::Path::new(""))
+                    && window.key.gutter == editor.show_line_numbers
+                    && window.key.line_display == editor.line_display
+                    && window.key.tab == editor.textarea.tab_length();
+                crate::source_window_surface::render(
+                    frame,
+                    chrome.content_area,
+                    window,
+                    {
+                        let cursor = editor.textarea.cursor();
+                        (cursor.0, cursor.1)
+                    },
+                    editor.textarea.selection_range(),
+                    current,
+                );
+                draw_source_scrollbar(frame, chrome.content_area, editor);
+            } else {
+                frame.render_widget(
+                    Paragraph::new(
+                        editor
+                            .preparation_error
+                            .as_deref()
+                            .unwrap_or("Preparing source…"),
+                    ),
+                    chrome.content_area,
+                );
             }
-            draw_source_scrollbar(frame, chrome.content_area, editor);
         }
         EditorViewMode::Rendered => match &editor.rendered {
             Some(document) => {
@@ -2163,21 +2520,36 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                 draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
             }
             None => {
-                frame.render_widget(Paragraph::new("Rendering…"), chrome.content_area);
+                frame.render_widget(
+                    Paragraph::new(editor.preparation_error.as_deref().unwrap_or("Rendering…")),
+                    chrome.content_area,
+                );
             }
         },
     }
 
     if let Some(minimap_area) = chrome.minimap_area {
-        let lines = editor.textarea.lines();
-        let highlight_line = minimap_highlight_line(editor, lines.len(), chrome.content_area.width);
-        minimap::render(
-            frame,
-            minimap_area,
-            lines,
-            highlight_line,
-            chrome.content_area.width,
-        );
+        if editor.view_mode == EditorViewMode::Rendered {
+            let lines = editor.textarea.lines();
+            let highlight = minimap_highlight_line(editor, lines.len(), chrome.content_area.width);
+            minimap::render(
+                frame,
+                minimap_area,
+                lines,
+                highlight,
+                chrome.content_area.width,
+            );
+        } else if let Some(window) = editor.installed_window() {
+            if let Some(minimap) = &window.viewport.minimap {
+                crate::minimap::render_prepared(
+                    frame,
+                    minimap_area,
+                    minimap,
+                    editor.textarea.cursor().0,
+                    editor.textarea.lines().len(),
+                );
+            }
+        }
     }
 }
 
@@ -2185,7 +2557,12 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// available editor body. It uses Ratatui's own scrollbar widget and shares
 /// the same authoritative viewport position as wheel navigation.
 fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
-    let total_lines = editor.source_visual_rows(area.width).len();
+    let Some(total_lines) = editor
+        .installed_window()
+        .and_then(|window| window.viewport.total_rows)
+    else {
+        return;
+    };
     if total_lines <= usize::from(area.height) {
         return;
     }
@@ -2327,6 +2704,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
         Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
+        Mode::ValueDialog(..) => "VALUE OPTIONS",
         Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
@@ -2543,6 +2921,74 @@ fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn smart_copy_preview_withholds_scene_attribution_and_recovers_after_close() {
+        use crate::background_animation::test_support::{fake_host, FakeProbe};
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("preview-paint".into(), project.path().to_path_buf());
+        let area = Rect::new(0, 0, 100, 30);
+        app.set_screen_area(area);
+        let probe = FakeProbe::new();
+        *app.animation_frame.host_mut() = fake_host(&probe);
+        app.animation_settings.enabled = true;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Stars;
+        app.animation_settings.density_percent = 100;
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
+            })
+            .unwrap();
+        app.animation_frame.settle_for_test();
+        terminal
+            .draw(|frame| {
+                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
+            })
+            .unwrap();
+        assert!(
+            app.animation_frame
+                .composed_bits()
+                .iter()
+                .any(|bits| *bits != 0),
+            "Control draw must contain actual composed scene ink"
+        );
+        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
+            "⣿⣿⣿⣿".into(),
+            1,
+            true,
+            Instant::now(),
+        ));
+        let preview = terminal
+            .draw(|frame| {
+                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
+            })
+            .unwrap();
+        assert!(
+            preview
+                .buffer
+                .content()
+                .iter()
+                .any(|cell| cell.symbol().contains('⣿')),
+            "The actual copied Braille preview must render"
+        );
+        assert!(
+            app.animation_frame.composed_bits().is_empty(),
+            "Late arbitrary preview text must not retain scene attribution"
+        );
+        app.smart_copy_preview = None;
+        terminal
+            .draw(|frame| {
+                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
+            })
+            .unwrap();
+        assert!(
+            app.animation_frame
+                .composed_bits()
+                .iter()
+                .any(|bits| *bits != 0),
+            "Closing preview must restore ordinary scene attribution"
+        );
+    }
     use super::*;
     use crate::app::{PaneRuntime, RightPanelTarget};
     use crate::terminal_view::TerminalView;
@@ -2551,6 +2997,63 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn status_tooltip_values_advance_only_after_the_original_row_is_emitted() {
+        let mut app = App::new("painted-tooltip".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "original shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree_state.select(vec![group, pane]);
+        app.tree_state.open(vec![group]);
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
+            )
+            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_base_layer(frame, frame.area(), &mut app);
+            })
+            .unwrap();
+        let original = app.capture_emitted_geometry(71);
+        let original_value =
+            status_tooltip_content(&app, pane, crate::status_icons::StatusSlot::Now).unwrap();
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::WaitingApproval, None),
+            )
+            .unwrap();
+        let newer_value =
+            status_tooltip_content(&app, pane, crate::status_icons::StatusSlot::Now).unwrap();
+        assert_ne!(original_value, newer_value);
+        app.commit_emitted_geometry(original);
+        assert_eq!(
+            app.emitted_status_tooltip(pane, crate::status_icons::StatusSlot::Now),
+            Some(&original_value)
+        );
+        terminal
+            .draw(|frame| {
+                draw_base_layer(frame, frame.area(), &mut app);
+            })
+            .unwrap();
+        let newer = app.capture_emitted_geometry(72);
+        assert_eq!(
+            app.emitted_status_tooltip(pane, crate::status_icons::StatusSlot::Now),
+            Some(&original_value)
+        );
+        app.commit_emitted_geometry(newer);
+        assert_eq!(
+            app.emitted_status_tooltip(pane, crate::status_icons::StatusSlot::Now),
+            Some(&newer_value)
+        );
+    }
 
     #[test]
     fn attention_mode_hides_tooltips_for_status_slots_without_a_glyph() {
@@ -3051,6 +3554,8 @@ mod tests {
         let mut editor = EditorPane::empty();
         editor.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
 
+        editor.prepare_test_source_window(12, 4, &ratatui_image::picker::Picker::halfblocks());
+
         let backend = TestBackend::new(12, 4);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal
@@ -3062,7 +3567,8 @@ mod tests {
             "overflowing source should render a scrollbar thumb"
         );
 
-        editor.textarea = TextArea::from(["short"]);
+        editor.replace_contents("short");
+        editor.prepare_test_source_window(12, 4, &ratatui_image::picker::Picker::halfblocks());
         terminal
             .draw(|frame| draw_source_scrollbar(frame, Rect::new(0, 0, 12, 4), &editor))
             .expect("render fitting source without scrollbar");
@@ -3075,7 +3581,7 @@ mod tests {
 
     #[test]
     fn create_agent_dialog_renders_selector_editable_prompt_and_button() {
-        let state = CreateAgentFromLineState::new(
+        let mut state = CreateAgentFromLineState::new(
             crate::agent_from_line::EditorSourceLine {
                 pane_id: NodeId(2),
                 path: PathBuf::from("/work/main.rs"),
@@ -3086,22 +3592,37 @@ mod tests {
         );
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
 
-        terminal
-            .draw(|frame| draw_create_agent_from_line(frame, frame.area(), &state))
-            .unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
+        for provider in crate::agent_from_line::AgentLaunchType::ALL {
+            state.agent_type = provider;
+            terminal
+                .draw(|frame| draw_create_agent_from_line(frame, frame.area(), &state))
+                .unwrap();
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
 
-        assert!(rendered.contains("Create agent from line"));
-        assert!(rendered.contains("Claude"));
-        assert!(rendered.contains("Codex"));
-        assert!(rendered.contains("/goal please do the following task"));
-        assert!(rendered.contains("[ Create agent ]"));
+            assert!(rendered.contains("Create agent from line"));
+            assert!(rendered.contains(provider.label()));
+            assert!(rendered.contains("/goal please do the following task"));
+            assert!(rendered.contains("[ Create agent ]"));
+            let controls =
+                crate::agent_from_line::provider_control(Rect::new(0, 0, 100, 30), &state)
+                    .geometry();
+            for (rect, glyph) in [
+                (controls.previous, "←"),
+                (controls.open, "+"),
+                (controls.next, "→"),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph
+                );
+            }
+        }
     }
 
     #[test]
@@ -3366,4 +3887,37 @@ mod tests {
             "⇠"
         );
     }
+}
+
+/// Real source-window UI route, prepared on the shared finite CPU bank.
+#[cfg(test)]
+pub(crate) fn test_source_window_pixels(
+    editor: &mut EditorPane,
+    width: u16,
+    height: u16,
+) -> ratatui::buffer::Buffer {
+    editor.show_minimap = false;
+    let area = Rect::new(0, 0, width, height + crate::editor_chrome::TOOLBAR_HEIGHT);
+    let content = crate::editor_chrome::compute(area, false).content_area;
+    assert_eq!(content.width, width);
+    assert_eq!(content.height, height);
+    editor.prepare_test_source_window_with_syntax(
+        width,
+        height,
+        &ratatui_image::picker::Picker::halfblocks(),
+    );
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+            .unwrap();
+    terminal
+        .draw(|frame| draw_editor(frame, area, editor))
+        .unwrap();
+    let mut output = ratatui::buffer::Buffer::empty(Rect::new(0, 0, width, height));
+    for row in 0..height {
+        for column in 0..width {
+            output[(column, row)] =
+                terminal.backend().buffer()[(content.x + column, content.y + row)].clone();
+        }
+    }
+    output
 }

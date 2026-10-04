@@ -89,6 +89,7 @@ impl App {
         self.semantic_presentation.load_error = match result {
             Ok(settings) => {
                 self.animation_settings = settings;
+                self.committed_animation_settings = None;
                 None
             }
             Err(error) => Some(error),
@@ -105,17 +106,26 @@ impl App {
             ) {
                 return self.reconcile_animation_presentation();
             }
-            let result = crate::project_config::load(&path)
-                .map(|config| config.animation)
-                .map_err(|error| {
-                    format!("Could not load animation settings for this project: {error}")
-                });
-            self.install_animation_project_settings(path, result);
+            self.semantic_presentation.bound_path = path.clone();
+            self.semantic_presentation.load_error =
+                Some("Project animation settings are loading".into());
+            self.semantic_presentation.cache.get_mut().take();
+            let result = self
+                .configuration_files
+                .as_mut()
+                .ok_or_else(|| "Project file worker unavailable".to_owned())
+                .and_then(|files| files.request_project(path));
+            if let Err(error) = result {
+                self.semantic_presentation.load_error = Some(error);
+            }
             changed = true;
         }
         self.reconcile_animation_presentation() || changed
     }
-    pub(super) fn animation_write_path(&self) -> Result<PathBuf, String> {
+    pub(crate) fn animation_project_binding(&self) -> PathBuf {
+        self.semantic_presentation.bound_path.clone()
+    }
+    pub(crate) fn animation_write_path(&self) -> Result<PathBuf, String> {
         let path = self.animation_project_path();
         if path != self.semantic_presentation.bound_path {
             return Err(
@@ -127,7 +137,7 @@ impl App {
         }
         Ok(path)
     }
-    pub(super) fn prepare_animation_edit(&mut self) -> bool {
+    pub(crate) fn prepare_animation_edit(&mut self) -> bool {
         self.synchronize_animation_project_settings();
         if let Err(error) = self.animation_write_path() {
             self.status_message = Some(error);
@@ -136,14 +146,17 @@ impl App {
         true
     }
     fn animation_resolution(&self) -> Rc<Resolution> {
+        let authored = self
+            .committed_animation_settings
+            .as_ref()
+            .unwrap_or(&self.animation_settings);
         let selection = self.animation_selection();
-        let owner =
-            selection
-                .as_ref()
-                .map(|selection| match self.animation_settings.semantic_scope {
-                    SemanticScope::Project => selection.project_id,
-                    SemanticScope::Entry => selection.entry_id,
-                });
+        let owner = selection
+            .as_ref()
+            .map(|selection| match authored.semantic_scope {
+                SemanticScope::Project => selection.project_id,
+                SemanticScope::Entry => selection.entry_id,
+            });
         let recommendation = owner
             .and_then(|id| self.tree.get(id))
             .and_then(|node| node.inferred_animation.as_ref());
@@ -157,18 +170,18 @@ impl App {
                 && cached.tree_version == self.tree_version
                 && cached.generation == generation
                 && cached.recommendation.as_ref() == recommendation
-                && cached.authored == self.animation_settings
+                && cached.authored == *authored
                 && cached.bound_path == self.semantic_presentation.bound_path
                 && cached.load_error == self.semantic_presentation.load_error
             {
                 return Rc::clone(&cached.resolution);
             }
         }
-        let semantic = self.animation_settings.kind == AnimationKind::Semantic;
+        let semantic = authored.kind == AnimationKind::Semantic;
         let result = if let Some(error) = &self.semantic_presentation.load_error {
             Err(error.clone())
         } else if !semantic {
-            Ok(self.animation_settings.clone())
+            Ok(authored.clone())
         } else if selection
             .as_ref()
             .is_some_and(|selection| selection.path != self.semantic_presentation.bound_path)
@@ -177,15 +190,12 @@ impl App {
         } else if selection.is_none() {
             Err("Semantic: select a project or entry".into())
         } else if let Some(recommendation) = recommendation {
-            crate::semantic_animation::resolve_recommendation(
-                recommendation,
-                &self.animation_settings,
-            )
-            .map_err(|error| format!("Semantic: {error}"))
+            crate::semantic_animation::resolve_recommendation(recommendation, authored)
+                .map_err(|error| format!("Semantic: {error}"))
         } else {
             Err(format!(
                 "Semantic: no {} recommendation; reorganize this project to create one",
-                if self.animation_settings.semantic_scope == SemanticScope::Project {
+                if authored.semantic_scope == SemanticScope::Project {
                     "project"
                 } else {
                     "entry"
@@ -199,7 +209,7 @@ impl App {
         let mut label = String::new();
         if semantic {
             if let Some(settings) = &settings {
-                let scope = if self.animation_settings.semantic_scope == SemanticScope::Project {
+                let scope = if authored.semantic_scope == SemanticScope::Project {
                     "project"
                 } else {
                     "entry"
@@ -232,7 +242,7 @@ impl App {
             tree_version: self.tree_version,
             generation,
             recommendation: recommendation.cloned(),
-            authored: self.animation_settings.clone(),
+            authored: authored.clone(),
             bound_path: self.semantic_presentation.bound_path.clone(),
             load_error: self.semantic_presentation.load_error.clone(),
             resolution: Rc::clone(&resolution),
@@ -295,7 +305,6 @@ impl App {
             .map(|settings| settings.kind);
         let new_kind = next.settings.as_ref().map(|settings| settings.kind);
         if changed && (next.settings.is_none() || (semantic && settings_changed)) {
-            *self.animation_cache.borrow_mut() = Default::default();
             self.semantic_presentation.field_settings = None;
             if next.settings.is_none() || old_kind != new_kind {
                 self.animation_frame.release_hosts();
@@ -309,8 +318,27 @@ impl App {
             && !self.is_animation_preview_visible()
         {
             self.animation_frame.release_hosts();
-            self.animation_cache.borrow_mut().pause();
             self.semantic_presentation.field_settings = None;
+        }
+        if settings_changed && self.animation_frame.has_requested() {
+            if let Some(settings) = next
+                .settings
+                .as_ref()
+                .filter(|settings| settings.enabled || self.is_animation_preview_visible())
+            {
+                if let Err(error) = self.animation_frame.request(
+                    settings,
+                    self.layout.screen_area.width,
+                    self.layout.screen_area.height,
+                    crate::background_composition::quantized_elapsed_at(
+                        self.started_at.elapsed(),
+                        self.animation_frames_per_second(),
+                    ),
+                    None,
+                ) {
+                    self.status_message = Some(format!("Animation transition pending: {error:?}"));
+                }
+            }
         }
         self.semantic_presentation.presented = Some(next);
         let layout = self.layout_for_animation(
@@ -331,7 +359,6 @@ impl App {
             4
         } else if settings.kind.is_ambient() && self.animation_field_matches(&settings) {
             self.animation_frame
-                .host()
                 .frames_per_second()
                 .unwrap_or(crate::background_composition::DEFAULT_FRAMES_PER_SECOND)
         } else {
@@ -379,10 +406,10 @@ impl App {
         crate::animation_rows::RowContext {
             effective_kind: kind,
             scene_uses_cell_colors: kind == Some(AnimationKind::Wikipedia)
-                || (current && self.animation_frame.host().uses_cell_colors()),
+                || (current && self.animation_frame.has_cell_colors()),
             scene_status,
             cache: if uses_loop {
-                self.animation_cache.borrow().status()
+                self.animation_frame.cache_status()
             } else {
                 Default::default()
             },

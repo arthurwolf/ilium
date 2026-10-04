@@ -11,12 +11,11 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread::{self, JoinHandle};
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
-use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
-use tokio::sync::mpsc::Sender as AsyncSender;
+use ilium_platform::owned_worker::StopToken;
+mod owner;
+pub use owner::{IconSearchFailure, IconSearchWorkers};
 
 use crate::icon_settings::{
     icon_categories, semantic_picker_search_results, IconCatalogEntry, IconCatalogFamily,
@@ -25,10 +24,10 @@ use crate::icon_settings::{
 
 const MAX_RESULTS_PER_FAMILY: usize = 120;
 const CATALOGUE_EMBEDDING_BATCH_SIZE: usize = 32;
-/// Four CPU execution threads keep the one-time catalogue build practical
-/// while leaving the rest of a typical development machine available to the
-/// terminal and editor. Query vectors themselves are tiny after that build.
-const CPU_THREADS: usize = 4;
+/// Inference and tokenization execute on the admitted owner thread, without
+/// dependency-owned thread pools multiplying the shared physical allowance.
+const CPU_THREADS: usize = 1;
+pub const MAX_QUERY_BYTES: usize = 8 * 1024;
 // Bumped from ILICV001 because the on-disk header gained the catalogue
 // fingerprint field below -- old-format files fail this check and are
 // safely rebuilt rather than misread with the fingerprint bytes offset.
@@ -48,61 +47,8 @@ pub enum IconSemanticSearchEvent {
     },
     Failed {
         revision: u64,
-        message: String,
+        message: IconSearchFailure,
     },
-}
-
-/// Keeps the one long-lived worker thread owned until the client exits.
-pub struct IconSearchWorkers {
-    requests_tx: Sender<IconSearchRequest>,
-    handle: Option<JoinHandle<()>>,
-}
-
-impl IconSearchWorkers {
-    pub fn new(events_tx: AsyncSender<IconSemanticSearchEvent>) -> Self {
-        let (requests_tx, requests_rx) = mpsc::channel();
-        // Thread creation is a fallible OS call (e.g. the process is already
-        // at its thread-count limit), not a "cannot fail" invariant, and the
-        // icon picker's semantic search is a supplementary feature -- so
-        // degrade to "search silently reports unavailable" the same way
-        // `SearchWorkers::start` propagates its own `thread::Builder::spawn`
-        // failure, instead of taking the whole client down over it. When
-        // spawn fails, `requests_rx` is dropped along with the unrun
-        // closure, so every future `request()` send fails immediately and
-        // is logged there.
-        let handle = match thread::Builder::new()
-            .name("ilium-icon-semantic-search".to_string())
-            .spawn(move || run_worker(requests_rx, events_tx))
-        {
-            Ok(handle) => Some(handle),
-            Err(error) => {
-                tracing::error!(%error, "could not start the icon semantic search worker thread");
-                None
-            }
-        };
-        Self {
-            requests_tx,
-            handle,
-        }
-    }
-
-    pub fn request(&mut self, request: IconSearchRequest) {
-        if self.requests_tx.send(request).is_err() {
-            tracing::error!("icon semantic search worker stopped unexpectedly");
-        }
-    }
-}
-
-impl Drop for IconSearchWorkers {
-    fn drop(&mut self) {
-        // Closing the request channel is the worker's explicit shutdown
-        // signal. Model inference cannot be safely interrupted, so terminal
-        // restoration never waits for it to finish.
-        let (replacement_tx, _) = mpsc::channel();
-        let old_tx = std::mem::replace(&mut self.requests_tx, replacement_tx);
-        drop(old_tx);
-        drop(self.handle.take());
-    }
 }
 
 struct IndexedIcon {
@@ -117,79 +63,11 @@ struct IconSemanticIndex {
     icons: Vec<IndexedIcon>,
 }
 
-fn run_worker(
-    requests_rx: Receiver<IconSearchRequest>,
-    events_tx: AsyncSender<IconSemanticSearchEvent>,
-) {
-    lower_current_thread(WorkerPriority::Lowest);
-    let mut index: Option<IconSemanticIndex> = None;
-    while let Ok(mut request) = requests_rx.recv() {
-        // Once the index is available, collapse a typing burst to its newest
-        // query before spending CPU on an embedding that cannot become visible.
-        while let Ok(newer_request) = requests_rx.try_recv() {
-            request = newer_request;
-        }
-        if index.is_none() {
-            tracing::info!(
-                model = ?EmbeddingModel::AllMiniLML6V2,
-                cache_directory = %icon_model_cache_dir().display(),
-                "icon semantic model initialization started"
-            );
-            match build_index() {
-                Ok(new_index) => {
-                    tracing::info!(
-                        indexed_icons = new_index.icons.len(),
-                        "icon semantic model initialization completed"
-                    );
-                    index = Some(new_index);
-                }
-                Err(message) => {
-                    // Initialization can include a dependency-owned model download,
-                    // so preserve its complete diagnostic even though the dependency
-                    // does not expose the individual HTTP exchange to this adapter.
-                    tracing::error!(%message, "icon semantic model initialization failed");
-                    let _ = events_tx.blocking_send(IconSemanticSearchEvent::Failed {
-                        revision: request.revision,
-                        message,
-                    });
-                    continue;
-                }
-            }
-        }
-        let Some(index) = index.as_mut() else {
-            // Every path that reaches here either already had `index` set
-            // from a prior iteration or just set it in the `Ok` arm above
-            // (the `Err` arm `continue`s before falling through) -- but
-            // logging and retrying on the next request is strictly safer
-            // than a panic if that invariant is ever violated by a future
-            // edit to the match above.
-            tracing::error!("icon semantic index unexpectedly empty after initialization");
-            continue;
-        };
-        match index.search(&request.query) {
-            Ok(results) => {
-                let _ = events_tx.blocking_send(IconSemanticSearchEvent::Results {
-                    revision: request.revision,
-                    results,
-                });
-            }
-            Err(message) => {
-                tracing::error!(
-                    revision = request.revision,
-                    query = %request.query,
-                    %message,
-                    "icon semantic search failed"
-                );
-                let _ = events_tx.blocking_send(IconSemanticSearchEvent::Failed {
-                    revision: request.revision,
-                    message,
-                });
-            }
-        }
+fn build_index(stop: &StopToken) -> Result<IconSemanticIndex, String> {
+    if stop.is_stopped() {
+        return Err("icon indexing cancelled".into());
     }
-}
-
-fn build_index() -> Result<IconSemanticIndex, String> {
+    tokenizers::utils::parallelism::set_parallelism(false);
     let cache_dir = icon_model_cache_dir();
     std::fs::create_dir_all(&cache_dir)
         .map_err(|error| format!("could not create icon model cache: {error}"))?;
@@ -242,11 +120,19 @@ fn build_index() -> Result<IconSemanticIndex, String> {
         .collect::<Vec<_>>();
     let cache_fingerprint = catalogue_fingerprint(model_info, &documents);
     let index_path = cache_dir.join("catalogue-v1.f32");
-    let embeddings = match load_cached_embeddings(&index_path, metadata.len(), cache_fingerprint) {
+    let embeddings = match load_cached_embeddings(
+        &index_path,
+        metadata.len(),
+        cache_fingerprint,
+        model_info.dim,
+    ) {
         Some(embeddings) => embeddings,
         None => {
             let mut embeddings = Vec::with_capacity(metadata.len());
             for batch in documents.chunks(CATALOGUE_EMBEDDING_BATCH_SIZE) {
+                if stop.is_stopped() {
+                    return Err("icon indexing cancelled".into());
+                }
                 let batch_embeddings = model
                     .embed(batch, Some(CATALOGUE_EMBEDDING_BATCH_SIZE))
                     .map_err(|error| format!("could not embed the icon catalogue: {error}"))?;
@@ -255,6 +141,12 @@ fn build_index() -> Result<IconSemanticIndex, String> {
                         "the icon embedding model returned an incomplete catalogue batch"
                             .to_string(),
                     );
+                }
+                if batch_embeddings
+                    .iter()
+                    .any(|embedding| embedding.len() != model_info.dim)
+                {
+                    return Err("icon model returned unexpected vector dimensions".into());
                 }
                 embeddings.extend(batch_embeddings);
             }
@@ -318,6 +210,7 @@ fn load_cached_embeddings(
     path: &std::path::Path,
     expected_count: usize,
     expected_fingerprint: u64,
+    expected_dimensions: usize,
 ) -> Option<Vec<Vec<f32>>> {
     let mut file = BufReader::new(std::fs::File::open(path).ok()?);
     let mut magic = [0_u8; INDEX_MAGIC.len()];
@@ -332,13 +225,18 @@ fn load_cached_embeddings(
         || fingerprint != expected_fingerprint
         || dimensions == 0
         || dimensions > 4096
+        || dimensions != expected_dimensions
     {
         return None;
     }
     // One sized read for the whole payload instead of one syscall per
     // float -- a full catalogue is tens of thousands of vectors, and this
     // cache's entire purpose is to make startup fast.
-    let mut payload = vec![0_u8; count * dimensions * 4];
+    let payload_bytes = count.checked_mul(dimensions)?.checked_mul(4)?;
+    if payload_bytes > 64 * 1024 * 1024 {
+        return None;
+    }
+    let mut payload = vec![0_u8; payload_bytes];
     file.read_exact(&mut payload).ok()?;
     let mut embeddings = Vec::with_capacity(count);
     for chunk in payload.chunks_exact(dimensions * 4) {
@@ -371,14 +269,14 @@ fn persist_embeddings(
     // Give each writer its own staging file; `rename` then publishes one
     // complete deterministic matrix without concurrent writers corrupting
     // each other's partial output.
-    let temporary_path = path.with_extension(format!("f32.{}.tmp", std::process::id()));
+    let temporary_path = path.with_extension(format!("f32.{}.tmp", uuid::Uuid::new_v4()));
     let result = write_embeddings_file(&temporary_path, embeddings, dimensions, fingerprint)
         .and_then(|()| {
             std::fs::rename(&temporary_path, path)
                 .map_err(|error| format!("could not publish icon vector cache: {error}"))
         });
     if result.is_err() {
-        // The staging file is per-PID (see above), so a write failure that
+        // The staging file is unique to this writer, so a write failure that
         // is not cleaned up here accumulates one orphaned ~18MB file per
         // failed attempt instead of leaving the cache directory as it was
         // found. Best-effort: a failure to remove it does not change the
@@ -529,14 +427,19 @@ mod tests {
         let cache_path = temporary_dir.path().join("catalogue-v1.f32");
         let embeddings = vec![vec![0.25, -0.5, 1.0], vec![0.0, 0.125, -0.25]];
         let fingerprint = 0xC0FF_EE00_1234_5678;
+        let dimensions = embeddings[0].len();
 
         persist_embeddings(&cache_path, &embeddings, fingerprint).expect("persist vector matrix");
 
         assert_eq!(
-            load_cached_embeddings(&cache_path, embeddings.len(), fingerprint),
+            load_cached_embeddings(&cache_path, embeddings.len(), fingerprint, dimensions),
             Some(embeddings)
         );
-        assert!(load_cached_embeddings(&cache_path, 3, fingerprint).is_none());
-        assert!(load_cached_embeddings(&cache_path, 2, fingerprint.wrapping_add(1)).is_none());
+        assert!(load_cached_embeddings(&cache_path, 3, fingerprint, dimensions).is_none());
+        assert!(
+            load_cached_embeddings(&cache_path, 2, fingerprint.wrapping_add(1), dimensions)
+                .is_none()
+        );
+        assert!(load_cached_embeddings(&cache_path, 2, fingerprint, dimensions + 1).is_none());
     }
 }

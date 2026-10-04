@@ -35,6 +35,8 @@ type RealtimeSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 struct SessionContext {
     instructions: String,
     tools: Vec<VoiceToolDefinition>,
+    // Installed source lease, replaced only after the old source is dropped.
+    allocation: Option<std::sync::Arc<dyn crate::VoiceTextAllocation>>,
 }
 
 /// Mutable state owned by one logical voice session across proactive
@@ -55,7 +57,14 @@ struct SessionState {
     /// item because a response was in flight. Each becomes its own turn, in
     /// order, exactly like successive spoken sentences. Survives a proactive
     /// reconnect, unlike the flags above.
-    pending_text: VecDeque<String>,
+    pending_text: VecDeque<crate::OwnedVoiceText>,
+    retained_context_bytes: usize,
+    retained_context_allocation: Option<std::sync::Arc<dyn crate::VoiceTextAllocation>>,
+    retained_text_capacity: usize,
+    // The websocket output Vec retains spare capacity after send/flush. The
+    // largest typed-frame allocation owner survives through the actual session
+    // and socket lifetime, rather than releasing at logical turn completion.
+    retained_text_allocation: Option<std::sync::Arc<dyn crate::VoiceTextAllocation>>,
 }
 
 impl SessionState {
@@ -64,12 +73,17 @@ impl SessionState {
             context: SessionContext {
                 instructions,
                 tools,
+                allocation: None,
             },
             completed_call_ids: BoundedCallIdSet::default(),
             playing_item: None,
             is_response_active: false,
             is_awaiting_tool_outputs: false,
             pending_text: VecDeque::new(),
+            retained_context_bytes: 0,
+            retained_context_allocation: None,
+            retained_text_capacity: 0,
+            retained_text_allocation: None,
         }
     }
 
@@ -105,12 +119,19 @@ enum CommandOutcome {
 
 /// Runs one owned audio pipeline across proactively renewed provider sessions.
 pub(crate) async fn run_session(
-    config: VoiceRuntimeConfig,
-    tools: Vec<VoiceToolDefinition>,
-    mut command_receiver: mpsc::Receiver<VoiceCommand>,
+    startup: crate::OwnedVoiceStartup,
+    command_receiver: &mut mpsc::Receiver<VoiceCommand>,
     mut shutdown_receiver: watch::Receiver<bool>,
-    event_sender: mpsc::Sender<VoiceEvent>,
+    event_sender: crate::EventSender,
+    quota: ilium_execution::QuotaGroup,
+    custody: crate::AudioCustody,
 ) -> Result<(), VoiceError> {
+    let crate::OwnedVoiceStartup {
+        config,
+        tools,
+        retained_bytes,
+        allocation,
+    } = startup;
     tracing::info!(
         model = config.model.api_name(),
         voice = config.voice.api_name(),
@@ -124,19 +145,25 @@ pub(crate) async fn run_session(
         config.output_device_name.as_deref(),
         config.input_mode,
         config.output_volume_percent,
-    )?;
+        &quota,
+        &custody,
+    )
+    .await?;
     let mut state = SessionState::new(config.instructions.clone(), tools);
+    state.context.allocation = Some(allocation.clone());
+    state.retained_context_bytes = retained_bytes;
+    state.retained_context_allocation = Some(allocation);
 
     loop {
         send_event(
             &event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Connecting),
         )
-        .await;
+        .await?;
         let mut socket = tokio::select! {
             result = connect_with_timeout(&config) => result?,
             _ = shutdown_receiver.changed() => {
-                send_disabled(&event_sender).await;
+                send_disabled(&event_sender).await?;
                 return Ok(());
             }
         };
@@ -153,7 +180,7 @@ pub(crate) async fn run_session(
             result = configure_session => result?,
             _ = shutdown_receiver.changed() => {
                 close_socket(&mut socket).await;
-                send_disabled(&event_sender).await;
+                send_disabled(&event_sender).await?;
                 return Ok(());
             }
         }
@@ -162,14 +189,14 @@ pub(crate) async fn run_session(
             &event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Listening),
         )
-        .await;
+        .await?;
 
         match run_connected_session(
             &config,
             &mut state,
             &mut socket,
             &mut audio,
-            &mut command_receiver,
+            command_receiver,
             &mut shutdown_receiver,
             &event_sender,
         )
@@ -182,7 +209,7 @@ pub(crate) async fn run_session(
             SessionExit::Shutdown => {
                 tracing::info!("OpenAI Realtime voice session shutting down");
                 close_socket(&mut socket).await;
-                send_disabled(&event_sender).await;
+                send_disabled(&event_sender).await?;
                 return Ok(());
             }
         }
@@ -232,7 +259,7 @@ async fn run_connected_session(
     audio: &mut AudioEngine,
     command_receiver: &mut mpsc::Receiver<VoiceCommand>,
     shutdown_receiver: &mut watch::Receiver<bool>,
-    event_sender: &mpsc::Sender<VoiceEvent>,
+    event_sender: &crate::EventSender,
 ) -> Result<SessionExit, VoiceError> {
     let renewal_timer = tokio::time::sleep(SESSION_RENEWAL_INTERVAL);
     tokio::pin!(renewal_timer);
@@ -257,7 +284,7 @@ async fn run_connected_session(
                 }
             }
             capture = audio.next_capture() => {
-                let capture = capture.ok_or(VoiceError::SessionEnded)?;
+                let capture = capture?.ok_or(VoiceError::SessionEnded)?;
                 append_audio_capture(socket, capture).await?;
             }
             message = socket.next() => {
@@ -271,13 +298,28 @@ async fn run_connected_session(
                     continue;
                 };
                 let event = parse_provider_event(&text)?;
-                handle_provider_event(
+                let audio_delta = matches!(
+                    event.get("type").and_then(Value::as_str),
+                    Some("response.audio.delta" | "response.output_audio.delta")
+                );
+                let handling = handle_provider_event(
                     socket,
                     audio,
                     event_sender,
                     state,
                     &event,
-                ).await?;
+                );
+                if audio_delta {
+                    // Lossless DSP backpressure must still observe explicit
+                    // session shutdown. This cancels audio, not a tool result.
+                    tokio::select! {
+                        biased;
+                        _ = shutdown_receiver.changed() => return Ok(SessionExit::Shutdown),
+                        result = handling => result?,
+                    }
+                } else {
+                    handling.await?;
+                }
             }
         }
     }
@@ -288,21 +330,26 @@ async fn handle_command(
     state: &mut SessionState,
     socket: &mut RealtimeSocket,
     audio: &mut AudioEngine,
-    event_sender: &mpsc::Sender<VoiceEvent>,
+    event_sender: &crate::EventSender,
     command: VoiceCommand,
 ) -> Result<CommandOutcome, VoiceError> {
     match command {
-        VoiceCommand::UpdateContext {
-            instructions,
-            tools,
-        } => {
+        VoiceCommand::UpdateContext(context) => {
+            let (instructions, tools, retained_bytes, allocation) = context.into_parts();
             state.context.instructions = instructions;
             state.context.tools = tools;
+            state.context.allocation = Some(allocation.clone());
+            let mut previous_allocation = None;
+            if retained_bytes > state.retained_context_bytes {
+                state.retained_context_bytes = retained_bytes;
+                previous_allocation = state.retained_context_allocation.replace(allocation);
+            }
             send_json(
                 socket,
                 &session_update_payload(config, &state.context.instructions, &state.context.tools),
             )
             .await?;
+            drop(previous_allocation);
         }
         VoiceCommand::SubmitToolOutputs(outputs) => {
             submit_tool_outputs(socket, event_sender, state, &outputs, true).await?;
@@ -311,12 +358,12 @@ async fn handle_command(
             submit_tool_outputs(socket, event_sender, state, &outputs, false).await?;
             return Ok(CommandOutcome::Shutdown);
         }
-        VoiceCommand::SendText(text) => {
-            let text = text.trim();
-            if text.is_empty() {
+        VoiceCommand::SendText(mut text) => {
+            text.trim_in_place();
+            if text.as_str().is_empty() {
                 return Ok(CommandOutcome::Continue);
             }
-            state.pending_text.push_back(text.to_owned());
+            state.pending_text.push_back(text);
             start_pending_typed_turn(socket, event_sender, state).await?;
         }
         VoiceCommand::StartPushToTalk => {
@@ -325,7 +372,7 @@ async fn handle_command(
                     send_json(socket, &json!({ "type": "response.cancel" })).await?;
                     state.is_response_active = false;
                 }
-                let played_milliseconds = audio.interrupt_playback();
+                let played_milliseconds = audio.interrupt_playback().await?;
                 if let Some(item) = state.playing_item.take() {
                     send_json(
                         socket,
@@ -344,19 +391,14 @@ async fn handle_command(
                     event_sender,
                     VoiceEvent::StateChanged(VoiceConnectionState::Recording),
                 )
-                .await;
+                .await?;
             }
         }
         VoiceCommand::StopPushToTalk => {
             if matches!(config.input_mode, VoiceInputMode::PushToTalk) {
-                audio.set_capture_enabled(false);
-                // The device callback delivers frames through a channel that
-                // only the session select loop drains, so at key-release time
-                // the tail of the utterance may still be queued locally. Flush
-                // it to the provider before committing; otherwise the commit
-                // cuts off the end of what the user said and the stale frames
-                // land in the next turn's buffer instead.
-                for capture in audio.drain_pending_captures() {
+                // Fence the in-flight callback and DSP capture ordinal before
+                // committing. Every accepted tail sample precedes the commit.
+                for capture in audio.pause_capture_and_drain().await? {
                     append_audio_capture(socket, capture).await?;
                 }
                 send_json(socket, &json!({ "type": "input_audio_buffer.commit" })).await?;
@@ -370,7 +412,7 @@ async fn handle_command(
                     event_sender,
                     VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
                 )
-                .await;
+                .await?;
             }
         }
     }
@@ -383,7 +425,7 @@ async fn handle_command(
 /// provider frame before the caller closes the ordered WebSocket stream.
 async fn submit_tool_outputs(
     socket: &mut RealtimeSocket,
-    event_sender: &mpsc::Sender<VoiceEvent>,
+    event_sender: &crate::EventSender,
     state: &mut SessionState,
     outputs: &[VoiceToolOutput],
     can_request_follow_up: bool,
@@ -402,7 +444,7 @@ async fn submit_tool_outputs(
             event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
         )
-        .await;
+        .await?;
     } else if can_request_follow_up {
         // No follow-up will end the turn, so no `response.done` is coming to
         // release a typed sentence that queued behind these tool calls.
@@ -417,7 +459,7 @@ async fn submit_tool_outputs(
 /// from a recognised utterance, so it picks tools and answers identically.
 async fn start_pending_typed_turn(
     socket: &mut RealtimeSocket,
-    event_sender: &mpsc::Sender<VoiceEvent>,
+    event_sender: &crate::EventSender,
     state: &mut SessionState,
 ) -> Result<(), VoiceError> {
     if !state.can_start_typed_turn() {
@@ -426,6 +468,14 @@ async fn start_pending_typed_turn(
     let Some(text) = state.pending_text.pop_front() else {
         return Ok(());
     };
+    let mut previous_allocation = None;
+    if text.retained_capacity() > state.retained_text_capacity {
+        state.retained_text_capacity = text.retained_capacity();
+        // Keep both old and new ownership through actual buffer growth. The
+        // old lease drops after the new preadmitted envelope takes custody.
+        previous_allocation =
+            std::mem::replace(&mut state.retained_text_allocation, text.allocation());
+    }
     send_json(
         socket,
         &json!({
@@ -433,18 +483,19 @@ async fn start_pending_typed_turn(
             "item": {
                 "type": "message",
                 "role": "user",
-                "content": [{ "type": "input_text", "text": text }],
+                "content": [{ "type": "input_text", "text": text.as_str().trim() }],
             },
         }),
     )
     .await?;
+    drop(previous_allocation);
     send_json(socket, &json!({ "type": "response.create" })).await?;
     state.is_response_active = true;
     send_event(
         event_sender,
         VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
     )
-    .await;
+    .await?;
     Ok(())
 }
 
@@ -468,7 +519,7 @@ async fn append_audio_capture(
 async fn handle_provider_event(
     socket: &mut RealtimeSocket,
     audio: &mut AudioEngine,
-    event_sender: &mpsc::Sender<VoiceEvent>,
+    event_sender: &crate::EventSender,
     state: &mut SessionState,
     event: &Value,
 ) -> Result<(), VoiceError> {
@@ -478,7 +529,7 @@ async fn handle_provider_event(
         .unwrap_or_default()
     {
         "input_audio_buffer.speech_started" => {
-            let played_milliseconds = audio.interrupt_playback();
+            let played_milliseconds = audio.interrupt_playback().await?;
             if let Some(item) = state.playing_item.take() {
                 send_json(
                     socket,
@@ -495,14 +546,14 @@ async fn handle_provider_event(
                 event_sender,
                 VoiceEvent::StateChanged(VoiceConnectionState::Recording),
             )
-            .await;
+            .await?;
         }
         "input_audio_buffer.speech_stopped" => {
             send_event(
                 event_sender,
                 VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
             )
-            .await;
+            .await?;
         }
         "response.created" => {
             state.is_response_active = true;
@@ -510,10 +561,19 @@ async fn handle_provider_event(
                 event_sender,
                 VoiceEvent::StateChanged(VoiceConnectionState::Thinking),
             )
-            .await;
+            .await?;
         }
         "response.output_audio.delta" | "response.audio.delta" => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                // Reject before allocating the decoded PCM. Output conversion
+                // itself is off-thread; this also bounds one actor admission
+                // interval so response controls cannot queue behind huge audio.
+                let maximum_encoded_bytes = crate::audio::MAX_PROVIDER_PCM_BYTES.div_ceil(3) * 4;
+                if delta.len() > maximum_encoded_bytes {
+                    return Err(VoiceError::AudioPreparation(
+                        "provider audio delta exceeds bounded admission".into(),
+                    ));
+                }
                 match base64::engine::general_purpose::STANDARD.decode(delta) {
                     Ok(bytes) => {
                         let item_id = event
@@ -526,18 +586,18 @@ async fn handle_provider_event(
                             .and_then(Value::as_u64)
                             .unwrap_or_default();
                         if state.playing_item.as_ref().map(|item| &item.item_id) != Some(&item_id) {
-                            audio.begin_response_audio();
+                            audio.begin_response_audio().await?;
                         }
                         state.playing_item = Some(PlayingItem {
                             item_id,
                             content_index,
                         });
-                        audio.enqueue_realtime_pcm16(&bytes);
+                        audio.enqueue_realtime_pcm16(&bytes).await?;
                         send_event(
                             event_sender,
                             VoiceEvent::StateChanged(VoiceConnectionState::Speaking),
                         )
-                        .await;
+                        .await?;
                     }
                     Err(error) => {
                         // Dropping a malformed chunk silently would hide a real
@@ -552,38 +612,51 @@ async fn handle_provider_event(
         }
         "conversation.item.input_audio_transcription.completed" => {
             if let Some(transcript) = event.get("transcript").and_then(Value::as_str) {
-                send_event(
-                    event_sender,
-                    VoiceEvent::UserTranscript(transcript.to_owned()),
-                )
-                .await;
+                event_sender
+                    .send_with(transcript.len(), || {
+                        VoiceEvent::UserTranscript(transcript.to_owned())
+                    })
+                    .await?;
             }
         }
         "response.output_audio_transcript.delta" | "response.audio_transcript.delta" => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                send_event(
-                    event_sender,
-                    VoiceEvent::AssistantTranscript(delta.to_owned()),
-                )
-                .await;
+                event_sender
+                    .send_with(delta.len(), || {
+                        VoiceEvent::AssistantTranscript(delta.to_owned())
+                    })
+                    .await?;
             }
         }
         "response.done" => {
             state.is_response_active = false;
-            let invocations = tool_invocations_from_response(event)
-                .into_iter()
-                .filter(|invocation| state.completed_call_ids.insert(invocation.call_id.clone()))
-                .collect::<Vec<_>>();
-            state.is_awaiting_tool_outputs = !invocations.is_empty();
-            if !invocations.is_empty() {
-                send_event(event_sender, VoiceEvent::ToolInvocations(invocations)).await;
+            let bytes = tool_invocation_allocation_bytes(event)?;
+            if bytes == 0 {
+                state.is_awaiting_tool_outputs = false;
+            } else {
+                event_sender
+                    .send_optional_with(bytes, |allocation| {
+                        let invocations = tool_invocations_from_response(event)
+                            .into_iter()
+                            .filter(|invocation| {
+                                state.completed_call_ids.insert_guarded(
+                                    invocation.call_id.clone(),
+                                    Some(allocation.clone()),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        state.is_awaiting_tool_outputs = !invocations.is_empty();
+                        (!invocations.is_empty())
+                            .then_some(VoiceEvent::ToolInvocations(invocations))
+                    })
+                    .await?;
             }
             state.playing_item = None;
             send_event(
                 event_sender,
                 VoiceEvent::StateChanged(VoiceConnectionState::Listening),
             )
-            .await;
+            .await?;
             // A typed sentence that arrived mid-response runs now (and puts
             // the state back to Thinking); with tool calls pending it waits
             // for their outputs instead.
@@ -593,14 +666,17 @@ async fn handle_provider_event(
             let message = event
                 .pointer("/error/message")
                 .and_then(Value::as_str)
-                .unwrap_or("OpenAI Realtime returned an unknown error")
-                .to_owned();
+                .unwrap_or("OpenAI Realtime returned an unknown error");
             tracing::error!(
                 provider_event = %diagnostic_json(event),
                 error = %message,
                 "OpenAI Realtime provider error"
             );
-            send_event(event_sender, VoiceEvent::ProviderError(message)).await;
+            event_sender
+                .send_with(message.len(), || {
+                    VoiceEvent::ProviderError(message.to_owned())
+                })
+                .await?;
         }
         _ => {}
     }
@@ -742,12 +818,12 @@ async fn close_socket(socket: &mut RealtimeSocket) {
     }
 }
 
-async fn send_disabled(event_sender: &mpsc::Sender<VoiceEvent>) {
+async fn send_disabled(event_sender: &crate::EventSender) -> Result<(), VoiceError> {
     send_event(
         event_sender,
         VoiceEvent::StateChanged(VoiceConnectionState::Disabled),
     )
-    .await;
+    .await
 }
 
 fn session_update_payload(
@@ -809,6 +885,51 @@ fn session_update_payload(
             "tool_choice": "auto",
         },
     })
+}
+
+fn tool_invocation_allocation_bytes(event: &Value) -> Result<usize, VoiceError> {
+    let mut bytes = 0usize;
+    for item in event
+        .pointer("/response/output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let (Some(call_id), Some(name)) = (
+            item.get("call_id").and_then(Value::as_str),
+            item.get("name").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let arguments = item
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        // Original capture + filtering scratch: geometric Vec capacity <=2n
+        // for each phase, plus original strings and two dedup ID captures.
+        let cost = std::mem::size_of::<VoiceToolInvocation>()
+            .checked_mul(4)
+            .and_then(|cost| cost.checked_add(256))
+            .and_then(|cost| cost.checked_add(call_id.len().checked_mul(3)?))
+            .and_then(|cost| cost.checked_add(name.len()))
+            .and_then(|cost| cost.checked_add(arguments.len()))
+            .and_then(|cost| bytes.checked_add(cost))
+            .ok_or_else(|| {
+                VoiceError::AudioPreparation("voice tool event allocation size overflow".into())
+            })?;
+        bytes = cost;
+    }
+    if bytes == 0 {
+        return Ok(0);
+    }
+    bytes
+        .checked_add(8 * std::mem::size_of::<VoiceToolInvocation>())
+        .ok_or_else(|| {
+            VoiceError::AudioPreparation("voice tool scratch allocation size overflow".into())
+        })
 }
 
 fn tool_invocations_from_response(event: &Value) -> Vec<VoiceToolInvocation> {
@@ -901,9 +1022,15 @@ async fn send_json(socket: &mut RealtimeSocket, payload: &Value) -> Result<(), V
         })
 }
 
-async fn send_event(event_sender: &mpsc::Sender<VoiceEvent>, event: VoiceEvent) {
-    if event_sender.send(event).await.is_err() {
-        tracing::warn!("voice event receiver closed before event delivery");
+async fn send_event(
+    event_sender: &crate::EventSender,
+    event: VoiceEvent,
+) -> Result<(), VoiceError> {
+    match event {
+        VoiceEvent::StateChanged(state) => event_sender.send_state(state).await,
+        _ => Err(VoiceError::AudioPreparation(
+            "owned provider event requires preallocation admission".into(),
+        )),
     }
 }
 
@@ -959,20 +1086,35 @@ fn diagnostic_json(payload: &Value) -> Value {
 
 #[derive(Default)]
 struct BoundedCallIdSet {
-    insertion_order: VecDeque<String>,
     values: HashSet<String>,
+    // Guard-last: the dedup string heap survives emitted-event receipt release.
+    insertion_order: VecDeque<(
+        String,
+        Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    )>,
 }
 
 impl BoundedCallIdSet {
+    #[cfg(test)]
     fn insert(&mut self, call_id: String) -> bool {
+        self.insert_guarded(call_id, None)
+    }
+
+    fn insert_guarded(
+        &mut self,
+        call_id: String,
+        allocation: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    ) -> bool {
         if !self.values.insert(call_id.clone()) {
             return false;
         }
 
-        self.insertion_order.push_back(call_id);
+        self.insertion_order.push_back((call_id, allocation));
         if self.insertion_order.len() > MAX_REMEMBERED_TOOL_CALLS {
-            if let Some(evicted) = self.insertion_order.pop_front() {
+            if let Some((evicted, _allocation)) = self.insertion_order.pop_front() {
                 self.values.remove(&evicted);
+                drop(evicted);
+                drop(_allocation);
             }
         }
         true
@@ -985,6 +1127,102 @@ mod tests {
 
     use super::*;
     use crate::{ReasoningEffort, VadEagerness, VoiceModel, VoiceName};
+
+    #[tokio::test]
+    async fn connected_actor_shutdown_cancels_actual_full_audio_admission_and_joins_dsp() {
+        use std::time::Instant;
+        use tokio_tungstenite::tungstenite::protocol::Role;
+        let quota = crate::test_quota();
+        let custody = crate::AudioCustody::new(&quota).unwrap();
+        let (mut audio, backpressured) =
+            AudioEngine::backpressure_fixture(&quota, &custody).unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let mut socket = WebSocketStream::from_raw_socket(
+            MaybeTlsStream::Plain(client.unwrap()),
+            Role::Client,
+            None,
+        )
+        .await;
+        let mut provider =
+            WebSocketStream::from_raw_socket(accepted.unwrap().0, Role::Server, None).await;
+        let config = config(VoiceInputMode::PushToTalk);
+        let mut state = SessionState::new(String::new(), Vec::new());
+        let (_commands, mut commands) = mpsc::channel(64);
+        let (shutdown, mut shutdown_receiver) = watch::channel(false);
+        let (events, event_receiver) = mpsc::channel(128);
+        let events = crate::EventSender {
+            sender: events,
+            quota: quota.clone(),
+        };
+        // Sixteen8KiB commands exceed one active output plus eight mailbox
+        // slots. No callback consumes the thirty-sample playback ring.
+        let delta = base64::engine::general_purpose::STANDARD.encode(vec![0u8; 128 * 1024]);
+        let message = Message::Text(
+            json!({
+                "type":"response.output_audio.delta", "delta":delta,
+                "item_id":"blocked-audio", "content_index":0,
+            })
+            .to_string()
+            .into(),
+        );
+        drop(delta);
+        let outcome = {
+            let actor = run_connected_session(
+                &config,
+                &mut state,
+                &mut socket,
+                &mut audio,
+                &mut commands,
+                &mut shutdown_receiver,
+                &events,
+            );
+            tokio::pin!(actor);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                tokio::select! {
+                    outcome = &mut actor => panic!("actor ended before provider delivery: {outcome:?}"),
+                    sent = provider.send(message) => sent.unwrap(),
+                }
+                loop {
+                    if backpressured() { break; }
+                    tokio::select! {
+                        outcome = &mut actor => panic!("actor ended before actual audio backpressure: {outcome:?}"),
+                        _ = tokio::time::sleep(Duration::from_millis(1)) => {},
+                    }
+                }
+            }).await.expect("real DSP filled playback and mailbox");
+            assert!(backpressured());
+            shutdown.send(true).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), &mut actor)
+                .await
+                .expect("shutdown must interrupt audio handler backpressure")
+                .unwrap()
+        };
+        assert_eq!(outcome, SessionExit::Shutdown);
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        drop(audio);
+        custody
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(custody.pending_owners(), 0);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        // Native-equivalent ring source/storage remains guarded after actual
+        // DSP join until its final original custody and probe are released.
+        assert!(quota.snapshot().worker_bytes >= 64 * 1024 * 1024);
+        drop(backpressured);
+        drop(provider);
+        drop(socket);
+        drop(listener);
+        drop(state);
+        drop(config);
+        drop(events);
+        drop(event_receiver);
+        drop(custody);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
 
     #[test]
     fn realtime_endpoint_defaults_to_the_provider_and_accepts_only_loopback_overrides() {
@@ -1160,15 +1398,19 @@ mod tests {
         let outputs = vec![
             VoiceToolOutput {
                 call_id: "call-1".to_owned(),
-                result: json!({ "ok": true }),
+                result: std::sync::Arc::new(json!({ "ok": true })),
                 request_follow_up: false,
                 terminate_session_after_delivery: true,
+                allocation_hold: None,
+                retained_bytes: 0,
             },
             VoiceToolOutput {
                 call_id: "call-2".to_owned(),
-                result: json!({ "selected": "pane-2" }),
+                result: std::sync::Arc::new(json!({ "selected": "pane-2" })),
                 request_follow_up: true,
                 terminate_session_after_delivery: false,
+                allocation_hold: None,
+                retained_bytes: 0,
             },
         ];
 

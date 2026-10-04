@@ -43,7 +43,9 @@ fn loop_cache_builds_incrementally_and_wraps_completed_frames() {
         loop_seconds: 1,
         ..Default::default()
     };
-    let mut cache = AnimationLoopCache::default();
+    let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+        crate::execution::test_client(),
+    ));
     cache.begin(&settings, 4, 2);
     assert_eq!(cache.status().total_frames, 30);
     assert!(cache.status().estimated_bytes > 0);
@@ -219,6 +221,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "chess",
         "open_street_map",
         "carpet",
+        "wind",
         "semantic",
     ];
     assert_eq!(expected.len(), AnimationKind::ALL.len());
@@ -1130,7 +1133,9 @@ fn overhaul_cache_has_at_least_thirty_frames_per_second() {
         loop_seconds: 1,
         ..Default::default()
     };
-    let mut cache = AnimationLoopCache::default();
+    let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+        crate::execution::test_client(),
+    ));
     cache.begin(&settings, 4, 2);
     assert!(
         cache.status().total_frames >= 30,
@@ -1485,7 +1490,9 @@ fn look_and_panel_settings_are_global_normalized_and_persist_through_serde() {
 
 #[test]
 fn look_changes_never_rebuild_the_loop_cache_but_pattern_changes_do() {
-    let mut cache = AnimationLoopCache::default();
+    let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+        crate::execution::test_client(),
+    ));
     let mut settings = AnimationSettings {
         enabled: true,
         ..Default::default()

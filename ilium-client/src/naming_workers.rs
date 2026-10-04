@@ -1,29 +1,28 @@
 //! Background provider-neutral title-inference workers: project-name
-//! bootstrap (once per session) and per-pane session-title inference
-//! (`session_naming::infer_pane_title`), each run on a dedicated
-//! `std::thread` -- these make a blocking HTTP call, so they must never run
-//! on the tokio event loop -- and bridged back into it the same way
-//! crossterm input is (see `crate::run`): the worker thread holds a
-//! `tokio::sync::mpsc::Sender` directly and calls its ordinary,
-//! non-async `blocking_send` from off the runtime, so no second bridging
-//! hop is needed.
+//! bootstrap and per-pane title inference share the client's bounded I/O
+//! bank. Typed original inputs survive admission rejection; completed results
+//! carry independent storage admission through their actual consumers.
+//! Exact prompt recovery keeps bounded per-pane cursors and uses finite I/O probes.
 //!
 //! Session-title inference (`spawn_session_title_worker`) receives one
 //! immutable `SessionTitleInput` captured by the automatic trigger router or
 //! explicit row action before this background boundary.
 
+mod exact;
+pub(crate) use exact::ExactSource;
+mod finite;
+pub(crate) use finite::{Kind as NamingKind, Request as NamingRequest};
+
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::{AgentClass, NodeId};
 use ilium_inference::InferenceSettings;
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
-use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use tokio::sync::mpsc::Sender;
 
 use crate::naming::DualTitle;
@@ -33,11 +32,11 @@ use crate::project_naming::ProjectNameBootstrap;
 /// (a session ID just resolving, a turn finishing, every second Enter
 /// press) or from the user explicitly clicking the tree row's "retitle"
 /// icon (`App::action_request_retitle`). `crate::tick::apply_naming_worker_event`
-/// applies the two differently: `Automatic` remains an automatic title the
-/// server will not place over a user rename; `Manual` marks a still-current
-/// result user-specified, the same as a typed rename. Both use the server's
-/// expected-session-ID compare-and-set and are discarded if that session
-/// changes.
+/// distinguishes passive and explicit triggers, but both produce automatic
+/// titles. The server normalizes an explicit AI title's legacy UserSpecified
+/// wire source; only a literal user rename fixes the presentation. Both use
+/// the server's session, invocation and presentation compare-and-set checks
+/// and cannot replace a newer accepted title or manual name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleTrigger {
     Automatic,
@@ -62,6 +61,10 @@ impl AutomaticAiDecision {
 
 /// A finished background naming result, forwarded into the main event loop.
 pub enum NamingWorkerEvent {
+    Prepared {
+        event: Box<NamingWorkerEvent>,
+        source_hold: Arc<ilium_execution::StorageAdmission>,
+    },
     ProjectName {
         decision: AutomaticAiDecision,
         result: anyhow::Result<ProjectNameBootstrap>,
@@ -86,7 +89,16 @@ pub enum NamingWorkerEvent {
     },
     Restructure(RestructureWorkerResult),
     LastPromptTranscript(LastPromptTranscriptWorkerResult),
-    AgentPromptTranscript(ExactAgentPromptTranscriptResult),
+    ExactPrepared {
+        result: ExactAgentPromptTranscriptResult,
+        source_hold: Arc<ExactSource>,
+    },
+    ExactTranscriptFailed {
+        pane_id: NodeId,
+        session_id: String,
+        prompt_epoch: String,
+        error: String,
+    },
 }
 
 /// All immutable inputs captured when a session-title worker starts. Keeping
@@ -105,6 +117,8 @@ pub struct SessionTitleWorkerRequest {
 /// request/response payloads as this event evolves.
 pub struct SessionTitleWorkerResult {
     pub pane_id: NodeId,
+    pub presentation_revision: u64,
+    pub process_id: Option<u32>,
     pub session_id: String,
     pub title_generation: u64,
     pub provider: ilium_inference::InferenceProviderKind,
@@ -121,6 +135,7 @@ pub struct SessionTitleWorkerResult {
 /// this checkpoint to keep that newer activity eligible for the next pass.
 pub struct RestructureWorkerResult {
     pub project_id: NodeId,
+    pub title_observations: Vec<ilium_ipc::PaneTitleObservation>,
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     pub automatic_ai_decision: AutomaticAiDecision,
     pub result: anyhow::Result<ilium_core::animation_recommendation::RecommendedRestructurePlan>,
@@ -167,6 +182,12 @@ pub struct ExactAgentPromptTranscriptRequest {
     pub prompt_epoch: String,
 }
 
+impl std::fmt::Debug for ExactAgentPromptTranscriptRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ExactAgentPromptTranscriptRequest")
+    }
+}
+
 pub struct ExactAgentPromptTranscriptResult {
     pub pane_id: NodeId,
     pub session_id: String,
@@ -200,161 +221,60 @@ const LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL: Duration = Duration::from_millis(20
 /// fresh.
 const LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS: u32 = 25;
 
-struct ExactPromptWorkerState {
-    pending: Mutex<Option<ExactAgentPromptTranscriptRequest>>,
-    changed: Condvar,
-}
-
-struct ExactPromptWorker {
-    session_id: String,
-    state: Arc<ExactPromptWorkerState>,
-    _owner: OwnedWorker,
-}
-
-fn run_exact_prompt_worker(
-    state: Arc<ExactPromptWorkerState>,
-    stop: StopToken,
-    events_tx: Sender<NamingWorkerEvent>,
-) {
-    lower_current_thread(WorkerPriority::BelowNormal);
-    loop {
-        let request = {
-            let mut pending = state
-                .pending
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            while pending.is_none() && !stop.is_stopped() {
-                pending = state
-                    .changed
-                    .wait(pending)
-                    .unwrap_or_else(|error| error.into_inner());
-            }
-            if stop.is_stopped() {
-                return;
-            }
-            match pending.take() {
-                Some(request) => request,
-                None => continue,
-            }
-        };
-        if exact_prompt_worker_interrupted(&state, &stop, LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY) {
-            continue;
-        }
-        let mut last_prompt = None;
-        for attempt in 0..LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
-            if stop.is_stopped() {
-                return;
-            }
-            if state
-                .pending
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .is_some()
-            {
-                break;
-            }
-            let verified = TranscriptLocator::new(&request.home, &request.project_path)
-                .transcript_for_session(&request.agent_class, &request.session_id)
-                .filter(|transcript| transcript.path == request.verified_path);
-            if verified.is_some() {
-                last_prompt = crate::agent_prompt_transcript::exact_user_prompt_after(
-                    &request.agent_class,
-                    &request.verified_path,
-                    request.baseline_length,
-                    request.submitted_after,
-                )
-                .ok()
-                .flatten();
-            }
-            if last_prompt.is_some() || attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
-                break;
-            }
-            if exact_prompt_worker_interrupted(&state, &stop, LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL)
-            {
-                break;
-            }
-        }
-        if stop.is_stopped() {
-            return;
-        }
-        if state
-            .pending
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .is_some()
-        {
-            continue;
-        }
-        if let Some(last_prompt) = last_prompt {
-            // Backpressure never blocks cancellation or pane cleanup. A lost
-            // optional fallback leaves the direct PTY evidence unchanged.
-            let _ = events_tx.try_send(NamingWorkerEvent::AgentPromptTranscript(
-                ExactAgentPromptTranscriptResult {
-                    pane_id: request.pane_id,
-                    session_id: request.session_id,
-                    prompt_epoch: request.prompt_epoch,
-                    last_prompt: Some(last_prompt),
-                },
-            ));
-        }
-    }
-}
-
-fn exact_prompt_worker_interrupted(
-    state: &ExactPromptWorkerState,
-    stop: &StopToken,
-    duration: Duration,
-) -> bool {
-    let pending = state
-        .pending
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if pending.is_some() || stop.is_stopped() {
-        return true;
-    }
-    let (pending, _) = state
-        .changed
-        .wait_timeout(pending, duration)
-        .unwrap_or_else(|error| error.into_inner());
-    pending.is_some() || stop.is_stopped()
-}
-
 /// Tracks which naming workers are currently in flight, so a caller never
 /// accidentally spawns a second one for the same target while the first is
 /// still running.
 pub struct NamingWorkers {
+    finite: Option<finite::FiniteWorkers>,
     events_tx: Sender<NamingWorkerEvent>,
-    inference_settings: InferenceSettings,
+    inference_settings: Arc<finite::SettingsSnapshot>,
     project_name_in_flight: bool,
-    session_title_in_flight: HashSet<(NodeId, String)>,
+    session_title_in_flight: HashMap<(NodeId, String), Arc<ilium_execution::StorageAdmission>>,
     terminal_title_in_flight: HashSet<NodeId>,
     inference_test_in_flight: bool,
     model_discovery_in_flight: bool,
     restructure_in_flight: HashSet<NodeId>,
-    exact_prompt_workers: HashMap<NodeId, ExactPromptWorker>,
+    exact: Option<exact::ExactWorkers>,
     concurrency_limiter: Arc<InferenceConcurrencyLimiter>,
     automatic_ai_decision: Arc<AtomicU64>,
+    original_retry_at: Option<Instant>,
+    settings_retry: Option<(Instant, ilium_execution::RejectReason)>,
 }
 
 const MAX_CONCURRENT_INFERENCE_JOBS: usize = 2;
 
 /// One process-wide client boundary prevents startup/completion triggers from
 /// turning independent per-pane workers into an unbounded provider burst.
-struct InferenceConcurrencyLimiter {
+pub(crate) struct InferenceConcurrencyLimiter {
     active_jobs: Mutex<usize>,
     available: Condvar,
+    release_wake: Arc<tokio::sync::Notify>,
     maximum: usize,
 }
 
 impl InferenceConcurrencyLimiter {
-    fn new(maximum: usize) -> Self {
+    pub(crate) fn new(maximum: usize) -> Self {
         Self {
             active_jobs: Mutex::new(0),
             available: Condvar::new(),
+            release_wake: crate::execution::admission_notification(),
             maximum: maximum.max(1),
         }
     }
 
+    pub(crate) fn try_acquire(self: &Arc<Self>) -> Option<InferencePermit> {
+        let mut active = self.active_jobs.try_lock().ok()?;
+        if *active >= self.maximum {
+            return None;
+        }
+        *active += 1;
+        Some(InferencePermit {
+            limiter: Arc::clone(self),
+            wake_on_release: false,
+        })
+    }
+
+    #[cfg(test)]
     fn acquire(self: &Arc<Self>) -> InferencePermit {
         let mut active_jobs = self
             .active_jobs
@@ -369,12 +289,89 @@ impl InferenceConcurrencyLimiter {
         *active_jobs += 1;
         InferencePermit {
             limiter: Arc::clone(self),
+            wake_on_release: true,
         }
     }
 }
 
-struct InferencePermit {
+/// Count physical captured capacities without serializing or exposing secrets.
+pub(crate) fn inference_settings_bytes(settings: &InferenceSettings) -> usize {
+    let instructions = &settings.instructions;
+    let database = &settings.kilo_gateway.proxy_database;
+    let structure = &database.structure;
+    let strings = [
+        &instructions.entry_naming,
+        &instructions.organization,
+        &instructions.naming_and_organization,
+        &instructions.project_naming,
+        &instructions.smart_copy,
+        &instructions.ask_for_update,
+        &settings.kilo_gateway.model,
+        &database.uri,
+        &database.database,
+        &database.collection,
+        &structure.ip,
+        &structure.port,
+        &structure.protocol,
+        &structure.username,
+        &structure.password,
+        &structure.enabled,
+        &settings.ollama.base_url,
+        &settings.ollama.model,
+        &settings.openai.base_url,
+        &settings.openai.api_key,
+        &settings.openai.model,
+        &settings.anthropic.base_url,
+        &settings.anthropic.api_key,
+        &settings.anthropic.model,
+        &settings.openrouter.api_key,
+        &settings.openrouter.model,
+    ];
+    strings
+        .iter()
+        .fold(std::mem::size_of::<InferenceSettings>(), |sum, value| {
+            sum.saturating_add(value.capacity())
+        })
+        .saturating_add(
+            settings
+                .kilo_gateway
+                .paid_proxies
+                .capacity()
+                .saturating_mul(std::mem::size_of::<ilium_inference::PaidProxy>()),
+        )
+        .saturating_add(
+            settings
+                .kilo_gateway
+                .paid_proxies
+                .iter()
+                .fold(0usize, |sum, proxy| {
+                    sum.saturating_add(proxy.ip.capacity())
+                        .saturating_add(proxy.protocol.capacity())
+                        .saturating_add(proxy.username.capacity())
+                        .saturating_add(proxy.password.capacity())
+                }),
+        )
+}
+
+/// All naming and streaming adapters in this process share these two slots.
+/// Cross-process/provider-host accounting remains a separate explicit boundary.
+pub(crate) fn shared_provider_limiter() -> Arc<InferenceConcurrencyLimiter> {
+    static LIMITER: OnceLock<Arc<InferenceConcurrencyLimiter>> = OnceLock::new();
+    Arc::clone(LIMITER.get_or_init(|| {
+        Arc::new(InferenceConcurrencyLimiter::new(
+            MAX_CONCURRENT_INFERENCE_JOBS,
+        ))
+    }))
+}
+
+pub(crate) struct InferencePermit {
     limiter: Arc<InferenceConcurrencyLimiter>,
+    wake_on_release: bool,
+}
+impl InferencePermit {
+    pub(crate) fn mark_started(&mut self) {
+        self.wake_on_release = true;
+    }
 }
 
 impl Drop for InferencePermit {
@@ -386,6 +383,12 @@ impl Drop for InferencePermit {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *active_jobs = active_jobs.saturating_sub(1);
         self.limiter.available.notify_one();
+        drop(active_jobs);
+        // A pending finite provider request must wake even when the permit
+        // was released by another naming/Smart Copy owner, with no UI tick.
+        if self.wake_on_release {
+            self.limiter.release_wake.notify_one();
+        }
     }
 }
 
@@ -425,22 +428,191 @@ fn panic_payload_message(panic_payload: &(dyn std::any::Any + Send)) -> String {
 impl NamingWorkers {
     pub fn new(
         events_tx: Sender<NamingWorkerEvent>,
-        inference_settings: InferenceSettings,
-    ) -> Self {
-        Self {
+        inference_settings: &InferenceSettings,
+    ) -> Result<Self, ilium_execution::RejectReason> {
+        let inference_settings = finite::SettingsSnapshot::capture(inference_settings)?;
+        Ok(Self {
+            #[cfg(test)]
+            finite: Some(finite::FiniteWorkers::new(
+                crate::execution::test_client(),
+                shared_provider_limiter(),
+            )),
+            #[cfg(not(test))]
+            finite: None,
             events_tx,
             inference_settings,
             project_name_in_flight: false,
-            session_title_in_flight: HashSet::new(),
+            session_title_in_flight: HashMap::new(),
             terminal_title_in_flight: HashSet::new(),
             inference_test_in_flight: false,
             model_discovery_in_flight: false,
             restructure_in_flight: HashSet::new(),
-            exact_prompt_workers: HashMap::new(),
-            concurrency_limiter: Arc::new(InferenceConcurrencyLimiter::new(
-                MAX_CONCURRENT_INFERENCE_JOBS,
-            )),
+            #[cfg(test)]
+            exact: Some(exact::ExactWorkers::new(crate::execution::test_client())),
+            #[cfg(not(test))]
+            exact: None,
+            concurrency_limiter: shared_provider_limiter(),
             automatic_ai_decision: Arc::new(AtomicU64::new(AutomaticAiDecision::new(0, true).0)),
+            original_retry_at: None,
+            settings_retry: None,
+        })
+    }
+
+    pub(crate) fn configure_execution(&mut self, client: ilium_execution::Client) {
+        self.finite = Some(finite::FiniteWorkers::new(
+            client.clone(),
+            Arc::clone(&self.concurrency_limiter),
+        ));
+        self.exact = Some(exact::ExactWorkers::new(client));
+    }
+    fn enqueue_finite(
+        &mut self,
+        kind: NamingKind,
+    ) -> Result<finite::Accepted, Box<ilium_execution::Rejected<NamingRequest>>> {
+        let request = NamingRequest::new(
+            kind,
+            Arc::clone(&self.inference_settings),
+            &self.automatic_ai_decision,
+        );
+        self.enqueue_original(request)
+    }
+    fn enqueue_original(
+        &mut self,
+        request: NamingRequest,
+    ) -> Result<finite::Accepted, Box<ilium_execution::Rejected<NamingRequest>>> {
+        let Some(finite) = &mut self.finite else {
+            return Err(Box::new(ilium_execution::Rejected {
+                reason: ilium_execution::RejectReason::Closed,
+                value: request,
+            }));
+        };
+        let result = finite.enqueue(request, &self.automatic_ai_decision);
+        if let Err(rejected) = &result {
+            use ilium_execution::RejectReason;
+            if matches!(
+                rejected.reason,
+                RejectReason::Busy
+                    | RejectReason::QueueFull
+                    | RejectReason::JobLimit
+                    | RejectReason::InputBytes
+                    | RejectReason::ResultBytes
+                    | RejectReason::WorkerBytes
+            ) {
+                self.original_retry_at
+                    .get_or_insert_with(|| Instant::now() + Duration::from_millis(100));
+            }
+        }
+        result
+    }
+    pub(crate) fn begin_retry_turn(&mut self, now: Instant) -> bool {
+        if self
+            .original_retry_at
+            .is_some_and(|deadline| deadline > now)
+        {
+            return false;
+        }
+        self.original_retry_at = None;
+        true
+    }
+    pub(crate) fn retry_delay(&self, now: Instant) -> Option<Duration> {
+        self.finite
+            .as_ref()
+            .and_then(|finite| finite.retry_delay(now))
+            .into_iter()
+            .chain(
+                self.original_retry_at
+                    .map(|deadline| deadline.saturating_duration_since(now)),
+            )
+            .chain(
+                self.settings_retry
+                    .map(|(deadline, _)| deadline.saturating_duration_since(now)),
+            )
+            .min()
+    }
+    pub(crate) fn retry_original(
+        &mut self,
+        request: NamingRequest,
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
+        let target = match &request.kind {
+            NamingKind::ProjectName(_) => (0, None),
+            NamingKind::SessionTitle(_) => (1, None),
+            NamingKind::TerminalTitle(input, _) => (2, Some(input.pane_id)),
+            NamingKind::InferenceTest => (3, None),
+            NamingKind::Models(_) => (4, None),
+            NamingKind::Restructure(input, _) => (5, Some(input.project_id)),
+            #[cfg(test)]
+            NamingKind::LastPrompt(_) => (6, None),
+        };
+        let accepted = self.enqueue_original(request)?;
+        self.mark_accepted(accepted);
+        match target {
+            (0, _) => self.project_name_in_flight = true,
+            (2, Some(pane)) => {
+                self.terminal_title_in_flight.insert(pane);
+            }
+            (3, _) => self.inference_test_in_flight = true,
+            (4, _) => self.model_discovery_in_flight = true,
+            (5, Some(project)) => {
+                self.restructure_in_flight.insert(project);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    fn mark_accepted(&mut self, accepted: finite::Accepted) {
+        if let Some(key) = accepted.session_key {
+            self.session_title_in_flight
+                .insert(key, accepted.source_hold);
+        }
+    }
+    pub(crate) fn collect(&mut self) {
+        if let Some(exact) = &mut self.exact {
+            exact.collect();
+            exact.publish(&self.events_tx);
+        }
+        let Some(finite) = &mut self.finite else {
+            return;
+        };
+        finite.collect();
+        while let Some(prepared) = finite.take_ready() {
+            let event = NamingWorkerEvent::Prepared {
+                event: Box::new(prepared.event),
+                source_hold: prepared.source_hold,
+            };
+            match self.events_tx.try_send(event) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(
+                    NamingWorkerEvent::Prepared { event, source_hold },
+                )) => {
+                    finite.return_ready(finite::Prepared {
+                        event: *event,
+                        source_hold,
+                    });
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    finite.close();
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    unreachable!("the sender always publishes the Prepared wrapper")
+                }
+            }
+        }
+    }
+    pub(crate) fn has_pending_exact_delivery(&self) -> bool {
+        self.exact
+            .as_ref()
+            .is_some_and(|exact| exact.delivery_pending())
+    }
+    pub(crate) fn close_finite(&mut self) {
+        self.original_retry_at = None;
+        self.settings_retry = None;
+        if let Some(exact) = &mut self.exact {
+            exact.close();
+        }
+        if let Some(finite) = &mut self.finite {
+            finite.close();
         }
     }
 
@@ -460,40 +632,16 @@ impl NamingWorkers {
     /// Spawns the one-shot project-name bootstrap worker, unless one is
     /// already running. A no-op call (e.g. a stored name already loaded
     /// synchronously at startup) is the caller's responsibility to avoid.
-    pub fn spawn_project_name_worker(&mut self, cwd: PathBuf) {
+    pub(crate) fn spawn_project_name_worker(
+        &mut self,
+        cwd: PathBuf,
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
         if self.project_name_in_flight {
-            return;
+            return Ok(());
         }
+        self.enqueue_finite(NamingKind::ProjectName(cwd))?;
         self.project_name_in_flight = true;
-        let events_tx = self.events_tx.clone();
-        let inference_settings = self.inference_settings.clone();
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        let decision_word = Arc::clone(&self.automatic_ai_decision);
-        let decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
-        std::thread::spawn(move || {
-            // Background inference must never compete with the render loop
-            // for CPU -- same convention as `search_workers::start`.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let _permit = concurrency_limiter.acquire();
-            let result = if decision.is_current(&decision_word) {
-                catch_worker_panic("project name", || {
-                    crate::project_naming::infer_project_name_without_persisting(
-                        &cwd,
-                        &inference_settings,
-                    )
-                })
-            } else {
-                Err(anyhow::anyhow!(
-                    "automatic AI request cancelled before provider call"
-                ))
-            };
-            // `blocking_send` (not the async `send`) since this closure
-            // runs on a plain `std::thread`, not a tokio task -- exactly
-            // the case that method exists for. It only ever actually
-            // blocks if the main loop is unusually far behind, since this
-            // channel carries at most one message per worker.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::ProjectName { decision, result });
-        });
+        Ok(())
     }
 
     pub fn project_name_worker_finished(&mut self) {
@@ -502,83 +650,26 @@ impl NamingWorkers {
 
     /// Spawns a session-title inference worker for `pane_id`, unless one is
     /// already running for it -- see the module docs for what triggers this.
-    pub fn spawn_session_title_worker(&mut self, request: SessionTitleWorkerRequest) {
-        let SessionTitleWorkerRequest {
-            home,
-            input,
-            title_generation,
-            trigger,
-        } = request;
-        let pane_id = input.pane_id;
-        let session_id = input.session_id.clone();
-        if !self
-            .session_title_in_flight
-            .insert((pane_id, session_id.clone()))
-        {
-            return;
+    pub(crate) fn spawn_session_title_worker(
+        &mut self,
+        request: SessionTitleWorkerRequest,
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
+        if self.session_title_in_flight.keys().any(|(pane, session)| {
+            *pane == request.input.pane_id && *session == request.input.session_id
+        }) {
+            return Ok(());
         }
-        let events_tx = self.events_tx.clone();
-        let inference_settings = self.inference_settings.clone();
-        let provider = inference_settings.selected_provider;
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        let decision_word = Arc::clone(&self.automatic_ai_decision);
-        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
-        std::thread::spawn(move || {
-            // See `spawn_project_name_worker` on why every naming worker
-            // thread lowers its own scheduling priority first.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let _permit = concurrency_limiter.acquire();
-            let started_at = Instant::now();
-            let trace = if !automatic_ai_decision.is_current(&decision_word) {
-                crate::session_naming::SessionTitleInferenceTrace {
-                    rendered_prompt: None,
-                    raw_response: None,
-                    result: Err(anyhow::anyhow!(
-                        "automatic AI request cancelled before provider call"
-                    )),
-                }
-            } else {
-                panic::catch_unwind(AssertUnwindSafe(|| {
-                    crate::session_naming::infer_pane_title_with_trace(
-                        &inference_settings,
-                        &home,
-                        &input,
-                    )
-                }))
-                .unwrap_or_else(|panic_payload| {
-                    crate::session_naming::SessionTitleInferenceTrace {
-                        rendered_prompt: None,
-                        raw_response: None,
-                        result: Err(anyhow::anyhow!(
-                            "session title worker panicked: {}",
-                            panic_payload_message(&panic_payload)
-                        )),
-                    }
-                })
-            };
-            let elapsed = started_at.elapsed();
-            // See `spawn_project_name_worker`'s matching comment on why
-            // `blocking_send` is correct here.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::SessionTitle(
-                SessionTitleWorkerResult {
-                    pane_id,
-                    session_id,
-                    title_generation,
-                    provider,
-                    elapsed,
-                    rendered_prompt: trace.rendered_prompt,
-                    raw_response: trace.raw_response,
-                    result: trace.result,
-                    trigger,
-                    automatic_ai_decision,
-                },
-            ));
-        });
+        let accepted = self.enqueue_finite(NamingKind::SessionTitle(Box::new(request)))?;
+        if let Some(key) = accepted.session_key {
+            self.session_title_in_flight
+                .insert(key, accepted.source_hold);
+        }
+        Ok(())
     }
 
     pub fn session_title_worker_finished(&mut self, pane_id: NodeId, session_id: &str) {
         self.session_title_in_flight
-            .remove(&(pane_id, session_id.to_string()));
+            .retain(|(pane, session), _| *pane != pane_id || session != session_id);
     }
 
     /// At most one owned worker per pane. A newer Enter replaces its pending
@@ -586,71 +677,24 @@ impl NamingWorkers {
     pub fn spawn_exact_agent_prompt_transcript_worker(
         &mut self,
         request: ExactAgentPromptTranscriptRequest,
-    ) -> Result<(), String> {
-        if self
-            .exact_prompt_workers
-            .get(&request.pane_id)
-            .is_some_and(|worker| worker.session_id != request.session_id)
-        {
-            self.exact_prompt_workers.remove(&request.pane_id);
-        }
-        if let Some(worker) = self.exact_prompt_workers.get(&request.pane_id) {
-            let mut pending = worker
-                .state
-                .pending
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            *pending = Some(request);
-            worker.state.changed.notify_one();
-            return Ok(());
-        }
-        let pane_id = request.pane_id;
-        let session_id = request.session_id.clone();
-        let state = Arc::new(ExactPromptWorkerState {
-            pending: Mutex::new(Some(request)),
-            changed: Condvar::new(),
-        });
-        let wake_state = Arc::clone(&state);
-        let body_state = Arc::clone(&state);
-        let events_tx = self.events_tx.clone();
-        let owner = spawn_owned(
-            "ilium-agent-prompt-history",
-            WorkerKind::Cooperative,
-            StopToken::default(),
-            move || {
-                // Hold the predicate mutex while signalling: the worker's
-                // Condvar wait releases this same lock atomically, so owner
-                // cancellation cannot lose its wake between check and wait.
-                let _pending = wake_state
-                    .pending
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                wake_state.changed.notify_all();
-            },
-            move |stop| run_exact_prompt_worker(body_state, stop, events_tx),
-        )
-        .map_err(|error| error.to_string())?;
-        self.exact_prompt_workers.insert(
-            pane_id,
-            ExactPromptWorker {
-                session_id,
-                state,
-                _owner: owner,
-            },
-        );
-        Ok(())
+    ) -> Result<(), Box<ilium_execution::Rejected<ExactAgentPromptTranscriptRequest>>> {
+        let Some(exact) = &mut self.exact else {
+            return Err(Box::new(ilium_execution::Rejected {
+                reason: ilium_execution::RejectReason::Closed,
+                value: request,
+            }));
+        };
+        exact.request(request)
     }
-
-    pub fn cancel_exact_prompt_worker(&mut self, pane_id: NodeId) {
-        self.exact_prompt_workers.remove(&pane_id);
+    pub fn cancel_exact_prompt_worker(&mut self, pane: NodeId) {
+        if let Some(exact) = &mut self.exact {
+            exact.cancel(pane);
+        }
     }
-
-    pub fn cancel_stale_exact_prompt_workers(
-        &mut self,
-        mut keep: impl FnMut(NodeId, &str) -> bool,
-    ) {
-        self.exact_prompt_workers
-            .retain(|pane_id, worker| keep(*pane_id, &worker.session_id));
+    pub fn cancel_stale_exact_prompt_workers(&mut self, keep: impl FnMut(NodeId, &str) -> bool) {
+        if let Some(exact) = &mut self.exact {
+            exact.cancel_stale(keep);
+        }
     }
 
     /// Spawns a background check of the agent CLI's own session transcript
@@ -660,194 +704,93 @@ impl NamingWorkers {
     /// idempotent file read (worst case ~10s), so an Enter press racing a
     /// still-running prior check just costs a redundant read rather than
     /// risking a dropped update.
-    pub fn spawn_last_prompt_transcript_worker(
+    #[cfg(test)]
+    pub(crate) fn spawn_last_prompt_transcript_worker(
         &mut self,
         request: LastPromptTranscriptWorkerRequest,
-    ) {
-        let LastPromptTranscriptWorkerRequest {
-            home,
-            pane_id,
-            project_path,
-            agent_class,
-            session_id,
-            baseline_last_prompt,
-        } = request;
-        let baseline_trimmed = baseline_last_prompt
-            .as_deref()
-            .map(str::trim)
-            .map(String::from);
-        let events_tx = self.events_tx.clone();
-        std::thread::spawn(move || {
-            // See `spawn_project_name_worker` on why every naming worker
-            // thread lowers its own scheduling priority first.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            std::thread::sleep(LAST_PROMPT_TRANSCRIPT_INITIAL_DELAY);
-            let mut last_prompt = None;
-            for attempt in 0..LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
-                let candidate = TranscriptLocator::new(&home, &project_path)
-                    .transcript_for_session(&agent_class, &session_id)
-                    .and_then(|transcript| {
-                        crate::transcript_context::recent_user_prompts(
-                            &agent_class,
-                            &transcript.path,
-                        )
-                        .ok()
-                    })
-                    .and_then(|prompts| prompts.into_iter().next_back());
-                // A candidate that's empty or still matches the
-                // pre-submission baseline isn't this turn's message yet --
-                // the agent CLI just hasn't flushed it to the transcript
-                // file. Treating either as "found" (as a bare `is_some()`
-                // check would) is exactly the bug this baseline exists to
-                // prevent: it would report the previous turn's text as if it
-                // were fresh, and the caller would overwrite a correct
-                // live-tracked value with stale content.
-                let is_fresh = candidate.as_deref().map(str::trim).is_some_and(|trimmed| {
-                    !trimmed.is_empty() && Some(trimmed) != baseline_trimmed.as_deref()
-                });
-                if is_fresh {
-                    last_prompt = candidate;
-                    break;
-                }
-                if attempt + 1 == LAST_PROMPT_TRANSCRIPT_MAX_ATTEMPTS {
-                    break;
-                }
-                std::thread::sleep(LAST_PROMPT_TRANSCRIPT_RETRY_INTERVAL);
-            }
-            // See `spawn_project_name_worker`'s matching comment on why
-            // `blocking_send` is correct here.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::LastPromptTranscript(
-                LastPromptTranscriptWorkerResult {
-                    pane_id,
-                    session_id,
-                    last_prompt,
-                },
-            ));
-        });
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
+        self.enqueue_finite(NamingKind::LastPrompt(Box::new(request)))
+            .map(|_| ())
     }
 
     /// Spawns a terminal-screen title inference worker for `input.pane_id`,
     /// unless one is already running for it -- see `crate::terminal_naming`
     /// and the manual/automatic request paths in `App`.
-    pub fn spawn_terminal_title_worker(
+    pub(crate) fn spawn_terminal_title_worker(
         &mut self,
         input: crate::terminal_naming::TerminalTitleInput,
         trigger: TitleTrigger,
-    ) {
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
         let pane_id = input.pane_id;
-        if !self.terminal_title_in_flight.insert(pane_id) {
-            return;
+        if self.terminal_title_in_flight.contains(&pane_id) {
+            return Ok(());
         }
-        let events_tx = self.events_tx.clone();
-        let inference_settings = self.inference_settings.clone();
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        let decision_word = Arc::clone(&self.automatic_ai_decision);
-        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
-        std::thread::spawn(move || {
-            // See `spawn_project_name_worker` on why every naming worker
-            // thread lowers its own scheduling priority first.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let _permit = concurrency_limiter.acquire();
-            let result = if !automatic_ai_decision.is_current(&decision_word) {
-                Err(anyhow::anyhow!(
-                    "automatic AI request cancelled before provider call"
-                ))
-            } else {
-                catch_worker_panic("terminal title", || {
-                    crate::terminal_naming::infer_terminal_title(&inference_settings, &input)
-                })
-            };
-            // See `spawn_project_name_worker`'s matching comment on why
-            // `blocking_send` is correct here.
-            let _ = events_tx.blocking_send(NamingWorkerEvent::TerminalTitle(
-                pane_id,
-                result,
-                trigger,
-                automatic_ai_decision,
-            ));
-        });
+        self.enqueue_finite(NamingKind::TerminalTitle(Box::new(input), trigger))?;
+        self.terminal_title_in_flight.insert(pane_id);
+        Ok(())
     }
 
     pub fn terminal_title_worker_finished(&mut self, pane_id: NodeId) {
         self.terminal_title_in_flight.remove(&pane_id);
     }
 
-    pub fn set_inference_settings(&mut self, settings: InferenceSettings) {
-        self.inference_settings = settings;
+    pub fn set_inference_settings(
+        &mut self,
+        settings: &InferenceSettings,
+    ) -> Result<(), ilium_execution::RejectReason> {
+        if &self.inference_settings.settings == settings {
+            self.settings_retry = None;
+            return Ok(());
+        }
+        let now = Instant::now();
+        if let Some((deadline, reason)) = self.settings_retry {
+            if deadline > now {
+                return Err(reason);
+            }
+        }
+        match finite::SettingsSnapshot::capture(settings) {
+            Ok(snapshot) => {
+                self.inference_settings = snapshot;
+                self.settings_retry = None;
+                Ok(())
+            }
+            Err(reason) => {
+                self.settings_retry = matches!(
+                    reason,
+                    ilium_execution::RejectReason::Busy
+                        | ilium_execution::RejectReason::WorkerBytes
+                )
+                .then_some((now + Duration::from_millis(100), reason));
+                Err(reason)
+            }
+        }
     }
 
-    pub fn spawn_inference_test_worker(&mut self) {
+    pub(crate) fn spawn_inference_test_worker(
+        &mut self,
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
         if self.inference_test_in_flight {
-            return;
+            return Ok(());
         }
+        self.enqueue_finite(NamingKind::InferenceTest)?;
         self.inference_test_in_flight = true;
-        let events_tx = self.events_tx.clone();
-        let settings = self.inference_settings.clone();
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        std::thread::spawn(move || {
-            // See `spawn_project_name_worker` on why every naming worker
-            // thread lowers its own scheduling priority first.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let _permit = concurrency_limiter.acquire();
-            let provider = settings.selected_provider;
-            let started_at = std::time::Instant::now();
-            let result =
-                catch_worker_panic("inference test", || crate::inference_test::run(&settings));
-            let _ = events_tx.blocking_send(NamingWorkerEvent::InferenceTest {
-                provider,
-                elapsed: started_at.elapsed(),
-                result,
-            });
-        });
+        Ok(())
     }
 
     pub fn inference_test_worker_finished(&mut self) {
         self.inference_test_in_flight = false;
     }
 
-    pub fn spawn_model_discovery_worker(
+    pub(crate) fn spawn_model_discovery_worker(
         &mut self,
         provider: ilium_inference::InferenceProviderKind,
-    ) {
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
         if self.model_discovery_in_flight {
-            return;
+            return Ok(());
         }
+        self.enqueue_finite(NamingKind::Models(provider))?;
         self.model_discovery_in_flight = true;
-        let events_tx = self.events_tx.clone();
-        let mut settings = self.inference_settings.clone();
-        settings.selected_provider = provider;
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        std::thread::spawn(move || {
-            // See `spawn_project_name_worker` on why every naming worker
-            // thread lowers its own scheduling priority first.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let _permit = concurrency_limiter.acquire();
-            let endpoint = match provider {
-                ilium_inference::InferenceProviderKind::KiloGateway => {
-                    ilium_inference::kilo_gateway_model_catalog_url()
-                }
-                ilium_inference::InferenceProviderKind::Ollama => format!(
-                    "{}/api/tags",
-                    settings.ollama.base_url.trim_end_matches('/')
-                ),
-                ilium_inference::InferenceProviderKind::OpenAi => {
-                    ilium_inference::model_catalog_endpoint(&settings).unwrap_or_default()
-                }
-                _ => provider.label().to_string(),
-            };
-            let started_at = std::time::Instant::now();
-            let result = catch_worker_panic("model discovery", || {
-                ilium_inference::provider_from_settings(&settings)
-                    .list_models()
-                    .map_err(anyhow::Error::from)
-            });
-            let _ = events_tx.blocking_send(NamingWorkerEvent::ProviderModels {
-                provider,
-                endpoint,
-                elapsed: started_at.elapsed(),
-                result,
-            });
-        });
+        Ok(())
     }
     pub fn model_discovery_worker_finished(&mut self) {
         self.model_discovery_in_flight = false;
@@ -860,64 +803,18 @@ impl NamingWorkers {
     /// transcripts (`crate::restructure::resolve_content_extracts`) before
     /// calling the LLM, mirroring `spawn_session_title_worker`'s own
     /// disk-I/O-inside-the-closure pattern.
-    pub fn spawn_restructure_worker(
+    pub(crate) fn spawn_restructure_worker(
         &mut self,
         request: crate::app::PendingRestructureRequest,
         home: PathBuf,
-    ) {
-        let crate::app::PendingRestructureRequest {
-            project_cwd,
-            recommendation_snapshot,
-            project_id,
-            mut contexts,
-            protected_split_views,
-            current_structure,
-            inference_activity_revisions,
-            ..
-        } = request;
-        if !self.restructure_in_flight.insert(project_id) {
-            return;
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
+        let project_id = request.project_id;
+        if self.restructure_in_flight.contains(&project_id) {
+            return Ok(());
         }
-        let events_tx = self.events_tx.clone();
-        let inference_settings = self.inference_settings.clone();
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
-        let decision_word = Arc::clone(&self.automatic_ai_decision);
-        let automatic_ai_decision = AutomaticAiDecision(decision_word.load(Ordering::SeqCst));
-        std::thread::spawn(move || {
-            // Lowered before `resolve_content_extracts`'s bulk transcript
-            // reads, not just the LLM call -- see `spawn_project_name_worker`.
-            lower_current_thread(WorkerPriority::BelowNormal);
-            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                crate::restructure::resolve_content_extracts(&mut contexts, &home);
-                let _permit = concurrency_limiter.acquire();
-                if !automatic_ai_decision.is_current(&decision_word) {
-                    anyhow::bail!("automatic AI request cancelled before provider call");
-                }
-                crate::restructure::infer_project_restructure(
-                    &inference_settings,
-                    &contexts,
-                    &current_structure,
-                    &protected_split_views,
-                    &recommendation_snapshot,
-                    &project_cwd,
-                )
-            }))
-            .unwrap_or_else(|panic_payload| {
-                Err(anyhow::anyhow!(
-                    "restructure worker panicked: {}",
-                    panic_payload_message(&panic_payload)
-                ))
-            });
-            // See `spawn_project_name_worker`'s matching comment on why
-            // `blocking_send` is correct here.
-            let _ =
-                events_tx.blocking_send(NamingWorkerEvent::Restructure(RestructureWorkerResult {
-                    project_id,
-                    inference_activity_revisions,
-                    automatic_ai_decision,
-                    result,
-                }));
-        });
+        self.enqueue_finite(NamingKind::Restructure(Box::new(request), home))?;
+        self.restructure_in_flight.insert(project_id);
+        Ok(())
     }
 
     pub fn restructure_worker_finished(&mut self, project_id: NodeId) {
@@ -926,31 +823,220 @@ impl NamingWorkers {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    fn await_finite_event(
+        workers: &mut NamingWorkers,
+        events: &mut tokio::sync::mpsc::Receiver<NamingWorkerEvent>,
+    ) -> finite::Prepared {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            workers.collect();
+            if let Ok(NamingWorkerEvent::Prepared { event, source_hold }) = events.try_recv() {
+                return finite::Prepared {
+                    event: *event,
+                    source_hold,
+                };
+            }
+            assert!(
+                Instant::now() < deadline,
+                "real finite naming worker did not publish"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn returned_unstarted_provider_permit_does_not_self_wake_but_completed_body_does() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let wake = Arc::new(tokio::sync::Notify::new());
+        let mut limiter = InferenceConcurrencyLimiter::new(1);
+        limiter.release_wake = Arc::clone(&wake);
+        let limiter = Arc::new(limiter);
+        let mut notified = Box::pin(wake.notified());
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            notified.as_mut().poll(&mut context),
+            Poll::Pending
+        ));
+        let permit = limiter.try_acquire().unwrap();
+        assert!(limiter.try_acquire().is_none());
+        // A rejected bank admission returns a permit without running a body.
+        drop(permit);
+        assert!(matches!(
+            notified.as_mut().poll(&mut context),
+            Poll::Pending
+        ));
+        let mut permit = limiter.try_acquire().unwrap();
+        permit.mark_started();
+        drop(permit);
+        assert!(matches!(
+            notified.as_mut().poll(&mut context),
+            Poll::Ready(())
+        ));
+        assert!(limiter.try_acquire().is_some());
+    }
+
+    #[test]
+    fn cancelled_blocked_body_retains_both_permits_until_actual_exit() {
+        use ilium_execution::{JobCost, JobOutcome, JobPoll, Lane};
+        use std::ops::ControlFlow;
+        let directory = tempfile::tempdir().expect("isolated lock directory");
+        let path = directory.path().join("body.lock");
+        let limiter = Arc::new(InferenceConcurrencyLimiter::new(1));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let job_path = path.clone();
+        let job_limiter = Arc::clone(&limiter);
+        let mut receipt = crate::execution::test_client()
+            .try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 1024,
+                    result_bytes: 1024,
+                },
+                move |context| {
+                    Ok::<_, std::convert::Infallible>(crate::provider_admission::run_with_probe(
+                        "original".to_owned(),
+                        context,
+                        &job_limiter,
+                        |_| false,
+                        |_, _| {
+                            entered_tx.send(()).expect("announce body entry");
+                            release_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("bounded body release");
+                        },
+                        || ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&job_path),
+                    ))
+                },
+            )
+            .expect("admit isolated blocking job");
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("body entered with both permits");
+        receipt.cancel();
+        assert!(
+            limiter.try_acquire().is_none(),
+            "cancel is not physical exit"
+        );
+        assert!(
+            ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&path)
+                .expect("contended host probe")
+                .is_none(),
+            "cancel must retain the actual host lock"
+        );
+        release_tx.send(()).expect("release test body");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match receipt.try_take() {
+                JobPoll::Pending => {
+                    assert!(Instant::now() < deadline, "body did not exit");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                JobPoll::Ready(result) => {
+                    let (outcome, retention) = result.into_parts();
+                    assert!(matches!(
+                        outcome,
+                        JobOutcome::Finished(Ok(ControlFlow::Continue(())))
+                    ));
+                    drop(retention);
+                    break;
+                }
+                JobPoll::Lost | JobPoll::Taken => panic!("blocked body outcome lost"),
+            }
+        }
+        assert!(
+            limiter.try_acquire().is_some(),
+            "process permit released at exit"
+        );
+        assert!(
+            ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&path)
+                .expect("post-exit host probe")
+                .is_some(),
+            "host lock released at exit"
+        );
+    }
+
+    #[test]
+    fn body_panic_releases_both_permits_without_recreating_original() {
+        use ilium_execution::{JobCost, JobOutcome, JobPoll, Lane};
+        let directory = tempfile::tempdir().expect("isolated lock directory");
+        let path = directory.path().join("panic.lock");
+        let limiter = Arc::new(InferenceConcurrencyLimiter::new(1));
+        let job_limiter = Arc::clone(&limiter);
+        let job_path = path.clone();
+        let mut receipt = crate::execution::test_client()
+            .try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 1024,
+                    result_bytes: 1024,
+                },
+                move |context| {
+                    Ok::<_, std::convert::Infallible>(crate::provider_admission::run_with_probe(
+                        "consumed once".to_owned(),
+                        context,
+                        &job_limiter,
+                        |_| false,
+                        |_, _| -> () { panic!("synthetic synchronous body panic") },
+                        || ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&job_path),
+                    ))
+                },
+            )
+            .expect("admit panic job");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match receipt.try_take() {
+                JobPoll::Pending => {
+                    assert!(Instant::now() < deadline, "panic did not settle");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                JobPoll::Ready(result) => {
+                    let (outcome, retention) = result.into_parts();
+                    assert!(matches!(outcome, JobOutcome::Panicked));
+                    drop(retention);
+                    break;
+                }
+                JobPoll::Lost | JobPoll::Taken => panic!("panic outcome lost"),
+            }
+        }
+        assert!(limiter.try_acquire().is_some());
+        assert!(
+            ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&path)
+                .expect("host lock after unwind")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn naming_and_smart_copy_share_the_exact_process_provider_gate() {
+        let (events_tx, _) = tokio::sync::mpsc::channel(1);
+        let workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
+        assert!(Arc::ptr_eq(
+            &workers.concurrency_limiter,
+            &shared_provider_limiter()
+        ));
+    }
 
     #[test]
     fn queued_project_worker_is_cancelled_before_provider_call() {
         let cwd = tempfile::tempdir().unwrap();
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let mut workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
         let held_permits = (0..MAX_CONCURRENT_INFERENCE_JOBS)
             .map(|_| workers.concurrency_limiter.acquire())
             .collect::<Vec<_>>();
-        workers.spawn_project_name_worker(cwd.path().to_path_buf());
+        workers
+            .spawn_project_name_worker(cwd.path().to_path_buf())
+            .unwrap();
         workers.set_automatic_ai_decision(1, false);
         drop(held_permits);
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        let event = runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(3), events_rx.recv())
-                .await
-                .unwrap()
-                .unwrap()
-        });
+        let prepared = await_finite_event(&mut workers, &mut events_rx);
+        let event = prepared.event;
         let NamingWorkerEvent::ProjectName { result, .. } = event else {
             panic!("expected project-name completion");
         };
@@ -1016,20 +1102,21 @@ mod tests {
         std::fs::write(&transcript_path, lines).expect("write synthetic transcript");
 
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let mut workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
         let pane_id = NodeId(11);
-        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
-            home: home.path().to_path_buf(),
-            pane_id,
-            project_path: project_path.to_path_buf(),
-            agent_class: AgentClass::Claude,
-            session_id: session_id.to_string(),
-            baseline_last_prompt: None,
-        });
+        workers
+            .spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+                home: home.path().to_path_buf(),
+                pane_id,
+                project_path: project_path.to_path_buf(),
+                agent_class: AgentClass::Claude,
+                session_id: session_id.to_string(),
+                baseline_last_prompt: None,
+            })
+            .unwrap();
 
-        let event = events_rx
-            .blocking_recv()
-            .expect("worker reports its result");
+        let prepared = await_finite_event(&mut workers, &mut events_rx);
+        let event = prepared.event;
         let NamingWorkerEvent::LastPromptTranscript(result) = event else {
             panic!("expected a LastPromptTranscript event");
         };
@@ -1104,16 +1191,18 @@ mod tests {
         write_claude_transcript(home.path(), project_path, session_id, &["old prompt"]);
 
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let mut workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
         let pane_id = NodeId(12);
-        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
-            home: home.path().to_path_buf(),
-            pane_id,
-            project_path: project_path.to_path_buf(),
-            agent_class: AgentClass::Claude,
-            session_id: session_id.to_string(),
-            baseline_last_prompt: Some("old prompt".to_string()),
-        });
+        workers
+            .spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+                home: home.path().to_path_buf(),
+                pane_id,
+                project_path: project_path.to_path_buf(),
+                agent_class: AgentClass::Claude,
+                session_id: session_id.to_string(),
+                baseline_last_prompt: Some("old prompt".to_string()),
+            })
+            .unwrap();
 
         // Appended only after the worker's first (pre-fix: only) read would
         // already have happened, simulating the agent CLI's flush landing
@@ -1126,9 +1215,8 @@ mod tests {
             &["old prompt", "new prompt"],
         );
 
-        let event = events_rx
-            .blocking_recv()
-            .expect("worker reports its result");
+        let prepared = await_finite_event(&mut workers, &mut events_rx);
+        let event = prepared.event;
         let NamingWorkerEvent::LastPromptTranscript(result) = event else {
             panic!("expected a LastPromptTranscript event");
         };
@@ -1151,24 +1239,222 @@ mod tests {
         write_claude_transcript(home.path(), project_path, session_id, &["only prompt"]);
 
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = NamingWorkers::new(events_tx, InferenceSettings::default());
+        let mut workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
         let pane_id = NodeId(13);
-        workers.spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
-            home: home.path().to_path_buf(),
-            pane_id,
-            project_path: project_path.to_path_buf(),
-            agent_class: AgentClass::Claude,
-            session_id: session_id.to_string(),
-            baseline_last_prompt: Some("only prompt".to_string()),
-        });
+        workers
+            .spawn_last_prompt_transcript_worker(LastPromptTranscriptWorkerRequest {
+                home: home.path().to_path_buf(),
+                pane_id,
+                project_path: project_path.to_path_buf(),
+                agent_class: AgentClass::Claude,
+                session_id: session_id.to_string(),
+                baseline_last_prompt: Some("only prompt".to_string()),
+            })
+            .unwrap();
 
-        let event = events_rx
-            .blocking_recv()
-            .expect("worker reports its result");
+        let prepared = await_finite_event(&mut workers, &mut events_rx);
+        let event = prepared.event;
         let NamingWorkerEvent::LastPromptTranscript(result) = event else {
             panic!("expected a LastPromptTranscript event");
         };
         assert_eq!(result.last_prompt, None);
+    }
+
+    pub(crate) fn exact_prompt_request_for_test(
+        home: &std::path::Path,
+        pane_id: NodeId,
+        epoch: &str,
+    ) -> ExactAgentPromptTranscriptRequest {
+        let project_path = home.join("synthetic-exact-worker-project");
+        std::fs::create_dir_all(&project_path).unwrap();
+        let session_id = "77777777-7777-4777-8777-777777777777";
+        let directory = home
+            .join(".claude/projects")
+            .join(claude_project_slug(&project_path));
+        std::fs::create_dir_all(&directory).unwrap();
+        let verified_path = directory.join(format!("{session_id}.jsonl"));
+        let submitted_after = chrono::Utc::now();
+        let row = serde_json::json!({
+            "type": "user", "sessionId": session_id, "cwd": project_path,
+            "timestamp": submitted_after.to_rfc3339(),
+            "message": {"content": "synthetic exact\nworker prompt  "}
+        });
+        std::fs::write(&verified_path, format!("{row}\n")).unwrap();
+        ExactAgentPromptTranscriptRequest {
+            home: home.to_path_buf(),
+            pane_id,
+            project_path,
+            agent_class: AgentClass::Claude,
+            session_id: session_id.to_string(),
+            verified_path,
+            baseline_length: 0,
+            submitted_after,
+            prompt_epoch: epoch.to_string(),
+        }
+    }
+
+    fn receive_exact_prompt_for_test(
+        workers: &mut NamingWorkers,
+        receiver: &mut tokio::sync::mpsc::Receiver<NamingWorkerEvent>,
+    ) -> finite::Prepared {
+        await_finite_event(workers, receiver)
+    }
+
+    #[test]
+    fn exact_prompt_idle_completion_releases_finite_request_and_context() {
+        let home = tempfile::tempdir().unwrap();
+        let pane = NodeId(771);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let mut workers = NamingWorkers::new(sender, &InferenceSettings::default()).unwrap();
+        workers
+            .spawn_exact_agent_prompt_transcript_worker(exact_prompt_request_for_test(
+                home.path(),
+                pane,
+                "idle-enter",
+            ))
+            .unwrap();
+        let prepared = receive_exact_prompt_for_test(&mut workers, &mut receiver);
+        let NamingWorkerEvent::ExactPrepared { result, .. } = prepared.event else {
+            panic!("exact result required")
+        };
+        assert_eq!(result.prompt_epoch, "idle-enter");
+        assert_eq!(
+            result.last_prompt.as_deref(),
+            Some("synthetic exact\nworker prompt  ")
+        );
+        assert_eq!(workers.exact.as_ref().unwrap().context_count_for_test(), 0);
+        assert_eq!(workers.exact.as_ref().unwrap().active_count_for_test(), 0);
+        workers.cancel_exact_prompt_worker(pane);
+    }
+
+    #[test]
+    fn exact_prompt_same_pane_supersession_reports_new_epoch_only() {
+        let home = tempfile::tempdir().unwrap();
+        let pane = NodeId(772);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+        let mut workers = NamingWorkers::new(sender, &InferenceSettings::default()).unwrap();
+        workers
+            .spawn_exact_agent_prompt_transcript_worker(exact_prompt_request_for_test(
+                home.path(),
+                pane,
+                "obsolete-enter",
+            ))
+            .unwrap();
+        workers
+            .spawn_exact_agent_prompt_transcript_worker(exact_prompt_request_for_test(
+                home.path(),
+                pane,
+                "current-enter",
+            ))
+            .unwrap();
+        assert_eq!(workers.exact.as_ref().unwrap().context_count_for_test(), 1);
+        let prepared = receive_exact_prompt_for_test(&mut workers, &mut receiver);
+        let NamingWorkerEvent::ExactPrepared { result, .. } = prepared.event else {
+            panic!("exact result required")
+        };
+        assert_eq!(result.pane_id, pane);
+        assert_eq!(result.prompt_epoch, "current-enter");
+        assert_eq!(
+            result.last_prompt.as_deref(),
+            Some("synthetic exact\nworker prompt  ")
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "obsolete request emitted a result"
+        );
+    }
+
+    #[test]
+    fn exact_prompt_full_event_channel_retains_result_and_cancels_without_waiting() {
+        let home = tempfile::tempdir().unwrap();
+        let pane = NodeId(773);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        sender
+            .try_send(NamingWorkerEvent::LastPromptTranscript(
+                LastPromptTranscriptWorkerResult {
+                    pane_id: NodeId(774),
+                    session_id: "synthetic-full-channel-sentinel".into(),
+                    last_prompt: None,
+                },
+            ))
+            .unwrap_or_else(|_| panic!("empty channel"));
+        let mut workers = NamingWorkers::new(sender, &InferenceSettings::default()).unwrap();
+        workers
+            .spawn_exact_agent_prompt_transcript_worker(exact_prompt_request_for_test(
+                home.path(),
+                pane,
+                "full-channel-enter",
+            ))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while workers.exact.as_ref().unwrap().ready_count_for_test() == 0 {
+            workers.collect();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(workers.events_tx.capacity(), 0);
+        assert_eq!(
+            workers.exact.as_ref().unwrap().active_count_for_test(),
+            0,
+            "finite IO probe is released even when output cannot publish"
+        );
+        workers.cancel_exact_prompt_worker(pane);
+        assert_eq!(workers.exact.as_ref().unwrap().context_count_for_test(), 0);
+        assert_eq!(workers.exact.as_ref().unwrap().ready_count_for_test(), 0);
+        let NamingWorkerEvent::LastPromptTranscript(sentinel) = receiver.try_recv().unwrap() else {
+            panic!("sentinel unchanged")
+        };
+        assert_eq!(sentinel.session_id, "synthetic-full-channel-sentinel");
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn closing_retains_completed_exact_evidence_until_full_channel_can_drain() {
+        let home = tempfile::tempdir().unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        sender
+            .try_send(NamingWorkerEvent::LastPromptTranscript(
+                LastPromptTranscriptWorkerResult {
+                    pane_id: NodeId(774),
+                    session_id: "preserved-sentinel".into(),
+                    last_prompt: None,
+                },
+            ))
+            .unwrap_or_else(|_| panic!("empty channel"));
+        let mut workers = NamingWorkers::new(sender, &InferenceSettings::default()).unwrap();
+        workers
+            .spawn_exact_agent_prompt_transcript_worker(exact_prompt_request_for_test(
+                home.path(),
+                NodeId(775),
+                "completed-before-close",
+            ))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while workers.exact.as_ref().unwrap().ready_count_for_test() == 0 {
+            workers.collect();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        workers.close_finite();
+        assert!(workers.has_pending_exact_delivery());
+        let NamingWorkerEvent::LastPromptTranscript(sentinel) = receiver.try_recv().unwrap() else {
+            panic!("sentinel must remain first")
+        };
+        assert_eq!(sentinel.session_id, "preserved-sentinel");
+        workers.collect();
+        let NamingWorkerEvent::Prepared { event, .. } = receiver.try_recv().unwrap() else {
+            panic!("guarded exact delivery")
+        };
+        let NamingWorkerEvent::ExactPrepared { result, .. } = *event else {
+            panic!("exact evidence after close")
+        };
+        assert_eq!(result.prompt_epoch, "completed-before-close");
+        assert_eq!(
+            result.last_prompt.as_deref(),
+            Some("synthetic exact\nworker prompt  ")
+        );
+        assert!(!workers.has_pending_exact_delivery());
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

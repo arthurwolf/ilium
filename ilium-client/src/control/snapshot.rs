@@ -23,6 +23,69 @@ pub struct ControlSnapshot {
     pub nodes: Vec<NodeSnapshot>,
     pub settings: Value,
     pub status_message: Option<String>,
+    #[serde(skip)]
+    pub(crate) search: Option<SearchCapture>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SearchCapture {
+    query: String,
+    revision: u64,
+    pending: bool,
+    selected: usize,
+    error: Option<String>,
+    results: std::sync::Arc<Vec<crate::search_ui::SearchResult>>,
+    _storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+impl ControlSnapshot {
+    /// CPU-owner-only projection; raw result heaps remain shared until this ends.
+    pub(crate) fn prepare(mut self) -> Result<Value, String> {
+        for node in &mut self.nodes {
+            if let Some(source) = node.pending_content.take() {
+                node.content = Some(source.prepare());
+            }
+        }
+        let search = self.search.take();
+        let mut value = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        if let Some(search) = search {
+            let results = search.results.iter().enumerate().map(|(index, result)| json!({
+                "index": index, "selected": index == search.selected,
+                "pane_id": result.pane_id.0, "kind": result.kind.label(), "name": result.object_name,
+                "path": result.path.as_ref().map(|path| path.display().to_string()),
+                "context": format!("{}{}{}", result.before, result.matched, result.after),
+            })).collect::<Vec<_>>();
+            let mut projection = serde_json::Map::new();
+            projection.insert("query".into(), Value::String(search.query));
+            projection.insert("revision".into(), Value::from(search.revision));
+            projection.insert(
+                "preparation".into(),
+                Value::String(
+                    if search.pending {
+                        "pending"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                ),
+            );
+            projection.insert(
+                "error".into(),
+                search.error.map(Value::String).unwrap_or(Value::Null),
+            );
+            projection.insert("selected_index".into(), Value::from(search.selected));
+            projection.insert("results".into(), Value::Array(results));
+            value
+                .as_object_mut()
+                .ok_or("Control snapshot was not an object")?
+                .insert("search".into(), Value::Object(projection));
+        } else {
+            value
+                .as_object_mut()
+                .ok_or("Control snapshot was not an object")?
+                .insert("search".into(), Value::Null);
+        }
+        Ok(value)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -34,6 +97,148 @@ pub struct NodeSnapshot {
     pub kind: String,
     pub status: Option<Value>,
     pub content: Option<Value>,
+    #[serde(skip)]
+    pending_content: Option<PaneCapture>,
+}
+
+/// Admission before capturing owned strings. Eightfold expansion accounts for
+/// JSON/map nodes, escaping and simultaneously retained input/output copies.
+/// This is cooperative allocation accounting, not an allocator RSS guarantee.
+pub(super) fn preflight(app: &App) -> Result<(), String> {
+    use ilium_core::AllocationSize;
+    let mut bytes = app.tree.retained_bytes().saturating_add(1024 * 1024);
+    for id in app.tree.all_ids() {
+        bytes = bytes.saturating_add(4096);
+        let mut ancestor = Some(id);
+        while let Some(id) = ancestor {
+            let Some(node) = app.tree.get(id) else {
+                break;
+            };
+            bytes = bytes.saturating_add(node.name.len().saturating_mul(2).saturating_add(1));
+            ancestor = node.parent;
+        }
+    }
+    for pane in app.panes.values() {
+        match pane {
+            PaneRuntime::Terminal(terminal) => {
+                // Screen allocation is already charged by the parser. Reserve
+                // the largest raw text materialization separately here.
+                bytes = bytes.saturating_add(terminal.with_screen(|screen| {
+                    let (rows, columns) = screen.size();
+                    usize::from(rows)
+                        .saturating_mul(usize::from(columns))
+                        .saturating_mul(32)
+                }));
+            }
+            PaneRuntime::Editor(editor) => {
+                bytes = bytes.saturating_add(
+                    editor
+                        .path
+                        .as_ref()
+                        .map_or(0, |path| path.as_os_str().len().saturating_mul(3)),
+                );
+                bytes = editor.textarea.lines().iter().fold(bytes, |bytes, line| {
+                    bytes.saturating_add(line.len()).saturating_add(64)
+                });
+            }
+            PaneRuntime::Board(board) => {
+                bytes =
+                    bytes.saturating_add(board.storage.path().as_os_str().len().saturating_mul(3));
+                for column in &board.columns {
+                    bytes = bytes
+                        .saturating_add(column.title.len())
+                        .saturating_add(4096);
+                    for card in &column.cards {
+                        bytes = bytes
+                            .saturating_add(card.title.len())
+                            .saturating_add(card.body.len())
+                            .saturating_add(24_000)
+                            .saturating_add(4096);
+                    }
+                }
+            }
+        }
+    }
+    for text in [
+        &app.session_name,
+        &app.git_settings.branch_prefix,
+        &app.git_settings.worktree_location_template,
+        &app.git_settings.setup_command,
+        &app.inference_settings.kilo_gateway.model,
+        &app.inference_settings.ollama.base_url,
+        &app.inference_settings.ollama.model,
+        &app.inference_settings.openai.base_url,
+        &app.inference_settings.openai.model,
+        &app.inference_settings.anthropic.base_url,
+        &app.inference_settings.anthropic.model,
+        &app.inference_settings.openrouter.model,
+        &app.voice_settings.custom_prompt,
+    ] {
+        bytes = bytes.saturating_add(text.len());
+    }
+    for text in [
+        app.status_message.as_ref(),
+        app.voice_settings.input_device_name.as_ref(),
+        app.voice_settings.output_device_name.as_ref(),
+        app.reset_monitor_state.claude.last_error.as_ref(),
+        app.reset_monitor_state.codex.last_error.as_ref(),
+    ] {
+        bytes = bytes.saturating_add(text.map_or(0, String::len));
+    }
+    if let ilium_voice::VoiceConnectionState::Failed(error) = &app.voice_connection_state {
+        bytes = bytes.saturating_add(error.len().saturating_mul(2));
+    }
+    bytes = bytes.saturating_add(app.session_cwd.as_os_str().len().saturating_mul(3));
+    bytes = bytes.saturating_add(
+        app.sound_settings
+            .file
+            .as_ref()
+            .map_or(0, |path| path.as_os_str().len().saturating_mul(3)),
+    );
+    for text in app
+        .kilo_gateway_models
+        .iter()
+        .chain(&app.ollama_models)
+        .chain(&app.ui_settings.icons.task_progress_frames)
+    {
+        bytes = bytes.saturating_add(text.len()).saturating_add(256);
+    }
+    for target in crate::icon_settings::IconTarget::ALL {
+        bytes = bytes
+            .saturating_add(app.ui_settings.icons.glyph(target).len())
+            .saturating_add(256);
+    }
+    for event in crate::trigger_settings::TriggerEvent::ALL {
+        bytes = bytes.saturating_add(
+            app.trigger_settings
+                .actions_for(event)
+                .len()
+                .saturating_mul(256),
+        );
+    }
+    if let Mode::Search(state) = &app.mode {
+        bytes = bytes
+            .saturating_add(state.query.buf.len())
+            .saturating_add(state.control_error.as_ref().map_or(0, String::len));
+        for result in state.results.iter() {
+            bytes = bytes
+                .saturating_add(result.object_name.len())
+                .saturating_add(result.before.len())
+                .saturating_add(result.matched.len())
+                .saturating_add(result.after.len())
+                .saturating_add(4096)
+                .saturating_add(
+                    result
+                        .path
+                        .as_ref()
+                        .map_or(0, |path| path.as_os_str().len().saturating_mul(3)),
+                );
+        }
+    }
+    if bytes.saturating_mul(8) > 128 * 1024 * 1024 {
+        return Err("Control state exceeds bounded preparation admission; request a smaller workspace snapshot".into());
+    }
+    Ok(())
 }
 
 pub fn capture(
@@ -52,16 +257,19 @@ pub fn capture(
     };
     let mut node_ids = app.tree.all_ids().collect::<Vec<_>>();
     node_ids.sort_unstable();
-    let nodes = node_ids
-        .into_iter()
-        .filter_map(|node_id| {
-            let include_content = matches!(detail, StateDetail::Full)
-                && requested_node
-                    .map(|requested| requested == node_id)
-                    .unwrap_or_else(|| app.active_pane_id() == Some(node_id));
-            node_snapshot(app, node_id, include_content)
-        })
-        .collect();
+    let mut nodes = Vec::with_capacity(node_ids.len());
+    for node_id in node_ids {
+        let include_content = matches!(detail, StateDetail::Full)
+            && requested_node
+                .map(|requested| requested == node_id)
+                .unwrap_or_else(|| app.active_pane_id() == Some(node_id));
+        if let Some(mut node) = node_snapshot(app, node_id) {
+            if include_content {
+                node.pending_content = capture_pane(app, node_id)?;
+            }
+            nodes.push(node);
+        }
+    }
 
     Ok(ControlSnapshot {
         session: app.session_name.clone(),
@@ -77,10 +285,22 @@ pub fn capture(
         nodes,
         settings: settings_snapshot(app),
         status_message: app.status_message.clone(),
+        search: match &app.mode {
+            Mode::Search(state) => Some(SearchCapture {
+                query: state.query.buf.clone(),
+                revision: state.revision(),
+                pending: state.is_preparing(),
+                selected: state.selected_index,
+                error: state.control_error.clone(),
+                results: std::sync::Arc::clone(&state.results),
+                _storage: state.result_retention.clone(),
+            }),
+            _ => None,
+        },
     })
 }
 
-fn node_snapshot(app: &App, node_id: NodeId, include_content: bool) -> Option<NodeSnapshot> {
+fn node_snapshot(app: &App, node_id: NodeId) -> Option<NodeSnapshot> {
     let node = app.tree.get(node_id)?;
     let (kind, status) = match &node.kind {
         NodeKind::Container(_) if node.is_project() => ("project".to_owned(), None),
@@ -106,9 +326,8 @@ fn node_snapshot(app: &App, node_id: NodeId, include_content: bool) -> Option<No
         path: node_path(app, node_id),
         kind,
         status,
-        content: include_content
-            .then(|| pane_content_snapshot(app, node_id))
-            .flatten(),
+        content: None,
+        pending_content: None,
     })
 }
 
@@ -190,55 +409,120 @@ fn agent_activity_key(activity: &AgentActivity) -> &'static str {
     }
 }
 
-fn pane_content_snapshot(app: &App, pane_id: NodeId) -> Option<Value> {
-    match app.panes.get(&pane_id)? {
+enum PaneCapture {
+    Terminal(crate::terminal_view::PreparationSnapshot),
+    Editor {
+        lines: Vec<String>,
+        metadata: serde_json::Map<String, Value>,
+    },
+    Board {
+        columns: Vec<crate::board::BoardColumn>,
+        metadata: serde_json::Map<String, Value>,
+    },
+}
+impl std::fmt::Debug for PaneCapture {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Terminal(_) => "TerminalCapture",
+            Self::Editor { .. } => "EditorCapture",
+            Self::Board { .. } => "BoardCapture",
+        })
+    }
+}
+impl PaneCapture {
+    fn prepare(self) -> Value {
+        match self {
+            Self::Terminal(snapshot) => {
+                let visible_text = snapshot.visible.contents();
+                json!({ "visible_text": suffix_by_characters(&visible_text, MAX_PANE_CONTENT_CHARACTERS),
+                    "scrollback_position":snapshot.scrollback_position,"scrollback_total":snapshot.scrollback_total })
+            }
+            Self::Editor {
+                lines,
+                mut metadata,
+            } => {
+                let full_text = lines.join("\n");
+                let start = suffix_start_index(&full_text, MAX_PANE_CONTENT_CHARACTERS);
+                let text_start_line = full_text[..start].matches('\n').count() + 1;
+                metadata.insert("text".into(), Value::String(full_text[start..].into()));
+                metadata.insert("text_truncated".into(), Value::Bool(start > 0));
+                metadata.insert("text_start_line".into(), Value::from(text_start_line));
+                Value::Object(metadata)
+            }
+            Self::Board {
+                columns,
+                mut metadata,
+            } => {
+                let columns = columns
+                    .into_iter()
+                    .enumerate()
+                    .map(|(column_index, column)| {
+                        let cards = column
+                            .cards
+                            .into_iter()
+                            .enumerate()
+                            .map(|(card_index, card)| {
+                                let mut value = serde_json::Map::new();
+                                value.insert("index".into(), Value::from(card_index));
+                                value.insert("title".into(), Value::String(card.title));
+                                value.insert(
+                                    "body".into(),
+                                    Value::String(suffix_by_characters(
+                                        &card.body,
+                                        MAX_PANE_CONTENT_CHARACTERS,
+                                    )),
+                                );
+                                Value::Object(value)
+                            })
+                            .collect::<Vec<_>>();
+                        let mut value = serde_json::Map::new();
+                        value.insert("index".into(), Value::from(column_index));
+                        value.insert("title".into(), Value::String(column.title));
+                        value.insert("cards".into(), Value::Array(cards));
+                        Value::Object(value)
+                    })
+                    .collect();
+                metadata.insert("columns".into(), Value::Array(columns));
+                Value::Object(metadata)
+            }
+        }
+    }
+}
+fn capture_pane(app: &App, pane_id: NodeId) -> Result<Option<PaneCapture>, String> {
+    let Some(pane) = app.panes.get(&pane_id) else {
+        return Ok(None);
+    };
+    Ok(Some(match pane {
         PaneRuntime::Terminal(terminal) => {
-            let visible_text = terminal.with_screen(|screen| screen.contents());
-            Some(json!({
-                "visible_text": suffix_by_characters(&visible_text, MAX_PANE_CONTENT_CHARACTERS),
-                "scrollback_position": terminal.scrollback_position(),
-                "scrollback_total": terminal.scrollback_total(),
-            }))
+            PaneCapture::Terminal(terminal.try_preparation_snapshot()?)
         }
         PaneRuntime::Editor(editor) => {
-            let full_text = editor.textarea.lines().join("\n");
-            let truncation_start = suffix_start_index(&full_text, MAX_PANE_CONTENT_CHARACTERS);
-            // `cursor.line` is a buffer-absolute line number, but `text` may be
-            // only the tail of the buffer once it exceeds the character
-            // budget. Without `text_start_line`, a consumer combining the two
-            // fields has no way to tell that "line 500" isn't the 500th line
-            // of the (truncated) `text` string -- report where `text` actually
-            // starts so the two stay mutually consistent.
-            let text_start_line = full_text[..truncation_start].matches('\n').count() + 1;
-            Some(json!({
-                "path": editor.path.as_ref().map(|path| path.display().to_string()),
-                "dirty": editor.dirty,
-                "view_mode": format!("{:?}", editor.view_mode).to_ascii_lowercase(),
-                "line_numbers": editor.show_line_numbers,
-                "minimap": editor.show_minimap,
-                "autosave": editor.show_autosave,
-                "cursor": { "line": editor.textarea.cursor().0 + 1, "column": editor.textarea.cursor().1 + 1 },
-                "text": &full_text[truncation_start..],
-                "text_truncated": truncation_start > 0,
-                "text_start_line": text_start_line,
-            }))
+            let metadata = json!({
+                "path":editor.path.as_ref().map(|path|path.display().to_string()),"dirty":editor.dirty,
+                "view_mode":format!("{:?}",editor.view_mode).to_ascii_lowercase(),
+                "line_numbers":editor.show_line_numbers,"minimap":editor.show_minimap,"autosave":editor.show_autosave,
+                "cursor":{"line":editor.textarea.cursor().0+1,"column":editor.textarea.cursor().1+1},
+            });
+            let Value::Object(metadata) = metadata else {
+                unreachable!("object literal");
+            };
+            PaneCapture::Editor {
+                lines: editor.textarea.lines().to_vec(),
+                metadata,
+            }
         }
-        PaneRuntime::Board(board) => Some(json!({
-            "storage": board.storage.path().display().to_string(),
-            "selected_column": board.selected_column,
-            "selected_card": board.selected_card,
-            "detail_panel_open": board.is_detail_panel_open,
-            "columns": board.columns.iter().enumerate().map(|(column_index, column)| json!({
-                "index": column_index,
-                "title": column.title,
-                "cards": column.cards.iter().enumerate().map(|(card_index, card)| json!({
-                    "index": card_index,
-                    "title": card.title,
-                    "body": suffix_by_characters(&card.body, MAX_PANE_CONTENT_CHARACTERS),
-                })).collect::<Vec<_>>()
-            })).collect::<Vec<_>>()
-        })),
-    }
+        PaneRuntime::Board(board) => {
+            let metadata = json!({"storage":board.storage.path().display().to_string(),"selected_column":board.selected_column,
+                "selected_card":board.selected_card,"detail_panel_open":board.is_detail_panel_open});
+            let Value::Object(metadata) = metadata else {
+                unreachable!("object literal");
+            };
+            PaneCapture::Board {
+                columns: board.columns.clone(),
+                metadata,
+            }
+        }
+    }))
 }
 
 fn settings_snapshot(app: &App) -> Value {
@@ -269,6 +553,7 @@ fn settings_snapshot(app: &App) -> Value {
             "ui.tree_row_management_controls", "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
             "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.task_progress_style", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.new_pane_directory",
+            "terminal.smart_copy_light", "terminal.smart_copy_light_key",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
             "session.recovery_policy", "session.backups_enabled", "keyboard.shortcut_base", "keyboard.preset",
@@ -327,6 +612,8 @@ fn settings_snapshot(app: &App) -> Value {
         "terminal": {
             "scrollback_budget_mib": app.terminal_settings.scrollback_budget_mib,
             "new_pane_directory": format!("{:?}", app.terminal_settings.new_pane_directory).to_ascii_lowercase(),
+            "smart_copy_light": app.terminal_settings.smart_copy_light,
+            "smart_copy_light_key": app.terminal_settings.smart_copy_light_key.config_name(),
         },
         "editor": {
             "line_numbers": app.editor_settings.show_line_numbers,
@@ -506,6 +793,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
         Mode::SchedulePaneInput(_) => "schedule_input",
         Mode::QueuePrompt(_) => "queue_prompt",
+        Mode::ValueDialog(_) => "value_options",
         Mode::TextTriggerDialog(_) => "text_trigger_dialog",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",
         Mode::CreateAgentFromLine(_) => "create_agent",

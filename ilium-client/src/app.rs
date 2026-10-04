@@ -49,8 +49,10 @@ use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeS
 use crate::restructure::LeafContext;
 use crate::scheduled_input::ScheduledInputDialogState;
 use crate::screen_transfer::ScreenTransfer;
+#[cfg(test)]
+use crate::search_ui;
 use crate::search_ui::{
-    self, SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
+    SearchLocation, SearchObjectKind, SearchResult, SearchState, WorkspaceSearchContent,
     WorkspaceSearchRequest, WorkspaceSearchSource, WorkspaceSearchText,
 };
 use crate::search_workers::{SearchWorkerEvent, SearchWorkers};
@@ -147,7 +149,7 @@ fn normalize_board_path(path: PathBuf) -> PathBuf {
     // Through `ilium_platform`, not `std`: a board path is written into the
     // board definition and shown to the user, and Windows' own canonical form
     // carries an extended-length `\\?\` prefix that should never reach either.
-    ilium_platform::paths::canonicalize(&path).unwrap_or_else(|_| normalize_path_lexically(&path))
+    normalize_path_lexically(&path)
 }
 
 /// Cycles through system default plus every discovered CPAL device. A saved
@@ -224,6 +226,7 @@ impl RightPanelTarget {
 pub struct ChatroomViewState {
     pub messages: Vec<crate::chatroom::ChatMessage>,
     pub draft: String,
+    pub(crate) retained_result: Option<std::sync::Arc<ilium_execution::Retained<()>>>,
     /// Wrapped rows between the current viewport and the live tail. Zero is
     /// the explicit "follow new messages" state.
     pub scroll_from_newest: usize,
@@ -252,6 +255,8 @@ pub enum Mode {
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
     /// Edits the loopback HTTP API port from Settings.
     ApiSettingPrompt(TextPromptState),
+    /// Shared searchable choice list or exact numeric editor above a retained parent.
+    ValueDialog(Box<crate::value_dialog_host::ValueDialogHost>),
     /// Edits one free-text Git worktree default from Settings.
     GitSettingPrompt(GitTextField, TextPromptState),
     /// Edits one Text control of the selected animation scene (a path, glob,
@@ -394,14 +399,23 @@ pub enum VoiceInteractionRequest {
 /// voice session as if they had been spoken. Received from the server as an
 /// offer and answered by the async owner of the voice actor once it knows
 /// whether a session exists to take them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct VoiceTextOffer {
     pub request_id: u64,
     pub sentences: Vec<String>,
     /// True when honouring the offer switched voice control on (or asked a
     /// failed session to restart) in this very turn.
     pub started_voice: bool,
+    pub(crate) _retention: Option<crate::connection::EventRetention>,
 }
+impl PartialEq for VoiceTextOffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.request_id == other.request_id
+            && self.sentences == other.sentences
+            && self.started_voice == other.started_voice
+    }
+}
+impl Eq for VoiceTextOffer {}
 
 /// Which tab is selected in the full-screen settings view. Add a new
 /// variant here -- and a matching arm in every `match` over this type --
@@ -696,10 +710,11 @@ pub enum AppearanceRow {
     ProgressFillStyle,
     TerminalTextSelection,
     LockClosedEnabled,
+    AutoRemoveEmptyGroups,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 17] = [
+    const GENERAL: [AppearanceRow; 18] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::TreeRowManagementControls,
@@ -717,6 +732,7 @@ impl AppearanceRow {
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
+        Self::AutoRemoveEmptyGroups,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -793,9 +809,16 @@ impl AgentMonitoringRow {
 pub enum TerminalRow {
     ScrollbackBudget,
     NewPaneDirectory,
+    SmartCopyLight,
+    SmartCopyLightKey,
 }
 impl TerminalRow {
-    pub const ALL: [Self; 2] = [Self::ScrollbackBudget, Self::NewPaneDirectory];
+    pub const ALL: [Self; 4] = [
+        Self::ScrollbackBudget,
+        Self::NewPaneDirectory,
+        Self::SmartCopyLight,
+        Self::SmartCopyLightKey,
+    ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorRow {
@@ -1014,6 +1037,10 @@ pub struct SettingsState {
     /// The Animations tab hides its controls so the live field fills the
     /// screen; any key or click restores them.
     pub animation_fullscreen: bool,
+    /// Browsing a subtab never changes the persisted/effective animation source.
+    pub animation_source_tab: crate::animation_plugins::AnimationSourceTab,
+    pub plugin_panel: crate::animation_plugins::PluginPanelState,
+    pub plugin_editor: Option<crate::animation_plugins::PluginEditor>,
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
@@ -1030,6 +1057,7 @@ pub struct SettingsState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IconPickerState {
+    pub(crate) identity: std::sync::Arc<()>,
     pub target: crate::icon_settings::IconTarget,
     /// Selected entry in the single, category-preserving picker document.
     pub selected_entry: usize,
@@ -1058,7 +1086,7 @@ pub struct IconPickerState {
 pub enum IconPickerSearchStatus {
     Browse,
     Searching,
-    Failed(String),
+    Failed(crate::icon_search_workers::IconSearchFailure),
 }
 
 /// Catalogue density options. Multi-column is the normal, information-dense
@@ -1071,6 +1099,7 @@ pub enum IconPickerColumnMode {
 }
 
 impl IconPickerColumnMode {
+    pub const ALL: [Self; 2] = [Self::MultiColumn, Self::SingleColumn];
     pub const fn toggle(self) -> Self {
         match self {
             Self::MultiColumn => Self::SingleColumn,
@@ -1089,6 +1118,7 @@ impl IconPickerColumnMode {
 impl IconPickerState {
     pub fn new(target: crate::icon_settings::IconTarget) -> Self {
         Self {
+            identity: std::sync::Arc::new(()),
             target,
             selected_entry: 0,
             scroll_row: 0,
@@ -1110,11 +1140,19 @@ impl IconPickerState {
             self.search_status = IconPickerSearchStatus::Browse;
             return None;
         }
+        if self.search_query.len() > crate::icon_search_workers::MAX_QUERY_BYTES {
+            self.search_status = IconPickerSearchStatus::Failed(
+                crate::icon_search_workers::IconSearchFailure::from_static(
+                    "icon query exceeds 8 KiB",
+                ),
+            );
+            return None;
+        }
         self.search_results = crate::icon_settings::IconPickerSearchResults::default();
         self.search_status = IconPickerSearchStatus::Searching;
         Some(IconSearchRequest {
             revision: self.search_revision,
-            query: self.search_query.clone(),
+            query: self.search_query.as_str().to_owned(),
         })
     }
 }
@@ -1129,6 +1167,9 @@ impl SettingsState {
             global_scroll: 0,
             animation_slider_drag: None,
             animation_fullscreen: false,
+            animation_source_tab: crate::animation_plugins::AnimationSourceTab::Native,
+            plugin_panel: crate::animation_plugins::PluginPanelState::default(),
+            plugin_editor: None,
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
@@ -1335,6 +1376,7 @@ pub struct SubmenuItem {
     pub action: SubmenuItemAction,
     pub label: String,
     pub disabled_reason: Option<String>,
+    disabled_reason_retention: Option<crate::connection::EventRetention>,
 }
 
 /// Adjacent menu shared by tree ordering and agent launch choices.
@@ -1380,11 +1422,19 @@ struct PendingStagedKeystrokes {
     pane_id: NodeId,
     stages: std::collections::VecDeque<Vec<u8>>,
     next_at: Instant,
+    semantic_submission: bool,
+    pane_identity: Option<std::sync::Arc<()>>,
 }
 
 /// State of a context menu: its tree target, screen position, and keyboard
 /// or mouse selection. The renderer only reads this state; all effects stay
 /// in `App`/`crate::keys`/`crate::mouse`.
+struct TerminalContextBlueprint {
+    key: crate::terminal_context_preparation::ContextKey,
+    actions: Vec<TerminalContextAction>,
+    screen_area: Rect,
+}
+
 pub struct ContextMenu {
     pub target: NodeId,
     pub area: Rect,
@@ -1395,11 +1445,13 @@ pub struct ContextMenu {
     /// remains open. Until then, worktree actions fail closed.
     pub worktree_unavailable_reason: Option<String>,
     pub hover_candidate: Option<(ContextMenuAction, Instant)>,
+    unavailable_retention: Option<crate::connection::EventRetention>,
+    unavailable_copies_retention: Option<crate::connection::EventRetention>,
 }
 
 impl ContextMenu {
     pub fn set_worktree_unavailable_reason(&mut self, reason: Option<String>) {
-        self.worktree_unavailable_reason = reason.clone();
+        self.worktree_unavailable_reason = reason;
         if let Some(submenu) = self.submenu.as_mut() {
             for item in &mut submenu.items {
                 if matches!(
@@ -1407,10 +1459,42 @@ impl ContextMenu {
                     SubmenuItemAction::AgentInNewWorktree(_)
                         | SubmenuItemAction::AgentInExistingWorktree(_)
                 ) {
-                    item.disabled_reason = reason.clone();
+                    item.disabled_reason = self.worktree_unavailable_reason.clone();
+                    item.disabled_reason_retention = None;
                 }
             }
         }
+        // Release previous copy credit only after all previous copies dropped.
+        self.unavailable_retention = None;
+        self.unavailable_copies_retention = None;
+    }
+    fn try_set_received_reason(
+        &mut self,
+        reason: Option<String>,
+        owner: Option<&crate::connection::EventRetention>,
+        copies: Option<&crate::connection::EventRetention>,
+    ) -> Result<(), ilium_execution::RejectReason> {
+        let copies = copies.cloned();
+        if reason.is_some() && owner.is_some() && copies.is_none() {
+            return Err(ilium_execution::RejectReason::InvalidCost);
+        }
+        self.set_worktree_unavailable_reason(reason);
+        if self.worktree_unavailable_reason.is_some() {
+            self.unavailable_retention = owner.cloned();
+        }
+        self.unavailable_copies_retention = copies;
+        if let Some(submenu) = &mut self.submenu {
+            for item in &mut submenu.items {
+                if matches!(
+                    item.action,
+                    SubmenuItemAction::AgentInNewWorktree(_)
+                        | SubmenuItemAction::AgentInExistingWorktree(_)
+                ) {
+                    item.disabled_reason_retention = self.unavailable_copies_retention.clone();
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1559,6 +1643,16 @@ pub enum BoardStorageKind {
     MarkdownFile,
 }
 
+impl BoardStorageKind {
+    pub const ALL: [Self; 2] = [Self::Folder, Self::MarkdownFile];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Folder => "Folder columns + Markdown cards",
+            Self::MarkdownFile => "One Markdown file",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CreateBoardState {
     /// The destination captured when the dialog opened. Keeping it stable
@@ -1642,6 +1736,8 @@ pub struct SessionPaneTitleRequest {
     pub pane_id: NodeId,
     pub expected_session_id: String,
     pub expected_title_generation: u64,
+    pub expected_presentation_revision: u64,
+    pub expected_process_id: Option<u32>,
     pub title: String,
     pub short_title: Option<String>,
     pub inferred_icon: Option<String>,
@@ -1659,6 +1755,7 @@ pub struct PendingRestructureRequest {
     pub project_name: String,
     pub project_cwd: PathBuf,
     pub contexts: Vec<LeafContext>,
+    pub title_observations: Vec<ilium_ipc::PaneTitleObservation>,
     /// Complete typed split-view constraints captured from the same tree
     /// snapshot as `current_structure`; these are never prompt-clipped.
     pub protected_split_views: Vec<crate::restructure::ProtectedSplitViewContext>,
@@ -1737,6 +1834,20 @@ pub struct ProjectRestructureJob {
     input_fingerprint: u64,
 }
 
+/// Geometry associated with one completely emitted terminal frame.
+/// The viewport count is bounded by the existing split-view domain limit.
+pub(crate) struct EmittedGeometry {
+    revision: u64,
+    layout: UiLayout,
+    mode: std::mem::Discriminant<Mode>,
+    viewports: Vec<PaneViewport>,
+    terminal_identities: Vec<(NodeId, std::sync::Arc<()>)>,
+    terminal_sources: Vec<(NodeId, crate::terminal_view::PaintedTerminal)>,
+    editor_sources: Vec<(NodeId, crate::source_window_surface::PaintedWindow)>,
+    tree_rows: Option<std::sync::Arc<crate::tree_ui::PaintedTreeRows>>,
+    _metadata: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+
 pub struct App {
     /// The session this client is attached to (used to resolve the UDS
     /// socket path and to label the window/status bar).
@@ -1748,7 +1859,7 @@ pub struct App {
     pub chatrooms: HashMap<NodeId, ChatroomViewState>,
     /// Last observed room availability. This is only used to invalidate the
     /// sidebar hit-test cache when another process creates/removes a room.
-    chatroom_projects: HashSet<NodeId>,
+    pub(crate) chatroom_projects: HashSet<NodeId>,
     /// Explicit filesystem-poll deadline shared by visible message refresh and
     /// provider integration repair.
     next_chatroom_reconcile_at: Option<Instant>,
@@ -1767,7 +1878,9 @@ pub struct App {
     /// `crate::run`). Keeping this a plain outbox instead of giving `App`
     /// a channel/socket handle directly is what keeps input dispatch
     /// synchronous and unit-testable without a real connection.
-    outbox: Vec<ClientRequest>,
+    outbox: Vec<crate::ipc_preparation::AdmittedRequest>,
+    pub(crate) outbound_admission: Option<ilium_execution::Client>,
+    pending_input_retention: Option<ilium_execution::Retention>,
     pub tree_state: TreeState<NodeId>,
     pub right_panel_target: RightPanelTarget,
     pub focus: FocusTarget,
@@ -1785,9 +1898,11 @@ pub struct App {
     pub status_message: Option<String>,
     /// Clipboard ownership must outlive the copy action on Linux, where the
     /// clipboard content can disappear when its last owner is dropped.
-    terminal_clipboard: Option<arboard::Clipboard>,
+    pub(crate) terminal_clipboard: Option<crate::terminal_clipboard::ClipboardService>,
+    pending_clipboard_copies: std::collections::HashMap<u64, String>,
     /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
     pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
+    pending_terminal_link_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
     /// Set by input dispatch when the client should leave its event loop.
     /// `None` keeps rendering; the concrete reason controls whether the CLI
     /// exits normally or re-execs a fresh client binary afterward.
@@ -1795,11 +1910,18 @@ pub struct App {
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
     pub animation_settings: crate::background_animation::AnimationSettings,
+    pub(crate) committed_animation_settings: Option<crate::background_animation::AnimationSettings>,
+    pub(crate) failed_animation_settings: Option<crate::background_animation::AnimationSettings>,
+    pub(crate) plugin_catalogue_preparation:
+        Option<crate::animation_plugins::preparation::CataloguePreparation>,
+    pub(crate) plugin_catalogue:
+        Option<ilium_execution::Retained<crate::animation_plugins::PluginCatalogue>>,
     semantic_presentation: semantic_presentation::SemanticPresentation,
-    /// The one screen-sized field (and hosted scene) shared by the ambient
-    /// background and the Settings preview.
-    pub animation_frame: crate::background_animation::AnimationFrame,
-    pub animation_cache: std::cell::RefCell<crate::background_animation::AnimationLoopCache>,
+    /// Immutable view shared by background and Settings preview. The service
+    /// owns all scenes, rendering and loop-cache generation off the UI thread.
+    pub animation_frame: crate::background_animation::AnimationSurface,
+    pub(crate) plugin_permission_session:
+        Option<crate::animation_plugins::review_bridge::ReviewSession>,
     /// Structural row transitions live beside the render-cache mirror, never
     /// in the authoritative server tree or the IPC protocol.
     pub(crate) tree_transitions: TreeTransitions,
@@ -1814,6 +1936,11 @@ pub struct App {
     requested_pane_sizes: HashMap<NodeId, (u16, u16)>,
     /// Geometry from the last terminal-size calculation.
     pub layout: UiLayout,
+    pub(crate) emitted_geometry: Option<EmittedGeometry>,
+    pub(crate) composed_tree_rows: Option<std::sync::Arc<crate::tree_ui::PaintedTreeRows>>,
+    pub(crate) composed_terminal_sources: Vec<(NodeId, crate::terminal_view::PaintedTerminal)>,
+    pub(crate) composed_editor_sources: Vec<(NodeId, crate::source_window_surface::PaintedWindow)>,
+    composition_metadata: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
     tree_width_animation: TreeWidthAnimation,
     /// This session's live `[ui]` settings -- the settings screen's own
     /// working state (`Mode::Settings` only holds navigation state; the
@@ -1838,6 +1965,10 @@ pub struct App {
     pub sound_discovery: ilium_sound::SoundDiscovery,
     /// Persisted inference provider settings used by title and organization workers.
     pub inference_settings: InferenceSettings,
+    pub(crate) restructure_budget_autosave_deadline: Option<Instant>,
+    pub(crate) inference_settings_save_error: Option<String>,
+    pub(crate) inference_save_state: crate::filesystem::configurations::InferenceSaveState,
+    pub(crate) restructure_budget_identity: Option<std::sync::Arc<()>>,
     /// Live event-to-actions routing table. Detection is server/render-cache
     /// owned; this client value decides which LLM work enters the outboxes.
     pub trigger_settings: TriggerSettings,
@@ -1881,6 +2012,7 @@ pub struct App {
     pub agent_detection_settings: Option<ilium_ipc::AgentDetectionSettings>,
     pub agent_detection_settings_error: Option<String>,
     pub agent_detection_settings_pending: bool,
+    pub(crate) detection_number_pending: Option<crate::value_detection::DetectionNumberPending>,
     pub agent_detection_signature_input: Option<String>,
     pub debug_settings: DebugSettings,
     pub api_settings: ApiSettings,
@@ -1893,6 +2025,9 @@ pub struct App {
     pending_voice_interaction_requests: Vec<VoiceInteractionRequest>,
     pending_voice_text_offers: Vec<VoiceTextOffer>,
     pending_debug_logging_enabled: Option<bool>,
+    pub(crate) pending_debug_logging_server_enabled: Option<bool>,
+    pub(crate) pending_voice_receiver_registration: bool,
+    pub debug_logging: crate::debug_logging::DebugLogging,
     pending_agent_debug_menu_enabled: Option<bool>,
     pending_progress_monitor_enabled: Option<bool>,
     pending_inference_test: bool,
@@ -1917,6 +2052,13 @@ pub struct App {
     /// status bar, this remains readable while Settings owns the full screen.
     pub inference_test_state: InferenceTestState,
     pub inference_test_result: Option<crate::inference_test::InferenceTestResult>,
+    pub(crate) inference_test_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) model_discovery_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) model_catalog_holds: [Option<std::sync::Arc<ilium_execution::StorageAdmission>>; 3],
+    pub(crate) model_catalog_preparation: crate::model_catalog_preparation::ModelCatalogPreparation,
+    pub(crate) incoming_model_result_hold:
+        Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) pending_naming_retries: Vec<crate::naming_workers::NamingRequest>,
     inference_test_settings: Option<InferenceSettings>,
     /// Where to write `config.toml` when a setting changes -- `None` when
     /// `crate::paths::config_dir` couldn't be resolved at startup, in which
@@ -1941,6 +2083,9 @@ pub struct App {
     /// The tree-row state slot under the pointer (node, slot, glyph cell),
     /// which drives the status explanation popover.
     pub hovered_status_slot: Option<(NodeId, crate::status_icons::StatusSlot, Position)>,
+    /// Pane whose progress footer is under the pointer, with the pointer cell
+    /// the long-description tooltip anchors to.
+    pub hovered_progress: Option<(NodeId, Position)>,
     /// Server-owned, non-persisted Git observations for worktree rows.
     pub workspace_git_statuses: HashMap<NodeId, ilium_ipc::WorkspaceGitStatus>,
     /// The costs-and-stats popover hanging off an agent pane's second header
@@ -1948,6 +2093,7 @@ pub struct App {
     pub stats_popover: Option<crate::session_stats_ui::StatsPopover>,
     /// Per-pane transcript statistics and the worker that reads them.
     pub session_stats: crate::session_stats_store::SessionStatsStore,
+    pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// The footer agent icon's hover or pinned worktree actions.
@@ -1977,6 +2123,11 @@ pub struct App {
     pub hovered_agent_toolbar_action: Option<(NodeId, AgentToolbarAction)>,
     /// Active frozen viewport and progressively validated semantic regions.
     pub smart_copy_session: Option<crate::smart_copy::SmartCopySession>,
+    /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
+    pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
+    /// The "Preview" dialog shown for a second after a light selection is copied.
+    pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
+    smart_copy_source: Option<crate::terminal_view::PaintedTerminal>,
     next_smart_copy_generation: u64,
     /// A multi-write PTY keystroke sequence still being drained by
     /// `tick::on_tick`, one stage per tick past its own delay -- see
@@ -1988,6 +2139,7 @@ pub struct App {
     /// before a drag starts and immediately after a plain click (no
     /// movement) collapses it back to nothing.
     pub terminal_selection: Option<crate::terminal_selection::TerminalSelection>,
+    terminal_selection_source: Option<(NodeId, crate::terminal_view::PaintedTerminal)>,
     help_leader_pending: bool,
     /// The session's project directory. Every new terminal pane spawns
     /// here (server-side), and the file-picker overlay always opens
@@ -2016,6 +2168,13 @@ pub struct App {
     /// `crate::lib::dispatch_pending_app_work`, same pattern as every other
     /// pending-work outbox on this struct.
     pub pending_last_prompt_transcript_checks: Vec<PendingLastPromptTranscriptCheck>,
+    pub(crate) pending_exact_prompt_retries:
+        Vec<crate::naming_workers::ExactAgentPromptTranscriptRequest>,
+    exact_prompt_reports_unflushed: usize,
+    pending_exact_prompt_reports: std::collections::VecDeque<(
+        ClientRequest,
+        std::sync::Arc<crate::naming_workers::ExactSource>,
+    )>,
     pub pending_exact_prompt_worker_cancellations: Vec<NodeId>,
     /// Files this client itself just asked the server to open as a new
     /// editor pane (via `request_new_editor`), keyed by file basename --
@@ -2031,7 +2190,7 @@ pub struct App {
     /// to carry a path back. Capped at `MAX_PENDING_EDITOR_OPENS`: a
     /// request whose `NewPane` the server rejects (or that otherwise never
     /// gets a confirming tree node) has nothing to ever call
-    /// `take_matching_pending_editor_open` for it, so without a bound this
+    /// `take_matching_pending_editor_open_from_node` for it, so without a bound this
     /// would grow by one abandoned entry per failed open for the life of
     /// the client process.
     pending_editor_opens: Vec<PendingEditorOpen>,
@@ -2041,7 +2200,46 @@ pub struct App {
     /// content kind, and (when available) target parent as its narrow match.
     pending_pane_focuses: Vec<PendingPaneFocus>,
     pub markdown_picker: ratatui_image::picker::Picker,
-    pub markdown_rasterizer: crate::markdown::raster::HeaderRasterizer,
+    pub document_preparation: Option<crate::document_preparation::DocumentPreparation>,
+    pub(crate) source_window_preparation:
+        Option<crate::source_window_preparation::SourceWindowPreparation>,
+    pub(crate) source_window_syntax: Option<crate::source_window_syntax::SourceWindowSyntax>,
+    pub(crate) source_window_client: Option<ilium_execution::Client>,
+    source_capture_budget: std::sync::Arc<crate::editor_capture_budget::CaptureBudget>,
+    pending_source_windows: Vec<crate::source_window_preparation::WindowCompletion>,
+    pending_source_styles: Vec<crate::source_window_syntax::StyledWindow>,
+    pub terminal_parsing: Option<crate::terminal_parsing::TerminalParsing>,
+    pub(crate) pending_terminal_events:
+        std::collections::VecDeque<crate::connection::Received<ilium_ipc::ServerEvent>>,
+    pub(crate) projection_admission_wake:
+        Option<std::pin::Pin<Box<tokio::sync::futures::OwnedNotified>>>,
+    pub(crate) projection_busy_retry_at: Option<tokio::time::Instant>,
+    pub(crate) projection_admission_failure: Option<ilium_execution::RejectReason>,
+    terminal_input: crate::terminal_input::TerminalInput,
+    pub(crate) pending_native_paste: Option<crate::terminal_input::NativePaste>,
+    native_paste_failure: Option<crate::terminal_input_owner::InputFailure>,
+    pub(crate) terminal_context_preparation:
+        Option<crate::terminal_context_preparation::TerminalContextPreparation>,
+    pending_terminal_context: Option<TerminalContextBlueprint>,
+    next_terminal_context_generation: u64,
+    pending_smart_copy_capture: Option<(NodeId, std::sync::Arc<()>, u64)>,
+    pub editor_files: Option<crate::filesystem::editors::EditorFiles>,
+    pub(crate) terminal_baselines: Option<crate::filesystem::transcript_baseline::BaselineFiles>,
+    pub(crate) sidebar_files: Option<crate::filesystem::sidebar::SidebarFiles>,
+    pub(crate) sidebar_snapshot: crate::filesystem::sidebar::SidebarSnapshot,
+    pub(crate) integration_files: Option<crate::filesystem::integrations::IntegrationFiles>,
+    pub(crate) failed_chatroom_appends: Vec<(NodeId, PathBuf, String)>,
+    pub(crate) integration_status_hold: Option<std::sync::Arc<ilium_execution::Retained<()>>>,
+    pub(crate) explorer_execution:
+        Option<(ilium_execution::Client, std::sync::Arc<tokio::sync::Notify>)>,
+    pub(crate) configuration_files: Option<crate::filesystem::configurations::ConfigurationFiles>,
+    pub(crate) configuration_admission: crate::filesystem::ConfigurationAdmission,
+    pub(crate) board_files: Option<crate::filesystem::boards::BoardFiles>,
+    pub(crate) pending_board_loads: Vec<NodeId>,
+    pub(crate) pending_board_dialogs: Vec<crate::filesystem::board_app::BoardDialogReceipt>,
+    pub(crate) onboarding_dismiss_pending: bool,
+    pub(crate) pending_editor_loads: Vec<crate::filesystem::editors::LoadTarget>,
+    pub(crate) editor_load_errors: HashMap<NodeId, String>,
     /// Creation-pulse bookkeeping: node id -> `started_at`-relative offset
     /// (ms) at which its insertion slide settles. Read by `tree_ui` to flash
     /// a freshly created node *after* it has moved into place, so a click (or
@@ -2085,6 +2283,10 @@ pub struct App {
     /// client attached. They let this client construct its own local editor
     /// buffer instead of treating a restored editor as a missing pane.
     pub restored_editor_paths: HashMap<NodeId, PathBuf>,
+    pub(crate) editor_path_holds:
+        HashMap<NodeId, std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) editor_path_event_holds: HashMap<NodeId, crate::connection::EventRetention>,
+    pub(crate) editor_load_retry_positions: HashMap<NodeId, (Option<u32>, Option<u32>)>,
     /// How many times background session-title inference has been
     /// attempted per pane/session pair -- bounds `crate::title_inference`'s retry path
     /// (`title_inference::MAX_ATTEMPTS`) so a pane whose transcript never
@@ -2145,6 +2347,33 @@ pub struct App {
     /// from plain shells. This keeps mouse hit rows aligned with rendering
     /// without rebuilding labels on every pointer move.
     tree_hit_test_cache: tree_ui::TreeItemCache,
+    // Original IPC allocation guards drop after every installed/pending UI payload.
+    pub(crate) processing_event_retention: Option<crate::connection::EventRetention>,
+    pub(crate) incoming_projection: crate::incoming_projection::ProjectionRetention,
+    // Conservatively kept until the next charged footer replacement or App drop.
+    pub(crate) status_message_retention: Option<crate::connection::EventRetention>,
+    pub(crate) processing_derivation_retention: Option<crate::connection::EventRetention>,
+    voice_text_transcript_retention: Option<crate::connection::EventRetention>,
+    pub(crate) voice_presentation_storage: crate::voice_presentation::VoicePresentationStorage,
+    pub(crate) voice_native_retirement: Option<crate::voice_retirement::VoiceRetirement>,
+    pub(crate) voice_shutdown_requested: bool,
+    pub(crate) voice_shutdown_batch: Option<ilium_voice::VoiceShutdownOutcome>,
+    pub(crate) voice_shutdown_after_delivery: bool,
+    pub(crate) normal_voice_retirement_failed: bool,
+    pub(crate) voice_event_projection_pending: bool,
+    pub(crate) voice_demo_retirement_pending: bool,
+    pub(crate) normal_voice_commands: crate::normal_voice::NormalVoiceCommands,
+    pub(crate) voice_preparation: crate::voice_preparation::VoicePreparation,
+    pub(crate) normal_voice_context_slot: Option<(
+        crate::normal_voice::ContextSlot,
+        crate::control::VoiceTargetContext,
+        std::sync::Arc<()>,
+    )>,
+    pub(crate) normal_voice_context_waiting: bool,
+    pub(crate) pending_normal_voice_outputs:
+        Option<(std::sync::Arc<()>, Vec<ilium_voice::VoiceToolOutput>)>,
+    // Last source owner for bounded pending PTT vectors and temporary restoration.
+    pending_voice_interaction_allocation: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
 pub(crate) struct PendingEditorOpen {
@@ -2208,20 +2437,10 @@ struct AnimationRequirements {
 }
 
 impl App {
-    /// Asks the terminal which image protocol it supports, upgrading markdown
-    /// image rendering from the half-block fallback when it answers.
-    ///
-    /// Kept out of [`App::new`] on purpose. Probing writes capability queries
-    /// (Kitty graphics, primary device attributes, text-area size) to stdout
-    /// and then *blocks* reading a reply, so a constructor that did it would
-    /// perform host I/O and stall wherever nothing answers. That is not
-    /// theoretical: it hung every `App::new` in the Windows test run for
-    /// roughly forty minutes each, and would equally hang a real user whose
-    /// terminal stays silent. Only the entry point calls this, exactly once.
-    pub fn probe_terminal_image_support(&mut self) {
-        if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
-            self.markdown_picker = picker;
-        }
+    /// Installs the capability result obtained by the single admitted input
+    /// worker before the first frame. Construction remains free of host I/O.
+    pub fn install_terminal_image_picker(&mut self, picker: ratatui_image::picker::Picker) {
+        self.markdown_picker = picker;
     }
 
     /// Starts a client session with an empty render-cache tree -- the real
@@ -2244,6 +2463,17 @@ impl App {
             pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
+            outbound_admission: {
+                #[cfg(test)]
+                {
+                    Some(crate::execution::test_client())
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            pending_input_retention: None,
             tree_state: TreeState::default(),
             right_panel_target: RightPanelTarget::Empty,
             focus: FocusTarget::Pane,
@@ -2256,12 +2486,18 @@ impl App {
             modal_stack: Vec::new(),
             status_message: None,
             terminal_clipboard: None,
+            pending_clipboard_copies: std::collections::HashMap::new(),
             pending_terminal_link: None,
+            pending_terminal_link_storage: None,
             exit_reason: None,
             started_at,
             animation_settings: Default::default(),
+            committed_animation_settings: None,
+            failed_animation_settings: None,
+            plugin_catalogue_preparation: None,
+            plugin_catalogue: None,
             animation_frame: Default::default(),
-            animation_cache: Default::default(),
+            plugin_permission_session: None,
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
                 session_cwd.clone(),
             ),
@@ -2269,6 +2505,11 @@ impl App {
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             requested_pane_sizes: HashMap::new(),
             layout: UiLayout::default(),
+            emitted_geometry: None,
+            composed_tree_rows: None,
+            composed_terminal_sources: Vec::new(),
+            composed_editor_sources: Vec::with_capacity(4),
+            composition_metadata: None,
             tree_width_animation: TreeWidthAnimation::new(
                 started_at,
                 UiSettings::default().left_panel_sizing.unfocused_width,
@@ -2282,6 +2523,10 @@ impl App {
             notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             inference_settings: InferenceSettings::default(),
+            restructure_budget_autosave_deadline: None,
+            inference_settings_save_error: None,
+            inference_save_state: Default::default(),
+            restructure_budget_identity: None,
             trigger_settings: TriggerSettings::default(),
             text_trigger_settings: TextTriggerSettings::default(),
             agent_setup_settings: AgentSetupSettings::default(),
@@ -2305,6 +2550,7 @@ impl App {
             agent_detection_settings: None,
             agent_detection_settings_error: None,
             agent_detection_settings_pending: false,
+            detection_number_pending: None,
             agent_detection_signature_input: None,
             debug_settings: DebugSettings::default(),
             api_settings: ApiSettings::default(),
@@ -2317,6 +2563,9 @@ impl App {
             pending_voice_interaction_requests: Vec::new(),
             pending_voice_text_offers: Vec::new(),
             pending_debug_logging_enabled: None,
+            pending_debug_logging_server_enabled: None,
+            pending_voice_receiver_registration: false,
+            debug_logging: crate::debug_logging::DebugLogging::default(),
             pending_agent_debug_menu_enabled: None,
             pending_progress_monitor_enabled: None,
             pending_inference_test: false,
@@ -2332,6 +2581,12 @@ impl App {
             model_discovery: ModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
             inference_test_result: None,
+            inference_test_hold: None,
+            model_discovery_hold: None,
+            model_catalog_holds: std::array::from_fn(|_| None),
+            model_catalog_preparation: Default::default(),
+            incoming_model_result_hold: None,
+            pending_naming_retries: Vec::new(),
             inference_test_settings: None,
             config_dir: None,
             agent_setup_home_dir: None,
@@ -2342,9 +2597,11 @@ impl App {
             last_tree_click: None,
             hovered_tree_node: None,
             hovered_status_slot: None,
+            hovered_progress: None,
             workspace_git_statuses: HashMap::new(),
             stats_popover: None,
             session_stats: crate::session_stats_store::SessionStatsStore::default(),
+            statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
             agent_popover: None,
@@ -2359,9 +2616,13 @@ impl App {
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
             smart_copy_session: None,
+            smart_copy_light: None,
+            smart_copy_preview: None,
+            smart_copy_source: None,
             next_smart_copy_generation: 1,
             pending_staged_keystrokes: None,
             terminal_selection: None,
+            terminal_selection_source: None,
             help_leader_pending: false,
             session_cwd,
             project_name: None,
@@ -2370,16 +2631,157 @@ impl App {
             titles_loading: HashSet::new(),
             pending_manual_retitles: HashSet::new(),
             pending_last_prompt_transcript_checks: Vec::new(),
+            pending_exact_prompt_retries: Vec::new(),
+            exact_prompt_reports_unflushed: 0,
+            pending_exact_prompt_reports: std::collections::VecDeque::new(),
             pending_exact_prompt_worker_cancellations: Vec::new(),
             pending_editor_opens: Vec::new(),
             pending_pane_focuses: Vec::new(),
             // Deliberately the protocol-free fallback rather than a probed
             // one: probing writes escape sequences to stdout and blocks
             // waiting for the terminal to answer, which is host I/O and has no
-            // place in a constructor. `probe_terminal_image_support` upgrades
-            // this once, from the real entry point.
+            // place in a constructor. The admitted input owner negotiates
+            // support and supplies the Picker from the real entry point.
             markdown_picker: ratatui_image::picker::Picker::halfblocks(),
-            markdown_rasterizer: crate::markdown::raster::HeaderRasterizer::new(),
+            document_preparation: None,
+            source_window_preparation: None,
+            source_window_syntax: None,
+            source_window_client: None,
+            source_capture_budget: std::sync::Arc::new(
+                crate::editor_capture_budget::CaptureBudget::new(),
+            ),
+            pending_source_windows: Vec::with_capacity(4),
+            pending_source_styles: Vec::with_capacity(4),
+            terminal_parsing: None,
+            pending_terminal_events: std::collections::VecDeque::with_capacity(2),
+            projection_admission_wake: None,
+            projection_busy_retry_at: None,
+            projection_admission_failure: None,
+            processing_event_retention: None,
+            incoming_projection: crate::incoming_projection::ProjectionRetention::default(),
+            status_message_retention: None,
+            processing_derivation_retention: None,
+            voice_text_transcript_retention: None,
+            voice_presentation_storage: Default::default(),
+            voice_native_retirement: None,
+            voice_shutdown_requested: false,
+            voice_shutdown_batch: None,
+            voice_shutdown_after_delivery: false,
+            normal_voice_retirement_failed: false,
+            voice_event_projection_pending: false,
+            voice_demo_retirement_pending: false,
+            normal_voice_commands: Default::default(),
+            voice_preparation: Default::default(),
+            normal_voice_context_slot: None,
+            normal_voice_context_waiting: false,
+            pending_normal_voice_outputs: None,
+            pending_voice_interaction_allocation: None,
+            terminal_input: crate::terminal_input::TerminalInput::default(),
+            pending_native_paste: None,
+            native_paste_failure: None,
+            terminal_context_preparation: None,
+            pending_terminal_context: None,
+            next_terminal_context_generation: 1,
+            pending_smart_copy_capture: None,
+            failed_chatroom_appends: Vec::new(),
+            integration_status_hold: None,
+            sidebar_snapshot: Default::default(),
+            sidebar_files: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::sidebar::SidebarFiles::new(
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            integration_files: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::integrations::IntegrationFiles::new(
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            explorer_execution: {
+                #[cfg(test)]
+                {
+                    Some((
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            editor_files: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::editors::EditorFiles::new(
+                        crate::execution::test_client(),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            terminal_baselines: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::transcript_baseline::BaselineFiles::new(
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            configuration_admission: Default::default(),
+            configuration_files: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::configurations::ConfigurationFiles::new(
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            board_files: {
+                #[cfg(test)]
+                {
+                    Some(crate::filesystem::boards::BoardFiles::new(
+                        crate::execution::test_client(),
+                        std::sync::Arc::new(tokio::sync::Notify::new()),
+                    ))
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            pending_board_loads: Vec::new(),
+            pending_board_dialogs: Vec::new(),
+            onboarding_dismiss_pending: false,
+            pending_editor_loads: Vec::new(),
+            editor_load_errors: HashMap::new(),
             recently_created: HashMap::new(),
             terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
@@ -2391,6 +2793,9 @@ impl App {
             pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
             restored_editor_paths: HashMap::new(),
+            editor_path_holds: HashMap::new(),
+            editor_path_event_holds: HashMap::new(),
+            editor_load_retry_positions: HashMap::new(),
             title_inference_attempts: HashMap::new(),
             inferred_title_session_ids: HashMap::new(),
             agent_title_generations: HashMap::new(),
@@ -2432,6 +2837,345 @@ impl App {
         self.push_modal(modal);
     }
 
+    pub(crate) fn begin_queue_delivery_dialog(&mut self, parent: Box<PromptQueueDialogState>) {
+        match crate::value_dialog_host::ValueDialogHost::queue_delivery(&parent) {
+            Ok(dialog) => self.push_modal_over(
+                Mode::QueuePrompt(parent),
+                Mode::ValueDialog(Box::new(dialog)),
+            ),
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = Mode::QueuePrompt(parent);
+            }
+        }
+    }
+
+    pub(crate) fn finish_value_dialog(
+        &mut self,
+        mut host: Box<crate::value_dialog_host::ValueDialogHost>,
+        outcome: crate::value_dialog::DialogOutcome,
+    ) {
+        use crate::value_dialog::DialogOutcome;
+        let result = match outcome {
+            DialogOutcome::Continue => {
+                self.mode = Mode::ValueDialog(host);
+                return;
+            }
+            DialogOutcome::Cancel => {
+                self.pop_modal();
+                return;
+            }
+            outcome @ (DialogOutcome::Choose(_) | DialogOutcome::CommitNumber(_)) => {
+                if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::Animation(_)
+                ) {
+                    self.commit_animation_value_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::EditorLineDisplay { .. }
+                ) {
+                    self.commit_editor_line_display_dialog(&host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::Plugin(_)
+                ) {
+                    self.commit_plugin_value_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::Cost { .. }
+                ) {
+                    self.commit_cost_value_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::SettingsNumber { .. }
+                        | crate::value_dialog_host::ValueTarget::DetectionNumber { .. }
+                ) {
+                    self.commit_settings_number_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::SettingsChoice { .. }
+                ) {
+                    self.commit_settings_choice_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::KeyboardPrefix { .. }
+                ) {
+                    self.commit_keyboard_prefix_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::SoundStudio { .. }
+                ) {
+                    self.commit_studio_number_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::OnboardingVoice { .. }
+                ) {
+                    self.commit_onboarding_voice_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::OnboardingInference { .. }
+                ) {
+                    self.commit_onboarding_inference_dialog(&mut host, &outcome)
+                } else if matches!(
+                    host.target,
+                    crate::value_dialog_host::ValueTarget::AgentEffort { .. }
+                ) {
+                    self.commit_agent_effort_dialog(&host, &outcome)
+                } else if let DialogOutcome::Choose(id) = outcome {
+                    match self.modal_stack.last_mut() {
+                        Some(Mode::Settings(parent)) => {
+                            host.apply_icon_column_choice(parent, &id, self.layout.screen_area)
+                        }
+                        Some(Mode::WorktreeManager(parent)) => {
+                            host.apply_prune_branch_choice(parent, &id)
+                        }
+                        Some(Mode::QueuePrompt(parent)) => host.apply_queue_choice(parent, &id),
+                        Some(Mode::CreateBoard(parent)) => {
+                            host.apply_board_storage_choice(parent, &id)
+                        }
+                        Some(Mode::CreateAgentFromLine(parent)) => {
+                            host.apply_agent_from_line_provider(parent, &id)
+                        }
+                        Some(Mode::CreateAgentWorkspace(parent)) => {
+                            host.apply_workspace_choice(parent, &id)
+                        }
+                        Some(Mode::TextTriggerDialog(parent)) => {
+                            host.apply_trigger_scope_choice(parent, &id)
+                        }
+                        _ => Err("The parent form changed; reopen its options".into()),
+                    }
+                } else {
+                    Err("This dialog target does not accept a number".into())
+                }
+            }
+        };
+        match result {
+            Ok(()) if host.is_saving() => self.mode = Mode::ValueDialog(host),
+            Ok(()) => self.pop_modal(),
+            Err(error) => {
+                host.reject(error);
+                self.mode = Mode::ValueDialog(host);
+            }
+        }
+    }
+
+    pub(crate) fn begin_cost_value_dialog(&mut self, row: crate::cost_settings::CostRow) {
+        let result = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "The configuration directory is unavailable".to_owned())
+            .and_then(|directory| {
+                crate::value_dialog_host::ValueDialogHost::cost(&self.cost_settings, row, directory)
+            });
+        match result {
+            Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
+            Err(error) => self.status_message = Some(error),
+        }
+    }
+
+    fn commit_cost_value_dialog(
+        &mut self,
+        host: &mut crate::value_dialog_host::ValueDialogHost,
+        outcome: &crate::value_dialog::DialogOutcome,
+    ) -> Result<(), String> {
+        let crate::value_dialog_host::ValueTarget::Cost { target, directory } = &host.target else {
+            return Err("This is not a cost value dialog".into());
+        };
+        if host.is_saving() {
+            return Err("The previous value is still being saved".into());
+        }
+        if self.config_dir.as_ref() != Some(directory) {
+            return Err("The configuration destination changed; reopen this dialog".into());
+        }
+        let mut settings = self.cost_settings.clone();
+        match outcome {
+            crate::value_dialog::DialogOutcome::Choose(id) => {
+                target.set_choice(&mut settings, id)?
+            }
+            crate::value_dialog::DialogOutcome::CommitNumber(text) => {
+                target.set_number(&mut settings, text)?
+            }
+            _ => return Err("No cost value was submitted".into()),
+        }
+        let token = std::sync::Arc::new(());
+        self.enqueue_configuration(
+            directory.clone(),
+            crate::filesystem::configuration::ConfigurationChange::Cost(settings.clone()),
+            crate::filesystem::configurations::ConfigurationIntent::ValueDialog {
+                token: std::sync::Arc::clone(&token),
+            },
+        )?;
+        self.cost_settings = settings;
+        host.begin_save(token);
+        Ok(())
+    }
+
+    pub(crate) fn begin_animation_value_dialog(&mut self, row: usize) {
+        use crate::animation_rows::AnimationRow;
+        use crate::value_animation::{AnimationControlScope, AnimationControlTarget};
+        if !self.prepare_animation_edit() {
+            return;
+        }
+        let result = (|| {
+            let model = self.animation_row_model();
+            let scope = match model.row(row) {
+                Some(AnimationRow::Common(_)) => AnimationControlScope::Common,
+                Some(AnimationRow::SceneControl(_)) => AnimationControlScope::Scene,
+                _ => return Err("This row does not offer a value dialog".into()),
+            };
+            let control = model
+                .control(row)
+                .cloned()
+                .ok_or("Animation control is no longer available")?;
+            let identity = format!(
+                "{:?}/{:?}",
+                self.animation_settings.kind,
+                model.effective_kind()
+            );
+            let target = AnimationControlTarget::new(
+                self.animation_write_path()?,
+                identity,
+                scope,
+                control,
+            )?;
+            crate::value_dialog_host::ValueDialogHost::animation(target)
+        })();
+        match result {
+            Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
+            Err(error) => self.status_message = Some(error),
+        }
+    }
+
+    fn commit_animation_value_dialog(
+        &mut self,
+        host: &mut crate::value_dialog_host::ValueDialogHost,
+        outcome: &crate::value_dialog::DialogOutcome,
+    ) -> Result<(), String> {
+        use crate::animation_rows::AnimationRow;
+        use crate::value_animation::AnimationControlScope;
+        use crate::value_dialog::DialogOutcome;
+        let crate::value_dialog_host::ValueTarget::Animation(target) = &host.target else {
+            return Err("This dialog is not an animation control".into());
+        };
+        if host.is_saving() {
+            return Err("The previous value is still being saved".into());
+        }
+        if !self.prepare_animation_edit() {
+            return Err("The animation is not ready for editing".into());
+        }
+        let model = self.animation_row_model();
+        let row = (0..model.len())
+            .find(|&row| match (target.scope(), model.row(row)) {
+                (AnimationControlScope::Common, Some(AnimationRow::Common(id)))
+                | (AnimationControlScope::Scene, Some(AnimationRow::SceneControl(id))) => {
+                    *id == target.control_id()
+                }
+                _ => false,
+            })
+            .ok_or("The animation control disappeared; reopen its dialog")?;
+        let current = model
+            .control(row)
+            .ok_or("The animation control is unavailable")?;
+        let identity = format!(
+            "{:?}/{:?}",
+            self.animation_settings.kind,
+            model.effective_kind()
+        );
+        let path = self.animation_write_path()?;
+        let value = match outcome {
+            DialogOutcome::Choose(id) => {
+                target.choice(&path, &identity, target.scope(), current, id)?
+            }
+            DialogOutcome::CommitNumber(text) => {
+                target.number(&path, &identity, target.scope(), current, text)?
+            }
+            _ => return Err("No animation value was submitted".into()),
+        };
+        let mut settings = self.animation_settings.clone();
+        match target.scope() {
+            AnimationControlScope::Common => {
+                settings.set_common_control(target.control_id(), value)?
+            }
+            AnimationControlScope::Scene => {
+                settings.set_scene_control(target.control_id(), value)?
+            }
+        };
+        let token = std::sync::Arc::new(());
+        self.enqueue_animation_settings_with_value(
+            settings,
+            None,
+            Some(std::sync::Arc::clone(&token)),
+        )?;
+        host.begin_save(token);
+        Ok(())
+    }
+
+    pub(crate) fn finish_value_dialog_save(
+        &mut self,
+        token: &std::sync::Arc<()>,
+        mut result: Result<(), String>,
+    ) {
+        if result.is_ok()
+            && matches!(&self.mode, Mode::ValueDialog(host)
+            if matches!(&host.target, crate::value_dialog_host::ValueTarget::Plugin(target)
+                if !target.binding_is_current(self)))
+        {
+            result = Err("Plugin binding changed while saving; reopen this dialog".into());
+        }
+        let success = result.is_ok();
+        let error = result.as_ref().err().cloned();
+        let Mode::ValueDialog(host) = &mut self.mode else {
+            return;
+        };
+        if !host.finish_save(token, result) {
+            return;
+        }
+        let api_port_saved = matches!(
+            host.target,
+            crate::value_dialog_host::ValueTarget::SettingsNumber {
+                field: crate::value_settings::SettingsNumber::ApiPort,
+                ..
+            }
+        );
+        let session_recovery_saved = matches!(
+            host.target,
+            crate::value_dialog_host::ValueTarget::SettingsChoice {
+                field: crate::value_settings_choice::SettingsChoice::SessionRecovery,
+                ..
+            }
+        );
+        if matches!(
+            host.target,
+            crate::value_dialog_host::ValueTarget::SettingsChoice {
+                field: crate::value_settings_choice::SettingsChoice::GitDefaultWhere
+                    | crate::value_settings_choice::SettingsChoice::GitDefaultBase
+                    | crate::value_settings_choice::SettingsChoice::GitBranchLine
+                    | crate::value_settings_choice::SettingsChoice::GitClosePolicy,
+                ..
+            }
+        ) {
+            self.git_settings_error = error.clone();
+        }
+        if success {
+            self.pop_modal();
+            if self.status_message.as_deref() == Some("Saving settings…") {
+                self.status_message = Some(
+                    if session_recovery_saved {
+                        "Recovery policy saved; applies when the server next starts"
+                    } else if api_port_saved {
+                        "HTTP API port saved; restart the server to apply it"
+                    } else {
+                        "Settings saved to disk"
+                    }
+                    .into(),
+                );
+            }
+        } else {
+            self.status_message = error;
+        }
+    }
+
     /// Closes only the active child and restores its immediate parent. This
     /// deliberately supports arbitrary nesting rather than a settings-only
     /// return flag or a freshly reconstructed parent screen.
@@ -2455,10 +3199,7 @@ impl App {
     }
 
     pub fn apply_icon_semantic_search_event(&mut self, event: IconSemanticSearchEvent) {
-        let Mode::Settings(settings) = &mut self.mode else {
-            return;
-        };
-        let Some(picker) = settings.icon_picker.as_mut() else {
+        let Some(picker) = self.retained_icon_picker_mut() else {
             return;
         };
         match event {
@@ -2532,31 +3273,168 @@ impl App {
         });
     }
 
-    /// Drains every `ClientRequest` queued by input handling since the
-    /// last drain, for the caller to actually send over the connection.
-    pub fn take_outbound_requests(&mut self) -> Vec<ClientRequest> {
+    /// Commit an already admitted nonterminal reply after its actor sideeffect.
+    /// Moving the original guard is infallible and never reacquires capacity.
+    pub(crate) fn enqueue_admitted_request(
+        &mut self,
+        request: crate::ipc_preparation::AdmittedRequest,
+    ) {
+        self.outbox.push(request);
+    }
+
+    pub(crate) fn take_admitted_outbound_requests(
+        &mut self,
+    ) -> Vec<crate::ipc_preparation::AdmittedRequest> {
         std::mem::take(&mut self.outbox)
+    }
+
+    #[cfg(test)]
+    pub fn take_outbound_requests(&mut self) -> Vec<ClientRequest> {
+        self.take_admitted_outbound_requests()
+            .into_iter()
+            .map(|request| {
+                let (request, _retention) = request.into_parts();
+                request
+            })
+            .collect()
+    }
+
+    /// Publish without awaiting a blocked socket. A refused FIFO head and
+    /// every following request remain owned here for the next capacity wake.
+    pub(crate) fn publish_outbound_requests(
+        &mut self,
+        sender: &crate::connection::RequestSender,
+    ) -> Result<(), crate::connection::RequestPublicationClosed> {
+        let requests = self.take_admitted_outbound_requests();
+        let mut pending = requests.into_iter();
+        while let Some(request) = pending.next() {
+            let Err(error) = sender.try_send_admitted(request) else {
+                continue;
+            };
+            let (request, is_closed) = match *error {
+                tokio::sync::mpsc::error::TrySendError::Full(request) => (request, false),
+                tokio::sync::mpsc::error::TrySendError::Closed(request) => (request, true),
+            };
+            self.outbox.push(request);
+            self.outbox.extend(pending);
+            return if is_closed {
+                Err(crate::connection::RequestPublicationClosed)
+            } else {
+                Ok(())
+            };
+        }
+        Ok(())
     }
 
     /// Detaches this connection cleanly and records how the CLI wrapper should
     /// proceed once the terminal has been restored by `TerminalGuard`.
-    pub fn request_client_exit(&mut self, reason: ClientExitReason) {
-        self.queue_request(ClientRequest::Detach);
-        self.exit_reason = Some(reason);
+    pub fn request_client_exit(&mut self, reason: ClientExitReason) -> bool {
+        if self.queue_request(ClientRequest::Detach) {
+            self.exit_reason = Some(reason);
+            true
+        } else {
+            false
+        }
     }
 
     /// Terminates the project-scoped server session. This is intentionally a
     /// separate leader action from [`request_client_exit`]: tmux/screen's
     /// detach leaves PTYs alive, while an explicit quit must not silently
     /// pretend to do the same thing.
-    pub fn request_session_kill(&mut self) {
-        self.queue_request(ClientRequest::KillSession);
-        self.exit_reason = Some(ClientExitReason::Quit);
+    pub fn request_session_kill(&mut self) -> bool {
+        if self.queue_request(ClientRequest::KillSession) {
+            self.exit_reason = Some(ClientExitReason::Quit);
+            true
+        } else {
+            false
+        }
     }
 
     /// Drains every `PendingRetitleRequest` queued since the last drain,
     /// for `crate::run::dispatch_input_event` to actually spawn a worker
     /// for -- see that type's doc comment.
+    /// Restores rejected originals without another screen/transcript capture.
+    /// These lists retain the same per-pane/project intent identity and Loading
+    /// state; rejection never claims that a provider started or completed.
+    pub(crate) fn requeue_naming_request(
+        &mut self,
+        request: crate::naming_workers::NamingRequest,
+    ) -> Result<(), Box<crate::naming_workers::NamingRequest>> {
+        const MAX_RETRIES: usize = 16;
+        const MAX_RETRY_BYTES: usize = 8 * 1024 * 1024;
+        let bytes = self
+            .pending_naming_retries
+            .iter()
+            .fold(request.retained_bytes(), |sum, item| {
+                sum.saturating_add(item.retained_bytes())
+            });
+        if self.pending_naming_retries.len() >= MAX_RETRIES || bytes > MAX_RETRY_BYTES {
+            return Err(Box::new(request));
+        }
+        self.pending_naming_retries.push(request);
+        Ok(())
+    }
+
+    pub(crate) fn queue_exact_prompt_report(
+        &mut self,
+        result: crate::naming_workers::ExactAgentPromptTranscriptResult,
+        hold: std::sync::Arc<crate::naming_workers::ExactSource>,
+    ) {
+        if let Some(last_prompt) = result.last_prompt {
+            // One process-wide exact-source slot follows each admitted result.
+            // Thus this FIFO plus every worker/channel owner is bounded to128.
+            self.pending_exact_prompt_reports.push_back((
+                ClientRequest::ReportAgentPromptFromTranscript {
+                    pane_id: result.pane_id,
+                    expected_session_id: result.session_id,
+                    prompt_epoch: result.prompt_epoch,
+                    last_prompt,
+                },
+                hold,
+            ));
+            self.collect_exact_prompt_reports();
+        }
+    }
+    pub(crate) fn has_pending_exact_prompt_reports(&self) -> bool {
+        !self.pending_exact_prompt_reports.is_empty()
+    }
+    pub(crate) fn unconfirmed_exact_prompt_reports(&self) -> usize {
+        self.exact_prompt_reports_unflushed
+            .saturating_add(self.pending_exact_prompt_reports.len())
+    }
+    pub(crate) fn confirm_exact_prompt_reports_flushed(&mut self) {
+        self.exact_prompt_reports_unflushed = 0;
+    }
+    pub(crate) fn collect_exact_prompt_reports(&mut self) {
+        while let Some((request, hold)) = self.pending_exact_prompt_reports.pop_front() {
+            match self.try_queue_terminal_request(request) {
+                Ok(()) => {
+                    self.exact_prompt_reports_unflushed =
+                        self.exact_prompt_reports_unflushed.saturating_add(1);
+                    drop(hold);
+                }
+                Err(original) => {
+                    self.pending_exact_prompt_reports
+                        .push_front((*original, hold));
+                    self.status_message =
+                        Some("Exact transcript evidence waiting for outbound admission".into());
+                    break;
+                }
+            }
+        }
+    }
+    pub(crate) fn retain_exact_prompt_retry(
+        &mut self,
+        request: crate::naming_workers::ExactAgentPromptTranscriptRequest,
+    ) {
+        if self.pending_exact_prompt_retries.len() < 16 {
+            self.pending_exact_prompt_retries.push(request);
+            self.status_message = Some("Exact transcript recovery waiting for admission".into());
+        } else {
+            self.status_message=Some("Exact transcript recovery did not start: retry capacity reached; terminal input remains delivered".into());
+        }
+    }
+
     pub fn take_pending_retitle_requests(&mut self) -> Vec<PendingRetitleRequest> {
         std::mem::take(&mut self.pending_retitle_requests)
     }
@@ -2642,6 +3520,7 @@ impl App {
     /// The server owns session identity and the client owns clipboard access.
     /// Verifying the file here ensures a copied path belongs to this pane's
     /// current agent session and project.
+    #[cfg(test)]
     fn history_file_path_for_pane(&self, pane_id: NodeId, home_dir: &Path) -> Option<PathBuf> {
         let (agent_class, session_id, project_path) = self.known_agent_history_context(pane_id)?;
         crate::agent_history_path::verified_jsonl_history_path(
@@ -2652,8 +3531,120 @@ impl App {
         )
     }
 
-    pub(crate) fn queue_request(&mut self, request: ClientRequest) {
-        let activity = match &request {
+    pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
+        if self.try_queue_terminal_request(request).is_err() {
+            self.status_message=Some("Request rejected before admission: bounded request/input credits are unavailable; retry after pending work completes".into());
+            return false;
+        }
+        true
+    }
+    pub(crate) fn try_queue_terminal_request(
+        &mut self,
+        request: ClientRequest,
+    ) -> Result<(), Box<ClientRequest>> {
+        let Some(client) = &self.outbound_admission else {
+            return Err(Box::new(request));
+        };
+        let request = crate::ipc_preparation::admit_request(client, request)
+            .map_err(|error| Box::new(error.value))?;
+        if self.terminal_parsing.is_some() {
+            let pane = match request.view() {
+                ClientRequest::KeyInput { pane_id, .. }
+                | ClientRequest::UserKeyInput { pane_id, .. }
+                | ClientRequest::SubmitTerminalText { pane_id, .. }
+                | ClientRequest::MouseInput { pane_id, .. } => Some(*pane_id),
+                _ => None,
+            };
+            if let Some(id) = pane {
+                if let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) {
+                    return self
+                        .terminal_input
+                        .admit_admitted_request(id, view.identity.clone(), request)
+                        .map_err(|request| {
+                            let (request, _retention) = (*request).into_parts();
+                            Box::new(request)
+                        });
+                }
+            }
+        }
+        self.queue_terminal_request_after_barrier(request);
+        Ok(())
+    }
+
+    fn queue_terminal_request_after_barrier(
+        &mut self,
+        request: crate::ipc_preparation::AdmittedRequest,
+    ) {
+        // Admission can precede a crash while the parser barrier is pending.
+        // Recheck recovery here so retained mouse modes cannot receive input.
+        if let ClientRequest::MouseInput { pane_id, .. } = request.view() {
+            if self.tree.agent_recovery(*pane_id).is_some() {
+                let pane_applied_ordinal =
+                    self.panes.get(pane_id).and_then(|runtime| match runtime {
+                        PaneRuntime::Terminal(view) => Some(view.applied_ordinal),
+                        _ => None,
+                    });
+                tracing::warn!(
+                    ?pane_id,
+                    ?pane_applied_ordinal,
+                    reason = "pane_entered_recovery",
+                    boundary = "parser_barrier",
+                    "admitted mouse input canceled before delivery"
+                );
+                self.status_message =
+                    Some("Mouse input canceled: its pane entered recovery before delivery".into());
+                return;
+            }
+        }
+        match self.try_hold_terminal_request_after_baseline(request) {
+            Ok(()) => {}
+            Err(request) => self.publish_terminal_request_after_baseline(*request),
+        }
+    }
+
+    pub(crate) fn publish_terminal_request_after_baseline(
+        &mut self,
+        request: crate::ipc_preparation::AdmittedRequest,
+    ) {
+        if let ClientRequest::MouseInput { pane_id, .. } = request.view() {
+            if self.tree.agent_recovery(*pane_id).is_some() {
+                let pane_applied_ordinal =
+                    self.panes.get(pane_id).and_then(|runtime| match runtime {
+                        PaneRuntime::Terminal(view) => Some(view.applied_ordinal),
+                        _ => None,
+                    });
+                tracing::warn!(
+                    ?pane_id,
+                    ?pane_applied_ordinal,
+                    reason = "pane_entered_recovery",
+                    boundary = "baseline_publication",
+                    "admitted mouse input canceled before delivery"
+                );
+                self.status_message =
+                    Some("Mouse input canceled: its pane entered recovery before delivery".into());
+                return;
+            }
+        }
+        if let ClientRequest::UserKeyInput {
+            pane_id,
+            prompt_epoch: Some(epoch),
+            ..
+        } = request.view()
+        {
+            if self.is_detected_agent_pane(*pane_id)
+                && !self
+                    .pending_last_prompt_transcript_checks
+                    .iter()
+                    .any(|check| check.prompt_epoch == *epoch)
+                && !self
+                    .pending_exact_prompt_worker_cancellations
+                    .contains(pane_id)
+            {
+                self.pending_exact_prompt_worker_cancellations
+                    .push(*pane_id);
+            }
+        }
+        let activity = match request.view() {
             ClientRequest::KeyInput { pane_id, bytes, .. }
             | ClientRequest::UserKeyInput { pane_id, bytes, .. }
                 if !bytes.is_empty() =>
@@ -2684,15 +3675,15 @@ impl App {
         pane_id: NodeId,
         bytes: Vec<u8>,
         submission: Option<PromptSubmissionSource>,
-    ) {
+    ) -> Result<(), Box<ClientRequest>> {
         if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
             view.scroll_to_bottom();
         }
-        self.queue_request(ClientRequest::KeyInput {
+        self.try_queue_terminal_request(ClientRequest::KeyInput {
             pane_id,
             bytes,
             submission,
-        });
+        })
     }
 
     /// Direct user-origin bytes, including voice/control terminal actions.
@@ -2701,16 +3692,16 @@ impl App {
         pane_id: NodeId,
         bytes: Vec<u8>,
         submission: Option<PromptSubmissionSource>,
-    ) {
+    ) -> Result<(), Box<ClientRequest>> {
         if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
             view.scroll_to_bottom();
         }
-        self.queue_request(ClientRequest::UserKeyInput {
+        self.try_queue_terminal_request(ClientRequest::UserKeyInput {
             pane_id,
             bytes,
             submission,
             prompt_epoch: None,
-        });
+        })
     }
 
     /// Queues one semantic text submission. The detached server inserts the
@@ -2720,15 +3711,15 @@ impl App {
         pane_id: NodeId,
         text: String,
         source: PromptSubmissionSource,
-    ) {
+    ) -> Result<(), Box<ClientRequest>> {
         if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
             view.scroll_to_bottom();
         }
-        self.queue_request(ClientRequest::SubmitTerminalText {
+        self.try_queue_terminal_request(ClientRequest::SubmitTerminalText {
             pane_id,
             text,
             source,
-        });
+        })
     }
 
     /// Reports one successful editor/board mutation to the server-owned
@@ -3084,14 +4075,12 @@ impl App {
             .collect()
     }
 
-    /// Whether the already-reserved toolbar slot displays controls: the user hasn't
-    /// turned the toolbar off globally, and the pane is either a detected
-    /// agent right now or was latched as one earlier (see
-    /// `agent_toolbar_latched_panes`'s doc comment). Checking live status
-    /// directly -- not only the latch -- means a pane's toolbar can never
-    /// stay dark just because whichever code path updated its `PaneStatus`
-    /// forgot to also populate the latch; latching still does its one real
-    /// job of keeping the row reserved after that agent exits.
+    /// Whether the already-reserved toolbar slot displays controls. Terminal
+    /// geometry reserves this row before agent detection; this check only
+    /// controls visibility. A detected agent or the retained latch keeps the
+    /// controls visible after an agent exits, unless the user disables the
+    /// toolbar. Checking live status also covers detection paths that have
+    /// not populated the latch yet.
     pub fn shows_agent_toolbar(&self, pane_id: NodeId) -> bool {
         self.ui_settings.agent_toolbar_enabled
             && (self.is_known_agent_pane(pane_id)
@@ -3178,8 +4167,223 @@ impl App {
             .find(|viewport| viewport.pane_id == pane_id)
     }
 
+    /// Reserve row/source metadata before widgets can consume one-time graphics
+    /// effects. Busy admission leaves input and the previous emitted frame usable.
+    pub(crate) fn admit_composition_metadata(&mut self) -> Result<bool, String> {
+        // The previous ACK's DTO and its replacement can coexist within the
+        // existing 70 MiB composition headroom. Refuse an impossible shape
+        // explicitly, before any widget consumes one-time graphics effects.
+        const MAX_METADATA_BYTES: usize = 32 * 1024 * 1024;
+        let bytes = usize::from(self.layout.tree_area.height) * (64 * 1024) + 4096;
+        if bytes > MAX_METADATA_BYTES {
+            return Err(format!("Terminal tree geometry requires {bytes} metadata bytes; maximum per frame is {MAX_METADATA_BYTES}"));
+        }
+        match crate::execution::process_quota().reserve_external_storage(bytes) {
+            Ok(hold) => {
+                self.composition_metadata = Some(std::sync::Arc::new(hold));
+                Ok(true)
+            }
+            Err(
+                ilium_execution::RejectReason::Busy | ilium_execution::RejectReason::WorkerBytes,
+            ) => Ok(false),
+            Err(reason) => Err(format!(
+                "Terminal composition metadata admission failed: {reason:?}"
+            )),
+        }
+    }
+
+    pub(crate) fn record_composed_tree_rows(&mut self, mut rows: crate::tree_ui::PaintedTreeRows) {
+        rows.retain_metadata(self.composition_metadata.clone());
+        self.composed_tree_rows = Some(std::sync::Arc::new(rows));
+    }
+
+    pub(crate) fn smart_copy_terminal_source(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<&crate::terminal_view::PaintedTerminal> {
+        let source = self.smart_copy_source.as_ref()?;
+        (self.smart_copy_session.as_ref().is_some_and(|session| session.pane_id == pane_id)
+            && matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &source.identity))).then_some(source)
+    }
+
+    pub(crate) fn selection_terminal_source(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<&crate::terminal_view::PaintedTerminal> {
+        let (id, source) = self.terminal_selection_source.as_ref()?;
+        (self.terminal_selection.is_some_and(|selection| selection.pane_id == pane_id)
+            && *id == pane_id
+            && matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &source.identity)))
+            .then_some(source)
+    }
+
+    pub(crate) fn emitted_terminal_source(
+        &self,
+        pane_id: NodeId,
+    ) -> Option<crate::terminal_view::PaintedTerminal> {
+        if let Some(geometry) = &self.emitted_geometry {
+            let (_, source) = geometry
+                .terminal_sources
+                .iter()
+                .find(|(id, _)| *id == pane_id)?;
+            return matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(view))
+                if std::sync::Arc::ptr_eq(&source.identity, &view.identity))
+            .then(|| source.clone());
+        }
+        #[cfg(test)]
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) {
+            return Some(view.painted_source());
+        }
+        None
+    }
+
+    pub(crate) fn emitted_status_tooltip(
+        &self,
+        node_id: NodeId,
+        slot: crate::status_icons::StatusSlot,
+    ) -> Option<&crate::status_icons::TooltipContent> {
+        self.emitted_geometry
+            .as_ref()?
+            .tree_rows
+            .as_ref()?
+            .status_tooltip(node_id, slot)
+    }
+    pub(crate) fn emitted_worktree_tooltip(
+        &self,
+        node_id: NodeId,
+    ) -> Option<&crate::status_icons::TooltipContent> {
+        self.emitted_geometry
+            .as_ref()?
+            .tree_rows
+            .as_ref()?
+            .worktree_tooltip(node_id)
+    }
+    pub(crate) fn emitted_cost_card_target(
+        &self,
+    ) -> Option<(u16, &crate::tree_ui::PaintedRowValues)> {
+        let (row, values) = self
+            .emitted_geometry
+            .as_ref()?
+            .tree_rows
+            .as_ref()?
+            .cost_card_target(self.hovered_tree_node)?;
+        self.tree.get(values.node_id).map(|_| (row, values))
+    }
+
+    pub(crate) fn emitted_tree_toolbar_at(&self, position: Position) -> Option<TreeToolbarAction> {
+        if let Some(geometry) = &self.emitted_geometry {
+            return geometry.tree_rows.as_ref()?.toolbar_at(position);
+        }
+        if cfg!(test) {
+            return tree_ui::toolbar_action_at(self.layout.tree_area, position);
+        }
+        None
+    }
+
+    pub(crate) fn emitted_tree_action_at(
+        &self,
+        position: Position,
+    ) -> Option<(TreeNodeHit, crate::tree_ui::TreeRowAction)> {
+        if let Some(geometry) = &self.emitted_geometry {
+            let (hit, action) = geometry.tree_rows.as_ref()?.action_at(position)?;
+            return self.tree.get(hit.id).map(|_| (hit, action));
+        }
+        #[cfg(test)]
+        if let Some(hit) = self.hovered_tree_node.filter(|hit| hit.line == 0) {
+            return tree_ui::row_action_at(
+                &self.tree,
+                hit.id,
+                self.layout.tree_area,
+                hit.row,
+                position,
+                self.ui_settings.show_tree_row_management_controls,
+            )
+            .map(|action| (hit, action));
+        }
+        None
+    }
+
+    pub(crate) fn capture_emitted_geometry(&self, revision: u64) -> EmittedGeometry {
+        EmittedGeometry {
+            revision,
+            terminal_sources: self.composed_terminal_sources.clone(),
+            editor_sources: self.composed_editor_sources.clone(),
+            tree_rows: self.composed_tree_rows.clone(),
+            _metadata: self.composition_metadata.clone(),
+            layout: self.layout,
+            mode: std::mem::discriminant(&self.mode),
+            viewports: self.pane_viewports(),
+            terminal_identities: self
+                .pane_viewports()
+                .into_iter()
+                .filter_map(|viewport| match self.panes.get(&viewport.pane_id) {
+                    Some(PaneRuntime::Terminal(view)) => {
+                        Some((viewport.pane_id, std::sync::Arc::clone(&view.identity)))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn commit_emitted_geometry(&mut self, geometry: EmittedGeometry) -> bool {
+        // The card reads acknowledged sources. Request one replacement paint
+        // when its source changes, including the first acknowledged tree.
+        // Buffer-only acknowledgements must not create a redraw feedback loop.
+        let previous = self.emitted_cost_card_target().map(|(row, values)| {
+            (
+                row,
+                values.node_id,
+                values.cost_title.as_str(),
+                values.cost_card.as_ref().map(std::sync::Arc::as_ptr),
+            )
+        });
+        let next = geometry
+            .tree_rows
+            .as_ref()
+            .and_then(|rows| rows.cost_card_target(self.hovered_tree_node))
+            .filter(|(_, values)| self.tree.get(values.node_id).is_some())
+            .map(|(row, values)| {
+                (
+                    row,
+                    values.node_id,
+                    values.cost_title.as_str(),
+                    values.cost_card.as_ref().map(std::sync::Arc::as_ptr),
+                )
+            });
+        let card_changed = previous != next;
+        self.emitted_geometry = Some(geometry);
+        card_changed
+    }
+
+    pub(crate) fn emitted_layout_revision(&self) -> Option<u64> {
+        self.emitted_geometry
+            .as_ref()
+            .map(|geometry| geometry.revision)
+    }
+
+    /// Reject before input admission when the interaction surface has changed
+    /// but its corresponding complete frame has not actually been emitted.
+    pub(crate) fn pointer_geometry_is_current(&self) -> bool {
+        self.emitted_geometry.as_ref().is_none_or(|geometry| {
+            geometry.layout == self.layout
+                && geometry.mode == std::mem::discriminant(&self.mode)
+                && geometry.viewports == self.pane_viewports()
+                && geometry
+                    .terminal_identities
+                    .iter()
+                    .all(|(pane_id, identity)| {
+                        matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(view))
+                        if std::sync::Arc::ptr_eq(identity, &view.identity))
+                    })
+        })
+    }
+
     pub fn pane_viewport_at(&self, position: Position) -> Option<PaneViewport> {
-        split_layout::viewport_at(&self.pane_viewports(), position)
+        match &self.emitted_geometry {
+            Some(geometry) => split_layout::viewport_at(&geometry.viewports, position),
+            None => split_layout::viewport_at(&self.pane_viewports(), position),
+        }
     }
 
     /// Returns the exact frozen-screen rectangle used by Smart Copy rendering
@@ -3259,7 +4463,7 @@ impl App {
                         .tree
                         .get(project_id)
                         .and_then(Node::project_path)
-                        .is_some_and(crate::chatroom::exists) =>
+                        .is_some_and(|_| self.chatroom_projects.contains(&project_id)) =>
             {
                 RightPanelTarget::Chatroom { project_id }
             }
@@ -3296,47 +4500,37 @@ impl App {
     /// Creates the file room and all provider-facing integration artifacts
     /// for one real project selected from its context menu.
     pub fn action_add_chatroom_to_project(&mut self, project_id: NodeId) {
-        let Some(project_root) = self
+        let Some(path) = self
             .tree
             .get(project_id)
             .filter(|node| node.is_project())
             .and_then(Node::project_path)
             .map(Path::to_path_buf)
         else {
-            self.status_message = Some("That entry is not a project".to_string());
+            self.status_message = Some("That entry is not a project".into());
             return;
         };
-        let instruction_file = project_root.join("CLAUDE.md");
-        match crate::chatroom::initialize(&project_root).and_then(|()| {
-            crate::agent_feature_setup::install(&instruction_file, AgentFeature::Chatroom)
-                .map_err(anyhow::Error::from)
-        }) {
-            Ok(()) => {
-                self.refresh_agent_setup_statuses();
-                self.chatroom_projects.insert(project_id);
-                self.bump_tree_version();
-                self.show_chatroom(project_id);
-                self.status_message =
-                    Some("Chatroom added; hooks and CLAUDE.md guidance are ready".to_string());
-            }
-            Err(error) => {
-                self.status_message = Some(format!("Could not add chatroom: {error}"));
-            }
-        }
+        let intent = crate::filesystem::integrations::IntegrationIntent::AddRoom(
+            crate::filesystem::integrations::RoomTarget {
+                id: project_id,
+                path,
+            },
+        );
+        let _ = self.enqueue_integration(intent);
     }
 
     /// Selects a virtual room row and makes its file-backed feed the active
     /// right-panel surface without pretending it is a server-owned pane.
     pub fn show_chatroom(&mut self, project_id: NodeId) {
-        let Some(project_root) = self
+        if self
             .tree
             .get(project_id)
             .and_then(Node::project_path)
-            .map(Path::to_path_buf)
-        else {
+            .is_none()
+        {
             return;
-        };
-        if !crate::chatroom::exists(&project_root) {
+        }
+        if !self.chatroom_projects.contains(&project_id) {
             self.status_message = Some("This project has no chatroom".to_string());
             return;
         }
@@ -3345,6 +4539,18 @@ impl App {
             crate::tree_ui::chatroom_node_id(project_id),
         ]);
         self.right_panel_target = RightPanelTarget::Chatroom { project_id };
+        if let Some(path) = self.tree.get(project_id).and_then(Node::project_path) {
+            let state = self.chatrooms.entry(project_id).or_default();
+            if state.draft.is_empty() {
+                if let Some(index) = self
+                    .failed_chatroom_appends
+                    .iter()
+                    .position(|(_, target, _)| target == path)
+                {
+                    state.draft = self.failed_chatroom_appends.remove(index).2;
+                }
+            }
+        }
         self.focus = FocusTarget::Pane;
         self.refresh_chatroom(project_id);
     }
@@ -3353,104 +4559,36 @@ impl App {
     /// maintenance pass. Broken manual edits surface as a status message but
     /// retain the last readable messages instead of blanking the conversation.
     pub fn refresh_chatroom(&mut self, project_id: NodeId) -> bool {
-        let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) else {
+        if self
+            .tree
+            .get(project_id)
+            .and_then(Node::project_path)
+            .is_none()
+        {
             return false;
-        };
-        match crate::chatroom::read_messages(project_root, 200) {
-            Ok(messages) => {
-                let Some(existing_state) = self.chatrooms.get(&project_id) else {
-                    self.chatrooms.insert(
-                        project_id,
-                        ChatroomViewState {
-                            messages,
-                            ..ChatroomViewState::default()
-                        },
-                    );
-                    return true;
-                };
-                if existing_state.messages == messages {
-                    return false;
-                }
-                // A positive tail distance means the user intentionally left
-                // the live tail. Grow that distance by the appended wrapped
-                // rows so the same historical top row remains on screen.
-                let previous_metrics = crate::chatroom_ui::scroll_metrics(
-                    self.layout.pane_area,
-                    &existing_state.messages,
-                    existing_state.scroll_from_newest,
-                );
-                let next_metrics =
-                    crate::chatroom_ui::scroll_metrics(self.layout.pane_area, &messages, 0);
-                let adjusted_scroll_from_newest = if existing_state.scroll_from_newest == 0 {
-                    0
-                } else if next_metrics.total_lines >= previous_metrics.total_lines {
-                    existing_state.scroll_from_newest.saturating_add(
-                        next_metrics
-                            .total_lines
-                            .saturating_sub(previous_metrics.total_lines),
-                    )
-                } else {
-                    existing_state.scroll_from_newest.saturating_sub(
-                        previous_metrics
-                            .total_lines
-                            .saturating_sub(next_metrics.total_lines),
-                    )
-                }
-                .min(next_metrics.maximum_top);
-                let Some(state) = self.chatrooms.get_mut(&project_id) else {
-                    return false;
-                };
-                state.messages = messages;
-                state.scroll_from_newest = adjusted_scroll_from_newest;
-                true
-            }
-            Err(error) => {
-                self.status_message = Some(format!("Could not read chatroom: {error}"));
-                false
-            }
         }
+        if let Err(error) = self.queue_integration_maintenance(false) {
+            self.status_message = Some(error);
+        }
+        false
     }
 
     /// Checks every visible project at boot and during normal UI ticks. An
     /// existing room repairs missing provider hooks/guidance before its agents
     /// do further work; projects without rooms remain completely untouched.
     pub fn reconcile_chatroom_projects(&mut self) -> bool {
-        let mut available = HashSet::new();
-        let mut has_changed = false;
-        let project_ids = self.tree.project_ids();
-        // Snapshot the live project set before consuming `project_ids` below so
-        // stale `self.chatrooms` entries (keyed by a project node the server
-        // tree no longer has, e.g. after project removal) can be dropped in the
-        // same pass instead of accumulating for the life of the client.
-        let live_project_ids: HashSet<NodeId> = project_ids.iter().copied().collect();
-        for project_id in project_ids {
-            let Some(project_root) = self.tree.get(project_id).and_then(Node::project_path) else {
-                continue;
-            };
-            match crate::chatroom::ensure_integrations(project_root) {
-                Ok(true) => {
-                    available.insert(project_id);
-                    if matches!(self.right_panel_target, RightPanelTarget::Chatroom { project_id: active } if active == project_id)
-                    {
-                        has_changed |= self.refresh_chatroom(project_id);
-                    }
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    self.status_message = Some(format!("Could not repair chatroom setup: {error}"));
-                }
-            }
+        let ids: HashSet<NodeId> = self.tree.project_ids().into_iter().collect();
+        let before = self.chatroom_projects.len();
+        self.chatroom_projects.retain(|id| ids.contains(id));
+        self.chatrooms.retain(|id, _| ids.contains(id));
+        if let Err(error) = self.queue_integration_maintenance(false) {
+            self.status_message = Some(error);
         }
-        let chatrooms_before = self.chatrooms.len();
-        self.chatrooms
-            .retain(|project_id, _| live_project_ids.contains(project_id));
-        has_changed |= self.chatrooms.len() != chatrooms_before;
-        if available == self.chatroom_projects {
-            return has_changed;
+        let changed = before != self.chatroom_projects.len();
+        if changed {
+            self.bump_tree_version();
         }
-        self.chatroom_projects = available;
-        self.bump_tree_version();
-        true
+        changed
     }
 
     /// Makes a structural project snapshot eligible for immediate chatroom
@@ -3506,6 +4644,19 @@ impl App {
             KeyCode::Home => self.scroll_chatroom_to_top(project_id),
             KeyCode::End => self.scroll_chatroom_to_bottom(project_id),
             KeyCode::Enter => {
+                if self.failed_chatroom_appends.len() >= 32 {
+                    self.status_message =
+                        Some("Chatroom recovery capacity reached; draft retained".into());
+                    return;
+                }
+                if self.chatrooms.get(&project_id).is_some_and(|state| {
+                    state.draft.len() > 16 * 1024 || state.draft.chars().count() > 4000
+                }) {
+                    self.status_message = Some(
+                        "Chatroom messages are limited to 4000 characters; draft retained".into(),
+                    );
+                    return;
+                }
                 let draft = self
                     .chatrooms
                     .get_mut(&project_id)
@@ -3531,18 +4682,17 @@ impl App {
                         Some("Could not send chatroom message: project is gone".to_string());
                     return;
                 };
-                match crate::chatroom::append_message(&project_root, "user", &draft) {
-                    Ok(()) => {
-                        self.refresh_chatroom(project_id);
-                        self.status_message = Some("Chatroom message sent".to_string());
-                    }
-                    Err(error) => {
-                        if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                            state.draft = draft;
-                        }
-                        self.status_message =
-                            Some(format!("Could not send chatroom message: {error}"));
-                    }
+                let room = crate::filesystem::integrations::RoomTarget {
+                    id: project_id,
+                    path: project_root,
+                };
+                let intent = crate::filesystem::integrations::IntegrationIntent::Append {
+                    room,
+                    draft: draft.clone(),
+                };
+                if let Err(error) = self.enqueue_integration(intent) {
+                    self.chatrooms.entry(project_id).or_default().draft = draft;
+                    self.status_message = Some(format!("Could not send chatroom message: {error}"));
                 }
             }
             KeyCode::Backspace => {
@@ -3874,13 +5024,15 @@ impl App {
             self.git_settings_error = Some(error.clone());
             return Err(error);
         }
-        if let Some(config_dir) = &self.config_dir {
-            crate::config::save_git_settings(config_dir, &settings).map_err(|error| {
-                let message = format!("Could not save Git settings: {error}");
-                self.status_message = Some(message.clone());
-                self.git_settings_error = Some(message.clone());
-                message
-            })?;
+        if let Some(directory) = self.config_dir.clone() {
+            self.enqueue_configuration(
+                directory,
+                crate::filesystem::configuration::ConfigurationChange::Git(settings.clone()),
+                crate::filesystem::configurations::ConfigurationIntent::Plain {
+                    label: "Git settings",
+                    success: None,
+                },
+            )?;
         }
         self.git_settings = settings;
         self.git_settings_error = None;
@@ -3965,11 +5117,10 @@ impl App {
     }
 
     fn persist_cost_settings(&mut self) {
-        if let Some(config_dir) = &self.config_dir {
-            if let Err(error) = crate::config::save_cost_settings(config_dir, &self.cost_settings) {
-                self.status_message = Some(format!("Could not save agent cost settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Cost(self.cost_settings.clone()),
+            "cost settings",
+        );
     }
 
     /// Starts typing an exact sparkline window (`Enter` on that row).
@@ -4017,14 +5168,12 @@ impl App {
             _ => return,
         }
         self.reset_planning_settings = settings;
-        if let Some(config_dir) = &self.config_dir {
-            if let Err(error) = crate::config::save_reset_planning_settings(
-                config_dir,
-                &self.reset_planning_settings,
-            ) {
-                self.status_message = Some(format!("Could not save reset planning: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::ResetPlanning(
+                self.reset_planning_settings.clone(),
+            ),
+            "reset planning settings",
+        );
     }
 
     /// Installs startup diagnostics policy. The process writer is owned by the
@@ -4055,13 +5204,15 @@ impl App {
             return;
         }
         self.api_settings.port = port;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) = crate::config::save_api_settings(&config_dir, &self.api_settings) {
-                self.status_message = Some(format!("Could not save API settings: {error}"));
-            } else {
-                self.status_message =
-                    Some("HTTP API port saved; restart the server to apply it".to_string());
-            }
+        if let Some(directory) = self.config_dir.clone() {
+            let _ = self.enqueue_configuration(
+                directory,
+                crate::filesystem::configuration::ConfigurationChange::Api(self.api_settings),
+                crate::filesystem::configurations::ConfigurationIntent::Plain {
+                    label: "API settings",
+                    success: Some("HTTP API port saved; restart the server to apply it"),
+                },
+            );
         }
     }
 
@@ -4080,6 +5231,10 @@ impl App {
         self.pending_agent_debug_menu_enabled = Some(self.ui_settings.agent_debug_menu_enabled);
     }
 
+    pub(crate) fn retain_agent_debug_menu_target(&mut self, enabled: bool) {
+        self.pending_agent_debug_menu_enabled = Some(enabled);
+    }
+
     pub fn take_pending_agent_debug_menu_enabled(&mut self) -> Option<bool> {
         self.pending_agent_debug_menu_enabled.take()
     }
@@ -4094,6 +5249,10 @@ impl App {
         self.pending_progress_monitor_enabled = Some(self.ui_settings.progress_monitor_enabled);
     }
 
+    pub(crate) fn retain_progress_monitor_target(&mut self, enabled: bool) {
+        self.pending_progress_monitor_enabled = Some(enabled);
+    }
+
     pub fn take_pending_progress_monitor_enabled(&mut self) -> Option<bool> {
         self.pending_progress_monitor_enabled.take()
     }
@@ -4102,33 +5261,43 @@ impl App {
     /// choice. The Debug tab explains that prompts/responses may contain
     /// private project and transcript context.
     pub fn settings_toggle_file_logging(&mut self) {
-        self.debug_settings.file_logging_enabled = !self.debug_settings.file_logging_enabled;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_debug_settings(&config_dir, &self.debug_settings)
-            {
-                self.status_message = Some(format!("Could not save debug settings: {error}"));
-                tracing::error!(%error, "failed to persist debug settings");
-            }
-        }
-        self.request_debug_logging_reconciliation();
+        let enabled = !self
+            .pending_debug_logging_enabled
+            .unwrap_or_else(|| self.debug_logging.desired_enabled());
+        let desired = DebugSettings {
+            file_logging_enabled: enabled,
+        };
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Debug(desired),
+            "Debug settings",
+        );
+        self.pending_debug_logging_enabled = Some(enabled);
+    }
+
+    pub(crate) fn retain_debug_logging_target(&mut self, enabled: bool) {
+        self.pending_debug_logging_enabled = Some(enabled);
     }
 
     /// Persists one live voice change and asks the async owner to reconcile
     /// the actor. Multiple changes in one input turn intentionally coalesce.
     pub fn apply_and_persist_voice_settings(&mut self, settings: VoiceSettings) {
+        self.apply_voice_runtime_settings(settings);
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Voice(
+                self.voice_settings.clone(),
+            ),
+            "voice settings",
+        );
+    }
+
+    /// Applies the existing actor reconciliation without issuing a second
+    /// write when a value dialog already owns its durable configuration receipt.
+    pub(crate) fn apply_voice_runtime_settings(&mut self, settings: VoiceSettings) {
         let was_enabled = self.voice_settings.enabled;
         let has_same_runtime_configuration = self
             .voice_settings
             .has_same_runtime_configuration(&settings);
         self.voice_settings = settings;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_voice_settings(&config_dir, &self.voice_settings)
-            {
-                self.status_message = Some(format!("Could not save voice settings: {error}"));
-            }
-        }
         self.pending_voice_runtime_request =
             Some(match (was_enabled, self.voice_settings.enabled) {
                 (false, true) => VoiceRuntimeRequest::Start,
@@ -4169,18 +5338,75 @@ impl App {
     pub fn take_voice_runtime_request(&mut self) -> Option<VoiceRuntimeRequest> {
         self.pending_voice_runtime_request.take()
     }
+    pub(crate) fn normal_voice_ownership_pending(&self, service_exists: bool) -> bool {
+        service_exists
+            || self.voice_preparation.is_pending()
+            || self.voice_shutdown_requested
+            || self.voice_shutdown_batch.is_some()
+            || self.voice_event_projection_pending
+            || self.normal_voice_commands.is_pending()
+            || self.pending_normal_voice_outputs.is_some()
+            || self
+                .voice_native_retirement
+                .as_ref()
+                .is_some_and(|owner| owner.is_pending())
+    }
+    pub(crate) fn pending_voice_runtime_request(&self) -> Option<VoiceRuntimeRequest> {
+        self.pending_voice_runtime_request
+    }
+    pub(crate) fn resume_voice_after_onboarding(&mut self) {
+        self.pending_voice_runtime_request = Some(if self.voice_settings.enabled {
+            VoiceRuntimeRequest::Start
+        } else {
+            VoiceRuntimeRequest::Stop
+        });
+    }
 
     /// Records a push-to-talk edge without performing async transport work in
     /// the keyboard layer. A vector preserves a press/release pair received in
     /// one input batch.
     pub fn request_voice_interaction(&mut self, request: VoiceInteractionRequest) {
+        if self.pending_voice_interaction_requests.len() >= 64 {
+            self.status_message = Some("Voice input busy: push-to-talk edge was not admitted; retry after the pending session settles".into());
+            return;
+        }
+        if self.pending_voice_interaction_allocation.is_none() {
+            match crate::execution::process_quota().reserve_external_storage(4096) {
+                Ok(allocation) => {
+                    self.pending_voice_interaction_allocation =
+                        Some(std::sync::Arc::new(allocation))
+                }
+                Err(reason) => {
+                    self.status_message =
+                        Some(format!("Voice push-to-talk admission busy: {reason:?}"));
+                    return;
+                }
+            }
+        }
+        if self.pending_voice_interaction_requests.capacity() < 64 {
+            if self
+                .pending_voice_interaction_requests
+                .try_reserve_exact(64 - self.pending_voice_interaction_requests.len())
+                .is_err()
+            {
+                self.status_message =
+                    Some("Voice push-to-talk allocation refused; edge not admitted".into());
+                return;
+            }
+        }
         self.pending_voice_interaction_requests.push(request);
     }
 
     pub fn take_voice_interaction_requests(&mut self) -> Vec<VoiceInteractionRequest> {
         std::mem::take(&mut self.pending_voice_interaction_requests)
     }
-
+    pub(crate) fn restore_voice_interaction_requests(
+        &mut self,
+        mut requests: Vec<VoiceInteractionRequest>,
+    ) {
+        requests.append(&mut self.pending_voice_interaction_requests);
+        self.pending_voice_interaction_requests = requests;
+    }
     /// Accepts a `ilium voice say` offer from the server. With `start_voice`,
     /// switches voice control on when it is off (persisting the setting, as
     /// F8 does) or asks a session that failed to restart, so the async owner
@@ -4209,7 +5435,13 @@ impl App {
             request_id,
             sentences,
             started_voice,
+            _retention: self.processing_event_retention.clone(),
         });
+    }
+
+    pub(crate) fn restore_voice_text_offers(&mut self, mut offers: Vec<VoiceTextOffer>) {
+        offers.append(&mut self.pending_voice_text_offers);
+        self.pending_voice_text_offers = offers;
     }
 
     pub fn take_voice_text_offers(&mut self) -> Vec<VoiceTextOffer> {
@@ -4218,6 +5450,13 @@ impl App {
 
     /// Mirrors what a recognised utterance leaves behind: the last user
     /// transcript, plus a short visible note so the typed turn is not silent.
+    pub(crate) fn retain_typed_voice_text(
+        &mut self,
+        retention: Option<crate::connection::EventRetention>,
+    ) {
+        self.voice_text_transcript_retention = retention;
+    }
+
     pub fn record_typed_voice_text(&mut self, sentences: &[String]) {
         let Some(last) = sentences.last() else {
             return;
@@ -4237,6 +5476,7 @@ impl App {
         // clear the previous utterance here rather than growing it forever.
         if matches!(state, ilium_voice::VoiceConnectionState::Thinking) {
             self.voice_last_assistant_transcript = None;
+            self.voice_presentation_storage.assistant = None;
         }
         self.voice_connection_state = state;
     }
@@ -4340,38 +5580,32 @@ impl App {
         self.apply_and_persist_voice_settings(settings);
     }
     fn persist_terminal_settings(&mut self) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_terminal_settings(&config_dir, &self.terminal_settings)
-            {
-                self.status_message = Some(format!("Could not save terminal settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Terminal(self.terminal_settings),
+            "terminal settings",
+        );
     }
     fn persist_editor_settings(&mut self) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_editor_settings(&config_dir, &self.editor_settings)
-            {
-                self.status_message = Some(format!("Could not save editor settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Editor(self.editor_settings),
+            "editor settings",
+        );
     }
     fn persist_session_settings(&mut self, previous: SessionSettings) -> bool {
-        let Some(config_dir) = self.config_dir.clone() else {
+        let Some(directory) = self.config_dir.clone() else {
             return true;
         };
-        match crate::config::save_session_settings(&config_dir, &previous, &self.session_settings) {
-            Ok(saved) => {
-                self.session_settings = saved;
-                true
-            }
-            Err(error) => {
-                self.session_settings = previous;
-                self.status_message = Some(format!("Could not save session settings: {error}"));
-                false
-            }
+        let desired = self.session_settings;
+        if let Err(error) = self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::Session { previous, desired },
+            crate::filesystem::configurations::ConfigurationIntent::Session { desired },
+        ) {
+            self.session_settings = previous;
+            self.status_message = Some(error);
+            return false;
         }
+        true
     }
 
     /// [`apply_ui_settings`] plus a best-effort write-through to
@@ -4393,11 +5627,12 @@ impl App {
         if progress_monitor_changed {
             self.request_progress_monitor_reconciliation();
         }
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) = crate::config::save_ui_settings(&config_dir, &self.ui_settings) {
-                self.status_message = Some(format!("Could not save settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Ui(Box::new(
+                self.ui_settings.clone(),
+            )),
+            "ui settings",
+        );
     }
 
     pub fn settings_set_agent_monitoring_mode(
@@ -4538,16 +5773,24 @@ impl App {
     /// Submits a complete detection-settings replacement. The displayed
     /// settings remain server-authoritative until the server accepts it.
     pub fn settings_update_agent_detection(&mut self, settings: ilium_ipc::AgentDetectionSettings) {
+        if self.detection_number_pending.is_some() {
+            return;
+        }
+        if !self.queue_request(ClientRequest::UpdateAgentDetectionSettings {
+            request_id: None,
+            settings,
+        }) {
+            return;
+        }
         self.agent_detection_settings_pending = true;
         self.agent_detection_settings_error = None;
-        self.queue_request(ClientRequest::UpdateAgentDetectionSettings { settings });
     }
 
     pub fn apply_agent_detection_settings_result(
         &mut self,
         result: Result<ilium_ipc::AgentDetectionSettings, ilium_ipc::AgentDetectionSettingsError>,
     ) {
-        self.agent_detection_settings_pending = false;
+        self.agent_detection_settings_pending = self.detection_number_pending.is_some();
         match result {
             Ok(settings) => {
                 self.agent_detection_settings = Some(settings);
@@ -4588,13 +5831,10 @@ impl App {
     /// disturbing other `config.toml` tables.
     pub fn apply_and_persist_keyboard_settings(&mut self, keyboard: KeyboardSettings) {
         self.keyboard_settings = keyboard;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_keyboard_settings(&config_dir, &self.keyboard_settings)
-            {
-                self.status_message = Some(format!("Could not save keyboard settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Keyboard(self.keyboard_settings),
+            "keyboard settings",
+        );
     }
 
     /// Replaces the complete binding map after a validated preset choice and
@@ -4627,15 +5867,13 @@ impl App {
     }
 
     fn persist_keymap(&mut self) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) = crate::config::save_keymap_settings(
-                &config_dir,
-                &self.keyboard_settings,
-                &self.keybindings,
-            ) {
-                self.status_message = Some(format!("Could not save keyboard settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Keymap(
+                self.keyboard_settings,
+                self.keybindings.clone(),
+            ),
+            "Keyboard settings",
+        );
     }
 
     /// Selects an explicit A-Z shortcut base, used by direct letter entry in
@@ -4699,14 +5937,12 @@ impl App {
     /// Writes the complete Kanban presentation table after either live
     /// control changes, preserving unrelated global configuration tables.
     fn persist_kanban_board_settings(&mut self) {
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_kanban_board_settings(&config_dir, &self.kanban_board_settings)
-            {
-                self.status_message =
-                    Some(format!("Could not save Kanban Board settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Kanban(
+                self.kanban_board_settings,
+            ),
+            "Kanban Board settings",
+        );
     }
 
     /// Adjusts the selected Kanban row without duplicating persistence logic
@@ -4782,7 +6018,7 @@ impl App {
     /// All global instruction files that currently shipped agent CLIs read.
     /// A configured Claude target remains authoritative for that provider;
     /// Codex always receives the same managed contract automatically.
-    fn automatic_global_agent_setup_files(&self, feature: AgentFeature) -> Vec<PathBuf> {
+    pub(crate) fn automatic_global_agent_setup_files(&self, feature: AgentFeature) -> Vec<PathBuf> {
         let mut files = self
             .agent_setup_global_file(feature)
             .into_iter()
@@ -4799,48 +6035,11 @@ impl App {
     /// without requiring a settings visit or an opt-in dialog. User-authored
     /// text is preserved by `agent_feature_setup`; only marker-owned blocks
     /// are inserted or upgraded.
-    fn ensure_automatic_agent_setup(&self) -> Vec<String> {
-        let mut failures = Vec::new();
-        for feature in AgentFeature::ALL {
-            for instruction_file in self.automatic_global_agent_setup_files(feature) {
-                if matches!(
-                    crate::agent_feature_setup::status(&instruction_file, feature),
-                    Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)
-                ) {
-                    continue;
-                }
-                if let Err(error) = self.install_agent_feature(feature, &instruction_file, None) {
-                    failures.push(format!(
-                        "{} in {}: {error}",
-                        feature.label(),
-                        instruction_file.display()
-                    ));
-                }
-            }
-            for project_root in self.agent_setup_project_roots() {
-                for filename in ["CLAUDE.md", "AGENTS.md"] {
-                    let instruction_file = project_root.join(filename);
-                    if matches!(
-                        crate::agent_feature_setup::status(&instruction_file, feature),
-                        Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)
-                    ) {
-                        continue;
-                    }
-                    if let Err(error) = self.install_agent_feature(
-                        feature,
-                        &instruction_file,
-                        Some(project_root.as_path()),
-                    ) {
-                        failures.push(format!(
-                            "{} in {}: {error}",
-                            feature.label(),
-                            instruction_file.display()
-                        ));
-                    }
-                }
-            }
-        }
-        failures
+    fn ensure_automatic_agent_setup(&mut self) -> Vec<String> {
+        self.queue_integration_maintenance(true)
+            .err()
+            .into_iter()
+            .collect()
     }
 
     /// Stable, de-duplicated project roots currently represented by this
@@ -4864,7 +6063,7 @@ impl App {
 
     fn is_agent_setup_project_current(&self, project_root: &Path) -> bool {
         let project_root = normalize_path_lexically(project_root);
-        project_root.is_dir() && self.agent_setup_project_roots().contains(&project_root)
+        self.agent_setup_project_roots().contains(&project_root)
     }
 
     /// Builds the complete selectable Setup document without filesystem I/O.
@@ -4917,21 +6116,9 @@ impl App {
     /// Refreshes every target once. The Settings renderer only consumes this
     /// cache, avoiding repeated disk reads on animation frames.
     pub fn refresh_agent_setup_statuses(&mut self) {
-        let targets: HashSet<(AgentFeature, PathBuf)> = self
-            .agent_setup_rows()
-            .into_iter()
-            .filter(|row| !matches!(row, AgentSetupRow::GlobalFile { .. }))
-            .map(|row| (row.feature(), row.instruction_file().to_path_buf()))
-            .collect();
-        self.agent_setup_statuses = targets
-            .into_iter()
-            .map(|(feature, path)| {
-                let status = crate::agent_feature_setup::status(&path, feature)
-                    .map(AgentSetupTargetStatus::Available)
-                    .unwrap_or_else(|error| AgentSetupTargetStatus::Unavailable(error.to_string()));
-                ((feature, path), status)
-            })
-            .collect();
+        if let Err(error) = self.queue_integration_maintenance(false) {
+            self.status_message = Some(error);
+        }
     }
 
     /// Opens the shared single-line editor for one feature's global file.
@@ -4980,12 +6167,6 @@ impl App {
                 return false;
             }
         };
-        self.refresh_agent_setup_statuses();
-        self.reconcile_agent_setup_prompts();
-        self.status_message = Some(
-            "Global target changed; any managed block in the previous file was left untouched"
-                .to_string(),
-        );
         true
     }
 
@@ -4998,145 +6179,68 @@ impl App {
     /// where a newly launched agent is uninformed. User-authored lookalikes
     /// are never deleted.
     pub fn settings_toggle_agent_setup_row(&mut self, row: &AgentSetupRow) {
-        let (feature, instruction_file, project_root) = match row {
+        let (feature, path, project) = match row {
             AgentSetupRow::GlobalTarget {
                 feature,
                 instruction_file,
-            } => (*feature, instruction_file.as_path(), None),
+            } => (*feature, instruction_file, None),
             AgentSetupRow::ProjectTarget {
                 feature,
                 instruction_file,
                 project_root,
-            } => (
-                *feature,
-                instruction_file.as_path(),
-                Some(project_root.as_path()),
-            ),
+            } => (*feature, instruction_file, Some(project_root.as_path())),
             AgentSetupRow::GlobalFile { .. } => return,
         };
-        if let Some(project_root) = project_root {
-            if !self.is_agent_setup_project_current(project_root) {
-                self.status_message = Some(format!(
-                    "Project is no longer open: {}",
-                    project_root.display()
-                ));
-                self.reconcile_agent_setup_prompts();
-                return;
-            }
+        if project.is_some_and(|root| !self.is_agent_setup_project_current(root)) {
+            self.status_message = Some("Project is no longer open".into());
+            return;
         }
-        // Re-read at action time instead of trusting the render cache: the
-        // user or another attached Ilium client may have edited this target
-        // since Settings was opened. The mutation itself takes a cross-process
-        // lock and reads again, so this fresh status only chooses enable versus
-        // disable; it is not the concurrency boundary.
-        let status = crate::agent_feature_setup::status(instruction_file, feature)
-            .map(AgentSetupTargetStatus::Available)
-            .unwrap_or_else(|error| AgentSetupTargetStatus::Unavailable(error.to_string()));
-        let result = match status {
-            AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed) => {
-                self.install_agent_feature(feature, instruction_file, project_root)
-            }
-            AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedFuture) => Ok(()),
-            AgentSetupTargetStatus::Available(
-                FeatureSetupStatus::NotInstalled
-                | FeatureSetupStatus::DetectedUnmanaged
-                | FeatureSetupStatus::ManagedStale,
-            ) => self.install_agent_feature(feature, instruction_file, project_root),
-            AgentSetupTargetStatus::Unavailable(error) => {
-                self.status_message = Some(format!(
-                    "Could not inspect {}: {error}",
-                    instruction_file.display()
-                ));
-                return;
-            }
-        };
-        match result {
-            Ok(()) => {
-                self.refresh_agent_setup_statuses();
-                let status = self.agent_setup_status(feature, instruction_file);
-                self.status_message = Some(format!(
-                    "{}: {} ({})",
-                    feature.label(),
-                    match status {
-                        AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed) => {
-                            "managed automatically"
-                        }
-                        AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedStale) => {
-                            "updated"
-                        }
-                        AgentSetupTargetStatus::Available(FeatureSetupStatus::ManagedFuture) => {
-                            "left newer managed instructions unchanged"
-                        }
-                        AgentSetupTargetStatus::Available(
-                            FeatureSetupStatus::DetectedUnmanaged,
-                        ) => "managed block removed; user instruction remains",
-                        AgentSetupTargetStatus::Available(FeatureSetupStatus::NotInstalled) => {
-                            "disabled"
-                        }
-                        AgentSetupTargetStatus::Unavailable(_) => "status unavailable",
-                    },
-                    instruction_file.display()
-                ));
-            }
-            Err(error) => {
-                self.status_message = Some(format!(
-                    "Could not update {} in {}: {error}",
-                    feature.label(),
-                    instruction_file.display()
-                ));
-            }
-        }
-    }
-
-    fn install_agent_feature(
-        &self,
-        feature: AgentFeature,
-        instruction_file: &Path,
-        project_root: Option<&Path>,
-    ) -> std::io::Result<()> {
-        if feature == AgentFeature::Chatroom {
-            if let Some(project_root) = project_root {
-                crate::chatroom::initialize(project_root).map_err(std::io::Error::other)?;
-            }
-        }
-        crate::agent_feature_setup::install(instruction_file, feature)
+        let target = self.integration_target(feature, path, project);
+        let _ = self.enqueue_integration(
+            crate::filesystem::integrations::IntegrationIntent::Install {
+                targets: vec![target],
+                prompt: None,
+            },
+        );
     }
 
     fn save_agent_setup_settings(
-        &self,
+        &mut self,
         settings: &AgentSetupSettings,
     ) -> Result<AgentSetupSettings, String> {
-        let Some(config_dir) = self.config_dir.as_ref() else {
-            return Err(
-                "Could not save agent setup settings: configuration directory is unavailable"
-                    .to_string(),
-            );
-        };
-        crate::config::update_agent_setup_settings(config_dir, &self.agent_setup_settings, settings)
-            .map_err(|error| format!("Could not save agent setup settings: {error}"))
+        let directory = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "The configuration directory is unavailable".to_owned())?;
+        self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::AgentSetup {
+                previous: self.agent_setup_settings.clone(),
+                desired: settings.clone(),
+            },
+            crate::filesystem::configurations::ConfigurationIntent::AgentSetup {
+                desired: settings.clone(),
+                dialog: match &self.mode {
+                    Mode::AgentSetupPathPrompt(feature, state) => {
+                        Some(crate::filesystem::configurations::AgentSetupDialog::Path {
+                            feature: *feature,
+                            value: state.buf.clone(),
+                        })
+                    }
+                    Mode::AgentSetupPrompt(state) => Some(
+                        crate::filesystem::configurations::AgentSetupDialog::Suppression(
+                            state.as_ref().clone(),
+                        ),
+                    ),
+                    _ => None,
+                },
+            },
+        )?;
+        Ok(settings.clone())
     }
 
     fn setup_feature_needs_install(&mut self, feature: AgentFeature, path: &Path) -> Option<bool> {
-        let status = match crate::agent_feature_setup::status(path, feature) {
-            Ok(status) => AgentSetupTargetStatus::Available(status),
-            Err(error) => {
-                self.status_message = Some(format!(
-                    "Could not inspect {} in {}: {error}",
-                    feature.label(),
-                    path.display()
-                ));
-                AgentSetupTargetStatus::Unavailable(error.to_string())
-            }
-        };
-        self.agent_setup_statuses
-            .insert((feature, path.to_path_buf()), status.clone());
-        match status {
-            AgentSetupTargetStatus::Unavailable(_) => None,
-            AgentSetupTargetStatus::Available(status) => Some(matches!(
-                status,
-                FeatureSetupStatus::NotInstalled | FeatureSetupStatus::ManagedStale
-            )),
-        }
+        self.cached_setup_needs_install(feature, path)
     }
 
     fn queue_agent_setup_prompt_global(&mut self) {
@@ -5203,25 +6307,23 @@ impl App {
     /// Called after authoritative project snapshots so newly opened projects
     /// receive the same one-time offer as the launch project.
     pub fn reconcile_agent_setup_prompts(&mut self) {
-        // Managed agent education is mandatory and provider-aware. Run this
-        // only after the attach snapshot establishes the authoritative set of
-        // project roots, then let the legacy prompt machinery observe that
-        // there is nothing left to opt into.
-        let automatic_failures =
+        let failures =
             if self.is_initial_state_sync_complete && self.is_agent_setup_policy_available {
                 self.ensure_automatic_agent_setup()
             } else {
                 Vec::new()
             };
         self.refresh_agent_setup_statuses();
+        if !failures.is_empty() {
+            self.status_message = Some(format!(
+                "Automatic agent setup remains pending: {}",
+                failures.join("; ")
+            ));
+        }
+    }
+    pub(crate) fn reconcile_cached_agent_setup_prompts(&mut self) {
         if !self.is_initial_state_sync_complete || !self.is_agent_setup_policy_available {
             return;
-        }
-        if !automatic_failures.is_empty() {
-            self.status_message = Some(format!(
-                "Automatic agent setup could not update: {}",
-                automatic_failures.join("; ")
-            ));
         }
         let global_chatroom = self.agent_setup_global_file(AgentFeature::Chatroom);
         let global_progress = self.agent_setup_global_file(AgentFeature::Progress);
@@ -5234,12 +6336,9 @@ impl App {
                 global_chatroom.as_ref() == Some(chatroom_file)
                     && global_progress.as_ref() == Some(progress_file)
             }
-            crate::setup_prompt::SetupPromptScope::Project(project_root) => {
-                project_root.is_dir()
-                    && project_roots
-                        .iter()
-                        .any(|candidate| candidate == project_root)
-            }
+            crate::setup_prompt::SetupPromptScope::Project(project_root) => project_roots
+                .iter()
+                .any(|candidate| candidate == project_root),
         };
         self.pending_agent_setup_prompts
             .retain(|scope| scope_is_current(scope));
@@ -5301,63 +6400,40 @@ impl App {
         chatroom: bool,
         progress: bool,
     ) -> bool {
-        let (chatroom_file, progress_file, project_root) = match scope {
+        let (chatroom_path, progress_path, project) = match scope {
             crate::setup_prompt::SetupPromptScope::Global {
                 chatroom_file,
                 progress_file,
             } => (chatroom_file.clone(), progress_file.clone(), None),
-            crate::setup_prompt::SetupPromptScope::Project(project_root) => {
-                let file = project_root.join("CLAUDE.md");
-                (file.clone(), file, Some(project_root.as_path()))
-            }
+            crate::setup_prompt::SetupPromptScope::Project(root) => (
+                root.join("CLAUDE.md"),
+                root.join("CLAUDE.md"),
+                Some(root.as_path()),
+            ),
         };
-        if let Some(project_root) = project_root {
-            if !self.is_agent_setup_project_current(project_root) {
-                self.status_message = Some(format!(
-                    "Setup target is no longer an open project: {}",
-                    project_root.display()
-                ));
-                return false;
-            }
+        if project.is_some_and(|root| !self.is_agent_setup_project_current(root)) {
+            self.status_message = Some("Setup target is no longer an open project".into());
+            return false;
         }
-        let mut applied = Vec::new();
-        let mut failures = Vec::new();
-        for (selected, feature, path) in [
-            (chatroom, AgentFeature::Chatroom, chatroom_file),
-            (progress, AgentFeature::Progress, progress_file),
-        ] {
-            if !selected {
-                continue;
-            }
-            match self.install_agent_feature(feature, &path, project_root) {
-                Ok(()) => applied.push(feature.label()),
-                Err(error) => failures.push(format!(
-                    "{} in {}: {error}",
-                    feature.label(),
-                    path.display()
-                )),
-            }
+        let mut targets = Vec::new();
+        if chatroom {
+            targets.push(self.integration_target(AgentFeature::Chatroom, &chatroom_path, project));
         }
-        self.refresh_agent_setup_statuses();
-        if failures.is_empty() {
-            self.status_message = Some(if applied.is_empty() {
-                "No agent setup changes selected".to_string()
-            } else {
-                format!("Agent setup updated: {}", applied.join(", "))
-            });
-            true
-        } else {
-            let success = if applied.is_empty() {
-                String::new()
-            } else {
-                format!("Updated {}. ", applied.join(", "))
-            };
-            self.status_message = Some(format!(
-                "{success}Setup failed; this offer remains open: {}",
-                failures.join("; ")
-            ));
-            false
+        if progress {
+            targets.push(self.integration_target(AgentFeature::Progress, &progress_path, project));
         }
+        if targets.is_empty() {
+            self.status_message = Some("No agent setup changes selected".into());
+            return true;
+        }
+        let prompt = match &self.mode {
+            Mode::AgentSetupPrompt(state) => Some((**state).clone()),
+            _ => None,
+        };
+        let _ = self.enqueue_integration(
+            crate::filesystem::integrations::IntegrationIntent::Install { targets, prompt },
+        );
+        false
     }
 
     pub fn suppress_agent_setup_prompt(
@@ -5396,17 +6472,18 @@ impl App {
         &mut self,
         settings: TextTriggerSettings,
     ) -> Result<(), String> {
-        let result = match self.config_dir.as_deref() {
-            Some(directory) => crate::config::save_text_trigger_settings(
-                directory,
-                &self.text_trigger_settings,
-                &settings,
-            )
-            .map(|()| settings)
-            .map_err(|error| error.to_string()),
-            None => Err("No durable configuration directory is available".to_owned()),
-        };
-        self.finish_text_trigger_save(result)
+        let directory = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "No durable configuration directory is available".to_owned())?;
+        self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::TextTriggers {
+                previous: self.text_trigger_settings.clone(),
+                desired: settings,
+            },
+            crate::filesystem::configurations::ConfigurationIntent::TextTriggers { dialog: None },
+        )
     }
 
     pub fn open_text_trigger_dialog(&mut self, index: Option<usize>) {
@@ -5432,63 +6509,66 @@ impl App {
         mut trigger: ilium_ipc::TextTrigger,
     ) -> Result<(), String> {
         if editing_id != editing_base.map(|rule| rule.id.as_str()) {
-            return self.finish_text_trigger_save(Err(
-                "Text Trigger edit identity does not match its original rule".to_owned(),
-            ));
+            return Err("Text Trigger edit identity does not match its original rule".into());
+        }
+        if let Some(editing_id) = editing_id {
+            if !self
+                .text_trigger_settings
+                .triggers
+                .iter()
+                .any(|rule| rule.id == editing_id)
+            {
+                return Err(
+                    "This Text Trigger was deleted; cancel and reopen to review the list".into(),
+                );
+            }
         }
         if let Some(editing_id) = editing_id {
             trigger.id = editing_id.to_owned();
         }
-        let result = match self.config_dir.as_deref() {
-            Some(directory) => {
-                crate::config::save_text_trigger_edit(directory, editing_base, Some(&trigger))
-                    .map_err(|error| error.to_string())
-            }
-            None => Err("No durable configuration directory is available".to_owned()),
-        };
-        self.finish_text_trigger_save(result)
-    }
-
-    fn finish_text_trigger_save(
-        &mut self,
-        result: Result<TextTriggerSettings, String>,
-    ) -> Result<(), String> {
-        let settings = match result {
-            Ok(settings) => settings,
-            Err(error) => {
-                self.status_message = Some(format!("Could not save Text Triggers: {error}"));
-                return Err(error);
-            }
-        };
-        self.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers { settings });
-        self.status_message = Some("Text Triggers saved to disk".to_owned());
-        Ok(())
+        let directory = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "No durable configuration directory is available".to_owned())?;
+        self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::TextTriggerEdit {
+                previous: editing_base.cloned(),
+                desired: Some(trigger.clone()),
+            },
+            crate::filesystem::configurations::ConfigurationIntent::TextTriggers {
+                dialog: Some(trigger),
+            },
+        )
     }
 
     pub fn delete_text_trigger(&mut self, index: usize) {
         let Some(expected) = self.text_trigger_settings.triggers.get(index).cloned() else {
-            self.status_message = Some("The selected Text Trigger is no longer present".to_owned());
+            self.status_message = Some("The selected Text Trigger is no longer present".into());
             return;
         };
-        let result = match self.config_dir.as_deref() {
-            Some(directory) => {
-                crate::config::save_text_trigger_edit(directory, Some(&expected), None)
-                    .map_err(|error| error.to_string())
-            }
-            None => Err("No durable configuration directory is available".to_owned()),
+        let Some(directory) = self.config_dir.clone() else {
+            self.status_message = Some("No durable configuration directory is available".into());
+            return;
         };
-        let _ = self.finish_text_trigger_save(result);
+        let _ = self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::TextTriggerEdit {
+                previous: Some(expected),
+                desired: None,
+            },
+            crate::filesystem::configurations::ConfigurationIntent::TextTriggers { dialog: None },
+        );
     }
 
     pub fn apply_and_persist_trigger_settings(&mut self, triggers: TriggerSettings) {
         self.apply_trigger_settings(triggers);
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_trigger_settings(&config_dir, &self.trigger_settings)
-            {
-                self.status_message = Some(format!("Could not save trigger settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Triggers(
+                self.trigger_settings.clone(),
+            ),
+            "trigger settings",
+        );
     }
 
     /// Applies one chip selection immediately and persists the complete typed
@@ -5504,6 +6584,11 @@ impl App {
     }
 
     pub fn apply_and_persist_inference_settings(&mut self, inference: InferenceSettings) {
+        self.apply_inference_settings_locally(inference);
+        self.persist_inference_configuration();
+    }
+
+    pub(crate) fn apply_inference_settings_locally(&mut self, inference: InferenceSettings) {
         if self.inference_settings.restructure_prompt_token_limit
             != inference.restructure_prompt_token_limit
         {
@@ -5523,6 +6608,7 @@ impl App {
         if self.inference_settings.ollama.base_url != inference.ollama.base_url {
             // Catalogs belong to one daemon; a URL edit must not reuse its models.
             self.ollama_models.clear();
+            self.model_catalog_holds[1] = None;
             if !self.model_discovery.is_loading() {
                 self.model_discovery = ModelDiscoveryState::Idle;
             }
@@ -5541,18 +6627,12 @@ impl App {
         }
         if openai_catalog_changed {
             self.openai_models.clear();
+            self.model_catalog_holds[2] = None;
             if !self.model_discovery.is_loading() {
                 self.model_discovery = ModelDiscoveryState::Idle;
             }
         }
         self.inference_settings = inference;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_inference_settings(&config_dir, &self.inference_settings)
-            {
-                self.status_message = Some(format!("Could not save inference settings: {error}"));
-            }
-        }
     }
 
     pub fn settings_select_inference_provider(
@@ -5585,6 +6665,12 @@ impl App {
     }
 
     pub fn settings_open_inference_field(&mut self, field: InferenceSettingField) {
+        self.restructure_budget_autosave_deadline = None;
+        if field == InferenceSettingField::RestructurePromptTokenLimit {
+            self.invalidate_restructure_budget_save();
+        } else {
+            self.restructure_budget_identity = None;
+        }
         let value = match field {
             InferenceSettingField::RestructurePromptTokenLimit => self
                 .inference_settings
@@ -5615,6 +6701,116 @@ impl App {
             field,
             TextPromptState::new(value),
         ));
+    }
+
+    fn invalidate_restructure_budget_save(&mut self) {
+        self.restructure_budget_identity = Some(std::sync::Arc::new(()));
+        self.inference_save_state = Default::default();
+        self.inference_settings_save_error = None;
+        self.status_message = None;
+    }
+
+    /// Every actual text edit fences earlier receipts, including edit-away/back.
+    /// Valid drafts debounce; cursor movement never calls this method.
+    pub(crate) fn queue_restructure_budget_autosave(&mut self, value: &str, now: Instant) {
+        self.invalidate_restructure_budget_save();
+        self.restructure_budget_autosave_deadline = value
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .map(|_| now + Duration::from_millis(600));
+    }
+
+    pub(crate) fn tick_restructure_budget_autosave(&mut self, now: Instant) -> bool {
+        let Some(deadline) = self.restructure_budget_autosave_deadline else {
+            return false;
+        };
+        if now < deadline {
+            return false;
+        }
+        self.restructure_budget_autosave_deadline = None;
+        let Mode::InferenceSettingPrompt(InferenceSettingField::RestructurePromptTokenLimit, state) =
+            &self.mode
+        else {
+            return false;
+        };
+        let value = state.buf.clone();
+        self.settings_commit_inference_field(
+            InferenceSettingField::RestructurePromptTokenLimit,
+            value,
+        );
+        true
+    }
+
+    pub(crate) fn restructure_budget_input_hint(&self, value: &str) -> (String, bool) {
+        use crate::filesystem::configurations::InferenceSaveState;
+        if !value.trim().parse::<u32>().is_ok_and(|limit| limit > 0) {
+            return (
+                "Enter a positive whole number up to 4294967295".into(),
+                true,
+            );
+        }
+        if self.restructure_budget_autosave_deadline.is_some() {
+            return ("Saving after 600 ms...".into(), false);
+        }
+        if let Some(error) = &self.inference_settings_save_error {
+            return (error.clone(), true);
+        }
+        let hint = match &self.inference_save_state {
+            InferenceSaveState::Pending { .. } => {
+                "Saving; Esc closes this dialog while the save continues"
+            }
+            InferenceSaveState::Durable
+                if value.trim().parse::<u32>()
+                    == Ok(self.inference_settings.restructure_prompt_token_limit) =>
+            {
+                "Saved; Enter confirms and closes after saving, Esc closes"
+            }
+            _ => {
+                "Save not confirmed; Enter saves and closes after confirmation, Esc cancels unsent edits"
+            }
+        };
+        (hint.into(), false)
+    }
+
+    pub(crate) fn commit_restructure_budget(&mut self) {
+        use crate::filesystem::configurations::InferenceSaveState;
+        use std::sync::Arc;
+        let Mode::InferenceSettingPrompt(InferenceSettingField::RestructurePromptTokenLimit, state) =
+            &self.mode
+        else {
+            return;
+        };
+        let Some(limit) = state
+            .buf
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|limit| *limit > 0)
+        else {
+            return;
+        };
+        let identity = Arc::clone(
+            self.restructure_budget_identity
+                .get_or_insert_with(|| Arc::new(())),
+        );
+        if matches!(
+            &self.inference_save_state,
+            InferenceSaveState::Pending {
+                budget_dialog: Some((current, pending_limit)),
+                ..
+            } if Arc::ptr_eq(current, &identity) && *pending_limit == limit
+        ) {
+            return;
+        }
+        self.settings_commit_inference_field(
+            InferenceSettingField::RestructurePromptTokenLimit,
+            limit.to_string(),
+        );
+        if let InferenceSaveState::Pending { budget_dialog, .. } = &mut self.inference_save_state {
+            *budget_dialog = Some((identity, limit));
+        }
     }
 
     pub fn settings_commit_inference_field(&mut self, field: InferenceSettingField, value: String) {
@@ -5660,6 +6856,7 @@ impl App {
             provider: self.inference_settings.selected_provider,
             started_at: Instant::now(),
         };
+        self.inference_test_hold = None;
         self.status_message = Some("Testing inference provider…".to_string());
     }
 
@@ -5761,6 +6958,134 @@ impl App {
         elapsed: Duration,
         result: Result<Vec<String>, String>,
     ) {
+        let source = self.incoming_model_result_hold.take();
+        let models = match result {
+            Ok(models) => models,
+            Err(error) => {
+                self.model_catalog_preparation.invalidate();
+                if let Some(source) = source {
+                    self.model_discovery_hold = Some(source);
+                }
+                self.install_model_catalog(provider, endpoint, elapsed, Err(error), false, None);
+                return;
+            }
+        };
+        let selected = if provider == ilium_inference::InferenceProviderKind::Ollama {
+            self.inference_settings.ollama.model.as_str()
+        } else {
+            ""
+        };
+        let request = match crate::model_catalog_preparation::CatalogRequest::new(
+            provider,
+            endpoint,
+            elapsed,
+            models,
+            self.openai_discovery_revision,
+            selected,
+            source,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                self.model_catalog_preparation.invalidate();
+                self.model_discovery = ModelDiscoveryState::Failed {
+                    provider,
+                    endpoint: String::new(),
+                    error: error.clone(),
+                    elapsed,
+                };
+                self.status_message = Some(error);
+                return;
+            }
+        };
+        self.model_discovery_hold = Some(std::sync::Arc::clone(&request.source));
+        self.model_discovery = ModelDiscoveryState::Loading {
+            provider,
+            endpoint: request.endpoint.clone(),
+            started_at: Instant::now(),
+        };
+        if let Err(error) = self.model_catalog_preparation.request(request) {
+            self.model_discovery = ModelDiscoveryState::Failed {
+                provider,
+                endpoint: String::new(),
+                error: error.clone(),
+                elapsed,
+            };
+            self.status_message = Some(error);
+        } else {
+            self.status_message = Some(format!("Preparing {} model catalog…", provider.label()));
+        }
+    }
+
+    pub(crate) fn collect_model_catalog_preparation(&mut self) -> bool {
+        let Some(prepared) = self.model_catalog_preparation.collect() else {
+            if self.model_catalog_preparation.pending() {
+                if let Some(reason) = self.model_catalog_preparation.diagnostic() {
+                    let message = format!("Model catalog preparation waiting: {reason}");
+                    if self.status_message.as_deref() != Some(message.as_str()) {
+                        self.status_message = Some(message);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        let request = prepared.request;
+        let slot = match request.provider {
+            ilium_inference::InferenceProviderKind::KiloGateway => Some(0),
+            ilium_inference::InferenceProviderKind::Ollama => Some(1),
+            ilium_inference::InferenceProviderKind::OpenAi => Some(2),
+            _ => None,
+        };
+        let old_revision = request.openai_revision;
+        let result = prepared.result.map(|_| request.models);
+        if request.provider == ilium_inference::InferenceProviderKind::OpenAi
+            && old_revision != self.openai_discovery_revision
+        {
+            // A newer discovery owns the pending revision. Discard the older
+            // CPU result without taking that revision or changing its spinner.
+            return false;
+        }
+        self.install_model_catalog(
+            request.provider,
+            request.endpoint,
+            request.elapsed,
+            result,
+            prepared.select_first,
+            Some(&request.selected_model),
+        );
+        if matches!(&self.model_discovery,ModelDiscoveryState::Loaded {provider,..} if *provider == request.provider)
+        {
+            if let Some(slot) = slot {
+                self.model_catalog_holds[slot] = Some(std::sync::Arc::clone(&request.source));
+            }
+        }
+        self.model_discovery_hold = Some(request.source);
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn settle_model_catalog_for_test(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.model_catalog_preparation.pending() {
+            assert!(
+                Instant::now() < deadline,
+                "model CPU preparation timed out: {:?}",
+                self.model_catalog_preparation.diagnostic()
+            );
+            self.collect_model_catalog_preparation();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn install_model_catalog(
+        &mut self,
+        provider: ilium_inference::InferenceProviderKind,
+        endpoint: String,
+        elapsed: Duration,
+        result: Result<Vec<String>, String>,
+        select_first: bool,
+        selected_model: Option<&str>,
+    ) {
         if provider == ilium_inference::InferenceProviderKind::OpenAi
             && (self.openai_discovery_revision.take() != Some(self.openai_catalog_revision)
                 || self.inference_settings.selected_provider != provider
@@ -5800,16 +7125,14 @@ impl App {
             Ok(models) => {
                 let model_count = match provider {
                     ilium_inference::InferenceProviderKind::KiloGateway => {
-                        let mut merged = ilium_inference::kilo_gateway_fallback_models();
-                        merged.extend(models);
-                        let mut seen = HashSet::new();
-                        merged.retain(|model| seen.insert(model.clone()));
-                        self.kilo_gateway_models = merged;
+                        self.kilo_gateway_models = models;
                         self.kilo_gateway_models.len()
                     }
                     ilium_inference::InferenceProviderKind::Ollama => {
-                        let should_select_first = self.inference_settings.ollama.model.is_empty()
-                            || !models.contains(&self.inference_settings.ollama.model);
+                        // A newer authored model wins over an older CPU selection proposal.
+                        let should_select_first = select_first
+                            && selected_model
+                                == Some(self.inference_settings.ollama.model.as_str());
                         self.ollama_models = models;
                         if should_select_first {
                             if let Some(model) = self.ollama_models.first() {
@@ -5852,7 +7175,6 @@ impl App {
             }
         }
     }
-
     pub fn take_pending_model_refresh(&mut self) -> Option<ilium_inference::InferenceProviderKind> {
         self.pending_model_refresh.take()
     }
@@ -5925,13 +7247,12 @@ impl App {
     /// through their owned watchers.
     pub(crate) fn apply_and_persist_sound_settings(&mut self, sound: ilium_sound::SoundSettings) {
         self.sound_settings = sound;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_sound_settings(&config_dir, &self.sound_settings)
-            {
-                self.status_message = Some(format!("Could not save sound settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Sound(
+                self.sound_settings.clone(),
+            ),
+            "sound settings",
+        );
         self.queue_request(ClientRequest::UpdateSoundSettings {
             settings: self.sound_settings.clone(),
         });
@@ -6071,14 +7392,12 @@ impl App {
         notifications: ilium_sound::NotificationSettings,
     ) {
         self.notification_settings = notifications;
-        if let Some(config_dir) = self.config_dir.clone() {
-            if let Err(error) =
-                crate::config::save_notification_settings(&config_dir, &self.notification_settings)
-            {
-                self.status_message =
-                    Some(format!("Could not save notification settings: {error}"));
-            }
-        }
+        self.persist_configuration(
+            crate::filesystem::configuration::ConfigurationChange::Notifications(
+                self.notification_settings,
+            ),
+            "Notifications settings",
+        );
     }
 
     /// Opens the full-screen settings view. See `Mode::Settings`'s and
@@ -6101,53 +7420,239 @@ impl App {
     /// snapshots and never borrows `App`, leaving the event loop free to
     /// render each key immediately.
     pub fn tick_workspace_search(&mut self, now: Instant, workers: &mut SearchWorkers) -> bool {
+        workers.reconcile(match &self.mode {
+            Mode::Search(state) => Some((&state.identity, state.revision())),
+            _ => None,
+        });
         if !workers.is_idle() {
             return false;
         }
-
-        // Inspect search state in place so a background maintenance tick can
-        // never replace Settings or another active interaction with Normal.
         let due_search = match &mut self.mode {
-            Mode::Search(state) => state.take_due_search(now),
+            Mode::Search(state) => state
+                .take_due_search(now)
+                .map(|(revision, query)| (revision, query, std::sync::Arc::clone(&state.identity))),
             _ => return false,
         };
-        let Some((revision, query)) = due_search else {
+        let Some((revision, query, identity)) = due_search else {
             return false;
         };
-        let request = WorkspaceSearchRequest {
-            revision,
-            query,
-            sources: self.workspace_search_sources(),
-        };
-        let started = match workers.start(request) {
-            Ok(()) => true,
-            Err(error) => {
-                // This function cannot change modes between taking the due
-                // query and starting its worker, so Search still owns the
-                // revision that needs to be released after a spawn failure.
-                if let Mode::Search(state) = &mut self.mode {
-                    state.cancel_in_flight_search(revision);
-                }
-                self.status_message = Some(format!("Could not start workspace search: {error}"));
-                false
+        let started = (|| {
+            let cost = self.workspace_search_cost(query.len());
+            let reservation = workers.reserve(cost)?;
+            let sources = self.workspace_search_sources()?;
+            workers.start(
+                reservation,
+                WorkspaceSearchRequest {
+                    fences: self.workspace_search_fences(),
+                    identity,
+                    revision,
+                    query,
+                    sources,
+                },
+            )
+        })();
+        if let Err(error) = started {
+            if let Mode::Search(state) = &mut self.mode {
+                state.cancel_in_flight_search(revision);
             }
-        };
-        started
+            self.status_message = Some(format!("Could not admit workspace search: {error}"));
+            return false;
+        }
+        true
     }
 
-    /// Receives one owned worker result. A revision mismatch is expected when
-    /// the user continued typing while a previous scan was still running.
+    /// Search scans are independent of terminal width; their raw history-byte
+    /// navigation targets and snippets are composed using the current layout.
+    fn workspace_search_cost(&self, query_bytes: usize) -> ilium_execution::JobCost {
+        let mut captured_bytes = 4096_usize;
+        let mut peak_history = 0_usize;
+        let mut largest_metadata = 0_usize;
+        for (pane_id, runtime) in &self.panes {
+            let Some(node) = self.tree.get(*pane_id) else {
+                continue;
+            };
+            let metadata = node.name.len().saturating_mul(4).saturating_add(4096);
+            largest_metadata = largest_metadata.max(metadata);
+            captured_bytes = captured_bytes.saturating_add(metadata);
+            match runtime {
+                PaneRuntime::Terminal(view) => {
+                    peak_history = peak_history.max(view.search_history_len())
+                }
+                PaneRuntime::Editor(editor) => {
+                    let path_bytes = editor
+                        .path
+                        .as_ref()
+                        .or_else(|| self.restored_editor_paths.get(pane_id))
+                        .map_or(0, |path| path.as_os_str().len());
+                    largest_metadata = largest_metadata.max(metadata.saturating_add(path_bytes));
+                    captured_bytes = captured_bytes.saturating_add(path_bytes);
+                    for line in editor.textarea.lines() {
+                        captured_bytes = captured_bytes
+                            .saturating_add(line.len().saturating_add(64).saturating_mul(4));
+                    }
+                }
+                PaneRuntime::Board(board) => {
+                    if let NodeKind::Pane {
+                        board_storage: Some(storage),
+                        ..
+                    } = &node.kind
+                    {
+                        let path_bytes = storage.path().as_os_str().len();
+                        largest_metadata =
+                            largest_metadata.max(metadata.saturating_add(path_bytes));
+                        captured_bytes = captured_bytes.saturating_add(path_bytes);
+                    }
+                    for column in &board.columns {
+                        for card in &column.cards {
+                            let bytes = column
+                                .title
+                                .len()
+                                .saturating_add(card.title.len())
+                                .saturating_add(card.body.len())
+                                .saturating_add(66);
+                            captured_bytes = captured_bytes.saturating_add(bytes.saturating_mul(4));
+                        }
+                    }
+                }
+            }
+        }
+        // Strip capacity <= raw bytes: invalid bytes are dropped, never expanded.
+        // Raw copy + stripped UTF-8 + u32 offset map + folded copy + headroom.
+        ilium_execution::JobCost {
+            input_bytes: captured_bytes
+                .saturating_add(peak_history.saturating_mul(8))
+                .saturating_add(query_bytes.saturating_mul(2)),
+            result_bytes: 800_usize
+                .saturating_mul(
+                    largest_metadata
+                        .saturating_mul(2)
+                        .saturating_add(query_bytes.saturating_mul(4))
+                        .saturating_add(2048),
+                )
+                .saturating_add(
+                    self.panes
+                        .len()
+                        .saturating_mul(2)
+                        .saturating_mul(std::mem::size_of::<crate::search_workers::SourceFence>()),
+                )
+                .saturating_add(4096),
+        }
+    }
+
+    fn workspace_search_fences(&self) -> Vec<crate::search_workers::SourceFence> {
+        self.panes
+            .iter()
+            .map(|(pane, runtime)| match runtime {
+                PaneRuntime::Terminal(view) => crate::search_workers::SourceFence::Terminal {
+                    pane: *pane,
+                    instance: std::sync::Arc::clone(&view.identity),
+                    origin: view.search_history_origin(),
+                },
+                PaneRuntime::Editor(editor) => crate::search_workers::SourceFence::Editor {
+                    pane: *pane,
+                    instance: editor.instance_identity(),
+                    revision: editor.content_revision(),
+                },
+                PaneRuntime::Board(board) => crate::search_workers::SourceFence::Board {
+                    pane: *pane,
+                    instance: board.instance_identity(),
+                    revision: board.intent_revision(),
+                },
+            })
+            .collect()
+    }
+
+    fn workspace_search_fences_match(&self, fences: &[crate::search_workers::SourceFence]) -> bool {
+        use crate::search_workers::SourceFence;
+        fences.iter().all(|fence| match fence {
+            SourceFence::Terminal { pane, instance, origin } => matches!(self.panes.get(pane), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(instance, &view.identity) && std::sync::Arc::ptr_eq(origin, &view.search_history_origin())),
+            SourceFence::Editor { pane, instance, revision } => matches!(self.panes.get(pane), Some(PaneRuntime::Editor(editor)) if std::sync::Arc::ptr_eq(instance, &editor.instance_identity()) && *revision == editor.content_revision()),
+            SourceFence::Board { pane, instance, revision } => matches!(self.panes.get(pane), Some(PaneRuntime::Board(board)) if std::sync::Arc::ptr_eq(instance, &board.instance_identity()) && *revision == board.intent_revision()),
+        })
+    }
+
     pub fn apply_workspace_search_result(&mut self, event: SearchWorkerEvent) -> bool {
-        // A late result may arrive after the user left Search. Ignore it in
-        // place instead of disturbing whichever interaction now owns `mode`.
+        let sources_current = self.workspace_search_fences_match(&event.fences);
         let Mode::Search(state) = &mut self.mode else {
             return false;
         };
-        state.complete_search(event.revision, event.results)
+        if !std::sync::Arc::ptr_eq(&state.identity, &event.identity)
+            || state.revision() != event.revision
+        {
+            return false;
+        }
+        if !sources_current {
+            state.cancel_in_flight_search(event.revision);
+            self.status_message =
+                Some("Workspace search source changed; refreshing matches".into());
+            return true;
+        }
+        if let Some(error) = event.error {
+            state.cancel_in_flight_search(event.revision);
+            self.status_message = Some(format!("Workspace search failed: {error}"));
+            return true;
+        }
+        if state.complete_search(event.revision, event.results) {
+            state.source_fences = event.fences;
+            state.result_retention = event.retention;
+            let mut opened = None;
+            let mut cancelled_after_open = false;
+            while let Some(continuation) = state.pending_control.pop_front() {
+                if continuation.revision != state.revision() {
+                    state.control_error = Some(
+                        "Search continuation cancelled because its query was superseded".into(),
+                    );
+                    continue;
+                }
+                match continuation.action {
+                    crate::search_ui::SearchContinuationAction::Move(delta) => {
+                        state.move_selection(delta, usize::MAX)
+                    }
+                    crate::search_ui::SearchContinuationAction::Select(index)
+                    | crate::search_ui::SearchContinuationAction::Open(Some(index))
+                        if index >= state.results.len() =>
+                    {
+                        let message = format!("Search result index {index} does not exist");
+                        state.control_error = Some(message.clone());
+                        self.status_message = Some(message);
+                    }
+                    crate::search_ui::SearchContinuationAction::Select(index) => {
+                        state.selected_index = index
+                    }
+                    crate::search_ui::SearchContinuationAction::Open(index) => {
+                        if let Some(index) = index {
+                            state.selected_index = index;
+                        }
+                        if let Some(result) = state.selected_result().cloned() {
+                            opened = Some(result);
+                            if !state.pending_control.is_empty() {
+                                cancelled_after_open = true;
+                                state.pending_control.clear();
+                            }
+                            break;
+                        } else {
+                            let message = "There is no selected search result".to_string();
+                            state.control_error = Some(message.clone());
+                            self.status_message = Some(message);
+                        }
+                    }
+                }
+            }
+            if let Some(result) = opened {
+                self.activate_search_result(result);
+                if cancelled_after_open {
+                    self.status_message = Some("Later search continuations cancelled because an earlier command closed the finder".into());
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     /// Synchronous helper retained for focused unit tests. Interactive
     /// search uses `tick_workspace_search` and `SearchWorkers` instead.
+    #[cfg(test)]
     pub fn refresh_search_results(&self, state: &mut SearchState) {
         // Adopt (rather than plain-replace) so the revision advances: a
         // debounced background worker still running for the previous query
@@ -6160,9 +7665,14 @@ impl App {
         }
 
         let request = WorkspaceSearchRequest {
+            fences: self.workspace_search_fences(),
+            identity: std::sync::Arc::clone(&state.identity),
             revision: 0,
             query: query.to_string(),
-            sources: self.workspace_search_sources(),
+            sources: match self.workspace_search_sources() {
+                Ok(sources) => sources,
+                Err(_) => return,
+            },
         };
         state.adopt_synchronous_results(search_ui::search_workspace(&request, || false));
     }
@@ -6170,7 +7680,7 @@ impl App {
     /// Captures all searchable client-owned state. The terminal half is an
     /// O(1) immutable-segment snapshot of server-replayed history; editor and board text
     /// is copied only after the debounce has elapsed and on a background scan.
-    fn workspace_search_sources(&self) -> Vec<WorkspaceSearchSource> {
+    fn workspace_search_sources(&self) -> Result<Vec<WorkspaceSearchSource>, String> {
         let mut sources = Vec::new();
         for (pane_id, runtime) in &self.panes {
             let Some(node) = self.tree.get(*pane_id) else {
@@ -6207,7 +7717,7 @@ impl App {
                         // output on the input/UI thread.
                         last_command: None,
                         content: WorkspaceSearchContent::Terminal(
-                            view.searchable_history_snapshot(),
+                            view.try_searchable_history_snapshot()?,
                         ),
                     });
                 }
@@ -6263,18 +7773,40 @@ impl App {
                 _ => {}
             }
         }
-        sources
+        Ok(sources)
     }
 
     /// Leaves search and navigates to the selected pane at the exact recorded
     /// editor line or terminal-history byte position.
     pub fn activate_search_result(&mut self, result: SearchResult) {
+        if let Mode::Search(state) = &self.mode {
+            if !self.workspace_search_fences_match(&state.source_fences) {
+                if let Mode::Search(state) = &mut self.mode {
+                    state.note_query_changed(Instant::now());
+                }
+                self.status_message =
+                    Some("Search source changed; refresh before opening this match".into());
+                return;
+            }
+        }
+        let history_origin = match &self.mode {
+            Mode::Search(state) => state.source_fences.iter().find_map(|fence| match fence {
+                crate::search_workers::SourceFence::Terminal { pane, origin, .. }
+                    if *pane == result.pane_id =>
+                {
+                    Some(std::sync::Arc::clone(origin))
+                }
+                _ => None,
+            }),
+            _ => None,
+        };
         self.mode = Mode::Normal;
         self.focus_pane(result.pane_id);
         match result.location {
             SearchLocation::Terminal { history_end_byte } => {
                 if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&result.pane_id) {
-                    view.jump_to_history_byte(history_end_byte);
+                    let origin = history_origin.unwrap_or_else(|| view.search_history_origin());
+                    view.jump_to_search_history(history_end_byte, origin);
                 }
             }
             SearchLocation::Editor { line } => {
@@ -6412,6 +7944,267 @@ impl App {
         self.effective_animation_row_context()
     }
 
+    pub(crate) fn request_plugin_catalogue(&mut self) {
+        if self.plugin_catalogue.is_some() {
+            return;
+        }
+        let result = self
+            .plugin_catalogue_preparation
+            .as_mut()
+            .ok_or_else(|| "Animation package discovery is not initialized".to_owned())
+            .and_then(|owner| owner.request());
+        if let Err(error) = result {
+            self.status_message = Some(error);
+        }
+    }
+
+    pub(crate) fn collect_plugin_catalogue(&mut self) -> bool {
+        let Some(result) = self
+            .plugin_catalogue_preparation
+            .as_mut()
+            .and_then(|owner| owner.collect())
+        else {
+            return false;
+        };
+        match result {
+            Ok(catalogue) => {
+                self.plugin_catalogue = Some(catalogue);
+                self.status_message = None;
+            }
+            Err(error) => self.status_message = Some(error),
+        }
+        true
+    }
+
+    pub(crate) fn plugin_panel_model(&self) -> crate::animation_plugins::PluginPanelModel {
+        use crate::animation_plugins::{PluginPanelModel, PluginPanelRow};
+        let mut model = if let Some(catalogue) = &self.plugin_catalogue {
+            let effective = self
+                .committed_animation_settings
+                .as_ref()
+                .unwrap_or(&self.animation_settings);
+            let active = (effective.source == crate::animation_plugins::AnimationSourceTab::Plugin)
+                .then(|| {
+                    effective
+                        .plugin
+                        .selected
+                        .as_ref()
+                        .map(|selection| selection.package_id.as_str())
+                })
+                .flatten();
+            PluginPanelModel::with_active(catalogue.view(), &self.animation_settings.plugin, active)
+        } else {
+            PluginPanelModel {
+                rows: vec![PluginPanelRow::Status],
+                labels: vec![self
+                    .plugin_catalogue_preparation
+                    .as_ref()
+                    .and_then(|owner| owner.status.clone())
+                    .unwrap_or_else(|| "Open Plugin to discover animation packages".into())],
+            }
+        };
+        let native = self.animation_row_model();
+        for (index, row) in native.rows().iter().enumerate() {
+            if let crate::animation_rows::AnimationRow::Common(id) = row {
+                if matches!(*id, "playback" | "loop_seconds") {
+                    continue;
+                }
+                if let Some(view) = native.view(index) {
+                    model.rows.push(PluginPanelRow::Common(index));
+                    model.labels.push(format!("{}: {}", view.label, view.value));
+                }
+            }
+        }
+        model
+    }
+
+    pub(crate) fn settings_select_plugin(&mut self, package_id: &str) {
+        let Some(descriptor) = self
+            .plugin_catalogue
+            .as_ref()
+            .and_then(|catalogue| catalogue.view().find(package_id))
+            .cloned()
+        else {
+            self.status_message = Some("Animation package is no longer installed".into());
+            return;
+        };
+        self.settings_edit_animation(|settings| {
+            let selection = settings.plugin.selection_for(&descriptor)?;
+            settings.plugin.activate_selection(&descriptor, selection)?;
+            settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
+            Ok(true)
+        });
+    }
+
+    pub(crate) fn settings_adjust_plugin_row(&mut self, row: usize, direction: i32) {
+        use crate::animation_plugins::{PluginControlEdit, PluginPanelRow};
+        let Some(row) = self.plugin_panel_model().rows.get(row).cloned() else {
+            return;
+        };
+        if let PluginPanelRow::Common(index) = row {
+            self.settings_adjust_animation_row(index, direction);
+            return;
+        }
+        if let PluginPanelRow::Package(package_id) = row {
+            self.settings_select_plugin(&package_id);
+            return;
+        }
+        if matches!(row, PluginPanelRow::Status) {
+            return;
+        }
+        if matches!(row, PluginPanelRow::Permissions) {
+            self.status_message = Some(
+                "Permission review is requested by activation before any privileged input starts"
+                    .into(),
+            );
+            return;
+        }
+        let Some(selection) = self.animation_settings.plugin.selected.clone() else {
+            return;
+        };
+        let Some(descriptor) = self
+            .plugin_catalogue
+            .as_ref()
+            .and_then(|catalogue| catalogue.view().find(&selection.package_id))
+            .cloned()
+        else {
+            return;
+        };
+        match row {
+            PluginPanelRow::Playback => {
+                self.settings_edit_animation(|settings| {
+                    let next = crate::animation_plugins::adjacent_mode(
+                        &descriptor,
+                        &selection,
+                        direction,
+                    )?;
+                    settings.plugin.activate_selection(&descriptor, next)?;
+                    Ok(true)
+                });
+            }
+            PluginPanelRow::Control(id) => match crate::animation_plugins::adjust_control(
+                &descriptor.manifest.settings,
+                &selection.settings,
+                &id,
+                direction,
+            ) {
+                Ok(PluginControlEdit::Values(values)) => {
+                    self.settings_edit_animation(|settings| {
+                        let next = crate::animation_plugins::PluginSelection::new(
+                            &descriptor,
+                            selection.mode,
+                            values,
+                        )?;
+                        settings.plugin.activate_selection(&descriptor, next)?;
+                        Ok(true)
+                    });
+                }
+                Ok(PluginControlEdit::TextPrompt { .. }) => {}
+                Err(error) => self.status_message = Some(error),
+            },
+            _ => {}
+        }
+    }
+
+    pub(crate) fn plugin_value_package_digest(&self, package_id: &str) -> Option<String> {
+        self.animation_frame
+            .plugin_package_digest(package_id)
+            .map(str::to_owned)
+    }
+
+    pub(crate) fn begin_plugin_editor(&mut self, state: &mut SettingsState, row: usize) -> bool {
+        let Some(crate::animation_plugins::PluginPanelRow::Control(id)) =
+            self.plugin_panel_model().rows.get(row).cloned()
+        else {
+            return false;
+        };
+        if let Some(selection) = &self.animation_settings.plugin.selected {
+            if let Some(descriptor) = self
+                .plugin_catalogue
+                .as_ref()
+                .and_then(|catalogue| catalogue.view().find(&selection.package_id))
+            {
+                if crate::animation_plugins::project_controls(
+                    &descriptor.manifest.settings,
+                    &selection.settings,
+                )
+                .ok()
+                .and_then(|controls| controls.into_iter().find(|control| control.id == id))
+                .is_some_and(|control| {
+                    matches!(
+                        control.kind,
+                        crate::animation_plugins::PluginControlKind::Toggle
+                    )
+                }) {
+                    return false;
+                }
+            }
+        }
+        let opened = (|| {
+            let selection = self
+                .animation_settings
+                .plugin
+                .selected
+                .as_ref()
+                .ok_or("No plugin selected")?;
+            let descriptor = self
+                .plugin_catalogue
+                .as_ref()
+                .and_then(|catalogue| catalogue.view().find(&selection.package_id))
+                .ok_or("Plugin package changed")?;
+            let digest = self
+                .animation_frame
+                .plugin_package_digest(&selection.package_id)
+                .map(str::to_owned)
+                .ok_or("The selected plugin is still loading; retry when ready")?;
+            let fence = crate::animation_plugins::PluginControlFence::new(
+                digest,
+                descriptor,
+                &self.animation_settings.plugin,
+            )?;
+            crate::animation_plugins::PluginEditor::new(fence, &id)
+        })();
+        match opened {
+            Ok(editor) => {
+                state.plugin_editor = Some(editor);
+                true
+            }
+            Err(error) => {
+                self.status_message = Some(error);
+                // This was an editor action; a refusal must not fall through
+                // to a stepper and mutate settings behind the failed fence.
+                true
+            }
+        }
+    }
+
+    pub(crate) fn submit_plugin_editor(
+        &mut self,
+        editor: &crate::animation_plugins::PluginEditor,
+    ) -> Result<(), String> {
+        if !self.prepare_animation_edit() {
+            return Err("Animation settings are not ready to edit".into());
+        }
+        let descriptor = self
+            .plugin_catalogue
+            .as_ref()
+            .and_then(|catalogue| catalogue.view().find(&editor.fence.selection.package_id))
+            .ok_or("Plugin package changed")?;
+        let digest = self
+            .animation_frame
+            .plugin_package_digest(&descriptor.manifest.id)
+            .ok_or("Plugin execution identity is unavailable")?;
+        let mut settings = self.animation_settings.clone();
+        editor.fence.commit(
+            digest,
+            descriptor,
+            &mut settings.plugin,
+            &editor.control_id,
+            editor.value()?,
+        )?;
+        self.try_save_animation(settings)
+    }
+
     /// The row list every Animations surface (render, keys, mouse, scroll,
     /// help anchors) derives from.
     pub fn animation_row_model(&self) -> crate::animation_rows::RowModel {
@@ -6436,11 +8229,15 @@ impl App {
         if !self.prepare_animation_edit() {
             return;
         }
-        if self.animation_settings.kind == kind {
+        if self.animation_settings.kind == kind
+            && self.animation_settings.source
+                == crate::animation_plugins::AnimationSourceTab::Native
+        {
             return;
         }
         let mut settings = self.animation_settings.clone();
         settings.kind = kind;
+        settings.source = crate::animation_plugins::AnimationSourceTab::Native;
         self.settings_save_animation(settings);
     }
 
@@ -6499,8 +8296,7 @@ impl App {
                 self.settings_select_animation_scene(*kind);
                 return;
             }
-            AnimationRow::Common(id) => self.animation_settings.common_control(id),
-            AnimationRow::SceneControl(id) => self.animation_settings.scene_control(id),
+            AnimationRow::Common(_) | AnimationRow::SceneControl(_) => model.control(row).cloned(),
             _ => None,
         };
         let Some(control) = control else {
@@ -6649,12 +8445,101 @@ impl App {
     }
 
     /// Opens the location picker over Settings; the caller has restored the
-    /// Settings mode first.
+    /// Settings mode first. OSM captures the validated project binding now.
     pub fn open_location_picker(&mut self) {
-        let picker = crate::location_picker::LocationPickerState::new(
-            self.animation_settings.ambient.location.clone(),
-        );
+        let picker = if self.animation_settings.kind
+            == crate::background_animation::AnimationKind::OpenStreetMap
+        {
+            let project_path = match self.animation_write_path() {
+                Ok(path) => path,
+                Err(error) => {
+                    self.status_message = Some(error);
+                    return;
+                }
+            };
+            let osm = &self.animation_settings.ambient.openstreetmap;
+            let current = match osm.picker_location() {
+                Ok(location) => location,
+                Err(error) => {
+                    self.status_message = Some(error);
+                    return;
+                }
+            };
+            crate::location_picker::LocationPickerState::for_openstreetmap(
+                current,
+                project_path,
+                osm.search.clone(),
+            )
+        } else {
+            crate::location_picker::LocationPickerState::new(
+                self.animation_settings.ambient.location.clone(),
+            )
+        };
         self.push_modal(Mode::LocationPicker(Box::new(picker)));
+    }
+
+    /// An OSM picker may save only to the project captured at opening. The
+    /// guard precedes synchronization because keyboard dispatch temporarily
+    /// replaces the modal mode while processing Enter.
+    pub fn confirm_location_picker(
+        &mut self,
+        picker: &mut crate::location_picker::LocationPickerState,
+        location: ilium_ambient::GeoLocation,
+    ) -> Result<(), String> {
+        use crate::location_picker::PickerTarget;
+        let PickerTarget::OpenStreetMap { project_path, .. } = picker.target() else {
+            self.settings_set_location(location);
+            return Ok(());
+        };
+        if picker.is_saving() {
+            return Ok(());
+        }
+        let current = self.animation_write_path()?;
+        if &current != project_path {
+            return Err("The selected project changed; reopen its map location picker".into());
+        }
+        if self.animation_settings.kind != crate::background_animation::AnimationKind::OpenStreetMap
+        {
+            return Err("The animation changed; reopen the map location picker".into());
+        }
+        let mut settings = self.animation_settings.clone();
+        settings
+            .ambient
+            .openstreetmap
+            .set_selected_location(&location)?;
+        // Even an unchanged optimistic value needs a durable retry receipt.
+        let token = std::sync::Arc::new(());
+        let save = crate::filesystem::configurations::AnimationPickerSave {
+            token: std::sync::Arc::clone(&token),
+            project_path: current,
+            candidate: location,
+        };
+        self.enqueue_animation_settings(settings, Some(save))?;
+        picker.begin_save(token);
+        Ok(())
+    }
+
+    /// Durable completion may dismiss only the exact admitted picker instance.
+    pub(crate) fn finish_animation_picker_save(
+        &mut self,
+        save: &crate::filesystem::configurations::AnimationPickerSave,
+        result: Result<(), String>,
+    ) {
+        let Mode::LocationPicker(picker) = &mut self.mode else {
+            return;
+        };
+        let matching_path = matches!(picker.target(), crate::location_picker::PickerTarget::OpenStreetMap { project_path, .. } if project_path == &save.project_path);
+        if !matching_path || picker.candidate != save.candidate || !picker.matches_save(&save.token)
+        {
+            return;
+        }
+        match result {
+            Ok(()) => self.pop_modal(),
+            Err(error) => {
+                picker.fail_save(error.clone());
+                self.status_message = Some(error);
+            }
+        }
     }
 
     /// Polls the open location picker's geocode worker. Returns whether the
@@ -6670,40 +8555,110 @@ impl App {
         &mut self,
         settings: crate::background_animation::AnimationSettings,
     ) {
-        let path = match self.animation_write_path() {
-            Ok(path) => path,
-            Err(error) => {
-                self.status_message = Some(error);
-                return;
-            }
-        };
-        match crate::project_config::set_animation(&path, settings.clone()) {
-            Ok(()) => {
-                self.animation_settings = settings.normalized();
-                self.animation_cache = Default::default();
-                self.status_message = None;
-                self.reconcile_animation_presentation();
-                let layout = self.layout_for_animation(
-                    self.layout.screen_area,
-                    self.tree_width_animation.current_width(),
-                );
-                self.set_layout(layout, PaneResizeCause::UserInterfaceSettings);
-            }
-            Err(error) => {
-                self.status_message = Some(format!("Could not save animation settings: {error}"))
+        if let Err(error) = self.try_save_animation(settings) {
+            self.status_message = Some(error);
+        }
+    }
+
+    /// The settings panel and OSM picker share one persistence/execution path.
+    /// A refused save leaves both the authored value and the active scene alone.
+    fn try_save_animation(
+        &mut self,
+        settings: crate::background_animation::AnimationSettings,
+    ) -> Result<(), String> {
+        self.enqueue_animation_settings(settings, None)
+    }
+    pub(crate) fn enqueue_animation_settings(
+        &mut self,
+        settings: crate::background_animation::AnimationSettings,
+        picker: Option<crate::filesystem::configurations::AnimationPickerSave>,
+    ) -> Result<(), String> {
+        self.enqueue_animation_settings_with_value(settings, picker, None)
+    }
+
+    pub(crate) fn enqueue_animation_settings_with_value(
+        &mut self,
+        settings: crate::background_animation::AnimationSettings,
+        picker: Option<crate::filesystem::configurations::AnimationPickerSave>,
+        value_dialog: Option<std::sync::Arc<()>>,
+    ) -> Result<(), String> {
+        if !self.animation_frame.can_queue_configuration() {
+            return Err("Animation busy; retry this settings change".into());
+        }
+
+        let path = self.animation_write_path()?;
+        self.enqueue_configuration(
+            path.clone(),
+            crate::filesystem::configuration::ConfigurationChange::Animation(Box::new(
+                settings.clone(),
+            )),
+            crate::filesystem::configurations::ConfigurationIntent::Animation {
+                path,
+                picker,
+                value_dialog,
+                desired: Box::new(settings.clone()),
+            },
+        )?;
+        // Authored choices accumulate while durability is pending. Rendering
+        // remains fenced to the last acknowledged configuration.
+        if self.committed_animation_settings.is_none() {
+            self.committed_animation_settings = Some(self.animation_settings.clone());
+        }
+        self.animation_settings = settings.normalized();
+        Ok(())
+    }
+
+    pub(crate) fn acknowledge_animation_settings(
+        &mut self,
+        path: &Path,
+        settings: crate::background_animation::AnimationSettings,
+    ) {
+        if self.animation_write_path().as_deref() != Ok(path) {
+            return;
+        }
+        self.committed_animation_settings = Some(settings.normalized());
+        self.status_message = None;
+        if let Some(effective) = self.effective_animation_settings() {
+            let elapsed = crate::background_composition::quantized_elapsed_at(
+                self.started_at.elapsed(),
+                self.animation_frames_per_second(),
+            );
+            if let Err(error) = self.animation_frame.request(
+                &effective,
+                self.layout.screen_area.width,
+                self.layout.screen_area.height,
+                elapsed,
+                None,
+            ) {
+                self.status_message = Some(format!(
+                    "Animation settings saved; execution pending: {error:?}"
+                ));
             }
         }
+        self.reconcile_animation_presentation();
+        let layout = self.layout_for_animation(
+            self.layout.screen_area,
+            self.tree_width_animation.current_width(),
+        );
+        self.set_layout(layout, PaneResizeCause::UserInterfaceSettings);
+        crate::animation_settings_ui::sync_active_scrolls(self);
     }
 
     /// Toggles the durable project-scoped divider preference. Project names,
     /// icons, and unknown YAML fields are merged under the same file lock.
     pub fn settings_toggle_project_separators(&mut self) {
         let enabled = !self.ui_settings.show_project_separators;
-        match crate::project_config::set_show_project_separators(&self.session_cwd, enabled) {
-            Ok(()) => self.ui_settings.show_project_separators = enabled,
-            Err(error) => {
-                self.status_message = Some(format!("Could not save project settings: {error}"));
-            }
+        if self
+            .enqueue_configuration(
+                self.session_cwd.clone(),
+                crate::filesystem::configuration::ConfigurationChange::Separators(enabled),
+                crate::filesystem::configurations::ConfigurationIntent::Separators,
+            )
+            .is_ok()
+        {
+            // Authored state advances on admission; ordered older receipts
+            // must not overwrite a newer toggle while durability is pending.
+            self.ui_settings.show_project_separators = enabled;
         }
     }
 
@@ -6722,6 +8677,14 @@ impl App {
     pub fn settings_toggle_lock_closed_enabled(&mut self) {
         let mut ui = self.ui_settings.clone();
         ui.lock_closed_enabled = !ui.lock_closed_enabled;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Toggles closing a group/folder automatically once its last entry is
+    /// closed.
+    pub fn settings_toggle_auto_remove_empty_groups(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.auto_remove_empty_groups = !ui.auto_remove_empty_groups;
         self.apply_and_persist_ui_settings(ui);
     }
 
@@ -6867,6 +8830,7 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
         if !self.ui_settings.terminal_text_selection_enabled {
             self.terminal_selection = None;
+            self.terminal_selection_source = None;
         }
     }
 
@@ -6893,7 +8857,15 @@ impl App {
             AgentToolbarAction::ToggleTextSelection => {
                 self.settings_toggle_terminal_text_selection()
             }
-            AgentToolbarAction::Stop => self.send_terminal_bytes(pane_id, b"\x1b".to_vec(), None),
+            AgentToolbarAction::Stop => {
+                if self
+                    .send_terminal_bytes(pane_id, b"\x1b".to_vec(), None)
+                    .is_err()
+                {
+                    self.status_message =
+                        Some("Stop key rejected before terminal admission".into());
+                }
+            }
             AgentToolbarAction::CopyScreen => {
                 let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
                     return;
@@ -6905,24 +8877,7 @@ impl App {
                 );
             }
             AgentToolbarAction::SmartCopy => self.start_smart_copy(pane_id),
-            AgentToolbarAction::CycleEffort => {
-                let next = self
-                    .agent_toolbar_effort
-                    .get(&pane_id)
-                    .copied()
-                    .unwrap_or_default()
-                    .next();
-                self.agent_toolbar_effort.insert(pane_id, next);
-                if next == EffortLevel::Ultracode {
-                    self.send_terminal_bytes(pane_id, b"ultracode ".to_vec(), None);
-                } else {
-                    self.send_terminal_submission(
-                        pane_id,
-                        format!("/effort {}", next.command_word()),
-                        PromptSubmissionSource::ToolbarAction,
-                    );
-                }
-            }
+            AgentToolbarAction::CycleEffort => self.step_agent_effort(pane_id, false),
             AgentToolbarAction::CodexModelTier(_) => {}
             _ => {
                 let Some(provider) = self.agent_toolbar_provider(pane_id) else {
@@ -6938,10 +8893,94 @@ impl App {
     }
 
     fn start_smart_copy(&mut self, pane_id: NodeId) {
-        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+        let Some(source) = self
+            .selection_terminal_source(pane_id)
+            .cloned()
+            .or_else(|| self.emitted_terminal_source(pane_id))
+        else {
+            self.status_message =
+                Some("Smart Copy is waiting for terminal presentation acknowledgement".into());
             return;
         };
-        let snapshot = view.with_screen(crate::smart_copy::SmartCopySnapshot::capture);
+        let generation = self.next_smart_copy_generation;
+        let Some(next) = generation.checked_add(1) else {
+            self.status_message = Some("Smart Copy generation exhausted".into());
+            return;
+        };
+        if let Some(preparation) = &mut self.terminal_context_preparation {
+            match preparation.request_capture(pane_id, generation, &source) {
+                Ok(()) => {
+                    self.next_smart_copy_generation = next;
+                    self.pending_smart_copy_capture =
+                        Some((pane_id, source.identity.clone(), generation));
+                    self.smart_copy_session = None;
+                    self.smart_copy_source = None;
+                    self.pending_smart_copy_request = None;
+                    self.smart_copy_cancel_requested = true;
+                    self.status_message =
+                        Some("Preparing Smart Copy from the emitted terminal frame…".into());
+                    self.mode = Mode::SmartCopy;
+                }
+                Err(error) => self.status_message = Some(error),
+            }
+            return;
+        }
+        #[cfg(test)]
+        {
+            let snapshot = source.with_screen(crate::smart_copy::SmartCopySnapshot::capture);
+            self.next_smart_copy_generation = next;
+            self.complete_smart_copy_capture(pane_id, generation, snapshot);
+        }
+        #[cfg(not(test))]
+        {
+            self.status_message = Some("Smart Copy preparation is unavailable".into());
+        }
+    }
+    pub(crate) fn collect_emitted_smart_copy_capture(&mut self) -> bool {
+        let Some(completion) = self
+            .terminal_context_preparation
+            .as_mut()
+            .and_then(|owner| owner.collect_capture())
+        else {
+            return false;
+        };
+        let matches = self.pending_smart_copy_capture.as_ref().is_some_and(
+            |(pane, identity, generation)| {
+                *pane == completion.pane_id
+                    && *generation == completion.generation
+                    && std::sync::Arc::ptr_eq(identity, &completion.identity)
+            },
+        ) && matches!(self.mode, Mode::SmartCopy)
+            && matches!(self.panes.get(&completion.pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &completion.identity));
+        if !matches {
+            return false;
+        }
+        self.pending_smart_copy_capture = None;
+        match completion.result {
+            Ok(result) => {
+                let (prepared, _job_hold) = result.into_parts();
+                self.smart_copy_source = Some(prepared.source);
+                self.install_smart_copy_capture(
+                    completion.pane_id,
+                    completion.generation,
+                    prepared.snapshot,
+                    prepared.prompt,
+                    prepared.charge,
+                );
+            }
+            Err(error) => {
+                self.mode = Mode::Normal;
+                self.status_message = Some(error);
+            }
+        }
+        true
+    }
+    fn complete_smart_copy_capture(
+        &mut self,
+        pane_id: NodeId,
+        generation: u64,
+        snapshot: crate::smart_copy::SmartCopySnapshot,
+    ) {
         let user_prompt = match crate::smart_copy::user_prompt(&snapshot) {
             Ok(prompt) => prompt,
             Err(error) => {
@@ -6949,12 +8988,46 @@ impl App {
                 return;
             }
         };
-        let generation = self.next_smart_copy_generation;
-        self.next_smart_copy_generation = self.next_smart_copy_generation.wrapping_add(1).max(1);
-        self.smart_copy_session = Some(crate::smart_copy::SmartCopySession::new(
-            generation, pane_id, snapshot,
+        self.install_smart_copy_capture(pane_id, generation, snapshot, user_prompt, None);
+    }
+    fn install_smart_copy_capture(
+        &mut self,
+        pane_id: NodeId,
+        generation: u64,
+        snapshot: crate::smart_copy::SmartCopySnapshot,
+        user_prompt: String,
+        source_hold: Option<std::sync::Arc<crate::terminal_parsing::SnapshotCharge>>,
+    ) {
+        // Relative paths on screen are checked against the pane's working
+        // directory, each of its ancestors and the project root.
+        let path_context = crate::smart_copy_tokens::PathContext::new(
+            self.tree.pane_cwd(pane_id),
+            &self.session_cwd,
+            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
+        );
+        self.smart_copy_session = Some(crate::smart_copy::SmartCopySession::with_path_context(
+            generation,
+            pane_id,
+            snapshot,
+            &path_context,
         ));
+        if self.smart_copy_light.is_some() {
+            // Smart Copy light never calls a model: the detected regions are
+            // the whole offer, so the session is complete from the start.
+            if let Some(session) = self.smart_copy_session.as_mut() {
+                session.phase = crate::smart_copy::SmartCopyPhase::Complete;
+                session.is_light = true;
+            }
+            self.pending_smart_copy_request = None;
+            self.smart_copy_cancel_requested = false;
+            self.terminal_selection = None;
+            self.terminal_selection_source = None;
+            self.status_message = None;
+            self.mode = Mode::SmartCopy;
+            return;
+        }
         self.pending_smart_copy_request = Some(crate::smart_copy_workers::SmartCopyWorkerRequest {
+            source_hold,
             generation,
             pane_id,
             inference_settings: self.inference_settings.clone(),
@@ -6968,6 +9041,7 @@ impl App {
         });
         self.smart_copy_cancel_requested = false;
         self.terminal_selection = None;
+        self.terminal_selection_source = None;
         self.mode = Mode::SmartCopy;
     }
 
@@ -6977,11 +9051,28 @@ impl App {
         self.pending_smart_copy_request.take()
     }
 
+    pub(crate) fn retry_pending_smart_copy_request(
+        &mut self,
+        request: crate::smart_copy_workers::SmartCopyWorkerRequest,
+    ) {
+        if self.smart_copy_session.as_ref().is_some_and(|session| {
+            session.generation == request.generation && session.pane_id == request.pane_id
+        }) {
+            self.pending_smart_copy_request = Some(request);
+        }
+    }
+
     pub(crate) fn take_smart_copy_cancel_requested(&mut self) -> bool {
         std::mem::take(&mut self.smart_copy_cancel_requested)
     }
 
     pub fn exit_smart_copy(&mut self) {
+        self.smart_copy_light = None;
+        self.smart_copy_source = None;
+        if let Some(owner) = &mut self.terminal_context_preparation {
+            owner.cancel_capture();
+        }
+        self.pending_smart_copy_capture = None;
         self.smart_copy_cancel_requested = true;
         self.pending_smart_copy_request = None;
         self.smart_copy_session = None;
@@ -7001,6 +9092,12 @@ impl App {
         if session.generation != event.generation || session.pane_id != event.pane_id {
             return;
         }
+        if let Some(retention) = event.retention {
+            session.output_retention = Some(retention);
+        }
+        if matches!(session.phase, SmartCopyPhase::Failed(_)) {
+            return;
+        }
         match event.update {
             SmartCopyWorkerUpdate::ResponseStarted => session.phase = SmartCopyPhase::Streaming,
             SmartCopyWorkerUpdate::Progress {
@@ -7008,6 +9105,10 @@ impl App {
             } => session.received_characters = received_characters,
             SmartCopyWorkerUpdate::JsonLine(line) => {
                 if let Err(error) = session.apply_json_line(&line) {
+                    if error == "Smart Copy retained candidate byte bound exceeded" {
+                        session.phase = SmartCopyPhase::Failed(error.clone());
+                        self.smart_copy_cancel_requested = true;
+                    }
                     tracing::warn!(generation = session.generation, %error, "rejected Smart Copy candidate");
                 }
             }
@@ -7041,6 +9142,134 @@ impl App {
         }
     }
 
+    /// Starts Smart Copy light when the configured modifier is held while the
+    /// pointer is over a terminal pane. Returns whether the event was consumed.
+    /// Only plain pointer events start it, so Ctrl+wheel keeps its meaning.
+    pub(crate) fn try_start_smart_copy_light(
+        &mut self,
+        mouse: &crossterm::event::MouseEvent,
+        position: Position,
+    ) -> bool {
+        use crossterm::event::MouseEventKind;
+        let settings = self.terminal_settings;
+        if !settings.smart_copy_light
+            || self.smart_copy_light.is_some()
+            || !matches!(self.mode, Mode::Normal)
+            || !self.modal_stack.is_empty()
+            || self.onboarding.is_some()
+            || !mouse
+                .modifiers
+                .contains(settings.smart_copy_light_key.modifier())
+            || !matches!(
+                mouse.kind,
+                MouseEventKind::Moved
+                    | MouseEventKind::Down(_)
+                    | MouseEventKind::Up(_)
+                    | MouseEventKind::Drag(_)
+            )
+        {
+            return false;
+        }
+        let Some(viewport) = self.pane_viewport_at(position) else {
+            return false;
+        };
+        if !viewport.content_area.contains(position)
+            || !matches!(
+                self.panes.get(&viewport.pane_id),
+                Some(PaneRuntime::Terminal(_))
+            )
+        {
+            return false;
+        }
+        // Armed before the capture starts: the synchronous test path installs
+        // the session from inside `start_smart_copy`.
+        self.smart_copy_light = Some(crate::smart_copy_light::SmartCopyLightState::new(
+            settings.smart_copy_light_key,
+            Instant::now(),
+        ));
+        self.smart_copy_preview = None;
+        self.start_smart_copy(viewport.pane_id);
+        if matches!(self.mode, Mode::SmartCopy) {
+            return true;
+        }
+        self.smart_copy_light = None;
+        false
+    }
+
+    /// Records that the light key is still down (a mouse event carried it).
+    pub(crate) fn note_smart_copy_light_key_held(&mut self, now: Instant) {
+        if let Some(light) = self.smart_copy_light.as_mut() {
+            light.last_key_activity = now;
+        }
+    }
+
+    pub(crate) fn smart_copy_light_key(&self) -> Option<crate::config::SmartCopyLightKey> {
+        self.smart_copy_light.map(|light| light.key)
+    }
+
+    /// The key was released: copy the selection, show the Preview and leave
+    /// the mode. An empty selection just leaves.
+    pub fn finish_smart_copy_light(&mut self) {
+        if self.smart_copy_light.is_none() {
+            return;
+        }
+        let selection = self
+            .smart_copy_session
+            .as_ref()
+            .map(|session| (session.selected_text(), session.selected_count()))
+            .filter(|(_, count)| *count > 0);
+        self.exit_smart_copy();
+        let Some((text, count)) = selection else {
+            return;
+        };
+        let copied = arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text.clone()))
+            .is_ok();
+        self.status_message = Some(if copied {
+            format!("Copied {count} selection(s)")
+        } else {
+            "Could not copy text".to_string()
+        });
+        self.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
+            text,
+            count,
+            copied,
+            Instant::now(),
+        ));
+    }
+
+    /// Escape: leave without copying anything.
+    pub fn cancel_smart_copy_light(&mut self) {
+        self.exit_smart_copy();
+    }
+
+    /// Ends the Preview after its second, and finishes a light selection whose
+    /// key release the terminal cannot report once the pointer has idled.
+    pub(crate) fn tick_smart_copy_light(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+        if let Some(preview) = &self.smart_copy_preview {
+            // Every frame while the Preview is up repaints its progress bar.
+            changed = true;
+            if preview.is_expired(now) {
+                self.smart_copy_preview = None;
+            }
+        }
+        if let Some(light) = self.smart_copy_light {
+            let has_selection = self
+                .smart_copy_session
+                .as_ref()
+                .is_some_and(|session| session.selected_count() > 0);
+            if has_selection
+                && now.saturating_duration_since(light.last_key_activity)
+                    >= crate::smart_copy_light::RELEASE_IDLE_GRACE
+            {
+                self.finish_smart_copy_light();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn smart_copy_copy_current(&mut self) {
         // Each click toggles the hovered region in a persistent multi-selection
         // and republishes the whole selection to the clipboard.
@@ -7064,6 +9293,11 @@ impl App {
             return;
         }
         let verb = if is_selected { "Added" } else { "Removed" };
+        if self.smart_copy_light.is_some() {
+            // Light mode copies once, when the key is released.
+            self.status_message = Some(format!("{verb} {label}; {count} selected"));
+            return;
+        }
         self.copy_terminal_text_to_clipboard(
             text,
             &format!("{verb} {label}; copied {count} selection(s)"),
@@ -7082,10 +9316,11 @@ impl App {
     /// interleaving the two into the same PTY or abandoning the old one
     /// mid-picker (see `PendingStagedKeystrokes`'s doc comment).
     fn send_staged_terminal_keystrokes(&mut self, pane_id: NodeId, mut stages: Vec<Vec<u8>>) {
-        if stages.is_empty() {
-            return;
-        }
-        if self.pending_staged_keystrokes.is_some() {
+        let pane_identity = match self.panes.get(&pane_id) {
+            Some(PaneRuntime::Terminal(view)) => Some(view.identity.clone()),
+            _ => None,
+        };
+        if stages.is_empty() || self.pending_staged_keystrokes.is_some() {
             return;
         }
         if stages.len() == 1 {
@@ -7098,41 +9333,105 @@ impl App {
                 tracing::error!("toolbar command is not UTF-8 text");
                 return;
             };
-            self.send_terminal_submission(pane_id, text, PromptSubmissionSource::ToolbarAction);
+            if let Err(ClientRequest::SubmitTerminalText { text, .. }) = self
+                .send_terminal_submission(pane_id, text, PromptSubmissionSource::ToolbarAction)
+                .map_err(|request| *request)
+            {
+                let mut bytes = text.into_bytes();
+                bytes.push(b'\r');
+                self.pending_staged_keystrokes = Some(PendingStagedKeystrokes {
+                    pane_id,
+                    pane_identity,
+                    stages: VecDeque::from([bytes]),
+                    next_at: Instant::now(),
+                    semantic_submission: true,
+                });
+                self.status_message = Some(
+                    "Toolbar submission retained until terminal admission is available".into(),
+                );
+            }
             return;
         }
-        let first_stage = stages.remove(0);
-        self.send_terminal_bytes(pane_id, first_stage, None);
+        let first = stages.remove(0);
+        let admitted = match self
+            .send_terminal_bytes(pane_id, first, None)
+            .map_err(|request| *request)
+        {
+            Ok(()) => true,
+            Err(ClientRequest::KeyInput { bytes, .. }) => {
+                stages.insert(0, bytes);
+                false
+            }
+            Err(_) => false,
+        };
         self.pending_staged_keystrokes = Some(PendingStagedKeystrokes {
             pane_id,
+            pane_identity,
             stages: stages.into(),
-            next_at: Instant::now() + STAGED_KEYSTROKE_DELAY,
+            next_at: Instant::now()
+                + if admitted {
+                    STAGED_KEYSTROKE_DELAY
+                } else {
+                    Duration::ZERO
+                },
+            semantic_submission: false,
         });
     }
 
-    /// Drains one due stage of an in-flight `PendingStagedKeystrokes`
-    /// sequence, if `now` has reached it. Called from `tick::on_tick` every
-    /// tick; a no-op when nothing is pending or the next stage isn't due yet.
     pub(crate) fn drain_pending_staged_keystrokes(&mut self, now: Instant) {
-        let Some(pending) = &mut self.pending_staged_keystrokes else {
+        let Some(mut pending) = self.pending_staged_keystrokes.take() else {
             return;
         };
-        if now < pending.next_at {
+        if pending.pane_identity.as_ref().is_some_and(|identity|!matches!(self.panes.get(&pending.pane_id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(identity,&view.identity))) {
+            self.status_message=Some("Staged toolbar input cancelled after confirmed pane replacement".into());return;
+        }
+        if now < pending.next_at
+            || (self.terminal_parsing.is_some()
+                && pending
+                    .stages
+                    .front()
+                    .is_some_and(|bytes| !self.terminal_input.can_admit(bytes.capacity())))
+        {
+            self.pending_staged_keystrokes = Some(pending);
             return;
         }
         let Some(stage) = pending.stages.pop_front() else {
-            self.pending_staged_keystrokes = None;
             return;
         };
-        let pane_id = pending.pane_id;
-        let sequence_finished = pending.stages.is_empty();
-        pending.next_at = now + STAGED_KEYSTROKE_DELAY;
-        // These remaining stages navigate Codex's model picker. They are key
-        // presses, not submitted agent prompts; non-CR stages would also fail
-        // the server's submission-metadata validation.
-        self.send_terminal_bytes(pane_id, stage, None);
-        if sequence_finished {
-            self.pending_staged_keystrokes = None;
+        let result = if pending.semantic_submission {
+            let body = stage.strip_suffix(b"\r").unwrap_or(&stage);
+            match String::from_utf8(body.to_vec()) {
+                Ok(text) => self.send_terminal_submission(
+                    pending.pane_id,
+                    text,
+                    PromptSubmissionSource::ToolbarAction,
+                ),
+                Err(_) => {
+                    self.status_message =
+                        Some("Retained toolbar submission is invalid UTF-8".into());
+                    return;
+                }
+            }
+        } else {
+            self.send_terminal_bytes(pending.pane_id, stage, None)
+        };
+        match result.map_err(|request| *request) {
+            Ok(()) => {
+                pending.semantic_submission = false;
+                pending.next_at = now + STAGED_KEYSTROKE_DELAY;
+            }
+            Err(ClientRequest::KeyInput { bytes, .. }) => pending.stages.push_front(bytes),
+            Err(ClientRequest::SubmitTerminalText { text, .. }) => {
+                let mut bytes = text.into_bytes();
+                bytes.push(b'\r');
+                pending.stages.push_front(bytes);
+            }
+            Err(_) => {
+                self.status_message = Some("Unexpected retained toolbar input rejection".into());
+            }
+        }
+        if !pending.stages.is_empty() {
+            self.pending_staged_keystrokes = Some(pending);
         }
     }
 
@@ -7264,6 +9563,7 @@ impl App {
             AppearanceRow::ProgressFillStyle => self.settings_adjust_progress_fill_style(direction),
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
             AppearanceRow::LockClosedEnabled => self.settings_toggle_lock_closed_enabled(),
+            AppearanceRow::AutoRemoveEmptyGroups => self.settings_toggle_auto_remove_empty_groups(),
         }
     }
 
@@ -7275,6 +9575,10 @@ impl App {
             }
             TerminalRow::NewPaneDirectory => {
                 settings.new_pane_directory = settings.new_pane_directory.stepped(direction)
+            }
+            TerminalRow::SmartCopyLight => settings.smart_copy_light = !settings.smart_copy_light,
+            TerminalRow::SmartCopyLightKey => {
+                settings.smart_copy_light_key = settings.smart_copy_light_key.stepped(direction)
             }
         };
         self.apply_terminal_settings(settings);
@@ -7373,6 +9677,7 @@ impl App {
                 self.pointer_position = None;
                 self.hovered_tree_node = None;
                 self.hovered_status_slot = None;
+                self.hovered_progress = None;
                 self.tree_toolbar_hovered = false;
                 self.hovered_tree_toolbar_action = None;
             }
@@ -7469,6 +9774,21 @@ impl App {
             }
         }
 
+        if self.smart_copy_preview.is_some() {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                crate::smart_copy_light::PREVIEW_FRAME_INTERVAL,
+            );
+        }
+        if self.smart_copy_light.is_some() {
+            // The idle grace must be able to fire without any input event.
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(250),
+            );
+            requirements.is_active = true;
+        }
         if let Some(session) = &self.smart_copy_session {
             use crate::smart_copy::SmartCopyPhase;
             let is_request_active = matches!(
@@ -7599,6 +9919,14 @@ impl App {
         self.animation_requirements(now).next_semantic_delay
     }
 
+    /// Permit an explicit retry only if the refusal matches the cached size.
+    /// A late refusal for a different size must preserve the newer request.
+    pub(crate) fn reject_requested_pane_resize(&mut self, pane_id: NodeId, rows: u16, cols: u16) {
+        if self.requested_pane_sizes.get(&pane_id) == Some(&(rows, cols)) {
+            self.requested_pane_sizes.remove(&pane_id);
+        }
+    }
+
     /// Resizes only the terminal panes currently visible in the right panel,
     /// using the exact content rectangle allocated to each slot.
     pub fn resize_displayed_panes(&mut self, cause: PaneResizeCause) {
@@ -7621,24 +9949,56 @@ impl App {
             let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
                 continue;
             };
-            if view.with_screen(|screen| screen.size()) != (rows, cols) {
-                view.resize(rows, cols);
-            }
-            // The local parser is presentation state, not evidence that the
-            // detached server's PTY received this geometry. New views are
-            // deliberately created at `last_known_pane_size`, while new PTYs
-            // start at 24x80; only a previously queued request is safe to
-            // deduplicate against.
-            if self.requested_pane_sizes.get(&pane_id) == Some(&(rows, cols)) {
+            // Permanently unsupported geometry must be rejected before an
+            // outbound credit is reserved. The credit only guards a resize
+            // that can advance the local parser and be published to IPC.
+            if let Err(error) = crate::terminal_parsing::validate_geometry(rows, cols) {
+                view.admission_error = Some(error.clone());
+                self.status_message = Some(error);
                 continue;
             }
-            self.queue_request(ClientRequest::ResizePane {
-                pane_id,
-                rows,
-                cols,
-                cause,
-            });
-            self.requested_pane_sizes.insert(pane_id, (rows, cols));
+            // Reserve outbound capacity before advancing the local parser.
+            // A refused resize must retain both the old geometry and its
+            // retry opportunity. Move this same credit through publication.
+            let request = if self.requested_pane_sizes.get(&pane_id) == Some(&(rows, cols)) {
+                None
+            } else {
+                let Some(client) = &self.outbound_admission else {
+                    self.status_message = Some(
+                        "Terminal resize rejected before admission: outbound request credits are unavailable".into(),
+                    );
+                    continue;
+                };
+                match crate::ipc_preparation::admit_request(
+                    client,
+                    ClientRequest::ResizePane {
+                        pane_id,
+                        rows,
+                        cols,
+                        cause,
+                    },
+                ) {
+                    Ok(request) => Some(request),
+                    Err(error) => {
+                        self.status_message = Some(format!(
+                            "Terminal resize rejected before admission: {:?}",
+                            error.reason,
+                        ));
+                        continue;
+                    }
+                }
+            };
+            if !view.admit_resize(rows, cols) {
+                self.status_message = view.admission_error.clone();
+                continue;
+            }
+            // An already queued server size still needs local synchronization
+            // when its render cache is new. Otherwise publish only after both
+            // outbound and local-parser admission succeeded.
+            if let Some(request) = request {
+                self.queue_terminal_request_after_barrier(request);
+                self.requested_pane_sizes.insert(pane_id, (rows, cols));
+            }
         }
     }
 
@@ -7647,6 +10007,19 @@ impl App {
     pub(crate) fn retain_requested_pane_sizes(&mut self, live_pane_ids: &HashSet<NodeId>) {
         self.requested_pane_sizes
             .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    }
+
+    /// Attach the shared finite document client to all document preparation.
+    /// Returns the same completion notification used by the event loop.
+    pub fn configure_document_preparation(
+        &mut self,
+        client: ilium_execution::Client,
+    ) -> std::sync::Arc<tokio::sync::Notify> {
+        let preparation = crate::document_preparation::DocumentPreparation::new(client.clone());
+        let notification = preparation.notification();
+        self.document_preparation = Some(preparation);
+        self.configure_source_windows(client, notification.clone());
+        notification
     }
 
     /// Rebuilds a focused editor pane's Rendered-mode document at the
@@ -7663,28 +10036,792 @@ impl App {
     /// raw pane width while the minimap reserves 8 columns of that width
     /// at draw time made every header/image in Rendered mode invisible
     /// whenever the minimap was showing -- the default.
+    pub(crate) fn configure_source_windows(
+        &mut self,
+        client: ilium_execution::Client,
+        notification: std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        let mut windows =
+            crate::source_window_preparation::SourceWindowPreparation::with_notification(
+                client.clone(),
+                notification.clone(),
+            );
+        windows.set_capture_budget(self.source_capture_budget.clone());
+        let mut syntax =
+            crate::source_window_syntax::SourceWindowSyntax::new(client.clone(), notification);
+        syntax.set_capture_budget(self.source_capture_budget.clone());
+        self.source_window_preparation = Some(windows);
+        self.source_window_syntax = Some(syntax);
+        self.source_window_client = Some(client);
+    }
+    /// Begin one interactive capture turn; its byte/time allowance is shared by all panes.
+    pub fn begin_editor_capture_turn(&self) {
+        self.source_capture_budget.begin_turn();
+    }
+    pub(crate) fn source_window_retry_delay(&self, now: Instant) -> Option<std::time::Duration> {
+        let windows = self
+            .source_window_preparation
+            .as_ref()
+            .and_then(|p| p.retry_delay(now));
+        let syntax = self
+            .source_window_syntax
+            .as_ref()
+            .and_then(|p| p.retry_delay(now));
+        let pending = (!self.pending_source_windows.is_empty()
+            || !self.pending_source_styles.is_empty())
+        .then_some(std::time::Duration::from_millis(20));
+        windows.into_iter().chain(syntax).chain(pending).min()
+    }
     pub fn rebuild_rendered_markdown(&mut self, id: NodeId) {
-        let width = self.editor_content_area(id).width;
+        let area = self.editor_content_area(id);
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
         let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
             return;
         };
-        if editor.view_mode != EditorViewMode::Rendered || !editor.is_markdown() {
+        if editor.view_mode == EditorViewMode::Source {
+            editor.clear_preparation();
+            editor.set_preparation_height(area.height);
+            if let Some(client) = &self.source_window_client {
+                editor.source_retirement = Some(client.retirement());
+            }
+            if let Some(key) = editor.window_preparation_key(area.width, &self.markdown_picker) {
+                if let Some(preparation) = &mut self.source_window_preparation {
+                    if let Err(error) = preparation.request(
+                        id,
+                        key.clone(),
+                        usize::from(editor.source_scroll_col()),
+                        editor.textarea.lines(),
+                    ) {
+                        self.status_message = Some(format!("Source window preparation: {error}"));
+                        editor.preparation_error = Some(error);
+                    }
+                }
+                if let (Some(syntax), Some(window)) =
+                    (&mut self.source_window_syntax, editor.installed_window())
+                {
+                    if window.key.same_geometry(&key) {
+                        if let Err(error) = syntax.request(
+                            id,
+                            key,
+                            window.viewport.clone(),
+                            editor.textarea.lines(),
+                        ) {
+                            self.status_message =
+                                Some(format!("Source syntax preparation: {error}"));
+                            editor.preparation_error = Some(error);
+                        }
+                    }
+                }
+            }
             return;
         }
-        let Some(path) = editor.path.clone() else {
-            return;
+        editor.clear_source_window();
+        if let Some(windows) = &mut self.source_window_preparation {
+            windows.cancel_pane(id);
+        }
+        if let Some(syntax) = &mut self.source_window_syntax {
+            syntax.cancel_pane(id);
+        }
+        if let Some(key) = editor.preparation_key(area.width, &self.markdown_picker) {
+            editor.fence_preparation(&key);
+        }
+        if let Some(preparation) = &mut self.document_preparation {
+            if let Err(error) = preparation.request(id, editor, area.width, &self.markdown_picker) {
+                editor.preparation_error = Some(error);
+            }
+        }
+    }
+    /// Stale immutable leaves retire on the CPU bank. Only one newest complete
+    /// replacement per visible pane waits for install metadata admission.
+    pub fn collect_document_preparation(&mut self) -> bool {
+        let visible = self.displayed_pane_ids();
+        for (id, pane) in &mut self.panes {
+            if !visible.contains(id) {
+                if let PaneRuntime::Editor(editor) = pane {
+                    editor.clear_preparation();
+                    editor.clear_source_window();
+                }
+            }
+        }
+        let rendered: Vec<_> = visible.iter().copied().filter(|id| matches!(self.panes.get(id), Some(PaneRuntime::Editor(e)) if e.view_mode == EditorViewMode::Rendered)).collect();
+        let source: Vec<_> = visible.iter().copied().filter(|id| matches!(self.panes.get(id), Some(PaneRuntime::Editor(e)) if e.view_mode == EditorViewMode::Source)).collect();
+        let mut changed = false;
+        let completed = if let Some(preparation) = &mut self.document_preparation {
+            preparation.retain_visible(&rendered);
+            preparation.collect()
+        } else {
+            Vec::new()
         };
-        let source = editor.textarea.lines().join("\n");
-        let base_dir = path.parent().unwrap_or(&self.session_cwd).to_path_buf();
-        let document = crate::markdown::document::parse(&source, &base_dir);
-        editor.rendered = Some(crate::markdown::render::render(
-            &document,
-            &self.markdown_picker,
-            &mut self.markdown_rasterizer,
-            width,
-            editor.heading_rendering,
-        ));
-        editor.rendered_width = width;
+        for completion in completed {
+            let width = self.editor_content_area(completion.id).width;
+            if let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&completion.id) {
+                changed |= editor.install_preparation(completion, &self.markdown_picker, width);
+            }
+        }
+        if let Some(windows) = &mut self.source_window_preparation {
+            windows.retain_visible(&source);
+            for completion in windows.collect() {
+                self.pending_source_windows
+                    .retain(|old| old.id != completion.id);
+                self.pending_source_windows.push(completion);
+            }
+        }
+        if let Some(syntax) = &mut self.source_window_syntax {
+            syntax.retain_visible(&source);
+            for completion in syntax.collect() {
+                self.pending_source_styles
+                    .retain(|old| old.id != completion.id);
+                self.pending_source_styles.push(completion);
+            }
+        }
+        let pending = std::mem::take(&mut self.pending_source_windows);
+        for completion in pending {
+            let area = self.editor_content_area(completion.id);
+            let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&completion.id) else {
+                continue;
+            };
+            editor.set_preparation_height(area.height);
+            let Some(key) = editor.window_preparation_key(area.width, &self.markdown_picker) else {
+                continue;
+            };
+            if !source.contains(&completion.id)
+                || !key.same_geometry(&completion.key)
+                || key.top != completion.key.top
+                || key.cursor != completion.key.cursor
+                || key.follow != completion.key.follow
+            {
+                continue;
+            }
+            if editor.install_window(&completion, &self.markdown_picker, area.width) {
+                changed = true;
+            } else {
+                self.pending_source_windows.push(completion);
+            }
+        }
+        let pending = std::mem::take(&mut self.pending_source_styles);
+        for completion in pending {
+            let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&completion.id) else {
+                continue;
+            };
+            let Some(window) = editor.installed_window() else {
+                continue;
+            };
+            if !source.contains(&completion.id)
+                || !window.key.same_geometry(&completion.key)
+                || !std::sync::Arc::ptr_eq(&window.viewport.rows, &completion.base.rows)
+            {
+                continue;
+            }
+            if editor.install_window_styles(&completion) {
+                changed = true;
+            } else {
+                self.pending_source_styles.push(completion);
+            }
+        }
+        for id in visible {
+            self.rebuild_rendered_markdown(id);
+        }
+        changed
+    }
+    pub(crate) fn cancel_source_windows(&mut self) {
+        if let Some(windows) = &mut self.source_window_preparation {
+            windows.cancel();
+        }
+        if let Some(syntax) = &mut self.source_window_syntax {
+            syntax.cancel();
+        }
+        self.pending_source_windows.clear();
+        self.pending_source_styles.clear();
+        self.composed_editor_sources.clear();
+        for pane in self.panes.values_mut() {
+            if let PaneRuntime::Editor(editor) = pane {
+                editor.clear_source_window();
+            }
+        }
+    }
+    pub(crate) fn release_editor_frame_owners(&mut self) {
+        self.cancel_source_windows();
+        if let Some(geometry) = &mut self.emitted_geometry {
+            geometry.editor_sources.clear();
+        }
+    }
+    pub(crate) fn emitted_editor_source(
+        &self,
+        id: NodeId,
+    ) -> Option<&crate::source_window_surface::PaintedWindow> {
+        self.emitted_geometry
+            .as_ref()
+            .filter(|geometry| geometry.mode == std::mem::discriminant(&self.mode))?
+            .editor_sources
+            .iter()
+            .find(|(pane, _)| *pane == id)
+            .map(|(_, source)| source)
+    }
+    pub(crate) fn submit_terminal_event(
+        &mut self,
+        event: ilium_ipc::ServerEvent,
+    ) -> Result<(), Box<ilium_ipc::ServerEvent>> {
+        use crate::terminal_parsing::PaneCommand;
+        let (pane_id, body) = match event {
+            ilium_ipc::ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence,
+                sequence,
+                bytes,
+            } => {
+                let track = self.tree.get(pane_id).is_some_and(|node| {
+                    matches!(
+                        node.kind,
+                        ilium_core::NodeKind::Pane {
+                            content: ilium_core::PaneContentKind::Terminal,
+                            status: ilium_core::PaneStatus::PlainShell,
+                            ..
+                        }
+                    )
+                });
+                (
+                    pane_id,
+                    PaneCommand::Output {
+                        first: first_sequence,
+                        sequence,
+                        bytes,
+                        track,
+                    },
+                )
+            }
+            ilium_ipc::ServerEvent::TerminalReplay {
+                pane_id,
+                through_sequence,
+                bytes,
+                is_complete,
+            } => (
+                pane_id,
+                PaneCommand::Replay {
+                    sequence: through_sequence,
+                    bytes,
+                    complete: is_complete,
+                },
+            ),
+            other => return Err(Box::new(other)),
+        };
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
+            return Ok(());
+        };
+        if view.is_confirmed_removed() {
+            let (first_sequence, through_sequence, byte_count) = match &body {
+                PaneCommand::Output {
+                    first,
+                    sequence,
+                    bytes,
+                    ..
+                } => (*first, *sequence, bytes.len()),
+                PaneCommand::Replay {
+                    sequence, bytes, ..
+                } => (*sequence, *sequence, bytes.len()),
+                _ => (0, 0, 0),
+            };
+            tracing::warn!(
+                ?pane_id,
+                first_sequence,
+                through_sequence,
+                byte_count,
+                reason = "confirmed_server_snapshot_removal",
+                "received terminal output canceled for the exact retired pane instance"
+            );
+            self.status_message =
+                Some("Terminal output canceled after confirmed server pane removal".into());
+            // The original bytes and incoming owner release here only after
+            // authoritative removal; no successful parser ordinal is invented.
+            return Ok(());
+        }
+        if let Some(parsing) = &self.terminal_parsing {
+            if let Err(error) = parsing.attach(pane_id, view) {
+                view.admission_error = Some(error);
+            }
+        }
+        let rejected = if let Some(frontend) = &mut view.frontend {
+            frontend.submit(body).err()
+        } else {
+            Some(body)
+        };
+        match rejected {
+            None => Ok(()),
+            Some(PaneCommand::Output {
+                first,
+                sequence,
+                bytes,
+                ..
+            }) => Err(Box::new(ilium_ipc::ServerEvent::ScreenUpdate {
+                pane_id,
+                first_sequence: first,
+                sequence,
+                bytes,
+            })),
+            Some(PaneCommand::Replay {
+                sequence,
+                bytes,
+                complete,
+            }) => Err(Box::new(ilium_ipc::ServerEvent::TerminalReplay {
+                pane_id,
+                through_sequence: sequence,
+                bytes,
+                is_complete: complete,
+            })),
+            _ => Ok(()),
+        }
+    }
+    pub(crate) fn collect_terminal_parsing(&mut self) -> bool {
+        if let Some(error) = self
+            .terminal_parsing
+            .as_mut()
+            .and_then(|parsing| parsing.failure())
+        {
+            self.status_message = Some(error);
+        }
+        let Some(parsing) = &self.terminal_parsing else {
+            return false;
+        };
+        let results = parsing.collect();
+        let mut changed = false;
+        for result in results {
+            use crate::terminal_parsing::ParseResult;
+            match result {
+                ParseResult::Published {
+                    target,
+                    ordinal,
+                    snapshot,
+                    evidence,
+                } => {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
+                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
+                            view.install(snapshot, ordinal);
+                            self.record_terminal_screen_change(target.pane_id, evidence);
+                            changed |= self.is_pane_displayed(target.pane_id);
+                        }
+                    }
+                }
+                ParseResult::Acknowledged {
+                    target,
+                    ordinal,
+                    evidence,
+                } => {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
+                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
+                            view.applied_ordinal = ordinal;
+                            self.record_terminal_screen_change(target.pane_id, evidence);
+                        }
+                    }
+                }
+                ParseResult::Error { target, message } => {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
+                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
+                            view.admission_error = Some(message.clone());
+                            self.status_message = Some(message);
+                            changed = true;
+                        }
+                    }
+                }
+                ParseResult::InputBarrier {
+                    target,
+                    generation,
+                    ordinal,
+                    sequence,
+                    mouse,
+                    paste,
+                } => {
+                    let valid = matches!(self.panes.get(&target.pane_id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,&target.identity));
+                    if valid {
+                        self.terminal_input.record_ready_barrier(
+                            target.pane_id,
+                            &target.identity,
+                            generation,
+                            (mouse, paste, ordinal, sequence),
+                        );
+                    }
+                }
+                #[cfg(test)]
+                ParseResult::CaptureFailed {
+                    target,
+                    generation,
+                    message,
+                } => {
+                    if self.pending_smart_copy_capture.as_ref().is_some_and(
+                        |(pane, identity, pending)| {
+                            *pane == target.pane_id
+                                && *pending == generation
+                                && std::sync::Arc::ptr_eq(identity, &target.identity)
+                        },
+                    ) {
+                        self.pending_smart_copy_capture = None;
+                        self.mode = Mode::Normal;
+                        self.status_message = Some(message);
+                        changed = true;
+                    }
+                }
+                #[cfg(test)]
+                ParseResult::Capture {
+                    target,
+                    generation,
+                    snapshot,
+                } => {
+                    if self.pending_smart_copy_capture.as_ref().is_some_and(
+                        |(pane, identity, pending)| {
+                            *pane == target.pane_id
+                                && *pending == generation
+                                && std::sync::Arc::ptr_eq(identity, &target.identity)
+                        },
+                    ) {
+                        self.pending_smart_copy_capture = None;
+                        self.complete_smart_copy_capture(target.pane_id, generation, snapshot);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        changed |= self.publish_ready_terminal_inputs();
+        let Some(parsing) = &self.terminal_parsing else {
+            return changed;
+        };
+        for (id, pane) in &mut self.panes {
+            if let PaneRuntime::Terminal(view) = pane {
+                if let Err(error) = parsing.attach(*id, view) {
+                    view.admission_error = Some(error);
+                }
+                if let Some(frontend) = &mut view.frontend {
+                    frontend.retry();
+                }
+            }
+        }
+        let cancelled = self.terminal_input.retain(|id,identity| matches!(self.panes.get(&id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,identity)));
+        if cancelled != 0 {
+            self.status_message=Some(format!("Cancelled {cancelled} queued terminal inputs after confirmed pane removal/replacement"));
+        }
+        for (id, identity) in self.terminal_input.needs_barriers() {
+            let Some(generation) = self.terminal_input.next_generation() else {
+                self.status_message = Some("Terminal input barrier generation exhausted".into());
+                break;
+            };
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&id) {
+                if std::sync::Arc::ptr_eq(&view.identity, &identity) {
+                    if let Some(frontend) = &mut view.frontend {
+                        if frontend
+                            .submit_intent(crate::terminal_parsing::PaneCommand::InputBarrier {
+                                generation,
+                            })
+                            .is_ok()
+                        {
+                            self.terminal_input.barrier_started(id, generation);
+                        }
+                    }
+                }
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn prepare_terminal_shutdown(&mut self) {
+        self.exit_smart_copy();
+        self.terminal_selection = None;
+        self.terminal_selection_source = None;
+        self.emitted_geometry = None;
+        self.composed_tree_rows = None;
+        self.composed_terminal_sources.clear();
+        self.composed_editor_sources.clear();
+        self.composition_metadata = None;
+        self.pending_terminal_context = None;
+        self.pending_terminal_link = None;
+        self.pending_terminal_link_storage = None;
+        if let Some(preparation) = &mut self.terminal_context_preparation {
+            preparation.cancel();
+        }
+        // Menu/search copies no longer serve an interaction after detach.
+        // Releasing their pins permits the final ordered parser publication.
+        self.modal_stack
+            .retain(|mode| !matches!(mode, Mode::TerminalPaneContextMenu(_) | Mode::SmartCopy));
+    }
+
+    pub(crate) fn terminal_pending_work(&self) -> (usize, usize, Option<(usize, usize)>) {
+        let frontend = self
+            .panes
+            .values()
+            .filter_map(|pane| match pane {
+                PaneRuntime::Terminal(view) => view.frontend.as_ref(),
+                _ => None,
+            })
+            .map(|frontend| frontend.pending_len())
+            .sum::<usize>();
+        (
+            self.pending_terminal_events.len(),
+            self.terminal_input.pending_count().saturating_add(frontend),
+            self.terminal_parsing
+                .as_ref()
+                .and_then(|parser| parser.pending_work()),
+        )
+    }
+
+    fn publish_ready_terminal_inputs(&mut self) -> bool {
+        if self.native_paste_failure.is_some() {
+            return false;
+        }
+        // A native read can complete after removal/replacement but before the
+        // next parser tick prunes its queue. Recheck the actual destination at
+        // publication; a stopped agent on the same terminal remains valid.
+        let cancelled = self.terminal_input.retain(|pane_id, identity| {
+            matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(view))
+                if std::sync::Arc::ptr_eq(&view.identity, identity))
+        });
+        if cancelled != 0 {
+            tracing::warn!(
+                cancelled,
+                "queued terminal input cancelled after confirmed pane removal/replacement"
+            );
+            self.status_message = Some(format!(
+                "Cancelled {cancelled} queued terminal inputs after confirmed pane removal/replacement"
+            ));
+        }
+        let mut changed = cancelled != 0;
+        for pane_id in self.terminal_input.ready_panes() {
+            let Some((intent, modes)) = self.terminal_input.ready_front(pane_id) else {
+                continue;
+            };
+            if let crate::terminal_input::InputIntent::NativePaste(event) = intent {
+                if event.paste_wire_bytes(modes.1) > ilium_ipc::MAX_FRAME_LEN as usize {
+                    if let Some((crate::terminal_input::InputIntent::NativePaste(event), _)) =
+                        self.terminal_input.complete_ready(pane_id)
+                    {
+                        self.native_paste_failure =
+                            Some(crate::terminal_input_owner::InputFailure::refused(
+                                ilium_execution::RejectReason::InputBytes,
+                                event,
+                            ));
+                    }
+                    break;
+                }
+            }
+            let reservation = if matches!(
+                intent,
+                crate::terminal_input::InputIntent::AdmittedRequest(_)
+                    | crate::terminal_input::InputIntent::LinkProbe { .. }
+            ) {
+                None
+            } else {
+                let Some(client) = &self.outbound_admission else {
+                    if matches!(intent, crate::terminal_input::InputIntent::NativePaste(_)) {
+                        if let Some((crate::terminal_input::InputIntent::NativePaste(event), _)) =
+                            self.terminal_input.complete_ready(pane_id)
+                        {
+                            self.native_paste_failure =
+                                Some(crate::terminal_input_owner::InputFailure::refused(
+                                    ilium_execution::RejectReason::Closed,
+                                    event,
+                                ));
+                        }
+                    }
+                    break;
+                };
+                let bytes = intent.bytes().saturating_mul(2).saturating_add(4096);
+                let reservation = match crate::ipc_preparation::reserve_request(client, bytes) {
+                    Ok(reservation) => reservation,
+                    Err(reason) => {
+                        if matches!(intent, crate::terminal_input::InputIntent::NativePaste(_))
+                            && matches!(
+                                reason,
+                                ilium_execution::RejectReason::Closed
+                                    | ilium_execution::RejectReason::InvalidCost
+                                    | ilium_execution::RejectReason::AccountingPoisoned
+                            )
+                        {
+                            if let Some((
+                                crate::terminal_input::InputIntent::NativePaste(event),
+                                _,
+                            )) = self.terminal_input.complete_ready(pane_id)
+                            {
+                                self.native_paste_failure =
+                                    Some(crate::terminal_input_owner::InputFailure::refused(
+                                        reason, event,
+                                    ));
+                            }
+                            break;
+                        }
+                        continue;
+                    }
+                };
+                if reservation
+                    .validate_value_type::<crate::terminal_input::InputIntent>()
+                    .is_err()
+                {
+                    continue;
+                }
+                let Ok(placeholder) = reservation.retain(()) else {
+                    continue;
+                };
+                let (_placeholder, retention) = placeholder.into_parts();
+                Some(retention)
+            };
+            let Some((intent, (mouse, paste, ordinal, sequence))) =
+                self.terminal_input.complete_ready(pane_id)
+            else {
+                continue;
+            };
+            if let Some(retention) = reservation {
+                self.pending_input_retention = Some(retention);
+                self.deliver_terminal_input(pane_id, intent, mouse, paste, ordinal, sequence);
+                self.pending_input_retention = None;
+            } else {
+                self.deliver_terminal_input(pane_id, intent, mouse, paste, ordinal, sequence);
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    fn queue_preflighted_terminal_request(&mut self, request: ClientRequest) {
+        if let Some(retention) = self.pending_input_retention.take() {
+            self.queue_terminal_request_after_barrier(retention.retain(request));
+        } else {
+            self.queue_request(request);
+        }
+    }
+
+    fn deliver_terminal_input(
+        &mut self,
+        pane_id: NodeId,
+        intent: crate::terminal_input::InputIntent,
+        mouse: bool,
+        paste: bool,
+        _ordinal: u64,
+        _sequence: u64,
+    ) {
+        use crate::terminal_input::InputIntent;
+        match intent {
+            InputIntent::AdmittedRequest(request) => {
+                self.queue_terminal_request_after_barrier(request)
+            }
+            InputIntent::LinkProbe {
+                id,
+                request,
+                completion,
+                layout_revision: captured_layout_revision,
+                forward_mouse,
+                ..
+            } => {
+                let Some(completion) = completion else {
+                    self.status_message =
+                        Some("Terminal link completion unavailable; click cancelled".into());
+                    return;
+                };
+                match completion.result {
+                    Ok(result) => {
+                        let (prepared, job_hold) = result.into_parts();
+                        if let Some(link) = prepared.link {
+                            self.status_message = Some(format!(
+                                "Link selected: {} — Ctrl+O opens, Ctrl+C copies, Esc cancels",
+                                link.display()
+                            ));
+                            self.pending_terminal_link = Some(link);
+                            self.pending_terminal_link_storage = prepared.storage;
+                        } else if forward_mouse {
+                            self.queue_terminal_request_after_barrier(request);
+                        }
+                        drop(job_hold);
+                    }
+                    Err(error) => {
+                        tracing::warn!(pane_id=pane_id.0, click_id=id, ?captured_layout_revision, barrier_ordinal=_ordinal,
+                            barrier_sequence=_sequence, request=?request.view(), %error, "terminal link probe cancelled before original mouse delivery");
+                        self.status_message =
+                            Some(format!("Terminal link click {id} cancelled: {error}"));
+                    }
+                }
+            }
+            InputIntent::ClipboardPaste { completion, .. } => {
+                let Some(completion) = completion else {
+                    self.status_message = Some("Clipboard paste completion unavailable".into());
+                    return;
+                };
+                let mut result = None;
+                let hold = completion.map(|completion| result = Some(completion.result));
+                match result {
+                    Some(Ok(text)) => {
+                        self.deliver_terminal_input(
+                            pane_id,
+                            InputIntent::Paste(text),
+                            mouse,
+                            paste,
+                            _ordinal,
+                            _sequence,
+                        );
+                        self.status_message = Some("Clipboard pasted into terminal".into());
+                    }
+                    Some(Err(error)) => {
+                        self.status_message = Some(format!("Could not read clipboard: {error}"))
+                    }
+                    None => {
+                        self.status_message = Some("Clipboard read completion unavailable".into())
+                    }
+                }
+                drop(hold);
+            }
+            InputIntent::NativePaste(event) => {
+                event.dispatch_paste(|text| {
+                    let bytes = if paste {
+                        encode_bracketed_paste(&text)
+                    } else {
+                        text.into_bytes()
+                    };
+                    self.queue_preflighted_terminal_request(ClientRequest::UserKeyInput {
+                        pane_id,
+                        bytes,
+                        submission: None,
+                        prompt_epoch: None,
+                    });
+                });
+            }
+            InputIntent::Paste(text) => {
+                let bytes = if paste {
+                    encode_bracketed_paste(&text)
+                } else {
+                    text.into_bytes()
+                };
+                self.queue_preflighted_terminal_request(ClientRequest::UserKeyInput {
+                    pane_id,
+                    bytes,
+                    submission: None,
+                    prompt_epoch: None,
+                });
+            }
+            InputIntent::Wheel {
+                request,
+                up,
+                recovery,
+                layout_revision: _captured_layout_revision,
+            } => {
+                // Admission can precede the same pane's crash. Retained mouse
+                // modes must not forward a queued wheel to an unavailable agent.
+                if recovery || self.tree.agent_recovery(pane_id).is_some() || !mouse {
+                    if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+                        if let Some(frontend) = &mut view.frontend {
+                            let effect = if up {
+                                crate::terminal_parsing::PaneCommand::ScrollUp(
+                                    TERMINAL_WHEEL_SCROLL_LINES,
+                                )
+                            } else {
+                                crate::terminal_parsing::PaneCommand::ScrollDown(
+                                    TERMINAL_WHEEL_SCROLL_LINES,
+                                )
+                            };
+                            if let Err(error) = frontend.submit_input_effect(effect) {
+                                self.status_message = Some(error);
+                            }
+                        }
+                    }
+                    self.clear_terminal_selection_for(pane_id);
+                } else {
+                    self.queue_preflighted_terminal_request(request);
+                }
+            }
+        }
     }
 
     /// Focuses `id` (a pane) both in the tree selection and as the right-panel
@@ -7917,7 +11054,7 @@ impl App {
                     if self.tree.get(*leaf).is_some() {
                         self.path_to(*leaf) != *path
                     } else {
-                        crate::tree_ui::folder_entry(&self.tree, *leaf)
+                        crate::tree_ui::folder_entry(&self.tree, *leaf, &self.sidebar_snapshot)
                             .is_none_or(|entry| entry.identifier_path != *path)
                     }
                 }
@@ -8023,28 +11160,31 @@ impl App {
 
     /// Queues a `NewPane` request for a plain shell under `parent_group`
     /// (the caller resolves that group -- see `group_for_new_node`).
-    pub fn request_new_terminal(&mut self, parent_group: NodeId) {
-        self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
-        self.queue_request(ClientRequest::NewPane {
+    pub fn request_new_terminal(&mut self, parent_group: NodeId) -> bool {
+        let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: self.new_pane_working_directory(),
         });
+        if admitted {
+            self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
+        }
+        admitted
     }
 
     /// Queues a `NewPane` request for a specific command line (e.g.
     /// `claude`, `codex`, `agy`) under `parent_group`.
-    pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) {
-        self.record_pending_pane_focus(
-            parent_group,
-            PaneContentKind::Terminal,
-            command_line.clone(),
-        );
-        self.queue_request(ClientRequest::NewPane {
+    pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) -> bool {
+        let pending_title = command_line.clone();
+        let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
             working_directory: self.new_pane_working_directory(),
         });
+        if admitted {
+            self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+        }
+        admitted
     }
 
     /// Queues one server-owned spawn-and-submit operation. Keeping the first
@@ -8055,13 +11195,9 @@ impl App {
         parent_group: NodeId,
         command_line: String,
         initial_input: String,
-    ) {
-        self.record_pending_pane_focus(
-            parent_group,
-            PaneContentKind::Terminal,
-            command_line.clone(),
-        );
-        self.queue_request(ClientRequest::NewPane {
+    ) -> bool {
+        let pending_title = command_line.clone();
+        let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line,
@@ -8069,13 +11205,17 @@ impl App {
             },
             working_directory: self.new_pane_working_directory(),
         });
+        if admitted {
+            self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+        }
+        admitted
     }
 
     /// Queues a `NewPane` request for the file picked in `Mode::Explorer`,
     /// and remembers it in `pending_editor_opens` so this client can load
     /// its own content locally once the server confirms the new node.
-    pub fn request_new_editor(&mut self, parent_group: NodeId, path: PathBuf) {
-        self.request_new_editor_at(parent_group, path, None, None);
+    pub fn request_new_editor(&mut self, parent_group: NodeId, path: PathBuf) -> bool {
+        self.request_new_editor_at(parent_group, path, None, None)
     }
 
     pub fn request_new_editor_at(
@@ -8084,11 +11224,18 @@ impl App {
         path: PathBuf,
         line: Option<u32>,
         column: Option<u32>,
-    ) {
+    ) -> bool {
         let basename = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        if !self.queue_request(ClientRequest::NewPane {
+            parent_group,
+            kind: ilium_ipc::NewPaneKind::Editor(path.clone()),
+            working_directory: self.new_pane_working_directory(),
+        }) {
+            return false;
+        }
         // Bounded, oldest-first eviction: an entry only survives this long
         // if its `NewPane` request was never confirmed (see
         // `pending_editor_opens`'s doc comment), so the oldest entry is the
@@ -8103,11 +11250,7 @@ impl App {
             column,
         });
         self.record_pending_pane_focus(parent_group, PaneContentKind::Editor, basename);
-        self.queue_request(ClientRequest::NewPane {
-            parent_group,
-            kind: ilium_ipc::NewPaneKind::Editor(path),
-            working_directory: self.new_pane_working_directory(),
-        });
+        true
     }
 
     fn new_pane_working_directory(&self) -> ilium_ipc::NewPaneWorkingDirectory {
@@ -8126,8 +11269,39 @@ impl App {
 
     /// Queues a `ClosePane` request. The tree/pane-runtime removal itself
     /// only happens once the server confirms it via the next `TreeSnapshot`.
-    pub fn request_close(&mut self, target: NodeId) {
-        self.queue_request(ClientRequest::ClosePane { pane_id: target });
+    pub fn request_close(&mut self, target: NodeId) -> bool {
+        let emptied_ancestor = self.empty_group_ancestor_after_close(target);
+        let is_admitted = self.queue_request(ClientRequest::ClosePane { pane_id: target });
+        if is_admitted {
+            if let Some(group_id) = emptied_ancestor {
+                self.queue_request(ClientRequest::ClosePane { pane_id: group_id });
+            }
+        }
+        is_admitted
+    }
+
+    /// Topmost group that becomes empty once `target` is closed, when
+    /// `auto_remove_empty_groups` is on. Only plain groups qualify: projects,
+    /// split views and the root stay even when empty.
+    fn empty_group_ancestor_after_close(&self, target: NodeId) -> Option<NodeId> {
+        if !self.ui_settings.auto_remove_empty_groups {
+            return None;
+        }
+        let mut emptied = None;
+        let mut current = target;
+        while let Some(parent_id) = self.tree.parent_of(current) {
+            let parent = self.tree.get(parent_id)?;
+            let only_child = self
+                .tree
+                .children_of(parent_id)
+                .is_ok_and(|children| children == [current]);
+            if parent_id == ROOT_ID || !parent.is_group() || !only_child {
+                break;
+            }
+            emptied = Some(parent_id);
+            current = parent_id;
+        }
+        emptied
     }
 
     pub(crate) fn request_interactive_close(&mut self, target: NodeId) {
@@ -8173,16 +11347,24 @@ impl App {
     pub(crate) fn confirm_workspace_close_removal(&mut self, pane_id: NodeId) {
         self.mode = Mode::Normal;
         let request_id = self.next_workspace_request_id();
-        self.queue_request(ClientRequest::ClosePaneWithWorkspaceDisposition {
+        let emptied_ancestor = self.empty_group_ancestor_after_close(pane_id);
+        let is_admitted = self.queue_request(ClientRequest::ClosePaneWithWorkspaceDisposition {
             request_id,
             pane_id,
             disposition: ilium_ipc::WorkspaceDisposition::RemoveWorktree,
         });
+        if let (true, Some(group_id)) = (is_admitted, emptied_ancestor) {
+            self.queue_request(ClientRequest::ClosePane { pane_id: group_id });
+        }
     }
 
-    pub fn request_move(&mut self, node_id: NodeId, direction: ilium_core::TreeMoveDirection) {
+    pub fn request_move(
+        &mut self,
+        node_id: NodeId,
+        direction: ilium_core::TreeMoveDirection,
+    ) -> bool {
         self.restore_manual_tree_order_for_mutation();
-        self.queue_request(ClientRequest::MoveNode { node_id, direction });
+        self.queue_request(ClientRequest::MoveNode { node_id, direction })
     }
 
     /// Queues an idempotent bookmark assignment. The server remains the
@@ -8200,13 +11382,18 @@ impl App {
     /// keybindings (`crate::keys`). The tree itself only changes once the
     /// server confirms it via the next `TreeSnapshot`, same as every other
     /// structural request.
-    pub fn request_reparent(&mut self, node_id: NodeId, new_parent: NodeId, index: Option<usize>) {
+    pub fn request_reparent(
+        &mut self,
+        node_id: NodeId,
+        new_parent: NodeId,
+        index: Option<usize>,
+    ) -> bool {
         self.restore_manual_tree_order_for_mutation();
         self.queue_request(ClientRequest::ReparentNode {
             node_id,
             new_parent,
             index,
-        });
+        })
     }
 
     /// Every direct tree-order mutation opts out of an automatic view first.
@@ -8232,13 +11419,13 @@ impl App {
         title: String,
         short_title: Option<String>,
         inferred_icon: Option<String>,
-    ) {
+    ) -> bool {
         self.queue_request(ClientRequest::RenameNode {
             node_id,
             title,
             short_title,
             inferred_icon,
-        });
+        })
     }
 
     /// Queues a title proposed by an automatic source with no agent-session
@@ -8270,6 +11457,8 @@ impl App {
             pane_id: request.pane_id,
             expected_session_id: request.expected_session_id,
             expected_title_generation: request.expected_title_generation,
+            expected_presentation_revision: request.expected_presentation_revision,
+            expected_process_id: request.expected_process_id,
             title: request.title,
             short_title: request.short_title,
             inferred_icon: request.inferred_icon,
@@ -8279,25 +11468,25 @@ impl App {
 
     /// Queues a `NewGroup` request. `name` defaults to `"group"` when
     /// blank, matching the create-group dialog's placeholder text.
-    pub fn request_new_group(&mut self, parent_group: NodeId, name: String) {
+    pub fn request_new_group(&mut self, parent_group: NodeId, name: String) -> bool {
         let name = if name.trim().is_empty() {
             "group".to_string()
         } else {
             name
         };
-        self.queue_request(ClientRequest::NewGroup { parent_group, name });
+        self.queue_request(ClientRequest::NewGroup { parent_group, name })
     }
 
-    pub fn request_new_folder(&mut self, parent_group: NodeId, path: PathBuf) {
-        self.queue_request(ClientRequest::NewFolder { parent_group, path });
+    pub fn request_new_folder(&mut self, parent_group: NodeId, path: PathBuf) -> bool {
+        self.queue_request(ClientRequest::NewFolder { parent_group, path })
     }
 
-    pub fn request_new_project(&mut self, path: PathBuf) {
-        self.queue_request(ClientRequest::NewProject { path });
+    pub fn request_new_project(&mut self, path: PathBuf) -> bool {
+        self.queue_request(ClientRequest::NewProject { path })
     }
 
-    pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) {
-        self.queue_request(ClientRequest::ChangeProjectFolder { project_id, path });
+    pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) -> bool {
+        self.queue_request(ClientRequest::ChangeProjectFolder { project_id, path })
     }
 
     /// Adds a board pane backed by an existing Markdown file. The file is
@@ -8310,22 +11499,24 @@ impl App {
             self.status_message = Some("That board file is already open".to_string());
             return;
         }
-        if let Err(error) =
-            BoardPane::load(ilium_core::BoardStorage::MarkdownFile { path: path.clone() })
-        {
-            self.status_message = Some(format!("Could not open board: {error}"));
-            return;
-        }
-        let name = path
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "Board".to_string());
-        self.record_pending_pane_focus(parent_group, PaneContentKind::Board, name.clone());
-        self.queue_request(ClientRequest::NewBoard {
-            parent_group,
-            name,
-            storage: ilium_core::BoardStorage::MarkdownFile { path },
+        let storage = ilium_core::BoardStorage::MarkdownFile { path };
+        let result = self
+            .board_files
+            .as_mut()
+            .ok_or_else(|| "Board file worker unavailable".to_owned())
+            .and_then(|files| {
+                files.request(
+                    crate::filesystem::boards::BoardLoadTarget::Open {
+                        parent_group,
+                        storage: storage.clone(),
+                    },
+                    storage,
+                    false,
+                )
+            });
+        self.status_message = Some(match result {
+            Ok(()) => "Loading board…".into(),
+            Err(error) => error,
         });
     }
 
@@ -8333,18 +11524,26 @@ impl App {
     /// any unsaved editor buffer so the board reads the exact contents the
     /// user sees instead of an older on-disk revision.
     pub fn request_board_from_markdown_editor(&mut self, editor_pane_id: NodeId) {
-        let path = match self.panes.get_mut(&editor_pane_id) {
-            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() => {
-                if editor.dirty {
-                    if let Err(error) = editor.save() {
-                        self.status_message = Some(format!(
-                            "Could not save Markdown before opening board: {error}"
-                        ));
-                        return;
-                    }
-                }
+        let dirty_path = match self.panes.get(&editor_pane_id) {
+            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() && editor.dirty => {
                 editor.path.clone()
             }
+            _ => None,
+        };
+        if let Some(path) = dirty_path {
+            if let Err(error) = self.enqueue_editor_save(
+                editor_pane_id,
+                path,
+                crate::filesystem::editors::SavePurpose::OpenAsBoard,
+            ) {
+                self.status_message = Some(format!(
+                    "Could not save Markdown before opening board: {error}"
+                ));
+            }
+            return;
+        }
+        let path = match self.panes.get_mut(&editor_pane_id) {
+            Some(PaneRuntime::Editor(editor)) if editor.is_markdown() => editor.path.clone(),
             _ => self.restored_editor_paths.get(&editor_pane_id).cloned(),
         };
         let Some(path) = path.filter(|path| crate::editor_pane::is_markdown_path(path)) else {
@@ -8388,19 +11587,29 @@ impl App {
             .project_cwd_for_node(parent_group)
             .join(".ilium")
             .join("boards");
-        let mut suffix = 1_u32;
-        let default_path = loop {
-            let filename = if suffix == 1 {
-                "board.md".to_string()
-            } else {
-                format!("board-{suffix}.md")
-            };
-            let candidate = board_directory.join(filename);
-            if !candidate.exists() && self.board_pane_for_path(&candidate).is_none() {
-                break candidate;
+        let default_path = board_directory.join("board.md");
+        let occupied = self
+            .tree
+            .panes()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Pane {
+                    board_storage: Some(storage),
+                    ..
+                } => Some(storage.path().to_path_buf()),
+                _ => None,
+            })
+            .take(33)
+            .collect();
+        if let Some(files) = &mut self.board_files {
+            if let Err(error) = files.suggest(
+                parent_group,
+                default_path.clone(),
+                board_directory,
+                occupied,
+            ) {
+                self.status_message = Some(error);
             }
-            suffix = suffix.saturating_add(1);
-        };
+        }
         self.mode = Mode::CreateBoard(CreateBoardState {
             parent_group,
             name: TextPromptState::new("Board"),
@@ -8412,6 +11621,11 @@ impl App {
 
     pub fn commit_create_board(&mut self, state: &CreateBoardState) {
         use ilium_core::BoardStorage;
+        if state.name.buf.len() > 8192 || state.path.buf.len() > 64 * 1024 {
+            self.status_message = Some("Board creation command exceeds retained byte limit".into());
+            self.mode = Mode::CreateBoard(state.clone());
+            return;
+        }
         let entered_path = PathBuf::from(state.path.buf.trim());
         if entered_path.as_os_str().is_empty() {
             self.status_message = Some("Board storage path is required".to_string());
@@ -8429,28 +11643,25 @@ impl App {
             self.mode = Mode::Normal;
             return;
         }
-        let board_result = if storage.path().exists() {
-            BoardPane::load(storage.clone())
-        } else {
-            BoardPane::create(storage.clone())
-        };
-        if let Err(error) = board_result {
-            self.status_message = Some(format!("Could not create board: {error}"));
-            self.mode = Mode::CreateBoard(state.clone());
-            return;
-        }
-        let name = if state.name.buf.trim().is_empty() {
-            "Board".to_string()
-        } else {
-            state.name.buf.trim().to_string()
-        };
-        self.record_pending_pane_focus(state.parent_group, PaneContentKind::Board, name.clone());
-        self.queue_request(ClientRequest::NewBoard {
-            parent_group: state.parent_group,
-            name,
-            storage,
+        self.mode = Mode::CreateBoard(state.clone());
+        let result = self
+            .board_files
+            .as_mut()
+            .ok_or_else(|| "Board file worker unavailable".to_owned())
+            .and_then(|files| {
+                files.request(
+                    crate::filesystem::boards::BoardLoadTarget::Create(
+                        state.clone(),
+                        storage.clone(),
+                    ),
+                    storage,
+                    true,
+                )
+            });
+        self.status_message = Some(match result {
+            Ok(()) => "Creating board…".into(),
+            Err(error) => error,
         });
-        self.mode = Mode::Normal;
     }
 
     /// Resolves user-entered relative board storage against the canonical
@@ -8462,14 +11673,13 @@ impl App {
         } else {
             self.project_cwd_for_node(project_node).join(path)
         };
-        ilium_platform::paths::canonicalize(&absolute_path)
-            .unwrap_or_else(|_| normalize_path_lexically(&absolute_path))
+        normalize_path_lexically(&absolute_path)
     }
 
     /// Finds the one board pane already owning `path`, if any. Board storage
     /// is single-owner inside a session because each pane otherwise carries an
     /// independent client-local document copy capable of stale overwrites.
-    fn board_pane_for_path(&self, path: &Path) -> Option<NodeId> {
+    pub(crate) fn board_pane_for_path(&self, path: &Path) -> Option<NodeId> {
         let candidate = normalize_board_path(path.to_path_buf());
         self.tree.panes().find_map(|node| {
             let NodeKind::Pane {
@@ -8479,7 +11689,11 @@ impl App {
             else {
                 return None;
             };
-            (normalize_board_path(storage.path().to_path_buf()) == candidate).then_some(node.id)
+            let path = match self.panes.get(&node.id) {
+                Some(PaneRuntime::Board(board)) => board.storage.path(),
+                _ => storage.path(),
+            };
+            (normalize_board_path(path.to_path_buf()) == candidate).then_some(node.id)
         })
     }
 
@@ -8487,9 +11701,9 @@ impl App {
         let picker_root = self.project_cwd_for_node(state.parent_group);
         let picker = match state.storage_kind {
             BoardStorageKind::Folder => {
-                ExplorerOverlay::open_folder_for(&picker_root, "Use Folder")
+                self.open_explorer_overlay(&picker_root, Some("Use Folder"))
             }
-            BoardStorageKind::MarkdownFile => ExplorerOverlay::open_at(&picker_root),
+            BoardStorageKind::MarkdownFile => self.open_explorer_overlay(&picker_root, None),
         };
         match picker {
             Ok(picker) => self.push_modal_over(
@@ -8529,8 +11743,8 @@ impl App {
         };
         match board.add_card(title) {
             Ok(()) => {
-                self.status_message = Some("Card saved".to_string());
-                self.record_client_node_activity(pane_id);
+                self.remember_board_modal(pane_id);
+                self.status_message = Some("Saving card…".to_string());
             }
             Err(error) => self.status_message = Some(error),
         }
@@ -8546,8 +11760,8 @@ impl App {
         };
         match board.add_column(title) {
             Ok(()) => {
-                self.status_message = Some("Column saved".to_string());
-                self.record_client_node_activity(pane_id);
+                self.remember_board_modal(pane_id);
+                self.status_message = Some("Saving column…".to_string());
             }
             Err(error) => self.status_message = Some(error),
         }
@@ -8580,15 +11794,14 @@ impl App {
         let Some(PaneRuntime::Board(board)) = self.panes.get_mut(&pane_id) else {
             return;
         };
-        let content_revision_before = board.content_revision();
         let result = match target {
             BoardRenameTarget::Card => board.rename_selected_card(title),
             BoardRenameTarget::Column => board.rename_selected_column(title),
         };
         if let Err(error) = result {
             self.status_message = Some(error);
-        } else if board.content_revision() != content_revision_before {
-            self.record_client_node_activity(pane_id);
+        } else {
+            self.remember_board_modal(pane_id);
         }
     }
 
@@ -8615,7 +11828,8 @@ impl App {
         if let Err(error) = result {
             self.status_message = Some(error);
         } else {
-            self.record_client_node_activity(pane_id);
+            self.remember_board_modal(pane_id);
+            self.status_message = Some("Saving board…".into());
         }
     }
 
@@ -8683,12 +11897,15 @@ impl App {
 
     /// Queues a `NewGroup` request for the destination currently selected
     /// in `state`, named from its text field, and returns to `Mode::Normal`.
-    pub fn commit_create_group(&mut self, state: &CreateGroupState) {
-        self.mode = Mode::Normal;
+    pub fn commit_create_group(&mut self, state: &CreateGroupState) -> bool {
         let Some(destination) = state.destinations.get(state.selected_index) else {
-            return;
+            return false;
         };
-        self.request_new_group(destination.id, state.name.buf.clone());
+        let admitted = self.request_new_group(destination.id, state.name.buf.clone());
+        if admitted {
+            self.mode = Mode::Normal;
+        }
+        admitted
     }
 
     pub fn open_create_split_dialog(&mut self) {
@@ -8809,7 +12026,9 @@ impl App {
     /// deliberately a first-class path rather than a synthetic empty picker
     /// state, so the orientation dialog can truthfully offer both workflows.
     pub fn commit_empty_split(&mut self, orientation: SplitOrientation) {
-        self.queue_create_split(self.split_parent_group(), orientation, Vec::new());
+        if !self.queue_create_split(self.split_parent_group(), orientation, Vec::new()) {
+            self.mode = Mode::CreateSplitOrientation(CreateSplitOrientationState { orientation });
+        }
     }
 
     pub fn toggle_create_split_member(&mut self, state: &mut CreateSplitMembersState) {
@@ -8831,11 +12050,13 @@ impl App {
     pub fn commit_create_split(&mut self, state: CreateSplitMembersState) {
         let pane_ids = state
             .choices
-            .into_iter()
+            .iter()
             .filter(|choice| choice.selected)
             .map(|choice| choice.pane_id)
             .collect();
-        self.queue_create_split(state.parent_group, state.orientation, pane_ids);
+        if !self.queue_create_split(state.parent_group, state.orientation, pane_ids) {
+            self.mode = Mode::CreateSplitMembers(state);
+        }
     }
 
     /// Queues the single atomic server mutation shared by the empty and
@@ -8846,18 +12067,21 @@ impl App {
         parent_group: NodeId,
         orientation: SplitOrientation,
         pane_ids: Vec<NodeId>,
-    ) {
+    ) -> bool {
         let name = match orientation {
             SplitOrientation::Vertical => "Vertical split",
             SplitOrientation::Horizontal => "Horizontal split",
         };
-        self.queue_request(ClientRequest::CreateSplitView {
+        let admitted = self.queue_request(ClientRequest::CreateSplitView {
             parent_group,
             name: name.to_string(),
             orientation,
             pane_ids,
         });
-        self.mode = Mode::Normal;
+        if admitted {
+            self.mode = Mode::Normal;
+        }
+        admitted
     }
 
     /// Builds the right-click context menu for `target`, anchored at the
@@ -8880,6 +12104,8 @@ impl App {
             selected_index: 0,
             submenu: None,
             worktree_unavailable_reason: Some("Checking Git repository…".to_string()),
+            unavailable_retention: None,
+            unavailable_copies_retention: None,
             hover_candidate: None,
         });
         let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
@@ -8887,7 +12113,7 @@ impl App {
         self.active_workspace_menu_query = Some((request_id, project));
     }
 
-    fn next_workspace_request_id(&mut self) -> u64 {
+    pub(crate) fn next_workspace_request_id(&mut self) -> u64 {
         let request_id = self.next_workspace_request_id;
         self.next_workspace_request_id = request_id.wrapping_add(1).max(1);
         request_id
@@ -8982,14 +12208,18 @@ impl App {
             other => other,
         };
         let request_id = self.next_workspace_request_id();
-        self.active_workspace_create_request_id = Some(request_id);
-        self.queue_request(ClientRequest::CreateAgentInWorkspace {
+        if !self.queue_request(ClientRequest::CreateAgentInWorkspace {
             request_id,
             parent_group: state.parent_group,
             provider,
             spec,
             initial_input,
-        });
+        }) {
+            state.set_create_error("Request queue is full; retry when pending work completes");
+            self.mode = Mode::CreateAgentWorkspace(state);
+            return;
+        }
+        self.active_workspace_create_request_id = Some(request_id);
         state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
         self.mode = Mode::CreateAgentWorkspace(state);
     }
@@ -9002,7 +12232,7 @@ impl App {
         provider: BuiltinAgentProvider,
         spec: ilium_ipc::WorkspaceCreateSpec,
         initial_input: Option<String>,
-    ) -> u64 {
+    ) -> Result<u64, String> {
         let setup_command = self.git_settings.setup_command.clone();
         let spec = if setup_command.trim().is_empty() {
             spec
@@ -9029,16 +12259,96 @@ impl App {
             }
         };
         let request_id = self.next_workspace_request_id();
-        self.queue_request(ClientRequest::CreateAgentInWorkspace {
+        if !self.queue_request(ClientRequest::CreateAgentInWorkspace {
             request_id,
             parent_group,
             provider,
             spec,
             initial_input,
-        });
-        request_id
+        }) {
+            return Err(self
+                .status_message
+                .clone()
+                .unwrap_or_else(|| "Request admission refused".into()));
+        }
+        Ok(request_id)
     }
 
+    /// Source-shaped temporary/output allocations in exact incoming handlers.
+    pub(crate) fn incoming_derivation_bytes(
+        &self,
+        event: &ilium_ipc::ServerEvent,
+    ) -> Option<usize> {
+        match event {
+            ilium_ipc::ServerEvent::RepoFactsReported {
+                request_id,
+                project,
+                result,
+            } => self.repo_facts_derivation_bytes(*request_id, *project, result),
+            ilium_ipc::ServerEvent::Error { message }
+            | ilium_ipc::ServerEvent::PaneResizeRejected { message, .. } => {
+                Some(message.len().saturating_add(32).saturating_mul(2))
+            }
+            ilium_ipc::ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
+                let joined = reasons
+                    .iter()
+                    .fold(0usize, |bytes, reason| bytes.saturating_add(reason.len()))
+                    .saturating_add(reasons.len().saturating_sub(1).saturating_mul(2));
+                Some(joined.saturating_add(joined.saturating_add(64).saturating_mul(2)))
+            }
+            ilium_ipc::ServerEvent::WorkspacePruneCompleted { target, result, .. } => {
+                let joined = result
+                    .reasons
+                    .iter()
+                    .fold(0usize, |bytes, reason| bytes.saturating_add(reason.len()))
+                    .saturating_add(result.reasons.len().saturating_sub(1).saturating_mul(2));
+                let path = target.worktree_root.as_os_str().len().saturating_mul(3);
+                Some(
+                    joined.saturating_add(
+                        joined
+                            .saturating_add(path)
+                            .saturating_add(128)
+                            .saturating_mul(2),
+                    ),
+                )
+            }
+            ilium_ipc::ServerEvent::WorkspaceCreateFailed { request_id, error }
+                if self.active_workspace_create_request_id == Some(*request_id)
+                    && !matches!(self.mode, Mode::CreateAgentWorkspace(_)) =>
+            {
+                Some(error.len().saturating_add(64).saturating_mul(2))
+            }
+            _ => None,
+        }
+    }
+    pub(crate) fn repo_facts_derivation_bytes(
+        &self,
+        request_id: u64,
+        project: NodeId,
+        result: &Result<ilium_ipc::RepoFacts, String>,
+    ) -> Option<usize> {
+        if self.active_workspace_dialog_query == Some((request_id, project)) {
+            if let (Some(state), Ok(facts)) = (self.workspace_dialog_ref(), result) {
+                if state.project_id == project {
+                    return Some(state.facts_derivation_bytes(facts).unwrap_or(usize::MAX));
+                }
+            }
+        }
+        if self.active_workspace_menu_query == Some((request_id, project)) {
+            if let (Mode::ContextMenu(menu), Err(reason)) = (&self.mode, result) {
+                if self.tree.project_ancestor(menu.target).unwrap_or(ROOT_ID) == project {
+                    return Some(
+                        reason
+                            .len()
+                            .checked_mul(4)
+                            .and_then(|bytes| bytes.checked_add(4096))
+                            .unwrap_or(usize::MAX),
+                    );
+                }
+            }
+        }
+        None
+    }
     pub fn receive_repo_facts(
         &mut self,
         request_id: u64,
@@ -9047,11 +12357,20 @@ impl App {
     ) {
         if self.active_workspace_dialog_query == Some((request_id, project)) {
             self.active_workspace_dialog_query = None;
-            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+            let event_retention = self.processing_event_retention.clone();
+            let derivation_retention = self.processing_derivation_retention.clone();
+            if let Some(state) = self.workspace_dialog_mut() {
                 if state.project_id == project {
                     match result {
-                        Ok(facts) => state.apply_facts(facts),
-                        Err(error) => state.apply_facts_error(error),
+                        Ok(facts) => {
+                            state.apply_facts(facts);
+                            state.facts_retention = event_retention;
+                            state.derivation_retention = derivation_retention;
+                        }
+                        Err(error) => {
+                            state.apply_facts_error(error);
+                            state.status_retention = event_retention;
+                        }
                     }
                 }
             }
@@ -9062,7 +12381,13 @@ impl App {
             if let Mode::ContextMenu(menu) = &mut self.mode {
                 let menu_project = self.tree.project_ancestor(menu.target).unwrap_or(ROOT_ID);
                 if menu_project == project {
-                    menu.set_worktree_unavailable_reason(result.err());
+                    if let Err(reason) = menu.try_set_received_reason(
+                        result.err(),
+                        self.processing_event_retention.as_ref(),
+                        self.processing_derivation_retention.as_ref(),
+                    ) {
+                        self.status_message = Some(format!("Repository details remain pending: UI allocation admission refused ({reason:?})"));
+                    }
                 }
             }
             return;
@@ -9072,6 +12397,11 @@ impl App {
             if let Some(popover) = &mut self.agent_popover {
                 popover.enabled = result.is_ok();
                 popover.unavailable_reason = result.err();
+                popover.unavailable_retention = if popover.unavailable_reason.is_some() {
+                    self.processing_event_retention.clone()
+                } else {
+                    None
+                };
             }
         }
     }
@@ -9107,8 +12437,10 @@ impl App {
         self.active_workspace_create_request_id = None;
         if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
             state.set_create_error(error);
+            state.status_retention = self.processing_event_retention.clone();
         } else {
             self.status_message = Some(format!("Worktree creation failed: {error}"));
+            self.status_message_retention = self.processing_derivation_retention.clone();
         }
     }
 
@@ -9164,7 +12496,14 @@ impl App {
         result: Result<ilium_ipc::WorkspaceInventory, String>,
     ) {
         if let Mode::WorktreeManager(state) = &mut self.mode {
-            let _ = state.receive_inventory(request_id, project, result);
+            let success = result.is_ok();
+            if state.receive_inventory(request_id, project, result) {
+                if success {
+                    state.inventory_retention = self.processing_event_retention.clone();
+                } else {
+                    state.view_retention = self.processing_event_retention.clone();
+                }
+            }
         }
     }
 
@@ -9182,12 +12521,17 @@ impl App {
             result.reasons.join("; ")
         );
         let accepted = if let Mode::WorktreeManager(state) = &mut self.mode {
-            state.receive_prune(request_id, project, target, result)
+            let accepted = state.receive_prune(request_id, project, target, result);
+            if accepted {
+                state.view_retention = self.processing_event_retention.clone();
+            }
+            accepted
         } else {
             false
         };
         if !accepted {
             self.status_message = Some(summary);
+            self.status_message_retention = self.processing_derivation_retention.clone();
         }
     }
 
@@ -9284,6 +12628,362 @@ impl App {
     /// exact pane identifier so incoming PTY output cannot retarget a later
     /// menu click.
     pub fn open_terminal_pane_context_menu(
+        &mut self,
+        pane_id: NodeId,
+        source_row: usize,
+        click_column: usize,
+        column: u16,
+        row: u16,
+    ) {
+        #[cfg(test)]
+        if self.terminal_context_preparation.is_none() {
+            self.open_terminal_pane_context_menu_reference(
+                pane_id,
+                source_row,
+                click_column,
+                column,
+                row,
+            );
+            return;
+        }
+        let Some(source) = self
+            .selection_terminal_source(pane_id)
+            .cloned()
+            .or_else(|| self.emitted_terminal_source(pane_id))
+        else {
+            self.status_message = Some("Waiting for terminal presentation acknowledgement".into());
+            return;
+        };
+        let identity = source.identity.clone();
+        let snapshot_ordinal = source.ordinal;
+        let generation = self.next_terminal_context_generation;
+        let Some(next_generation) = self.next_terminal_context_generation.checked_add(1) else {
+            self.status_message = Some("Terminal context generation exhausted".into());
+            return;
+        };
+        self.next_terminal_context_generation = next_generation;
+        let home_dir = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let history_context = self.known_agent_history_context(pane_id);
+        let selection = self
+            .terminal_selection
+            .filter(|selection| selection.pane_id == pane_id && !selection.is_empty());
+        let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
+        let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
+        // Preserve the existing agent-debug entry point and its first-row
+        // activation contract when the user has explicitly enabled it. The
+        // activation itself still verifies that this exact pane is an agent.
+        if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
+            actions.push(TerminalContextAction::ShowAgentDebugLog);
+        }
+        if self.is_detected_agent_pane(pane_id) {
+            actions.push(TerminalContextAction::ToggleAgentToolbar {
+                currently_visible: self.shows_agent_toolbar(pane_id),
+            });
+        }
+        if history_context.is_some() {
+            let history_path = PathBuf::new();
+            actions
+                .push(TerminalContextAction::CopyHistoryFilePathToClipboard { path: history_path });
+        }
+        if selection.is_some() {
+            actions.push(TerminalContextAction::CopySelectionToClipboard);
+        }
+        let recovery = self.tree.get(pane_id).and_then(|node| match &node.kind {
+            NodeKind::Pane { status, .. } => status.agent_recovery(),
+            _ => None,
+        });
+        if let Some(recovery) = recovery {
+            if let Some(prompt) = recovery
+                .last_prompt
+                .as_deref()
+                .filter(|prompt| !prompt.is_empty())
+            {
+                actions.push(TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                    prompt: prompt.to_string(),
+                });
+            } else if recovery.latest_prompt_unavailable {
+                actions.push(TerminalContextAction::LastSubmittedPromptUnavailable);
+                if let Some(prompt) = recovery
+                    .previous_exact_prompt
+                    .as_deref()
+                    .filter(|prompt| !prompt.is_empty())
+                {
+                    actions.push(TerminalContextAction::CopyPreviousExactPromptToClipboard {
+                        prompt: prompt.to_string(),
+                    });
+                }
+            }
+        } else if let Some(prompt) = self
+            .tree
+            .last_prompt(pane_id)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            actions.push(TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                prompt: prompt.to_string(),
+            });
+        }
+        actions.extend([
+            TerminalContextAction::CopyLineToClipboard,
+            TerminalContextAction::CopyVisibleTerminalToClipboard,
+            TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+            TerminalContextAction::PasteClipboard,
+        ]);
+        actions.extend(screen_transfer_actions);
+        let key = crate::terminal_context_preparation::ContextKey {
+            pane_id,
+            identity,
+            generation,
+            column,
+            row,
+            snapshot_ordinal,
+        };
+        let Some(preparation) = &mut self.terminal_context_preparation else {
+            self.status_message = Some("Terminal context preparation is unavailable".into());
+            return;
+        };
+        if let Err(error) = preparation.request(
+            &source,
+            crate::terminal_context_preparation::ContextRequest {
+                key: key.clone(),
+                source_row,
+                column: click_column,
+                selection,
+                cwd: self.session_cwd.clone(),
+                home: home_dir,
+                history_context,
+            },
+        ) {
+            self.status_message = Some(error);
+            return;
+        }
+        self.pending_terminal_context = Some(TerminalContextBlueprint {
+            key,
+            actions,
+            screen_area: self.layout.screen_area,
+        });
+        self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
+            pane_id,
+            source_line_text: String::new(),
+            visible_contents: String::new(),
+            full_history: String::new(),
+            selection_text: None,
+            area: Rect::new(
+                column.min(self.layout.screen_area.right().saturating_sub(38)),
+                row.min(self.layout.screen_area.bottom().saturating_sub(3)),
+                38.min(self.layout.screen_area.width),
+                3.min(self.layout.screen_area.height),
+            ),
+            actions: Vec::new(),
+            selected_index: 0,
+            preparation_generation: generation,
+            _preparation_hold: None,
+        });
+        self.status_message = Some("Preparing terminal context from the clicked snapshot…".into());
+    }
+
+    fn collect_terminal_link_preparations(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(completion) = self
+            .terminal_context_preparation
+            .as_mut()
+            .and_then(|owner| owner.collect_link())
+        {
+            changed |= self.terminal_input.finish_link(completion);
+        }
+        self.publish_ready_terminal_inputs() || changed
+    }
+
+    fn start_terminal_link_preparation(
+        &mut self,
+        pane_id: NodeId,
+        viewport: crate::split_layout::PaneViewport,
+        position: Position,
+        event: crossterm::event::MouseEvent,
+        source: crate::terminal_view::PaintedTerminal,
+    ) -> Result<(), String> {
+        let id = self.next_terminal_context_generation;
+        let next = id
+            .checked_add(1)
+            .ok_or_else(|| "Terminal link generation exhausted".to_string())?;
+        let (kind, modifiers) = crate::mouse::to_ipc_mouse_event(event);
+        let request = ClientRequest::MouseInput {
+            pane_id,
+            kind,
+            column: position.x.saturating_sub(viewport.content_area.x),
+            row: position.y.saturating_sub(viewport.content_area.y),
+            modifiers,
+        };
+        let client = self
+            .outbound_admission
+            .as_ref()
+            .ok_or_else(|| "Terminal link outbound admission unavailable".to_string())?;
+        let request =
+            crate::ipc_preparation::admit_request(client, request).map_err(|rejected| {
+                format!(
+                    "Terminal link click rejected before admission: {:?}",
+                    rejected.reason
+                )
+            })?;
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let owner = self
+            .terminal_context_preparation
+            .as_mut()
+            .ok_or_else(|| "Terminal link preparation unavailable".to_string())?;
+        let result_capacity = owner.request_link(
+            &source,
+            crate::terminal_context_preparation::LinkRequest {
+                id,
+                pane_id,
+                row: usize::from(position.y.saturating_sub(viewport.content_area.y)),
+                column: usize::from(position.x.saturating_sub(viewport.content_area.x)),
+                cwd: &self.session_cwd,
+                home: home.as_deref(),
+            },
+        )?;
+        let intent = crate::terminal_input::InputIntent::LinkProbe {
+            id,
+            request,
+            completion: None,
+            result_capacity,
+            layout_revision: self.emitted_layout_revision(),
+            forward_mouse: self.tree.agent_recovery(pane_id).is_none(),
+        };
+        if self
+            .terminal_input
+            .admit(pane_id, source.identity.clone(), intent)
+            .is_err()
+        {
+            if let Some(owner) = &mut self.terminal_context_preparation {
+                owner.cancel_link(id);
+            }
+            return Err(
+                "Terminal link click rejected before admission: ordered input queue is full".into(),
+            );
+        }
+        self.next_terminal_context_generation = next;
+        Ok(())
+    }
+
+    pub(crate) fn collect_terminal_context_preparation(&mut self) -> bool {
+        if self.pending_terminal_link.is_none() {
+            self.pending_terminal_link_storage = None;
+        }
+        let links_changed = self.collect_terminal_link_preparations();
+        if self.terminal_selection_source.as_ref().is_some_and(|(pane_id, source)|
+            !matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &source.identity))) {
+            self.terminal_selection = None;
+            self.terminal_selection_source = None;
+        }
+        if self.pending_terminal_context.as_ref().is_some_and(|pending| !matches!(&self.mode,Mode::TerminalPaneContextMenu(menu) if menu.preparation_generation==pending.key.generation)) {
+            self.pending_terminal_context=None;
+            if let Some(preparation)=&mut self.terminal_context_preparation {preparation.cancel();}
+            return links_changed;
+        }
+        let completion = self
+            .terminal_context_preparation
+            .as_mut()
+            .and_then(|preparation| preparation.collect());
+        let Some(completion) = completion else {
+            return links_changed;
+        };
+        let matching = self
+            .pending_terminal_context
+            .as_ref()
+            .is_some_and(|pending| pending.key.generation == completion.key.generation)
+            && matches!(&self.mode,Mode::TerminalPaneContextMenu(menu) if menu.preparation_generation==completion.key.generation)
+            && matches!(self.panes.get(&completion.key.pane_id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,&completion.key.identity) && view.applied_ordinal>=completion.key.snapshot_ordinal);
+        if !matching {
+            return links_changed;
+        }
+        let Some(mut blueprint) = self.pending_terminal_context.take() else {
+            return links_changed;
+        };
+        let text = match completion.text {
+            Ok(text) => text,
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = Mode::Normal;
+                return true;
+            }
+        };
+        let mut prepared = None;
+        let hold = text.map(|mut text| {
+            let source_hold = text.source_hold.take();
+            prepared = Some(text);
+            source_hold
+        });
+        let Some(text) = prepared else {
+            return links_changed;
+        };
+        blueprint.actions.retain_mut(|action| match action {
+            TerminalContextAction::CopyHistoryFilePathToClipboard { path } => {
+                match &text.history_path {
+                    Some(verified) => {
+                        *path = verified.clone();
+                        true
+                    }
+                    None => false,
+                }
+            }
+            TerminalContextAction::CopySelectionToClipboard => text.selection_text.is_some(),
+            _ => true,
+        });
+        let insert = blueprint
+            .actions
+            .iter()
+            .position(|action| matches!(action, TerminalContextAction::PasteScreenInto { .. }))
+            .unwrap_or(blueprint.actions.len());
+        if let Some(target) = text.open_target {
+            let mut extra = Vec::new();
+            if let Some(path) = target.file_path() {
+                extra.push(TerminalContextAction::OpenInEditor {
+                    path: path.to_owned(),
+                });
+            }
+            extra.push(TerminalContextAction::OpenExternally(target));
+            blueprint.actions.splice(insert..insert, extra);
+        }
+        let width = blueprint
+            .actions
+            .iter()
+            .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(3);
+        let width = u16::try_from(width)
+            .unwrap_or(u16::MAX)
+            .max(38)
+            .min(blueprint.screen_area.width.max(1));
+        let height = (blueprint.actions.len() as u16 + 2).min(blueprint.screen_area.height.max(1));
+        self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
+            pane_id: blueprint.key.pane_id,
+            source_line_text: text.source_line_text,
+            visible_contents: text.visible_contents,
+            full_history: text.full_history,
+            selection_text: text.selection_text,
+            area: Rect::new(
+                blueprint
+                    .key
+                    .column
+                    .min(blueprint.screen_area.right().saturating_sub(width)),
+                blueprint
+                    .key
+                    .row
+                    .min(blueprint.screen_area.bottom().saturating_sub(height)),
+                width,
+                height,
+            ),
+            actions: blueprint.actions,
+            selected_index: 0,
+            preparation_generation: blueprint.key.generation,
+            _preparation_hold: Some(hold),
+        });
+        self.status_message = text.warning;
+        true
+    }
+
+    #[cfg(test)]
+    fn open_terminal_pane_context_menu_reference(
         &mut self,
         pane_id: NodeId,
         source_row: usize,
@@ -9419,6 +13119,8 @@ impl App {
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
         self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
             pane_id,
+            preparation_generation: 0,
+            _preparation_hold: None,
             source_line_text,
             visible_contents,
             full_history,
@@ -9590,38 +13292,97 @@ impl App {
     /// Uses the host clipboard for terminal text while keeping UI feedback at
     /// the terminal interaction boundary.
     fn copy_terminal_text_to_clipboard(&mut self, text: String, success_message: &str) {
-        let result = match self.terminal_clipboard.as_mut() {
-            Some(clipboard) => clipboard.set_text(text),
-            None => arboard::Clipboard::new().and_then(|mut clipboard| {
-                clipboard.set_text(text)?;
-                self.terminal_clipboard = Some(clipboard);
-                Ok(())
-            }),
+        if success_message.len() > 1024 {
+            self.status_message =
+                Some("Clipboard acknowledgement label exceeds its admission limit".into());
+            return;
+        }
+        let Some(clipboard) = &self.terminal_clipboard else {
+            self.status_message = Some("Clipboard service unavailable".into());
+            return;
         };
-        match result {
-            Ok(()) => self.status_message = Some(success_message.to_string()),
-            Err(error) => self.status_message = Some(format!("Could not copy text: {error}")),
+        match clipboard.submit(crate::terminal_clipboard::Operation::Write(text)) {
+            Ok(id) => {
+                self.pending_clipboard_copies
+                    .insert(id, success_message.to_owned());
+                self.status_message = Some("Copying text…".into());
+            }
+            Err((_original, error)) => {
+                self.status_message = Some(format!("Could not copy text: {error}"))
+            }
         }
     }
-
-    /// Reads text from the host clipboard and forwards it to the terminal the
-    /// context menu was opened for. The menu target is authoritative so a
-    /// concurrent focus change cannot paste into a different pane.
     fn paste_clipboard_to_terminal(&mut self, pane_id: NodeId) {
-        let clipboard_text =
-            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
-                Ok(clipboard_text) => clipboard_text,
-                Err(error) => {
-                    self.status_message = Some(format!("Could not read clipboard: {error}"));
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+            self.status_message = Some("The selected pane is no longer a terminal".into());
+            return;
+        };
+        let identity = view.identity.clone();
+        if !self
+            .terminal_input
+            .can_admit(std::mem::size_of::<crate::terminal_input::InputIntent>())
+        {
+            self.status_message =
+                Some("Terminal input queue full; clipboard paste was not admitted".into());
+            return;
+        }
+        let Some(clipboard) = &self.terminal_clipboard else {
+            self.status_message = Some("Clipboard service unavailable".into());
+            return;
+        };
+        match clipboard.submit(crate::terminal_clipboard::Operation::Read) {
+            Ok(id) => {
+                // UI owns this queue exclusively: the checked slot cannot be
+                // stolen between native admission and inserting its placeholder.
+                let admitted = self.terminal_input.admit(
+                    pane_id,
+                    identity,
+                    crate::terminal_input::InputIntent::ClipboardPaste {
+                        id,
+                        completion: None,
+                    },
+                );
+                if admitted.is_err() {
+                    self.status_message = Some("Clipboard paste input admission failed".into());
                     return;
                 }
-            };
-
-        if self.forward_terminal_paste(pane_id, &clipboard_text) {
-            self.status_message = Some("Clipboard pasted into terminal".to_string());
-        } else {
-            self.status_message = Some("The selected pane is no longer a terminal".to_string());
+                self.status_message = Some("Reading clipboard…".into());
+            }
+            Err((_original, error)) => {
+                self.status_message = Some(format!("Could not read clipboard: {error}"))
+            }
         }
+    }
+    pub(crate) fn collect_clipboard(&mut self) -> bool {
+        let mut changed = false;
+        loop {
+            let completion = self
+                .terminal_clipboard
+                .as_ref()
+                .and_then(|clipboard| clipboard.try_take());
+            let Some(completion) = completion else {
+                break;
+            };
+            changed = true;
+            let id = completion.view().id;
+            if let Some(message) = self.pending_clipboard_copies.remove(&id) {
+                self.status_message = Some(match &completion.view().result {
+                    Ok(_) => message,
+                    Err(error) => format!("Could not copy text: {error}"),
+                });
+                continue;
+            }
+            if self
+                .terminal_input
+                .finish_clipboard(id, completion)
+                .is_none()
+            {
+                self.status_message =
+                    Some("Clipboard paste target was removed before the read completed".into());
+            }
+        }
+        changed |= self.publish_ready_terminal_inputs();
+        changed
     }
 
     /// Keeps an open terminal menu usable when debug history is disabled by
@@ -9760,6 +13521,7 @@ impl App {
                         action: SubmenuItemAction::SetTreeOrder(*tree_order),
                         label: tree_order.label().to_string(),
                         disabled_reason: None,
+                        disabled_reason_retention: None,
                     })
                     .collect(),
                 TreeOrder::ALL
@@ -9773,16 +13535,19 @@ impl App {
                         action: SubmenuItemAction::AgentHere(provider),
                         label: "Here".to_string(),
                         disabled_reason: None,
+                        disabled_reason_retention: None,
                     },
                     SubmenuItem {
                         action: SubmenuItemAction::AgentInNewWorktree(provider),
                         label: "In new worktree…".to_string(),
                         disabled_reason: menu.worktree_unavailable_reason.clone(),
+                        disabled_reason_retention: menu.unavailable_copies_retention.clone(),
                     },
                     SubmenuItem {
                         action: SubmenuItemAction::AgentInExistingWorktree(provider),
                         label: "In existing worktree…".to_string(),
                         disabled_reason: menu.worktree_unavailable_reason.clone(),
+                        disabled_reason_retention: menu.unavailable_copies_retention.clone(),
                     },
                 ],
                 if menu.worktree_unavailable_reason.is_some() {
@@ -9812,26 +13577,31 @@ impl App {
                             action: SubmenuItemAction::CopyWorktreeBranch,
                             label: "Copy branch".to_string(),
                             disabled_reason: None,
+                            disabled_reason_retention: None,
                         },
                         SubmenuItem {
                             action: SubmenuItemAction::CopyWorktreePath,
                             label: "Copy path".to_string(),
                             disabled_reason: None,
+                            disabled_reason_retention: None,
                         },
                         SubmenuItem {
                             action: SubmenuItemAction::NewTerminalInWorktree,
                             label: "New terminal here".to_string(),
                             disabled_reason: None,
+                            disabled_reason_retention: None,
                         },
                         SubmenuItem {
                             action: SubmenuItemAction::OpenWorktreeFolder,
                             label: "Open folder in sidebar".to_string(),
                             disabled_reason: None,
+                            disabled_reason_retention: None,
                         },
                         SubmenuItem {
                             action: SubmenuItemAction::RemoveWorktree,
                             label: "Remove worktree…".to_string(),
                             disabled_reason: removal_reason,
+                            disabled_reason_retention: None,
                         },
                     ],
                     0,
@@ -9869,14 +13639,25 @@ impl App {
 
     pub fn execute_context_submenu_item(&mut self, item: &SubmenuItem, target: NodeId) {
         if let Some(reason) = &item.disabled_reason {
+            let retention = match &item.disabled_reason_retention {
+                Some(owner) => match owner.try_reserve_derived(reason.len()) {
+                    Ok(retention) => Some(retention),
+                    Err(error) => {
+                        self.status_message = Some(format!("Worktree action remains unavailable: UI allocation admission refused ({error:?}); see repository details"));
+                        return;
+                    }
+                },
+                None => None,
+            };
             self.status_message = Some(reason.clone());
+            self.status_message_retention = retention;
             return;
         }
         self.select_node(target);
         match item.action {
             SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
             SubmenuItemAction::AgentHere(provider) => {
-                self.action_new_command_pane(provider.command_line())
+                self.action_new_command_pane(provider.command_line());
             }
             SubmenuItemAction::AgentInNewWorktree(provider) => {
                 self.open_create_agent_workspace_dialog(provider, target, false)
@@ -10085,56 +13866,110 @@ impl App {
         }
     }
 
-    /// Copies already-selected editor text through the same host clipboard
-    /// adapter used by terminal-link actions, keeping user feedback local to
-    /// the interaction that initiated it.
+    /// Publishes editor copy commands to the bounded host clipboard owner.
+    /// Success is reported only after the same acknowledgement used by terminal copies.
     fn copy_editor_text_to_clipboard(&mut self, text: String, action: EditorLineContextAction) {
-        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text)) {
-            Ok(()) => {
-                let message = match action {
-                    EditorLineContextAction::CopyLineToClipboard => "Line copied to clipboard",
-                    EditorLineContextAction::OpenInEditor { .. } => {
-                        unreachable!("only clipboard actions reach the clipboard adapter")
-                    }
-                    EditorLineContextAction::CopyChapterToClipboard => {
-                        "Chapter copied to clipboard"
-                    }
-                    EditorLineContextAction::CopyEntireFileToClipboard => {
-                        "Entire file copied to clipboard"
-                    }
-                    EditorLineContextAction::CreateAgentFromLine
-                    | EditorLineContextAction::OpenExternally(_) => {
-                        unreachable!("only clipboard actions reach the clipboard adapter")
-                    }
-                };
-                self.status_message = Some(message.to_string());
+        let message = match action {
+            EditorLineContextAction::CopyLineToClipboard => "Line copied to clipboard",
+            EditorLineContextAction::CopyChapterToClipboard => "Chapter copied to clipboard",
+            EditorLineContextAction::CopyEntireFileToClipboard => "Entire file copied to clipboard",
+            _ => {
+                self.status_message = Some("Selected action does not copy text".into());
+                return;
             }
-            Err(error) => self.status_message = Some(format!("Could not copy text: {error}")),
-        }
+        };
+        self.copy_terminal_text_to_clipboard(text, message);
     }
 
     /// Validates and queues the dialog's selected agent plus edited prompt.
     pub fn commit_create_agent_from_line(&mut self, state: Box<CreateAgentFromLineState>) {
-        let initial_input = state.prompt_text();
-        if initial_input.trim().is_empty() {
-            self.status_message = Some("Agent task cannot be empty".to_string());
+        if let Err(error) = self.try_admit_create_agent_from_line(&state) {
+            self.status_message = Some(error);
             self.mode = Mode::CreateAgentFromLine(state);
             return;
         }
-
-        let agent_type = state.agent_type;
-        self.request_new_command_pane_with_input(
-            state.parent_group,
-            agent_type.command_line().to_string(),
-            initial_input,
-        );
         self.status_message = Some(format!(
             "Creating {} agent from {}:{}",
-            agent_type.label(),
+            state.agent_type.label(),
             state.source.path.display(),
             state.source.line_number
         ));
         self.mode = Mode::Normal;
+    }
+
+    /// Borrow the draft until admission succeeds. Refusal never creates a
+    /// second full prompt or changes the captured parent/focus intent.
+    fn try_admit_create_agent_from_line(
+        &mut self,
+        state: &CreateAgentFromLineState,
+    ) -> Result<(), String> {
+        if state
+            .prompt
+            .lines()
+            .iter()
+            .all(|line| line.trim().is_empty())
+        {
+            return Err("Agent task cannot be empty".into());
+        }
+        if !self
+            .tree
+            .get(state.parent_group)
+            .is_some_and(ilium_core::Node::accepts_normal_children)
+        {
+            return Err("Agent destination is no longer available; draft remains editable".into());
+        }
+        let command = state.agent_type.command_line();
+        let prompt_bytes = state
+            .prompt
+            .lines()
+            .iter()
+            .try_fold(0_usize, |bytes, line| bytes.checked_add(line.len()))
+            .and_then(|bytes| bytes.checked_add(state.prompt.lines().len().saturating_sub(1)))
+            .ok_or_else(|| "Agent prompt size overflow; draft remains editable".to_string())?;
+        // Include the pending-focus title derivative while it is constructed.
+        // Like existing request accounting, this declares owned capacities,
+        // not an allocator/RSS guarantee.
+        let bytes = std::mem::size_of::<ClientRequest>()
+            .checked_add(prompt_bytes)
+            .and_then(|bytes| bytes.checked_add(command.len()))
+            .and_then(|bytes| bytes.checked_add(command.len()))
+            .ok_or_else(|| "Agent request size overflow; draft remains editable".to_string())?;
+        let client = self.outbound_admission.as_ref().ok_or_else(|| {
+            "Agent request admission is unavailable; draft remains editable".to_string()
+        })?;
+        let reservation =
+            crate::ipc_preparation::reserve_request(client, bytes).map_err(|reason| {
+                format!("Agent request not admitted: {reason:?}; draft remains editable")
+            })?;
+        // All owned prompt/command copies start after the finite reservation.
+        let request = ClientRequest::NewPane {
+            parent_group: state.parent_group,
+            kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
+                command_line: command.to_owned(),
+                initial_input: state.prompt_text(),
+            },
+            working_directory: self.new_pane_working_directory(),
+        };
+        let pending_title = command.to_owned();
+        let actual_bytes = crate::ipc_preparation::request_retained_bytes(&request)
+            .checked_add(pending_title.capacity())
+            .ok_or_else(|| "Agent request capacity overflow; draft remains editable".to_string())?;
+        if actual_bytes > bytes {
+            return Err("Agent request capacity exceeded admission; draft remains editable".into());
+        }
+        let admitted = reservation.retain(request).map_err(|rejected| {
+            format!(
+                "Agent request not admitted: {:?}; draft remains editable",
+                rejected.reason
+            )
+        })?;
+        self.queue_terminal_request_after_barrier(admitted);
+        self.record_pending_pane_focus(
+            state.parent_group,
+            PaneContentKind::Terminal,
+            pending_title,
+        );
+        Ok(())
     }
 
     /// Inserts the expand/collapse and lock/unlock actions appropriate to
@@ -10325,7 +14160,7 @@ impl App {
             }
             ContextMenuAction::NewTerminal => self.action_new_terminal(),
             ContextMenuAction::NewAgent(provider) => {
-                self.action_new_command_pane(provider.command_line())
+                self.action_new_command_pane(provider.command_line());
             }
             ContextMenuAction::NewEditor => self.action_new_editor(),
             ContextMenuAction::NewGroup => {
@@ -10354,10 +14189,10 @@ impl App {
             }
             ContextMenuAction::Rename => self.action_start_rename(),
             ContextMenuAction::MoveUp => {
-                self.request_move(target, ilium_core::TreeMoveDirection::Up)
+                self.request_move(target, ilium_core::TreeMoveDirection::Up);
             }
             ContextMenuAction::MoveDown => {
-                self.request_move(target, ilium_core::TreeMoveDirection::Down)
+                self.request_move(target, ilium_core::TreeMoveDirection::Down);
             }
             ContextMenuAction::Close => self.action_close(target),
             ContextMenuAction::ManageWorktrees => self.open_worktree_manager(target),
@@ -10365,7 +14200,7 @@ impl App {
             // direct execution is intentionally a harmless no-op.
             ContextMenuAction::OrderBy | ContextMenuAction::Worktree => {}
             ContextMenuAction::Restart => {
-                self.request_client_exit(ClientExitReason::RestartRequested)
+                self.request_client_exit(ClientExitReason::RestartRequested);
             }
             ContextMenuAction::Settings => self.action_open_settings(),
         }
@@ -10381,15 +14216,17 @@ impl App {
             self.status_message = Some("No idle agent to ask for an update".to_string());
             return;
         }
-        let pane_count = pane_ids.len();
+        let mut pane_count = 0;
         for pane_id in pane_ids {
-            self.send_terminal_submission(
+            if self.send_terminal_submission(
                 pane_id,
                 ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({"custom_instructions": self.inference_settings.instructions.ask_for_update.trim()})),
                 PromptSubmissionSource::AskForUpdate,
-            );
+            ).is_ok() { pane_count += 1; }
         }
-        self.status_message = Some(if pane_count == 1 {
+        self.status_message = Some(if pane_count == 0 {
+            "No update requests admitted: terminal input queue is full".to_string()
+        } else if pane_count == 1 {
             "Asked for an update".to_string()
         } else {
             format!("Asked {pane_count} agents for an update")
@@ -10408,12 +14245,15 @@ impl App {
                 return;
             }
         };
-        self.queue_request(ClientRequest::SchedulePaneInput {
+        if !self.queue_request(ClientRequest::SchedulePaneInput {
             pane_id: state.pane_id,
             delay_seconds,
             text,
             send_enter,
-        });
+        }) {
+            self.mode = Mode::SchedulePaneInput(state);
+            return;
+        }
         self.status_message = Some("Scheduled pane input".to_string());
         self.mode = Mode::Normal;
     }
@@ -10427,11 +14267,14 @@ impl App {
                 return;
             }
         };
-        self.queue_request(ClientRequest::EnqueuePrompt {
+        if !self.queue_request(ClientRequest::EnqueuePrompt {
             pane_id: state.pane_id,
             text,
             delivery,
-        });
+        }) {
+            self.mode = Mode::QueuePrompt(state);
+            return;
+        }
         self.status_message = Some("Prompt queued for the next agent completion".to_string());
         self.mode = Mode::Normal;
     }
@@ -10494,19 +14337,35 @@ impl App {
 
     /// Creates a specific command-line pane (e.g. `claude`, `codex`, `agy`) under
     /// the currently targeted group.
-    pub fn action_new_command_pane(&mut self, command_line: impl Into<String>) {
+    pub fn action_new_command_pane(&mut self, command_line: impl Into<String>) -> bool {
         let parent = self.group_for_new_node();
-        self.request_new_command_pane(parent, command_line.into());
+        self.request_new_command_pane(parent, command_line.into())
     }
 
     /// Opens the file-picker overlay rooted at the session's cwd; the
     /// picked file (if any) becomes a `NewPane` request under the
     /// currently targeted group -- see `Mode::Explorer`'s doc comment for
     /// why there is no placeholder tree node anymore.
+    fn open_explorer_overlay(
+        &self,
+        path: &Path,
+        folder_label: Option<&str>,
+    ) -> anyhow::Result<ExplorerOverlay> {
+        let overlay = match folder_label {
+            Some(label) => ExplorerOverlay::open_folder_for(path, label)?,
+            None => ExplorerOverlay::open_at(path)?,
+        };
+        let (client, ready) = self
+            .explorer_execution
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Explorer execution unavailable"))?;
+        Ok(overlay.attach_execution(client.clone(), std::sync::Arc::clone(ready)))
+    }
+
     pub fn action_new_editor(&mut self) {
         let parent = self.group_for_new_node();
         let picker_root = self.project_cwd_for_node(parent);
-        match ExplorerOverlay::open_at(&picker_root) {
+        match self.open_explorer_overlay(&picker_root, None) {
             Ok(overlay) => self.mode = Mode::Explorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open file picker: {err}")),
         }
@@ -10516,14 +14375,14 @@ impl App {
     pub fn action_new_folder(&mut self) {
         let parent = self.split_parent_group();
         let picker_root = self.project_cwd_for_node(parent);
-        match ExplorerOverlay::open_folder_for(&picker_root, "Add Folder") {
+        match self.open_explorer_overlay(&picker_root, Some("Add Folder")) {
             Ok(overlay) => self.mode = Mode::FolderExplorer(Box::new(overlay), parent),
             Err(err) => self.status_message = Some(format!("Could not open folder picker: {err}")),
         }
     }
 
     pub fn action_new_project(&mut self) {
-        match ExplorerOverlay::open_folder_for(&self.session_cwd, "Create Project") {
+        match self.open_explorer_overlay(&self.session_cwd, Some("Create Project")) {
             Ok(overlay) => {
                 self.mode = Mode::ProjectFolderExplorer(
                     Box::new(overlay),
@@ -10544,7 +14403,7 @@ impl App {
             self.status_message = Some("That entry is not a project".to_string());
             return;
         };
-        match ExplorerOverlay::open_folder_for(&path, "Use Project Folder") {
+        match self.open_explorer_overlay(&path, Some("Use Project Folder")) {
             Ok(overlay) => {
                 self.mode = Mode::ProjectFolderExplorer(
                     Box::new(overlay),
@@ -10599,20 +14458,21 @@ impl App {
 
     pub fn action_save_focused_editor(&mut self) {
         let Some(id) = self.active_pane_id() else {
-            self.status_message = Some("No pane focused".to_string());
+            self.status_message = Some("No pane focused".into());
             return;
         };
-        let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
-            self.status_message = Some("Focused pane is not an editor".to_string());
+        let Some(PaneRuntime::Editor(editor)) = self.panes.get(&id) else {
+            self.status_message = Some("Focused pane is not an editor".into());
             return;
         };
-        if editor.path.is_none() {
+        let Some(path) = editor.path.clone() else {
             self.action_start_save_as(id);
             return;
-        }
-        match editor.save() {
-            Ok(()) => self.status_message = Some("Saved".to_string()),
-            Err(err) => self.status_message = Some(format!("Save failed: {err}")),
+        };
+        if let Err(error) =
+            self.enqueue_editor_save(id, path, crate::filesystem::editors::SavePurpose::Explicit)
+        {
+            self.status_message = Some(format!("Save not admitted: {error}"));
         }
     }
 
@@ -10637,39 +14497,19 @@ impl App {
     pub fn action_save_as(&mut self, id: NodeId, new_path: String) {
         let new_path = new_path.trim();
         if new_path.is_empty() {
-            self.status_message = Some("Save As: no filename given".to_string());
+            self.status_message = Some("Save As: no filename given".into());
             return;
         }
-        // Built from the already-trimmed string -- otherwise a leading space
-        // survives into the saved filename, and a leading space before a
-        // leading `/` defeats `is_absolute()` entirely, silently nesting an
-        // intended-absolute path under `session_cwd` instead.
         let path = PathBuf::from(new_path);
         let path = if path.is_absolute() {
             path
         } else {
             self.session_cwd.join(path)
         };
-
-        let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
-            return;
-        };
-        match editor.save_to(&path) {
-            Ok(()) => {
-                editor.retarget_path(path.clone());
-                // `retarget_path` drops any cached rendered document (its
-                // relative image links were resolved against the old path's
-                // directory); rebuild immediately so a pane sitting in
-                // Rendered mode doesn't linger on the "Rendering…"
-                // placeholder until some later resize. The rebuild guards
-                // itself against non-Markdown/non-Rendered panes.
-                self.rebuild_rendered_markdown(id);
-                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    self.request_rename(id, name.to_string(), None, None);
-                }
-                self.status_message = Some("Saved".to_string());
-            }
-            Err(err) => self.status_message = Some(format!("Save failed: {err}")),
+        if let Err(error) =
+            self.enqueue_editor_save(id, path, crate::filesystem::editors::SavePurpose::SaveAs)
+        {
+            self.status_message = Some(format!("Save As not admitted: {error}"));
         }
     }
 
@@ -10743,18 +14583,31 @@ impl App {
     /// either way this tick), so the caller knows whether this otherwise
     /// silent tick still needs to force a redraw.
     pub fn tick_autosave(&mut self) -> bool {
-        let mut wrote_any = false;
-        for runtime in self.panes.values_mut() {
-            if let PaneRuntime::Editor(editor) = runtime {
-                if let Some(result) = editor.autosave_if_due() {
-                    wrote_any = true;
-                    if let Err(err) = result {
-                        tracing::warn!("autosave failed: {err}");
-                    }
-                }
+        let due: Vec<_> = self
+            .panes
+            .iter()
+            .filter_map(|(id, runtime)| {
+                let PaneRuntime::Editor(editor) = runtime else {
+                    return None;
+                };
+                editor
+                    .autosave_due()
+                    .then(|| editor.path.clone().map(|path| (*id, path)))
+                    .flatten()
+            })
+            .collect();
+        let mut admitted = false;
+        for (id, path) in due {
+            match self.enqueue_editor_save(
+                id,
+                path,
+                crate::filesystem::editors::SavePurpose::Autosave,
+            ) {
+                Ok(()) => admitted = true,
+                Err(error) => self.status_message = Some(format!("Autosave pending: {error}")),
             }
         }
-        wrote_any
+        admitted
     }
 
     /// Computes when non-input maintenance can next affect visible state.
@@ -10793,6 +14646,7 @@ impl App {
                 Mode::Search(search) => search.next_due_search_at(),
                 _ => None,
             })
+            .chain(self.restructure_budget_autosave_deadline)
             .chain(self.next_chatroom_reconcile_at)
             .min();
 
@@ -10874,6 +14728,16 @@ impl App {
         &mut self,
         position: Position,
     ) -> Option<(NodeId, crate::status_icons::StatusSlot, Position)> {
+        if let Some(geometry) = &self.emitted_geometry {
+            return geometry
+                .tree_rows
+                .as_ref()?
+                .status_at(position)
+                .filter(|(id, _, _)| self.tree.get(*id).is_some());
+        }
+        if !cfg!(test) {
+            return None;
+        }
         if self
             .tree_transitions
             .presentation_tree(self.started_at.elapsed().as_millis())
@@ -10888,8 +14752,8 @@ impl App {
             self.tree_version,
             tree_order,
             self.tree_state.opened(),
-            &overlay.ranks,
-            overlay.rank_epoch,
+            (&overlay.ranks, overlay.rank_epoch),
+            (&self.sidebar_snapshot, &self.chatroom_projects),
         );
         tree_ui::status_slot_at_position(
             items,
@@ -10911,6 +14775,16 @@ impl App {
     /// `TreeItem` list is served from `tree_hit_test_cache` rather than
     /// rebuilt (see that field's doc comment).
     pub fn tree_node_at(&mut self, position: Position) -> Option<TreeNodeHit> {
+        if let Some(geometry) = &self.emitted_geometry {
+            return geometry
+                .tree_rows
+                .as_ref()?
+                .node_at(position)
+                .filter(|hit| self.tree.get(hit.id).is_some());
+        }
+        if !cfg!(test) {
+            return None;
+        }
         if self
             .tree_transitions
             .presentation_tree(self.started_at.elapsed().as_millis())
@@ -10928,8 +14802,8 @@ impl App {
             self.tree_version,
             tree_order,
             self.tree_state.opened(),
-            &overlay.ranks,
-            overlay.rank_epoch,
+            (&overlay.ranks, overlay.rank_epoch),
+            (&self.sidebar_snapshot, &self.chatroom_projects),
         );
         tree_ui::node_at_position(
             items,
@@ -10940,23 +14814,41 @@ impl App {
         )
     }
 
-    /// Consumes the oldest still-pending editor-open request whose
-    /// remembered basename matches `name`, if any -- see
-    /// `pending_editor_opens`'s doc comment.
-    pub(crate) fn take_matching_pending_editor_open(
+    /// Match authoritative names by borrowing the tree, then move the original
+    /// pending intent. Hydration does not clone an entire node or its content.
+    pub(crate) fn take_matching_pending_editor_open_from_node(
         &mut self,
-        name: &str,
+        pane_id: NodeId,
     ) -> Option<PendingEditorOpen> {
+        let name = &self.tree.get(pane_id)?.name;
         let index = self
             .pending_editor_opens
             .iter()
-            .position(|pending| pending.basename == name)?;
+            .position(|pending| pending.basename == *name)?;
         Some(self.pending_editor_opens.remove(index))
+    }
+    pub(crate) fn take_matching_pending_terminal_focus_from_node(
+        &mut self,
+        pane_id: NodeId,
+    ) -> bool {
+        let Some(node) = self.tree.get(pane_id) else {
+            return false;
+        };
+        let parent_group = self.tree.parent_of(pane_id);
+        let Some(index) = self.pending_pane_focuses.iter().position(|pending| {
+            pending.content == PaneContentKind::Terminal
+                && pending.name == node.name
+                && (pending.parent_group.is_none() || pending.parent_group == parent_group)
+        }) else {
+            return false;
+        };
+        self.pending_pane_focuses.remove(index);
+        true
     }
 
     /// Records a pane this attached client just requested so only its server
     /// confirmation changes the current right-panel presentation.
-    fn record_pending_pane_focus(
+    pub(crate) fn record_pending_pane_focus(
         &mut self,
         parent_group: NodeId,
         content: PaneContentKind,
@@ -10970,27 +14862,6 @@ impl App {
             content,
             parent_group: (parent_group != ROOT_ID).then_some(parent_group),
         });
-    }
-
-    /// Consumes this client's pending focus request once the matching pane
-    /// exists in the authoritative tree snapshot. `ROOT_ID` is deliberately
-    /// unconstrained because the server first materializes its project/group.
-    pub(crate) fn take_matching_pending_pane_focus(
-        &mut self,
-        pane_id: NodeId,
-        content: PaneContentKind,
-        name: &str,
-    ) -> bool {
-        let parent_group = self.tree.parent_of(pane_id);
-        let Some(index) = self.pending_pane_focuses.iter().position(|pending| {
-            pending.content == content
-                && pending.name == name
-                && (pending.parent_group.is_none() || pending.parent_group == parent_group)
-        }) else {
-            return false;
-        };
-        self.pending_pane_focuses.remove(index);
-        true
     }
 
     /// Ordinary (non-leader) key handling while the tree panel has focus.
@@ -11015,11 +14886,15 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(id) = self.selected_node_id() {
-                    if let Some(project_id) = crate::tree_ui::chatroom_project(&self.tree, id) {
+                    if let Some(project_id) =
+                        crate::tree_ui::chatroom_project(&self.tree, id, &self.chatroom_projects)
+                    {
                         self.show_chatroom(project_id);
                         return;
                     }
-                    if let Some(entry) = crate::tree_ui::folder_entry(&self.tree, id) {
+                    if let Some(entry) =
+                        crate::tree_ui::folder_entry(&self.tree, id, &self.sidebar_snapshot)
+                    {
                         if entry.is_directory {
                             self.toggle_selected_tree_node();
                         } else {
@@ -11174,8 +15049,7 @@ impl App {
                     if let Err(error) = result {
                         self.status_message = Some(error);
                     } else if result == Ok(true) {
-                        self.status_message = Some("Card saved".to_string());
-                        self.record_client_node_activity(id);
+                        self.status_message = Some("Saving card…".to_string());
                     }
                     return;
                 }
@@ -11230,7 +15104,14 @@ impl App {
                         self.action_add_board_column(id);
                         return;
                     }
-                    KeyCode::Char('r') => board.reload(),
+                    KeyCode::Char('r') => {
+                        if board.pending_writes() != 0 {
+                            return;
+                        }
+                        let storage = board.storage.clone();
+                        self.request_board_load(id, storage);
+                        return;
+                    }
                     KeyCode::Char('e') => {
                         self.action_rename_board_selection(id);
                         return;
@@ -11265,39 +15146,24 @@ impl App {
         if let Some(bytes) = pending_key_input {
             let prompt_epoch = is_enter_press.then(|| uuid::Uuid::new_v4().to_string());
             let submitted_after = chrono::Utc::now();
-            // Resolve the provider-owned file before sending Enter. Comparing
-            // against the byte offset catches even a repeated identical
-            // prompt and keeps multiline/trailing text intact.
-            let transcript_check = prompt_epoch.as_ref().and_then(|epoch| {
-                let (agent_class, session_id, project_path) =
-                    self.last_prompt_transcript_context(id)?;
-                let home = directories::BaseDirs::new()?;
-                let verified_path = self.history_file_path_for_pane(id, home.home_dir())?;
-                let baseline_length = std::fs::metadata(&verified_path).ok()?.len();
-                Some(PendingLastPromptTranscriptCheck {
-                    pane_id: id,
-                    agent_class,
-                    session_id,
-                    project_path,
-                    verified_path,
-                    baseline_length,
-                    submitted_after,
-                    prompt_epoch: epoch.clone(),
-                })
-            });
-            self.queue_request(ClientRequest::UserKeyInput {
+            // Capture immutable identity now; the finite I/O owner holds
+            // this Enter and later same-pane input until its baseline completes.
+            if let Some(epoch) = &prompt_epoch {
+                if let Err(error) = self.capture_terminal_baseline(id, epoch, submitted_after) {
+                    self.status_message = Some(error);
+                    return;
+                }
+            }
+            let admitted = self.queue_request(ClientRequest::UserKeyInput {
                 pane_id: id,
                 bytes,
                 submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
-                prompt_epoch,
+                prompt_epoch: prompt_epoch.clone(),
             });
-            if let Some(check) = transcript_check {
-                self.pending_last_prompt_transcript_checks.push(check);
-            } else if is_enter_press && self.is_detected_agent_pane(id) {
-                // A newer Enter with no verified transcript file still
-                // revokes an older worker for this live composer. Shell
-                // input after a crash leaves historical recovery pending.
-                self.pending_exact_prompt_worker_cancellations.push(id);
+            if !admitted {
+                if let (Some(files), Some(epoch)) = (&mut self.terminal_baselines, &prompt_epoch) {
+                    files.forget(epoch);
+                }
             }
         }
         if did_change_client_content {
@@ -11310,6 +15176,176 @@ impl App {
     /// whether the bulk UTF-8 payload receives bracketed-paste delimiters;
     /// this keeps Codex's semantic paste intact without exposing shell prompts
     /// that never requested mode 2004 to literal control sequences.
+    pub(crate) fn take_native_paste_failure(
+        &mut self,
+    ) -> Option<crate::terminal_input_owner::InputFailure> {
+        self.native_paste_failure.take()
+    }
+    pub(crate) fn take_undelivered_native_paste(
+        &mut self,
+    ) -> Option<crate::terminal_input_owner::InputEvent> {
+        self.terminal_input.take_native_paste()
+    }
+
+    pub(crate) fn native_terminal_paste_destination(&self) -> Option<NodeId> {
+        if self.focus != FocusTarget::Pane || !matches!(self.mode, Mode::Normal) {
+            return None;
+        }
+        self.active_pane_id()
+            .filter(|pane_id| matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(_))))
+    }
+
+    pub(crate) fn capture_native_terminal_paste(
+        &mut self,
+        pane_id: NodeId,
+        event: crate::terminal_input_owner::InputEvent,
+    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+        if self.pending_native_paste.is_some() {
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::QueueFull,
+                event,
+            ));
+        }
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::Closed,
+                event,
+            ));
+        };
+        self.last_tree_click = None;
+        self.pending_native_paste = Some(crate::terminal_input::NativePaste {
+            pane_id,
+            identity: view.identity.clone(),
+            event,
+        });
+        self.retry_native_terminal_paste()
+    }
+
+    /// Retry only this captured original. No later native event is dispatched
+    /// while it is waiting; parser/IPC/presentation collectors remain active.
+    pub(crate) fn retry_native_terminal_paste(
+        &mut self,
+    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+        if let Some(failure) = self.native_paste_failure.take() {
+            return Err(failure);
+        }
+        let Some(pending) = self.pending_native_paste.take() else {
+            return Ok(());
+        };
+        let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pending.pane_id) else {
+            self.status_message =
+                Some("Terminal paste cancelled after confirmed pane removal".into());
+            tracing::warn!(
+                pane_id = pending.pane_id.0,
+                "captured terminal paste cancelled after confirmed pane removal"
+            );
+            return Ok(());
+        };
+        if !std::sync::Arc::ptr_eq(&view.identity, &pending.identity) {
+            self.status_message =
+                Some("Terminal paste cancelled after confirmed pane replacement".into());
+            tracing::warn!(
+                pane_id = pending.pane_id.0,
+                "captured terminal paste cancelled after confirmed pane replacement"
+            );
+            return Ok(());
+        }
+        let bytes = pending.event.retained_payload_bytes().saturating_add(12);
+        // Capacity policy is checked against the original allocation, without
+        // copying/replaying it. An impossible head returns owned typed failure.
+        let wire_bytes = pending
+            .event
+            .paste_wire_bytes(self.terminal_parsing.is_none() && view.wants_bracketed_paste());
+        if bytes > crate::terminal_input::MAX_BYTES
+            || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
+        {
+            return Err(crate::terminal_input_owner::InputFailure::refused(
+                ilium_execution::RejectReason::InputBytes,
+                pending.event,
+            ));
+        }
+        if self.terminal_parsing.is_none() {
+            let Some(client) = &self.outbound_admission else {
+                return Err(crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    pending.event,
+                ));
+            };
+            let reservation = match crate::ipc_preparation::reserve_request(
+                client,
+                bytes.saturating_mul(2).saturating_add(4096),
+            ) {
+                Ok(reservation) => reservation,
+                Err(reason) => {
+                    if matches!(
+                        reason,
+                        ilium_execution::RejectReason::Closed
+                            | ilium_execution::RejectReason::InvalidCost
+                            | ilium_execution::RejectReason::AccountingPoisoned
+                    ) {
+                        return Err(crate::terminal_input_owner::InputFailure::refused(
+                            reason,
+                            pending.event,
+                        ));
+                    }
+                    self.pending_native_paste = Some(pending);
+                    return Ok(());
+                }
+            };
+            let placeholder = match reservation.retain(()) {
+                Ok(placeholder) => placeholder,
+                Err(_) => {
+                    return Err(crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::InvalidCost,
+                        pending.event,
+                    ))
+                }
+            };
+            let (_, retention) = placeholder.into_parts();
+            let paste = view.wants_bracketed_paste();
+            view.scroll_to_bottom();
+            self.pending_input_retention = Some(retention);
+            self.deliver_terminal_input(
+                pending.pane_id,
+                crate::terminal_input::InputIntent::NativePaste(pending.event),
+                false,
+                paste,
+                0,
+                0,
+            );
+            self.pending_input_retention = None;
+            return Ok(());
+        }
+        if !self.terminal_input.can_admit(bytes) {
+            self.status_message = Some("Terminal paste waiting for bounded input capacity".into());
+            self.pending_native_paste = Some(pending);
+            return Ok(());
+        }
+        let pane_id = pending.pane_id;
+        let identity = pending.identity;
+        match self.terminal_input.admit(
+            pane_id,
+            identity.clone(),
+            crate::terminal_input::InputIntent::NativePaste(pending.event),
+        ) {
+            Ok(()) => {
+                view.scroll_to_bottom();
+                Ok(())
+            }
+            Err(intent) => match *intent {
+                crate::terminal_input::InputIntent::NativePaste(event) => {
+                    self.pending_native_paste = Some(crate::terminal_input::NativePaste {
+                        pane_id,
+                        identity,
+                        event,
+                    });
+                    Ok(())
+                }
+                _ => unreachable!("terminal input refusal preserves the exact supplied intent"),
+            },
+        }
+    }
+
     pub fn handle_terminal_paste(&mut self, pasted: &str) -> bool {
         let Some(pane_id) = self.active_pane_id() else {
             return false;
@@ -11323,6 +15359,33 @@ impl App {
         let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
             return false;
         };
+
+        if self.terminal_parsing.is_some() {
+            if !self
+                .terminal_input
+                .can_admit(pasted.len().saturating_add(12))
+            {
+                self.status_message = Some(
+                    "Terminal paste rejected before admission: bounded input queue is full".into(),
+                );
+                return false;
+            }
+            let identity = view.identity.clone();
+            view.scroll_to_bottom();
+            if self
+                .terminal_input
+                .admit(
+                    pane_id,
+                    identity,
+                    crate::terminal_input::InputIntent::Paste(pasted.to_owned()),
+                )
+                .is_err()
+            {
+                self.status_message = Some("Terminal paste rejected before admission".into());
+                return false;
+            }
+            return true;
+        }
 
         // A search-history anchor may represent an older screen whose modes
         // differ from the live foreground application. Restore the live parser
@@ -11453,11 +15516,9 @@ impl App {
 
     /// Entry point for the tree row's manual "retitle" icon
     /// (`TreeRowAction::Retitle`): asks the LLM for a fresh title right
-    /// now, bypassing the passive triggers' cadence/retry caps and, unlike
-    /// them, overriding even a previously user-specified title -- an
-    /// explicit click is itself a genuine user decision, the same as if
-    /// they'd typed a name in directly (see `TitleTrigger::Manual`'s doc
-    /// comment for how the result is applied once the worker finishes).
+    /// now, bypassing the passive triggers' cadence/retry caps. Agent titles
+    /// remain inferred and require the server's current-session, genuine-task
+    /// and presentation checks; the click cannot replace a literal user rename.
     pub fn action_request_retitle(&mut self, id: NodeId) {
         if self.titles_loading.contains(&id) {
             // Don't drop the click: an automatic retitle already owns this
@@ -11814,12 +15875,14 @@ impl App {
                 input_fingerprint,
             },
         );
+        let title_observations = self.capture_title_observations(&contexts);
         self.pending_restructure_requests
             .push(PendingRestructureRequest {
                 project_id,
                 project_name,
                 project_cwd,
                 contexts,
+                title_observations,
                 protected_split_views,
                 current_structure,
                 recommendation_snapshot,
@@ -11878,10 +15941,41 @@ impl App {
         std::mem::take(&mut self.pending_restructure_requests)
     }
 
+    fn capture_title_observations(
+        &self,
+        contexts: &[LeafContext],
+    ) -> Vec<ilium_ipc::PaneTitleObservation> {
+        contexts
+            .iter()
+            .filter_map(|context| {
+                let node = self.tree.get(context.id)?;
+                let agent_class = match &node.kind {
+                    NodeKind::Pane { status, .. } => {
+                        status.known_agent_state().map(|agent| agent.class.clone())
+                    }
+                    _ => None,
+                };
+                Some(ilium_ipc::PaneTitleObservation {
+                    pane_id: context.id,
+                    presentation_revision: node.presentation_revision,
+                    agent_class,
+                    session_id: self.agent_session_ids.get(&context.id).cloned(),
+                    process_id: self.agent_process_ids.get(&context.id).copied(),
+                    title_generation: self
+                        .agent_title_generations
+                        .get(&context.id)
+                        .copied()
+                        .unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
     pub fn finish_project_restructure(
         &mut self,
         project_id: NodeId,
         inference_activity_revisions: &[ilium_core::NodeActivityRevision],
+        title_observations: &[ilium_ipc::PaneTitleObservation],
         result: anyhow::Result<ilium_core::animation_recommendation::RecommendedRestructurePlan>,
     ) {
         let Some(job) = self.project_restructure_jobs.get(&project_id) else {
@@ -11907,11 +16001,19 @@ impl App {
             }
         }
         if let Some(plan) = plan_to_apply {
-            self.request_apply_project_restructure_plan(
+            if !self.request_apply_project_restructure_plan(
                 project_id,
                 plan,
                 inference_activity_revisions.to_vec(),
-            );
+                title_observations.to_vec(),
+            ) {
+                if let Some(job) = self.project_restructure_jobs.get_mut(&project_id) {
+                    job.state = ProjectRestructureState::Failed(
+                        "Request admission refused; retry after pending work completes".into(),
+                    );
+                }
+                inference_failed = true;
+            }
         }
         if inference_failed && request_origin.is_automatic() {
             self.record_automatic_restructure_failure(project_id, input_fingerprint);
@@ -12028,8 +16130,11 @@ impl App {
 
     /// Compatibility path for the old one-project request. Multi-project
     /// restructure callers use `request_apply_project_restructure_plan`.
-    pub fn request_apply_restructure_plan(&mut self, plan: ilium_core::RestructurePlan) {
-        self.queue_request(ClientRequest::ApplyRestructurePlan(plan));
+    pub fn request_apply_restructure_plan(&mut self, plan: ilium_core::RestructurePlan) -> bool {
+        self.queue_request(ClientRequest::ApplyRestructurePlan {
+            plan,
+            title_observations: Vec::new(),
+        })
     }
 
     pub fn request_apply_project_restructure_plan(
@@ -12037,22 +16142,24 @@ impl App {
         project_id: NodeId,
         plan: ilium_core::animation_recommendation::RecommendedRestructurePlan,
         inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
-    ) {
+        title_observations: Vec<ilium_ipc::PaneTitleObservation>,
+    ) -> bool {
         self.queue_request(ClientRequest::ApplyRecommendedProjectRestructurePlan {
             project_id,
             plan,
             inference_activity_revisions,
-        });
+            title_observations,
+        })
     }
 
     /// Compatibility path for the old one-project undo request.
-    pub fn request_revert_last_restructure(&mut self) {
-        self.queue_request(ClientRequest::RevertLastRestructure);
+    pub fn request_revert_last_restructure(&mut self) -> bool {
+        self.queue_request(ClientRequest::RevertLastRestructure)
     }
 
     /// Restores only one project's latest restructure snapshot.
-    pub fn request_revert_project_restructure(&mut self, project_id: NodeId) {
-        self.queue_request(ClientRequest::RevertProjectRestructure { project_id });
+    pub fn request_revert_project_restructure(&mut self, project_id: NodeId) -> bool {
+        self.queue_request(ClientRequest::RevertProjectRestructure { project_id })
     }
 
     /// Exact content rectangle for editor `id`, after its toolbar and
@@ -12091,9 +16198,20 @@ impl App {
             }
         }
         let Some(viewport) = self.pane_viewport_at(position) else {
+            self.hovered_progress = None;
             return;
         };
         let id = viewport.pane_id;
+        self.hovered_progress = (matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
+            && viewport
+                .progress_area
+                .is_some_and(|area| area.contains(position))
+            && self.shows_progress_footer(id)
+            && self
+                .tree
+                .pane_progress(id)
+                .is_some_and(|progress| !progress.report.details.is_empty()))
+        .then_some((id, position));
         // The hamburger sits on the border/title row, outside `content_area`
         // entirely, so it must be checked before the `content_area` bail-out
         // below -- it reuses `theme::CHROME_ICONS`' existing glyph rather
@@ -12150,6 +16268,37 @@ impl App {
                     show_labels: self.ui_settings.show_toolbar_labels,
                     selection_enabled: self.ui_settings.terminal_text_selection_enabled,
                 };
+                if let crossterm::event::MouseEventKind::Down(
+                    button @ (crossterm::event::MouseButton::Left
+                    | crossterm::event::MouseButton::Right),
+                ) = mouse.kind
+                {
+                    if let Some(control) =
+                        crate::agent_toolbar::effort_control(toolbar_area, toolbar_ctx)
+                    {
+                        if control.geometry().row.contains(position) {
+                            use crate::value_control::{ControlAction, PointerButton};
+                            let pointer = if button == crossterm::event::MouseButton::Left {
+                                PointerButton::Left
+                            } else {
+                                PointerButton::Right
+                            };
+                            match control.hit(position, pointer) {
+                                Some(ControlAction::OpenChoices) => {
+                                    self.begin_agent_effort_dialog(id)
+                                }
+                                Some(ControlAction::PreviousChoice) => {
+                                    self.step_agent_effort(id, true)
+                                }
+                                Some(ControlAction::NextChoice) => {
+                                    self.step_agent_effort(id, false)
+                                }
+                                _ => {}
+                            }
+                            return;
+                        }
+                    }
+                }
                 let action = crate::agent_toolbar::action_at(toolbar_area, toolbar_ctx, position);
                 match mouse.kind {
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
@@ -12262,40 +16411,57 @@ impl App {
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL)
         {
-            let row = usize::from(position.y.saturating_sub(viewport.content_area.y));
-            let column = usize::from(position.x.saturating_sub(viewport.content_area.x));
-            if let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) {
-                let line = view.with_screen(|screen| {
-                    screen
-                        .contents()
-                        .lines()
-                        .nth(row)
-                        .unwrap_or_default()
-                        .to_string()
-                });
-                // Resolved once per click (not cached on `App`): a Ctrl+click
-                // is not a hot path, and computing it here keeps
-                // `terminal_links::link_at` itself free of I/O so it stays a
-                // plain, unit-testable function.
-                let home_dir = directories::BaseDirs::new()
-                    .map(|directories| directories.home_dir().to_path_buf());
-                let link = crate::terminal_links::link_at(
-                    &line,
-                    column,
-                    &self.session_cwd,
-                    home_dir.as_deref(),
-                )
-                .or_else(|| {
-                    view.osc8_link_at(&line, column)
-                        .map(crate::terminal_links::TerminalLink::Url)
-                });
-                if let Some(link) = link {
-                    self.status_message = Some(format!(
-                        "Link selected: {} — Ctrl+O opens, Ctrl+C copies, Esc cancels",
-                        link.display()
-                    ));
-                    self.pending_terminal_link = Some(link);
-                    return;
+            if self.terminal_context_preparation.is_some() {
+                if let Some(source) = self.emitted_terminal_source(id) {
+                    if let Err(error) =
+                        self.start_terminal_link_preparation(id, viewport, position, mouse, source)
+                    {
+                        self.status_message = Some(error);
+                    }
+                } else {
+                    self.status_message = Some(
+                        "Terminal link click is waiting for presentation acknowledgement".into(),
+                    );
+                }
+                return;
+            }
+            #[cfg(test)]
+            {
+                let row = usize::from(position.y.saturating_sub(viewport.content_area.y));
+                let column = usize::from(position.x.saturating_sub(viewport.content_area.x));
+                if let Some(view) = self.emitted_terminal_source(id) {
+                    let line = view.with_screen(|screen| {
+                        screen
+                            .contents()
+                            .lines()
+                            .nth(row)
+                            .unwrap_or_default()
+                            .to_string()
+                    });
+                    // Resolved once per click (not cached on `App`): a Ctrl+click
+                    // is not a hot path, and computing it here keeps
+                    // `terminal_links::link_at` itself free of I/O so it stays a
+                    // plain, unit-testable function.
+                    let home_dir = directories::BaseDirs::new()
+                        .map(|directories| directories.home_dir().to_path_buf());
+                    let link = crate::terminal_links::link_at(
+                        &line,
+                        column,
+                        &self.session_cwd,
+                        home_dir.as_deref(),
+                    )
+                    .or_else(|| {
+                        view.osc8_link_at(&line, column)
+                            .map(crate::terminal_links::TerminalLink::Url)
+                    });
+                    if let Some(link) = link {
+                        self.status_message = Some(format!(
+                            "Link selected: {} — Ctrl+O opens, Ctrl+C copies, Esc cancels",
+                            link.display()
+                        ));
+                        self.pending_terminal_link = Some(link);
+                        return;
+                    }
                 }
             }
         }
@@ -12309,6 +16475,36 @@ impl App {
         // complaint this feature addresses.
         use crossterm::event::MouseEventKind;
         let is_recovery_pane = self.tree.agent_recovery(id).is_some();
+        if self.terminal_parsing.is_some()
+            && matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) {
+                let identity = view.identity.clone();
+                let (kind, modifiers) = crate::mouse::to_ipc_mouse_event(mouse);
+                let intent = crate::terminal_input::InputIntent::Wheel {
+                    request: ClientRequest::MouseInput {
+                        pane_id: id,
+                        kind,
+                        column: position.x.saturating_sub(viewport.content_area.x),
+                        row: position.y.saturating_sub(viewport.content_area.y),
+                        modifiers,
+                    },
+                    up: matches!(mouse.kind, MouseEventKind::ScrollUp),
+                    recovery: is_recovery_pane,
+                    layout_revision: self.emitted_layout_revision(),
+                };
+                if self.terminal_input.admit(id, identity, intent).is_err() {
+                    self.status_message = Some(
+                        "Terminal wheel action rejected before admission: input queue is full"
+                            .into(),
+                    );
+                }
+                return;
+            }
+        }
         if matches!(
             mouse.kind,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -12356,6 +16552,17 @@ impl App {
         content_area: Rect,
         position: Position,
     ) {
+        let Some(source) = self.emitted_terminal_source(pane_id) else {
+            return;
+        };
+        let source = match source.pinned() {
+            Ok(source) => source,
+            Err(error) => {
+                self.status_message = Some(error);
+                return;
+            }
+        };
+        self.terminal_selection_source = Some((pane_id, source));
         let Some(point) = self.terminal_selection_point_at(pane_id, content_area, position) else {
             return;
         };
@@ -12396,6 +16603,7 @@ impl App {
             .is_some_and(|selection| selection.pane_id == pane_id && selection.is_empty())
         {
             self.terminal_selection = None;
+            self.terminal_selection_source = None;
         }
     }
 
@@ -12408,6 +16616,7 @@ impl App {
             .is_some_and(|selection| selection.pane_id == pane_id)
         {
             self.terminal_selection = None;
+            self.terminal_selection_source = None;
         }
     }
 
@@ -12420,10 +16629,11 @@ impl App {
         content_area: Rect,
         position: Position,
     ) -> Option<crate::terminal_selection::SelectionPoint> {
-        let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return None;
-        };
-        let (rows, cols) = view.with_screen(|screen| screen.size());
+        let source = self
+            .selection_terminal_source(pane_id)
+            .cloned()
+            .or_else(|| self.emitted_terminal_source(pane_id))?;
+        let (rows, cols) = source.with_screen(|screen| screen.size());
         if rows == 0 || cols == 0 {
             return None;
         }
@@ -12433,6 +16643,7 @@ impl App {
     }
 
     pub fn confirm_terminal_link(&mut self, open: bool) {
+        let _source_hold = self.pending_terminal_link_storage.take();
         let Some(link) = self.pending_terminal_link.take() else {
             return;
         };
@@ -12517,7 +16728,7 @@ impl App {
                         board.drag_source = None;
                         board.drag_target = None;
                         match board.toggle_card_checkbox(column_index, card_index, checkbox_index) {
-                            Ok(()) => self.status_message = Some("Card saved".to_string()),
+                            Ok(()) => self.status_message = Some("Card save queued".to_string()),
                             Err(error) => self.status_message = Some(error),
                         }
                     }
@@ -12683,6 +16894,14 @@ impl App {
         };
         let chrome = crate::editor_chrome::compute(pane_content_area, editor.show_minimap);
 
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+            if let Some(action) =
+                crate::editor_toolbar::right_action_at(chrome.toolbar_area, editor, position)
+            {
+                self.execute_editor_toolbar_action(id, action);
+                return;
+            }
+        }
         if let Some(action) =
             crate::editor_toolbar::action_at(chrome.toolbar_area, editor, position)
         {
@@ -12710,14 +16929,15 @@ impl App {
                     Some("Switch to Source view to select a physical file line".to_string());
                 return;
             }
-            let source_visual_row = usize::from(editor.source_scroll_row())
-                + usize::from(position.y.saturating_sub(chrome.content_area.y));
-            let Some(visual_row) =
-                editor.source_visual_row_at(chrome.content_area.width, source_visual_row)
+            let Some((source_row, click_column)) =
+                crate::mouse::emitted_editor_position(self, id, position)
             else {
+                self.status_message = Some(
+                    "Editor source changed; wait for the replacement frame before selecting a line"
+                        .into(),
+                );
                 return;
             };
-            let source_row = visual_row.source_row;
             let Some(line_text) = editor.textarea.lines().get(source_row).cloned() else {
                 return;
             };
@@ -12725,23 +16945,6 @@ impl App {
                 self.status_message = Some("This editor has no file path".to_string());
                 return;
             };
-            // Same gutter math as `checkbox_at`'s column mapping (including
-            // its "assumes no horizontal scroll" caveat): `start_column` is
-            // `visual_row`'s own first physical-line column, so the on-screen
-            // offset past the gutter lands the click at the right character
-            // even when a long line has wrapped into several visual rows.
-            let gutter_width = if editor.show_line_numbers {
-                usize::from(crate::editor_highlight::line_number_gutter_width(
-                    editor.textarea.lines().len(),
-                ))
-            } else {
-                0
-            };
-            let clicked_col_on_screen =
-                usize::from(position.x.saturating_sub(chrome.content_area.x));
-            let click_column = visual_row
-                .start_column
-                .saturating_add(clicked_col_on_screen.saturating_sub(gutter_width));
             self.open_editor_line_context_menu(
                 EditorSourceLine {
                     pane_id: id,
@@ -12758,6 +16961,23 @@ impl App {
         // The source editor owns its own viewport: wheel events must be
         // handled before checkbox hit-testing, otherwise the old early return
         // made scrolling work only over the minimap.
+        let clicked_checkbox = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            crate::mouse::emitted_editor_position(self, id, position).and_then(
+                |(physical, column)| {
+                    let painted = self.emitted_editor_source(id)?;
+                    let row = painted.installed.viewport.rows.get(usize::from(
+                        position.y.saturating_sub(painted.content_area.y),
+                    ))?;
+                    let (bracket, checked) = row.checkbox?;
+                    (editor.is_markdown()
+                        && column >= bracket
+                        && column < bracket.saturating_add(3))
+                    .then_some((physical, bracket, checked))
+                },
+            )
+        } else {
+            None
+        };
         if let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) {
             if editor.view_mode == EditorViewMode::Source {
                 match mouse.kind {
@@ -12779,10 +16999,6 @@ impl App {
                     }
                     _ => {}
                 }
-                let clicked_checkbox =
-                    matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                        .then(|| checkbox_at(editor, chrome.content_area, position))
-                        .flatten();
                 if let Some((row, bracket_col, checked)) = clicked_checkbox {
                     let content_revision_before = editor.content_revision();
                     editor.toggle_checkbox(row, bracket_col, checked);
@@ -12830,10 +17046,35 @@ impl App {
     /// clicked source line.
     fn handle_editor_minimap_click(&mut self, id: NodeId, minimap_area: Rect, click_row: u16) {
         let editor_content_area = self.editor_content_area(id);
+        let emitted_count = self
+            .emitted_editor_source(id)
+            .filter(|source| {
+                source.minimap_area == Some(minimap_area)
+                    && source.installed.viewport.minimap.is_some()
+            })
+            .map(|source| {
+                (
+                    source.installed.key.identity.clone(),
+                    source.installed.key.revision,
+                    source.installed.physical_count,
+                )
+            });
         let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
             return;
         };
-        let total_lines = editor.textarea.lines().len();
+        let total_lines = if editor.view_mode == EditorViewMode::Source {
+            let Some((identity, revision, count)) = emitted_count else {
+                return;
+            };
+            if !std::sync::Arc::ptr_eq(&identity, &editor.instance_identity())
+                || revision != editor.content_revision()
+            {
+                return;
+            }
+            count
+        } else {
+            editor.textarea.lines().len()
+        };
         let relative_row = click_row.saturating_sub(minimap_area.y);
         let target_line =
             crate::minimap::line_for_click(relative_row, minimap_area.height, total_lines);
@@ -12870,6 +17111,10 @@ impl App {
         action: crate::editor_toolbar::ToolbarAction,
     ) {
         use crate::editor_toolbar::ToolbarAction;
+        if action == ToolbarAction::ChooseLineDisplay {
+            self.begin_editor_line_display_dialog(id);
+            return;
+        }
         let content_area = self.editor_content_area(id);
         let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&id) else {
             return;
@@ -12894,6 +17139,7 @@ impl App {
                 self.rebuild_rendered_markdown(id);
             }
             ToolbarAction::ToggleLineNumbers => editor.toggle_line_numbers(),
+            ToolbarAction::ChooseLineDisplay => {} // Handled before the mutable editor borrow.
             ToolbarAction::ToggleLineDisplay => {
                 editor.toggle_line_display();
                 editor.clamp_rendered_scroll(content_area.width, content_area.height);
@@ -12905,10 +17151,20 @@ impl App {
                 }
             }
             ToolbarAction::ToggleAutosave => editor.toggle_autosave(),
-            ToolbarAction::Save => match editor.save() {
-                Ok(()) => self.status_message = Some("Saved".to_string()),
-                Err(err) => self.status_message = Some(format!("Save failed: {err}")),
-            },
+            ToolbarAction::Save => {
+                let path = editor.path.clone();
+                if let Some(path) = path {
+                    if let Err(error) = self.enqueue_editor_save(
+                        id,
+                        path,
+                        crate::filesystem::editors::SavePurpose::Explicit,
+                    ) {
+                        self.status_message = Some(format!("Save not admitted: {error}"));
+                    }
+                } else {
+                    self.action_start_save_as(id);
+                }
+            }
             ToolbarAction::SaveAs => self.action_start_save_as(id),
         }
     }
@@ -12926,6 +17182,7 @@ impl App {
 /// on a line long enough to have scrolled horizontally (rare for a short
 /// "- [ ] ..." item) simply won't be found rather than risk mutating the
 /// wrong character.
+#[cfg(test)]
 fn checkbox_at(
     editor: &EditorPane,
     content_area: Rect,
@@ -13036,6 +17293,615 @@ mod tests {
 
     fn app() -> App {
         App::new("test-session".to_string(), std::env::temp_dir())
+    }
+
+    mod create_agent_line_admission_tests {
+        use super::*;
+
+        fn draft(app: &mut App) -> Box<CreateAgentFromLineState> {
+            let group = app.tree.add_group(ROOT_ID, "captured parent").unwrap();
+            let source = EditorSourceLine {
+                pane_id: group,
+                path: PathBuf::from("/fixture/original.rs"),
+                line_number: 7,
+                text: "original source".into(),
+            };
+            let mut state = CreateAgentFromLineState::new(source, group);
+            state.agent_type = crate::agent_from_line::AgentLaunchType::Codex;
+            state.prompt = ratatui_textarea::TextArea::from(["exact edited task", "second line"]);
+            Box::new(state)
+        }
+
+        #[test]
+        fn create_agent_line_refusal_retains_exact_draft_then_retry_accepts_once() {
+            let (mut execution, client) = native_paste_bank();
+            let mut app = app();
+            app.outbound_admission = Some(client.clone());
+            let state = draft(&mut app);
+            let parent = state.parent_group;
+            let original_box = (&*state) as *const CreateAgentFromLineState;
+            let original_line = state.prompt.lines()[0].as_ptr();
+            let mut holds = Vec::new();
+            for _ in 0..32 {
+                holds.push(crate::ipc_preparation::reserve_request(&client, 4096).unwrap());
+            }
+            app.commit_create_agent_from_line(state);
+            let Mode::CreateAgentFromLine(state) = std::mem::replace(&mut app.mode, Mode::Normal)
+            else {
+                panic!("refusal must keep original draft");
+            };
+            assert_eq!((&*state) as *const CreateAgentFromLineState, original_box);
+            assert_eq!(state.prompt.lines()[0].as_ptr(), original_line);
+            assert_eq!(state.prompt_text(), "exact edited task\nsecond line");
+            assert_eq!(state.parent_group, parent);
+            assert!(app.outbox.is_empty());
+            assert!(app.pending_pane_focuses.is_empty());
+            assert!(app
+                .status_message
+                .as_deref()
+                .unwrap()
+                .contains("not admitted"));
+            drop(holds);
+            app.commit_create_agent_from_line(state);
+            assert!(matches!(app.mode, Mode::Normal));
+            assert_eq!(app.pending_pane_focuses.len(), 1);
+            assert_eq!(app.pending_pane_focuses[0].parent_group, Some(parent));
+            assert_eq!(
+                app.take_outbound_requests(),
+                vec![ClientRequest::NewPane {
+                    parent_group: parent,
+                    kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
+                        command_line: "codex".into(),
+                        initial_input: "exact edited task\nsecond line".into(),
+                    },
+                    working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+                }]
+            );
+            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+            let report = execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            assert!(report.shutdown_complete);
+        }
+
+        #[test]
+        fn create_agent_line_removed_parent_keeps_draft_without_retargeting() {
+            let (mut execution, client) = native_paste_bank();
+            let mut app = app();
+            app.outbound_admission = Some(client);
+            let state = draft(&mut app);
+            let parent = state.parent_group;
+            let original = (&*state) as *const CreateAgentFromLineState;
+            app.tree.remove_node(parent).unwrap();
+            app.tree
+                .add_group(ROOT_ID, "different live parent")
+                .unwrap();
+            app.commit_create_agent_from_line(state);
+            let Mode::CreateAgentFromLine(state) = &app.mode else {
+                panic!("preserve draft");
+            };
+            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
+            assert_eq!(state.parent_group, parent);
+            assert!(app.outbox.is_empty());
+            assert!(app.pending_pane_focuses.is_empty());
+            assert!(app
+                .status_message
+                .as_deref()
+                .unwrap()
+                .contains("destination"));
+            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+            let report = execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            assert!(report.shutdown_complete);
+        }
+
+        #[test]
+        fn create_agent_line_closed_admission_preserves_draft_and_parent_modal() {
+            let (mut execution, client) = native_paste_bank();
+            let mut app = app();
+            app.outbound_admission = Some(client);
+            app.modal_stack.push(Mode::Help);
+            let state = draft(&mut app);
+            let original = (&*state) as *const CreateAgentFromLineState;
+            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+            app.commit_create_agent_from_line(state);
+            let Mode::CreateAgentFromLine(state) = &app.mode else {
+                panic!("preserve draft");
+            };
+            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
+            assert!(matches!(app.modal_stack.as_slice(), [Mode::Help]));
+            assert!(app.status_message.as_deref().unwrap().contains("Closed"));
+            assert!(app.outbox.is_empty());
+            assert!(app.pending_pane_focuses.is_empty());
+            let report = execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            assert!(report.shutdown_complete);
+        }
+
+        #[test]
+        fn create_agent_line_empty_prompt_preserves_exact_draft_without_admission() {
+            let mut app = app();
+            app.outbound_admission = None;
+            let mut state = draft(&mut app);
+            state.prompt = ratatui_textarea::TextArea::from([" ", "\t"]);
+            let original = (&*state) as *const CreateAgentFromLineState;
+            app.commit_create_agent_from_line(state);
+            let Mode::CreateAgentFromLine(state) = &app.mode else {
+                panic!("preserve draft");
+            };
+            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
+            assert_eq!(
+                app.status_message.as_deref(),
+                Some("Agent task cannot be empty")
+            );
+            assert!(app.outbox.is_empty());
+            assert!(app.pending_pane_focuses.is_empty());
+        }
+    }
+
+    fn native_paste_bank() -> (ilium_execution::Execution, ilium_execution::Client) {
+        use ilium_execution::{Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits};
+        let empty = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 32,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 512 * 1024 * 1024,
+            worker_threads: 1,
+            worker_bytes: 2 * 1024 * 1024,
+        });
+        let execution = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 32,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                io: empty,
+                service: empty,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(crate::ipc_preparation::request_limits())
+            .unwrap();
+        (execution, client)
+    }
+
+    fn native_paste_app(client: ilium_execution::Client) -> (App, NodeId) {
+        let mut app = app();
+        app.outbound_admission = Some(client);
+        let group = app.tree.add_group(ROOT_ID, "native paste fixture").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: pane };
+        (app, pane)
+    }
+
+    #[test]
+    fn native_paste_retry_keeps_original_pointer_lease_and_captured_destination() {
+        let (mut execution, client) = native_paste_bank();
+        let holds = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect::<Vec<_>>();
+        let (mut app, pane) = native_paste_app(client);
+        let text = String::from("one semantic\nPaste");
+        let pointer = text.as_ptr();
+        let (event, quota) = crate::terminal_input_owner::paste_fixture(text);
+        let charged = quota.snapshot().worker_bytes;
+        app.capture_native_terminal_paste(pane, event).unwrap();
+        assert_eq!(app.pending_native_paste.as_ref().unwrap().pane_id, pane);
+        assert!(
+            matches!(app.pending_native_paste.as_ref().unwrap().event.view(), crossterm::event::Event::Paste(text) if text.as_ptr() == pointer)
+        );
+        assert_eq!(quota.snapshot().worker_bytes, charged);
+        assert!(app.outbox.is_empty());
+        // Ordinary coordination remains usable while the native FIFO is paused.
+        app.status_message = Some("collector remains active".into());
+        app.right_panel_target = RightPanelTarget::Empty;
+        app.retry_native_terminal_paste().unwrap();
+        assert!(app.pending_native_paste.is_some());
+        drop(holds);
+        app.retry_native_terminal_paste().unwrap();
+        assert!(app.pending_native_paste.is_none());
+        assert!(
+            matches!(app.outbox[0].view(), ClientRequest::UserKeyInput { pane_id, bytes, .. } if *pane_id == pane && bytes.as_ptr() == pointer && bytes == b"one semantic\nPaste")
+        );
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            0,
+            "native lease releases only after original transfers to admitted request"
+        );
+        app.outbox.clear();
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+    }
+
+    #[test]
+    fn native_paste_oversized_capacity_returns_whole_original_without_key_replay() {
+        let (mut execution, client) = native_paste_bank();
+        let (mut app, pane) = native_paste_app(client);
+        let mut text = String::with_capacity(crate::terminal_input::MAX_BYTES + 1);
+        text.push_str("small body, oversized original capacity");
+        let pointer = text.as_ptr();
+        let (event, quota) = crate::terminal_input_owner::paste_fixture(text);
+        let charged = quota.snapshot().worker_bytes;
+        let failure = app.capture_native_terminal_paste(pane, event).unwrap_err();
+        assert!(
+            matches!(failure.original().unwrap().view(), crossterm::event::Event::Paste(text) if text.as_ptr() == pointer && text == "small body, oversized original capacity")
+        );
+        assert_eq!(quota.snapshot().worker_bytes, charged);
+        assert!(app.outbox.is_empty());
+        assert!(app.pending_native_paste.is_none());
+        drop(failure);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[tokio::test]
+    async fn native_paste_wire_header_allowance_matches_current_protocol() {
+        for bytes in [Vec::new(), "UTF-8 café\n".as_bytes().to_vec()] {
+            let expected = 4 + 8 + 8 + 1 + 1 + bytes.len();
+            let request = ClientRequest::UserKeyInput {
+                pane_id: NodeId(7),
+                bytes,
+                submission: None,
+                prompt_epoch: None,
+            };
+            let (mut writer, reader) = tokio::io::duplex(128);
+            ilium_ipc::write_frame(&mut writer, &request).await.unwrap();
+            assert_eq!(
+                ilium_ipc::FrameReader::new(reader)
+                    .read_encoded_length()
+                    .await
+                    .unwrap() as usize,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn native_paste_parserless_bracketed_payload_remains_one_semantic_request() {
+        let (mut execution, client) = native_paste_bank();
+        let (mut app, pane) = native_paste_app(client);
+        let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane) else {
+            panic!("terminal fixture")
+        };
+        view.feed(b"\x1b[?2004h");
+        let (event, quota) =
+            crate::terminal_input_owner::paste_fixture("one\nUnicode: café 世界".into());
+        app.capture_native_terminal_paste(pane, event).unwrap();
+        assert!(app.pending_native_paste.is_none());
+        assert!(
+            matches!(app.outbox[0].view(), ClientRequest::UserKeyInput { pane_id, bytes, submission: None, prompt_epoch: None } if *pane_id == pane && bytes == &encode_bracketed_paste("one\nUnicode: café 世界"))
+        );
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        app.outbox.clear();
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn native_paste_wire_overflow_returns_original_before_encoding() {
+        let (mut execution, client) = native_paste_bank();
+        let (mut app, pane) = native_paste_app(client);
+        let text = "x".repeat(ilium_ipc::MAX_FRAME_LEN as usize - 20);
+        assert!(text.capacity() + 12 <= crate::terminal_input::MAX_BYTES);
+        let pointer = text.as_ptr();
+        let (event, quota) = crate::terminal_input_owner::paste_fixture(text);
+        let failure = app.capture_native_terminal_paste(pane, event).unwrap_err();
+        assert!(
+            matches!(failure.original().unwrap().view(), crossterm::event::Event::Paste(text) if text.as_ptr() == pointer)
+        );
+        assert!(app.outbox.is_empty());
+        drop(failure);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn native_paste_closed_admission_returns_original_without_replay() {
+        let (mut execution, client) = native_paste_bank();
+        let (mut app, pane) = native_paste_app(client);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let (event, quota) = crate::terminal_input_owner::paste_fixture("whole original\n".into());
+        let charged = quota.snapshot().worker_bytes;
+        let failure = app.capture_native_terminal_paste(pane, event).unwrap_err();
+        assert!(
+            matches!(failure.original().unwrap().view(), crossterm::event::Event::Paste(text) if text == "whole original\n")
+        );
+        assert_eq!(quota.snapshot().worker_bytes, charged);
+        assert!(app.outbox.is_empty());
+        assert!(app.pending_native_paste.is_none());
+        drop(failure);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        app.outbound_admission = None;
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn native_paste_replacement_cancels_only_captured_instance() {
+        let (mut execution, client) = native_paste_bank();
+        let holds = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect::<Vec<_>>();
+        let (mut app, pane) = native_paste_app(client);
+        let (event, quota) = crate::terminal_input_owner::paste_fixture("old instance".into());
+        app.capture_native_terminal_paste(pane, event).unwrap();
+        app.panes.insert(
+            pane,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.retry_native_terminal_paste().unwrap();
+        assert!(app.pending_native_paste.is_none());
+        assert!(app.outbox.is_empty());
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("confirmed pane replacement"));
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        drop(holds);
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn no_link_completion_preserves_original_suppression_and_audits_later_recovery() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let group = app.tree.add_group(ROOT_ID, "link fixture").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::Pane { pane_id: pane };
+        let mut view = TerminalView::new(8, 80);
+        view.feed(b"plain words");
+        assert_eq!(b"plain words"[5], b' ');
+        let source = view.painted_source();
+        let identity = view.identity.clone();
+        app.panes
+            .insert(pane, PaneRuntime::Terminal(Box::new(view)));
+        app.terminal_context_preparation = Some(
+            crate::terminal_context_preparation::TerminalContextPreparation::new(
+                crate::execution::test_client(),
+            ),
+        );
+        let viewport = app.pane_viewport(pane).unwrap();
+        let position = Position::new(viewport.content_area.x + 5, viewport.content_area.y);
+        let event = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: position.x,
+            row: position.y,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        };
+        let recovery = || {
+            PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                last_known_state: ilium_core::AgentState::from_activity(
+                    AgentClass::Codex,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
+                process: ilium_core::AgentProcessKey {
+                    class: AgentClass::Codex,
+                    process_id: 42,
+                    started_at_unix_seconds: 1,
+                },
+                availability: ilium_core::AgentAvailability::ShellForeground,
+                signal_name: None,
+                session_id: None,
+                last_prompt: None,
+                previous_exact_prompt: None,
+                latest_prompt_unavailable: false,
+            }))
+        };
+        for original_recovery in [false, true] {
+            app.tree
+                .set_pane_status(
+                    pane,
+                    if original_recovery {
+                        recovery()
+                    } else {
+                        PaneStatus::PlainShell
+                    },
+                )
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match app.start_terminal_link_preparation(
+                    pane,
+                    viewport,
+                    position,
+                    event,
+                    source.clone(),
+                ) {
+                    Ok(()) => break,
+                    Err(error) if error.contains("Busy") && Instant::now() < deadline => {
+                        std::thread::yield_now()
+                    }
+                    Err(error) => panic!("link fixture admission: {error}"),
+                }
+            }
+            // Reverse recovery after acceptance. The original suppression
+            // survives; a new crash reaches the existing explicit IPC audit.
+            app.tree
+                .set_pane_status(
+                    pane,
+                    if original_recovery {
+                        PaneStatus::PlainShell
+                    } else {
+                        recovery()
+                    },
+                )
+                .unwrap();
+            app.terminal_input.barrier_started(pane, 41);
+            assert!(app.terminal_input.record_ready_barrier(
+                pane,
+                &identity,
+                41,
+                (true, false, 31, 32)
+            ));
+            loop {
+                app.collect_terminal_context_preparation();
+                if app.terminal_input.pending_count() == 0 {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "link fixture completion deadline"
+                );
+                std::thread::yield_now();
+            }
+            assert!(
+                app.outbox.is_empty(),
+                "a suppressed or explicitly refused original mouse must not be delivered"
+            );
+            if !original_recovery {
+                assert!(app.status_message.as_deref().is_some_and(|message| message.contains("entered recovery before delivery")),
+                    "new recovery must use the visible delivery audit, not silently consume NoLink");
+            }
+        }
+    }
+
+    #[test]
+    fn impossible_composition_shape_is_refused_before_replacing_last_metadata() {
+        let mut app = app();
+        app.layout.tree_area.height = u16::MAX;
+        assert!(app
+            .admit_composition_metadata()
+            .unwrap_err()
+            .contains("maximum per frame"));
+        assert!(app.composition_metadata.is_none());
+    }
+
+    #[test]
+    fn terminal_content_reader_advances_only_with_emitted_ack_and_rejects_replacement() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 80, 24));
+        let group = app.tree.add_group(ROOT_ID, "frame fixture").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        app.focus = FocusTarget::Pane;
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        let view = match app.panes.get_mut(&pane_id).unwrap() {
+            PaneRuntime::Terminal(view) => view,
+            _ => panic!("terminal fixture"),
+        };
+        view.feed(b"emitted original");
+        app.composed_terminal_sources
+            .push((pane_id, view.painted_source()));
+        let original = app.capture_emitted_geometry(7);
+        let view = match app.panes.get_mut(&pane_id).unwrap() {
+            PaneRuntime::Terminal(view) => view,
+            _ => unreachable!(),
+        };
+        view.feed(b"\r\nnewer not emitted");
+        app.commit_emitted_geometry(original);
+        let source = app.emitted_terminal_source(pane_id).unwrap();
+        assert!(source
+            .with_screen(|screen| screen.contents())
+            .contains("emitted original"));
+        assert!(!source
+            .with_screen(|screen| screen.contents())
+            .contains("newer not emitted"));
+        let view = match app.panes.get(&pane_id).unwrap() {
+            PaneRuntime::Terminal(view) => view,
+            _ => unreachable!(),
+        };
+        app.composed_terminal_sources = vec![(pane_id, view.painted_source())];
+        let next = app.capture_emitted_geometry(8);
+        assert!(!app
+            .emitted_terminal_source(pane_id)
+            .unwrap()
+            .with_screen(|screen| screen.contents())
+            .contains("newer not emitted"));
+        app.commit_emitted_geometry(next);
+        assert!(app
+            .emitted_terminal_source(pane_id)
+            .unwrap()
+            .with_screen(|screen| screen.contents())
+            .contains("newer not emitted"));
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(24, 80))),
+        );
+        assert!(app.emitted_terminal_source(pane_id).is_none());
+    }
+
+    #[test]
+    fn pointer_geometry_advances_only_after_matching_frame_emission() {
+        let mut app = app();
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 80, 24));
+        let first = app.capture_emitted_geometry(7);
+        assert_eq!(app.emitted_layout_revision(), None);
+        app.commit_emitted_geometry(first);
+        assert_eq!(app.emitted_layout_revision(), Some(7));
+        assert!(app.pointer_geometry_is_current());
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 120, 40));
+        let next = app.capture_emitted_geometry(8);
+        assert_eq!(app.emitted_layout_revision(), Some(7));
+        assert!(!app.pointer_geometry_is_current());
+        app.commit_emitted_geometry(next);
+        assert_eq!(app.emitted_layout_revision(), Some(8));
+        assert!(app.pointer_geometry_is_current());
     }
 
     #[test]
@@ -13171,6 +18037,79 @@ mod tests {
     }
 
     #[test]
+    fn hovering_the_progress_footer_shows_the_long_description_tooltip() {
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+        use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "tasks").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "task", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        let progress = PaneProgress::new(
+            17,
+            ProgressTaskReport::new(
+                "release-build".to_owned(),
+                ProgressTaskStatus::Running,
+                40.0,
+                "Building the release binaries - crate 4 of 10".to_owned(),
+                "What: compile the app for release\nWhy: you asked for a deployable build\nNext: install and verify it".to_owned(),
+                None,
+            )
+            .unwrap(),
+            1000,
+        )
+        .unwrap();
+        app.tree.set_pane_progress(pane_id, Some(progress)).unwrap();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let progress_area = app.pane_viewport(pane_id).unwrap().progress_area.unwrap();
+        let on_footer = Position::new(progress_area.x + 2, progress_area.y);
+        let event = |position: Position| MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: position.x,
+            row: position.y,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_pane_mouse(event(on_footer), on_footer);
+        assert_eq!(app.hovered_progress, Some((pane_id, on_footer)));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("you asked for a deployable build"));
+
+        let elsewhere = Position::new(progress_area.x + 2, progress_area.y.saturating_sub(3));
+        app.handle_pane_mouse(event(elsewhere), elsewhere);
+        assert_eq!(app.hovered_progress, None);
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(!rendered.contains("you asked for a deployable build"));
+    }
+
+    #[test]
     fn completed_progress_expiry_hides_text_without_resizing_or_losing_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
@@ -13193,6 +18132,7 @@ mod tests {
                 status: ProgressTaskStatus::Done,
                 percent: 100.0,
                 message: "retained expiry footer marker".to_owned(),
+                details: String::new(),
                 error: None,
             },
             1000,
@@ -13276,6 +18216,7 @@ mod tests {
                         },
                         percent: 100.0,
                         message: "retained split result".into(),
+                        details: String::new(),
                         error: None,
                     },
                     1000,
@@ -13333,6 +18274,7 @@ mod tests {
                 message: "old reply".to_owned(),
                 target: ilium_ipc::TextTriggerTarget::Both,
                 sample_text: String::new(),
+                delay_seconds: 60,
             }],
         });
 
@@ -13353,10 +18295,12 @@ mod tests {
                 message: "new reply".to_owned(),
                 target: ilium_ipc::TextTriggerTarget::Agents,
                 sample_text: "new sample".to_owned(),
+                delay_seconds: 60,
             },
         )
         .expect("durable stable-ID edit");
 
+        app.settle_filesystem_for_test();
         let persisted = crate::config::load(directory.path()).expect("read text trigger config");
         assert_eq!(app.text_trigger_settings, baseline);
         app.apply_text_trigger_settings(persisted.text_triggers.clone());
@@ -13501,6 +18445,7 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &pending.inference_activity_revisions,
+            &pending.title_observations,
             Ok(recommended_test_plan(ilium_core::RestructurePlan {
                 children: vec![ilium_core::RestructureNode::Pane {
                     id: pane_id,
@@ -13549,6 +18494,7 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &pending.inference_activity_revisions,
+            &pending.title_observations,
             Ok(recommended_test_plan(ilium_core::RestructurePlan {
                 children: vec![ilium_core::RestructureNode::Pane {
                     id: pane_id,
@@ -13567,11 +18513,13 @@ mod tests {
             project_id: requested_project,
             plan,
             inference_activity_revisions,
+            title_observations,
         }] = requests.as_slice()
         else {
             panic!("expected the complete recommendation transaction");
         };
         assert_eq!(*requested_project, project_id);
+        assert_eq!(title_observations, &pending.title_observations);
         // A production snapshot supplies the accepted metadata before a later
         // unchanged check; a checkpoint ACK alone cannot invent it.
         app.tree
@@ -13593,6 +18541,56 @@ mod tests {
     }
 
     #[test]
+    fn pending_restructure_retains_original_title_observation_after_manual_rename() {
+        let mut app = app();
+        let project_id = app
+            .tree
+            .add_project(PathBuf::from("/tmp/title-observation-project"))
+            .unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(project_id, "untouched", PaneContentKind::Terminal)
+            .unwrap();
+        app.action_request_project_restructure(project_id);
+        let pending = app.take_pending_restructure_requests().remove(0);
+        let original = pending
+            .title_observations
+            .iter()
+            .find(|observation| observation.pane_id == pane_id)
+            .unwrap()
+            .clone();
+        app.tree
+            .rename_node(pane_id, "manual name", Some("manual".into()), None)
+            .unwrap();
+        assert_ne!(
+            original.presentation_revision,
+            app.tree.get(pane_id).unwrap().presentation_revision
+        );
+        app.finish_project_restructure(
+            project_id,
+            &pending.inference_activity_revisions,
+            &pending.title_observations,
+            Ok(recommended_test_plan(ilium_core::RestructurePlan {
+                children: vec![ilium_core::RestructureNode::Pane {
+                    id: pane_id,
+                    title: "old proposal".into(),
+                    short_title: None,
+                    icon: None,
+                }],
+            })),
+        );
+        let requests = app.take_outbound_requests();
+        let [ClientRequest::ApplyRecommendedProjectRestructurePlan {
+            title_observations, ..
+        }] = requests.as_slice()
+        else {
+            panic!("expected captured request")
+        };
+        assert_eq!(title_observations, &pending.title_observations);
+        assert_eq!(title_observations[0], original);
+    }
+
+    #[test]
     fn automatic_restructure_failures_back_off_but_manual_and_changed_input_bypass_them() {
         let mut app = app();
         let project_id = app
@@ -13609,6 +18607,7 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &automatic_request.inference_activity_revisions,
+            &automatic_request.title_observations,
             Err(anyhow::anyhow!("gateway timed out")),
         );
         assert_eq!(
@@ -13624,6 +18623,7 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &manual_request.inference_activity_revisions,
+            &manual_request.title_observations,
             Err(anyhow::anyhow!("manual provider failure")),
         );
         assert_eq!(
@@ -13655,6 +18655,7 @@ mod tests {
         app.finish_project_restructure(
             project_id,
             &automatic_request.inference_activity_revisions,
+            &automatic_request.title_observations,
             Err(anyhow::anyhow!("gateway timed out")),
         );
         assert!(app.project_restructure_jobs.contains_key(&project_id));
@@ -13836,6 +18837,7 @@ mod tests {
         app.settings_set_unfocused_panel_width(26);
         app.settings_set_focused_panel_width(70);
 
+        app.settle_filesystem_for_test();
         let loaded = crate::config::load(config_dir.path())
             .expect("left panel sizing settings should persist");
         assert_eq!(
@@ -14051,6 +19053,7 @@ mod tests {
             Duration::from_millis(10),
             result,
         );
+        app.settle_model_catalog_for_test();
     }
     #[test]
     fn openai_catalog_preserves_saved_selection_and_last_good_list_on_failure() {
@@ -14100,7 +19103,7 @@ mod tests {
         assert!(app.openai_models.is_empty());
     }
     #[test]
-    fn openai_keyboard_selection_persists_and_enter_keeps_manual_editing() {
+    fn openai_keyboard_selection_persists_and_e_keeps_manual_editing() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = configured_openai_app();
         app.config_dir = Some(directory.path().to_path_buf());
@@ -14126,6 +19129,7 @@ mod tests {
             )),
         );
         assert_eq!(app.inference_settings.openai.model, "first-model");
+        app.settle_filesystem_for_test();
         let loaded = crate::config::load(directory.path()).unwrap();
         assert_eq!(loaded.inference.openai.model, "first-model");
         assert_eq!(
@@ -14135,7 +19139,7 @@ mod tests {
         crate::keys::handle_event(
             &mut app,
             crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyCode::Char('e'),
                 crossterm::event::KeyModifiers::NONE,
             )),
         );
@@ -14160,9 +19164,17 @@ mod tests {
             ..Default::default()
         };
         app.layout.screen_area = ratatui::layout::Rect::new(0, 0, 180, 60);
-        let layout =
+        let mut layout =
             crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
-        let column = layout.content_area.right() - 2;
+        // Rendering and real mouse dispatch reserve the instruction panel first.
+        let instruction_height =
+            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+        layout.content_area.y += instruction_height;
+        layout.content_area.height = layout
+            .content_area
+            .height
+            .saturating_sub(instruction_height);
+        let column = layout.content_area.x + 50;
         let row = (layout.content_area.y..layout.content_area.bottom())
             .find(|row| {
                 crate::settings_ui::inference_content_hit_with_test(
@@ -14187,6 +19199,7 @@ mod tests {
         );
         assert_eq!(app.inference_settings.openai.model, "first-model");
         assert!(matches!(app.mode, Mode::Settings(_)));
+        app.settle_filesystem_for_test();
         let loaded = crate::config::load(directory.path()).unwrap();
         assert_eq!(loaded.inference.openai.model, "first-model");
         assert_eq!(loaded.inference.openai.api_key, "fixture-key");
@@ -14212,6 +19225,7 @@ mod tests {
             Duration::from_millis(10),
             Ok(vec!["old-daemon-model".to_string()]),
         );
+        app.settle_model_catalog_for_test();
         assert!(app.ollama_models.is_empty());
         assert_eq!(app.inference_settings.ollama.model, "new-daemon-model");
         assert!(matches!(
@@ -14235,6 +19249,7 @@ mod tests {
             Duration::from_millis(125),
             Ok(vec!["qwen3.6:latest".to_string(), "gemma4:12b".to_string()]),
         );
+        app.settle_model_catalog_for_test();
 
         assert_eq!(app.ollama_models, ["qwen3.6:latest", "gemma4:12b"]);
         assert_eq!(app.inference_settings.ollama.model, "qwen3.6:latest");
@@ -14257,6 +19272,7 @@ mod tests {
             Duration::from_millis(250),
             Err("connection refused".to_string()),
         );
+        app.settle_model_catalog_for_test();
 
         assert_eq!(app.ollama_models, ["qwen3.6:latest"]);
         assert!(matches!(
@@ -14280,6 +19296,7 @@ mod tests {
             Duration::from_millis(100),
             Ok(vec!["stepfun/step-3.7-flash:free".to_string()]),
         );
+        app.settle_model_catalog_for_test();
 
         assert_eq!(
             app.inference_settings.kilo_gateway.model,
@@ -14623,6 +19640,7 @@ mod tests {
             .contains(&ContextMenuAction::CreateBoardFromMarkdown));
 
         app.execute_context_action(ContextMenuAction::CreateBoardFromMarkdown, editor_id);
+        app.settle_filesystem_for_test();
 
         assert_eq!(
             app.take_outbound_requests(),
@@ -14747,8 +19765,66 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_last_item_also_closes_its_emptied_group_chain() {
+        let mut app = app();
+        let outer = app.tree.add_group(ROOT_ID, "outer").unwrap();
+        let inner = app.tree.add_group(outer, "inner").unwrap();
+        let only = app
+            .tree
+            .add_pane(inner, "only", PaneContentKind::Terminal)
+            .unwrap();
+        app.take_outbound_requests();
+
+        assert!(app.ui_settings.auto_remove_empty_groups);
+        app.request_close(only);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![
+                ClientRequest::ClosePane { pane_id: only },
+                ClientRequest::ClosePane { pane_id: outer },
+            ]
+        );
+    }
+
+    #[test]
+    fn closing_a_non_last_item_or_disabled_setting_leaves_the_group() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "b", PaneContentKind::Terminal)
+            .unwrap();
+        app.take_outbound_requests();
+
+        app.request_close(first);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ClosePane { pane_id: first }]
+        );
+
+        app.ui_settings.auto_remove_empty_groups = false;
+        let solo_group = app.tree.add_group(ROOT_ID, "solo").unwrap();
+        let solo = app
+            .tree
+            .add_pane(solo_group, "c", PaneContentKind::Terminal)
+            .unwrap();
+        app.take_outbound_requests();
+        app.request_close(solo);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::ClosePane { pane_id: solo }]
+        );
+        let _ = second;
+    }
+
+    #[test]
     fn interactive_worktree_close_uses_correlated_offer_and_keeps_by_default() {
         let mut app = app();
+        app.ui_settings.auto_remove_empty_groups = false;
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -15152,6 +20228,66 @@ mod tests {
     }
 
     #[test]
+    fn full_outbound_credit_keeps_original_scheduled_and_prompt_forms_for_retry() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let terminal = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let mut limits = crate::ipc_preparation::request_limits();
+        limits.jobs = 1;
+        app.outbound_admission = Some(
+            app.outbound_admission
+                .as_ref()
+                .unwrap()
+                .child(limits)
+                .unwrap(),
+        );
+        assert!(app.queue_request(ClientRequest::UpdateDebugLogging { enabled: true }));
+        app.execute_context_action(ContextMenuAction::SchedulePaneInput, terminal);
+        let Mode::SchedulePaneInput(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("schedule form")
+        };
+        state.seconds = TextPromptState::new("3");
+        state.text = TextPromptState::new("retain unicode λ\nsecond line");
+        app.commit_scheduled_pane_input(state);
+        let Mode::SchedulePaneInput(state) = &app.mode else {
+            panic!("full credit must retain original form")
+        };
+        assert_eq!(state.text.buf, "retain unicode λ\nsecond line");
+        assert!(!app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("Scheduled pane input"));
+        app.mode = Mode::Normal;
+        app.execute_context_action(ContextMenuAction::QueuePrompt, terminal);
+        let Mode::QueuePrompt(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("prompt form")
+        };
+        state.text = TextPromptState::new("original queued prompt");
+        app.commit_queued_prompt(state);
+        let Mode::QueuePrompt(state) = &app.mode else {
+            panic!("full credit must retain original prompt")
+        };
+        assert_eq!(state.text.buf, "original queued prompt");
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::UpdateDebugLogging { enabled: true }]
+        );
+        let Mode::QueuePrompt(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("retained form")
+        };
+        app.commit_queued_prompt(state);
+        assert!(
+            matches!(app.take_outbound_requests().as_slice(),[ClientRequest::EnqueuePrompt{text,..}] if text=="original queued prompt")
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
     fn pending_scheduled_input_keeps_countdown_redraws_active() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -15266,9 +20402,14 @@ mod tests {
         // An absolute path in the platform's own shape: `/tmp/...` is relative
         // on Windows, so normalization would resolve it against the current
         // directory and no longer match what was passed in.
-        let path = std::env::temp_dir().join("project").join("release-plan.md");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("release-plan.md");
+        let original = "# Release plan\n\n## To do\n- Preserve authored task\n";
+        std::fs::write(&path, original).unwrap();
 
         app.request_new_markdown_board(group, path.clone());
+        app.settle_filesystem_for_test();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
         assert_eq!(
             app.take_outbound_requests(),
@@ -15303,6 +20444,7 @@ mod tests {
             .unwrap();
 
         app.open_create_board_dialog();
+        app.settle_filesystem_for_test();
 
         let Mode::CreateBoard(state) = &app.mode else {
             panic!("new board should open its creation dialog");
@@ -15332,6 +20474,7 @@ mod tests {
         };
 
         app.commit_create_board(&state);
+        app.settle_filesystem_for_test();
 
         let board_path = project_path.join("plans").join("sprint.md");
         assert!(board_path.is_file());
@@ -15368,6 +20511,7 @@ mod tests {
         };
 
         app.commit_create_board(&state);
+        app.settle_filesystem_for_test();
 
         assert!(app.take_outbound_requests().is_empty());
         assert!(matches!(app.mode, Mode::CreateBoard(_)));
@@ -16641,6 +21785,7 @@ mod tests {
         );
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.ui_settings.auto_remove_empty_groups = false;
         app.take_outbound_requests();
         let action = app
             .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
@@ -16874,6 +22019,11 @@ mod tests {
     #[test]
     fn stopped_agent_menu_prefers_its_exact_prompt_over_later_shell_input() {
         let mut app = app();
+        app.terminal_context_preparation = Some(
+            crate::terminal_context_preparation::TerminalContextPreparation::new(
+                crate::execution::test_client(),
+            ),
+        );
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -16919,6 +22069,20 @@ mod tests {
             "verified-session"
         );
         app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.collect_terminal_context_preparation();
+            if matches!(&app.mode, Mode::TerminalPaneContextMenu(menu) if !menu.actions.is_empty())
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "recovery menu preparation did not complete: {:?}",
+                app.status_message
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
             panic!("menu did not open");
         };
@@ -16935,6 +22099,11 @@ mod tests {
     #[test]
     fn opaque_latest_submission_labels_previous_exact_prompt_as_historical() {
         let mut app = app();
+        app.terminal_context_preparation = Some(
+            crate::terminal_context_preparation::TerminalContextPreparation::new(
+                crate::execution::test_client(),
+            ),
+        );
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -16968,6 +22137,20 @@ mod tests {
             )
             .unwrap();
         app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.collect_terminal_context_preparation();
+            if matches!(&app.mode, Mode::TerminalPaneContextMenu(menu) if !menu.actions.is_empty())
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "recovery menu preparation did not complete: {:?}",
+                app.status_message
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let Mode::TerminalPaneContextMenu(menu) = &app.mode else {
             panic!("menu did not open");
         };
@@ -16985,10 +22168,69 @@ mod tests {
         )));
     }
 
-    #[test]
+    #[tokio::test(flavor = "current_thread")]
     #[ignore = "requires an isolated host clipboard to avoid changing the user's clipboard"]
-    fn terminal_recovery_copy_keeps_exact_prompt_available_after_the_menu_closes() {
+    async fn terminal_recovery_copy_keeps_exact_prompt_available_after_the_menu_closes() {
+        fn prepared_menu(app: &mut App, pane_id: NodeId) -> TerminalPaneContextMenu {
+            app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                app.collect_terminal_context_preparation();
+                if matches!(&app.mode, Mode::TerminalPaneContextMenu(menu) if !menu.actions.is_empty())
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "actual context preparation timed out: {:?}",
+                    app.status_message
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let Mode::TerminalPaneContextMenu(menu) =
+                std::mem::replace(&mut app.mode, Mode::Normal)
+            else {
+                panic!("prepared recovery menu did not open");
+            };
+            menu
+        }
+        fn await_copy(app: &mut App) {
+            assert_eq!(app.status_message.as_deref(), Some("Copying text…"));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !app.pending_clipboard_copies.is_empty() {
+                app.collect_clipboard();
+                assert!(
+                    Instant::now() < deadline,
+                    "native clipboard acknowledgement timed out"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                app.status_message
+                    .as_deref()
+                    .is_some_and(|status| status.ends_with("copied to clipboard")),
+                "native clipboard write failed: {:?}",
+                app.status_message
+            );
+        }
         let mut app = app();
+        let helper = std::path::PathBuf::from(
+            std::env::var_os("ILIUM_TEST_CLIPBOARD_HELPER")
+                .expect("isolated runner must supply the matching native helper"),
+        );
+        app.terminal_clipboard = Some(
+            crate::terminal_clipboard::ClipboardService::start_with_native_helper(
+                crate::execution::test_client(),
+                &helper,
+            )
+            .expect("native clipboard service admission"),
+        );
+        app.terminal_context_preparation = Some(
+            crate::terminal_context_preparation::TerminalContextPreparation::new(
+                crate::execution::test_client(),
+            ),
+        );
+        let session_id = "840cdeca-c171-4556-8494-28b341e38c14";
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
             .tree
@@ -16996,7 +22238,15 @@ mod tests {
             .unwrap();
         app.panes.insert(
             pane_id,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+            PaneRuntime::Terminal(Box::new({
+                let mut view = TerminalView::new(24, 80);
+                let mut output = (0..30)
+                    .map(|index| format!("earlier retained line {index:02}\r\n"))
+                    .collect::<String>();
+                output.push_str("FATAL café 日本語 🦀");
+                view.feed(output.as_bytes());
+                view
+            })),
         );
         let prompt = format!(
             "{}\nUnicode café 日本語 🦀\r\nlast line  ",
@@ -17005,12 +22255,75 @@ mod tests {
         app.tree
             .set_last_prompt(pane_id, Some(prompt.clone()))
             .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Codex,
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process: ilium_core::AgentProcessKey {
+                        class: AgentClass::Codex,
+                        process_id: 42,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: ilium_core::AgentAvailability::Exited(
+                        ilium_core::AgentExitOutcome::ExitCode(42),
+                    ),
+                    signal_name: None,
+                    session_id: Some(session_id.to_string()),
+                    last_prompt: Some(prompt.clone()),
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+        assert!(app.is_known_agent_pane(pane_id));
+        assert!(!app.is_detected_agent_pane(pane_id));
         app.ui_settings.last_prompt_enabled = false;
-        app.open_terminal_pane_context_menu(pane_id, 0, 0, 1, 1);
-        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("recovery menu did not open");
-        };
+        app.terminal_selection = Some(crate::terminal_selection::TerminalSelection {
+            pane_id,
+            anchor: crate::terminal_selection::SelectionPoint::new(23, 0),
+            cursor: crate::terminal_selection::SelectionPoint::new(23, 4),
+        });
+        let menu = prepared_menu(&mut app, pane_id);
+        assert!(menu.full_history.contains("earlier retained line 00"));
+        assert!(menu.full_history.contains("FATAL café 日本語 🦀"));
+        assert!(menu.visible_contents.contains("FATAL café 日本語 🦀"));
+        assert!(!menu.visible_contents.contains("earlier retained line 00"));
+        assert!(!menu.source_line_text.is_empty());
+        assert_eq!(menu.selection_text.as_deref(), Some("FATAL"));
+        let copies = [
+            (
+                TerminalContextAction::CopySelectionToClipboard,
+                "FATAL".to_string(),
+            ),
+            (
+                TerminalContextAction::CopyLineToClipboard,
+                menu.source_line_text.clone(),
+            ),
+            (
+                TerminalContextAction::CopyVisibleTerminalToClipboard,
+                menu.visible_contents.clone(),
+            ),
+            (
+                TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+                menu.full_history.clone(),
+            ),
+        ];
+        for (action, expected) in copies {
+            assert!(menu.actions.contains(&action));
+            let before = app.outbox.len();
+            let copy_menu = prepared_menu(&mut app, pane_id);
+            app.execute_terminal_context_action(action, copy_menu);
+            await_copy(&mut app);
+            assert_eq!(app.outbox.len(), before, "copy must emit no terminal input");
+            let mut reader = arboard::Clipboard::new().expect("isolated clipboard reader");
+            assert_eq!(reader.get_text().expect("clipboard readback"), expected);
+            assert!(matches!(app.mode, Mode::Normal));
+        }
         let action = menu
             .actions
             .iter()
@@ -17027,6 +22340,7 @@ mod tests {
             .unwrap();
         let outbox_before = app.outbox.len();
         app.execute_terminal_context_action(action, menu);
+        await_copy(&mut app);
         assert_eq!(
             app.outbox.len(),
             outbox_before,
@@ -17040,7 +22354,57 @@ mod tests {
         // variables and the captured menu have been dropped.
         let mut reader = arboard::Clipboard::new().expect("isolated host clipboard reader");
         assert_eq!(reader.get_text().expect("clipboard readback"), prompt);
+
+        // Resolve a labelled fixture through the same historical ownership
+        // checks as the menu; copying a path must never modify the transcript.
+        let home = tempfile::tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/10/03");
+        std::fs::create_dir_all(&directory).unwrap();
+        let transcript_path =
+            directory.join(format!("rollout-2026-10-03T12-00-00-{session_id}.jsonl"));
+        let transcript = format!(
+            "{}\n",
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "id": session_id, "cwd": app.session_cwd },
+                "synthetic_fixture_evidence": "private clipboard test; not production data"
+            })
+        );
+        std::fs::write(&transcript_path, &transcript).unwrap();
+        let verified_path = app
+            .history_file_path_for_pane(pane_id, home.path())
+            .expect("historical session must resolve its own fixture transcript");
+        assert_eq!(verified_path, transcript_path);
+        let path_menu = prepared_menu(&mut app, pane_id);
+        let before = app.outbox.len();
+        app.execute_terminal_context_action(
+            TerminalContextAction::CopyHistoryFilePathToClipboard {
+                path: verified_path,
+            },
+            path_menu,
+        );
+        await_copy(&mut app);
+        assert_eq!(
+            reader.get_text().expect("history path clipboard readback"),
+            transcript_path.display().to_string()
+        );
+        assert_eq!(
+            app.outbox.len(),
+            before,
+            "path copy must emit no terminal input"
+        );
+        assert_eq!(
+            std::fs::read(&transcript_path).unwrap(),
+            transcript.as_bytes()
+        );
+        app.terminal_clipboard
+            .take()
+            .expect("native service retained")
+            .shutdown()
+            .await
+            .expect("owned native clipboard helper and worker joined");
     }
+
     #[test]
     fn left_drag_over_terminal_content_creates_a_local_selection_instead_of_forwarding() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -17113,6 +22477,354 @@ mod tests {
             elsewhere,
         );
         assert!(app.terminal_selection.is_none());
+    }
+
+    #[test]
+    fn ready_clipboard_completion_keeps_exact_destination_identity() {
+        use crate::terminal_input::InputIntent;
+        for class in [AgentClass::Codex, AgentClass::Claude] {
+            for disposition in ["unchanged-crashed", "removed", "replaced"] {
+                let mut app = app();
+                let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+                let pane_id = app
+                    .tree
+                    .add_pane(group, "provider", PaneContentKind::Terminal)
+                    .unwrap();
+                let view = TerminalView::new(24, 80);
+                let identity = view.identity.clone();
+                app.panes
+                    .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+                app.tree
+                    .set_pane_status(
+                        pane_id,
+                        PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                            last_known_state: ilium_core::AgentState::from_activity(
+                                class.clone(),
+                                AgentActivity::Working,
+                                None,
+                            ),
+                            process: ilium_core::AgentProcessKey {
+                                class: class.clone(),
+                                process_id: 42,
+                                started_at_unix_seconds: 1,
+                            },
+                            availability: ilium_core::AgentAvailability::Exited(
+                                ilium_core::AgentExitOutcome::ExitCode(42),
+                            ),
+                            signal_name: None,
+                            session_id: Some("retained-session".into()),
+                            last_prompt: Some("saved submitted prompt  ".into()),
+                            previous_exact_prompt: None,
+                            latest_prompt_unavailable: false,
+                        })),
+                    )
+                    .unwrap();
+                assert!(app
+                    .terminal_input
+                    .admit(
+                        pane_id,
+                        identity.clone(),
+                        InputIntent::ClipboardPaste {
+                            id: 17,
+                            completion: None
+                        }
+                    )
+                    .is_ok());
+                assert!(app
+                    .terminal_input
+                    .admit(
+                        pane_id,
+                        identity.clone(),
+                        InputIntent::Paste("later key".into())
+                    )
+                    .is_ok());
+                let generation = app.terminal_input.next_generation().unwrap();
+                app.terminal_input.barrier_started(pane_id, generation);
+                assert!(app.terminal_input.record_clipboard_barrier(
+                    pane_id,
+                    &identity,
+                    generation,
+                    (true, true, 1, 1)
+                ));
+                match disposition {
+                    "removed" => {
+                        app.panes.remove(&pane_id);
+                    }
+                    "replaced" => {
+                        app.panes.insert(
+                            pane_id,
+                            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+                        );
+                    }
+                    _ => {}
+                }
+                // A labelled synthetic acknowledgement drives the actual App
+                // collector/publication boundary. Native clipboard bytes are
+                // separately verified by the ignored private-display fixture.
+                let text = "saved café 日本語 🦀\nlast line  ".to_string();
+                let completion = crate::execution::test_client()
+                    .try_reserve_external(ilium_execution::JobCost {
+                        input_bytes: 4096,
+                        result_bytes: text.capacity() + 4096,
+                    })
+                    .unwrap()
+                    .retain(crate::terminal_clipboard::Completion {
+                        id: 17,
+                        result: Ok(text.clone()),
+                    })
+                    .map_err(|error| error.reason)
+                    .unwrap();
+                assert_eq!(
+                    app.terminal_input.finish_clipboard(17, completion),
+                    Some(pane_id)
+                );
+                app.take_outbound_requests();
+                app.collect_clipboard();
+                let requests = app.take_outbound_requests();
+                if disposition != "unchanged-crashed" {
+                    assert!(requests.is_empty(), "late clipboard bytes must not reach a removed or replaced destination: {disposition}");
+                    assert_eq!(
+                        app.terminal_input.pending_count(),
+                        0,
+                        "confirmed destination loss cancels both queued inputs"
+                    );
+                    continue;
+                }
+                assert!(matches!(requests.as_slice(), [ClientRequest::UserKeyInput { pane_id: actual, bytes, .. }] if *actual == pane_id && *bytes == encode_bracketed_paste(&text)), "manual paste into the same crashed pane must preserve exact bytes and negotiated modes");
+                assert_eq!(
+                    app.terminal_input.pending_count(),
+                    1,
+                    "later input stays behind native read completion"
+                );
+                let generation = app.terminal_input.next_generation().unwrap();
+                app.terminal_input.barrier_started(pane_id, generation);
+                assert!(app.terminal_input.record_ready_barrier(
+                    pane_id,
+                    &identity,
+                    generation,
+                    (false, false, 2, 2)
+                ));
+                app.publish_ready_terminal_inputs();
+                assert!(
+                    matches!(app.take_outbound_requests().as_slice(), [ClientRequest::UserKeyInput { bytes, .. }] if bytes == b"later key"),
+                    "later accepted input must retain FIFO order"
+                );
+                assert_eq!(
+                    app.tree
+                        .agent_recovery(pane_id)
+                        .unwrap()
+                        .last_prompt
+                        .as_deref(),
+                    Some("saved submitted prompt  ")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn queued_live_agent_wheel_is_not_forwarded_after_crash_before_barrier_completion() {
+        use crate::terminal_input::InputIntent;
+
+        for class in [AgentClass::Codex, AgentClass::Claude] {
+            let mut app = app();
+            let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+            let pane_id = app
+                .tree
+                .add_pane(group, "provider", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::from_activity(class.clone(), AgentActivity::Working, None),
+                )
+                .unwrap();
+            let view = TerminalView::new(24, 80);
+            let identity = view.identity.clone();
+            app.panes
+                .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+            let request = ClientRequest::MouseInput {
+                pane_id,
+                kind: ilium_ipc::MouseEventKind::ScrollUp,
+                column: 1,
+                row: 1,
+                modifiers: ilium_ipc::MouseModifiers::default(),
+            };
+            assert!(app
+                .terminal_input
+                .admit(
+                    pane_id,
+                    identity.clone(),
+                    InputIntent::Wheel {
+                        request,
+                        up: true,
+                        recovery: false,
+                        layout_revision: None,
+                    }
+                )
+                .is_ok());
+            let generation = app.terminal_input.next_generation().unwrap();
+            app.terminal_input.barrier_started(pane_id, generation);
+
+            // Status may arrive while the same terminal owner's input barrier
+            // is pending. Retained mouse modes are not a live receiver.
+            app.tree
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                        last_known_state: ilium_core::AgentState::from_activity(
+                            class.clone(),
+                            AgentActivity::Working,
+                            None,
+                        ),
+                        process: ilium_core::AgentProcessKey {
+                            class,
+                            process_id: 42,
+                            started_at_unix_seconds: 1,
+                        },
+                        availability: ilium_core::AgentAvailability::Unverified,
+                        signal_name: None,
+                        session_id: Some("retained-session".to_string()),
+                        last_prompt: Some("retained exact prompt  ".to_string()),
+                        previous_exact_prompt: None,
+                        latest_prompt_unavailable: false,
+                    })),
+                )
+                .unwrap();
+            let intent = app
+                .terminal_input
+                .complete(pane_id, &identity, generation)
+                .expect("same-pane barrier completion");
+            app.take_outbound_requests();
+            app.deliver_terminal_input(pane_id, intent, true, false, 1, 1);
+            assert!(
+                app.take_outbound_requests().is_empty(),
+                "queued wheel must become local recovery input after the agent crashes"
+            );
+            assert_eq!(
+                app.tree
+                    .agent_recovery(pane_id)
+                    .unwrap()
+                    .last_prompt
+                    .as_deref(),
+                Some("retained exact prompt  ")
+            );
+        }
+    }
+    #[test]
+    fn queued_live_agent_mouse_is_not_forwarded_after_crash_before_barrier_completion() {
+        use ilium_ipc::{MouseButton, MouseEventKind};
+
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+        ] {
+            for class in [AgentClass::Codex, AgentClass::Claude] {
+                let mut app = app();
+                let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+                let pane_id = app
+                    .tree
+                    .add_pane(group, "provider", PaneContentKind::Terminal)
+                    .unwrap();
+                app.tree
+                    .set_pane_status(
+                        pane_id,
+                        PaneStatus::from_activity(class.clone(), AgentActivity::Working, None),
+                    )
+                    .unwrap();
+                let view = TerminalView::new(24, 80);
+                let identity = view.identity.clone();
+                app.panes
+                    .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+                let request = ClientRequest::MouseInput {
+                    pane_id,
+                    kind,
+                    column: 1,
+                    row: 1,
+                    modifiers: ilium_ipc::MouseModifiers::default(),
+                };
+                // Parallel fixtures share the real finite bank. Busy means its
+                // ledger lock is contended, before the recovery scenario starts.
+                // Retry only that transient bootstrap refusal with the original
+                // request; capacity and ownership failures remain fatal.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let mut request = request;
+                let admitted = loop {
+                    match crate::ipc_preparation::admit_request(
+                        app.outbound_admission.as_ref().expect("actual admission"),
+                        request,
+                    ) {
+                        Ok(admitted) => break admitted,
+                        Err(rejected)
+                            if rejected.reason == ilium_execution::RejectReason::Busy
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            request = rejected.value;
+                            std::thread::yield_now();
+                        }
+                        Err(rejected) => panic!("admitted mouse before recovery: {rejected:?}"),
+                    }
+                };
+                assert!(app
+                    .terminal_input
+                    .admit_admitted_request(pane_id, identity.clone(), admitted)
+                    .is_ok());
+                let generation = app.terminal_input.next_generation().unwrap();
+                app.terminal_input.barrier_started(pane_id, generation);
+
+                // Status may arrive while the same terminal owner's input barrier
+                // is pending. Retained mouse modes are not a live receiver.
+                app.tree
+                    .set_pane_status(
+                        pane_id,
+                        PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                            last_known_state: ilium_core::AgentState::from_activity(
+                                class.clone(),
+                                AgentActivity::Working,
+                                None,
+                            ),
+                            process: ilium_core::AgentProcessKey {
+                                class,
+                                process_id: 42,
+                                started_at_unix_seconds: 1,
+                            },
+                            availability: ilium_core::AgentAvailability::Unverified,
+                            signal_name: None,
+                            session_id: Some("retained-session".to_string()),
+                            last_prompt: Some("retained exact prompt  ".to_string()),
+                            previous_exact_prompt: None,
+                            latest_prompt_unavailable: false,
+                        })),
+                    )
+                    .unwrap();
+                let intent = app
+                    .terminal_input
+                    .complete(pane_id, &identity, generation)
+                    .expect("same-pane barrier completion");
+                app.take_outbound_requests();
+                app.deliver_terminal_input(pane_id, intent, true, false, 1, 1);
+                assert!(
+                    app.take_outbound_requests().is_empty(),
+                    "queued mouse must not reach an unavailable agent after barrier completion"
+                );
+                assert_eq!(
+                    app.status_message.as_deref(),
+                    Some("Mouse input canceled: its pane entered recovery before delivery"),
+                    "accepted mouse cancellation is visible"
+                );
+                assert_eq!(
+                    app.tree
+                        .agent_recovery(pane_id)
+                        .unwrap()
+                        .last_prompt
+                        .as_deref(),
+                    Some("retained exact prompt  ")
+                );
+            }
+        }
     }
 
     #[test]
@@ -17434,6 +23146,7 @@ mod tests {
         };
         view.feed(b"live output changed after capture\r\n");
         app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+            retention: None,
             generation: request.generation,
             pane_id,
             update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
@@ -18302,6 +24015,8 @@ mod tests {
         let content = crate::editor_chrome::compute(viewport.content_area, true).content_area;
         let position = Position::new(content.x + 5, content.y + 1);
 
+        app.prepare_test_editor_source_frame(editor_id);
+
         app.handle_pane_mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Right),
@@ -18373,6 +24088,8 @@ mod tests {
         // Gutter is 3 columns ("n  ") for a 3-line buffer; "see " is 4 more,
         // so column 9 lands on the 'c' of "docs/guide.md".
         let position = Position::new(content.x + 9, content.y + 1);
+
+        app.prepare_test_editor_source_frame(editor_id);
 
         app.handle_pane_mouse(
             MouseEvent {
@@ -18597,6 +24314,7 @@ mod tests {
             app.reset_planning_settings.time_style,
             ResetTimeStyle::Human
         );
+        app.settle_filesystem_for_test();
         assert_eq!(
             crate::config::load(config_dir.path())
                 .unwrap()
@@ -18620,6 +24338,7 @@ mod tests {
             app.cost_settings.sparkline.visibility,
             CostVisibility::Always
         );
+        app.settle_filesystem_for_test();
         assert_eq!(
             crate::config::load(config_dir.path()).unwrap().cost,
             app.cost_settings
@@ -18633,6 +24352,7 @@ mod tests {
         app.restore_manual_tree_order_for_mutation();
         assert!(!app.cost_settings.sort_by_cost);
         assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
+        app.settle_filesystem_for_test();
         assert!(
             !crate::config::load(config_dir.path())
                 .unwrap()
@@ -18663,6 +24383,7 @@ mod tests {
             ilium_inference::TitleStyle::Labeling
         );
         app.settings_select_title_style(ilium_inference::TitleStyle::Summarization);
+        app.settle_filesystem_for_test();
         assert_eq!(
             app.inference_settings.title_style,
             ilium_inference::TitleStyle::Summarization
@@ -18684,10 +24405,28 @@ mod tests {
         assert!(!app.debug_settings.file_logging_enabled);
         app.settings_toggle_file_logging();
 
-        assert!(app.debug_settings.file_logging_enabled);
+        assert!(
+            !app.debug_settings.file_logging_enabled,
+            "runtime state changes only after logging acknowledgement"
+        );
         assert_eq!(app.take_pending_debug_logging_enabled(), Some(true));
+        app.settle_filesystem_for_test();
         let loaded = crate::config::load(config_dir.path()).expect("saved debug config");
         assert!(loaded.debug.file_logging_enabled);
+        app.settings_toggle_file_logging();
+        app.settings_toggle_file_logging();
+        assert_eq!(
+            app.take_pending_debug_logging_enabled(),
+            Some(false),
+            "rapid toggles compose against pending intent, not confirmed state"
+        );
+        app.settle_filesystem_for_test();
+        assert!(
+            !crate::config::load(config_dir.path())
+                .unwrap()
+                .debug
+                .file_logging_enabled
+        );
     }
 
     #[test]
@@ -18706,10 +24445,12 @@ mod tests {
         app.settings_adjust_row(AppearanceRow::ProjectSeparators, 1);
 
         assert!(app.ui_settings.show_project_separators);
+        app.settle_filesystem_for_test();
         let persisted = crate::project_config::load(project.path()).unwrap();
         assert!(persisted.show_project_separators);
         assert_eq!(persisted.project_name.as_deref(), Some("Current"));
         assert_eq!(persisted.project_icon.as_deref(), Some("🧭"));
+        app.settle_filesystem_for_test();
         assert!(
             !crate::project_config::load(other_project.path())
                 .unwrap()
@@ -18726,6 +24467,7 @@ mod tests {
         assert!(!app.ui_settings.use_stable_glyphs);
         app.settings_adjust_row(AppearanceRow::UseStableGlyphs, 1);
         assert!(app.ui_settings.use_stable_glyphs);
+        app.settle_filesystem_for_test();
         assert!(
             crate::config::load(config_dir.path())
                 .unwrap()
@@ -18743,6 +24485,7 @@ mod tests {
         app.settings_adjust_row(AppearanceRow::ProgressFillStyle, 1);
         let blocks = crate::icon_settings::task_progress_preset_frames(1);
         assert_eq!(app.ui_settings.icons.task_progress_frames, blocks);
+        app.settle_filesystem_for_test();
         assert_eq!(
             crate::config::load(config_dir.path())
                 .unwrap()
@@ -18774,6 +24517,7 @@ mod tests {
         app.settings_adjust_row(AppearanceRow::ContextMenuIcons, 1);
 
         assert!(!app.ui_settings.show_context_menu_icons);
+        app.settle_filesystem_for_test();
         assert!(
             !crate::config::load(config_dir.path())
                 .unwrap()
@@ -18797,6 +24541,7 @@ mod tests {
         app.settings_adjust_row(AppearanceRow::TreeRowManagementControls, 1);
 
         assert!(app.ui_settings.show_tree_row_management_controls);
+        app.settle_filesystem_for_test();
         assert!(
             crate::config::load(config_dir.path())
                 .unwrap()
@@ -18817,6 +24562,7 @@ mod tests {
 
         assert!(app.voice_settings.confirm_terminal_submissions);
         assert!(app.take_voice_runtime_request().is_none());
+        app.settle_filesystem_for_test();
         assert!(
             crate::config::load(config_dir.path())
                 .unwrap()
@@ -18837,6 +24583,7 @@ mod tests {
 
         assert!(!app.voice_settings.pause_media_while_active);
         assert!(app.take_voice_runtime_request().is_none());
+        app.settle_filesystem_for_test();
         assert!(
             !crate::config::load(config_dir.path())
                 .unwrap()
@@ -18853,11 +24600,13 @@ mod tests {
 
         for _ in 0..20 {
             app.settings_adjust_card_preview_lines(1);
+            app.settle_filesystem_for_test();
         }
         app.settings_adjust_board_column_width(100);
 
         assert_eq!(app.kanban_board_settings.card_preview_lines, 10);
         assert_eq!(app.kanban_board_settings.minimum_column_width, 80);
+        app.settle_filesystem_for_test();
         let persisted = crate::config::load(config_dir.path()).unwrap().kanban_board;
         assert_eq!(persisted.card_preview_lines, 10);
         assert_eq!(persisted.minimum_column_width, 80);
@@ -18981,6 +24730,7 @@ mod tests {
             [ClientRequest::UpdateSoundSettings { settings }]
                 if settings == &app.sound_settings
         ));
+        app.settle_filesystem_for_test();
         let persisted = crate::config::load(&config_dir).unwrap();
         assert_eq!(persisted.sound, app.sound_settings);
 
@@ -19000,14 +24750,23 @@ mod tests {
         assert!(!app.notification_settings.task_succeeded);
 
         app.settings_adjust_sound_row(SoundRow::NotifyTaskSucceeded, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyTaskFailed, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyAgentFinished, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyApprovalRequired, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifySuppressRedundant, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyEnabled, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, 1);
+        app.settle_filesystem_for_test();
         app.settings_adjust_sound_row(SoundRow::NotifyCoalesce, -1);
+        app.settle_filesystem_for_test();
 
         let settings = app.notification_settings;
         assert!(settings.task_succeeded);
@@ -19020,6 +24779,7 @@ mod tests {
         // Servers read `[notifications]` from the config file via their
         // watcher, so no live IPC request is queued.
         assert!(app.take_outbound_requests().is_empty());
+        app.settle_filesystem_for_test();
         let persisted = crate::config::load(&config_dir).unwrap();
         assert_eq!(persisted.notifications, settings);
 
@@ -19079,8 +24839,7 @@ mod tests {
         state.query = TextPromptState::new("workspace_debounce_needle");
         state.note_query_changed(started);
 
-        let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = SearchWorkers::new(events_tx);
+        let mut workers = SearchWorkers::new(crate::execution::test_client());
         assert!(!app.tick_workspace_search(
             started + search_ui::SEARCH_DEBOUNCE - std::time::Duration::from_millis(1),
             &mut workers,
@@ -19088,8 +24847,14 @@ mod tests {
         assert!(workers.is_idle());
 
         assert!(app.tick_workspace_search(started + search_ui::SEARCH_DEBOUNCE, &mut workers));
-        let event = events_rx.blocking_recv().expect("worker result");
-        workers.finish();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let event = loop {
+            if let Some(event) = workers.collect() {
+                break event;
+            }
+            assert!(Instant::now() < deadline, "search completion timeout");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
         assert!(app.apply_workspace_search_result(event));
 
         let Mode::Search(state) = &app.mode else {
@@ -19103,15 +24868,18 @@ mod tests {
     fn workspace_search_maintenance_preserves_an_active_settings_view() {
         let mut app = app();
         app.action_open_settings();
-        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = SearchWorkers::new(events_tx);
+        let mut workers = SearchWorkers::new(crate::execution::test_client());
 
         assert!(!app.tick_workspace_search(Instant::now(), &mut workers));
         assert!(matches!(app.mode, Mode::Settings(_)));
 
         assert!(!app.apply_workspace_search_result(SearchWorkerEvent {
+            identity: std::sync::Arc::new(()),
             revision: 1,
             results: Vec::new(),
+            error: None,
+            fences: Vec::new(),
+            retention: None,
         }));
         assert!(matches!(app.mode, Mode::Settings(_)));
     }
@@ -19119,6 +24887,9 @@ mod tests {
     #[test]
     fn pixel_header_toolbar_action_rebuilds_rendered_markdown_as_plain_text() {
         let mut app = app();
+        app.document_preparation = Some(crate::document_preparation::DocumentPreparation::new(
+            crate::execution::test_client(),
+        ));
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let editor_id = app
             .tree
@@ -19141,6 +24912,19 @@ mod tests {
             crate::editor_toolbar::ToolbarAction::ToggleHeadingRendering,
         );
 
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.collect_document_preparation();
+            if matches!(app.panes.get(&editor_id),Some(PaneRuntime::Editor(editor)) if editor.rendered.is_some())
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "document worker must finish toolbar preparation"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         let PaneRuntime::Editor(editor) = app.panes.get(&editor_id).unwrap() else {
             panic!("test pane must remain an editor");
         };
@@ -19179,7 +24963,7 @@ mod tests {
         editor.rendered = Some(crate::markdown::render::render(
             &crate::markdown::document::parse("# Notes", project.path()),
             &app.markdown_picker,
-            &mut app.markdown_rasterizer,
+            &mut crate::markdown::raster::HeaderRasterizer::new(),
             80,
             editor.heading_rendering,
         ));
@@ -19191,6 +24975,7 @@ mod tests {
             project.path().join("notes.txt").display().to_string(),
         );
 
+        app.settle_filesystem_for_test();
         let PaneRuntime::Editor(editor) = app.panes.get(&editor_id).unwrap() else {
             panic!("test pane must remain an editor");
         };
@@ -19213,6 +24998,24 @@ mod tests {
 
     #[test]
     fn chatroom_refresh_follows_only_while_the_view_is_at_the_live_tail() {
+        fn reconcile(app: &mut App) -> bool {
+            let before_rooms = app.chatroom_projects.clone();
+            let before_messages = app
+                .chatrooms
+                .iter()
+                .map(|(id, state)| (*id, state.messages.clone()))
+                .collect::<HashMap<_, _>>();
+            app.reconcile_chatroom_projects();
+            app.settle_filesystem_for_test();
+            before_rooms != app.chatroom_projects
+                || before_messages
+                    != app
+                        .chatrooms
+                        .iter()
+                        .map(|(id, state)| (*id, state.messages.clone()))
+                        .collect::<HashMap<_, _>>()
+        }
+
         let directory = tempfile::tempdir().unwrap();
         crate::chatroom::initialize(directory.path()).unwrap();
         for index in 0..20 {
@@ -19229,9 +25032,13 @@ mod tests {
             .add_project(directory.path().to_path_buf())
             .unwrap();
         app.set_screen_area(Rect::new(0, 0, 90, 16));
+        assert!(
+            reconcile(&mut app),
+            "room discovery completes before selecting its row"
+        );
         app.show_chatroom(project_id);
-        assert!(app.reconcile_chatroom_projects());
-        assert!(!app.reconcile_chatroom_projects());
+        assert!(reconcile(&mut app));
+        assert!(!reconcile(&mut app));
 
         let initial_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
         assert!(initial_metrics.is_overflowing());
@@ -19251,7 +25058,7 @@ mod tests {
             "new message while history is being inspected",
         )
         .unwrap();
-        assert!(app.reconcile_chatroom_projects());
+        assert!(reconcile(&mut app));
         assert_eq!(
             app.chatroom_scroll_metrics(project_id).unwrap().top,
             manually_scrolled_top
@@ -19268,7 +25075,7 @@ mod tests {
             "new message while following the live tail",
         )
         .unwrap();
-        assert!(app.reconcile_chatroom_projects());
+        assert!(reconcile(&mut app));
         let followed_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
         assert_eq!(followed_metrics.top, followed_metrics.maximum_top);
         assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
@@ -19337,6 +25144,7 @@ mod tests {
         app.is_initial_state_sync_complete = true;
 
         app.reconcile_agent_setup_prompts();
+        app.settle_filesystem_for_test();
 
         for target in [
             home.join(".claude/CLAUDE.md"),
@@ -19362,6 +25170,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_string(), project.path().to_path_buf());
         app.refresh_agent_setup_statuses();
+        app.settle_filesystem_for_test();
         let row = app
             .agent_setup_rows()
             .into_iter()
@@ -19377,6 +25186,7 @@ mod tests {
             .unwrap();
 
         app.settings_toggle_agent_setup_row(&row);
+        app.settle_filesystem_for_test();
         assert!(crate::chatroom::exists(project.path()));
         assert!(matches!(
             app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
@@ -19384,6 +25194,7 @@ mod tests {
         ));
 
         app.settings_toggle_agent_setup_row(&row);
+        app.settle_filesystem_for_test();
         assert!(crate::chatroom::exists(project.path()));
         assert!(matches!(
             app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
@@ -19420,6 +25231,7 @@ mod tests {
             ))
         );
 
+        app.settle_filesystem_for_test();
         let persisted = crate::config::load(&config_dir).unwrap().agent_setup;
         assert!(persisted.never_ask_global);
         assert_eq!(persisted.never_ask_projects, vec![project]);
@@ -19603,6 +25415,7 @@ mod text_trigger_concurrency_tests {
             editor.candidate(),
         )
         .expect("save by stable ID");
+        app.settle_filesystem_for_test();
         let saved = crate::config::load(directory.path()).unwrap().text_triggers;
         app.apply_text_trigger_settings(saved);
 
@@ -19610,5 +25423,659 @@ mod text_trigger_concurrency_tests {
         expected.message = "new-edited-message".to_owned();
         assert_eq!(app.text_trigger_settings.triggers, vec![retained, expected]);
         assert_eq!(app.take_outbound_requests().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod exact_prompt_delivery_tests {
+    use super::*;
+    use crate::naming_workers::{NamingWorkerEvent, NamingWorkers};
+    #[test]
+    fn exact_evidence_fifo_retains_original_bytes_and_source_until_outbound_admission() {
+        let home = tempfile::tempdir().unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+        let mut workers =
+            NamingWorkers::new(sender, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut app = App::new("synthetic-exact-delivery".into(), home.path().to_path_buf());
+        let client = app.outbound_admission.take().unwrap();
+        let mut pointers = Vec::new();
+        for epoch in ["original-first-epoch", "original-second-epoch"] {
+            workers
+                .spawn_exact_agent_prompt_transcript_worker(
+                    crate::naming_workers::tests::exact_prompt_request_for_test(
+                        home.path(),
+                        NodeId(8001),
+                        epoch,
+                    ),
+                )
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let (result, hold) = loop {
+                workers.collect();
+                if let Ok(NamingWorkerEvent::Prepared { event, .. }) = receiver.try_recv() {
+                    let NamingWorkerEvent::ExactPrepared {
+                        result,
+                        source_hold,
+                    } = *event
+                    else {
+                        panic!("exact prepared result required")
+                    };
+                    break (result, source_hold);
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            pointers.push(result.last_prompt.as_ref().unwrap().as_ptr());
+            app.queue_exact_prompt_report(result, hold);
+        }
+        assert_eq!(
+            app.pending_exact_prompt_reports.len(),
+            2,
+            "same-pane semantic evidence must not coalesce"
+        );
+        assert!(app.outbox.is_empty());
+        for _ in 0..16 {
+            app.collect_exact_prompt_reports();
+        }
+        assert_eq!(app.pending_exact_prompt_reports.len(), 2);
+        for (index, (request, _hold)) in app.pending_exact_prompt_reports.iter().enumerate() {
+            let ClientRequest::ReportAgentPromptFromTranscript { last_prompt, .. } = request else {
+                panic!("original evidence request")
+            };
+            assert_eq!(
+                last_prompt.as_ptr(),
+                pointers[index],
+                "refusal must not copy or replace original evidence"
+            );
+        }
+        app.outbound_admission = Some(client);
+        app.collect_exact_prompt_reports();
+        assert!(app.pending_exact_prompt_reports.is_empty());
+        assert_eq!(app.outbox.len(), 2);
+        for (index, request) in app.outbox.iter().enumerate() {
+            let ClientRequest::ReportAgentPromptFromTranscript {
+                prompt_epoch,
+                last_prompt,
+                ..
+            } = request.view()
+            else {
+                panic!("outbound exact evidence")
+            };
+            assert_eq!(
+                prompt_epoch,
+                ["original-first-epoch", "original-second-epoch"][index]
+            );
+            assert_eq!(last_prompt.as_ptr(), pointers[index]);
+            assert_eq!(last_prompt, "synthetic exact\nworker prompt  ");
+        }
+    }
+}
+
+impl App {
+    pub(crate) fn reconcile_plugin_permission_review(&mut self) {
+        let Some(bridge) = self.animation_frame.permission_bridge() else {
+            self.plugin_permission_session = None;
+            return;
+        };
+        if self
+            .plugin_permission_session
+            .as_ref()
+            .is_some_and(|session| bridge.is_current(session))
+        {
+            return;
+        }
+        self.plugin_permission_session = None;
+        match bridge.session() {
+            Ok(session) => self.plugin_permission_session = session,
+            Err(error) => self.status_message = Some(error),
+        }
+    }
+    pub(crate) fn handle_plugin_permission_event(
+        &mut self,
+        event: &crossterm::event::Event,
+    ) -> bool {
+        self.reconcile_plugin_permission_review();
+        let Some(session) = self.plugin_permission_session.as_mut() else {
+            return false;
+        };
+        let Some(bridge) = self.animation_frame.permission_bridge() else {
+            return true;
+        };
+        let crossterm::event::Event::Key(key) = event else {
+            return true;
+        };
+        let navigation = matches!(
+            key.code,
+            crossterm::event::KeyCode::Up
+                | crossterm::event::KeyCode::Down
+                | crossterm::event::KeyCode::Left
+                | crossterm::event::KeyCode::Right
+                | crossterm::event::KeyCode::PageUp
+                | crossterm::event::KeyCode::PageDown
+        );
+        let should_handle = key.kind == crossterm::event::KeyEventKind::Press
+            || (key.kind == crossterm::event::KeyEventKind::Repeat && navigation);
+        if !should_handle {
+            return true;
+        }
+        if let Err(error) = session.handle_key(&bridge, key.code) {
+            session.set_error(&error);
+        }
+        true // Protected review consumes paste/keys instead of forwarding them.
+    }
+    pub(crate) fn handle_plugin_permission_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+    ) -> bool {
+        self.reconcile_plugin_permission_review();
+        let Some(session) = self.plugin_permission_session.as_mut() else {
+            return false;
+        };
+        let Some(bridge) = self.animation_frame.permission_bridge() else {
+            return true;
+        };
+        if let Err(error) = session.handle_mouse(&bridge, self.layout.screen_area, mouse) {
+            session.set_error(&error);
+        }
+        true
+    }
+    pub(crate) fn draw_plugin_permission_review(&mut self, frame: &mut ratatui::Frame<'_>) -> bool {
+        self.reconcile_plugin_permission_review();
+        let Some(session) = self.plugin_permission_session.as_mut() else {
+            let Some(bridge) = self.animation_frame.permission_bridge() else {
+                return false;
+            };
+            let Ok(status) = bridge.status() else {
+                return false;
+            };
+            if matches!(
+                status.phase(),
+                crate::animation_plugins::review_bridge::ReviewPhase::Inactive
+                    | crate::animation_plugins::review_bridge::ReviewPhase::Ready
+            ) || frame.area().height == 0
+            {
+                return false;
+            }
+            let screen = frame.area();
+            let rect = self.layout.status_area.intersection(screen);
+            if rect.width == 0 || rect.height == 0 {
+                return false;
+            }
+            self.animation_frame.occlude_composed(screen, rect);
+            frame.render_widget(ratatui::widgets::Paragraph::new(status.message()), rect);
+            return false;
+        };
+        self.animation_frame.discard_composed_receipt();
+        session.draw(frame, frame.area(), ratatui::style::Style::default());
+        true
+    }
+}
+
+/// Explicit unit-fixture entry only: compose the real installed source surface,
+/// submit it to the real output owner, and commit the captured geometry solely
+/// after the matching physical flush ACK. No fabricated frame/hit DTO.
+#[cfg(test)]
+impl App {
+    pub(crate) fn prepare_test_editor_source_frame(&mut self, id: NodeId) {
+        let area = self.editor_content_area(id);
+        let PaneRuntime::Editor(editor) = self.panes.get_mut(&id).unwrap() else {
+            panic!("source fixture requires an editor pane");
+        };
+        editor.prepare_test_source_window_with_syntax(
+            area.width,
+            area.height,
+            &self.markdown_picker,
+        );
+        let client = crate::execution::test_client();
+        let quota = client.quota_group();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut presenter = loop {
+            match crate::presentation::Presenter::start(
+                ratatui::backend::CrosstermBackend::new(Vec::<u8>::new()),
+                &quota,
+            ) {
+                Ok(presenter) => break presenter,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::yield_now()
+                }
+                Err(error) => panic!("real fixture presenter admission: {error}"),
+            }
+        };
+        // Admission precedes actual composition, matching production ownership.
+        let reservation = presenter.try_reserve().unwrap();
+        let screen = self.layout.screen_area;
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
+            screen.width,
+            screen.height,
+        ))
+        .unwrap();
+        terminal.draw(|frame| crate::ui::draw(frame, self)).unwrap();
+        let revision = 1;
+        let geometry = self.capture_emitted_geometry(revision);
+        let frame = crate::presentation::PreparedFrame::new(
+            reservation,
+            terminal.backend().buffer().clone(),
+            None,
+            1,
+            revision,
+        )
+        .unwrap();
+        presenter.submit(frame).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let emitted = runtime.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                presenter.acknowledgements.recv(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+        });
+        assert_eq!(emitted.frame.frame_id, 1);
+        assert_eq!(emitted.frame.layout_revision, geometry.revision);
+        assert!(geometry.editor_sources.iter().any(|(pane, _)| *pane == id));
+        self.commit_emitted_geometry(geometry);
+        drop(emitted);
+        runtime.block_on(presenter.shutdown()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod board_handoff_tests {
+    use super::*;
+    use crate::filesystem::boards::BoardLoadTarget;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+    };
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn bank() -> (
+        Execution,
+        ilium_execution::Client,
+        ilium_execution::Client,
+        QuotaGroup,
+    ) {
+        let empty = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 64,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 512 * 1024 * 1024,
+            worker_threads: 1,
+            worker_bytes: 32 * 1024 * 1024,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: empty,
+                service: empty,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 4,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+            },
+        )
+        .unwrap();
+        let outbound = execution
+            .client(crate::ipc_preparation::request_limits())
+            .unwrap();
+        let files = execution
+            .client(ClientLimits {
+                jobs: 4,
+                service_jobs: 0,
+                input_bytes: 64 * 1024 * 1024,
+                result_bytes: 16 * 1024 * 1024,
+            })
+            .unwrap();
+        (execution, outbound, files, quota)
+    }
+
+    #[test]
+    fn completed_board_open_survives_real_outbound_saturation_without_ghost_focus() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retained-board.md");
+        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+        let (mut execution, outbound, client, quota) = bank();
+        let holds = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
+            .collect::<Vec<_>>();
+        let mut app = App::new("board-handoff-fixture".into(), directory.path().to_owned());
+        app.outbound_admission = Some(outbound);
+        let parent_group = ilium_core::ROOT_ID;
+        let mut files = crate::filesystem::boards::BoardFiles::new(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        files.set_storage_quota(quota.clone());
+        files
+            .request(
+                BoardLoadTarget::Open {
+                    parent_group,
+                    storage: storage.clone(),
+                },
+                storage,
+                true,
+            )
+            .unwrap();
+        app.board_files = Some(files);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.collect_board_files();
+            if !app.pending_pane_focuses.is_empty()
+                || app.status_message.as_ref().is_some_and(|message| {
+                    message.contains("opening retained pending request admission")
+                })
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "original board read did not reach retained handoff: {:?}",
+                app.status_message
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let original = std::fs::read(&path).unwrap();
+        assert!(
+            app.pending_pane_focuses.is_empty(),
+            "refused NewBoard must not record pending focus"
+        );
+        let charged = quota.snapshot().worker_bytes;
+        assert!(
+            charged > 1024 * 1024,
+            "completed source retains its original storage credit"
+        );
+        assert_eq!(app.board_files.as_ref().unwrap().pending(), 1);
+        assert!(app.pending_pane_focuses.is_empty());
+        assert!(app.outbox.is_empty());
+        for _ in 0..3 {
+            app.collect_board_files();
+            assert_eq!(quota.snapshot().worker_bytes, charged);
+            assert!(app.pending_pane_focuses.is_empty());
+            assert!(app.outbox.is_empty());
+        }
+        drop(holds);
+        app.collect_board_files();
+        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
+        assert_eq!(app.pending_pane_focuses.len(), 1);
+        assert_eq!(app.outbox.len(), 1);
+        assert!(
+            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == path)
+        );
+        app.collect_board_files();
+        assert_eq!(
+            app.outbox.len(),
+            1,
+            "retry must not duplicate accepted board creation"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "retry must preserve the durable file"
+        );
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn removed_board_parent_cancels_open_without_request_or_pending_focus() {
+        let (mut execution, outbound, client, _) = bank();
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "board-parent-removal-fixture".into(),
+            directory.path().to_owned(),
+        );
+        app.outbound_admission = Some(outbound);
+        let source = crate::board::BoardSource {
+            storage: ilium_core::BoardStorage::MarkdownFile {
+                path: directory.path().join("preserved.md"),
+            },
+            columns: Vec::new(),
+            markdown_revision: None,
+            retention: None,
+            capture_hold: None,
+        };
+        // Synthetic completed source; this case verifies cancellation, not persistence.
+        let target = BoardLoadTarget::Open {
+            parent_group: NodeId(u64::MAX),
+            storage: source.storage.clone(),
+        };
+        assert!(app.try_finish_new_board(&target, &source));
+        assert!(app.outbox.is_empty());
+        assert!(app.pending_pane_focuses.is_empty());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("parent group removal"));
+        drop(client);
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn cancelled_create_dialog_preserves_completed_file_without_delayed_open() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("created-before-cancel.md");
+        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+        let (mut execution, outbound, client, quota) = bank();
+        let holds = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
+            .collect::<Vec<_>>();
+        let state = CreateBoardState {
+            parent_group: ilium_core::ROOT_ID,
+            name: crate::text_prompt::TextPromptState::new("Captured name"),
+            path: crate::text_prompt::TextPromptState::new(path.display().to_string()),
+            storage_kind: BoardStorageKind::MarkdownFile,
+            editing_path: false,
+        };
+        let mut app = App::new(
+            "board-create-cancel-fixture".into(),
+            directory.path().to_owned(),
+        );
+        app.outbound_admission = Some(outbound);
+        app.mode = Mode::CreateBoard(state.clone());
+        let mut files = crate::filesystem::boards::BoardFiles::new(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        files.set_storage_quota(quota);
+        files
+            .request(
+                BoardLoadTarget::Create(state, storage.clone()),
+                storage,
+                true,
+            )
+            .unwrap();
+        app.board_files = Some(files);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            app.collect_board_files();
+            if app.status_message.as_ref().is_some_and(|message| {
+                message.contains("opening retained pending request admission")
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "create result did not reach retained handoff: {:?}",
+                app.status_message
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let original = std::fs::read(&path).unwrap();
+        assert!(
+            matches!(app.mode, Mode::CreateBoard(_)),
+            "refused request retains the original dialog"
+        );
+        app.mode = Mode::Normal;
+        app.collect_board_files();
+        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
+        assert!(app.outbox.is_empty());
+        assert!(app.pending_pane_focuses.is_empty());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("dialog changed"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        drop(holds);
+        app.collect_board_files();
+        assert!(
+            app.outbox.is_empty(),
+            "later capacity must not revive cancelled opening"
+        );
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_without_editor_drains_board_creation_and_reports_open_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("shutdown-preserved.md");
+        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+        let (mut execution, outbound, client, quota) = bank();
+        let holds = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&outbound, 4096).unwrap())
+            .collect::<Vec<_>>();
+        let mut app = App::new("board-shutdown-fixture".into(), directory.path().to_owned());
+        app.editor_files = None;
+        app.configuration_files = None;
+        app.integration_files = None;
+        app.outbound_admission = Some(outbound);
+        let mut files = crate::filesystem::boards::BoardFiles::new(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        files.set_storage_quota(quota);
+        files
+            .request(
+                BoardLoadTarget::Open {
+                    parent_group: ilium_core::ROOT_ID,
+                    storage: storage.clone(),
+                },
+                storage,
+                true,
+            )
+            .unwrap();
+        app.board_files = Some(files);
+        // No collector has submitted the accepted disk intent yet. Shutdown
+        // must finish it using this board owner's independent wake source.
+        app.drain_filesystem().await.unwrap();
+        assert!(
+            path.is_file(),
+            "shutdown must finish the accepted durable creation"
+        );
+        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
+        assert!(app.outbox.is_empty());
+        assert!(app.pending_pane_focuses.is_empty());
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .contains("client shutdown"));
+        let source =
+            crate::board::read_source(ilium_core::BoardStorage::MarkdownFile { path }, false)
+                .unwrap();
+        assert!(
+            !source.columns.is_empty(),
+            "authoritative disk readback remains valid"
+        );
+        drop(source);
+        drop(holds);
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn captured_project_accepts_board_open_without_retargeting() {
+        let (mut execution, outbound, client, _) = bank();
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "board-project-parent-fixture".into(),
+            directory.path().to_owned(),
+        );
+        app.outbound_admission = Some(outbound);
+        let parent_group = app
+            .tree
+            .add_project(directory.path().join("captured-project"))
+            .unwrap();
+        let source = crate::board::BoardSource {
+            storage: ilium_core::BoardStorage::MarkdownFile {
+                path: directory.path().join("project-board.md"),
+            },
+            columns: Vec::new(),
+            markdown_revision: None,
+            retention: None,
+            capture_hold: None,
+        };
+        // Synthetic completed source: verify the actual domain parent contract,
+        // while the other forcing cases establish durable creation/readback.
+        let target = BoardLoadTarget::Open {
+            parent_group,
+            storage: source.storage.clone(),
+        };
+        assert!(app
+            .tree
+            .get(parent_group)
+            .unwrap()
+            .accepts_normal_children());
+        assert!(!app.tree.get(parent_group).unwrap().is_group());
+        assert!(app.try_finish_new_board(&target, &source));
+        assert_eq!(app.outbox.len(), 1);
+        assert_eq!(app.pending_pane_focuses.len(), 1);
+        assert!(
+            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, storage, .. } if *actual == parent_group && storage.path() == source.storage.path())
+        );
+        drop(source);
+        drop(client);
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
     }
 }

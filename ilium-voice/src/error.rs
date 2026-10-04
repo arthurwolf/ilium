@@ -36,6 +36,8 @@ pub enum VoiceError {
         direction: &'static str,
         source: cpal::Error,
     },
+    #[error("audio preparation worker failed: {0}")]
+    AudioPreparation(String),
     #[error("failed to connect to the OpenAI Realtime API: {0}")]
     Connect(String),
     #[error("timed out while connecting to the OpenAI Realtime API")]

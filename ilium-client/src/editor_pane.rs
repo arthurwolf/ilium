@@ -59,7 +59,7 @@ fn saturating_u16(value: usize) -> u16 {
 struct HighlightCache {
     revision: u64,
     path: PathBuf,
-    lines: Vec<crate::syntax::LineTokens>,
+    lines: std::sync::Arc<Vec<crate::syntax::LineTokens>>,
 }
 
 /// One terminal row in the Source view. In Clip mode each source line maps
@@ -83,6 +83,8 @@ pub struct EditorPane {
     pub textarea: TextArea<'static>,
     pub path: Option<PathBuf>,
     pub dirty: bool,
+    pub(crate) pending_saves: usize,
+    pub(crate) latest_save_operation: Option<std::sync::Arc<()>>,
     pub view_mode: EditorViewMode,
     /// Source-mode overflow policy shared by global editor defaults and the
     /// per-editor toolbar. It changes presentation only, never file content.
@@ -139,21 +141,35 @@ pub struct EditorPane {
     /// `highlighted_lines` knows its cached highlighting is stale and
     /// needs re-running through `syntax::highlight`.
     content_revision: u64,
-    /// Cached Source-mode syntax highlighting, rebuilt lazily by
+    /// Cached Source-mode syntax highlighting, prepared by workers for
     /// `highlighted_lines`. `RefCell` because that method takes `&self`
     /// (same reason `source_scroll_row` above is a `Cell`).
     highlight_cache: RefCell<Option<HighlightCache>>,
+    preparation_identity: std::sync::Arc<()>,
+    preparation_key: Option<crate::document_preparation::PreparationKey>,
+    pub preparation_error: Option<String>,
+    /// Diagnostic hash of the exact immutable worker snapshot.
+    pub preparation_hash: Option<u64>,
+    // Declared payload fields above must drop before their reservation.
+    preparation_hold: Option<ilium_execution::Retained<()>>,
+    // Loaded authored buffer remains charged after its completion is consumed.
+    source_window:
+        Option<ilium_execution::RetiringArc<crate::source_window_surface::InstalledWindow>>,
+    source_window_height: Cell<u16>,
+    pub(crate) source_retirement: Option<ilium_execution::RetirementHandle>,
+    _source_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
 impl EditorPane {
     /// A new, empty, unsaved buffer. The picker path only uses it in tests;
     /// production editor panes are always backed by a selected path.
-    #[cfg(test)]
     pub fn empty() -> Self {
         Self {
             textarea: TextArea::default(),
             path: None,
             dirty: false,
+            pending_saves: 0,
+            latest_save_operation: None,
             view_mode: EditorViewMode::Source,
             line_display: crate::config::LineDisplay::default(),
             heading_rendering: HeadingRendering::Rasterized,
@@ -170,7 +186,46 @@ impl EditorPane {
             source_scroll_col: Cell::new(0),
             content_revision: 0,
             highlight_cache: RefCell::new(None),
+            preparation_identity: std::sync::Arc::new(()),
+            preparation_key: None,
+            preparation_error: None,
+            preparation_hash: None,
+            preparation_hold: None,
+            source_window: None,
+            source_window_height: Cell::new(24),
+            source_retirement: None,
+            _source_hold: None,
         }
+    }
+
+    /// Installs lines already read and bounded by the filesystem worker.
+    /// This constructor performs no filesystem access.
+    pub(crate) fn from_source(source: crate::filesystem::editor::EditorSource) -> Self {
+        let mut editor = Self::empty();
+        editor.textarea = TextArea::from(source.lines);
+        editor.path = Some(source.path);
+        editor._source_hold = source.retention;
+        editor.apply_line_number_style();
+        editor
+    }
+
+    /// An older save can confirm its own source without clearing newer edits.
+    pub(crate) fn acknowledge_saved_revision(&mut self, revision: u64) {
+        if self.content_revision == revision {
+            self.dirty = false;
+            self.autosave_pending_since = None;
+        }
+    }
+
+    pub(crate) fn autosave_due(&self) -> bool {
+        self.show_autosave
+            && self.dirty
+            && self
+                .autosave_pending_since
+                .is_some_and(|since| since.elapsed() >= self.autosave_delay)
+    }
+    pub(crate) fn acknowledge_autosave_admission(&mut self) {
+        self.autosave_pending_since = None;
     }
 
     /// Loads a file's contents into a new buffer. If the file doesn't exist
@@ -198,6 +253,8 @@ impl EditorPane {
             textarea,
             path: Some(path),
             dirty: false,
+            pending_saves: 0,
+            latest_save_operation: None,
             view_mode: EditorViewMode::Source,
             line_display: crate::config::LineDisplay::default(),
             heading_rendering: HeadingRendering::Rasterized,
@@ -214,6 +271,15 @@ impl EditorPane {
             source_scroll_col: Cell::new(0),
             content_revision: 0,
             highlight_cache: RefCell::new(None),
+            preparation_identity: std::sync::Arc::new(()),
+            preparation_key: None,
+            preparation_error: None,
+            preparation_hash: None,
+            preparation_hold: None,
+            source_window: None,
+            source_window_height: Cell::new(24),
+            source_retirement: None,
+            _source_hold: None,
         };
         pane.apply_line_number_style();
         Ok(pane)
@@ -261,6 +327,7 @@ impl EditorPane {
     pub fn retarget_path(&mut self, new_path: PathBuf) {
         self.path = Some(new_path);
         self.rendered = None;
+        self.clear_source_window();
         if !self.is_markdown() {
             self.view_mode = EditorViewMode::Source;
             self.rendered_scroll = 0;
@@ -540,6 +607,7 @@ impl EditorPane {
             self.autosave_pending_since = Some(Instant::now());
         }
         self.rendered = None;
+        self.clear_source_window();
     }
 
     /// Keeps the Source viewport valid for this render. Keyboard navigation
@@ -632,21 +700,346 @@ impl EditorPane {
     /// exactly as it did before syntax highlighting existed.
     pub fn highlighted_lines(&self) -> Option<Ref<'_, Vec<crate::syntax::LineTokens>>> {
         let path = self.path.as_ref()?;
-        let stale = match self.highlight_cache.borrow().as_ref() {
-            Some(cache) => cache.revision != self.content_revision || cache.path != *path,
-            None => true,
-        };
-        if stale {
-            let lines = crate::syntax::highlight(path, self.textarea.lines())?;
-            *self.highlight_cache.borrow_mut() = Some(HighlightCache {
-                revision: self.content_revision,
-                path: path.clone(),
-                lines,
-            });
+        let cache = self.highlight_cache.borrow();
+        if !cache
+            .as_ref()
+            .is_some_and(|cache| cache.revision == self.content_revision && cache.path == *path)
+        {
+            return None;
         }
-        Some(Ref::map(self.highlight_cache.borrow(), |cache| {
-            &cache.as_ref().expect("just populated above").lines
-        }))
+        Ref::filter_map(cache, |cache| {
+            cache.as_ref().map(|cache| cache.lines.as_ref())
+        })
+        .ok()
+    }
+
+    pub(crate) fn preparation_key(
+        &self,
+        width: u16,
+        picker: &ratatui_image::picker::Picker,
+    ) -> Option<crate::document_preparation::PreparationKey> {
+        Some(crate::document_preparation::PreparationKey {
+            identity: self.preparation_identity.clone(),
+            revision: self.content_revision,
+            path: self.path.clone()?,
+            width,
+            rendered: self.view_mode == EditorViewMode::Rendered && self.is_markdown(),
+            heading: self.heading_rendering,
+            line_display: self.line_display,
+            picker: format!("{picker:?}"),
+            height: 0,
+            top: 0,
+            tab: 0,
+            gutter: false,
+            cursor: (0, 0),
+            follow: false,
+        })
+    }
+    pub(crate) fn set_preparation_height(&self, height: u16) {
+        self.source_window_height.set(height);
+    }
+    pub(crate) fn window_preparation_key(
+        &self,
+        width: u16,
+        _picker: &ratatui_image::picker::Picker,
+    ) -> Option<crate::document_preparation::PreparationKey> {
+        Some(crate::document_preparation::PreparationKey {
+            identity: self.preparation_identity.clone(),
+            revision: self.content_revision,
+            path: self.path.clone().unwrap_or_default(),
+            width,
+            rendered: false,
+            heading: self.heading_rendering,
+            line_display: self.line_display,
+            picker: String::new(),
+            height: self.source_window_height.get(),
+            top: usize::from(self.source_scroll_row.get()),
+            tab: self.textarea.tab_length(),
+            gutter: self.show_line_numbers,
+            cursor: {
+                let cursor = self.textarea.cursor();
+                (cursor.0, cursor.1)
+            },
+            follow: self.source_scroll_should_follow_cursor.get(),
+        })
+    }
+    pub(crate) fn installed_window(
+        &self,
+    ) -> Option<&ilium_execution::RetiringArc<crate::source_window_surface::InstalledWindow>> {
+        self.source_window.as_ref()
+    }
+    pub(crate) fn clear_source_window(&mut self) {
+        self.source_window = None;
+    }
+    pub(crate) fn install_window(
+        &mut self,
+        completion: &crate::source_window_preparation::WindowCompletion,
+        picker: &ratatui_image::picker::Picker,
+        width: u16,
+    ) -> bool {
+        let Some(current) = self.window_preparation_key(width, picker) else {
+            return false;
+        };
+        if !current.same_geometry(&completion.key)
+            || current.top != completion.key.top
+            || current.cursor != completion.key.cursor
+            || current.follow != completion.key.follow
+        {
+            return false;
+        }
+        let Some(retirement) = &self.source_retirement else {
+            return false;
+        };
+        let bytes = std::mem::size_of::<crate::source_window_surface::InstalledWindow>()
+            .saturating_add(completion.key.path.capacity())
+            .saturating_add(completion.key.picker.capacity())
+            .saturating_add(4096);
+        let permit =
+            match retirement.try_reserve::<crate::source_window_surface::InstalledWindow>(bytes) {
+                Ok(permit) => permit,
+                Err(reason) => {
+                    self.preparation_error =
+                        Some(format!("Source window install admission: {reason:?}"));
+                    return false;
+                }
+            };
+        self.source_scroll_row
+            .set(saturating_u16(completion.viewport.top));
+        self.source_scroll_col
+            .set(saturating_u16(completion.viewport.left));
+        self.source_window = Some(permit.attach_shared(
+            crate::source_window_surface::InstalledWindow {
+                key: completion.key.clone(),
+                physical_count: self.textarea.lines().len(),
+                viewport: completion.viewport.clone(),
+            },
+        ));
+        self.preparation_error = None;
+        true
+    }
+    pub(crate) fn install_window_styles(
+        &mut self,
+        completion: &crate::source_window_syntax::StyledWindow,
+    ) -> bool {
+        let Some(installed) = self.source_window.as_ref() else {
+            return false;
+        };
+        if !installed.key.same_geometry(&completion.key)
+            || !std::sync::Arc::ptr_eq(&installed.viewport.rows, &completion.base.rows)
+        {
+            return false;
+        }
+        let Some(retirement) = &self.source_retirement else {
+            return false;
+        };
+        // Reserve both immutable metadata owners before cloning any owned key bytes.
+        let bytes = std::mem::size_of::<crate::source_window_surface::InstalledWindow>()
+            .saturating_add(installed.key.path.capacity())
+            .saturating_add(installed.key.picker.capacity())
+            .saturating_add(4096);
+        let Ok(parent) =
+            retirement.try_reserve::<crate::source_window_surface::InstalledWindow>(bytes)
+        else {
+            return false;
+        };
+        let Ok(leaf) = retirement.try_reserve::<crate::source_stream::Viewport>(4096) else {
+            return false;
+        };
+        let base = &completion.base;
+        let mut viewport = leaf.attach(crate::source_stream::Viewport {
+            identity: base.identity.clone(),
+            top: base.top,
+            left: base.left,
+            rows: base.rows.clone(),
+            total_rows: base.total_rows,
+            scanned_until: base.scanned_until,
+            minimap: base.minimap.clone(),
+            styles: Some(completion.styles.clone()),
+            allocation: base.allocation.clone(),
+        });
+        viewport.set_storage_guard(base.allocation.clone());
+        self.source_window = Some(parent.attach_shared(
+            crate::source_window_surface::InstalledWindow {
+                key: installed.key.clone(),
+                physical_count: installed.physical_count,
+                viewport: std::sync::Arc::new(viewport),
+            },
+        ));
+        true
+    }
+    /// Explicit fixture setup uses the real finite bank, never inline source preparation.
+    #[cfg(test)]
+    pub(crate) fn prepare_test_source_window(
+        &mut self,
+        width: u16,
+        height: u16,
+        picker: &ratatui_image::picker::Picker,
+    ) {
+        let client = crate::execution::test_document_client();
+        self.prepare_test_source_window_on_client(
+            width,
+            height,
+            picker,
+            client,
+            std::sync::Arc::new(crate::editor_capture_budget::CaptureBudget::new()),
+        );
+    }
+    #[cfg(test)]
+    fn prepare_test_source_window_on_client(
+        &mut self,
+        width: u16,
+        height: u16,
+        picker: &ratatui_image::picker::Picker,
+        client: ilium_execution::Client,
+        budget: std::sync::Arc<crate::editor_capture_budget::CaptureBudget>,
+    ) {
+        self.source_retirement = Some(client.retirement());
+        self.set_preparation_height(height);
+        let key = self.window_preparation_key(width, picker).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut windows =
+            crate::source_window_preparation::SourceWindowPreparation::new(client.clone());
+        windows.set_capture_budget(budget);
+        let completion = loop {
+            windows.begin_capture_turn();
+            match windows.request(
+                ilium_core::NodeId(1),
+                key.clone(),
+                usize::from(self.source_scroll_col()),
+                self.textarea.lines(),
+            ) {
+                Ok(()) => {}
+                Err(error) if error.ends_with("Busy") && Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("finite source fixture admission: {error}"),
+            }
+            // These small complete-document fixtures assert exact scroll limits.
+            // The real stream may publish usable glyphs before its final row count.
+            if let Some(completion) = windows.collect().pop() {
+                if completion.viewport.total_rows.is_some() {
+                    break completion;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "finite source window fixture timed out"
+            );
+            std::thread::yield_now();
+        };
+        assert!(self.install_window(&completion, picker, width));
+        windows.cancel();
+    }
+    /// Both stages use one real finite client identity; no inline syntect DTO.
+    #[cfg(test)]
+    pub(crate) fn prepare_test_source_window_with_syntax(
+        &mut self,
+        width: u16,
+        height: u16,
+        picker: &ratatui_image::picker::Picker,
+    ) {
+        let client = crate::execution::test_document_client();
+        let budget = std::sync::Arc::new(crate::editor_capture_budget::CaptureBudget::new());
+        self.prepare_test_source_window_on_client(
+            width,
+            height,
+            picker,
+            client.clone(),
+            budget.clone(),
+        );
+        let mut syntax = crate::source_window_syntax::SourceWindowSyntax::new(
+            client,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+        );
+        syntax.set_capture_budget(budget);
+        let window = self.installed_window().unwrap().clone();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let completion = loop {
+            syntax.begin_capture_turn();
+            match syntax.request(
+                ilium_core::NodeId(1),
+                window.key.clone(),
+                window.viewport.clone(),
+                self.textarea.lines(),
+            ) {
+                Ok(()) => {}
+                Err(error) if error.ends_with("Busy") && Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("finite syntax fixture admission: {error}"),
+            }
+            if let Some(completion) = syntax.collect().pop() {
+                break completion;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "finite source syntax fixture timed out"
+            );
+            std::thread::yield_now();
+        };
+        assert!(self.install_window_styles(&completion));
+        syntax.cancel();
+    }
+    pub(crate) fn instance_identity(&self) -> std::sync::Arc<()> {
+        self.preparation_identity.clone()
+    }
+    #[cfg(test)]
+    pub(crate) fn install_test_highlighting(&mut self) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        *self.highlight_cache.get_mut() = crate::syntax::highlight(&path, self.textarea.lines())
+            .map(|lines| HighlightCache {
+                revision: self.content_revision,
+                path,
+                lines: std::sync::Arc::new(lines),
+            });
+    }
+    pub(crate) fn clear_preparation(&mut self) {
+        self.rendered = None;
+        *self.highlight_cache.get_mut() = None;
+        self.preparation_key = None;
+        self.preparation_hash = None;
+        self.preparation_error = None;
+        self.preparation_hold = None;
+    }
+    pub(crate) fn fence_preparation(&mut self, key: &crate::document_preparation::PreparationKey) {
+        if self
+            .preparation_key
+            .as_ref()
+            .is_some_and(|previous| previous != key)
+        {
+            self.clear_preparation();
+        }
+    }
+    pub(crate) fn install_preparation(
+        &mut self,
+        completion: crate::document_preparation::Completion,
+        picker: &ratatui_image::picker::Picker,
+        width: u16,
+    ) -> bool {
+        if self.preparation_key(width, picker).as_ref() != Some(&completion.key) {
+            return false;
+        }
+        self.clear_preparation();
+        self.preparation_key = Some(completion.key.clone());
+        let hold = completion.content.map(|result| match result {
+            Ok(content) => {
+                self.preparation_hash = Some(content.hash);
+                *self.highlight_cache.get_mut() = content.highlights.map(|lines| HighlightCache {
+                    revision: completion.key.revision,
+                    path: completion.key.path.clone(),
+                    lines,
+                });
+                self.rendered = content.rendered;
+                self.rendered_width = width;
+            }
+            Err(error) => self.preparation_error = Some(error),
+        });
+        if self.preparation_hash.is_some() {
+            self.preparation_hold = Some(hold);
+        }
+        true
     }
 
     /// Moves the cursor to the start of `line` (clamped to the buffer's
@@ -681,13 +1074,17 @@ impl EditorPane {
         // which against a never-rendered rect teleports the insertion point
         // to (scroll offset, column 0). Highlighted panes must scroll only
         // through the explicit mirror below.
-        let renders_through_widget = self.highlighted_lines().is_none();
-        if renders_through_widget {
-            self.textarea.scroll((delta, 0));
-        }
+        // Pending and unrecognized languages use the same explicit source
+        // renderer, so a never-rendered TextArea viewport cannot move the cursor.
 
-        let max_top = saturating_u16(self.source_visual_rows(viewport_width).len())
-            .saturating_sub(viewport_height);
+        let max_top = self
+            .source_window
+            .as_ref()
+            .and_then(|source| source.viewport.total_rows)
+            .map_or(u16::MAX, |total| {
+                saturating_u16(total).saturating_sub(viewport_height)
+            });
+        let _ = viewport_width;
         let current = self.source_scroll_row.get();
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
@@ -718,9 +1115,22 @@ impl EditorPane {
         viewport_width: u16,
         visual_row: usize,
     ) -> Option<SourceVisualRow> {
-        self.source_visual_rows(viewport_width)
-            .get(visual_row)
-            .copied()
+        if let Some(source) = &self.source_window {
+            if source.key.width == viewport_width {
+                return crate::source_windows::row_at(&source.viewport, visual_row);
+            }
+        }
+        #[cfg(test)]
+        {
+            return self
+                .source_visual_rows(viewport_width)
+                .get(visual_row)
+                .copied();
+        }
+        #[cfg(not(test))]
+        {
+            None
+        }
     }
 
     fn source_wrap_width(&self, viewport_width: u16) -> usize {
@@ -988,8 +1398,11 @@ mod tests {
         let mut pane = EditorPane::empty();
         pane.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
 
+        pane.prepare_test_source_window(20, 4, &ratatui_image::picker::Picker::halfblocks());
         pane.scroll_source_view(3, 4, 20);
         assert_eq!(pane.source_scroll_row(), 3);
+
+        pane.prepare_test_source_window(20, 4, &ratatui_image::picker::Picker::halfblocks());
 
         // Rendering preserves a wheel-selected reading position instead of
         // snapping to the insertion point on the first line.
@@ -1014,6 +1427,10 @@ mod tests {
         pane.path = Some(PathBuf::from("scroll-cursor.rs"));
         pane.textarea = TextArea::from((0..10).map(|row| format!("let line_{row} = {row};")));
         pane.jump_to_location(5, 4);
+        // The oracle starts from the independent reading viewport at zero,
+        // even though the insertion point is on physical line five.
+        pane.scroll_source_view(0, 4, 40);
+        pane.prepare_test_source_window(40, 4, &ratatui_image::picker::Picker::halfblocks());
         let cursor_before = pane.textarea.cursor();
 
         pane.scroll_source_view(3, 4, 40);
@@ -1026,9 +1443,11 @@ mod tests {
     fn cursor_navigation_reveals_cursor_after_source_wheel_scroll() {
         let mut pane = EditorPane::empty();
         pane.textarea = TextArea::from((0..10).map(|row| format!("line {row}")));
+        pane.prepare_test_source_window(20, 4, &ratatui_image::picker::Picker::halfblocks());
         pane.scroll_source_view(6, 4, 20);
 
         pane.jump_to_line(0);
+        pane.prepare_test_source_window(20, 4, &ratatui_image::picker::Picker::halfblocks());
         pane.update_source_scroll_mirror(4, 20);
 
         assert_eq!(pane.source_scroll_row(), 0);

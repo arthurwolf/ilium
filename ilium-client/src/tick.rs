@@ -34,14 +34,18 @@ pub fn on_tick(
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
+    let budget_saved =
+        app.tick_restructure_budget_autosave(now) | app.tick_inference_number_autosave(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let session_stats_changed = app.tick_session_stats(now);
     let cost_changed = app.tick_cost(now);
+    let model_catalog_changed = app.collect_model_catalog_preparation();
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
     let animation_hover_changed = app.tick_animation_hover(now);
     let location_picker_changed = app.tick_location_picker();
+    let smart_copy_light_changed = app.tick_smart_copy_light(now);
     app.drain_pending_staged_keystrokes(now);
     let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     app.maybe_show_agent_setup_prompt();
@@ -51,14 +55,17 @@ pub fn on_tick(
         || tree_transition_changed
         || terminal_activity_changed
         || autosave_wrote
+        || budget_saved
         || workspace_search_started
         || chatroom_changed
         || session_stats_changed
         || cost_changed
+        || model_catalog_changed
         || context_menu_hover_changed
         || agent_popover_changed
         || animation_hover_changed
         || location_picker_changed
+        || smart_copy_light_changed
         || setup_prompt_changed
 }
 
@@ -84,6 +91,37 @@ pub fn apply_naming_worker_event(
     event: NamingWorkerEvent,
 ) {
     match event {
+        NamingWorkerEvent::Prepared { event, source_hold } => {
+            let test = matches!(&*event, NamingWorkerEvent::InferenceTest { .. });
+            let models = match &*event {
+                NamingWorkerEvent::ProviderModels {
+                    provider, result, ..
+                } => Some((*provider, result.is_ok())),
+                _ => None,
+            };
+            if models.is_some() {
+                app.incoming_model_result_hold = Some(std::sync::Arc::clone(&source_hold));
+            }
+            apply_naming_worker_event(app, workers, *event);
+            if test {
+                app.inference_test_hold = Some(source_hold);
+            } else if let Some((provider, succeeded)) = models {
+                if succeeded
+                    && matches!(&app.model_discovery,crate::app::ModelDiscoveryState::Loaded { provider:installed,.. } if *installed==provider)
+                {
+                    let slot = match provider {
+                        ilium_inference::InferenceProviderKind::KiloGateway => Some(0),
+                        ilium_inference::InferenceProviderKind::Ollama => Some(1),
+                        ilium_inference::InferenceProviderKind::OpenAi => Some(2),
+                        _ => None,
+                    };
+                    if let Some(slot) = slot {
+                        app.model_catalog_holds[slot] = Some(std::sync::Arc::clone(&source_hold));
+                    }
+                }
+                app.model_discovery_hold = Some(source_hold);
+            }
+        }
         NamingWorkerEvent::ProjectName { decision, result } => {
             workers.project_name_worker_finished();
             app.is_project_name_loading = false;
@@ -123,6 +161,8 @@ pub fn apply_naming_worker_event(
                 pane_id,
                 session_id,
                 title_generation,
+                presentation_revision,
+                process_id,
                 provider,
                 elapsed,
                 rendered_prompt,
@@ -228,6 +268,8 @@ pub fn apply_naming_worker_event(
                                 pane_id,
                                 expected_session_id: session_id,
                                 expected_title_generation: title_generation,
+                                expected_presentation_revision: presentation_revision,
+                                expected_process_id: process_id,
                                 title: title.long,
                                 short_title: Some(title.short),
                                 inferred_icon: Some(title.icon),
@@ -239,10 +281,12 @@ pub fn apply_naming_worker_event(
                                 pane_id,
                                 expected_session_id: session_id,
                                 expected_title_generation: title_generation,
+                                expected_presentation_revision: presentation_revision,
+                                expected_process_id: process_id,
                                 title: title.long,
                                 short_title: Some(title.short),
                                 inferred_icon: Some(title.icon),
-                                title_source: ilium_core::PaneTitleSource::UserSpecified,
+                                title_source: ilium_core::PaneTitleSource::Automatic,
                             });
                         }
                     }
@@ -397,6 +441,7 @@ pub fn apply_naming_worker_event(
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
                 inference_activity_revisions,
+                title_observations,
                 automatic_ai_decision,
                 result,
             } = outcome;
@@ -419,16 +464,29 @@ pub fn apply_naming_worker_event(
             if let Err(error) = &result {
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
-            app.finish_project_restructure(project_id, &inference_activity_revisions, result);
+            app.finish_project_restructure(
+                project_id,
+                &inference_activity_revisions,
+                &title_observations,
+                result,
+            );
         }
-        NamingWorkerEvent::AgentPromptTranscript(result) => {
-            if let Some(last_prompt) = result.last_prompt {
-                app.queue_request(ilium_ipc::ClientRequest::ReportAgentPromptFromTranscript {
-                    pane_id: result.pane_id,
-                    expected_session_id: result.session_id,
-                    prompt_epoch: result.prompt_epoch,
-                    last_prompt,
-                });
+        NamingWorkerEvent::ExactPrepared {
+            result,
+            source_hold,
+        } => app.queue_exact_prompt_report(result, source_hold),
+        NamingWorkerEvent::ExactTranscriptFailed {
+            pane_id,
+            session_id,
+            prompt_epoch,
+            error,
+        } => {
+            if app
+                .known_agent_history_context(pane_id)
+                .is_some_and(|(_, known, _)| known == session_id)
+            {
+                app.status_message = Some(format!("Exact transcript recovery failed: {error}"));
+                tracing::warn!(pane_id=pane_id.0,%prompt_epoch,"exact transcript evidence was unavailable");
             }
         }
         NamingWorkerEvent::LastPromptTranscript(result) => {
@@ -513,12 +571,11 @@ mod tests {
             app.inference_settings.restructure_prompt_token_limit,
             200_000
         );
-        let edited = Instant::now();
-        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
-        let mut workers = SearchWorkers::new(events_tx);
+        let deadline = app.restructure_budget_autosave_deadline.unwrap();
+        let mut workers = SearchWorkers::new(crate::execution::test_client());
         on_tick(
             &mut app,
-            edited + Duration::from_millis(599),
+            deadline - Duration::from_nanos(1),
             false,
             &mut workers,
         );
@@ -526,12 +583,8 @@ mod tests {
             app.inference_settings.restructure_prompt_token_limit,
             200_000
         );
-        on_tick(
-            &mut app,
-            edited + Duration::from_millis(700),
-            false,
-            &mut workers,
-        );
+        on_tick(&mut app, deadline, false, &mut workers);
+        app.settle_filesystem_for_test();
         assert_eq!(
             app.inference_settings.restructure_prompt_token_limit,
             234567
@@ -547,13 +600,147 @@ mod tests {
     }
 
     #[test]
+    fn restructure_budget_autosave_cancels_invalid_input_and_escape() {
+        use crate::app::{InferenceSettingField, Mode};
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let project = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
+        app.config_dir = Some(config.path().to_path_buf());
+        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
+        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
+            state.buf = "123456".into();
+            state.cursor = 6;
+        }
+        app.queue_restructure_budget_autosave("123456", Instant::now());
+        let deadline = app.restructure_budget_autosave_deadline.unwrap();
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        );
+        assert!(app.restructure_budget_autosave_deadline.is_none());
+        assert!(!app.tick_restructure_budget_autosave(deadline));
+        assert!(app.restructure_budget_input_hint("123456x").1);
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+        );
+        assert!(app.restructure_budget_autosave_deadline.is_some());
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(!app.tick_restructure_budget_autosave(deadline));
+        assert_eq!(
+            app.inference_settings.restructure_prompt_token_limit,
+            200_000
+        );
+        assert!(!config.path().join("config.toml").exists());
+    }
+
+    #[test]
+    fn restructure_budget_commit_waits_for_own_durable_success() {
+        use crate::app::{InferenceSettingField, Mode, SettingsState, SettingsTab};
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+        let project = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut app = App::new("budget-receipt-test".into(), project.path().to_path_buf());
+        app.config_dir = Some(config.path().to_path_buf());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Inference,
+            selected_row: 2,
+            scroll: 3,
+            ..SettingsState::default()
+        });
+        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
+        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
+            state.buf = "234567".into();
+            state.cursor = 6;
+        }
+        let enter = || Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        crate::keys::handle_event(&mut app, enter());
+        // Admission has not even started the ordered writer yet. Closing now
+        // would lose the user's draft before any durable acknowledgement.
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+        assert!(!config.path().join("config.toml").exists());
+        assert!(!app
+            .restructure_budget_input_hint("234567")
+            .0
+            .starts_with("Saved"));
+        let accepted = app.configuration_admission.accepted;
+        crate::keys::handle_event(&mut app, enter());
+        assert_eq!(app.configuration_admission.accepted, accepted);
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::config::load(config.path())
+                .unwrap()
+                .inference
+                .restructure_prompt_token_limit,
+            234567
+        );
+        assert!(matches!(
+            &app.mode,
+            Mode::Settings(state)
+                if state.tab == SettingsTab::Inference
+                    && state.selected_row == 2
+                    && state.scroll == 3
+        ));
+        assert!(app.modal_stack.is_empty());
+    }
+
+    #[test]
+    fn restructure_budget_autosave_reports_persistence_failure() {
+        use crate::app::{InferenceSettingField, Mode};
+        let project = tempfile::tempdir().unwrap();
+        let config = tempfile::NamedTempFile::new().unwrap();
+        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
+        app.config_dir = Some(config.path().to_path_buf()); // A file cannot contain config.toml.
+        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
+        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
+            state.buf = "123456".into();
+        }
+        app.queue_restructure_budget_autosave("123456", Instant::now());
+        assert!(
+            app.tick_restructure_budget_autosave(app.restructure_budget_autosave_deadline.unwrap())
+        );
+        app.settle_filesystem_for_test();
+        let (hint, is_error) = app.restructure_budget_input_hint("123456");
+        assert!(is_error);
+        let error = app.inference_settings_save_error.as_ref().unwrap();
+        assert!(!error.is_empty());
+        assert_eq!(&hint, error);
+        let status = app.status_message.as_ref().unwrap();
+        assert!(status.contains("Could not save"));
+        assert!(status.contains(error));
+        assert!(!hint.starts_with("Saved"));
+        crate::keys::handle_event(
+            &mut app,
+            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
+        app.settle_filesystem_for_test();
+        assert!(app.restructure_budget_input_hint("123456").1);
+    }
+
+    #[test]
     fn project_name_result_after_ai_opt_out_does_not_write_or_publish() {
         let cwd = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
         app.is_project_name_loading = true;
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
         let old_decision = crate::naming_workers::AutomaticAiDecision::new(0, true);
         app.onboarding_progress.begin();
         app.onboarding_progress
@@ -587,7 +774,7 @@ mod tests {
         let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
         let old_decision = crate::naming_workers::AutomaticAiDecision::new(0, true);
         workers.set_automatic_ai_decision(1, false);
         workers.set_automatic_ai_decision(2, true);
@@ -617,7 +804,7 @@ mod tests {
         app.is_project_name_loading = true;
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
 
         apply_naming_worker_event(
             &mut app,
@@ -664,12 +851,14 @@ mod tests {
         app.pending_manual_retitles.insert(pane_id);
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
 
         apply_naming_worker_event(
             &mut app,
             &mut workers,
             NamingWorkerEvent::SessionTitle(crate::naming_workers::SessionTitleWorkerResult {
+                presentation_revision: 0,
+                process_id: None,
                 pane_id,
                 session_id: "session-1".to_string(),
                 title_generation: 3,
@@ -711,12 +900,14 @@ mod tests {
         app.titles_loading.insert(pane_id);
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
 
         apply_naming_worker_event(
             &mut app,
             &mut workers,
             NamingWorkerEvent::SessionTitle(crate::naming_workers::SessionTitleWorkerResult {
+                presentation_revision: 0,
+                process_id: None,
                 pane_id,
                 session_id: "old-session".to_string(),
                 title_generation: 0,
@@ -752,12 +943,14 @@ mod tests {
         app.titles_loading.insert(pane_id);
         let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
         let mut workers =
-            NamingWorkers::new(events_tx, ilium_inference::InferenceSettings::default());
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
 
         apply_naming_worker_event(
             &mut app,
             &mut workers,
             NamingWorkerEvent::SessionTitle(crate::naming_workers::SessionTitleWorkerResult {
+                presentation_revision: 0,
+                process_id: None,
                 pane_id,
                 session_id: "current-session".to_string(),
                 title_generation: 2,

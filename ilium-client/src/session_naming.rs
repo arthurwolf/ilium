@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use ilium_agent_session::TranscriptLocator;
+use ilium_agent_session::{GenuineRequestEvidence, TranscriptLocator};
 use ilium_core::{AgentActivity, AgentClass, NodeId, PaneTitleSource};
 use serde::Serialize;
 
@@ -29,6 +29,7 @@ const SESSION_TITLE_TEMPLATE: &str = ilium_prompts::naming::SESSION_TITLE;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionTitleInput {
     pub pane_id: NodeId,
+    pub presentation_revision: u64,
     pub project_name: String,
     /// The pane's launch cwd, including a worktree or project subdirectory.
     /// This also selects the transcript store and verifies its embedded cwd.
@@ -89,7 +90,8 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
     home: &Path,
     input: &SessionTitleInput,
 ) -> anyhow::Result<DualTitle> {
-    let transcript = TranscriptLocator::new(home, &input.project_path)
+    let locator = TranscriptLocator::new(home, &input.project_path);
+    let transcript = locator
         .transcript_for_session(&input.agent_class, &input.session_id)
         .ok_or_else(|| {
             anyhow::anyhow!(ilium_prompts::render_value(
@@ -97,6 +99,12 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
                 &serde_json::json!({"v0": (input.session_id).to_string()})
             ))
         })?;
+    if !matches!(
+        locator.genuine_request_evidence(&input.agent_class, &input.session_id)?,
+        GenuineRequestEvidence::Present { .. }
+    ) {
+        anyhow::bail!(ilium_prompts::naming::NAMING_SESSION_NAMING_NO_USER_TRANSCRIPT_ENTRIES_AVAILABLE_TO_INFER_A_SESSION_TITLE_FROM);
+    }
     let transcript_entries =
         transcript_context::recent_transcript_entries(&input.agent_class, &transcript.path)?;
     // Preserve the established empty-session contract: metadata and a splash
@@ -406,6 +414,7 @@ mod tests {
     fn input(project_path: PathBuf) -> SessionTitleInput {
         SessionTitleInput {
             pane_id: NodeId(42),
+            presentation_revision: 0,
             project_name: "ilium".to_string(),
             project_path,
             agent_class: AgentClass::Codex,

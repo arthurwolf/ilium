@@ -415,9 +415,20 @@ async fn first_pane_id(dirs: &IsolatedDirs, project_dir: &Path) -> NodeId {
     let pane_id = tokio::time::timeout(WAIT_TIMEOUT, async {
         let mut tree = None;
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
-                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => tree = Some(snapshot),
-                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => tree = Some(snapshot),
+                ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        snapshot,
+                        _event_retention,
+                    ))
+                }
+                ServerEvent::TreeSnapshot(snapshot) if tree.is_none() => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        snapshot,
+                        _event_retention,
+                    ))
+                }
                 ServerEvent::InitialStateSyncComplete => {
                     return tree
                         .expect("initial state includes a tree")

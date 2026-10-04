@@ -88,6 +88,8 @@ pub enum SetupPromptOutcome {
 /// Pure interaction state for a single setup offer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupPromptState {
+    /// Clones share a window identity; a reopened identical offer is distinct.
+    pub(crate) identity: std::sync::Arc<()>,
     pub scope: SetupPromptScope,
     /// `true` only when the Chatroom instruction block is absent at `scope`.
     pub chatroom_needs_setup: bool,
@@ -107,6 +109,7 @@ impl SetupPromptState {
         progress_needs_setup: bool,
     ) -> Self {
         let mut state = Self {
+            identity: std::sync::Arc::new(()),
             scope,
             chatroom_needs_setup,
             progress_needs_setup,

@@ -1,0 +1,630 @@
+//! Prepared single-row controls; retain this object with the displayed row snapshot.
+//! The caller owns focus, option identities, validation, mutation and persistence.
+use crossterm::event::KeyCode;
+use ratatui::layout::{Position, Rect};
+use ratatui::style::Style;
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlKind {
+    Choice,
+    Number,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerButton {
+    Left,
+    Right,
+    Other,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlAction {
+    PreviousChoice,
+    NextChoice,
+    OpenChoices,
+    Decrement,
+    Increment,
+    EditNumber,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct ControlSpec<'a> {
+    pub kind: ControlKind,
+    pub label: &'a str,
+    pub value: &'a str,
+    pub label_width: u16,
+    pub previous_enabled: bool,
+    pub next_enabled: bool,
+    pub open_enabled: bool,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct ControlGeometry {
+    pub row: Rect,
+    pub label: Rect,
+    pub value_slot: Rect,
+    pub value: Rect,
+    pub previous: Rect,
+    pub next: Rect,
+    pub open: Rect,
+}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ControlStyles {
+    pub background: Style,
+    pub label: Style,
+    pub value: Style,
+    pub button: Style,
+    pub disabled: Style,
+}
+#[derive(Debug, Clone)]
+pub struct ValueControl {
+    kind: ControlKind,
+    geometry: ControlGeometry,
+    label_text: String,
+    value_text: String,
+    value_ink: Vec<Rect>,
+    previous_enabled: bool,
+    next_enabled: bool,
+    open_enabled: bool,
+}
+impl ValueControl {
+    pub fn new(area: Rect, spec: ControlSpec<'_>) -> Self {
+        let width = area.width.min(u16::MAX - area.x);
+        let height = area.height.min(1).min(u16::MAX - area.y);
+        let row = Rect::new(area.x, area.y, width, height);
+        let empty = Rect::new(row.x, row.y, 0, 0);
+        let mut prepared = Self {
+            kind: spec.kind,
+            geometry: ControlGeometry {
+                row,
+                label: empty,
+                value_slot: empty,
+                value: empty,
+                previous: empty,
+                next: empty,
+                open: empty,
+            },
+            label_text: String::new(),
+            value_text: String::new(),
+            value_ink: Vec::new(),
+            previous_enabled: spec.previous_enabled,
+            next_enabled: spec.next_enabled,
+            open_enabled: spec.open_enabled,
+        };
+        if row.width == 0 || row.height == 0 {
+            return prepared;
+        }
+        let requested_label = if spec.label.is_empty() {
+            0
+        } else {
+            spec.label_width
+        };
+        let label_width = requested_label.min(row.width.saturating_sub(8));
+        let label_gap = u16::from(label_width > 0);
+        let control_x = row.x + label_width + label_gap;
+        let control_width = row.width - label_width - label_gap;
+        let geometry = &mut prepared.geometry;
+        geometry.label = Rect::new(row.x, row.y, label_width, 1);
+        prepared.label_text = clip_cells(spec.label, label_width);
+        if control_width < 4 {
+            geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
+            geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
+        } else {
+            let gap = u16::from(control_width >= 7);
+            geometry.previous = Rect::new(control_x, row.y, 1, 1);
+            geometry.value_slot =
+                Rect::new(control_x + 1 + gap, row.y, control_width - 3 - 3 * gap, 1);
+            let middle = Rect::new(control_x + control_width - 2 - gap, row.y, 1, 1);
+            let last = Rect::new(control_x + control_width - 1, row.y, 1, 1);
+            match spec.kind {
+                ControlKind::Choice => {
+                    geometry.open = middle;
+                    geometry.next = last;
+                }
+                ControlKind::Number => {
+                    geometry.next = middle;
+                    geometry.open = last;
+                }
+            }
+        }
+        prepared.value_text = clip_cells(spec.value, geometry.value_slot.width);
+        let value_width = cell_width(&prepared.value_text) as u16;
+        let padding = if spec.kind == ControlKind::Number {
+            (geometry.value_slot.width - value_width) / 2
+        } else {
+            0
+        };
+        geometry.value = Rect::new(geometry.value_slot.x + padding, row.y, value_width, 1);
+        let mut ink_x = geometry.value.x;
+        for grapheme in UnicodeSegmentation::graphemes(prepared.value_text.as_str(), true) {
+            let ink_width = UnicodeWidthStr::width(grapheme) as u16;
+            if !grapheme.chars().all(char::is_whitespace) && ink_width > 0 {
+                prepared
+                    .value_ink
+                    .push(Rect::new(ink_x, row.y, ink_width, 1));
+            }
+            ink_x += ink_width;
+        }
+        prepared
+    }
+    pub fn geometry(&self) -> ControlGeometry {
+        self.geometry
+    }
+    pub fn value_ink(&self) -> &[Rect] {
+        &self.value_ink
+    }
+    pub fn render(&self, frame: &mut Frame, styles: ControlStyles) {
+        let geometry = self.geometry;
+        if geometry.row.width == 0 || geometry.row.height == 0 {
+            return;
+        }
+        paint(
+            frame,
+            geometry.row,
+            &" ".repeat(usize::from(geometry.row.width)),
+            styles.background,
+        );
+        paint(frame, geometry.label, &self.label_text, styles.label);
+        paint(frame, geometry.value, &self.value_text, styles.value);
+        let glyphs = match self.kind {
+            ControlKind::Choice => ["←", "→", "+"],
+            ControlKind::Number => ["−", "+", "*"],
+        };
+        let buttons = [
+            (geometry.previous, self.previous_enabled),
+            (geometry.next, self.next_enabled),
+            (geometry.open, self.open_enabled),
+        ];
+        for (index, (rectangle, enabled)) in buttons.into_iter().enumerate() {
+            let style = if enabled {
+                styles.button
+            } else {
+                styles.disabled
+            };
+            paint(frame, rectangle, glyphs[index], style);
+        }
+    }
+    pub fn hit(&self, position: Position, button: PointerButton) -> Option<ControlAction> {
+        if !self.geometry.row.contains(position) {
+            return None;
+        }
+        let [previous, next, open] = self.actions();
+        if self
+            .value_ink
+            .iter()
+            .any(|rectangle| rectangle.contains(position))
+        {
+            let action = match (self.kind, button) {
+                (ControlKind::Choice, PointerButton::Left) => next,
+                (ControlKind::Choice, PointerButton::Right) => previous,
+                (ControlKind::Number, PointerButton::Left) => open,
+                _ => return None,
+            };
+            return self.allowed(action);
+        }
+        if button != PointerButton::Left {
+            return None;
+        }
+        let action = if self.geometry.previous.contains(position) {
+            previous
+        } else if self.geometry.next.contains(position) {
+            next
+        } else if self.geometry.open.contains(position) {
+            open
+        } else {
+            return None;
+        };
+        self.allowed(action)
+    }
+    pub fn key_action(&self, code: KeyCode, focused: bool) -> Option<ControlAction> {
+        if !focused {
+            return None;
+        }
+        let [previous, next, open] = self.actions();
+        let action = match code {
+            KeyCode::Left => previous,
+            KeyCode::Right => next,
+            KeyCode::Enter => open,
+            KeyCode::Char('+') if self.kind == ControlKind::Choice => open,
+            KeyCode::Char('+') => next,
+            KeyCode::Char('-') if self.kind == ControlKind::Number => previous,
+            KeyCode::Char('*') if self.kind == ControlKind::Number => open,
+            _ => return None,
+        };
+        self.allowed(action)
+    }
+    fn actions(&self) -> [ControlAction; 3] {
+        match self.kind {
+            ControlKind::Choice => [
+                ControlAction::PreviousChoice,
+                ControlAction::NextChoice,
+                ControlAction::OpenChoices,
+            ],
+            ControlKind::Number => [
+                ControlAction::Decrement,
+                ControlAction::Increment,
+                ControlAction::EditNumber,
+            ],
+        }
+    }
+    fn allowed(&self, action: ControlAction) -> Option<ControlAction> {
+        let enabled = match action {
+            ControlAction::PreviousChoice | ControlAction::Decrement => self.previous_enabled,
+            ControlAction::NextChoice | ControlAction::Increment => self.next_enabled,
+            ControlAction::OpenChoices | ControlAction::EditNumber => self.open_enabled,
+        };
+        enabled.then_some(action)
+    }
+}
+pub fn cell_width(text: &str) -> usize {
+    UnicodeSegmentation::graphemes(text, true)
+        .map(UnicodeWidthStr::width)
+        .sum()
+}
+pub fn clip_cells(text: &str, width: u16) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let limit = usize::from(width);
+    let mut output = String::new();
+    let mut used = 0_usize;
+    for source in UnicodeSegmentation::graphemes(text, true) {
+        let grapheme = if source.chars().any(char::is_control) {
+            " "
+        } else {
+            source
+        };
+        let next_width = UnicodeWidthStr::width(grapheme);
+        if next_width == 0 {
+            continue;
+        }
+        if used + next_width <= limit {
+            output.push_str(grapheme);
+            used += next_width;
+            continue;
+        }
+        if used == limit {
+            if let Some(last) = UnicodeSegmentation::graphemes(output.as_str(), true).next_back() {
+                let keep_bytes = output.len() - last.len();
+                output.truncate(keep_bytes);
+            }
+        }
+        output.push('…');
+        return output;
+    }
+    output
+}
+fn paint(frame: &mut Frame, rectangle: Rect, text: &str, style: Style) {
+    if rectangle.width == 0 || rectangle.height == 0 {
+        return;
+    }
+    frame.render_widget(Paragraph::new(text).style(style), rectangle);
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    fn spec(kind: ControlKind, value: &str) -> ControlSpec<'_> {
+        ControlSpec {
+            kind,
+            label: "Mode",
+            value,
+            label_width: 0,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        }
+    }
+    #[test]
+    fn narrow_layouts_paint_only_their_actual_targets() {
+        let expected_rows = [
+            "",
+            "+",
+            "…+",
+            "AB+",
+            "←…+→",
+            "←AB+→",
+            "←AB +→",
+            "← … + →",
+            "← AB + →",
+        ];
+        for width in 0_u16..=8 {
+            let mut options = spec(ControlKind::Choice, "AB");
+            options.label_width = u16::MAX;
+            let control = ValueControl::new(Rect::new(2, 1, width, 2), options);
+            let mut terminal = Terminal::new(TestBackend::new(14, 4)).unwrap();
+            terminal
+                .draw(|frame| control.render(frame, ControlStyles::default()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let painted: String = (2..2 + width)
+                .map(|x| buffer.cell((x, 1)).unwrap().symbol())
+                .collect();
+            assert_eq!(painted, expected_rows[usize::from(width)], "width {width}");
+            for x in 0_u16..14 {
+                let expected = match buffer.cell((x, 1)).unwrap().symbol() {
+                    "←" => Some(ControlAction::PreviousChoice),
+                    "→" | "A" | "B" | "…" => Some(ControlAction::NextChoice),
+                    "+" => Some(ControlAction::OpenChoices),
+                    _ => None,
+                };
+                assert_eq!(
+                    control.hit(Position::new(x, 1), PointerButton::Left),
+                    expected,
+                    "width {width}, x {x}"
+                );
+                assert_eq!(control.hit(Position::new(x, 2), PointerButton::Left), None);
+            }
+        }
+    }
+    #[test]
+    fn narrow_numbers_keep_entry_visible_without_hidden_step_targets() {
+        let cases = [
+            (1_u16, "*"),
+            (2, "…*"),
+            (3, "42*"),
+            (4, "−…+*"),
+            (5, "−42+*"),
+            (6, "−42 +*"),
+            (7, "− … + *"),
+        ];
+        for (width, expected_row) in cases {
+            let control =
+                ValueControl::new(Rect::new(0, 0, width, 1), spec(ControlKind::Number, "42"));
+            let mut terminal = Terminal::new(TestBackend::new(9, 2)).unwrap();
+            terminal
+                .draw(|frame| control.render(frame, ControlStyles::default()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let painted: String = (0..width)
+                .map(|x| buffer.cell((x, 0)).unwrap().symbol())
+                .collect();
+            assert_eq!(painted, expected_row, "width {width}");
+            for x in 0_u16..9 {
+                let expected = match buffer.cell((x, 0)).unwrap().symbol() {
+                    "−" => Some(ControlAction::Decrement),
+                    "+" => Some(ControlAction::Increment),
+                    "*" | "4" | "2" | "…" => Some(ControlAction::EditNumber),
+                    _ => None,
+                };
+                assert_eq!(
+                    control.hit(Position::new(x, 0), PointerButton::Left),
+                    expected,
+                    "width {width}, x {x}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn labels_spaces_and_non_left_buttons_do_not_fall_through() {
+        let mut options = spec(ControlKind::Choice, "A B");
+        options.label_width = 4;
+        let control = ValueControl::new(Rect::new(10, 4, 24, 2), options);
+        for x in 9_u16..=34 {
+            let expected = match x {
+                15 => Some(ControlAction::PreviousChoice),
+                17 | 19 | 33 => Some(ControlAction::NextChoice),
+                31 => Some(ControlAction::OpenChoices),
+                _ => None,
+            };
+            assert_eq!(
+                control.hit(Position::new(x, 4), PointerButton::Left),
+                expected,
+                "x {x}"
+            );
+            let reverse = if x == 17 || x == 19 {
+                Some(ControlAction::PreviousChoice)
+            } else {
+                None
+            };
+            assert_eq!(
+                control.hit(Position::new(x, 4), PointerButton::Right),
+                reverse,
+                "x {x}"
+            );
+            assert_eq!(control.hit(Position::new(x, 4), PointerButton::Other), None);
+            assert_eq!(control.hit(Position::new(x, 5), PointerButton::Left), None);
+        }
+    }
+    #[test]
+    fn number_is_centered_and_padding_is_inert() {
+        let control = ValueControl::new(Rect::new(2, 1, 13, 1), spec(ControlKind::Number, "42"));
+        assert_eq!(control.geometry().value_slot, Rect::new(4, 1, 7, 1));
+        assert_eq!(control.geometry().value, Rect::new(6, 1, 2, 1));
+        let mut terminal = Terminal::new(TestBackend::new(18, 3)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let painted: String = (2_u16..15)
+            .map(|x| buffer.cell((x, 1)).unwrap().symbol())
+            .collect();
+        assert_eq!(painted, "−   42    + *");
+        for x in 1_u16..=15 {
+            let expected = match x {
+                2 => Some(ControlAction::Decrement),
+                6 | 7 | 14 => Some(ControlAction::EditNumber),
+                12 => Some(ControlAction::Increment),
+                _ => None,
+            };
+            assert_eq!(
+                control.hit(Position::new(x, 1), PointerButton::Left),
+                expected
+            );
+            assert_eq!(control.hit(Position::new(x, 1), PointerButton::Right), None);
+        }
+    }
+    #[test]
+    fn clipping_keeps_unicode_whole_and_single_line() {
+        assert_eq!(clip_cells("anything", 0), "");
+        assert_eq!(clip_cells("界", 1), "…");
+        assert_eq!(clip_cells("界x", 2), "…");
+        assert_eq!(clip_cells("e\u{301}xy", 2), "e\u{301}…");
+        assert_eq!(clip_cells("\u{301}", 4), "");
+        assert_eq!(clip_cells("a\nb\tc\r\nd", 20), "a b c d");
+        let emoji = "👩‍❤️‍💋‍👩";
+        let emoji_width = cell_width(emoji) as u16;
+        assert_eq!(clip_cells(emoji, emoji_width), emoji);
+        assert_eq!(clip_cells(emoji, emoji_width.saturating_sub(1)), "…");
+        for width in 0_u16..=12 {
+            assert!(cell_width(&clip_cells("界e\u{301} 👩‍❤️‍💋‍👩 tail", width)) <= usize::from(width));
+        }
+    }
+    #[test]
+    fn wide_and_combining_value_cells_share_the_painted_geometry() {
+        let control = ValueControl::new(
+            Rect::new(1, 1, 11, 1),
+            spec(ControlKind::Number, "界e\u{301}"),
+        );
+        assert_eq!(control.geometry().value, Rect::new(4, 1, 3, 1));
+        let mut terminal = Terminal::new(TestBackend::new(14, 3)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.cell((4, 1)).unwrap().symbol(), "界");
+        assert_eq!(buffer.cell((6, 1)).unwrap().symbol(), "e\u{301}");
+        for x in 4_u16..=6 {
+            assert_eq!(
+                control.hit(Position::new(x, 1), PointerButton::Left),
+                Some(ControlAction::EditNumber)
+            );
+        }
+        for x in [3_u16, 7] {
+            assert_eq!(control.hit(Position::new(x, 1), PointerButton::Left), None);
+        }
+    }
+    #[test]
+    fn disabled_actions_are_inert_for_mouse_and_keyboard() {
+        for kind in [ControlKind::Choice, ControlKind::Number] {
+            for disabled in 0_usize..3 {
+                let mut options = spec(kind, "7");
+                options.previous_enabled = disabled != 0;
+                options.next_enabled = disabled != 1;
+                options.open_enabled = disabled != 2;
+                let control = ValueControl::new(Rect::new(0, 0, 9, 1), options);
+                let rectangles = [
+                    control.geometry().previous,
+                    control.geometry().next,
+                    control.geometry().open,
+                ];
+                let actions = if kind == ControlKind::Choice {
+                    [
+                        ControlAction::PreviousChoice,
+                        ControlAction::NextChoice,
+                        ControlAction::OpenChoices,
+                    ]
+                } else {
+                    [
+                        ControlAction::Decrement,
+                        ControlAction::Increment,
+                        ControlAction::EditNumber,
+                    ]
+                };
+                for index in 0_usize..3 {
+                    let expected = (index != disabled).then_some(actions[index]);
+                    assert_eq!(
+                        control.hit(Position::new(rectangles[index].x, 0), PointerButton::Left),
+                        expected
+                    );
+                    assert_eq!(
+                        control.key_action(
+                            [KeyCode::Left, KeyCode::Right, KeyCode::Enter][index],
+                            true
+                        ),
+                        expected
+                    );
+                }
+                let value_position = Position::new(control.geometry().value.x, 0);
+                let value_index = if kind == ControlKind::Choice { 1 } else { 2 };
+                assert_eq!(
+                    control.hit(value_position, PointerButton::Left),
+                    (disabled != value_index).then_some(actions[value_index])
+                );
+                let reverse = if kind == ControlKind::Choice && disabled != 0 {
+                    Some(ControlAction::PreviousChoice)
+                } else {
+                    None
+                };
+                assert_eq!(control.hit(value_position, PointerButton::Right), reverse);
+            }
+        }
+    }
+    #[test]
+    fn keyboard_actions_require_focus_and_keep_their_distinct_meanings() {
+        let number = ValueControl::new(Rect::new(4, 2, 0, 1), spec(ControlKind::Number, "10"));
+        assert_eq!(
+            number.key_action(KeyCode::Char('*'), true),
+            Some(ControlAction::EditNumber)
+        );
+        assert_eq!(
+            number.key_action(KeyCode::Char('+'), true),
+            Some(ControlAction::Increment)
+        );
+        assert_eq!(
+            number.key_action(KeyCode::Char('-'), true),
+            Some(ControlAction::Decrement)
+        );
+        assert_eq!(number.key_action(KeyCode::Enter, false), None);
+        assert_eq!(number.key_action(KeyCode::Esc, true), None);
+        assert_eq!(number.key_action(KeyCode::Tab, true), None);
+        assert_eq!(number.hit(Position::new(4, 2), PointerButton::Left), None);
+        let choice = ValueControl::new(Rect::new(0, 0, 1, 1), spec(ControlKind::Choice, "A"));
+        assert_eq!(
+            choice.key_action(KeyCode::Char('+'), true),
+            Some(ControlAction::OpenChoices)
+        );
+        assert_eq!(choice.key_action(KeyCode::Char('*'), true), None);
+        assert_eq!(
+            choice.key_action(KeyCode::Left, true),
+            Some(ControlAction::PreviousChoice)
+        );
+    }
+    #[test]
+    fn empty_and_extreme_allocations_have_no_phantom_cells() {
+        for area in [Rect::new(7, 3, 0, 4), Rect::new(7, 3, 12, 0)] {
+            let control = ValueControl::new(area, spec(ControlKind::Number, "9"));
+            let geometry = control.geometry();
+            for rectangle in [
+                geometry.previous,
+                geometry.next,
+                geometry.open,
+                geometry.value,
+            ] {
+                assert!(rectangle.width == 0 || rectangle.height == 0);
+            }
+            assert!(control.value_ink().is_empty());
+            assert_eq!(control.hit(Position::new(7, 3), PointerButton::Left), None);
+        }
+        let area = Rect {
+            x: u16::MAX - 2,
+            y: 4,
+            width: 20,
+            height: 2,
+        };
+        let control = ValueControl::new(area, spec(ControlKind::Choice, "A"));
+        assert_eq!(control.geometry().row, Rect::new(u16::MAX - 2, 4, 2, 1));
+        assert_eq!(
+            control.hit(Position::new(u16::MAX - 1, 4), PointerButton::Left),
+            Some(ControlAction::OpenChoices)
+        );
+        assert_eq!(
+            control.hit(Position::new(u16::MAX, 4), PointerButton::Left),
+            None
+        );
+        let bottom = ValueControl::new(
+            Rect {
+                x: 0,
+                y: u16::MAX,
+                width: 9,
+                height: 1,
+            },
+            spec(ControlKind::Number, "1"),
+        );
+        assert_eq!(bottom.geometry().row.height, 0);
+        assert_eq!(
+            bottom.hit(Position::new(0, u16::MAX), PointerButton::Left),
+            None
+        );
+    }
+}

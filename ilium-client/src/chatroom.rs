@@ -6,7 +6,7 @@
 //! provider integrations idempotently.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
@@ -109,9 +109,16 @@ pub fn append_message(project_root: &Path, author: &str, content: &str) -> anyho
         // edit may have left the file without a trailing newline. Appending
         // straight onto that would silently splice our new record onto the
         // end of the human's last line, corrupting both.
-        let needs_leading_newline = fs::read(&path)
-            .map(|bytes| bytes.last().is_some_and(|&byte| byte != b'\n'))
-            .unwrap_or(false);
+        let mut existing = ilium_platform::secure_fs::open_regular_file(&path)?;
+        let length = existing.metadata()?.len();
+        let needs_leading_newline = if length == 0 {
+            false
+        } else {
+            existing.seek(SeekFrom::End(-1))?;
+            let mut last = [0_u8; 1];
+            existing.read_exact(&mut last)?;
+            last[0] != b'\n'
+        };
         let mut file = OpenOptions::new().append(true).open(&path)?;
         if needs_leading_newline {
             writeln!(file)?;
@@ -132,6 +139,9 @@ pub fn append_message(project_root: &Path, author: &str, content: &str) -> anyho
 /// Reads the tail of valid chat records. Human edits outside the record shape
 /// remain visible in the file but are safely ignored by the structured UI.
 pub fn read_messages(project_root: &Path, limit: usize) -> anyhow::Result<Vec<ChatMessage>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
     if !exists(project_root) {
         return Ok(Vec::new());
     }
@@ -202,6 +212,7 @@ fn write_new_chatroom(path: &Path) -> anyhow::Result<()> {
     writeln!(file)?;
     writeln!(file, "{}", ilium_prompts::agent::CHATROOM_MESSAGES_HEADING)?;
     file.sync_all()?;
+    let _ = ilium_platform::secure_fs::sync_parent_directory_if_supported(path)?;
     Ok(())
 }
 
@@ -212,14 +223,72 @@ fn write_new_chatroom(path: &Path) -> anyhow::Result<()> {
 /// `fs::write` that would otherwise silently truncate a real, unreadable
 /// file down to just the generated ilium block.
 fn read_existing_or_empty(path: &Path) -> anyhow::Result<String> {
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(contents),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(anyhow::anyhow!(
-            "failed to read {}: {error}",
-            path.display()
-        )),
+    let file = match ilium_platform::secure_fs::open_regular_file(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "failed to read {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let mut bytes = Vec::new();
+    file.take(512 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 512 * 1024 {
+        anyhow::bail!("{} exceeds 512 KiB integration file limit", path.display());
     }
+    Ok(String::from_utf8(bytes)?)
+}
+
+/// Tail preparation for the TUI. History remains in the authoritative file;
+/// oversized human-edited records are refused rather than truncated silently.
+pub(crate) fn read_messages_bounded(
+    project_root: &Path,
+    limit: usize,
+) -> anyhow::Result<Vec<ChatMessage>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    if !exists(project_root) {
+        return Ok(Vec::new());
+    }
+    let mut file = ilium_platform::secure_fs::open_regular_file(&path_for_project(project_root))?;
+    let length = file.metadata()?.len();
+    let start = length.saturating_sub(8 * 1024 * 1024);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        anyhow::bail!("Chatroom tail grew beyond preparation limit");
+    }
+    let begin = if start == 0 {
+        0
+    } else {
+        bytes
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |index| index + 1)
+    };
+    let text = std::str::from_utf8(&bytes[begin..])?;
+    let mut messages = std::collections::VecDeque::new();
+    let mut retained = 0_usize;
+    for line in text.lines().rev() {
+        if let Some(message) = parse_message_line(line) {
+            retained += message.timestamp.capacity()
+                + message.author.capacity()
+                + message.content.capacity()
+                + std::mem::size_of::<ChatMessage>();
+            if retained > 4 * 1024 * 1024 {
+                anyhow::bail!("Chatroom messages exceed 4 MiB retained limit");
+            }
+            messages.push_front(message);
+            if messages.len() >= limit.min(200) {
+                break;
+            }
+        }
+    }
+    Ok(messages.into())
 }
 
 fn ensure_gitignore(project_root: &Path) -> anyhow::Result<()> {
@@ -228,12 +297,13 @@ fn ensure_gitignore(project_root: &Path) -> anyhow::Result<()> {
     if existing.lines().any(|line| line.trim() == "/CHATROOM.md") {
         return Ok(());
     }
+    let expected = existing.clone();
     let mut contents = existing;
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
     contents.push_str("/CHATROOM.md\n");
-    fs::write(path, contents)?;
+    publish_integration_file(&path, contents.as_bytes(), &expected)?;
     Ok(())
 }
 
@@ -252,6 +322,7 @@ fn ensure_hook_file(path: &Path, events: &[&str]) -> anyhow::Result<()> {
         fs::create_dir_all(parent)?;
     }
     let existing = read_existing_or_empty(path)?;
+    let expected = existing.clone();
     let existing = if existing.trim().is_empty() {
         "{}".to_string()
     } else {
@@ -293,9 +364,42 @@ fn ensure_hook_file(path: &Path, events: &[&str]) -> anyhow::Result<()> {
         }
     }
     if changed {
-        fs::write(path, format!("{}\n", serde_json::to_string_pretty(&root)?))?;
+        let updated = format!("{}\n", serde_json::to_string_pretty(&root)?);
+        publish_integration_file(path, updated.as_bytes(), &expected)?;
     }
     Ok(())
+}
+
+fn publish_integration_file(path: &Path, contents: &[u8], expected: &str) -> anyhow::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = parent.join(format!(
+        ".{name}.ilium-integration-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        if let Ok(metadata) = fs::metadata(path) {
+            file.set_permissions(metadata.permissions())?;
+        }
+        file.write_all(contents)?;
+        file.sync_all()?;
+        if read_existing_or_empty(path)? != expected {
+            anyhow::bail!(
+                "{} changed while preparing integrations; no replacement made",
+                path.display()
+            );
+        }
+        ilium_platform::secure_fs::replace_file_durably(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn is_ilium_hook_group(group: &Value) -> bool {

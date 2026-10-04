@@ -83,6 +83,61 @@ pub fn parse(markdown: &str, base_dir: &Path) -> Document {
         .collect();
     Builder::new(base_dir, markdown).run(&events)
 }
+/// Worker entrypoint bounds the parser event inventory before building layout.
+pub(crate) fn parse_bounded(markdown: &str, base_dir: &Path) -> Result<Document, &'static str> {
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_GFM;
+    let mut events = Vec::new();
+    for event in Parser::new_ext(markdown, options).into_offset_iter() {
+        if events.len() == 65536 {
+            return Err("Markdown has too many preparation events; use source view");
+        }
+        events.push(event);
+    }
+    let document = Builder::new(base_dir, markdown).run(&events);
+    let mut bytes = document
+        .blocks
+        .capacity()
+        .saturating_mul(std::mem::size_of::<Block>());
+    for block in &document.blocks {
+        let charge = match block {
+            Block::Text(lines) | Block::BlankLines(lines) => lines
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Line<'static>>())
+                .saturating_add(
+                    lines
+                        .iter()
+                        .map(|line| {
+                            line.spans
+                                .capacity()
+                                .saturating_mul(std::mem::size_of::<Span<'static>>())
+                                .saturating_add(
+                                    line.spans
+                                        .iter()
+                                        .map(|span| span.content.len())
+                                        .sum::<usize>(),
+                                )
+                        })
+                        .sum::<usize>(),
+                ),
+            Block::Heading { text, .. } => text.capacity(),
+            Block::Image { alt, path } => {
+                alt.capacity()
+                    + match path {
+                        ImagePath::Local(path) => path.as_os_str().len(),
+                        ImagePath::Unsupported(url) => url.capacity(),
+                    }
+            }
+        };
+        bytes = bytes.saturating_add(charge);
+        if bytes > 8 * 1024 * 1024 {
+            return Err("Markdown exceeds styled document budget; use source view");
+        }
+    }
+    Ok(document)
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Document {

@@ -13,7 +13,7 @@
 //! `/goal`, so no per-provider variant exists.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use ilium_platform::file_lock::ExclusiveFileLock;
@@ -49,7 +49,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(5),
+            Self::Progress => Some(6),
         }
     }
 
@@ -130,13 +130,7 @@ pub fn global_claude_path() -> Option<PathBuf> {
 }
 
 pub fn status(path: &Path, feature: AgentFeature) -> std::io::Result<FeatureSetupStatus> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(FeatureSetupStatus::NotInstalled)
-        }
-        Err(error) => return Err(error),
-    };
+    let contents = read_existing(path)?;
     let managed_blocks = validated_managed_blocks(&contents, feature)?;
     if !managed_blocks.is_empty() {
         if let Some(current_version) = feature.current_version() {
@@ -188,11 +182,19 @@ pub fn uninstall(path: &Path, feature: AgentFeature) -> std::io::Result<()> {
 }
 
 fn read_existing(path: &Path) -> std::io::Result<String> {
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(contents),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error),
+    let file = match ilium_platform::secure_fs::open_regular_file(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(error),
+    };
+    let mut bytes = Vec::new();
+    file.take(512 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 512 * 1024 {
+        return Err(invalid_data(
+            "Instruction file exceeds bounded 512 KiB preparation limit",
+        ));
     }
+    String::from_utf8(bytes).map_err(|error| invalid_data(error.to_string()))
 }
 
 /// Serialises Ilium writers for one target and publishes a complete new file
@@ -279,7 +281,7 @@ fn write_target_atomically(
                 ),
             ));
         }
-        fs::rename(&temporary_path, path)
+        ilium_platform::secure_fs::replace_file_durably(&temporary_path, path)
     })();
 
     if result.is_err() {
@@ -583,7 +585,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=5"));
+        assert!(contents.contains("ilium-agent-feature: progress version=6"));
         assert!(contents.contains("at least three minutes"));
         assert!(contents.contains("MUST NOT poll"));
         assert!(contents.contains("sole recurring poller"));
@@ -831,7 +833,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=5"));
+        assert!(updated.contains("version=6"));
         assert!(!updated.contains("version=99"));
     }
 

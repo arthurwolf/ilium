@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use ilium_agent_session::{genuine_request_text, is_codex_injected_message};
 use ilium_core::AgentClass;
 use serde::Serialize;
 use serde_json::Value;
@@ -233,8 +234,10 @@ fn claude_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
         };
         match entry.get("type").and_then(Value::as_str) {
             Some("user") => match message.get("content") {
-                Some(Value::String(content)) => {
-                    recent.push(TranscriptEntryKind::User, content.clone());
+                Some(Value::String(_)) => {
+                    if let Some(content) = genuine_request_text(&AgentClass::Claude, &entry) {
+                        recent.push(TranscriptEntryKind::User, content);
+                    }
                 }
                 Some(Value::Array(items)) => {
                     for item in items {
@@ -294,17 +297,8 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
                 };
                 match payload.get("type").and_then(Value::as_str) {
                     Some("user_message") => {
-                        if let Some(message) = payload.get("message").and_then(Value::as_str) {
-                            push_codex_user(&mut recent, &mut event_users, message);
-                        }
-                    }
-                    Some("thread_goal_updated") => {
-                        if let Some(objective) = payload
-                            .get("goal")
-                            .and_then(|goal| goal.get("objective"))
-                            .and_then(Value::as_str)
-                        {
-                            push_codex_user(&mut recent, &mut event_users, objective);
+                        if let Some(message) = genuine_request_text(&AgentClass::Codex, &entry) {
+                            push_codex_user(&mut recent, &mut event_users, &message);
                         }
                     }
                     Some("agent_message") => {
@@ -322,11 +316,9 @@ fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
                 if payload.get("type").and_then(Value::as_str) == Some("message")
                     && payload.get("role").and_then(Value::as_str) == Some("user")
                 {
-                    if let Some(message) = textual_value(payload.get("content")) {
-                        if !is_codex_context_envelope(&message) {
-                            push_codex_user(&mut recent, &mut response_users, &message);
-                            has_response_user = true;
-                        }
+                    if let Some(message) = genuine_request_text(&AgentClass::Codex, &entry) {
+                        push_codex_user(&mut recent, &mut response_users, &message);
+                        has_response_user = true;
                     }
                     continue;
                 }
@@ -367,14 +359,7 @@ fn push_codex_user(recent: &mut RecentEntries, queue: &mut KindEntries, content:
 }
 
 pub(crate) fn is_codex_context_envelope(message: &str) -> bool {
-    let message = message.trim_start();
-    message.starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_AGENTS_MD_INSTRUCTIONS_FOR)
-        || message.starts_with("<environment_context>")
-        || message
-            .starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_CODEX_INTERNAL_CONTEXT)
-        || message.starts_with("<task-notification>")
-        || message
-            .starts_with(ilium_prompts::naming::NAMING_TRANSCRIPT_CONTEXT_ILIUM_PROGRESS_MONITOR)
+    is_codex_injected_message(message)
 }
 
 /// Extracts text from the string/array/block shapes used by Claude and Codex
@@ -437,8 +422,8 @@ fn antigravity_recent_entries(transcript_path: &Path) -> anyhow::Result<Vec<Tran
         if entry.get("conversationId").and_then(Value::as_str) != Some(session_id) {
             continue;
         }
-        if let Some(display) = entry.get("display").and_then(Value::as_str) {
-            recent.push(TranscriptEntryKind::User, display.to_string());
+        if let Some(display) = genuine_request_text(&AgentClass::Antigravity, &entry) {
+            recent.push(TranscriptEntryKind::User, display);
         }
     }
     Ok(recent.finish())
@@ -511,6 +496,15 @@ mod tests {
     }
 
     #[test]
+    fn codex_event_notifications_do_not_establish_a_user_task() {
+        let lines = [
+            serde_json::json!({"type":"event_msg", "payload":{"type":"user_message", "message":"Ilium progress monitor 42 reports completion"}}).to_string(),
+            serde_json::json!({"type":"event_msg", "payload":{"type":"user_message", "message":"<environment_context>startup</environment_context>"}}).to_string(),
+        ];
+        assert!(codex_entries(lines.into_iter()).is_empty());
+    }
+
+    #[test]
     fn codex_response_item_user_turns_supersede_sparse_goal_events() {
         let contents = [
             r#"{"type":"event_msg","payload":{"type":"thread_goal_updated","goal":{"objective":"old advisor setup"}}}"#,
@@ -531,7 +525,7 @@ mod tests {
                 TranscriptEntry {
                     kind: TranscriptEntryKind::User,
                     content: "add board folders".to_string(),
-                },
+                }
             ]
         );
     }

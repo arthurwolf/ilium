@@ -53,6 +53,8 @@ pub enum CliError {
     SessionNotRunning(String),
     #[error("the server reported an error: {0}")]
     ServerReportedError(String),
+    #[error("the server reported an error: {0}")]
+    ReceivedServerReportedError(ilium_client::connection::Received<String>),
     #[error("could not resolve the running ilium client executable: {0}")]
     ResolveClientExecutable(#[source] std::io::Error),
     #[error("failed to restart ilium client from {path:?}: {source}")]
@@ -74,4 +76,16 @@ pub enum CliError {
     Client(#[from] ilium_client::error::ClientError),
     #[error(transparent)]
     Logging(#[from] ilium_logging::LoggingError),
+}
+
+impl CliError {
+    pub fn received_server_error(
+        message: String,
+        retention: Option<ilium_client::connection::EventRetention>,
+    ) -> Self {
+        match retention {
+            Some(retention) => Self::ReceivedServerReportedError(retention.retain(message)),
+            None => Self::ServerReportedError(message),
+        }
+    }
 }

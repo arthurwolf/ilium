@@ -80,11 +80,12 @@ pub(crate) struct SayArgs {
 }
 
 /// A refusal or failure, before it is rendered as an `error` record.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct SayFailure {
     code: &'static str,
     message: String,
     hint: Option<&'static str>,
+    retention: Option<ilium_client::connection::EventRetention>,
 }
 
 impl SayFailure {
@@ -93,6 +94,7 @@ impl SayFailure {
             code,
             message: message.into(),
             hint,
+            retention: None,
         }
     }
 }
@@ -118,7 +120,10 @@ async fn say(args: SayArgs, cwd: &Path) -> Result<(), CliError> {
         Ok(()) => Ok(()),
         Err(failure) => {
             println!("{}", error_record(request_id, &failure));
-            Err(CliError::ServerReportedError(failure.message))
+            Err(CliError::received_server_error(
+                failure.message,
+                failure.retention,
+            ))
         }
     }
 }
@@ -159,11 +164,17 @@ async fn run_say(args: &SayArgs, cwd: &Path, request_id: u64) -> Result<(), SayF
     let timeout = Duration::from_secs(args.timeout_s);
     let outcome = tokio::time::timeout(timeout, async {
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ServerEvent::VoiceTextResult {
                     request_id: response_id,
                     result,
-                } if response_id == request_id => return Some(result),
+                } if response_id == request_id => {
+                    return Some(ilium_client::connection::Received::with_retention(
+                        result,
+                        _event_retention,
+                    ))
+                }
                 // Only the correlated answer matters; the attach handshake
                 // and unrelated broadcasts are not this command's business.
                 _ => {}
@@ -173,7 +184,14 @@ async fn run_say(args: &SayArgs, cwd: &Path, request_id: u64) -> Result<(), SayF
     })
     .await;
     let _ = connection.requests.send(ClientRequest::Detach).await;
-
+    let mut outcome_retention = None;
+    let outcome = outcome.map(|reply| {
+        reply.map(|received| {
+            let (value, retention) = received.into_parts();
+            outcome_retention = retention;
+            value
+        })
+    });
     match outcome {
         Ok(Some(Ok(accepted))) => {
             println!(
@@ -182,7 +200,11 @@ async fn run_say(args: &SayArgs, cwd: &Path, request_id: u64) -> Result<(), SayF
             );
             Ok(())
         }
-        Ok(Some(Err(rejection))) => Err(rejection_failure(&rejection)),
+        Ok(Some(Err(rejection))) => {
+            let mut failure = rejection_failure(rejection);
+            failure.retention = outcome_retention;
+            Err(failure)
+        }
         Ok(None) => Err(SayFailure::new(
             "server-closed-connection",
             "the server closed the connection before answering",
@@ -230,7 +252,7 @@ fn collect_sentences(
             }
         }
     }
-    normalize_voice_sentences(sentences).map_err(|rejection| rejection_failure(&rejection))
+    normalize_voice_sentences(sentences).map_err(rejection_failure)
 }
 
 /// The pane's own session when run from inside one (its environment names
@@ -271,7 +293,7 @@ const fn rejection_code_name(code: VoiceTextRejectionCode) -> &'static str {
     }
 }
 
-fn rejection_failure(rejection: &VoiceTextRejection) -> SayFailure {
+fn rejection_failure(rejection: VoiceTextRejection) -> SayFailure {
     let hint = match rejection.code {
         VoiceTextRejectionCode::VoiceOff => {
             Some("pass --start to switch voice control on, or press F8 in the Ilium client")
@@ -287,11 +309,7 @@ fn rejection_failure(rejection: &VoiceTextRejection) -> SayFailure {
         }
         VoiceTextRejectionCode::InvalidRequest => None,
     };
-    SayFailure::new(
-        rejection_code_name(rejection.code),
-        rejection.message.clone(),
-        hint,
-    )
+    SayFailure::new(rejection_code_name(rejection.code), rejection.message, hint)
 }
 
 const fn phase_name(phase: VoiceTextPhase) -> &'static str {
@@ -415,7 +433,7 @@ mod tests {
         assert!(result.contains("\"voice_phase\":\"listening\""));
         assert!(result.contains("\"started_voice\":true"));
 
-        let failure = rejection_failure(&VoiceTextRejection::new(
+        let failure = rejection_failure(VoiceTextRejection::new(
             VoiceTextRejectionCode::VoiceOff,
             "voice control is \"off\"\nsecond line",
         ));

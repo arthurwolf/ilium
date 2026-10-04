@@ -36,6 +36,10 @@ const PROMPT_TEXT_LIMIT: usize = 1_500;
 const SAMPLE_CAP: usize = 4_000;
 /// Upper bound on stored activity timestamps; halved when exceeded.
 const ACTIVITY_CAP: usize = 20_000;
+/// Upper bound on stored work-state marks; halved when exceeded.
+const WORK_MARK_CAP: usize = 20_000;
+/// Upper bound on stored progress-bar runs (most recent kept).
+const PROGRESS_SPAN_CAP: usize = 256;
 /// Upper bound on stored turn durations (most recent kept).
 const TURN_DURATION_CAP: usize = 400;
 /// Bytes of a Codex line inspected by the pre-filter. Every record's kind
@@ -127,6 +131,103 @@ pub struct TokenSample {
     pub context: Option<u64>,
 }
 
+/// What the agent was doing between one transcript event and the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum WorkKind {
+    /// No turn running: waiting for the user.
+    Idle,
+    /// The model is generating (thinking or writing text).
+    Model,
+    /// A shell command is running.
+    Shell,
+    /// A file is being edited or written.
+    Edit,
+    /// Files are being read or searched.
+    Read,
+    /// A sub-agent is working.
+    Agent,
+    /// A web fetch or search is running.
+    Web,
+    /// Any other tool (MCP, planning, ...).
+    Other,
+}
+
+impl WorkKind {
+    pub const ALL: [WorkKind; 8] = [
+        Self::Idle,
+        Self::Model,
+        Self::Shell,
+        Self::Edit,
+        Self::Read,
+        Self::Agent,
+        Self::Web,
+        Self::Other,
+    ];
+
+    /// Maps a tool name from either provider's transcript to what it does.
+    pub fn for_tool(name: &str) -> Self {
+        let name = name.to_ascii_lowercase();
+        match name.as_str() {
+            "bash" | "shell" | "exec_command" | "local_shell" | "shell_command" | "write_stdin"
+            | "bashoutput" | "killshell" => Self::Shell,
+            "edit" | "write" | "multiedit" | "notebookedit" | "apply_patch" => Self::Edit,
+            "read" | "grep" | "glob" | "ls" | "view_image" => Self::Read,
+            "task" | "agent" | "spawn_agent" | "wait_agent" | "send_input" => Self::Agent,
+            "webfetch" | "websearch" | "web_search" => Self::Web,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The agent switched to `kind` at `at_ms` and stayed there until the next mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkMark {
+    pub at_ms: i64,
+    pub kind: WorkKind,
+}
+
+/// How an Ilium progress-bar (progress monitor) run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressOutcome {
+    /// Still being watched.
+    Running,
+    Success,
+    Failure,
+    /// The monitor stopped before the task reported a terminal status.
+    Unknown,
+    /// The agent cleared the monitor itself.
+    Cleared,
+}
+
+/// One progress-bar run: from the `ilium progress set` call to its outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgressSpan {
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub outcome: ProgressOutcome,
+}
+
+/// Reads the delivery text Ilium types into an agent when a progress monitor
+/// ends; returns the monitor number and how it ended.
+pub(crate) fn parse_progress_outcome(text: &str) -> Option<(u64, ProgressOutcome)> {
+    let rest = text.trim_start().strip_prefix("Ilium progress monitor ")?;
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    let monitor_id: u64 = rest[..digits].parse().ok()?;
+    let first_line = rest[digits..].lines().next().unwrap_or("");
+    let outcome = if first_line.contains(" completed successfully") {
+        ProgressOutcome::Success
+    } else if first_line.contains(" failed") {
+        ProgressOutcome::Failure
+    } else if first_line.contains("stopped before")
+        || first_line.contains("could no longer observe")
+    {
+        ProgressOutcome::Unknown
+    } else {
+        return None;
+    };
+    Some((monitor_id, outcome))
+}
+
 /// A rate-limit window as reported by the provider (Codex).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RateLimitWindow {
@@ -177,6 +278,23 @@ pub struct QuotaBucket {
 
 const MINUTE_MS: i64 = 60_000;
 
+/// Allocation custody travels with immutable statistics, including exported
+/// Arc snapshots. Equality compares domain data rather than quota identity.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StatsRetention {
+    _hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+impl StatsRetention {
+    pub(crate) fn new(hold: std::sync::Arc<ilium_execution::StorageAdmission>) -> Self {
+        Self { _hold: Some(hold) }
+    }
+}
+impl PartialEq for StatsRetention {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// Everything the popover shows about one session.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SessionStats {
@@ -226,9 +344,14 @@ pub struct SessionStats {
     /// Per-minute rise of each plan-quota window (Codex only).
     pub quota_spend: Vec<QuotaBucket>,
     pub activity_ms: Vec<i64>,
+    /// Chronological state changes of the agent, for the work ribbon.
+    pub work_marks: Vec<WorkMark>,
+    /// Progress-bar runs, oldest first.
+    pub progress_spans: Vec<ProgressSpan>,
 
     pub bytes_read: u64,
     pub records_parsed: u64,
+    pub(crate) retention: StatsRetention,
 }
 
 /// One slice of the session timeline, for the Activity charts.
@@ -242,6 +365,72 @@ pub struct TimelineBucket {
 }
 
 impl SessionStats {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let metadata = [
+            &self.provider,
+            &self.model,
+            &self.effort,
+            &self.advisor_model,
+            &self.cli_version,
+            &self.git_branch,
+            &self.cwd,
+            &self.plan_type,
+        ];
+        metadata
+            .iter()
+            .filter_map(|value| value.as_ref())
+            .map(|value| value.capacity())
+            .sum::<usize>()
+            + self.models.capacity() * std::mem::size_of::<ModelUsage>()
+            + self
+                .models
+                .iter()
+                .map(|value| value.model.capacity())
+                .sum::<usize>()
+            + self.tools.capacity() * std::mem::size_of::<(String, u32)>()
+            + self
+                .tools
+                .iter()
+                .map(|(name, _)| name.capacity())
+                .sum::<usize>()
+            + self.recent_prompts.capacity() * std::mem::size_of::<PromptRecord>()
+            + self
+                .recent_prompts
+                .iter()
+                .map(|prompt| prompt.text.capacity())
+                .sum::<usize>()
+            + self.turn_durations_ms.capacity() * 8
+            + self.samples.capacity() * std::mem::size_of::<TokenSample>()
+            + self.activity_ms.capacity() * 8
+            + self.work_marks.capacity() * std::mem::size_of::<WorkMark>()
+            + self.progress_spans.capacity() * std::mem::size_of::<ProgressSpan>()
+            + self.spend.capacity() * std::mem::size_of::<SpendBucket>()
+            + self
+                .spend
+                .iter()
+                .map(|bucket| bucket.model.len())
+                .sum::<usize>()
+            + self.quota_spend.capacity() * std::mem::size_of::<QuotaBucket>()
+            + self
+                .quota_spend
+                .iter()
+                .map(|bucket| bucket.window.len())
+                .sum::<usize>()
+            + self.rate_limits.capacity() * std::mem::size_of::<(String, RateLimitWindow)>()
+            + self
+                .rate_limits
+                .iter()
+                .map(|(name, _)| name.capacity())
+                .sum::<usize>()
+            + self.cost.as_ref().map_or(0, |cost| {
+                cost.model_costs.capacity() * std::mem::size_of::<(String, f64)>()
+                    + cost
+                        .model_costs
+                        .iter()
+                        .map(|(name, _)| name.capacity())
+                        .sum::<usize>()
+            })
+    }
     /// Wall-clock span from the first to the last recorded event.
     pub fn span_ms(&self) -> Option<u64> {
         let (first, last) = (self.first_at_ms?, self.last_at_ms?);
@@ -260,7 +449,12 @@ impl SessionStats {
         let (Some(first), Some(last)) = (self.first_at_ms, self.last_at_ms) else {
             return Vec::new();
         };
-        if count == 0 {
+        self.timeline_between(count, first, last)
+    }
+
+    /// Like [`Self::timeline`] but over `first..=last`, ignoring events outside.
+    pub fn timeline_between(&self, count: usize, first: i64, last: i64) -> Vec<TimelineBucket> {
+        if count == 0 || last < first {
             return Vec::new();
         }
         let span = (last - first).max(1);
@@ -274,13 +468,21 @@ impl SessionStats {
                 ..TimelineBucket::default()
             })
             .collect();
-        for sample in &self.samples {
+        for sample in self
+            .samples
+            .iter()
+            .filter(|sample| (first..=last).contains(&sample.at_ms))
+        {
             let bucket = &mut buckets[index_for(sample.at_ms)];
             bucket.tokens.add(&sample.tokens);
             bucket.calls += 1;
             bucket.peak_context = bucket.peak_context.max(sample.context.unwrap_or(0));
         }
-        for at_ms in &self.activity_ms {
+        for at_ms in self
+            .activity_ms
+            .iter()
+            .filter(|at_ms| (first..=last).contains(at_ms))
+        {
             buckets[index_for(*at_ms)].events += 1;
         }
         buckets
@@ -317,6 +519,9 @@ pub struct StatsAccumulator {
     first_token_total_ms: u64,
     first_token_count: u64,
     cost_snapshot: Option<ReportedCost>,
+    /// Monitor numbers whose outcome was already recorded (Codex logs the
+    /// same delivered message in two record shapes).
+    seen_progress_outcomes: HashSet<u64>,
 
     claude_calls: Vec<ClaudeCall>,
     claude_call_index: HashMap<String, usize>,
@@ -336,6 +541,8 @@ pub struct StatsAccumulator {
     /// identifies which window period it belongs to.
     codex_quota_last: HashMap<String, (f64, Option<i64>)>,
     codex_quota_spend: BTreeMap<(i64, String), f64>,
+    // Last field: the state debit outlives destruction of every owned map/vector.
+    retention: StatsRetention,
 }
 
 impl StatsAccumulator {
@@ -354,6 +561,7 @@ impl StatsAccumulator {
             first_token_total_ms: 0,
             first_token_count: 0,
             cost_snapshot: None,
+            seen_progress_outcomes: HashSet::new(),
             claude_calls: Vec::new(),
             claude_call_index: HashMap::new(),
             claude_tool_errors: 0,
@@ -367,6 +575,120 @@ impl StatsAccumulator {
             codex_spend: BTreeMap::new(),
             codex_quota_last: HashMap::new(),
             codex_quota_spend: BTreeMap::new(),
+            retention: StatsRetention::default(),
+        }
+    }
+
+    pub(crate) fn attach_retention(&mut self, retention: StatsRetention) {
+        self.retention = retention.clone();
+        self.stats.retention = retention;
+    }
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let strings = self
+            .tool_counts
+            .keys()
+            .chain(self.seen_tool_ids.iter())
+            .chain(self.claude_call_index.keys())
+            .chain(self.codex_model_usage.keys())
+            .chain(self.codex_quota_last.keys());
+        let string_bytes = strings.map(String::capacity).sum::<usize>();
+        self.stats.retained_bytes()
+            + self.prompts.capacity() * std::mem::size_of::<PromptRecord>()
+            + self
+                .prompts
+                .iter()
+                .map(|prompt| prompt.text.capacity())
+                .sum::<usize>()
+            + self.event_prompts.capacity() * std::mem::size_of::<PromptRecord>()
+            + self
+                .event_prompts
+                .iter()
+                .map(|prompt| prompt.text.capacity())
+                .sum::<usize>()
+            + self.turn_durations.capacity() * 8
+            + self.codex_samples.capacity() * std::mem::size_of::<TokenSample>()
+            + self
+                .codex_current_model
+                .as_ref()
+                .map_or(0, String::capacity)
+            + self.codex_rate_limits.capacity() * std::mem::size_of::<(String, RateLimitWindow)>()
+            + self
+                .codex_rate_limits
+                .iter()
+                .map(|(name, _)| name.capacity())
+                .sum::<usize>()
+            + self.cost_snapshot.as_ref().map_or(0, |cost| {
+                cost.model_costs.capacity() * std::mem::size_of::<(String, f64)>()
+                    + cost
+                        .model_costs
+                        .iter()
+                        .map(|(name, _)| name.capacity())
+                        .sum::<usize>()
+            })
+            + string_bytes
+            + self.claude_calls.capacity() * std::mem::size_of::<ClaudeCall>()
+            + self
+                .claude_calls
+                .iter()
+                .map(|call| call.model.capacity())
+                .sum::<usize>()
+            + self
+                .codex_spend
+                .keys()
+                .map(|(_, name)| name.capacity() + 256)
+                .sum::<usize>()
+            + self
+                .codex_quota_spend
+                .keys()
+                .map(|(_, name)| name.capacity() + 256)
+                .sum::<usize>()
+            + self
+                .extra_offsets
+                .keys()
+                .map(|path| path.capacity() + 128)
+                .sum::<usize>()
+            + (self.tool_counts.capacity()
+                + self.seen_tool_ids.capacity()
+                + self.claude_call_index.capacity()
+                + self.codex_model_usage.capacity()
+                + self.codex_quota_last.capacity())
+                * 128
+    }
+    fn check_bounds(&self) -> std::io::Result<()> {
+        let records = self.seen_tool_ids.len()
+            + self.claude_calls.len()
+            + self.codex_spend.len()
+            + self.codex_quota_spend.len();
+        let retained = self.retained_bytes();
+        if records > 65_536 || self.extra_offsets.len() > 4096 || retained > 8 * 1024 * 1024 {
+            return Err(std::io::Error::other(
+                "Statistics retained record/byte bound reached; totals incomplete",
+            ));
+        }
+        Ok(())
+    }
+    fn read_bounded_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> std::io::Result<usize> {
+        const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+        line.clear();
+        loop {
+            let buffer = reader.fill_buf()?;
+            if buffer.is_empty() {
+                return Ok(line.len());
+            }
+            let count = buffer
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(buffer.len(), |index| index + 1);
+            if line.len().saturating_add(count) > MAX_LINE_BYTES {
+                return Err(std::io::Error::other(
+                    "Statistics transcript line exceeds 4 MiB; totals incomplete",
+                ));
+            }
+            line.extend_from_slice(&buffer[..count]);
+            reader.consume(count);
+            if line.last() == Some(&b'\n') {
+                return Ok(line.len());
+            }
         }
     }
 
@@ -384,22 +706,36 @@ impl StatsAccumulator {
     pub fn ingest_file(
         &mut self,
         path: &Path,
+        on_progress: impl FnMut(&Self, u64, u64),
+    ) -> std::io::Result<()> {
+        self.ingest_file_cancellable(path, || false, on_progress)
+    }
+    pub(crate) fn ingest_file_cancellable(
+        &mut self,
+        path: &Path,
+        should_stop: impl Fn() -> bool,
         mut on_progress: impl FnMut(&Self, u64, u64),
     ) -> std::io::Result<()> {
         const PROGRESS_INTERVAL_BYTES: u64 = 24 * 1024 * 1024;
 
-        let file = std::fs::File::open(path)?;
+        let file = ilium_platform::secure_fs::open_regular_file(path)?;
         let length = file.metadata()?.len();
         if length < self.offset {
+            let retention = self.retention.clone();
             *self = Self::new(self.class.clone());
+            self.attach_retention(retention);
         }
         let mut reader = BufReader::with_capacity(1 << 20, file);
         reader.seek(SeekFrom::Start(self.offset))?;
         let mut line = Vec::new();
         let mut since_progress = 0_u64;
         loop {
-            line.clear();
-            let read = reader.read_until(b'\n', &mut line)?;
+            if should_stop() {
+                return Err(std::io::Error::other(
+                    "Statistics cancelled; totals incomplete",
+                ));
+            }
+            let read = Self::read_bounded_line(&mut reader, &mut line)?;
             if read == 0 {
                 break;
             }
@@ -411,6 +747,7 @@ impl StatsAccumulator {
             self.offset += read as u64;
             since_progress += read as u64;
             self.feed_line(&line);
+            self.check_bounds()?;
             if since_progress >= PROGRESS_INTERVAL_BYTES {
                 since_progress = 0;
                 on_progress(self, self.offset, length);
@@ -429,7 +766,7 @@ impl StatsAccumulator {
     /// file it resumes at its remembered offset and leaves a partial last line
     /// for the next pass. A file that shrank is skipped rather than re-read.
     pub fn ingest_extra_file(&mut self, path: &Path) -> std::io::Result<()> {
-        let file = std::fs::File::open(path)?;
+        let file = ilium_platform::secure_fs::open_regular_file(path)?;
         let length = file.metadata()?.len();
         let mut offset = self.extra_offsets.get(path).copied().unwrap_or(0);
         if length <= offset {
@@ -439,13 +776,13 @@ impl StatsAccumulator {
         reader.seek(SeekFrom::Start(offset))?;
         let mut line = Vec::new();
         loop {
-            line.clear();
-            let read = reader.read_until(b'\n', &mut line)?;
+            let read = Self::read_bounded_line(&mut reader, &mut line)?;
             if read == 0 || line.last() != Some(&b'\n') {
                 break;
             }
             offset += read as u64;
             self.feed_line(&line);
+            self.check_bounds()?;
         }
         self.extra_offsets.insert(path.to_path_buf(), offset);
         Ok(())
@@ -517,18 +854,31 @@ impl StatsAccumulator {
             self.stats.api_errors += 1;
             return;
         }
+        let mut work = WorkKind::Model;
         if let Some(Value::Array(blocks)) = message.get("content") {
             for block in blocks {
                 if block.get("type").and_then(Value::as_str) != Some("tool_use") {
                     continue;
                 }
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                work = WorkKind::for_tool(name);
                 let id = block.get("id").and_then(Value::as_str).unwrap_or("");
                 if !id.is_empty() && !self.seen_tool_ids.insert(id.to_string()) {
                     continue;
                 }
-                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                if !sidechain && work == WorkKind::Shell {
+                    let command = block
+                        .get("input")
+                        .and_then(|input| input.get("command"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    self.note_shell_command(at_ms, command);
+                }
                 self.count_tool(name, at_ms);
             }
+        }
+        if !sidechain {
+            self.push_work(at_ms, work);
         }
         let Some(usage) = message.get("usage") else {
             return;
@@ -582,6 +932,8 @@ impl StatsAccumulator {
             return;
         }
         self.touch(at_ms);
+        self.note_progress_text(at_ms, &text);
+        self.push_work(at_ms, WorkKind::Model);
         self.stats.prompt_count += 1;
         self.push_prompt(at_ms, &text);
         if let Some(at_ms) = at_ms {
@@ -597,6 +949,7 @@ impl StatsAccumulator {
                     self.stats.turns_completed += 1;
                     self.push_turn_duration(duration);
                 }
+                self.push_work(at_ms, WorkKind::Idle);
             }
             Some("compact_boundary") => self.stats.compactions += 1,
             _ => {}
@@ -701,12 +1054,14 @@ impl StatsAccumulator {
             CodexLine::TokenCount => self.codex_token_count(payload, at_ms),
             CodexLine::TaskStarted => {
                 self.touch(at_ms);
+                self.push_work(at_ms, WorkKind::Model);
                 if let Some(window) = payload.get("model_context_window").and_then(Value::as_u64) {
                     self.stats.context_window = Some(window);
                 }
             }
             CodexLine::TaskComplete => {
                 self.touch(at_ms);
+                self.push_work(at_ms, WorkKind::Idle);
                 if let Some(duration) = payload.get("duration_ms").and_then(Value::as_u64) {
                     self.stats.turns_completed += 1;
                     self.push_turn_duration(duration);
@@ -721,6 +1076,7 @@ impl StatsAccumulator {
             }
             CodexLine::TurnAborted => {
                 self.touch(at_ms);
+                self.push_work(at_ms, WorkKind::Idle);
                 self.stats.turns_aborted += 1;
             }
             CodexLine::EventUser | CodexLine::GoalUpdated => {
@@ -734,6 +1090,9 @@ impl StatsAccumulator {
                 };
                 if let Some(text) = text.map(str::trim).filter(|text| !text.is_empty()) {
                     self.touch(at_ms);
+                    if kind == CodexLine::EventUser {
+                        self.note_progress_text(at_ms, text);
+                    }
                     self.event_prompt_count += 1;
                     push_bounded_prompt(&mut self.event_prompts, at_ms, text);
                 }
@@ -747,6 +1106,7 @@ impl StatsAccumulator {
                     return;
                 }
                 self.touch(at_ms);
+                self.note_progress_text(at_ms, &text);
                 self.response_prompt_count += 1;
                 push_bounded_prompt(&mut self.prompts, at_ms, &text);
             }
@@ -756,6 +1116,15 @@ impl StatsAccumulator {
                     .get("name")
                     .and_then(Value::as_str)
                     .unwrap_or("tool");
+                let work = WorkKind::for_tool(name);
+                if work == WorkKind::Shell {
+                    let arguments = payload
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    self.note_shell_command(at_ms, arguments);
+                }
+                self.push_work(at_ms, work);
                 self.count_tool(name, at_ms);
             }
             CodexLine::Compacted => {}
@@ -898,6 +1267,70 @@ impl StatsAccumulator {
         }
     }
 
+    /// Records that the agent switched to `kind`; repeats of the current
+    /// state carry no information and are dropped.
+    fn push_work(&mut self, at_ms: Option<i64>, kind: WorkKind) {
+        let Some(at_ms) = at_ms else {
+            return;
+        };
+        if self
+            .stats
+            .work_marks
+            .last()
+            .is_some_and(|last| last.kind == kind)
+        {
+            return;
+        }
+        self.stats.work_marks.push(WorkMark { at_ms, kind });
+        if self.stats.work_marks.len() > WORK_MARK_CAP {
+            let thinned: Vec<WorkMark> = self.stats.work_marks.iter().copied().step_by(2).collect();
+            self.stats.work_marks = thinned;
+        }
+    }
+
+    /// Notes a shell command: `ilium progress set` starts a progress-bar run,
+    /// `ilium progress clear` ends the oldest open one without an outcome.
+    fn note_shell_command(&mut self, at_ms: Option<i64>, command: &str) {
+        let Some(at_ms) = at_ms else {
+            return;
+        };
+        if command.contains("ilium progress set") {
+            self.stats.progress_spans.push(ProgressSpan {
+                start_ms: at_ms,
+                end_ms: None,
+                outcome: ProgressOutcome::Running,
+            });
+            if self.stats.progress_spans.len() > PROGRESS_SPAN_CAP {
+                self.stats.progress_spans.remove(0);
+            }
+        } else if command.contains("ilium progress clear") {
+            self.end_progress(at_ms, ProgressOutcome::Cleared);
+        }
+    }
+
+    /// Reads a delivered progress-monitor result out of user-visible text.
+    fn note_progress_text(&mut self, at_ms: Option<i64>, text: &str) {
+        let (Some(at_ms), Some((monitor_id, outcome))) = (at_ms, parse_progress_outcome(text))
+        else {
+            return;
+        };
+        if self.seen_progress_outcomes.insert(monitor_id) {
+            self.end_progress(at_ms, outcome);
+        }
+    }
+
+    fn end_progress(&mut self, at_ms: i64, outcome: ProgressOutcome) {
+        if let Some(span) = self
+            .stats
+            .progress_spans
+            .iter_mut()
+            .find(|span| span.end_ms.is_none())
+        {
+            span.end_ms = Some(at_ms.max(span.start_ms));
+            span.outcome = outcome;
+        }
+    }
+
     fn push_prompt(&mut self, at_ms: Option<i64>, text: &str) {
         push_bounded_prompt(&mut self.prompts, at_ms, text);
     }
@@ -915,6 +1348,7 @@ impl StatsAccumulator {
     pub fn snapshot(&self) -> SessionStats {
         let mut stats = self.stats.clone();
         stats.bytes_read = self.offset;
+        stats.work_marks.sort_by_key(|mark| mark.at_ms);
         stats.tools = {
             let mut tools: Vec<(String, u32)> = self
                 .tool_counts
@@ -1336,6 +1770,54 @@ impl CodexFilters {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn progress_outcomes_are_read_from_delivered_monitor_text() {
+        use super::{parse_progress_outcome as parse, ProgressOutcome::*};
+        assert_eq!(
+            parse("Ilium progress monitor 7 reports that job completed successfully.\nFinal progress: 100%."),
+            Some((7, Success))
+        );
+        assert_eq!(
+            parse("Ilium progress monitor 12 reports that job failed.\nError: boom."),
+            Some((12, Failure))
+        );
+        assert_eq!(
+            parse("Ilium progress monitor 3 stopped before job reached a terminal task status."),
+            Some((3, Unknown))
+        );
+        assert_eq!(parse("fix the progress monitor"), None);
+    }
+
+    #[test]
+    fn claude_transcript_yields_work_marks_and_progress_runs() {
+        let mut acc = StatsAccumulator::new(AgentClass::Claude);
+        let lines = [
+            r#"{"type":"user","timestamp":"2026-10-03T10:00:00.000Z","message":{"role":"user","content":"build it"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-03T10:00:10.000Z","message":{"id":"m1","model":"claude-sonnet-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ilium progress set --command x"}}],"usage":{"input_tokens":1,"output_tokens":2}}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-03T10:05:00.000Z","message":{"id":"m2","model":"claude-sonnet-5","content":[{"type":"text","text":"waiting"}],"usage":{"input_tokens":1,"output_tokens":2}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-03T10:06:00.000Z","message":{"role":"user","content":"Ilium progress monitor 4 reports that job failed.\nFinal progress: 40%."}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-03T10:07:00.000Z","durationMs":420000}"#,
+        ];
+        for line in lines {
+            acc.feed_line(line.as_bytes());
+        }
+        let stats = acc.snapshot();
+        let kinds: Vec<_> = stats.work_marks.iter().map(|m| m.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                WorkKind::Model,
+                WorkKind::Shell,
+                WorkKind::Model,
+                WorkKind::Idle
+            ]
+        );
+        assert_eq!(stats.progress_spans.len(), 1);
+        let span = stats.progress_spans[0];
+        assert_eq!(span.outcome, ProgressOutcome::Failure);
+        assert!(span.end_ms.unwrap() > span.start_ms);
+    }
+
     use super::*;
 
     fn feed(class: AgentClass, lines: &[&str]) -> SessionStats {
@@ -1636,6 +2118,35 @@ mod tests {
         assert_eq!(buckets[3].tokens.output, 30);
         assert_eq!(buckets[3].peak_context, 9);
         assert_eq!(buckets.iter().map(|b| b.events).sum::<u32>(), 3);
+    }
+
+    #[test]
+    fn oversized_complete_line_is_explicitly_incomplete_and_does_not_advance_offset() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-oversized.jsonl");
+        let mut bytes = vec![b'x'; 4 * 1024 * 1024 + 1];
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        let error = accumulator.ingest_file(&path, |_, _, _| {}).unwrap_err();
+        assert!(error.to_string().contains("totals incomplete"));
+        assert_eq!(accumulator.offset(), 0);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    #[test]
+    fn cancellation_preserves_the_last_complete_record_offset() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-cancelled.jsonl");
+        std::fs::write(&path, b"{}\n").unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        assert!(accumulator
+            .ingest_file_cancellable(&path, || true, |_, _, _| {})
+            .unwrap_err()
+            .to_string()
+            .contains("cancelled"));
+        assert_eq!(accumulator.offset(), 0);
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert_eq!(accumulator.offset(), 3);
     }
 
     #[test]

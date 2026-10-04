@@ -7,6 +7,8 @@ fn context() -> LeafContext {
     LeafContext {
         id: NodeId(1),
         kind_label: "Plain shell".into(),
+        current_short_title: None,
+        is_title_eligible: true,
         current_title: "Paris transport research".into(),
         current_icon: None,
         is_name_fixed: false,
@@ -279,7 +281,7 @@ fn semantic_contract_retries_with_catalog_and_original_prompt_limit() {
     for prompt in prompts.iter() {
         assert!(prompt.contains(catalog));
         assert!(
-            estimated_prompt_tokens(&prompt)
+            estimated_prompt_tokens(prompt)
                 <= ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT as usize
         );
     }
@@ -305,13 +307,15 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
     };
     let prompt = render_restructure_prompt_with_instructions(
         TitleStyle::Summarization,
-        &ilium_inference::PromptInstructions::default(),
+        RestructurePromptPolicy {
+            instructions: &ilium_inference::PromptInstructions::default(),
+            prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+        },
         &contexts,
         &"y".repeat(30_000),
         &[],
         None,
         &recommendation_context,
-        ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
     )
     .unwrap();
     assert!(

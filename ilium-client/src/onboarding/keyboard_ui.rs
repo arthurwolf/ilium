@@ -23,6 +23,7 @@ const FIRST_BINDING: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardRequest {
+    OpenPrefix(crate::value_keyboard::KeyboardPrefix),
     ApplyPreset(KeymapPreset),
     SetGeneralPrefix(ShortcutBase),
     SetNavigationPrefix(ShortcutBase),
@@ -33,6 +34,7 @@ pub enum KeyboardRequest {
 
 #[derive(Debug, Default)]
 pub struct KeyboardUiState {
+    pub(crate) identity: std::sync::Arc<()>,
     pub focus: usize,
     pub hovered: Option<usize>,
     /// Scroll is measured in complete bindings, not terminal rows.
@@ -71,6 +73,7 @@ struct HitArea {
 
 #[derive(Debug, Default)]
 pub struct KeyboardGeometry {
+    prefix_rows: [Rect; 2],
     hits: Vec<HitArea>,
     visible_bindings: usize,
     footer: Rect,
@@ -108,6 +111,7 @@ pub fn geometry(area: Rect, state: &KeyboardUiState) -> KeyboardGeometry {
     let visible_bindings = (list_height / row_height).max(1) as usize;
     let mut result = KeyboardGeometry {
         hits: Vec::new(),
+        prefix_rows: [row(2), row(3)],
         visible_bindings,
         row_height,
         footer: Rect::new(
@@ -152,24 +156,6 @@ pub fn geometry(area: Rect, state: &KeyboardUiState) -> KeyboardGeometry {
         };
         result.hits.push(HitArea {
             area: prefix_area,
-            target: target(1),
-        });
-        result.hits.push(HitArea {
-            area: Rect::new(
-                prefix_area.x,
-                prefix_area.y,
-                prefix_area.width.min(2),
-                prefix_area.height,
-            ),
-            target: target(-1),
-        });
-        result.hits.push(HitArea {
-            area: Rect::new(
-                prefix_area.right().saturating_sub(2).max(prefix_area.x),
-                prefix_area.y,
-                prefix_area.width.min(2),
-                prefix_area.height,
-            ),
             target: target(1),
         });
     }
@@ -243,6 +229,13 @@ impl KeyboardUiState {
                     .max(FIRST_BINDING)
                     .min(close)
             }
+            KeyCode::Enter | KeyCode::Char('+') if matches!(self.focus, 2 | 3) => {
+                return Some(KeyboardRequest::OpenPrefix(if self.focus == 2 {
+                    crate::value_keyboard::KeyboardPrefix::General
+                } else {
+                    crate::value_keyboard::KeyboardPrefix::Navigation
+                }));
+            }
             KeyCode::Left | KeyCode::Right if matches!(self.focus, 2 | 3) => {
                 let direction = if key.code == KeyCode::Left { -1 } else { 1 };
                 return Some(self.prefix_request(keyboard, direction));
@@ -312,6 +305,54 @@ impl KeyboardUiState {
         keyboard: &KeyboardSettings,
         bindings: &[KeyBinding],
     ) -> Option<KeyboardRequest> {
+        self.click_button(
+            geometry,
+            position,
+            keyboard,
+            bindings,
+            crate::value_control::PointerButton::Left,
+        )
+    }
+
+    pub fn click_button(
+        &mut self,
+        geometry: &KeyboardGeometry,
+        position: Position,
+        keyboard: &KeyboardSettings,
+        bindings: &[KeyBinding],
+        button: crate::value_control::PointerButton,
+    ) -> Option<KeyboardRequest> {
+        use crate::value_control::ControlAction;
+        for field in crate::value_keyboard::KeyboardPrefix::ALL {
+            let row = geometry.prefix_rows[field.row()];
+            if !row.contains(position) {
+                continue;
+            }
+            self.focus = 2 + field.row();
+            let action = field.control(row, *keyboard, 20).hit(position, button)?;
+            self.pending_rebind = None;
+            return match action {
+                ControlAction::OpenChoices => Some(KeyboardRequest::OpenPrefix(field)),
+                ControlAction::PreviousChoice | ControlAction::NextChoice => {
+                    let prefix = field.current(*keyboard).stepped(
+                        if action == ControlAction::PreviousChoice {
+                            -1
+                        } else {
+                            1
+                        },
+                    );
+                    Some(if field == crate::value_keyboard::KeyboardPrefix::General {
+                        KeyboardRequest::SetGeneralPrefix(prefix)
+                    } else {
+                        KeyboardRequest::SetNavigationPrefix(prefix)
+                    })
+                }
+                _ => None,
+            };
+        }
+        if button != crate::value_control::PointerButton::Left {
+            return None;
+        }
         let target = geometry.hit(position)?;
         let request = match target {
             KeyboardHit::Preset(preset) => KeyboardRequest::ApplyPreset(preset),
@@ -402,6 +443,12 @@ pub fn render(
         Rect::new(area.x, area.y, area.width, area.height.min(1)),
     );
     for hit in &geometry.hits {
+        if matches!(
+            hit.target,
+            KeyboardHit::GeneralPrefix(_) | KeyboardHit::NavigationPrefix(_)
+        ) {
+            continue;
+        }
         let focus = if hit.target == KeyboardHit::Close {
             FIRST_BINDING + bindings.len()
         } else {
@@ -456,6 +503,26 @@ pub fn render(
         };
         control(frame, hit.area, text, highlighted);
     }
+    for field in crate::value_keyboard::KeyboardPrefix::ALL {
+        let style = if state.focus == 2 + field.row() {
+            Style::new().fg(ACCENT).bg(PANEL)
+        } else {
+            Style::new().fg(INK).bg(PANEL)
+        };
+        field
+            .control(geometry.prefix_rows[field.row()], *keyboard, 20)
+            .render(
+                frame,
+                crate::value_control::ControlStyles {
+                    background: Style::new().bg(PANEL),
+                    label: style,
+                    value: style,
+                    button: style,
+                    ..Default::default()
+                },
+            );
+    }
+
     let detail = feedback.map(str::to_owned).unwrap_or_else(|| {
         if let Some(action) = state.pending_rebind {
             format!(
@@ -670,16 +737,34 @@ mod tests {
             None
         );
         assert!(text(&terminal).contains("Key already assigned"));
-        assert!(text(&terminal).contains("General prefix: Ctrl+B"));
-        assert!(text(&terminal).contains("Tree prefix: Ctrl+B"));
-        assert_eq!(
-            geometry.hit(Position::new(0, 2)),
-            Some(KeyboardHit::GeneralPrefix(-1))
-        );
-        assert_eq!(
-            geometry.hit(Position::new(39, 2)),
-            Some(KeyboardHit::GeneralPrefix(1))
-        );
+        for field in crate::value_keyboard::KeyboardPrefix::ALL {
+            let control = field.control(geometry.prefix_rows[field.row()], keyboard, 20);
+            let row = control.geometry();
+            for (rectangle, glyph) in [(row.previous, "←"), (row.open, "+"), (row.next, "→")] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                    glyph
+                );
+            }
+            assert_eq!(
+                state.click(
+                    &geometry,
+                    Position::new(row.open.x, row.open.y),
+                    &keyboard,
+                    &bindings
+                ),
+                Some(KeyboardRequest::OpenPrefix(field))
+            );
+            assert_eq!(
+                state.click(
+                    &geometry,
+                    Position::new(row.label.x, row.label.y),
+                    &keyboard,
+                    &bindings
+                ),
+                None
+            );
+        }
     }
 
     #[test]

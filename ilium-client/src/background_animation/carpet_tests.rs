@@ -135,7 +135,11 @@ fn ordinary_mouse_path_supplies_screen_relative_pointer_without_consuming_foregr
     );
     let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
     buffer[(60, 10)].set_symbol("X");
-    crate::background_composition::compose(&mut buffer, &mut app, Duration::from_secs(1));
+    crate::background_composition::compose_ready_for_test(
+        &mut buffer,
+        &mut app,
+        Duration::from_secs(1),
+    );
     assert_eq!(
         *positions.lock().unwrap(),
         vec![Some([60.5 / 80.0, 10.5 / 24.0])]

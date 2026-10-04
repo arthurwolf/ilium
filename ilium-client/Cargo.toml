@@ -28,7 +28,9 @@ fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-
 ilium-agent-debug = { version = "0.1.0", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
 ilium-ambient = { version = "0.1.0", path = "../ilium-ambient" }
+ilium-animation-js = { version = "0.1.0", path = "../ilium-animation-js" }
 ilium-gpu = { version = "0.1.0", path = "../ilium-gpu" }
+ilium-execution = { version = "0.1.0", path = "../ilium-execution" }
 ilium-core = { version = "0.1.0", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.0", path = "../ilium-ipc" }
 ilium-inference = { version = "0.1.0", path = "../ilium-inference" }
@@ -48,9 +50,11 @@ ratatui-textarea = "0.9.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_norway = "0.9.42"
 serde_json = "1.0.149"
+sha2 = "0.10.9"
 strip-ansi-escapes = "0.2.1"
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
 toml = "0.8.23"
 tracing = "0.1.44"
 tui-term = "0.3.4"
@@ -61,7 +65,7 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-on
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
 ureq = { version = "3.2.0", features = ["json"] }
-zbus = "5.18.0"
+zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
 uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]

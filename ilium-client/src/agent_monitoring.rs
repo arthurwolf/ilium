@@ -339,6 +339,7 @@ mod tests {
             status,
             percent,
             "test report".to_string(),
+            String::new(),
             (status == ProgressTaskStatus::Error).then(|| "test failure".to_string()),
         )
         .unwrap();

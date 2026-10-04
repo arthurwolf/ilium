@@ -178,6 +178,44 @@ pub fn render<S: AsRef<str>>(
 /// indent-then-glyph bar reflecting the bucket's longest line, tinted by
 /// its dominant `LineKind`, optionally washed with a full-width "you are
 /// here" background.
+pub(crate) struct PreparedMinimap {
+    rows: Vec<Line<'static>>,
+    highlighted: Vec<Line<'static>>,
+}
+pub(crate) fn render_prepared(
+    frame: &mut Frame,
+    area: Rect,
+    projection: &PreparedMinimap,
+    highlight: usize,
+    total_lines: usize,
+) {
+    let highlighted = highlight / bucket_size(total_lines, usize::from(area.height));
+    let lines: Vec<Line<'_>> = projection
+        .rows
+        .iter()
+        .enumerate()
+        .take(usize::from(area.height))
+        .map(|(index, row)| {
+            let row = if index == highlighted {
+                &projection.highlighted[index]
+            } else {
+                row
+            };
+            Line::from(
+                row.spans
+                    .iter()
+                    .map(|span| Span::styled(span.content.as_ref(), span.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Builds one minimap row from the source lines in `bucket`: an
+/// indent-then-glyph bar reflecting the bucket's longest line, tinted by
+/// its dominant `LineKind`, optionally washed with a full-width "you are
+/// here" background.
 fn render_bucket_row<'a, S: AsRef<str>>(
     bucket: &[S],
     content_width: u16,
@@ -238,6 +276,133 @@ fn render_bucket_row<'a, S: AsRef<str>>(
     // pure spaces, indistinguishable from a genuinely blank row.
     let indent_cols = scale_to_width(leading_whitespace(widest_line), content_width, area_width)
         .min(area_width.saturating_sub(1));
+    let mut bar_cols = scale_to_width(max_len, content_width, area_width)
+        .saturating_sub(indent_cols)
+        .max(1);
+    if dominant == LineKind::Heading {
+        bar_cols = bar_cols.min(((area_width as f32 * HEADING_WIDTH_FRACTION) as usize).max(1));
+    }
+    bar_cols = bar_cols.min(area_width.saturating_sub(indent_cols));
+
+    let glyph = DENSITY_GLYPHS[density_index(mean_len, content_width)];
+    let bar: String = std::iter::repeat_n(' ', indent_cols)
+        .chain(std::iter::repeat_n(glyph, bar_cols))
+        .collect();
+
+    if is_highlighted {
+        let drawn = indent_cols + bar_cols;
+        let pad: String = std::iter::repeat_n(' ', area_width.saturating_sub(drawn)).collect();
+        Line::from(vec![
+            Span::styled(bar, bar_style),
+            Span::styled(pad, Style::new().bg(highlight_bg)),
+        ])
+    } else {
+        Line::from(Span::styled(bar, bar_style))
+    }
+}
+
+/// Scales a character count (a line's length, or its leading whitespace)
+/// from the real content area's width down to the minimap's own width.
+pub(crate) struct BucketFacts {
+    dominant: LineKind,
+    widest: usize,
+    leading: usize,
+    total: usize,
+    nonblank: usize,
+}
+impl Default for BucketFacts {
+    fn default() -> Self {
+        Self {
+            dominant: LineKind::Blank,
+            widest: 0,
+            leading: 0,
+            total: 0,
+            nonblank: 0,
+        }
+    }
+}
+impl BucketFacts {
+    pub fn add(&mut self, line: &crate::source_line_facts::LineFacts) -> Result<(), String> {
+        let kind = line.kind();
+        self.dominant = self.dominant.max(kind);
+        if kind != LineKind::Blank {
+            self.total = self
+                .total
+                .checked_add(line.chars)
+                .ok_or("source minimap character count overflow")?;
+            self.nonblank = self
+                .nonblank
+                .checked_add(1)
+                .ok_or("source minimap line count overflow")?;
+            // max_by_key in the existing renderer chooses the LAST equal-width line.
+            if line.chars >= self.widest {
+                self.widest = line.chars;
+                self.leading = line.leading;
+            }
+        }
+        Ok(())
+    }
+}
+pub(crate) fn prepare_facts(
+    buckets: &[BucketFacts],
+    width: u16,
+    content_width: u16,
+) -> PreparedMinimap {
+    PreparedMinimap {
+        rows: buckets
+            .iter()
+            .map(|facts| render_facts_row(facts, content_width, usize::from(width), false))
+            .collect(),
+        highlighted: buckets
+            .iter()
+            .map(|facts| render_facts_row(facts, content_width, usize::from(width), true))
+            .collect(),
+    }
+}
+fn render_facts_row(
+    facts: &BucketFacts,
+    content_width: u16,
+    area_width: usize,
+    is_highlighted: bool,
+) -> Line<'static> {
+    let dominant = facts.dominant;
+
+    let highlight_bg = Color::Rgb(0x3b, 0x41, 0x52);
+    let base_style = Style::new().fg(kind_color(dominant));
+    let bar_style = if is_highlighted {
+        base_style.bg(highlight_bg).add_modifier(Modifier::BOLD)
+    } else {
+        base_style
+    };
+
+    if dominant == LineKind::Blank {
+        return if is_highlighted {
+            let pad: String = std::iter::repeat_n(' ', area_width).collect();
+            Line::from(Span::styled(pad, Style::new().bg(highlight_bg)))
+        } else {
+            Line::from("")
+        };
+    }
+
+    // A blank/whitespace-only line carries no visual "ink" (it never draws
+    // its own bar -- see the early return above), so it must not stand in
+    // for the bucket's content width either: a short line of real text next
+    // to a longer whitespace-only line would otherwise have its bar sized
+    // and indented from the blank line's raw character count instead of
+    // from any actual content, making the bar collapse to a near-invisible
+    // sliver despite real text being present. `dominant != Blank` here
+    // guarantees at least one non-blank line exists.
+    let max_len = facts.widest;
+    let mean_len = facts.total / facts.nonblank.max(1);
+
+    // Capped to `area_width - 1` (never the full row) so a line whose
+    // leading whitespace alone reaches or exceeds `content_width` -- e.g.
+    // deeply nested code, or a minimap column narrower than the indent
+    // depth -- can't consume every column and leave zero room for the
+    // glyph run below. Without this cap a non-blank bucket could render as
+    // pure spaces, indistinguishable from a genuinely blank row.
+    let indent_cols =
+        scale_to_width(facts.leading, content_width, area_width).min(area_width.saturating_sub(1));
     let mut bar_cols = scale_to_width(max_len, content_width, area_width)
         .saturating_sub(indent_cols)
         .max(1);

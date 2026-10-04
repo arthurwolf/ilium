@@ -11,6 +11,7 @@ pub enum TextTriggerFocus {
     Regexp,
     Message,
     Target,
+    Delay,
     Sample,
     Enabled,
     Save,
@@ -21,7 +22,8 @@ impl TextTriggerFocus {
         match self {
             Self::Regexp => Self::Message,
             Self::Message => Self::Target,
-            Self::Target => Self::Sample,
+            Self::Target => Self::Delay,
+            Self::Delay => Self::Sample,
             Self::Sample => Self::Enabled,
             Self::Enabled => Self::Save,
             Self::Save => Self::Regexp,
@@ -32,7 +34,8 @@ impl TextTriggerFocus {
             Self::Regexp => Self::Save,
             Self::Message => Self::Regexp,
             Self::Target => Self::Message,
-            Self::Sample => Self::Target,
+            Self::Delay => Self::Target,
+            Self::Sample => Self::Delay,
             Self::Enabled => Self::Sample,
             Self::Save => Self::Enabled,
         }
@@ -50,6 +53,8 @@ pub struct TextTriggerDialogState {
     pub regexp: TextPromptState,
     pub message: TextPromptState,
     pub target: TextTriggerTarget,
+    /// Digits only; blank means the default delay.
+    pub delay: TextPromptState,
     pub sample: TextArea<'static>,
     pub enabled: bool,
     pub focus: TextTriggerFocus,
@@ -70,6 +75,7 @@ impl TextTriggerDialogState {
             regexp: TextPromptState::new(trigger.regexp),
             message: TextPromptState::new(trigger.message),
             target: trigger.target,
+            delay: TextPromptState::new(trigger.delay_seconds.to_string()),
             sample: TextArea::from(
                 trigger
                     .sample_text
@@ -81,8 +87,24 @@ impl TextTriggerDialogState {
             focus: TextTriggerFocus::Regexp,
         }
     }
+    pub fn identity(&self) -> &str {
+        &self.draft_id
+    }
+
     pub fn sample_text(&self) -> String {
         self.sample.lines().join("\n")
+    }
+    /// Parsed delay; a blank buffer is the default and an oversized one clamps.
+    pub fn delay_seconds(&self) -> u32 {
+        let digits = self.delay.buf.trim();
+        if digits.is_empty() {
+            return ilium_ipc::DEFAULT_TEXT_TRIGGER_DELAY_SECONDS;
+        }
+        digits
+            .parse::<u64>()
+            .map_or(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS, |seconds| {
+                seconds.min(u64::from(ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS)) as u32
+            })
     }
     pub fn candidate(&self) -> TextTrigger {
         TextTrigger {
@@ -95,6 +117,7 @@ impl TextTriggerDialogState {
             message: self.message.buf.clone(),
             target: self.target,
             sample_text: self.sample_text(),
+            delay_seconds: self.delay_seconds(),
         }
     }
 }
@@ -104,6 +127,7 @@ pub struct TextTriggerDialogLayout {
     pub regexp: Rect,
     pub message: Rect,
     pub target: Rect,
+    pub delay: Rect,
     pub sample: Rect,
     pub enabled: Rect,
     pub preview: Rect,
@@ -124,6 +148,7 @@ pub fn layout(area: Rect) -> TextTriggerDialogLayout {
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Length(2),
+            Constraint::Length(2),
             Constraint::Length(1),
             Constraint::Length(5),
             Constraint::Length(1),
@@ -136,17 +161,18 @@ pub fn layout(area: Rect) -> TextTriggerDialogLayout {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(16)])
         .flex(Flex::Center)
-        .split(rows[7])[0];
+        .split(rows[8])[0];
     TextTriggerDialogLayout {
         popup,
         regexp: rows[0],
         message: rows[1],
         target: rows[2],
-        sample: rows[4],
-        enabled: rows[5],
-        preview: rows[6],
+        delay: rows[3],
+        sample: rows[5],
+        enabled: rows[6],
+        preview: rows[7],
         save,
-        hint: rows[8],
+        hint: rows[9],
     }
 }
 
@@ -167,4 +193,56 @@ pub(crate) fn draw_save_error(frame: &mut ratatui::Frame<'_>, app: &crate::app::
             .wrap(ratatui::widgets::Wrap { trim: false }),
         area,
     );
+}
+
+/// Uses the first target row; the second row stays available to the form layout.
+pub fn target_control(
+    area: Rect,
+    state: &TextTriggerDialogState,
+) -> crate::value_control::ValueControl {
+    let target = layout(area).target;
+    crate::value_control::ValueControl::new(
+        target,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: "Match",
+            value: state.target.label(),
+            label_width: 8,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
+}
+
+#[cfg(test)]
+mod delay_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_trigger_starts_at_sixty_seconds() {
+        let state = TextTriggerDialogState::new(None);
+        assert_eq!(state.delay.buf, "60");
+        assert_eq!(state.candidate().delay_seconds, 60);
+    }
+
+    #[test]
+    fn an_existing_trigger_keeps_its_delay_and_blank_means_default() {
+        let existing = TextTrigger {
+            id: "r".into(),
+            delay_seconds: 0,
+            ..TextTrigger::default()
+        };
+        let mut state = TextTriggerDialogState::new(Some((0, &existing)));
+        assert_eq!(state.candidate().delay_seconds, 0);
+        state.delay.buf = "125".into();
+        assert_eq!(state.candidate().delay_seconds, 125);
+        state.delay.buf.clear();
+        assert_eq!(state.candidate().delay_seconds, 60);
+        state.delay.buf = "99999999999999999999".into();
+        assert_eq!(
+            state.candidate().delay_seconds,
+            ilium_ipc::MAX_TEXT_TRIGGER_DELAY_SECONDS
+        );
+    }
 }

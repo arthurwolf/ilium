@@ -420,6 +420,25 @@ pub fn create_board_dialog_layout_for_size(width: u16, height: u16) -> CreateBoa
     create_board_dialog_layout(Rect::new(0, 0, width, height))
 }
 
+/// Prepared storage selector shared by the board painter and pointer handler.
+pub fn create_board_storage_control(
+    screen_area: Rect,
+    value: &str,
+) -> crate::value_control::ValueControl {
+    crate::value_control::ValueControl::new(
+        create_board_dialog_layout(screen_area).storage_row,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: "Storage",
+            value,
+            label_width: 9,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
+}
+
 /// Insets a rectangle without underflow on very small terminals.
 pub(crate) fn inset_rect(area: Rect, margin: u16) -> Rect {
     Rect::new(
@@ -460,7 +479,17 @@ pub fn render_text_prompt(
     state: &TextPromptState,
     confirm_label: &str,
 ) {
-    render_text_prompt_with_hint(
+    render_text_prompt_cursor(frame, screen_area, title, state, confirm_label);
+}
+
+pub fn render_text_prompt_cursor(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    state: &TextPromptState,
+    confirm_label: &str,
+) -> Option<Position> {
+    render_text_prompt_with_hint_cursor(
         frame,
         screen_area,
         title,
@@ -468,7 +497,7 @@ pub fn render_text_prompt(
         confirm_label,
         "Click a button or use the shown keyboard shortcut",
         Style::new().add_modifier(Modifier::DIM),
-    );
+    )
 }
 
 /// [`render_text_prompt`] with its own bottom line: a placeholder hint, or a
@@ -482,6 +511,26 @@ pub fn render_text_prompt_with_hint(
     hint: &str,
     hint_style: Style,
 ) {
+    render_text_prompt_with_hint_cursor(
+        frame,
+        screen_area,
+        title,
+        state,
+        confirm_label,
+        hint,
+        hint_style,
+    );
+}
+
+pub fn render_text_prompt_with_hint_cursor(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    state: &TextPromptState,
+    confirm_label: &str,
+    hint: &str,
+    hint_style: Style,
+) -> Option<Position> {
     let layout = text_prompt_dialog_layout(screen_area);
     frame.render_widget(Clear, layout.popup);
 
@@ -504,10 +553,9 @@ pub fn render_text_prompt_with_hint(
     // display width of everything left of it, exactly as
     // `ui::draw_create_group` measures its name-field prefix.
     let prefix: String = state.buf.chars().take(state.cursor).collect();
-    frame.set_cursor_position(single_line_cursor_position(
-        layout.input_area,
-        prefix.width(),
-    ));
+    let cursor_position = single_line_cursor_position(layout.input_area, prefix.width());
+    frame.set_cursor_position(cursor_position);
+    Some(cursor_position)
 }
 
 /// Terminal cursor position for a single-line input starting at
@@ -540,6 +588,16 @@ pub fn render_masked_text_prompt(
     state: &TextPromptState,
     confirm_label: &str,
 ) {
+    render_masked_text_prompt_cursor(frame, screen_area, title, state, confirm_label);
+}
+
+pub fn render_masked_text_prompt_cursor(
+    frame: &mut Frame,
+    screen_area: Rect,
+    title: &str,
+    state: &TextPromptState,
+    confirm_label: &str,
+) -> Option<Position> {
     let layout = text_prompt_dialog_layout(screen_area);
     frame.render_widget(Clear, layout.popup);
     let block = theme::block(true).title(theme::chrome_title(title));
@@ -564,7 +622,9 @@ pub fn render_masked_text_prompt(
     );
     // Every buffer char is painted as exactly one single-cell bullet, so the
     // char index *is* the display column here -- no width measurement needed.
-    frame.set_cursor_position(single_line_cursor_position(layout.input_area, state.cursor));
+    let cursor_position = single_line_cursor_position(layout.input_area, state.cursor);
+    frame.set_cursor_position(cursor_position);
+    Some(cursor_position)
 }
 
 /// Large multiline text area used by the Voice control prompt editor.

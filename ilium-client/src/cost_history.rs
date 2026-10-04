@@ -7,17 +7,19 @@
 //! enough. Results are cached by path, size and modification time, which makes
 //! every scan after the first one cost a directory walk.
 //!
-//! The scan runs on one low-priority worker thread and reports through a
-//! channel; the UI thread never waits on it.
+//! One ordered finite job uses the shared I/O bank and a typed receipt.
+//! The UI never waits on filesystem work.
 
+use ilium_execution::{
+    Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt, RetirementReservation,
+    RetiringArc,
+};
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use ilium_platform::thread_priority::{lower_current_thread, WorkerPriority};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -62,6 +64,25 @@ pub struct HistoryEntry {
 }
 
 impl HistoryEntry {
+    fn retained_bytes(&self) -> usize {
+        self.path.capacity()
+            + self.quota.capacity() * std::mem::size_of::<(String, f64)>()
+            + self
+                .quota
+                .iter()
+                .map(|(name, _)| name.capacity())
+                .sum::<usize>()
+            + match &self.source {
+                HistorySource::Tokens { models } => {
+                    models.capacity() * std::mem::size_of::<(String, TokenTotals)>()
+                        + models
+                            .iter()
+                            .map(|(name, _)| name.capacity())
+                            .sum::<usize>()
+                }
+                _ => 0,
+            }
+    }
     /// Session dollars under `prices`, or `None` when unknown or negligible.
     pub fn usd(&self, prices: &PriceTable) -> Option<f64> {
         let usd = match &self.source {
@@ -122,42 +143,107 @@ pub fn default_cache_path() -> Option<PathBuf> {
 }
 
 fn load_cache(path: &Path) -> HashMap<String, HistoryEntry> {
-    let Ok(bytes) = std::fs::read(path) else {
+    if std::fs::metadata(path).map_or(true, |metadata| metadata.len() > 16 * 1024 * 1024) {
+        return HashMap::new();
+    }
+    let Ok(file) = std::fs::File::open(path) else {
         return HashMap::new();
     };
+    let mut bytes = Vec::new();
+    if file
+        .take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > 16 * 1024 * 1024
+    {
+        return HashMap::new();
+    }
     match serde_json::from_slice::<CacheFile>(&bytes) {
-        Ok(file) if file.version == CACHE_VERSION => file.entries,
+        Ok(file)
+            if file.version == CACHE_VERSION
+                && file.entries.len() <= 16_384
+                && file
+                    .entries
+                    .iter()
+                    .map(|(key, value)| key.capacity() + value.retained_bytes() + 256)
+                    .sum::<usize>()
+                    <= 16 * 1024 * 1024 =>
+        {
+            file.entries
+        }
         _ => HashMap::new(),
     }
 }
 
-fn save_cache(path: &Path, entries: &HashMap<String, HistoryEntry>) {
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
+fn save_cache(
+    path: &Path,
+    entries: &HashMap<String, HistoryEntry>,
+    should_stop: &dyn Fn() -> bool,
+) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Cost history cache has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let lock_path = path.with_extension("json.lock");
+    let _lock = ilium_platform::file_lock::ExclusiveFileLock::try_acquire(&lock_path)?.ok_or_else(
+        || {
+            std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "Cost history cache writer busy",
+            )
+        },
+    )?;
     let file = CacheFile {
         version: CACHE_VERSION,
         entries: entries.clone(),
     };
-    let Ok(bytes) = serde_json::to_vec(&file) else {
-        return;
-    };
-    // Write-then-rename so a crash never leaves a half-written cache.
-    let temporary = path.with_extension("json.tmp");
-    if std::fs::write(&temporary, bytes).is_ok() {
-        let _ = std::fs::rename(&temporary, path);
+    let bytes = serde_json::to_vec(&file).map_err(std::io::Error::other)?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err(std::io::Error::other(
+            "Cost history cache byte bound exceeded",
+        ));
     }
+    let temporary = parent.join(format!(".ilium-cost-history-{}.tmp", uuid::Uuid::new_v4()));
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let result = (|| {
+        ilium_platform::secure_fs::restrict_open_file_to_owner(&output)?;
+        output.write_all(&bytes)?;
+        output.sync_all()?;
+        drop(output);
+        if should_stop() {
+            return Err(std::io::Error::other(
+                "Cost history cancelled before cache publication",
+            ));
+        }
+        ilium_platform::secure_fs::replace_file_durably(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// Transcript files modified within `days` of `now_ms`: Claude Code's
 /// per-project session files and Codex's dated rollout files.
-fn candidate_files(home: &Path, days: u16, now_ms: i64) -> Vec<(PathBuf, u64, i64, bool)> {
+fn candidate_files(
+    home: &Path,
+    days: u16,
+    now_ms: i64,
+    should_stop: &dyn Fn() -> bool,
+) -> Result<Vec<(PathBuf, u64, i64, bool)>, String> {
     let oldest_ms = now_ms - i64::from(days) * 86_400_000;
     let mut found = Vec::new();
+    let mut path_bytes = 0;
+    let mut overflow = false;
+    let mut scanned = 0;
     let mut consider = |path: PathBuf, is_codex: bool| {
+        if found.len() >= 16_384 || path_bytes + path.capacity() > 8 * 1024 * 1024 {
+            overflow = true;
+            return;
+        }
         let Ok(metadata) = std::fs::metadata(&path) else {
             return;
         };
@@ -170,16 +256,28 @@ fn candidate_files(home: &Path, days: u16, now_ms: i64) -> Vec<(PathBuf, u64, i6
             return;
         };
         if mtime_ms >= oldest_ms && metadata.len() > 0 {
+            path_bytes += path.capacity();
             found.push((path, metadata.len(), mtime_ms, is_codex));
         }
     };
 
     if let Ok(projects) = std::fs::read_dir(home.join(".claude").join("projects")) {
         for project in projects.flatten() {
+            scanned += 1;
+            if should_stop() || scanned > 32_768 {
+                return Err(
+                    "Cost history scan cancelled or entry limit exceeded; calibration incomplete"
+                        .into(),
+                );
+            }
             let Ok(files) = std::fs::read_dir(project.path()) else {
                 continue;
             };
             for file in files.flatten() {
+                scanned += 1;
+                if should_stop() || scanned > 32_768 {
+                    return Err("Cost history scan cancelled or entry limit exceeded; calibration incomplete".into());
+                }
                 let path = file.path();
                 if path
                     .extension()
@@ -196,11 +294,20 @@ fn candidate_files(home: &Path, days: u16, now_ms: i64) -> Vec<(PathBuf, u64, i6
             continue;
         };
         for child in children.flatten() {
+            scanned += 1;
+            if should_stop() || scanned > 32_768 || pending.len() >= 4096 {
+                return Err("Cost history scan cancelled or directory limit exceeded; calibration incomplete".into());
+            }
             let path = child.path();
             let Ok(kind) = child.file_type() else {
                 continue;
             };
             if kind.is_dir() {
+                if pending.iter().map(PathBuf::capacity).sum::<usize>() + path.capacity()
+                    > 4 * 1024 * 1024
+                {
+                    return Err("Cost history pending directory byte bound exceeded; calibration incomplete".into());
+                }
                 pending.push(path);
             } else if path
                 .extension()
@@ -210,7 +317,12 @@ fn candidate_files(home: &Path, days: u16, now_ms: i64) -> Vec<(PathBuf, u64, i6
             }
         }
     }
-    found
+    if overflow {
+        return Err(
+            "Cost history candidate byte/record bound exceeded; calibration incomplete".into(),
+        );
+    }
+    Ok(found)
 }
 
 /// Scans the stores under `home`, reusing `cache_path` for unchanged files.
@@ -221,14 +333,15 @@ pub fn scan(
     days: u16,
     now_ms: i64,
     should_stop: &dyn Fn() -> bool,
-) -> Vec<HistoryEntry> {
+) -> Result<Vec<HistoryEntry>, String> {
     let mut cache = cache_path.map(load_cache).unwrap_or_default();
     let mut entries = Vec::new();
     let mut fresh: HashMap<String, HistoryEntry> = HashMap::new();
     let mut parsed_any = false;
-    for (path, size, mtime_ms, is_codex) in candidate_files(home, days, now_ms) {
+    let mut retained_bytes = 0;
+    for (path, size, mtime_ms, is_codex) in candidate_files(home, days, now_ms, should_stop)? {
         if should_stop() {
-            return entries;
+            return Err("Cost history cancelled; calibration incomplete".into());
         }
         let key = path.to_string_lossy().into_owned();
         let entry = match cache.remove(&key) {
@@ -242,7 +355,7 @@ pub fn scan(
                     source: if is_codex {
                         read_codex(&path, size)
                     } else {
-                        read_claude(&path, size)
+                        read_claude(&path, size)?
                     },
                     quota: if is_codex {
                         read_codex_quota(&path, size)
@@ -252,16 +365,41 @@ pub fn scan(
                 }
             }
         };
+        let payload_bytes = match &entry.source {
+            HistorySource::Tokens { models } => models
+                .iter()
+                .map(|(name, _)| name.capacity())
+                .sum::<usize>(),
+            _ => 0,
+        };
+        if entry.path.capacity() > 64 * 1024
+            || payload_bytes > 64 * 1024
+            || entry.quota.len() > 16
+            || entry.quota.iter().any(|(name, _)| name.capacity() > 1024)
+        {
+            return Err(
+                "Cost history record exceeds retained limits; calibration incomplete".into(),
+            );
+        }
+        retained_bytes += entry.retained_bytes() + 256;
+        if retained_bytes > 16 * 1024 * 1024 {
+            return Err("Cost history retained byte limit exceeded; calibration incomplete".into());
+        }
         fresh.insert(key, entry.clone());
         entries.push(entry);
+    }
+    if should_stop() {
+        return Err("Cost history cancelled; calibration incomplete".into());
     }
     // Entries for files that vanished or aged out are dropped with `cache`.
     if let Some(path) = cache_path {
         if parsed_any || !cache.is_empty() {
-            save_cache(path, &fresh);
+            save_cache(path, &fresh, should_stop).map_err(|error| {
+                format!("Cost history cache publication: {error}; calibration not refreshed")
+            })?;
         }
     }
-    entries
+    Ok(entries)
 }
 
 fn read_range(path: &Path, size: u64, length: u64) -> Option<Vec<u8>> {
@@ -299,12 +437,17 @@ fn last_line_containing<'a>(bytes: &'a [u8], needle: &[u8]) -> Option<&'a [u8]> 
     Some(&complete[start..end])
 }
 
-fn read_claude(path: &Path, size: u64) -> HistorySource {
+fn read_claude(path: &Path, size: u64) -> Result<HistorySource, String> {
     for length in [TAIL_BYTES, WIDE_TAIL_BYTES] {
         let Some(bytes) = read_range(path, size, length) else {
-            return HistorySource::Skipped;
+            return Ok(HistorySource::Skipped);
         };
         if let Some(line) = last_line_containing(&bytes, br#""type":"cost-state""#) {
+            if line.len() > 4 * 1024 * 1024 {
+                return Err(
+                    "Cost history cost-state line exceeds4MiB; calibration incomplete".into(),
+                );
+            }
             // A tail read can start mid-line, but a line that holds the
             // needle and starts at the buffer start may be cut; JSON parsing
             // rejects such a fragment and the wider attempt takes over.
@@ -312,14 +455,14 @@ fn read_claude(path: &Path, size: u64) -> HistorySource {
                 .ok()
                 .and_then(|record| record.get("totalCostUSD").and_then(Value::as_f64))
             {
-                return HistorySource::Reported { usd };
+                return Ok(HistorySource::Reported { usd });
             }
         }
         if size <= length {
             break;
         }
     }
-    HistorySource::Skipped
+    Ok(HistorySource::Skipped)
 }
 
 fn model_pattern() -> &'static Regex {
@@ -370,6 +513,9 @@ fn read_codex(path: &Path, size: u64) -> HistorySource {
 type QuotaReading = (String, f64, Option<i64>);
 
 fn quota_readings(line: &[u8]) -> Vec<QuotaReading> {
+    if line.len() > 4 * 1024 * 1024 {
+        return Vec::new();
+    }
     let Some(limits) = serde_json::from_slice::<Value>(line)
         .ok()
         .and_then(|record| record.get("payload")?.get("rate_limits").cloned())
@@ -431,48 +577,126 @@ fn read_codex_quota(path: &Path, size: u64) -> Vec<(String, f64)> {
 
 // ------------------------------------------------------------------ worker
 
-enum HistoryEvent {
-    Finished {
-        generation: u64,
-        days: u16,
-        entries: Vec<HistoryEntry>,
-    },
-}
-
-/// Owns the scan worker and the latest finished result.
-pub struct CostHistory {
-    events_tx: Sender<HistoryEvent>,
-    events_rx: Receiver<HistoryEvent>,
+/// One admitted generation; its last reader retires the original allocation on CPU.
+#[derive(Debug)]
+struct HistoryGeneration {
     entries: Vec<HistoryEntry>,
-    scanned_days: Option<u16>,
-    in_flight: bool,
-    generation: u64,
-    finished_at: Option<Instant>,
-    /// Bumped whenever `entries` change, so callers can cache derived data.
-    revision: u64,
 }
-
+#[derive(Clone, Default)]
+pub(crate) struct HistorySnapshot {
+    generation: Option<RetiringArc<HistoryGeneration>>,
+    revision: u64,
+    scanning: bool,
+    has_result: bool,
+}
+impl HistorySnapshot {
+    pub(crate) fn entries(&self) -> &[HistoryEntry] {
+        self.generation
+            .as_ref()
+            .map_or(&[], |generation| generation.entries.as_slice())
+    }
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub(crate) const fn is_scanning(&self) -> bool {
+        self.scanning
+    }
+    pub(crate) const fn has_result(&self) -> bool {
+        self.has_result
+    }
+}
+struct HistoryResult {
+    generation: RetiringArc<HistoryGeneration>,
+}
+struct HistoryScan {
+    home: PathBuf,
+    cache_path: Option<PathBuf>,
+    days: u16,
+    generation: RetirementReservation<HistoryGeneration>,
+}
+impl Job for HistoryScan {
+    type Output = HistoryResult;
+    type Error = String;
+    fn run(self, context: JobContext) -> Result<HistoryResult, String> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() as i64);
+        scan(
+            &self.home,
+            self.cache_path.as_deref(),
+            self.days,
+            now_ms,
+            &|| context.stop_requested(),
+        )
+        .and_then(|entries| {
+            let bytes = entries.capacity() * std::mem::size_of::<HistoryEntry>()
+                + entries
+                    .iter()
+                    .map(HistoryEntry::retained_bytes)
+                    .sum::<usize>()
+                + 1024 * 1024;
+            if bytes > 64 * 1024 * 1024 {
+                return Err(
+                    "Cost history physical capacity exceeded admission; calibration incomplete"
+                        .into(),
+                );
+            }
+            Ok(HistoryResult {
+                generation: self.generation.attach_shared(HistoryGeneration { entries }),
+            })
+        })
+    }
+}
+struct ActiveHistory {
+    home: PathBuf,
+    cache_path: Option<PathBuf>,
+    days: u16,
+    receipt: Receipt<HistoryScan>,
+}
+/// One ordered finite history job; the previous complete result survives a
+/// failed/cancelled scan and retains its quota through its real ownership.
+#[cfg_attr(not(test), derive(Default))]
+pub struct CostHistory {
+    client: Option<Client>,
+    active: Option<ActiveHistory>,
+    generation: Option<RetiringArc<HistoryGeneration>>,
+    scanned_for: Option<(PathBuf, Option<PathBuf>, u16)>,
+    in_flight: bool,
+    discard_active: bool,
+    finished_at: Option<Instant>,
+    revision: u64,
+    error: Option<String>,
+}
+#[cfg(test)]
 impl Default for CostHistory {
     fn default() -> Self {
-        let (events_tx, events_rx) = channel();
         Self {
-            events_tx,
-            events_rx,
-            entries: Vec::new(),
-            scanned_days: None,
+            client: {
+                #[cfg(test)]
+                {
+                    Some(crate::execution::test_client())
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
+            active: None,
+            generation: None,
+            scanned_for: None,
             in_flight: false,
-            generation: 0,
+            discard_active: false,
             finished_at: None,
             revision: 0,
+            error: None,
         }
     }
 }
-
 impl std::fmt::Debug for CostHistory {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("CostHistory")
-            .field("entries", &self.entries.len())
+            .field("entries", &self.entries().len())
             .field("in_flight", &self.in_flight)
             .finish()
     }
@@ -480,7 +704,17 @@ impl std::fmt::Debug for CostHistory {
 
 impl CostHistory {
     pub fn entries(&self) -> &[HistoryEntry] {
-        &self.entries
+        self.generation
+            .as_ref()
+            .map_or(&[], |generation| generation.entries.as_slice())
+    }
+    pub(crate) fn snapshot(&self) -> HistorySnapshot {
+        HistorySnapshot {
+            generation: self.generation.clone(),
+            revision: self.revision,
+            scanning: self.in_flight,
+            has_result: self.finished_at.is_some(),
+        }
     }
 
     pub const fn revision(&self) -> u64 {
@@ -506,60 +740,179 @@ impl CostHistory {
         days: u16,
         now: Instant,
     ) -> bool {
-        if self.in_flight {
+        if self
+            .scanned_for
+            .as_ref()
+            .is_some_and(|(old_home, old_cache, _)| *old_home != home || *old_cache != cache_path)
+        {
+            self.generation = None;
+            self.scanned_for = None;
+            self.finished_at = None;
+            self.revision = self.revision.wrapping_add(1);
+        }
+        if let Some(active) = &self.active {
+            if active.home != home || active.cache_path != cache_path || active.days != days {
+                active.receipt.cancel();
+                self.discard_active = true;
+            }
             return false;
         }
-        let is_fresh = self.scanned_days == Some(days)
+        if home.capacity() > 64 * 1024
+            || cache_path
+                .as_ref()
+                .is_some_and(|path| path.capacity() > 64 * 1024)
+        {
+            self.error = Some("Cost history path bound exceeded".into());
+            return false;
+        }
+        let is_fresh = self
+            .scanned_for
+            .as_ref()
+            .is_some_and(|(old_home, old_cache, old_days)| {
+                old_home == &home && old_cache == &cache_path && *old_days == days
+            })
             && self
                 .finished_at
                 .is_some_and(|finished| now.duration_since(finished) < RESCAN_INTERVAL);
         if is_fresh {
             return false;
         }
-        self.in_flight = true;
-        self.generation += 1;
-        let generation = self.generation;
-        let events_tx = self.events_tx.clone();
-        std::thread::spawn(move || {
-            lower_current_thread(WorkerPriority::Lowest);
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_millis() as i64);
-            let entries = scan(&home, cache_path.as_deref(), days, now_ms, &|| false);
-            let _ = events_tx.send(HistoryEvent::Finished {
-                generation,
-                days,
-                entries,
-            });
-        });
+        let Some(client) = &self.client else {
+            self.error = Some("Cost history worker unavailable".into());
+            return false;
+        };
+        let generation = match client
+            .retirement()
+            .try_reserve::<HistoryGeneration>(64 * 1024 * 1024)
+        {
+            Ok(generation) => generation,
+            Err(reason) => {
+                self.error = Some(format!("Cost history storage admission: {reason:?}"));
+                return false;
+            }
+        };
+        let job = HistoryScan {
+            home: home.clone(),
+            cache_path: cache_path.clone(),
+            days,
+            generation,
+        };
+        match client.try_submit(
+            Lane::Io,
+            JobCost {
+                input_bytes: 256 * 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            },
+            job,
+        ) {
+            Ok(receipt) => {
+                self.active = Some(ActiveHistory {
+                    home,
+                    cache_path,
+                    days,
+                    receipt,
+                });
+                self.in_flight = true;
+                self.discard_active = false;
+                self.error = None;
+            }
+            Err(rejected) => {
+                self.error = Some(format!(
+                    "Cost history admission: {:?}; calibration not refreshed",
+                    rejected.reason
+                ));
+                return false;
+            }
+        }
+
         true
     }
 
     /// Applies a finished scan. Returns whether the result changed.
     pub fn drain_events(&mut self, now: Instant) -> bool {
-        let mut changed = false;
-        while let Ok(HistoryEvent::Finished {
-            generation,
+        let Some(active) = &mut self.active else {
+            return false;
+        };
+        let outcome = match active.receipt.try_take() {
+            JobPoll::Pending => return false,
+            JobPoll::Ready(outcome) => Some(outcome),
+            _ => None,
+        };
+        let Some(ActiveHistory {
+            home,
+            cache_path: cache,
             days,
-            entries,
-        }) = self.events_rx.try_recv()
-        {
-            if generation != self.generation {
-                continue;
-            }
-            self.in_flight = false;
-            self.scanned_days = Some(days);
-            self.finished_at = Some(now);
-            if self.entries != entries {
-                self.entries = entries;
-                self.revision += 1;
-                changed = true;
-            }
-            // The first completion always counts as a change: "calibrating"
-            // turns into a real scale even when the store was empty.
-            changed |= self.revision == 0;
+            ..
+        }) = self.active.take()
+        else {
+            return false;
+        };
+        self.in_flight = false;
+        let Some(outcome) = outcome else {
+            self.error = Some("Cost history receipt lost; calibration incomplete".into());
+            return true;
+        };
+        let (outcome, _temporary_retention) = outcome.into_parts();
+        if self.discard_active {
+            self.discard_active = false;
+            self.error = Some("Cost history owner/settings changed; stale result discarded".into());
+            return true;
         }
-        changed
+        match outcome {
+            JobOutcome::Finished(Ok(HistoryResult { generation })) => {
+                // Every successful generation gets a revision. Equality across up to
+                // 32768 entries belongs to CPU derivation, never this coordinator.
+                let changed = true;
+                self.generation = Some(generation);
+                self.scanned_for = Some((home, cache, days));
+                self.finished_at = Some(now);
+                self.revision = self.revision.wrapping_add(1);
+                self.error = None;
+                changed
+            }
+            JobOutcome::Finished(Err(error)) => {
+                self.error = Some(error);
+                true
+            }
+            _ => {
+                self.error =
+                    Some("Cost history cancelled or failed; calibration not refreshed".into());
+                true
+            }
+        }
+    }
+    /// Reconfiguration invalidates the old cache intent even when a new scan
+    /// is disabled. A running publication may finish at its captured path;
+    /// cancellation never asserts rollback, and its result cannot be installed.
+    pub(crate) fn invalidate_cache(&mut self) {
+        if let Some(active) = &self.active {
+            active.receipt.cancel();
+            self.discard_active = true;
+        }
+        self.generation = None;
+        self.scanned_for = None;
+        self.finished_at = None;
+        self.revision = self.revision.wrapping_add(1);
+    }
+    pub(crate) fn configure_execution(&mut self, client: Client) {
+        self.client = Some(client);
+    }
+    pub(crate) fn cancel_pending(&mut self) {
+        if let Some(active) = self.active.take() {
+            active.receipt.cancel();
+            // Dropping the receiver also releases an already-ready generation.
+            // An in-flight result is destroyed by its original I/O publisher.
+        }
+        self.generation = None;
+        self.in_flight = false;
+    }
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+}
+impl Drop for CostHistory {
+    fn drop(&mut self) {
+        self.cancel_pending();
     }
 }
 
@@ -614,7 +967,7 @@ mod tests {
         claude_file(home.path(), "-proj", "a", Some(12.5));
         claude_file(home.path(), "-proj", "b", None);
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        let entries = scan(home.path(), None, 30, now_ms, &|| false).unwrap();
         assert_eq!(entries.len(), 2);
         let totals = sorted_totals(&entries, &PriceTable::default());
         assert_eq!(totals, vec![12.5]);
@@ -651,7 +1004,7 @@ mod tests {
         codex_quota_file(home.path(), "reset", &[(90.0, 100), (6.0, 200)]);
         codex_quota_file(home.path(), "flat", &[(50.0, 100), (50.0, 100)]);
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        let entries = scan(home.path(), None, 30, now_ms, &|| false).unwrap();
         assert_eq!(entries.len(), 3);
         let mut primary = sorted_quota(&entries, "primary");
         primary
@@ -669,7 +1022,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         claude_file(home.path(), "-proj", "a", Some(3.0));
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        let entries = scan(home.path(), None, 30, now_ms, &|| false).unwrap();
         assert!(sorted_quota(&entries, "primary").is_empty());
     }
 
@@ -686,7 +1039,7 @@ mod tests {
         );
         codex_file(home.path(), "b", "gpt-reserve", 10, 0, 10);
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let entries = scan(home.path(), None, 30, now_ms, &|| false);
+        let entries = scan(home.path(), None, 30, now_ms, &|| false).unwrap();
         let totals = sorted_totals(&entries, &PriceTable::default());
         // 1M fresh x $4 + 1M cached x $0.40 + 0.1M output x $20.
         assert_eq!(totals.len(), 1);
@@ -699,7 +1052,9 @@ mod tests {
         claude_file(home.path(), "-proj", "a", Some(5.0));
         let now_ms = chrono::Utc::now().timestamp_millis();
         let far_future = now_ms + 200 * 86_400_000;
-        assert!(scan(home.path(), None, 30, far_future, &|| false).is_empty());
+        assert!(scan(home.path(), None, 30, far_future, &|| false)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -708,7 +1063,7 @@ mod tests {
         let cache = home.path().join("cache").join("history.json");
         claude_file(home.path(), "-proj", "a", Some(3.0));
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let first = scan(home.path(), Some(&cache), 30, now_ms, &|| false);
+        let first = scan(home.path(), Some(&cache), 30, now_ms, &|| false).unwrap();
         assert_eq!(first.len(), 1);
 
         // Poison the cached total; an unchanged file must return the cache.
@@ -716,14 +1071,14 @@ mod tests {
         for entry in cached.values_mut() {
             entry.source = HistorySource::Reported { usd: 999.0 };
         }
-        save_cache(&cache, &cached);
-        let second = scan(home.path(), Some(&cache), 30, now_ms, &|| false);
+        save_cache(&cache, &cached, &|| false).unwrap();
+        let second = scan(home.path(), Some(&cache), 30, now_ms, &|| false).unwrap();
         assert_eq!(second[0].source, HistorySource::Reported { usd: 999.0 });
 
         // A changed file is parsed again (its mtime moves on).
         std::thread::sleep(Duration::from_millis(25));
         claude_file(home.path(), "-proj", "a", Some(7.0));
-        let third = scan(home.path(), Some(&cache), 30, now_ms, &|| false);
+        let third = scan(home.path(), Some(&cache), 30, now_ms, &|| false).unwrap();
         assert_eq!(third[0].source, HistorySource::Reported { usd: 7.0 });
     }
 
@@ -732,7 +1087,26 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         claude_file(home.path(), "-proj", "a", Some(5.0));
         let now_ms = chrono::Utc::now().timestamp_millis();
-        assert!(scan(home.path(), None, 30, now_ms, &|| true).is_empty());
+        assert!(scan(home.path(), None, 30, now_ms, &|| true)
+            .unwrap_err()
+            .contains("incomplete"));
+    }
+
+    #[test]
+    fn cancelled_scan_is_an_error_and_does_not_publish_partial_cache() {
+        let home = tempfile::tempdir().unwrap();
+        claude_file(home.path(), "-synthetic-project", "synthetic-id", Some(4.0));
+        let cache = home.path().join("synthetic-cache.json");
+        std::fs::write(&cache, b"original-cache-bytes").unwrap();
+        let result = scan(
+            home.path(),
+            Some(&cache),
+            30,
+            chrono::Utc::now().timestamp_millis(),
+            &|| true,
+        );
+        assert!(result.unwrap_err().contains("incomplete"));
+        assert_eq!(std::fs::read(&cache).unwrap(), b"original-cache-bytes");
     }
 
     #[test]

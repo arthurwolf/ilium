@@ -168,3 +168,220 @@ pub fn dialog_layout(screen_area: Rect) -> PromptQueueDialogLayout {
         hint: rows[9],
     }
 }
+
+impl PromptQueueDialogState {
+    pub fn delivery_control(&self, area: Rect) -> crate::value_control::ValueControl {
+        use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+        let value = match self.delivery_choice {
+            PromptQueueDelivery::Once => "Once",
+            PromptQueueDelivery::Times { .. } => "Run X times",
+            PromptQueueDelivery::Forever => "Enqueue forever (DANGER)",
+        };
+        ValueControl::new(
+            area,
+            ControlSpec {
+                kind: ControlKind::Choice,
+                label: "",
+                value,
+                label_width: 0,
+                previous_enabled: true,
+                next_enabled: true,
+                open_enabled: true,
+            },
+        )
+    }
+}
+
+impl PromptQueueDialogState {
+    /// Prepare the exact repeat-count row used by rendering and mouse dispatch.
+    pub fn times_control(&self, area: Rect) -> crate::value_control::ValueControl {
+        use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+        let enabled = matches!(self.delivery_choice, PromptQueueDelivery::Times { .. });
+        let value = if enabled {
+            self.times.buf.as_str()
+        } else {
+            "(only for Run X times)"
+        };
+        let count = self
+            .times
+            .buf
+            .parse::<u32>()
+            .ok()
+            .filter(|count| *count > 0);
+        ValueControl::new(
+            ratatui::widgets::Block::bordered().inner(area),
+            ControlSpec {
+                kind: ControlKind::Number,
+                label: "",
+                value,
+                label_width: 0,
+                previous_enabled: enabled && count.is_some_and(|count| count > 1),
+                next_enabled: enabled && count.is_some_and(|count| count < u32::MAX),
+                open_enabled: enabled,
+            },
+        )
+    }
+
+    /// Buttons edit the draft count; enqueueing remains the separate form action.
+    pub fn apply_times_control(
+        &mut self,
+        action: crate::value_control::ControlAction,
+    ) -> Result<(), String> {
+        use crate::value_control::ControlAction;
+        use crate::value_number::{NumberSpec, NumberValue};
+        if !matches!(self.delivery_choice, PromptQueueDelivery::Times { .. }) {
+            return Err("Select Run X times before editing the repeat count".into());
+        }
+        let direction = match action {
+            ControlAction::Decrement => -1,
+            ControlAction::Increment => 1,
+            ControlAction::EditNumber => {
+                self.focus = PromptQueueFocus::Times;
+                return Ok(());
+            }
+            _ => return Err("Unsupported repeat-count action".into()),
+        };
+        let spec = NumberSpec::Integer {
+            minimum: 1,
+            maximum: i128::from(u32::MAX),
+        };
+        let value = spec.parse(&self.times.buf)?;
+        let NumberValue::Integer(next) = spec.stepped(value, NumberValue::Integer(1), direction)?
+        else {
+            return Err("Run count must be a whole number".into());
+        };
+        self.times = TextPromptState::new(next.to_string());
+        self.focus = PromptQueueFocus::Times;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use super::*;
+    use crate::value_control::{ControlAction, PointerButton};
+    use ratatui::layout::Position;
+    fn times() -> PromptQueueDialogState {
+        let mut s = PromptQueueDialogState::new(NodeId(1));
+        s.delivery_choice = PromptQueueDelivery::Times { remaining_runs: 2 };
+        s
+    }
+    #[test]
+    fn repeat_count_buttons_step_and_saturate_without_submitting() {
+        let mut s = times();
+        s.apply_times_control(ControlAction::Increment).unwrap();
+        assert_eq!(s.times.buf, "3");
+        s.apply_times_control(ControlAction::Decrement).unwrap();
+        assert_eq!(s.times.buf, "2");
+        s.times = TextPromptState::new("1");
+        s.apply_times_control(ControlAction::Decrement).unwrap();
+        assert_eq!(s.times.buf, "1");
+        s.times = TextPromptState::new(u32::MAX.to_string());
+        s.apply_times_control(ControlAction::Increment).unwrap();
+        assert_eq!(s.times.buf, u32::MAX.to_string());
+        assert!(s.text.buf.is_empty());
+    }
+    #[test]
+    fn direct_entry_focus_preserves_draft_and_invalid_numbers() {
+        let mut s = times();
+        s.times = TextPromptState::new("not a count");
+        s.apply_times_control(ControlAction::EditNumber).unwrap();
+        assert_eq!(s.focus, PromptQueueFocus::Times);
+        assert_eq!(s.times.buf, "not a count");
+        assert!(s.apply_times_control(ControlAction::Increment).is_err());
+        assert_eq!(s.times.buf, "not a count");
+    }
+    #[test]
+    fn repeat_count_has_no_active_controls_outside_times_mode() {
+        let s = PromptQueueDialogState::new(NodeId(1));
+        let c = s.times_control(Rect::new(10, 3, 21, 3));
+        for x in 10..31 {
+            assert_eq!(
+                c.hit(Position::new(x, c.geometry().row.y), PointerButton::Left),
+                None
+            );
+        }
+        assert_eq!(c.key_action(KeyCode::Enter, true), None);
+    }
+    #[test]
+    fn repeat_control_geometry_uses_inner_row_and_centers_value() {
+        let s = times();
+        let c = s.times_control(Rect::new(10, 3, 21, 3));
+        assert_eq!(c.geometry().row, Rect::new(11, 4, 19, 1));
+        assert_eq!(c.geometry().value, Rect::new(19, 4, 1, 1));
+        assert_eq!(
+            c.hit(Position::new(11, 4), PointerButton::Left),
+            Some(ControlAction::Decrement)
+        );
+        assert_eq!(
+            c.hit(Position::new(27, 4), PointerButton::Left),
+            Some(ControlAction::Increment)
+        );
+        assert_eq!(
+            c.hit(Position::new(29, 4), PointerButton::Left),
+            Some(ControlAction::EditNumber)
+        );
+        assert_eq!(c.hit(Position::new(12, 4), PointerButton::Left), None);
+    }
+}
+
+#[cfg(test)]
+mod delivery_control_tests {
+    use super::*;
+    use crate::value_control::{ControlAction, ControlStyles, PointerButton};
+    use ratatui::{backend::TestBackend, layout::Position, Terminal};
+    #[test]
+    fn delivery_glyphs_value_clicks_and_option_button_share_rendered_cells() {
+        let state = PromptQueueDialogState::new(NodeId(1));
+        let control = state.delivery_control(Rect::new(0, 0, 40, 1));
+        let mut terminal = Terminal::new(TestBackend::new(40, 1)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let geometry = control.geometry();
+        for (area, glyph, action) in [
+            (geometry.previous, "←", ControlAction::PreviousChoice),
+            (geometry.open, "+", ControlAction::OpenChoices),
+            (geometry.next, "→", ControlAction::NextChoice),
+        ] {
+            assert_eq!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .cell((area.x, area.y))
+                    .unwrap()
+                    .symbol(),
+                glyph
+            );
+            assert_eq!(
+                control.hit(Position::new(area.x, area.y), PointerButton::Left),
+                Some(action)
+            );
+        }
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.value.x, geometry.value.y),
+                PointerButton::Left
+            ),
+            Some(ControlAction::NextChoice)
+        );
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.value.x, geometry.value.y),
+                PointerButton::Right
+            ),
+            Some(ControlAction::PreviousChoice)
+        );
+        assert_eq!(
+            control.hit(
+                Position::new(geometry.open.x, geometry.open.y),
+                PointerButton::Right
+            ),
+            None
+        );
+        assert_eq!(
+            control.key_action(KeyCode::Enter, true),
+            Some(ControlAction::OpenChoices)
+        );
+    }
+}

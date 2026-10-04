@@ -10,6 +10,9 @@ use std::time::Duration;
 use zbus::zvariant::OwnedValue;
 use zbus::Connection;
 
+mod owner;
+pub(crate) use owner::{MediaLease, MediaOwner};
+
 const MPRIS_BUS_NAME_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PLAYER_OBJECT_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -20,8 +23,7 @@ const PLAYING_STATUS: &str = "Playing";
 // zbus applies no reply timeout by default, and the bus daemon never
 // answers on a peer's behalf, so without this a wedged bus-name owner
 // (e.g. a stopped player process that never replies to `Get` or `Pause`)
-// would hang the await forever -- and these calls run inline in the
-// client's single event loop, so that would freeze the whole TUI.
+// would hang the supervised owner indefinitely and delay restoration.
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Session-bus connection whose method calls all carry
@@ -32,6 +34,7 @@ async fn session_connection() -> Option<Connection> {
     zbus::connection::Builder::session()
         .ok()?
         .method_timeout(DBUS_METHOD_TIMEOUT)
+        .max_queued(1)
         .build()
         .await
         .ok()
@@ -45,12 +48,25 @@ async fn session_connection() -> Option<Connection> {
 /// player running is a normal, expected condition, not a bug -- it simply
 /// pauses nothing.
 pub async fn pause_playing_players() -> Vec<String> {
+    pause_playing_players_until(&|| false).await
+}
+
+/// Stop admitting new player effects when the owner no longer wants Pause.
+/// A Pause already sent is awaited and retained if positively acknowledged.
+async fn pause_playing_players_until(should_stop: &(dyn Fn() -> bool + Sync)) -> Vec<String> {
+    if should_stop() {
+        return Vec::new();
+    }
     let Some(connection) = session_connection().await else {
         return Vec::new();
     };
     let mut paused = Vec::new();
     for player in mpris_player_names(&connection).await {
+        if should_stop() {
+            break;
+        }
         if playback_status(&connection, &player).await.as_deref() == Some(PLAYING_STATUS)
+            && !should_stop()
             && call_player_method(&connection, &player, "Pause").await
         {
             paused.push(player);
@@ -89,13 +105,22 @@ async fn mpris_player_names(connection: &Connection) -> Vec<String> {
     else {
         return Vec::new();
     };
-    reply
+    if reply.body().len() > 512 * 1024 {
+        tracing::error!("media ListNames response exceeds 512 KiB admission");
+        return Vec::new();
+    }
+    let names: Vec<String> = reply
         .body()
         .deserialize::<Vec<String>>()
         .unwrap_or_default()
         .into_iter()
         .filter(|name| name.starts_with(MPRIS_BUS_NAME_PREFIX))
-        .collect()
+        .collect();
+    if names.len() > 256 {
+        tracing::error!("media player inventory exceeds 256-player admission");
+        return Vec::new();
+    }
+    names
 }
 
 /// `player`'s current `org.mpris.MediaPlayer2.Player.PlaybackStatus`
@@ -112,6 +137,10 @@ async fn playback_status(connection: &Connection, player: &str) -> Option<String
         )
         .await
         .ok()?;
+    if reply.body().len() > 1024 {
+        tracing::error!("media PlaybackStatus response exceeds 1 KiB admission");
+        return None;
+    }
     let value: OwnedValue = reply.body().deserialize().ok()?;
     String::try_from(value).ok()
 }

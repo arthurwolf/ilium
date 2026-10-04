@@ -85,6 +85,9 @@ pub struct LeafContext {
     pub id: NodeId,
     pub kind_label: String,
     pub current_title: String,
+    pub current_short_title: Option<String>,
+    /// Inference policy only; never changes persisted manual ownership.
+    pub is_title_eligible: bool,
     pub current_icon: Option<String>,
     pub is_name_fixed: bool,
     pub filename: Option<String>,
@@ -95,6 +98,34 @@ pub struct LeafContext {
     automatic_content_fingerprint: u64,
     #[serde(skip)]
     agent_lookup: Option<(AgentClass, String, PathBuf)>,
+}
+
+impl LeafContext {
+    /// Owned heap capacities; the worker separately charges inline vector storage.
+    /// Include lookup evidence even though it is omitted from serialized prompts.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let mut bytes = self
+            .kind_label
+            .capacity()
+            .saturating_add(self.current_title.capacity())
+            .saturating_add(self.content_extract.capacity());
+        for value in [
+            &self.current_short_title,
+            &self.current_icon,
+            &self.filename,
+        ] {
+            bytes = bytes.saturating_add(value.as_ref().map_or(0, String::capacity));
+        }
+        if let Some((agent_class, session_id, cwd)) = &self.agent_lookup {
+            bytes = bytes
+                .saturating_add(session_id.capacity())
+                .saturating_add(cwd.capacity());
+            if let AgentClass::Other(name) = agent_class {
+                bytes = bytes.saturating_add(name.capacity());
+            }
+        }
+        bytes
+    }
 }
 
 /// Exact user-owned split layout captured beside the restructure's leaf
@@ -175,6 +206,11 @@ pub fn gather_leaf_contexts(
             id: pane_id,
             kind_label: describe_pane_status(status),
             current_title: node.name.clone(),
+            current_short_title: node.short_name.clone(),
+            is_title_eligible: !matches!(
+                status,
+                PaneStatus::PlainShell | PaneStatus::Agent(_) | PaneStatus::AgentUnavailable(_)
+            ),
             current_icon: node.inferred_icon.clone(),
             is_name_fixed: node.is_name_fixed,
             filename: None,
@@ -182,20 +218,13 @@ pub fn gather_leaf_contexts(
             automatic_content_fingerprint: 0,
             agent_lookup: None,
         };
+        if let Some(agent) = status.known_agent_state() {
+            context.agent_lookup = agent_session_ids.get(&pane_id).and_then(|session_id| {
+                tree.pane_cwd(pane_id)
+                    .map(|cwd| (agent.class.clone(), session_id.clone(), cwd.to_path_buf()))
+            });
+        }
         match (panes.get(&pane_id), status) {
-            (Some(PaneRuntime::Terminal(view)), PaneStatus::Agent(agent))
-                if agent_session_ids.contains_key(&pane_id) =>
-            {
-                context.automatic_content_fingerprint =
-                    stable_restructure_fingerprint(&view.with_screen(|screen| screen.contents()));
-                context.agent_lookup = tree.pane_cwd(pane_id).map(|cwd| {
-                    (
-                        agent.class.clone(),
-                        agent_session_ids[&pane_id].clone(),
-                        cwd.to_path_buf(),
-                    )
-                });
-            }
             (Some(PaneRuntime::Terminal(view)), _) => {
                 context.content_extract = clip_lines(&view.with_screen(|screen| screen.contents()));
                 context.automatic_content_fingerprint =
@@ -233,6 +262,8 @@ pub fn gather_leaf_contexts(
                 id: folder_id,
                 kind_label: "Folder".to_string(),
                 current_title: node.name.clone(),
+                current_short_title: node.short_name.clone(),
+                is_title_eligible: true,
                 current_icon: node.inferred_icon.clone(),
                 is_name_fixed: node.is_name_fixed,
                 filename: None,
@@ -458,13 +489,24 @@ pub fn resolve_content_extracts(contexts: &mut [LeafContext], home: &Path) {
         let Some((class, session_id, cwd)) = context.agent_lookup.take() else {
             continue;
         };
-        let entries = ilium_agent_session::TranscriptLocator::new(home, &cwd)
-            .transcript_for_session(&class, &session_id)
+        let locator = ilium_agent_session::TranscriptLocator::new(home, &cwd);
+        let has_request = matches!(
+            locator.genuine_request_evidence(&class, &session_id),
+            Ok(ilium_agent_session::GenuineRequestEvidence::Present { .. })
+        );
+        let entries = has_request
+            .then(|| locator.transcript_for_session(&class, &session_id))
+            .flatten()
             .and_then(|transcript| {
                 crate::transcript_context::recent_transcript_entries(&class, &transcript.path).ok()
             });
+        context.is_title_eligible = entries.as_ref().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.kind == crate::transcript_context::TranscriptEntryKind::User)
+        });
         context.content_extract = match entries {
-            Some(entries) if !entries.is_empty() => {
+            Some(entries) if context.is_title_eligible => {
                 clip_lines(&format_transcript_entries(&entries))
             }
             _ => ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT.to_string(),
@@ -663,7 +705,7 @@ impl PromptLeafContext {
                     icon_budget,
                 ))
             }),
-            is_name_fixed: item.is_name_fixed,
+            is_name_fixed: item.is_name_fixed || !item.is_title_eligible,
             filename: item.filename.as_deref().map(|filename| {
                 crate::naming::encode_untrusted_context(&clip_restructure_evidence(
                     filename,
@@ -740,26 +782,37 @@ fn render_restructure_prompt(
 ) -> anyhow::Result<String> {
     render_restructure_prompt_with_instructions(
         title_style,
-        &ilium_inference::PromptInstructions::default(),
+        RestructurePromptPolicy {
+            instructions: &ilium_inference::PromptInstructions::default(),
+            prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+        },
         items,
         current_structure,
         protected_split_views,
         retry_feedback,
         &RecommendationContext::default(),
-        ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
     )
+}
+
+/// Inference options for one rendered prompt, kept separate from leaf evidence.
+struct RestructurePromptPolicy<'a> {
+    instructions: &'a ilium_inference::PromptInstructions,
+    prompt_token_limit: u32,
 }
 
 fn render_restructure_prompt_with_instructions(
     title_style: TitleStyle,
-    instructions: &ilium_inference::PromptInstructions,
+    policy: RestructurePromptPolicy<'_>,
     items: &[LeafContext],
     current_structure: &str,
     protected_split_views: &[ProtectedSplitViewContext],
     retry_feedback: Option<&str>,
     recommendation_context: &RecommendationContext,
-    prompt_token_limit: u32,
 ) -> anyhow::Result<String> {
+    let RestructurePromptPolicy {
+        instructions,
+        prompt_token_limit,
+    } = policy;
     let mut item_evidence_budget = MAXIMUM_ITEM_EVIDENCE_CHARACTERS;
     let mut structure_evidence_budget = MAXIMUM_STRUCTURE_EVIDENCE_CHARACTERS;
 
@@ -923,13 +976,15 @@ pub fn infer_restructure_plan_with_protected_splits<G: RestructureCompletionClie
     for attempt in 1..=RESTRUCTURE_MAX_ATTEMPTS {
         let prompt = render_restructure_prompt_with_instructions(
             generator.title_style(),
-            &generator.prompt_instructions(),
+            RestructurePromptPolicy {
+                instructions: &generator.prompt_instructions(),
+                prompt_token_limit: generator.restructure_prompt_token_limit(),
+            },
             contexts,
             current_structure,
             protected_split_views,
             retry_feedback.as_deref(),
             recommendation_context,
-            generator.restructure_prompt_token_limit(),
         )?;
         tracing::info!(
             operation_id,
@@ -1091,7 +1146,7 @@ fn parse_restructure_response(
     validate_titles(&parsed.children)?;
     let fixed_name_ids: HashSet<NodeId> = contexts
         .iter()
-        .filter(|context| context.is_name_fixed)
+        .filter(|context| context.is_name_fixed || !context.is_title_eligible)
         .map(|context| context.id)
         .collect();
     if title_style == TitleStyle::Labeling {
@@ -1111,7 +1166,7 @@ fn parse_restructure_response(
         .collect();
     let (project, entries) =
         recommendations::parse_pointers(&candidate, &parsed.animations, recommendation_context)?;
-    let plan = RecommendedRestructurePlan {
+    let mut plan = RecommendedRestructurePlan {
         structure: RestructurePlan {
             children: parsed
                 .children
@@ -1125,8 +1180,42 @@ fn parse_restructure_response(
         project,
         entries,
     };
+    preserve_protected_leaf_titles(&mut plan.structure.children, contexts);
     plan.validate_assignments()?;
     Ok(plan)
+}
+
+/// Restore exact bundles after normalization, including empty short names and icons.
+fn preserve_protected_leaf_titles(nodes: &mut [RestructureNode], contexts: &[LeafContext]) {
+    for node in nodes {
+        match node {
+            RestructureNode::Pane {
+                id,
+                title,
+                short_title,
+                icon,
+            }
+            | RestructureNode::Folder {
+                id,
+                title,
+                short_title,
+                icon,
+            } => {
+                if let Some(context) = contexts.iter().find(|context| {
+                    context.id == *id && (context.is_name_fixed || !context.is_title_eligible)
+                }) {
+                    *title = context.current_title.clone();
+                    *short_title = context.current_short_title.clone();
+                    *icon = context.current_icon.clone();
+                }
+            }
+            RestructureNode::Group { children, .. }
+            | RestructureNode::ExistingGroup { children, .. }
+            | RestructureNode::ExistingSplitView { children, .. } => {
+                preserve_protected_leaf_titles(children, contexts)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1621,13 +1710,15 @@ mod tests {
         let render = |limit| {
             render_restructure_prompt_with_instructions(
                 TitleStyle::Summarization,
-                &instructions,
+                RestructurePromptPolicy {
+                    instructions: &instructions,
+                    prompt_token_limit: limit,
+                },
                 std::slice::from_ref(&item),
                 "",
                 &[],
                 None,
                 &RecommendationContext::default(),
-                limit,
             )
         };
         let prompt = render(200_000).unwrap();
@@ -1746,6 +1837,8 @@ mod tests {
             id: NodeId(id),
             kind_label: "Plain shell".to_string(),
             current_title: title.to_string(),
+            current_short_title: None,
+            is_title_eligible: true,
             current_icon: None,
             is_name_fixed: false,
             filename: None,
@@ -2336,6 +2429,8 @@ mod tests {
         ));
         let mut fixed = leaf(1, "user's original mixed Case title with many words");
         fixed.is_name_fixed = true;
+        fixed.current_short_title = Some("user's Case".to_string());
+        fixed.current_icon = Some("📌".to_string());
         let plan = infer_restructure_plan(&generator, &[fixed, leaf(2, "Coding Session")]).unwrap();
         let RestructureNode::Group {
             title,
@@ -2349,13 +2444,17 @@ mod tests {
         assert_eq!(title, "RELATED WORK");
         assert_eq!(short_title.as_deref(), Some("WORK"));
         let RestructureNode::Pane {
-            title, short_title, ..
+            title,
+            short_title,
+            icon,
+            ..
         } = &children[0]
         else {
             panic!("expected fixed pane");
         };
         assert_eq!(title, "user's original mixed Case title with many words");
         assert_eq!(short_title.as_deref(), Some("user's Case"));
+        assert_eq!(icon.as_deref(), Some("📌"));
         let RestructureNode::Pane {
             title, short_title, ..
         } = &children[1]
@@ -2532,6 +2631,8 @@ mod tests {
             id: NodeId(1),
             kind_label: "Claude agent (working)".to_string(),
             current_title: "shell".to_string(),
+            current_short_title: None,
+            is_title_eligible: false,
             current_icon: None,
             is_name_fixed: false,
             filename: None,
@@ -2551,6 +2652,72 @@ mod tests {
             ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT
         );
         assert!(contexts[0].agent_lookup.is_none());
+    }
+
+    #[test]
+    fn ineligible_title_bundle_survives_inference_normalization() {
+        let mut context = leaf(1, "User's unchanged long title");
+        context.current_short_title = Some("Existing short title".into());
+        context.current_icon = Some("custom persisted icon".into());
+        context.is_title_eligible = false;
+        let prompt_item = PromptLeafContext::from_leaf(&context, 1000);
+        assert!(prompt_item.is_name_fixed);
+        assert!(
+            !context.is_name_fixed,
+            "effective protection must not claim manual ownership"
+        );
+        let mut nodes = vec![RestructureNode::Group {
+            title: "New grouping".into(),
+            short_title: None,
+            icon: None,
+            children: vec![RestructureNode::Pane {
+                id: context.id,
+                title: "Unrelated guess".into(),
+                short_title: None,
+                icon: None,
+            }],
+        }];
+        preserve_protected_leaf_titles(&mut nodes, &[context.clone()]);
+        let RestructureNode::Group { children, .. } = &nodes[0] else {
+            panic!()
+        };
+        assert_eq!(
+            children[0],
+            RestructureNode::Pane {
+                id: context.id,
+                title: context.current_title,
+                short_title: context.current_short_title,
+                icon: context.current_icon,
+            }
+        );
+    }
+
+    #[test]
+    fn assistant_only_agent_transcript_cannot_supply_task_title_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let cwd = directory.path().join("repo");
+        let transcript_dir = home.join(".codex/sessions/2026/10/03");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        let session_id = "11111111-1111-4111-8111-111111111111";
+        let transcript = [
+            serde_json::json!({"type":"session_meta", "payload":{"id":session_id,"cwd":cwd}}),
+            serde_json::json!({"type":"event_msg", "payload":{"type":"agent_message","message":"Startup information only"}}),
+        ].into_iter().map(|entry| entry.to_string()).collect::<Vec<_>>().join("\n");
+        std::fs::write(
+            transcript_dir.join(format!("rollout-2026-10-03T00-00-00-{session_id}.jsonl")),
+            transcript,
+        )
+        .unwrap();
+        let mut context = leaf(1, "Codex");
+        context.agent_lookup = Some((AgentClass::Codex, session_id.into(), cwd));
+        resolve_content_extracts(std::slice::from_mut(&mut context), &home);
+        assert_eq!(
+            context.content_extract,
+            ilium_prompts::naming::UNAVAILABLE_TRANSCRIPT
+        );
+        assert!(!context.is_title_eligible);
     }
 
     #[test]

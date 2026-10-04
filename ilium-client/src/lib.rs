@@ -38,6 +38,7 @@ pub mod agent_monitoring;
 pub mod agent_prompt_transcript;
 pub mod agent_toolbar;
 mod animation_hover;
+mod animation_plugins;
 mod animation_rows;
 mod animation_settings_ui;
 pub mod app;
@@ -61,18 +62,25 @@ pub mod cost_overlay;
 pub mod cost_settings;
 pub mod cost_settings_ui;
 pub mod cost_tracker;
+pub mod debug_logging;
+pub mod document_preparation;
+mod editor_capture_budget;
 pub mod editor_chrome;
 pub mod editor_highlight;
 pub mod editor_line_path;
 pub mod editor_pane;
 pub mod editor_toolbar;
 pub mod error;
+pub mod execution;
 pub mod explorer_overlay;
+pub mod filesystem;
 pub mod help;
 pub mod icon_search_workers;
 pub mod icon_settings;
+mod incoming_projection;
 pub mod inference_test;
 mod instruction_settings;
+mod ipc_preparation;
 pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
@@ -82,21 +90,26 @@ pub mod markdown;
 pub mod media_control;
 pub mod minimap;
 pub mod modal;
+mod model_catalog_preparation;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+mod normal_voice;
 pub mod onboarding;
 pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;
 pub mod popover;
+pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
+mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod release_animation;
 pub mod release_embedding;
 pub mod render_cache;
 pub mod reset_planning;
@@ -111,20 +124,34 @@ pub mod session_naming;
 pub mod session_stats;
 pub mod session_stats_popover;
 pub mod session_stats_store;
+pub mod session_stats_timeline;
 pub mod session_stats_ui;
 pub mod settings_help;
 pub mod settings_ui;
 pub mod setup_prompt;
 pub mod smart_copy;
+pub mod smart_copy_light;
+pub mod smart_copy_tokens;
 pub mod smart_copy_workers;
+mod source_line_facts;
+mod source_stream;
+mod source_window_preparation;
+mod source_window_surface;
+mod source_window_syntax;
+mod source_windows;
 pub mod split_layout;
 pub mod status_icons;
 pub mod syntax;
 pub mod terminal_activity;
+pub mod terminal_clipboard;
 pub mod terminal_context_menu;
+mod terminal_context_preparation;
 pub mod terminal_guard;
+mod terminal_input;
+mod terminal_input_owner;
 pub mod terminal_links;
 pub mod terminal_naming;
+pub mod terminal_parsing;
 pub mod terminal_selection;
 pub mod terminal_title_inference;
 pub mod terminal_view;
@@ -141,6 +168,29 @@ pub mod trigger_execution_lease;
 pub mod trigger_settings;
 pub mod trigger_settings_ui;
 pub mod ui;
+pub mod value_animation;
+pub mod value_config;
+pub mod value_control;
+pub mod value_cost;
+pub mod value_detection;
+pub mod value_dialog;
+pub mod value_dialog_host;
+pub mod value_editor;
+pub mod value_effort;
+pub mod value_icon;
+pub mod value_inference;
+pub mod value_keyboard;
+pub mod value_manager;
+pub mod value_number;
+pub mod value_plugin;
+pub mod value_scene;
+pub mod value_settings;
+pub mod value_settings_choice;
+pub mod value_voice;
+pub mod value_worktree;
+mod voice_preparation;
+mod voice_presentation;
+mod voice_retirement;
 pub mod voice_settings;
 pub mod workspace_file;
 pub mod worktree_dialog;
@@ -159,12 +209,13 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 pub use crate::app::ClientExitReason;
+pub use crate::execution::bootstrap_process_quota;
 
-use crate::app::App;
+use crate::app::{App, PaneRuntime};
 use crate::connection::Connection;
 use crate::error::ClientError;
 use crate::icon_search_workers::IconSearchWorkers;
-use crate::naming_workers::NamingWorkers;
+use crate::naming_workers::{NamingWorkerEvent, NamingWorkers};
 use crate::search_workers::SearchWorkers;
 use crate::smart_copy_workers::{SmartCopyWorkerUpdate, SmartCopyWorkers};
 use crate::terminal_guard::TerminalGuard;
@@ -192,15 +243,6 @@ pub struct RunOptions {
     pub log_path: PathBuf,
 }
 
-/// Bounded capacity for the crossterm-input and naming-worker-result
-/// channels the event loop selects on. A generous "few hundred" headroom
-/// for interactive latency (a burst of pasted text, a flurry of mouse-move
-/// events) while still giving the producer real backpressure instead of an
-/// unbounded backlog the loop would have to fully drain -- stale input and
-/// all -- before ever catching up, if it's ever starved by OS scheduling
-/// under load. See `crate::connection` for the matching bound on the
-/// server event/request channels.
-const INPUT_CHANNEL_CAPACITY: usize = 256;
 /// Naming-worker results are one-shot per worker (see `naming_workers.rs`),
 /// so this only needs enough headroom to never be the bottleneck; it's
 /// bounded at all purely for consistency with every other channel in this
@@ -208,15 +250,16 @@ const INPUT_CHANNEL_CAPACITY: usize = 256;
 const NAMING_EVENTS_CHANNEL_CAPACITY: usize = 16;
 /// Semantic icon queries are revisioned, so a tiny bounded channel is enough:
 /// the worker drains superseded typing before it runs the next CPU inference.
-const ICON_SEARCH_EVENTS_CHANNEL_CAPACITY: usize = 4;
 /// Upper bound for server events applied in one select turn. Terminal output
 /// can arrive continuously; yielding after a bounded batch gives pointer and
 /// keyboard events a reliable chance to run instead of making hover depend
 /// on how chatty the displayed PTY happens to be.
 const MAX_SERVER_EVENTS_PER_BATCH: usize = 16;
+const MAX_PENDING_SERVER_EVENTS: usize = 256;
 /// Byte ceiling for a same-pane raw-output run merged in one client turn.
 /// Event count alone is insufficient because a server frame can itself carry
 /// a large burst.
+#[cfg(test)]
 const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// Input is intentionally favoured over render-cache updates, but it remains
 /// bounded so a key-repeat or pointer flood cannot starve incoming terminal
@@ -238,6 +281,7 @@ fn output_redraw_is_due(needs_immediate_redraw: bool, now: Instant, last_draw_at
 }
 
 /// Event count and byte count are independent fairness limits.
+#[cfg(test)]
 fn screen_updates_fit(current_bytes: usize, incoming_bytes: usize) -> bool {
     current_bytes.saturating_add(incoming_bytes) <= MAX_MERGED_SCREEN_BYTES_PER_BATCH
 }
@@ -377,6 +421,7 @@ fn record_client_surface_change(app: &App, last_recorded_surface: &mut Option<Cl
 /// loses the server connection. The typed result lets the CLI wrapper re-exec
 /// only for the explicit restart path after this function restores the terminal.
 pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
+    let process_quota = bootstrap_process_quota().map_err(ClientError::ProcessResources)?;
     if !options.session_cwd.is_dir() {
         return Err(ClientError::InvalidSessionCwd(options.session_cwd));
     }
@@ -405,7 +450,12 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
                 .flatten()
         })
         .unwrap_or(false);
-    ilium_logging::initialize(&options.log_path, file_logging_enabled_hint, "client")?;
+    ilium_logging::initialize(
+        &options.log_path,
+        file_logging_enabled_hint,
+        "client",
+        &process_quota,
+    )?;
     ilium_logging::install_panic_logging();
     let (mut config, config_dir, is_agent_setup_policy_available) =
         init_config(config_dir_result, file_logging_enabled_hint);
@@ -428,11 +478,6 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         log_path = %options.log_path.display(),
         "ilium-client starting"
     );
-    match crate::chatroom::ensure_integrations(&options.session_cwd) {
-        Ok(true) => tracing::info!("repaired chatroom integrations for session project"),
-        Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "could not repair chatroom integrations at startup"),
-    }
     let sound_discovery = ilium_sound::discover_system_sounds();
     let voice_input_devices = ilium_voice::available_input_devices().unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to enumerate voice input devices");
@@ -443,26 +488,34 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         Vec::new()
     });
 
-    // `TerminalGuard::drop` restores the terminal whether this function
-    // returns `Ok`, `Err`, or panics and unwinds through this stack frame.
-    let guard = TerminalGuard::enter().map_err(|error| {
+    // Claim input before raw-mode changes. The admitted native reader owns
+    // both the image query and all subsequent ordinary input.
+    let input_reservation = terminal_input_owner::InputReservation::prepare(&process_quota)?;
+    let terminal_guard = TerminalGuard::enter().map_err(|error| {
         tracing::error!(%error, error_debug = ?error, "failed to enter terminal UI mode");
         error
     })?;
+    let guard = InputTerminalGuard {
+        _guard: terminal_guard,
+        _session: input_reservation.session_claim(),
+    };
     let result = run_inner(
         &options,
-        config,
-        config_dir,
-        should_open_onboarding,
-        is_agent_setup_policy_available,
-        sound_discovery,
-        VoiceDeviceCatalog {
-            input: voice_input_devices,
-            output: voice_output_devices,
+        PreparedStartup {
+            config,
+            config_dir,
+            should_open_onboarding,
+            is_agent_setup_policy_available,
+            sound_discovery,
+            voice_devices: VoiceDeviceCatalog {
+                input: voice_input_devices,
+                output: voice_output_devices,
+            },
+            guard,
+            input_reservation,
         },
     )
     .await;
-    drop(guard);
     if let Err(error) = &result {
         tracing::error!(%error, error_debug = ?error, "ilium-client exited with an error");
     } else {
@@ -523,52 +576,271 @@ struct VoiceDeviceCatalog {
     output: Vec<String>,
 }
 
-async fn run_inner(
-    options: &RunOptions,
+// Field order restores terminal state before releasing the session share,
+// including when a failed presenter start drops its cleanup closure.
+struct InputTerminalGuard {
+    _guard: TerminalGuard,
+    _session: terminal_input_owner::InputSession,
+}
+
+/// Resources and policy resolved before transferring terminal ownership.
+struct PreparedStartup {
     config: crate::config::ClientConfig,
     config_dir: Option<PathBuf>,
     should_open_onboarding: bool,
     is_agent_setup_policy_available: bool,
     sound_discovery: ilium_sound::SoundDiscovery,
     voice_devices: VoiceDeviceCatalog,
+    guard: InputTerminalGuard,
+    input_reservation: terminal_input_owner::InputReservation,
+}
+
+async fn run_inner(
+    options: &RunOptions,
+    startup: PreparedStartup,
 ) -> Result<ClientExitReason, ClientError> {
+    let PreparedStartup {
+        config,
+        config_dir,
+        should_open_onboarding,
+        is_agent_setup_policy_available,
+        sound_discovery,
+        voice_devices,
+        guard,
+        input_reservation,
+    } = startup;
     let VoiceDeviceCatalog {
         input: voice_input_devices,
         output: voice_output_devices,
     } = voice_devices;
-    // Buffered, not bare `stdout()`. `std::io::Stdout` is a `LineWriter`: it
-    // flushes on every newline, and a rendered frame is full of them. A frame
-    // therefore reached the terminal as dozens of partial writes, and under
-    // load the terminal could be observed mid-frame -- text from the new frame
-    // interleaved with the old, producing corruptions like `Cogiaating` for
-    // `Cogitating`.
-    //
-    // Those do not heal on the next frame, which is what made them
-    // load-bearing rather than cosmetic: ratatui writes only the cells that
-    // differ from the previous buffer, and the previous buffer records what
-    // was *intended*, not what arrived. A cell corrupted in transit is
-    // therefore never rewritten, and the wrong text stays on screen
-    // indefinitely.
-    //
-    // The capacity is a whole large frame's worth of escape sequences, so an
-    // ordinary redraw reaches the terminal in one write.
-    const FRAME_BUFFER_BYTES: usize = 1 << 20;
-    let backend = CrosstermBackend::new(std::io::BufWriter::with_capacity(
-        FRAME_BUFFER_BYTES,
-        std::io::stdout(),
-    ));
-    let mut terminal = Terminal::new(backend).map_err(ClientError::TerminalSetup)?;
+    // Only the presenter owns terminal diffing, encoding and writes. The UI
+    // terminal is an inert composition surface; get_frame does not run a diff.
+    let (columns, rows) = crossterm::terminal::size().map_err(ClientError::TerminalSetup)?;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(columns, rows))
+        .unwrap_or_else(|error| match error {});
 
+    let execution = crate::execution::ClientExecution::start()
+        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
+    let outbound_admission = execution
+        .client(crate::ipc_preparation::request_limits())
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "outbound admission startup: {error:?}"
+            )))
+        })?;
+    app.outbound_admission = Some(outbound_admission.clone());
+    let catalogue_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4 * 1024 * 1024,
+            result_bytes: 64 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "animation catalogue startup: {error:?}"
+            )))
+        })?;
+    let catalogue_preparation =
+        crate::animation_plugins::preparation::CataloguePreparation::new(catalogue_client);
+    let catalogue_notification = catalogue_preparation.notification();
+    app.plugin_catalogue_preparation = Some(catalogue_preparation);
+    let documents = execution.documents().map_err(|error| {
+        ClientError::TerminalSetup(std::io::Error::other(format!(
+            "document preparation startup: {error:?}"
+        )))
+    })?;
+    let document_notification = app.configure_document_preparation(documents);
+    let context_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 4,
+            service_jobs: 0,
+            input_bytes: 384 * 1024 * 1024,
+            result_bytes: 256 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "context preparation startup: {error:?}"
+            )))
+        })?;
+    let context_preparation =
+        crate::terminal_context_preparation::TerminalContextPreparation::new(context_client);
+    let context_notification = context_preparation.notification();
+    app.terminal_context_preparation = Some(context_preparation);
+    let clipboard_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 64 * 1024 * 1024 + 64 * 1024,
+            result_bytes: 128 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "clipboard client startup: {error:?}"
+            )))
+        })?;
+    let clipboard = crate::terminal_clipboard::ClipboardService::start(clipboard_client)
+        .map_err(ClientError::TerminalSetup)?;
+    let clipboard_notification = clipboard.notification();
+    app.terminal_clipboard = Some(clipboard);
+    let parsing = crate::terminal_parsing::TerminalParsing::start(
+        execution.terminal_parser().map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "terminal parser client: {error:?}"
+            )))
+        })?,
+    )
+    .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
+    let terminal_notification = parsing.notification();
+    app.terminal_parsing = Some(parsing);
+    let filesystem_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 16,
+            service_jobs: 0,
+            input_bytes: 384 * 1024 * 1024,
+            result_bytes: 256 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "filesystem startup: {error:?}"
+            )))
+        })?;
+    let statistics_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 24,
+            service_jobs: 0,
+            input_bytes: 384 * 1024 * 1024,
+            result_bytes: 384 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "statistics startup: {error:?}"
+            )))
+        })?;
+    let statistics_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let statistics_wake = std::sync::Arc::clone(&statistics_notification);
+    let statistics_client =
+        statistics_client.with_completion_wake(move || statistics_wake.notify_one());
+    app.session_stats
+        .configure_execution(statistics_client.clone());
+    app.cost_tracker.configure_execution(statistics_client);
+    let editor_files = crate::filesystem::editors::EditorFiles::new(filesystem_client.clone());
+    let filesystem_notification = editor_files.notification();
+    let filesystem_admission_notification = crate::execution::admission_notification();
+    app.terminal_baselines = Some(crate::filesystem::transcript_baseline::BaselineFiles::new(
+        filesystem_client.clone(),
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    app.integration_files = Some(crate::filesystem::integrations::IntegrationFiles::new(
+        filesystem_client.clone(),
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    app.sidebar_files = Some(crate::filesystem::sidebar::SidebarFiles::new(
+        filesystem_client.clone(),
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    app.explorer_execution = Some((
+        filesystem_client.clone(),
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    app.configuration_files = Some(crate::filesystem::configurations::ConfigurationFiles::new(
+        filesystem_client.clone(),
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    let voice_retirement_client = filesystem_client.clone();
+    app.voice_native_retirement = Some(crate::voice_retirement::VoiceRetirement::new(
+        voice_retirement_client.clone(),
+    ));
+    app.voice_preparation
+        .configure(voice_retirement_client.clone());
+    let normal_voice_preparation_notification = app.voice_preparation.notification();
+    app.board_files = Some(crate::filesystem::boards::BoardFiles::new(
+        filesystem_client,
+        std::sync::Arc::clone(&filesystem_notification),
+    ));
+    app.editor_files = Some(editor_files);
     app.agent_setup_home_dir = std::env::var_os(AGENT_SETUP_HOME_ENV)
         .map(std::path::PathBuf::from)
         .or_else(|| {
             directories::BaseDirs::new().map(|directories| directories.home_dir().to_path_buf())
         });
     app.is_agent_setup_policy_available = is_agent_setup_policy_available;
-    // The one place a terminal capability query belongs: a real process with a
-    // real terminal attached, once. See `App::probe_terminal_image_support`.
-    app.probe_terminal_image_support();
+    // Keep supervised service owners outside the event-loop future so every
+    // error path restores the terminal before awaiting their actual exit.
+    let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
+    let provider_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let provider_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 16,
+            service_jobs: 0,
+            input_bytes: 384 * 1024 * 1024,
+            result_bytes: 256 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "provider work startup: {error:?}"
+            )))
+        })?;
+    let provider_wake = std::sync::Arc::clone(&provider_notification);
+    let provider_client = provider_client.with_completion_wake(move || provider_wake.notify_one());
+    app.model_catalog_preparation
+        .configure(provider_client.clone());
+    let mut naming_workers =
+        NamingWorkers::new(naming_events_tx, &config.inference).map_err(|reason| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "naming settings startup: {reason:?}"
+            )))
+        })?;
+    naming_workers.configure_execution(provider_client.clone());
+    let (smart_copy_events_tx, mut smart_copy_events_rx) = mpsc::channel(64);
+    let mut smart_copy_workers = SmartCopyWorkers::new(smart_copy_events_tx);
+    smart_copy_workers.configure_execution(provider_client.clone());
+    smart_copy_workers.set_completion_notification(std::sync::Arc::clone(&provider_notification));
+    let media_owner =
+        crate::media_control::MediaOwner::start().map_err(ClientError::TerminalSetup)?;
+    let mut icon_search_workers = IconSearchWorkers::new();
+    let ambient_resources = execution.ambient_resources().map_err(|error| {
+        ClientError::TerminalSetup(std::io::Error::other(format!(
+            "ambient resources startup: {error:?}"
+        )))
+    })?;
+    app.animation_frame.configure_resources(ambient_resources);
+    let keyboard_enhancement_pushed = guard._guard.keyboard_enhancement_state();
+    // The presenter does not emit a frame until the owned query resolves.
+    let backend =
+        CrosstermBackend::new(crate::presentation::TerminalOutput::new(std::io::stdout()));
+    let mut presenter = crate::presentation::Presenter::start_with_cleanup(
+        backend,
+        &crate::execution::process_quota(),
+        move || drop(guard),
+    )
+    .map_err(ClientError::TerminalSetup)?;
+    let animation_notification = app.animation_frame.notification();
+    let animation_admission_notification = app.animation_frame.admission_notification();
+    // Single-flight presentation bounds this to one exact frame token. A token
+    // remains here until successful emission or an explicit failed-frame exit.
+    let mut animation_presentations: std::collections::VecDeque<(
+        u64,
+        Option<crate::background_animation::ComposedPresentation>,
+        crate::app::EmittedGeometry,
+    )> = std::collections::VecDeque::new();
+    let mut voice_service = None;
+    let mut pending_voice_event = None;
+    let mut voice_event_retry_at = None;
+    let mut onboarding_voice =
+        crate::onboarding::voice_runtime::VoiceDemoRuntime::new(voice_retirement_client.clone());
+    let onboarding_voice_notification = onboarding_voice.notification();
+    let mut pending_demo_event = None;
+    let mut demo_event_retry_at = None;
+    let mut demonstration_retirement_failed = false;
+    let mut input_owner = None;
+    let mut input_failure = None;
+    let mut deferred_input = None;
+    let result = async {
+    let mut presentation_frame_id = 0_u64;
+    let mut presentation_layout_revision = 0_u64;
+
     app.apply_ui_settings(config.ui);
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
@@ -616,19 +888,23 @@ async fn run_inner(
     if should_open_onboarding {
         crate::onboarding::integration::open(&mut app, options.onboarding);
     }
-    let initial_size = terminal.size().map_err(ClientError::TerminalSetup)?;
-    app.set_screen_area(Rect::new(0, 0, initial_size.width, initial_size.height));
+    app.set_screen_area(Rect::new(0, 0, columns, rows));
 
-    let mut connection =
-        Connection::connect(&options.socket_path, options.session_name.clone()).await?;
+    // Ordered codecs use the existing CPU bank. Their directional groups
+    // bypass the independently bounded general aggregate while sharing its root.
+    let mut connection = Connection::connect_admitted(
+        &options.socket_path,
+        options.session_name.clone(),
+        &execution,
+        outbound_admission,
+    ).await?;
     let mut trigger_execution_lease = TriggerExecutionLease::open(&options.socket_path);
     // Tells the server this connection hosts the voice session, so
     // `ilium voice say` can offer typed sentences to it. One-shot CLI
     // connections never send this.
-    app.queue_request(ilium_ipc::ClientRequest::RegisterVoiceTextReceiver);
+    app.pending_voice_receiver_registration = true;
+    reconcile_voice_receiver_registration(&mut app);
 
-    let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
-    let mut naming_workers = NamingWorkers::new(naming_events_tx, app.inference_settings.clone());
     naming_workers.set_automatic_ai_decision(
         app.onboarding_revision,
         app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
@@ -636,39 +912,34 @@ async fn run_inner(
     let (conversion_events_tx, mut conversion_events_rx) = mpsc::channel(256);
     let mut conversion_workers =
         crate::session_conversion::ConversionWorkers::new(conversion_events_tx);
-    let (search_events_tx, mut search_events_rx) = mpsc::channel(1);
-    let mut search_workers = SearchWorkers::new(search_events_tx);
-    let (smart_copy_events_tx, mut smart_copy_events_rx) = mpsc::channel(64);
-    let mut smart_copy_workers = SmartCopyWorkers::new(smart_copy_events_tx);
-    let (icon_search_events_tx, mut icon_search_events_rx) =
-        mpsc::channel(ICON_SEARCH_EVENTS_CHANNEL_CAPACITY);
-    let mut icon_search_workers = IconSearchWorkers::new(icon_search_events_tx);
+    let search_client = execution.client(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 })
+        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("workspace search startup: {error:?}"))))?;
+    let mut search_workers = SearchWorkers::new(search_client);
+    let search_notification = search_workers.notification();
+    let icon_search_notification = icon_search_workers.notification();
     let (reset_events_tx, mut reset_events_rx) = mpsc::channel(4);
     let (reset_settings_tx, reset_settings_rx) =
         tokio::sync::watch::channel(app.reset_planning_settings.clone());
     let reset_monitor = crate::reset_planning::spawn_monitor(reset_settings_rx, reset_events_tx);
-    let mut control_plane = crate::control::ControlPlane::default();
-    let mut onboarding_voice = crate::onboarding::voice_runtime::VoiceDemoRuntime::default();
-    let mut onboarding_paused_players = Vec::new();
-    let mut voice_service = if app.voice_settings.enabled && app.onboarding.is_none() {
+    let control_client = execution.client(ilium_execution::ClientLimits {
+        jobs: 20, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 256 * 1024 * 1024,
+    }).map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
+    let mut control_plane = crate::control::ControlPlane::new(control_client);
+    let control_notification = control_plane.notification().ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("control preparation notification unavailable")))?;
+    let demonstration_media = media_owner.demonstration();
+    voice_service = if app.voice_settings.enabled && app.onboarding.is_none() {
         start_voice_service(&mut app, &control_plane)
     } else {
         None
     };
+    control_plane.synchronize_voice_instance(voice_service.as_ref().map(ilium_voice::VoiceService::instance_identity));
     let mut delivered_voice_target_context = voice_service
         .as_ref()
         .map(|_| crate::control::VoiceTargetContext::capture(&app));
-    // Bus names of the MPRIS players `pause_playing_players` paused, so a
-    // later stop resumes only those -- see `reconcile_voice_runtime` and
-    // `VoiceSettings::pause_media_while_active`. Voice mode can already be
-    // enabled at startup (a persisted setting, not just an F8 press), so
-    // this covers that path the same way as an in-session toggle.
-    let mut paused_media_players =
-        if voice_service.is_some() && app.voice_settings.pause_media_while_active {
-            crate::media_control::pause_playing_players().await
-        } else {
-            Vec::new()
-        };
+    // The media owner retains actual acknowledged player names; this lease
+    // publishes only intent, including voice enabled by a persisted setting.
+    let mut normal_media = media_owner.normal();
+    normal_media.request(voice_service.is_some() && app.voice_settings.pause_media_while_active);
     // Resolved once at startup (cheap: just reads `$HOME`/the platform's
     // equivalent), rather than per pane -- `None` on a platform/environment
     // where it can't be resolved simply disables session-title inference
@@ -690,7 +961,7 @@ async fn run_inner(
         Ok(None) if app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed() => {
             app.is_project_name_loading = true;
             app.project_name_attempt_revision = Some(app.onboarding_revision);
-            naming_workers.spawn_project_name_worker(app.session_cwd.clone());
+            handle_naming_admission(naming_workers.spawn_project_name_worker(app.session_cwd.clone()), &mut app);
         }
         Ok(None) => {}
         Err(error) => {
@@ -703,7 +974,18 @@ async fn run_inner(
         }
     }
 
-    let mut input_rx = spawn_input_forwarder();
+    let (owner, mut input_rx, picker_receiver) =
+        input_reservation.start_with_image_probe(keyboard_enhancement_pushed)?;
+    input_owner = Some(owner);
+    let picker = picker_receiver
+        .await
+        .map_err(|_| ClientError::TerminalSetup(std::io::Error::other(
+            "terminal image probe worker exited before reporting"
+        )))?
+        .map_err(ClientError::TerminalSetup)?;
+    if let Some(picker) = picker {
+        app.install_terminal_image_picker(picker);
+    }
 
     // Set so the very first pass through the loop always draws (there's
     // nothing on screen yet); every branch below that actually changes
@@ -720,18 +1002,54 @@ async fn run_inner(
     let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
+        app.begin_editor_capture_turn();
+        if let Err(failure) = app.retry_native_terminal_paste() {
+            input_failure = Some(failure);
+            break;
+        }
+        if app.pending_native_paste.is_none() {
+            if let Some(event) = deferred_input.take() {
+                if let Some(failure) = dispatch_ready_input_events(
+                    &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
+                    home_dir.as_deref(), event, &mut deferred_input,
+                ) {
+                    input_failure = Some(failure);
+                    break;
+                }
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
+        }
         if app.synchronize_animation_project_settings() {
             needs_redraw = true;
             needs_immediate_redraw = true;
         }
         let now = Instant::now();
+        let voice_output_owner = voice_service.as_ref().map(ilium_voice::VoiceService::instance_identity);
+        control_plane.synchronize_voice_instance(voice_output_owner.clone());
         let mut voice_tool_outputs = Vec::new();
         let maintenance_schedule = app.maintenance_schedule(now);
         let mut tick_delay = maintenance_schedule.delay;
+        if let Some(delay) = onboarding_voice.startup_retry_delay(now) {
+            tick_delay = tick_delay.min(delay);
+        }
+        if let Some(delay) = app.voice_preparation.retry_delay(now) {
+            tick_delay = tick_delay.min(delay);
+        }
+        for delay in [naming_workers.retry_delay(now), smart_copy_workers.retry_delay(now)].into_iter().flatten() {
+            tick_delay = tick_delay.min(delay);
+        }
+        if onboarding_voice.pending_work() || app.voice_preparation.is_pending() || app.normal_voice_commands.is_pending()
+            || app.voice_shutdown_requested || app.voice_shutdown_batch.is_some()
+            || app.pending_normal_voice_outputs.is_some() || app.normal_voice_context_waiting
+            || app.voice_native_retirement.as_ref().is_some_and(|owner| owner.is_pending()) {
+            tick_delay = tick_delay.min(Duration::from_millis(100));
+        }
+        if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
         }
-        if needs_redraw && !needs_immediate_redraw {
+        if needs_redraw && !needs_immediate_redraw && presenter.outstanding_frames() == 0 {
             tick_delay = tick_delay.min(output_redraw_delay(now, last_draw_at));
         }
         if let Some(interval) = app
@@ -747,36 +1065,101 @@ async fn run_inner(
             tick_delay = tick_delay.min(delay);
         }
 
+        let onboarding_actor_notification = onboarding_voice.actor_notification();
         tokio::select! {
-            input_event = input_rx.recv() => {
+            () = async {
+                match &onboarding_actor_notification {
+                    Some(notification) => notification.notified().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                onboarding_voice.collect(Instant::now()).await;
+                needs_redraw = true;
+            }
+            _ = control_notification.notified() => { needs_redraw = true; }
+            _ = clipboard_notification.notified() => {needs_redraw=true;}
+            _ = context_notification.notified() => { needs_redraw=true; }
+            _ = document_notification.notified() => { needs_redraw = true; }
+            _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
+            _ = statistics_notification.notified() => {
+                needs_redraw |= app.session_stats.drain_events();
+                needs_redraw |= app.tick_cost(Instant::now());
+            }
+            _ = terminal_notification.notified() => { needs_redraw = true; }
+            _ = filesystem_notification.notified() => { needs_redraw |= app.collect_editor_files(); }
+            _ = async { match &mut app.projection_admission_wake { Some(wake) => wake.as_mut().await, None => std::future::pending().await } } => {
+                app.projection_admission_wake = None;
+                app.projection_busy_retry_at = None;
+            }
+            _ = async { match app.projection_busy_retry_at { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => {
+                app.projection_admission_wake = None;
+                app.projection_busy_retry_at = None;
+            }
+            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();}
+            completion = app.debug_logging.next_completion() => {
+                apply_debug_logging_completion(&mut app, completion);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
+            acknowledgement = presenter.acknowledgements.recv() => {
+                let presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation owner exited")))?
+                    .map_err(ClientError::TerminalSetup)?;
+                if let Some((frame_id, animation, geometry)) = animation_presentations.pop_front() {
+                    if frame_id != presented.frame.frame_id {
+                        return Err(ClientError::TerminalSetup(std::io::Error::other("animation presentation identity mismatch")));
+                    }
+                    needs_redraw |= app.commit_emitted_geometry(geometry);
+                    if let Some(animation) = animation {
+                        let snapshot = animation.snapshot();
+                        tracing::trace!(frame_id, animation_revision = snapshot.revision,
+                            animation_sequence = snapshot.sequence,
+                            composition_to_emission_us = presented.emitted_at.saturating_duration_since(animation.composed_at()).as_micros() as u64,
+                            request_to_emission_us = presented.emitted_at.saturating_duration_since(snapshot.requested_at).as_micros() as u64,
+                            completed_frame_age_us = presented.emitted_at.saturating_duration_since(snapshot.completed_at).as_micros() as u64,
+                            "animation frame emitted");
+                        app.animation_frame.acknowledge(animation);
+                    }
+                }
+                tracing::trace!(frame_id = presented.frame.frame_id, layout_revision = presented.frame.layout_revision,
+                    frame_age_us = presented.emitted_at.duration_since(presented.frame.prepared_at).as_micros() as u64,
+                    emission_us = presented.emission_duration.as_micros() as u64, "terminal frame emitted");
+            }
+            _ = animation_notification.notified() => {
+                needs_redraw |= app.animation_frame.collect();
+            }
+            _ = animation_admission_notification.notified() => {
+                needs_redraw |= app.animation_frame.collect();
+            }
+            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && deferred_input.is_none() => {
                 match input_event {
                     Some(event) => {
-                        dispatch_ready_input_events(
+                        if let Some(failure) = dispatch_ready_input_events(
                             &mut app,
                             &mut input_rx,
                             &mut naming_workers,
                             &mut icon_search_workers,
                             home_dir.as_deref(),
                             event,
-                        );
+                            &mut deferred_input,
+                        ) {
+                            input_failure = Some(failure);
+                            break;
+                        }
                         needs_redraw = true;
                         needs_immediate_redraw = true;
                     }
-                    // The input-reading thread ended (a crossterm read
-                    // error -- see `spawn_input_forwarder`); keyboard and
-                    // mouse are the only way `exit_reason` ever gets set
-                    // (see `keys.rs`), so without this the client would
-                    // otherwise keep running forever, fully unresponsive to
-                    // the user, until something external kills the process.
                     None => {
-                        tracing::error!("input event channel closed; client can no longer accept input");
-                        break;
+                        return Err(ClientError::TerminalSetup(std::io::Error::other(
+                            "terminal input owner stopped before a requested shutdown",
+                        )));
                     }
                 }
             }
-            server_event = connection.events.recv() => {
+            server_event = connection.events.recv(), if app.pending_terminal_events.len() < MAX_PENDING_SERVER_EVENTS => {
                 match server_event {
                     Some(event) => {
+                        needs_redraw = true;
+                        let Some(event) = queue_server_event_in_order(&mut app, event) else { continue; };
                         let damage = apply_server_events(
                             &mut app,
                             &mut connection.events,
@@ -811,12 +1194,12 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            Some(search_event) = search_events_rx.recv() => {
-                search_workers.finish();
-                app.apply_workspace_search_result(search_event);
+            _ = search_notification.notified() => {
+                if let Some(search_event) = search_workers.collect() { app.apply_workspace_search_result(search_event); }
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
+            _=provider_notification.notified()=>{naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();},
             Some(smart_copy_event) = smart_copy_events_rx.recv() => {
                 let generation = smart_copy_event.generation;
                 let is_terminal = matches!(smart_copy_event.update, SmartCopyWorkerUpdate::Finished | SmartCopyWorkerUpdate::Failed(_));
@@ -827,32 +1210,57 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            Some(icon_search_event) = icon_search_events_rx.recv() => {
-                app.apply_icon_semantic_search_event(icon_search_event);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
+            _ = icon_search_notification.notified() => {
+                if let Some(event) = icon_search_workers.poll() {
+                    app.apply_icon_semantic_search_event(event);
+                    needs_redraw = true;
+                    needs_immediate_redraw = true;
+                }
             }
             Some(reset_event) = reset_events_rx.recv() => {
                 app.reset_monitor_state.apply(reset_event, &app.reset_planning_settings);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            demo_event = onboarding_voice.next_event() => {
+            demo_event = next_demo_voice_event(&mut onboarding_voice, &mut pending_demo_event, demo_event_retry_at) => {
                 match demo_event {
-                    Some(event)=>onboarding_voice.handle_event(event).await,
+                    Some(event) => match onboarding_voice.handle_event(event).await {
+                        Ok(()) => demo_event_retry_at = None,
+                        Err(original) => {
+                            pending_demo_event = Some(original);
+                            demo_event_retry_at = Some(tokio::time::Instant::now() + Duration::from_millis(20));
+                        }
+                    },
                     None=>onboarding_voice.channel_closed().await,
                 }
                 needs_redraw=true;needs_immediate_redraw=true;
             }
-            voice_event = next_voice_event(&mut voice_service) => {
+            () = normal_voice_preparation_notification.notified() => { needs_redraw=true; }
+            () = onboarding_voice_notification.notified() => {
+                onboarding_voice.collect(Instant::now()).await;
+                needs_redraw = true;
+            }
+            voice_event = next_voice_event(&mut voice_service, &mut pending_voice_event, voice_event_retry_at), if app.pending_normal_voice_outputs.is_none() && app.normal_voice_commands.available()!=0 => {
                 match voice_event {
                     Some(event) => {
-                        voice_tool_outputs =
-                            handle_voice_event(&mut app, &mut control_plane, event);
+                        match handle_voice_event(&mut app, &mut control_plane, event) {
+                            Ok(outputs) => {
+                                app.voice_event_projection_pending = false;
+                                voice_tool_outputs = outputs;
+                                voice_event_retry_at = None;
+                            }
+                            Err((original, reason)) => {
+                                app.voice_event_projection_pending = true;
+                                pending_voice_event = Some(original);
+                                voice_event_retry_at = Some(tokio::time::Instant::now() + Duration::from_millis(20));
+                                app.status_message = Some(reason);
+                            }
+                        }
                     }
                     None if voice_service.is_some() => {
                         tracing::error!("voice service event stream closed");
-                        voice_service = None;
+                        app.voice_shutdown_requested = true;
+                        if let Some(service) = &voice_service { service.request_shutdown(); }
                         if should_report_unexpected_voice_stop(
                             app.voice_settings.enabled,
                             &app.voice_connection_state,
@@ -867,8 +1275,7 @@ async fn run_inner(
                         // the user's perspective -- media paused for it must
                         // not stay paused just because the actor crashed
                         // instead of shutting down through `reconcile_voice_runtime`.
-                        let players = std::mem::take(&mut paused_media_players);
-                        crate::media_control::resume_players(players).await;
+                        normal_media.request(false);
                     }
                     None => {}
                 }
@@ -894,6 +1301,12 @@ async fn run_inner(
             }
         }
 
+        if app.pending_normal_voice_outputs.is_none() && app.normal_voice_commands.available()!=0 {
+            if let Some(output) = control_plane.collect_prepared(&mut app) {
+                voice_tool_outputs.push(output);needs_redraw=true;
+            }
+        }
+
         // Continuous IPC/input can starve the sleep branch. Presentation
         // expiry must advance on every pass, including those busy passes.
         needs_redraw |=
@@ -909,28 +1322,43 @@ async fn run_inner(
             &mut icon_search_workers,
             home_dir.as_deref(),
         );
-        if app.take_smart_copy_cancel_requested() {
-            smart_copy_workers.cancel();
+        dispatch_pending_smart_copy_work(&mut app, &mut smart_copy_workers); // Cancellation precedes the dated App-original retry gate.
+        smart_copy_workers.collect();
+        needs_redraw |= app.collect_terminal_parsing();
+        if app.projection_admission_wake.is_none() {
+        if let Some(event)=app.pending_terminal_events.pop_front() {
+            let damage=apply_server_events(&mut app,&mut connection.events,event,&mut naming_workers,&mut icon_search_workers,&mut trigger_execution_lease,home_dir.as_deref());
+            needs_redraw|=damage.needs_redraw;needs_immediate_redraw|=damage.needs_immediate_redraw;
         }
-        if let Some(request) = app.take_pending_smart_copy_request() {
-            smart_copy_workers.start(request);
         }
+        needs_redraw |= app.collect_document_preparation();
+        needs_redraw |= app.collect_terminal_context_preparation();
+        needs_redraw |= app.collect_emitted_smart_copy_capture();
+        needs_redraw |= app.collect_clipboard();
+        needs_redraw |= app.collect_editor_files();
         reconcile_debug_logging(&mut app);
+        reconcile_debug_logging_server(&mut app);
+        reconcile_voice_receiver_registration(&mut app);
+        collect_normal_voice_preparation(&mut app,&mut voice_service,&mut delivered_voice_target_context,&mut normal_media);
         reconcile_agent_debug_menu(&mut app);
         reconcile_progress_monitor_enabled(&mut app);
         // Release the demonstration's devices/media ownership before the
         // saved normal voice preference can acquire those resources again.
         let is_voice_step = app.onboarding.is_some()
             && app.onboarding_progress.wizard.step == crate::onboarding::state::Step::Voice;
+        onboarding_voice.set_external_owner_pending(
+            app.normal_voice_ownership_pending(voice_service.is_some()),
+        );
         onboarding_voice
             .reconcile(&app.voice_settings, is_voice_step)
             .await;
-        if (!onboarding_voice.state.is_running || !app.voice_settings.pause_media_while_active)
-            && !onboarding_paused_players.is_empty()
-        {
-            crate::media_control::resume_players(std::mem::take(&mut onboarding_paused_players))
-                .await;
-        }
+        onboarding_voice.collect(Instant::now()).await;
+        needs_redraw |= audit_demo_voice_retirement(
+            &mut app, &mut onboarding_voice, &mut demonstration_retirement_failed,
+        );
+        app.voice_demo_retirement_pending = onboarding_voice.pending_work();
+        demonstration_media.request(onboarding_voice.state.can_stop
+            && app.voice_settings.pause_media_while_active);
         let is_voice_tool_shutdown = voice_tool_outputs_request_shutdown(&voice_tool_outputs);
         if is_voice_tool_shutdown {
             // A terminating result dominates any parallel tool call that may
@@ -942,7 +1370,7 @@ async fn run_inner(
                 &mut app,
                 &control_plane,
                 &mut voice_service,
-                &mut paused_media_players,
+                &mut normal_media,
             )
             .await;
             reconcile_voice_target_context(
@@ -962,11 +1390,11 @@ async fn run_inner(
         // pane or split transition. The server journal repairs a newly
         // visible pane before its live stream resumes.
         let streamed_pane_slots = app.displayed_pane_slots();
-        if last_streamed_pane_slots != Some(streamed_pane_slots) {
-            app.queue_request(ilium_ipc::ClientRequest::SetVisiblePanes {
+        if last_streamed_pane_slots != Some(streamed_pane_slots)
+            && app.queue_request(ilium_ipc::ClientRequest::SetVisiblePanes {
                 pane_ids: streamed_pane_slots.into_iter().flatten().collect(),
-            });
-            last_streamed_pane_slots = Some(streamed_pane_slots);
+            }) {
+                last_streamed_pane_slots = Some(streamed_pane_slots);
         }
 
         if let Some(job) = app.take_pending_conversion_start() {
@@ -976,28 +1404,34 @@ async fn run_inner(
             conversion_workers.cancel();
         }
 
-        let outbound_requests = crate::outbound_requests::coalesce(app.take_outbound_requests());
-        for request in outbound_requests {
-            // The writer queue is deliberately bounded. Awaiting its capacity
-            // applies lossless backpressure to crossterm's already-bounded
-            // input channel instead of silently dropping a key or command.
-            if connection.requests.send(request).await.is_err() {
-                tracing::error!("server request channel closed before request delivery");
-                break 'event_loop;
-            }
+        if app.publish_outbound_requests(&connection.requests).is_err() {
+            tracing::error!("server request channel closed before request delivery");
+            break 'event_loop;
         }
 
         // A confirmation-required terminal submission queues its visible
         // text as IPC before returning the tool result that makes the voice
         // model ask the question. This preserves the user-facing contract:
         // type first, then ask whether to press Enter.
-        deliver_voice_tool_outputs(&mut app, &mut voice_service, voice_tool_outputs).await;
+        let current_voice_owner = voice_service.as_ref().map(ilium_voice::VoiceService::instance_identity);
+        let same_owner = match (&voice_output_owner, &current_voice_owner) {
+            (Some(original), Some(current)) => std::sync::Arc::ptr_eq(original, current),
+            (None, None) => true,
+            _ => false,
+        };
+        let discarded_voice_requests = control_plane.has_pending_preparation() || !voice_tool_outputs.is_empty();
+        if control_plane.synchronize_voice_instance(current_voice_owner) && !same_owner && discarded_voice_requests {
+            app.status_message = Some("Voice control requests cancelled because their original voice session ended".into());
+        }
+        if same_owner {
+            deliver_voice_tool_outputs(&mut app, &mut voice_service, voice_tool_outputs).await;
+        }
         if is_voice_tool_shutdown {
             reconcile_voice_runtime(
                 &mut app,
                 &control_plane,
                 &mut voice_service,
-                &mut paused_media_players,
+                &mut normal_media,
             )
             .await;
             reconcile_voice_target_context(
@@ -1023,10 +1457,9 @@ async fn run_inner(
                         let result = onboarding_voice.start_test(&app.voice_settings).await;
                         if result.is_ok()
                             && app.voice_settings.pause_media_while_active
-                            && onboarding_paused_players.is_empty()
+                            && !demonstration_media.is_requested()
                         {
-                            onboarding_paused_players =
-                                crate::media_control::pause_playing_players().await;
+                            demonstration_media.request(true);
                         }
                         result
                     }
@@ -1049,10 +1482,9 @@ async fn run_inner(
             }
         }
         if (!onboarding_voice.state.is_running || !app.voice_settings.pause_media_while_active)
-            && !onboarding_paused_players.is_empty()
+            && demonstration_media.is_requested()
         {
-            crate::media_control::resume_players(std::mem::take(&mut onboarding_paused_players))
-                .await;
+            demonstration_media.request(false);
         }
 
         if app.synchronize_animation_project_settings() {
@@ -1083,42 +1515,473 @@ async fn run_inner(
             needs_redraw = true;
         }
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
-        if needs_redraw && can_draw {
-            let completed_frame = terminal
-                .draw(|frame| {
-                    crate::ui::draw_at(frame, &mut app, animation_elapsed);
-                    crate::text_trigger_dialog::draw_save_error(frame, &app);
-                    crate::terminal_guard::skip_bottom_right_cell(frame, cfg!(windows));
-                })
-                .map_err(ClientError::TerminalSetup)?;
-            // CompletedFrame exists only after Ratatui's backend flush succeeds.
-            // It contains the actual auto-resized buffer after overlays and
-            // platform Skip controls, not the earlier scene raster.
-            crate::background_composition::acknowledge_final(
-                completed_frame.buffer,
-                completed_frame.area,
-                &mut app,
-            );
+        // Reserve before composition: graphics uploads and exact animation
+        // receipts must follow the ordered frame that really reaches output.
+        if needs_redraw && can_draw && presenter.outstanding_frames() == 0 {
+            let reservation = match presenter.try_reserve() {
+                Some(reservation) => app.admit_composition_metadata()
+                    .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?
+                    .then_some(reservation),
+                None => None,
+            };
+            if let Some(reservation) = reservation {
+                let area = app.layout.screen_area;
+                if terminal.current_buffer_mut().area != area {
+                    terminal.resize(area).unwrap_or_else(|error| match error {});
+                }
+                terminal.current_buffer_mut().reset();
+                let mut frame = terminal.get_frame();
+                let cursor = crate::ui::draw_at_with_cursor(&mut frame, &mut app, animation_elapsed);
+                crate::text_trigger_dialog::draw_save_error(&mut frame, &app);
+                crate::terminal_guard::skip_bottom_right_cell(&mut frame, cfg!(windows));
+                let buffer = frame.buffer_mut().clone();
+                presentation_frame_id = presentation_frame_id.checked_add(1)
+                    .ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation frame identity exhausted")))?;
+                presentation_layout_revision = presentation_layout_revision.checked_add(1)
+                    .ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation layout revision exhausted")))?;
+                let animation = crate::background_composition::capture_final(&buffer, area, &mut app);
+                let prepared = crate::presentation::PreparedFrame::new(reservation, buffer, cursor,
+                    presentation_frame_id, presentation_layout_revision).map_err(ClientError::TerminalSetup)?;
+                let geometry = app.capture_emitted_geometry(presentation_layout_revision);
+                presenter.submit(prepared).map_err(|failure| ClientError::TerminalSetup(failure.error))?;
+                animation_presentations.push_back((presentation_frame_id, animation, geometry));
             needs_redraw = false;
             needs_immediate_redraw = false;
             last_draw_at = Instant::now();
             last_animation_frame_bucket = animation_frame_bucket;
+            }
         }
     }
+    input_rx.close();
     reset_monitor.abort();
 
-    smart_copy_workers.cancel();
-    onboarding_voice.shutdown().await;
-    crate::media_control::resume_players(onboarding_paused_players).await;
-
-    if let Some(service) = voice_service {
-        service.shutdown().await;
+    // Settle accepted state replies and their following semantic actions while
+    // their original voice actor and the outbound terminal consumers remain alive.
+    let control_drain = async {
+        while control_plane.has_pending_preparation() {
+            let ready = control_notification.notified();
+            let admission = filesystem_admission_notification.notified();
+            tokio::pin!(ready, admission);
+            ready.as_mut().enable();
+            admission.as_mut().enable();
+            collect_normal_voice_preparation(&mut app,&mut voice_service,&mut delivered_voice_target_context,&mut normal_media);
+            reconcile_voice_target_context(&mut app, &control_plane, voice_service.as_ref(), &mut delivered_voice_target_context).await;
+            deliver_voice_tool_outputs(&mut app, &mut voice_service, Vec::new()).await;
+            if app.pending_normal_voice_outputs.is_none() && app.normal_voice_commands.available() != 0 {
+                if let Some(output) = control_plane.collect_prepared(&mut app) {
+                    deliver_voice_tool_outputs(&mut app, &mut voice_service, vec![output]).await;
+                    continue;
+                }
+            }
+            if !control_plane.has_pending_preparation() { break; }
+            tokio::select! { _ = &mut ready => {}, _ = &mut admission => {}, _ = tokio::time::sleep(Duration::from_millis(20)) => {} }
+        }
+    };
+    if tokio::time::timeout(Duration::from_secs(5), control_drain).await.is_err() {
+        control_plane.cancel_pending();
+        return Err(ClientError::TerminalSetup(std::io::Error::other("voice control drain deadline expired; preparation cancelled without claiming delivery")));
     }
-    crate::media_control::resume_players(paused_media_players).await;
 
-    // A dropped input/server channel remains an ordinary exit. Only the
-    // explicit Restart menu action can request a process re-exec.
+    app.model_catalog_preparation.close();
+    naming_workers.close_finite();
+    smart_copy_workers.cancel();
+    app.prepare_terminal_shutdown();
+    app.cancel_source_windows();
+    connection.request_read_shutdown();
+    // Detach stops new frames at a transport boundary. Drive all already
+    // accepted bytes and input barriers through the same consumers before
+    // cancelling the persistent parser. A deadline reports uncertainty.
+    let terminal_drain = async {
+        loop {
+            let notification = terminal_notification.notified();
+            let baseline_ready = filesystem_notification.notified();
+            let baseline_admission = filesystem_admission_notification.notified();
+            tokio::pin!(notification, baseline_ready, baseline_admission);
+            notification.as_mut().enable();
+            baseline_ready.as_mut().enable();
+            baseline_admission.as_mut().enable();
+            naming_workers.collect();
+            while let Ok(event)=naming_events_rx.try_recv() {
+                tick::apply_naming_worker_event(&mut app,&mut naming_workers,event);
+            }
+            app.collect_terminal_parsing();
+            if let Some(failure) = app.take_native_paste_failure() {
+                input_failure = Some(terminal_input_owner::InputFailure::combine(input_failure.take(), failure));
+                return Err(ClientError::TerminalSetup(std::io::Error::other("terminal Paste publication failed; original retained for caller")));
+            }
+            app.collect_terminal_context_preparation();
+            app.collect_clipboard();
+            app.collect_terminal_baselines();
+            dispatch_pending_app_work(&mut app, &mut naming_workers, &mut icon_search_workers, home_dir.as_deref());
+            if let Some(reason) = app.projection_admission_failure {
+                return Err(ClientError::TerminalSetup(std::io::Error::other(format!("unrecoverable incoming projection admission failure: {reason:?}"))));
+            }
+            let event = if app.projection_admission_wake.is_none() {
+                app.pending_terminal_events.pop_front().or_else(|| connection.events.try_recv().ok())
+            } else { None };
+            if let Some(event) = event {
+                apply_server_events(&mut app, &mut connection.events, event,
+                    &mut naming_workers, &mut icon_search_workers,
+                    &mut trigger_execution_lease, home_dir.as_deref());
+            }
+            for request in app.take_admitted_outbound_requests() {
+                connection.requests.send_admitted(request).await.map_err(|_| ClientError::TerminalSetup(
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe,
+                        "accepted terminal input could not drain before detach")))?;
+            }
+            let (events, intents, owner) = app.terminal_pending_work();
+            if events == 0 && intents == 0 && owner == Some((0, 0))
+                && animation_presentations.is_empty()
+                && !app.has_pending_exact_prompt_reports()
+                && !naming_workers.has_pending_exact_delivery() && naming_events_rx.is_empty()
+                && !app.terminal_clipboard.as_ref().is_some_and(|clipboard|clipboard.pending())
+                && app.terminal_baselines.as_ref().is_none_or(|files| !files.pending())
+                && connection.events.is_closed() && connection.events.is_empty() {
+                // Observe a final publication queued just before active_bytes
+                // cleared, including a barrier which can produce more input.
+                app.collect_terminal_parsing();
+                app.collect_clipboard();
+                app.collect_terminal_baselines();
+                if app.terminal_pending_work() == (0, 0, Some((0, 0))) && !naming_workers.has_pending_exact_delivery() && naming_events_rx.is_empty() && !app.has_pending_exact_prompt_reports() && !app.terminal_clipboard.as_ref().is_some_and(|clipboard|clipboard.pending()) && app.terminal_baselines.as_ref().is_none_or(|files| !files.pending()) {
+                    break;
+                }
+                continue;
+            }
+            if let Some(error) = app.terminal_parsing.as_mut().and_then(|parser| parser.failure()) {
+                return Err(ClientError::TerminalSetup(std::io::Error::other(error)));
+            }
+            if naming_workers.has_pending_exact_delivery() || !naming_events_rx.is_empty() {continue;}
+            tokio::select! {
+                // Queued complete frames retain parser source leases. Consume
+                // actual output receipts during parser drain so those leases
+                // cannot prevent the next ordered snapshot publication.
+                acknowledgement = presenter.acknowledgements.recv(), if !animation_presentations.is_empty() => {
+                    let presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(
+                        std::io::Error::other("presentation owner closed during terminal drain")))?
+                        .map_err(ClientError::TerminalSetup)?;
+                    let Some((frame_id, animation, geometry)) = animation_presentations.pop_front() else {
+                        return Err(ClientError::TerminalSetup(std::io::Error::other("missing terminal drain presentation identity")));
+                    };
+                    if frame_id != presented.frame.frame_id {
+                        return Err(ClientError::TerminalSetup(std::io::Error::other("terminal drain presentation identity mismatch")));
+                    }
+                    // Interaction has ended; installing geometry would pin the
+                    // emitted source again. Scene receipts still apply exactly.
+                    drop(geometry);
+                    if let Some(animation) = animation { app.animation_frame.acknowledge(animation); }
+                    app.animation_frame.collect();
+                },
+                _ = notification => {},
+                _ = baseline_ready => {},
+                _ = baseline_admission => {},
+                _ = async { match &mut app.projection_admission_wake { Some(wake) => wake.as_mut().await, None => std::future::pending().await } } => {
+                    app.projection_admission_wake = None; app.projection_busy_retry_at = None;
+                },
+                _ = async { match app.projection_busy_retry_at { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => {
+                    app.projection_admission_wake = None; app.projection_busy_retry_at = None;
+                },
+                _ = clipboard_notification.notified() => {},
+                _ = context_notification.notified() => {},
+                event = connection.events.recv(), if app.pending_terminal_events.len() < MAX_PENDING_SERVER_EVENTS && !connection.events.is_closed() => {
+                    if let Some(event) = event.and_then(|event| queue_server_event_in_order(&mut app, event)) {
+                        apply_server_events(&mut app, &mut connection.events, event,
+                            &mut naming_workers, &mut icon_search_workers,
+                            &mut trigger_execution_lease, home_dir.as_deref());
+                    }
+                },
+                // A short try_lock failure can unlock without an owner wake.
+                _ = tokio::time::sleep(Duration::from_millis(1)), if owner.is_none() || app.has_pending_exact_prompt_reports() || app.terminal_baselines.as_ref().is_some_and(|files| files.needs_retry()) => {},
+            }
+        }
+        connection.finish_read_shutdown().await.map_err(|error|
+            ClientError::TerminalSetup(std::io::Error::other(error)))
+    };
+    tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
+        .map_err(|_| ClientError::TerminalSetup(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "terminal detach deadline: accepted bytes or input remain unacknowledged")))??;
+    onboarding_voice.shutdown().await;
+    demonstration_media.request(false);
+
+    drain_normal_voice_retirement(&mut app, &mut voice_service, &mut pending_voice_event)
+        .await.map_err(ClientError::TerminalSetup)?;
+    normal_media.request(false);
+    media_owner.cancel();
+    icon_search_workers.cancel();
+
+    // Release exact emitted scene leases before configuration durability
+    // receipts try to admit their ordered semantic animation changes.
+    settle_presentation_receipts(&mut app, &mut presenter, &mut animation_presentations).await?;
+
+    // Finish logging transitions while the connection still owns its writer.
+    // The local file receipt alone cannot prove the server request was emitted.
+    let request_drain = async {
+        app.drain_filesystem().await.map_err(|error| crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(error)))?;
+        reconcile_debug_logging(&mut app);
+        while app.debug_logging.is_pending() {
+            let completion = app.debug_logging.next_completion().await;
+            apply_debug_logging_completion(&mut app, completion);
+        }
+        for request in app.take_admitted_outbound_requests() {
+            connection.requests.send_admitted(request).await.map_err(|_| {
+                crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "request writer closed during final drain")))
+            })?;
+        }
+        connection.requests.flush().await.map_err(crate::connection::ConnectionError::RequestDrain)?;
+        app.confirm_exact_prompt_reports_flushed();
+        Ok::<(),crate::connection::ConnectionError>(())
+    };
+    tokio::time::timeout(Duration::from_secs(5), request_drain).await
+        .map_err(|_| crate::connection::ConnectionError::DrainDeadline)??;
+
+    // Only the explicit Restart menu action can request a process re-exec.
+    // Input failures and undispatched originals are returned after cleanup.
     Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
+    }.await;
+    if let Some(pending) = app.pending_native_paste.take() {
+        input_failure = Some(terminal_input_owner::InputFailure::undispatched(
+            pending.event,
+            input_failure.take(),
+        ));
+    }
+    if let Some(event) = deferred_input.take() {
+        match event {
+            Ok(event) => {
+                input_failure = Some(terminal_input_owner::InputFailure::undispatched(
+                    event,
+                    input_failure.take(),
+                ))
+            }
+            Err(error) => {
+                input_failure = Some(terminal_input_owner::InputFailure::combine(
+                    input_failure.take(),
+                    error,
+                ))
+            }
+        }
+    }
+    if let Some(failure) = app.take_native_paste_failure() {
+        input_failure = Some(terminal_input_owner::InputFailure::combine(
+            input_failure.take(),
+            failure,
+        ));
+    }
+    while let Some(event) = app.take_undelivered_native_paste() {
+        input_failure = Some(terminal_input_owner::InputFailure::undispatched(
+            event,
+            input_failure.take(),
+        ));
+    }
+    let input_retirement = input_owner
+        .take()
+        .map(terminal_input_owner::InputOwner::stop);
+    let input_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    naming_workers.close_finite();
+    naming_workers.collect();
+    // Preserve completed exact evidence even when an unrelated error exits the
+    // event loop. The independent FIFO keeps bytes and source leases intact.
+    while let Ok(event) = naming_events_rx.try_recv() {
+        let exact = match &event {
+            NamingWorkerEvent::ExactPrepared { .. } => true,
+            NamingWorkerEvent::Prepared { event, .. } => {
+                matches!(&**event, NamingWorkerEvent::ExactPrepared { .. })
+            }
+            _ => false,
+        };
+        if exact {
+            tick::apply_naming_worker_event(&mut app, &mut naming_workers, event);
+        }
+    }
+    if result.is_err()
+        && (app.unconfirmed_exact_prompt_reports() != 0
+            || naming_workers.has_pending_exact_delivery())
+    {
+        tracing::error!(unconfirmed_exact_transcript_reports=app.unconfirmed_exact_prompt_reports(),
+            pending_exact_delivery=naming_workers.has_pending_exact_delivery(),
+            "Published exact transcript evidence has no final outbound flush acknowledgement; delivery is uncertain");
+    }
+    smart_copy_workers.cancel();
+    // This runs on every Result exit, including connection and output errors.
+    // Restore raw/alternate-screen state only after output has stopped.
+    let normal_shutdown_result =
+        drain_normal_voice_retirement(&mut app, &mut voice_service, &mut pending_voice_event)
+            .await
+            .map_err(ClientError::TerminalSetup);
+    let demonstration_shutdown_result = drain_demo_voice_retirement(
+        &mut app,
+        &mut onboarding_voice,
+        &mut pending_demo_event,
+        &mut demonstration_retirement_failed,
+    )
+    .await
+    .map_err(ClientError::TerminalSetup);
+    let clipboard_shutdown_result = match app.terminal_clipboard.take() {
+        Some(clipboard) => clipboard
+            .shutdown()
+            .await
+            .map_err(ClientError::TerminalSetup),
+        None => Ok(()),
+    };
+    let logging_result = tokio::time::timeout(Duration::from_secs(5), app.debug_logging.drain())
+        .await
+        .map_err(|_| ClientError::Logging(ilium_logging::LoggingError::Deadline))
+        .and_then(|result| result.map_err(ClientError::Logging));
+    app.prepare_terminal_shutdown();
+    app.cancel_source_windows();
+    if let Some(preparation) = &mut app.document_preparation {
+        preparation.cancel();
+    }
+    if let Some(preparation) = &mut app.terminal_context_preparation {
+        preparation.cancel();
+    }
+    let shutdown_result = presenter
+        .shutdown()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    let input_shutdown_result = match input_retirement {
+        Some(retirement) => finish_input_retirement(retirement, input_deadline).await,
+        None => Ok(()),
+    };
+    let media_shutdown_result = media_owner
+        .shutdown()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    let icon_shutdown_result = icon_search_workers
+        .shutdown()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    // Shutdown drains terminal output first; successful receipts still need
+    // exact scene credit even when the event loop exited for another error.
+    let mut animation_receipt_result = Ok(());
+    while let Ok(acknowledgement) = presenter.acknowledgements.try_recv() {
+        if let Ok(presented) = acknowledgement {
+            match animation_presentations.pop_front() {
+                Some((frame_id, animation, geometry)) if frame_id == presented.frame.frame_id => {
+                    drop(geometry);
+                    if let Some(animation) = animation {
+                        app.animation_frame.acknowledge(animation);
+                    }
+                }
+                _ => {
+                    animation_receipt_result = Err(ClientError::TerminalSetup(
+                        std::io::Error::other("animation shutdown presentation identity mismatch"),
+                    ))
+                }
+            }
+        }
+    }
+    // Remaining tokens correspond to frames without a successful flush.
+    animation_presentations.clear();
+    // Presenter has joined and every ordered ACK/failed-frame owner was settled.
+    // Release its last immutable editor leaves before execution retirement joins.
+    app.release_editor_frame_owners();
+    let filesystem_result = app
+        .drain_filesystem()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    for pane in app.panes.values_mut() {
+        if let PaneRuntime::Editor(editor) = pane {
+            editor.clear_preparation();
+        }
+    }
+    if let Some(parsing) = &mut app.terminal_parsing {
+        parsing.cancel();
+    }
+    let animation_shutdown_result = app
+        .animation_frame
+        .shutdown()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    app.session_stats.cancel_pending();
+    app.cost_tracker.cancel_pending();
+    app.model_catalog_preparation.close();
+    let execution_result = execution
+        .shutdown()
+        .await
+        .map_err(ClientError::TerminalSetup);
+    let result = shutdown_result
+        .and(normal_shutdown_result)
+        .and(demonstration_shutdown_result)
+        .and(clipboard_shutdown_result)
+        .and(media_shutdown_result)
+        .and(icon_shutdown_result)
+        .and(animation_receipt_result)
+        .and(animation_shutdown_result)
+        .and(logging_result)
+        .and(filesystem_result)
+        .and(execution_result)
+        .and(result);
+    let retirement = input_shutdown_result.err();
+    if input_failure.is_some() || retirement.is_some() {
+        Err(ClientError::Input(Box::new(crate::error::InputRunError {
+            failure: input_failure,
+            retirement,
+            other: result.err(),
+        })))
+    } else {
+        result
+    }
+}
+
+async fn finish_input_retirement(
+    mut retirement: terminal_input_owner::InputRetirement,
+    deadline: tokio::time::Instant,
+) -> Result<(), crate::error::InputRetirementError> {
+    loop {
+        if let Some(report) = retirement.try_complete() {
+            return report
+                .into_result()
+                .map_err(crate::error::InputRetirementError::Failed);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(crate::error::InputRetirementError::Deadline(
+                retirement.into_deadline(),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Drain already-admitted frames while preserving their exact scene leases.
+async fn settle_presentation_receipts(
+    app: &mut App,
+    presenter: &mut crate::presentation::Presenter,
+    pending: &mut std::collections::VecDeque<(
+        u64,
+        Option<crate::background_animation::ComposedPresentation>,
+        crate::app::EmittedGeometry,
+    )>,
+) -> Result<(), ClientError> {
+    let drain = async {
+        while !pending.is_empty() {
+            let presented = presenter.acknowledgements.recv().await.ok_or_else(|| {
+                std::io::Error::other("presentation owner closed before final acknowledgement")
+            })??;
+            let Some((frame_id, animation, geometry)) = pending.pop_front() else {
+                return Err(std::io::Error::other("missing final presentation identity"));
+            };
+            if frame_id != presented.frame.frame_id {
+                return Err(std::io::Error::other(
+                    "final presentation identity mismatch",
+                ));
+            }
+            drop(geometry);
+            if let Some(animation) = animation {
+                app.animation_frame.acknowledge(animation);
+            }
+            app.animation_frame.collect();
+        }
+        Ok(())
+    };
+    tokio::time::timeout(Duration::from_secs(5), drain)
+        .await
+        .map_err(|_| {
+            ClientError::TerminalSetup(std::io::Error::other(
+                "terminal presentation drain deadline",
+            ))
+        })?
+        .map_err(ClientError::TerminalSetup)
 }
 
 /// Applies one coalesced Debug toggle to this client process and queues the
@@ -1129,19 +1992,77 @@ fn reconcile_debug_logging(app: &mut App) {
         return;
     };
     if !enabled {
-        tracing::info!("client file logging disabled from Debug settings");
+        tracing::info!("client file logging disable requested");
     }
-    match ilium_logging::set_enabled(enabled) {
+    match app.debug_logging.request(enabled) {
         Ok(()) => {
-            app.queue_request(ilium_ipc::ClientRequest::UpdateDebugLogging { enabled });
-            if enabled {
-                tracing::info!("client file logging enabled from Debug settings");
+            app.debug_settings.file_logging_enabled = app.debug_logging.confirmed_enabled();
+            mark_debug_logging_pending(app);
+        }
+        Err(error) => {
+            app.retain_debug_logging_target(enabled);
+            app.status_message = Some(format!("Debug logging change queued: {error}"));
+        }
+    }
+}
+
+fn mark_debug_logging_pending(app: &mut App) {
+    // A successfully queued runtime transition must not erase a config-save
+    // failure or another feature's status with a premature success impression.
+    if app.status_message.as_deref().is_none_or(|message| {
+        message == "Applying debug logging…" || message == "Debug logging applied"
+    }) {
+        app.status_message = Some("Applying debug logging…".to_owned());
+    }
+}
+
+fn apply_debug_logging_completion(app: &mut App, completion: crate::debug_logging::Completion) {
+    app.debug_settings.file_logging_enabled = app.debug_logging.confirmed_enabled();
+    match completion.result {
+        Ok(()) => {
+            if completion.origin == crate::debug_logging::Origin::Client {
+                app.pending_debug_logging_server_enabled = Some(completion.enabled);
+                reconcile_debug_logging_server(app);
+            }
+            if completion.enabled {
+                tracing::info!("client file logging transition acknowledged");
+            }
+            if !completion.is_pending
+                && app.pending_debug_logging_server_enabled.is_none()
+                && app.status_message.as_deref() == Some("Applying debug logging…")
+            {
+                app.status_message = Some("Debug logging applied".to_owned());
             }
         }
         Err(error) => {
-            tracing::error!(%error, "failed to apply Debug file logging setting");
             app.status_message = Some(format!("Could not apply debug logging: {error}"));
+            tracing::error!(%error, "client logging transition failed");
         }
+    }
+}
+
+// The local writer transition has already completed. Retrying this complete
+// server state must not rerun the writer transition or its filesystem effects.
+fn reconcile_debug_logging_server(app: &mut App) {
+    let Some(enabled) = app.pending_debug_logging_server_enabled else {
+        return;
+    };
+    if app.queue_request(ilium_ipc::ClientRequest::UpdateDebugLogging { enabled }) {
+        app.pending_debug_logging_server_enabled = None;
+        if !app.debug_logging.is_pending()
+            && app.debug_logging.confirmed_enabled() == enabled
+            && app.status_message.as_deref() == Some("Applying debug logging…")
+        {
+            app.status_message = Some("Debug logging applied".to_owned());
+        }
+    }
+}
+
+fn reconcile_voice_receiver_registration(app: &mut App) {
+    if app.pending_voice_receiver_registration
+        && app.queue_request(ilium_ipc::ClientRequest::RegisterVoiceTextReceiver)
+    {
+        app.pending_voice_receiver_registration = false;
     }
 }
 
@@ -1149,57 +2070,56 @@ fn reconcile_agent_debug_menu(app: &mut App) {
     let Some(enabled) = app.take_pending_agent_debug_menu_enabled() else {
         return;
     };
-    app.queue_request(ilium_ipc::ClientRequest::UpdateAgentDebugMenu { enabled });
+    if !app.queue_request(ilium_ipc::ClientRequest::UpdateAgentDebugMenu { enabled }) {
+        app.retain_agent_debug_menu_target(enabled);
+    }
 }
 
 fn reconcile_progress_monitor_enabled(app: &mut App) {
     let Some(enabled) = app.take_pending_progress_monitor_enabled() else {
         return;
     };
-    app.queue_request(ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled { enabled });
+    if !app.queue_request(ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled { enabled }) {
+        app.retain_progress_monitor_target(enabled);
+    }
 }
 
 fn start_voice_service(
     app: &mut App,
-    control_plane: &crate::control::ControlPlane,
+    _control_plane: &crate::control::ControlPlane,
 ) -> Option<ilium_voice::VoiceService> {
-    let target_context = crate::control::VoiceTargetContext::capture(app);
-    let settings = &app.voice_settings;
-    let api_key = if settings.api_key.trim().is_empty() {
-        std::env::var("OPENAI_API_KEY").unwrap_or_default()
-    } else {
-        settings.api_key.clone()
+    let kind = crate::voice_preparation::PreparationKind::NormalStartup {
+        target: crate::control::VoiceTargetContext::capture(app),
     };
-    let config = ilium_voice::VoiceRuntimeConfig {
-        api_key: api_key.into(),
-        model: settings.model,
-        voice: settings.voice,
-        reasoning_effort: settings.reasoning_effort,
-        input_mode: settings.input_mode,
-        vad_eagerness: settings.vad_eagerness,
-        input_device_name: settings.input_device_name.clone(),
-        output_device_name: settings.output_device_name.clone(),
-        output_volume_percent: settings.output_volume_percent,
-        instructions: crate::control::system_instructions(&settings.custom_prompt, target_context),
-    };
-    match ilium_voice::VoiceService::start(config, control_plane.tool_definitions()) {
-        Ok(service) => {
-            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Connecting);
-            Some(service)
-        }
+    match app.voice_preparation.request(&app.voice_settings, kind) {
+        Ok(()) => app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Connecting),
         Err(error) => {
-            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
-                error.to_string(),
-            ));
-            None
+            app.status_message = Some(format!("Voice startup preparation: {error:?}"));
+            if error.is_retryable() {
+                app.resume_voice_after_onboarding();
+            } else {
+                app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+                    "Voice startup source or execution owner unavailable".into(),
+                ));
+            }
         }
     }
+    None
 }
 
 /// Builds one Realtime context update only when agent detection changed the
 /// semantic destination of an otherwise unqualified utterance. The tool still
 /// resolves the exact active pane at execution time, so focus changes between
 /// two detected agents do not require a provider update.
+#[cfg(test)]
+#[derive(Debug)]
+struct NormalVoiceContextAllocation {
+    _source: std::sync::Arc<ilium_execution::StorageAdmission>,
+}
+#[cfg(test)]
+impl ilium_voice::VoiceTextAllocation for NormalVoiceContextAllocation {}
+
+#[cfg(test)]
 fn pending_voice_target_context_update(
     app: &App,
     control_plane: &crate::control::ControlPlane,
@@ -1213,52 +2133,396 @@ fn pending_voice_target_context_update(
         return None;
     }
 
+    // Fixed13 trusted semantic schemas plus <=64KiB custom prompt. Reserve
+    // original source, escaped JSON/transport derivatives and fixed scaffolding
+    // before constructing either owned definition or rendered instructions.
+    if app.voice_settings.custom_prompt.len() > 64 * 1024 {
+        return None;
+    }
+    let context_bytes = crate::normal_voice::capture_bytes(
+        &app.voice_settings,
+        ilium_prompts::voice::VOICE_MOD_SYSTEM_INSTRUCTIONS.len(),
+        include_str!("control/tools.rs").len(),
+    )?;
+    let context_source = std::sync::Arc::new(
+        crate::execution::process_quota()
+            .reserve_external_storage(context_bytes)
+            .ok()?,
+    );
+    let instructions =
+        crate::control::system_instructions(&app.voice_settings.custom_prompt, current_context);
+    let tools = control_plane.tool_definitions();
+    let actual = ilium_voice::context_capture_bytes(&instructions, &tools)?
+        .checked_add(instructions.capacity())?
+        .checked_add(
+            tools
+                .capacity()
+                .checked_mul(std::mem::size_of::<ilium_voice::VoiceToolDefinition>())?,
+        )?;
+    if actual > context_bytes {
+        return None;
+    }
     Some((
         current_context,
-        ilium_voice::VoiceCommand::UpdateContext {
-            instructions: crate::control::system_instructions(
-                &app.voice_settings.custom_prompt,
-                current_context,
-            ),
-            tools: control_plane.tool_definitions(),
-        },
+        ilium_voice::VoiceCommand::UpdateContext(
+            ilium_voice::OwnedVoiceContext::charged(
+                instructions,
+                tools,
+                context_bytes,
+                std::sync::Arc::new(NormalVoiceContextAllocation {
+                    _source: context_source,
+                }),
+            )
+            .ok()?,
+        ),
     ))
 }
-
 /// Keeps the long-lived Realtime session aligned with client focus and the
 /// server's latest agent classification without restarting audio or losing
 /// conversation state.
 async fn reconcile_voice_target_context(
     app: &mut App,
-    control_plane: &crate::control::ControlPlane,
-    voice_service: Option<&ilium_voice::VoiceService>,
-    delivered_context: &mut Option<crate::control::VoiceTargetContext>,
+    _control_plane: &crate::control::ControlPlane,
+    service: Option<&ilium_voice::VoiceService>,
+    delivered: &mut Option<crate::control::VoiceTargetContext>,
 ) {
-    let Some(service) = voice_service else {
-        *delivered_context = None;
+    let Some(service) = service else {
+        *delivered = None;
         return;
     };
-    let Some((current_context, command)) =
-        pending_voice_target_context_update(app, control_plane, *delivered_context)
-    else {
-        return;
-    };
-
-    if service.command_sender().send(command).await.is_err() {
-        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
-            "could not update the active-agent context for the voice model".to_owned(),
-        ));
+    if app.voice_shutdown_requested && !app.voice_shutdown_after_delivery {
         return;
     }
+    let target = crate::control::VoiceTargetContext::capture(app);
+    if *delivered == Some(target) && app.normal_voice_context_slot.is_none() {
+        app.normal_voice_context_waiting = false;
+        return;
+    }
+    if app.normal_voice_context_slot.is_some() {
+        return;
+    }
+    let actor = service.instance_identity();
+    let slot = match app
+        .normal_voice_commands
+        .reserve_context(actor.clone(), &crate::execution::process_quota())
+    {
+        Ok(slot) => slot,
+        Err(error) => {
+            app.normal_voice_context_waiting = true;
+            app.status_message = Some(error);
+            return;
+        }
+    };
+    let kind = crate::voice_preparation::PreparationKind::Context {
+        target,
+        actor: actor.clone(),
+    };
+    match app.voice_preparation.request(&app.voice_settings, kind) {
+        Ok(()) => {
+            app.normal_voice_context_slot = Some((slot, target, actor));
+            app.normal_voice_context_waiting = true;
+        }
+        Err(error) => {
+            app.normal_voice_commands.cancel_context(&slot);
+            app.normal_voice_context_waiting = error.is_retryable();
+            app.status_message = Some(format!("Voice context preparation: {error:?}"));
+            if !app.normal_voice_context_waiting {
+                if !app.voice_shutdown_after_delivery {
+                    service.request_shutdown();
+                }
+                app.voice_shutdown_requested = true;
+            }
+        }
+    }
+}
 
-    *delivered_context = Some(current_context);
+/// Install only an exact current settings/actor result. CPU envelopes release
+/// here; the independent captured source follows the actor/context allocation.
+fn collect_normal_voice_preparation(
+    app: &mut App,
+    service: &mut Option<ilium_voice::VoiceService>,
+    delivered: &mut Option<crate::control::VoiceTargetContext>,
+    media: &mut crate::media_control::MediaLease,
+) {
+    let Some(prepared) = app.voice_preparation.collect() else {
+        return;
+    };
+    let current_settings = prepared.settings().enabled == app.voice_settings.enabled
+        && prepared
+            .settings()
+            .has_same_runtime_configuration(&app.voice_settings);
+    let kind = prepared.kind().clone();
+    match kind {
+        crate::voice_preparation::PreparationKind::NormalStartup { target } => {
+            if !current_settings
+                || !app.voice_settings.enabled
+                || app.onboarding.is_some()
+                || app.voice_demo_retirement_pending
+                || service.is_some()
+                || app.voice_shutdown_requested
+                || app
+                    .voice_native_retirement
+                    .as_ref()
+                    .is_some_and(|owner| owner.is_pending())
+            {
+                if app.voice_settings.enabled && app.onboarding.is_none() {
+                    app.resume_voice_after_onboarding();
+                }
+                return;
+            }
+            if !matches!(
+                &prepared.value,
+                Ok(crate::voice_preparation::PreparedValue::Startup(_))
+            ) {
+                match prepared.value {
+                    Err(error) => app.update_voice_connection_state(
+                        ilium_voice::VoiceConnectionState::Failed(error),
+                    ),
+                    _ => app.normal_voice_retirement_failed = true,
+                }
+                return;
+            }
+            let admission =
+                match ilium_voice::VoiceService::admit_startup(crate::execution::process_quota()) {
+                    Ok(admission) => admission,
+                    Err(
+                        reason @ (ilium_execution::RejectReason::Busy
+                        | ilium_execution::RejectReason::WorkerBytes),
+                    ) => {
+                        app.voice_preparation.defer_ready(prepared, Instant::now());
+                        app.status_message = Some(format!(
+                            "Voice startup waiting for actor metadata: {reason:?}"
+                        ));
+                        return;
+                    }
+                    Err(reason) => {
+                        app.update_voice_connection_state(
+                            ilium_voice::VoiceConnectionState::Failed(format!(
+                                "Voice startup metadata admission failed: {reason:?}"
+                            )),
+                        );
+                        return;
+                    }
+                };
+            let Ok(crate::voice_preparation::PreparedValue::Startup(startup)) = prepared.value
+            else {
+                return;
+            };
+            *service = Some(ilium_voice::VoiceService::start(startup, admission));
+            *delivered = Some(target);
+            media.request(app.voice_settings.pause_media_while_active);
+        }
+        crate::voice_preparation::PreparationKind::Context { target, actor } => {
+            let Some((slot, expected, owner)) = app.normal_voice_context_slot.take() else {
+                return;
+            };
+            let valid = current_settings
+                && target == expected
+                && std::sync::Arc::ptr_eq(&actor, &owner)
+                && service.as_ref().is_some_and(|service| {
+                    std::sync::Arc::ptr_eq(&owner, &service.instance_identity())
+                });
+            if !valid {
+                app.normal_voice_commands.cancel_context(&slot);
+                app.normal_voice_context_waiting = false;
+                return;
+            }
+            match prepared.value {
+                Ok(crate::voice_preparation::PreparedValue::Context(context)) => {
+                    if app
+                        .normal_voice_commands
+                        .fill_context(&slot, ilium_voice::VoiceCommand::UpdateContext(context))
+                        .is_ok()
+                    {
+                        *delivered = Some(target);
+                    }
+                    app.normal_voice_context_waiting = false;
+                }
+                Err(error) => {
+                    app.normal_voice_commands.cancel_context(&slot);
+                    app.normal_voice_context_waiting = false;
+                    app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+                        error,
+                    ));
+                    if !app.voice_shutdown_after_delivery {
+                        if let Some(service) = service {
+                            service.request_shutdown();
+                        }
+                    }
+                    app.voice_shutdown_requested = true;
+                }
+                _ => {
+                    app.normal_voice_commands.cancel_context(&slot);
+                    app.normal_voice_retirement_failed = true;
+                }
+            }
+        }
+        crate::voice_preparation::PreparationKind::DemoStartup => {
+            app.normal_voice_retirement_failed = true;
+        }
+    }
+}
+async fn next_demo_voice_event(
+    runtime: &mut crate::onboarding::voice_runtime::VoiceDemoRuntime,
+    pending: &mut Option<ilium_voice::VoiceEventReceipt>,
+    retry_at: Option<tokio::time::Instant>,
+) -> Option<ilium_voice::VoiceEventReceipt> {
+    if pending.is_some() {
+        if let Some(deadline) = retry_at {
+            tokio::time::sleep_until(deadline).await;
+        }
+        return pending.take();
+    }
+    runtime.next_event().await
+}
+
+/// Disposes canceled originals only after recording their terminal disposition.
+/// Payload content stays private; counts identify incomplete provider delivery.
+fn audit_demo_voice_retirement(
+    app: &mut App,
+    runtime: &mut crate::onboarding::voice_runtime::VoiceDemoRuntime,
+    failed: &mut bool,
+) -> bool {
+    let mut changed = false;
+    if runtime.native_retirement_failed() {
+        if !*failed {
+            tracing::error!("Onboarding voice native owner joined with a failure");
+        }
+        *failed = true;
+    }
+    if let Some((event, allocation)) = runtime.take_cancelled_event() {
+        tracing::warn!("Onboarding voice event explicitly canceled during shutdown");
+        drop(event);
+        drop(allocation);
+        changed = true;
+    }
+    if let Some(commands) = runtime.take_cancelled_commands() {
+        let count = commands.count();
+        if count != 0 {
+            app.status_message = Some(format!(
+                "Voice demonstration stopped; {count} queued commands were canceled"
+            ));
+            tracing::warn!(
+                count,
+                "Onboarding voice queued commands explicitly canceled"
+            );
+            changed = true;
+        }
+        commands.dispose();
+    }
+    if let Some(outcome) = runtime.take_shutdown_outcome() {
+        if matches!(
+            &outcome.actor_exit,
+            Some(
+                ilium_voice::VoiceActorExit::Failed(_)
+                    | ilium_voice::VoiceActorExit::Panicked(_)
+                    | ilium_voice::VoiceActorExit::Canceled
+            )
+        ) {
+            *failed = true;
+            tracing::error!("Onboarding voice actor retired with a failed outcome");
+            if !matches!(
+                runtime.state.connection.as_ref(),
+                ilium_voice::VoiceConnectionState::Failed(_)
+            ) {
+                app.status_message =
+                    Some("Voice demonstration actor stopped with a failure".into());
+            }
+        }
+        let commands = outcome.undelivered_commands.len();
+        let outputs = outcome
+            .undelivered_stop_outputs
+            .as_ref()
+            .map_or(0, Vec::len);
+        if commands != 0 || outputs != 0 {
+            app.status_message = Some(format!(
+                "Voice demonstration stopped with {commands} commands and {outputs} tool results undelivered"
+            ));
+            tracing::warn!(
+                commands,
+                outputs,
+                "Onboarding voice original undelivered values explicitly retired"
+            );
+        }
+        // The original batch metadata remains alive until all its original
+        // commands, outputs and actor error are destroyed by this outcome.
+        drop(outcome);
+        changed = true;
+    }
+    changed
+}
+
+async fn drain_demo_voice_retirement(
+    app: &mut App,
+    runtime: &mut crate::onboarding::voice_runtime::VoiceDemoRuntime,
+    pending: &mut Option<ilium_voice::VoiceEventReceipt>,
+    failed: &mut bool,
+) -> std::io::Result<()> {
+    runtime.shutdown().await;
+    let notification = runtime.notification();
+    let drain = async {
+        loop {
+            runtime.collect(Instant::now()).await;
+            audit_demo_voice_retirement(app, runtime, failed);
+            if !runtime.pending_work() && pending.is_none() {
+                return;
+            }
+            if let Some(original) = pending.take() {
+                if let Err(original) = runtime.handle_event(original).await {
+                    *pending = Some(original);
+                }
+            }
+            tokio::select! {
+                event = runtime.next_event(), if pending.is_none() => {
+                    if let Some(event) = event {
+                        if let Err(original) = runtime.handle_event(event).await {
+                            *pending = Some(original);
+                        }
+                    } else {
+                        runtime.channel_closed().await;
+                    }
+                }
+                () = notification.notified() => {}
+                () = tokio::time::sleep(Duration::from_millis(20)) => {}
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), drain)
+        .await
+        .map_err(|_| {
+            tracing::error!("Onboarding voice retirement deadline; original pending custody remains owned, native shutdown unverified");
+            std::io::Error::new(std::io::ErrorKind::TimedOut,
+                "voice demonstration retirement deadline; native shutdown unverified")
+        })?;
+    if *failed {
+        return Err(std::io::Error::other(
+            "voice demonstration retired with a failed actor or native outcome",
+        ));
+    }
+    Ok(())
 }
 
 async fn next_voice_event(
     voice_service: &mut Option<ilium_voice::VoiceService>,
-) -> Option<ilium_voice::VoiceEvent> {
+    pending: &mut Option<ilium_voice::VoiceEventReceipt>,
+    retry_at: Option<tokio::time::Instant>,
+) -> Option<ilium_voice::VoiceEventReceipt> {
+    if pending.is_some() {
+        if let Some(deadline) = retry_at {
+            tokio::time::sleep_until(deadline).await;
+        }
+        return pending.take();
+    }
     match voice_service {
-        Some(service) => service.next_event().await,
+        Some(service) => {
+            let event = service.next_event().await;
+            if event.is_none() && !service.actor_is_finished() {
+                // Channel closure can precede actual actor retirement. Give
+                // other event-loop branches time instead of spinning on None.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            event
+        }
         None => std::future::pending().await,
     }
 }
@@ -1273,35 +2537,102 @@ fn should_report_unexpected_voice_stop(
     is_voice_enabled && !matches!(state, ilium_voice::VoiceConnectionState::Failed(_))
 }
 
+#[derive(Debug)]
+struct VoiceInvocationAllocation {
+    _result: Option<std::sync::Arc<dyn std::fmt::Debug + Send + Sync>>,
+    _source: std::sync::Arc<ilium_execution::StorageAdmission>,
+}
+
 fn handle_voice_event(
     app: &mut App,
     control_plane: &mut crate::control::ControlPlane,
-    event: ilium_voice::VoiceEvent,
-) -> Vec<ilium_voice::VoiceToolOutput> {
+    receipt: ilium_voice::VoiceEventReceipt,
+) -> Result<Vec<ilium_voice::VoiceToolOutput>, (ilium_voice::VoiceEventReceipt, String)> {
+    if matches!(receipt.event(), ilium_voice::VoiceEvent::ToolInvocations(_)) {
+        let (event, source) = receipt.into_parts();
+        let ilium_voice::VoiceEvent::ToolInvocations(invocations) = event else {
+            unreachable!("checked original event variant")
+        };
+        let mut outputs = invocations
+            .into_iter()
+            .filter_map(|invocation| control_plane.begin_invocation(app, invocation))
+            .collect::<Vec<_>>();
+        for output in &mut outputs {
+            output.allocation_hold = Some(std::sync::Arc::new(VoiceInvocationAllocation {
+                _result: output.allocation_hold.take(),
+                _source: std::sync::Arc::clone(&source),
+            }));
+        }
+        return Ok(outputs);
+    }
+    project_final_voice_event(app, receipt).map(|()| Vec::new())
+}
+
+fn project_final_voice_event(
+    app: &mut App,
+    receipt: ilium_voice::VoiceEventReceipt,
+) -> Result<(), (ilium_voice::VoiceEventReceipt, String)> {
+    let derived = match crate::voice_presentation::prepare_derivation(
+        &crate::execution::process_quota(),
+        receipt.event(),
+        app.voice_last_assistant_transcript.as_ref(),
+    ) {
+        Ok(hold) => hold,
+        Err(reason) => {
+            return Err((
+                receipt,
+                format!("Voice event waiting for storage admission: {reason:?}"),
+            ))
+        }
+    };
+    if let ilium_voice::VoiceEvent::AssistantTranscript(delta) = receipt.event() {
+        if let Err(error) = app
+            .voice_last_assistant_transcript
+            .get_or_insert_with(String::new)
+            .try_reserve_exact(delta.len())
+        {
+            return Err((
+                receipt,
+                format!("Voice transcript allocation failed: {error}"),
+            ));
+        }
+    }
+    let (event, original_storage) = receipt.into_parts();
     match event {
         ilium_voice::VoiceEvent::StateChanged(state) => {
+            let has_error = matches!(&state, ilium_voice::VoiceConnectionState::Failed(_));
             app.update_voice_connection_state(state);
-            Vec::new()
+            app.voice_presentation_storage.state = Some(original_storage);
+            if has_error {
+                app.voice_presentation_storage.status = derived;
+            }
         }
-        ilium_voice::VoiceEvent::ToolInvocations(invocations) => invocations
-            .into_iter()
-            .map(|invocation| control_plane.execute_invocation(app, invocation))
-            .collect::<Vec<_>>(),
+        ilium_voice::VoiceEvent::ToolInvocations(invocations) => {
+            tracing::warn!(
+                count = invocations.len(),
+                "Voice invocations explicitly cancelled during original session shutdown"
+            );
+            app.status_message = Some(format!(
+                "Cancelled {} voice tool invocation(s) during shutdown",
+                invocations.len()
+            ));
+        }
         ilium_voice::VoiceEvent::UserTranscript(transcript) => {
             app.voice_last_user_transcript = Some(transcript);
-            Vec::new()
+            app.voice_presentation_storage.user = Some(original_storage);
         }
         ilium_voice::VoiceEvent::AssistantTranscript(delta) => {
             app.voice_last_assistant_transcript
                 .get_or_insert_with(String::new)
                 .push_str(&delta);
-            Vec::new()
+            app.voice_presentation_storage.assistant = derived;
         }
         ilium_voice::VoiceEvent::ProviderError(error) => {
             app.status_message = Some(format!("Voice provider error: {error}"));
-            Vec::new()
+            app.voice_presentation_storage.status = derived;
         }
     }
+    Ok(())
 }
 
 /// Returns completed tool calls to the model only after the event loop has
@@ -1309,32 +2640,84 @@ fn handle_voice_event(
 async fn deliver_voice_tool_outputs(
     app: &mut App,
     voice_service: &mut Option<ilium_voice::VoiceService>,
-    outputs: Vec<ilium_voice::VoiceToolOutput>,
+    mut outputs: Vec<ilium_voice::VoiceToolOutput>,
 ) {
+    let Some(service) = voice_service.as_ref() else {
+        if !outputs.is_empty() {
+            tracing::warn!(
+                count = outputs.len(),
+                "Tool outputs explicitly cancelled: original voice actor absent"
+            );
+            app.status_message =
+                Some("Voice tool outputs cancelled because their original session ended".into());
+        }
+        return;
+    };
+    let owner = service.instance_identity();
+    if let Some((original, pending)) = app.pending_normal_voice_outputs.take() {
+        if !std::sync::Arc::ptr_eq(&original, &owner) {
+            app.pending_normal_voice_outputs = Some((original, pending));
+            app.status_message =
+                Some("Earlier voice outputs await original actor cancellation receipt".into());
+            if !outputs.is_empty() {
+                app.normal_voice_retirement_failed = true;
+                tracing::error!(cancelled_outputs=outputs.len(), "Voice output producer crossed actor fence; incoming originals explicitly cancelled");
+            }
+            return;
+        }
+        // A single retained head fences both incoming event and CPU collectors.
+        if !outputs.is_empty() {
+            app.normal_voice_retirement_failed = true;
+            tracing::error!(cancelled_outputs=outputs.len(), "Voice output producer crossed retained-head fence; incoming originals explicitly cancelled");
+            app.status_message =
+                Some("Voice output producer ordering failed; earlier originals retained".into());
+            outputs = pending;
+        } else {
+            outputs = pending;
+        }
+    }
     if outputs.is_empty() {
         return;
     }
-    let is_session_terminating = voice_tool_outputs_request_shutdown(&outputs);
-    if is_session_terminating {
-        let Some(service) = voice_service.take() else {
-            return;
-        };
-        service.shutdown_after_tool_outputs(outputs).await;
+    let terminating = voice_tool_outputs_request_shutdown(&outputs);
+    // Preserve staged-stop intent even when context or FIFO admission is busy.
+    // An ordinary shutdown signal must not overtake the original final outputs.
+    if terminating {
+        app.voice_shutdown_after_delivery = true;
+        app.voice_shutdown_requested = true;
+    }
+    if app.normal_voice_context_waiting {
+        app.pending_normal_voice_outputs = Some((owner, outputs));
         return;
     }
-
-    let Some(service) = voice_service.as_ref() else {
-        return;
+    let command = if terminating {
+        ilium_voice::VoiceCommand::SubmitToolOutputsAndShutdown(outputs)
+    } else {
+        ilium_voice::VoiceCommand::SubmitToolOutputs(outputs)
     };
-    if service
-        .command_sender()
-        .send(ilium_voice::VoiceCommand::SubmitToolOutputs(outputs))
-        .await
-        .is_err()
-    {
-        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
-            "could not return the tool result to the voice model".to_owned(),
-        ));
+    match app.normal_voice_commands.enqueue(
+        owner.clone(),
+        command,
+        &crate::execution::process_quota(),
+    ) {
+        Ok(()) => {
+            if terminating {
+                app.voice_shutdown_after_delivery = true;
+                app.voice_shutdown_requested = true;
+            }
+        }
+        Err(original) => {
+            app.status_message = Some(original.reason);
+            let outputs = match original.command {
+                ilium_voice::VoiceCommand::SubmitToolOutputs(outputs)
+                | ilium_voice::VoiceCommand::SubmitToolOutputsAndShutdown(outputs) => outputs,
+                _ => unreachable!("typed tool-output command returns unchanged from admission"),
+            };
+            app.pending_normal_voice_outputs = Some((owner, outputs));
+        }
+    }
+    if let Err(error) = app.normal_voice_commands.publish(service, Instant::now()) {
+        app.status_message = Some(error);
     }
 }
 
@@ -1346,80 +2729,292 @@ fn voice_tool_outputs_request_shutdown(outputs: &[ilium_voice::VoiceToolOutput])
         .any(|output| output.terminate_session_after_delivery)
 }
 
+/// All Result exits retain the original actor, event head and native custody
+/// outside this bounded future. Timing out reports uncertainty, never success.
+async fn drain_normal_voice_retirement(
+    app: &mut App,
+    service: &mut Option<ilium_voice::VoiceService>,
+    pending: &mut Option<ilium_voice::VoiceEventReceipt>,
+) -> std::io::Result<()> {
+    app.voice_preparation.close();
+    if let Some((slot, _, _)) = app.normal_voice_context_slot.take() {
+        app.normal_voice_commands.cancel_context(&slot);
+        app.normal_voice_context_waiting = false;
+    }
+    let drain = async {
+        loop {
+            drop(app.voice_preparation.collect());
+            if let Some(original) = pending.take() {
+                match project_final_voice_event(app, original) {
+                    Ok(()) => app.voice_event_projection_pending = false,
+                    Err((original, error)) => {
+                        *pending = Some(original);
+                        app.voice_event_projection_pending = true;
+                        app.status_message = Some(error);
+                    }
+                }
+            }
+            // Unpublished replaceable context was explicitly cancelled above;
+            // original younger semantic commands/final outputs still retire.
+            app.normal_voice_context_waiting = false;
+            deliver_voice_tool_outputs(app, service, Vec::new()).await;
+            if let Some(actor) = service.as_mut() {
+                if let Err(error) = app.normal_voice_commands.publish(actor, Instant::now()) {
+                    app.status_message = Some(error);
+                }
+                if !app.voice_shutdown_after_delivery {
+                    actor.request_shutdown();
+                }
+                app.voice_shutdown_requested = true;
+                if pending.is_none() {
+                    if let Ok(original) = actor.try_next_event() {
+                        *pending = Some(original);
+                        app.voice_event_projection_pending = true;
+                    }
+                }
+            }
+            if pending.is_none() {
+                collect_normal_voice_retirement(app, service).await;
+            }
+            if !app.normal_voice_ownership_pending(service.is_some()) && pending.is_none() {
+                return;
+            }
+            // Dated backpressure retry, not a capacity await on the interactive
+            // loop. Core actor completion has a separate event-loop wake.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), drain).await.map_err(|_| {
+        tracing::error!("Normal voice retirement deadline; original actor/event/native custody remains owned and delivery is uncertain");
+        std::io::Error::new(std::io::ErrorKind::TimedOut,
+            "normal voice retirement deadline; command delivery or native shutdown unverified")
+    })?;
+    if app.normal_voice_retirement_failed
+        || app
+            .voice_native_retirement
+            .as_ref()
+            .is_some_and(crate::voice_retirement::VoiceRetirement::has_terminal_failure)
+    {
+        return Err(std::io::Error::other(
+            "normal voice retired with a failed actor, undelivered final output or native outcome",
+        ));
+    }
+    Ok(())
+}
+
+/// Observe the SAME actor only after its readiness hint. Finished batches keep
+/// original metadata/events/commands alive until each disposition is consumed.
+async fn collect_normal_voice_retirement(
+    app: &mut App,
+    voice_service: &mut Option<ilium_voice::VoiceService>,
+) -> bool {
+    let now = Instant::now();
+    if let Some(retirement) = &mut app.voice_native_retirement {
+        retirement.collect(now);
+        if let Some(error) = retirement.take_failure() {
+            app.status_message = Some(error);
+        }
+    }
+    if app.voice_shutdown_batch.is_none()
+        && voice_service
+            .as_ref()
+            .is_some_and(ilium_voice::VoiceService::actor_is_finished)
+    {
+        if let Some(service) = voice_service.take() {
+            app.voice_shutdown_batch = Some(service.finish_actor_if_ready().await);
+        }
+    }
+    let Some(mut batch) = app.voice_shutdown_batch.take() else {
+        return !app.voice_shutdown_requested
+            && app
+                .voice_native_retirement
+                .as_ref()
+                .is_none_or(|owner| !owner.is_pending());
+    };
+    // Project one original per turn; overload keeps exact head and metadata.
+    if let Some(receipt) = batch.events.pop_front() {
+        if let Err((original, error)) = project_final_voice_event(app, receipt) {
+            batch.events.push_front(original);
+            app.status_message = Some(error);
+        }
+        app.voice_shutdown_batch = Some(batch);
+        return false;
+    }
+    let state = std::mem::replace(
+        &mut batch.state,
+        ilium_voice::VoiceShutdownState::Complete(ilium_voice::VoiceActorExit::Canceled),
+    );
+    match state {
+        ilium_voice::VoiceShutdownState::Pending(service) => {
+            // No continue_shutdown await on the UI: restore the original actor
+            // and its receiver until its next finished readiness observation.
+            *voice_service = Some(*service);
+        }
+        ilium_voice::VoiceShutdownState::Complete(exit) => {
+            batch.state = ilium_voice::VoiceShutdownState::Complete(exit);
+            let Some(retirement) = &mut app.voice_native_retirement else {
+                app.voice_shutdown_batch = Some(batch);
+                app.status_message = Some(
+                    "Voice native retirement owner unavailable; original custody retained".into(),
+                );
+                return false;
+            };
+            if retirement.retain(batch.audio_custody.clone()).is_err() {
+                app.voice_shutdown_batch = Some(batch);
+                return false;
+            }
+            app.voice_preparation.cancel();
+            app.normal_voice_context_slot = None;
+            let local = app.normal_voice_commands.cancel_after_actor_exit();
+            app.normal_voice_context_waiting = false;
+            let pending_outputs = app.pending_normal_voice_outputs.take();
+            let pending_output_count = pending_outputs
+                .as_ref()
+                .map_or(0, |(_, outputs)| outputs.len());
+            let interactions = app.take_voice_interaction_requests();
+            let cancelled = batch.undelivered_commands.len() + local.len() + interactions.len();
+            let final_outputs =
+                batch.undelivered_stop_outputs.as_ref().map_or(0, Vec::len) + pending_output_count;
+            match &batch.state {
+                ilium_voice::VoiceShutdownState::Complete(
+                    ilium_voice::VoiceActorExit::Completed,
+                ) => {}
+                ilium_voice::VoiceShutdownState::Complete(exit) => {
+                    if matches!(
+                        exit,
+                        ilium_voice::VoiceActorExit::Failed(_)
+                            | ilium_voice::VoiceActorExit::Panicked(_)
+                    ) {
+                        app.normal_voice_retirement_failed = true;
+                    }
+                    tracing::error!(
+                        cancelled_commands = cancelled,
+                        undelivered_stop_outputs = final_outputs,
+                        "Original voice actor stopped; consumed provider delivery may be uncertain"
+                    );
+                    app.status_message = Some(format!("Voice actor stopped; {cancelled} commands and {final_outputs} final outputs undelivered"));
+                }
+                _ => {}
+            }
+            if final_outputs != 0 {
+                app.normal_voice_retirement_failed = true;
+            }
+            if cancelled != 0 || final_outputs != 0 {
+                tracing::warn!(
+                    cancelled_commands = cancelled,
+                    undelivered_stop_outputs = final_outputs,
+                    "Voice originals explicitly cancelled; never replayed into replacement actor"
+                );
+                app.status_message = Some(format!("Original voice session cancelled {cancelled} queued commands and {final_outputs} final outputs"));
+            }
+            app.voice_shutdown_requested = false;
+            app.voice_shutdown_after_delivery = false;
+            // Batch metadata now remains owned by the same native custody in
+            // the finite observer; all original cancellation receipts consumed.
+        }
+    }
+    false
+}
+
 /// Reconciles a pending start/stop/reconfigure and, on a real start or stop
 /// (not a reconfigure -- that's a live settings change, not the user
 /// entering or leaving voice mode), pauses or resumes system media playback
 /// through [`crate::media_control`] when
 /// `VoiceSettings::pause_media_while_active` is on. Resuming always runs
 /// regardless of that setting's *current* value and drains
-/// `paused_media_players` unconditionally, so toggling the setting off
-/// mid-session can never strand a player paused.
+/// the media owner's acknowledged set, so toggling the setting off requests
+/// restoration even when no voice runtime transition is queued.
 async fn reconcile_voice_runtime(
     app: &mut App,
     control_plane: &crate::control::ControlPlane,
     voice_service: &mut Option<ilium_voice::VoiceService>,
-    paused_media_players: &mut Vec<String>,
+    normal_media: &mut crate::media_control::MediaLease,
 ) {
-    if app.onboarding.is_some() {
-        app.onboarding_voice_suspended |= app.voice_settings.enabled;
-        app.take_voice_runtime_request();
-        if let Some(service) = voice_service.take() {
-            service.shutdown().await;
+    if !app.voice_settings.pause_media_while_active {
+        normal_media.request(false);
+    }
+    if let Some(service) = voice_service.as_ref() {
+        if let Err(error) = app.normal_voice_commands.publish(service, Instant::now()) {
+            app.status_message = Some(error);
         }
-        let players = std::mem::take(paused_media_players);
-        crate::media_control::resume_players(players).await;
+    }
+    deliver_voice_tool_outputs(app, voice_service, Vec::new()).await;
+    let onboarding = app.onboarding.is_some();
+    if onboarding {
+        app.onboarding_voice_suspended |= app.voice_settings.enabled;
+    }
+    let transition = onboarding || app.pending_voice_runtime_request().is_some();
+    if onboarding
+        || matches!(
+            app.pending_voice_runtime_request(),
+            Some(crate::app::VoiceRuntimeRequest::Stop)
+        )
+    {
+        app.voice_preparation.cancel();
+        if let Some((slot, _, _)) = app.normal_voice_context_slot.take() {
+            app.normal_voice_commands.cancel_context(&slot);
+        }
+        app.normal_voice_context_waiting = false;
+    }
+    if transition && voice_service.is_some() && !app.voice_shutdown_requested {
+        // Staged self-stop outputs must reach the original actor before close.
+        if !app.voice_shutdown_after_delivery {
+            if let Some(service) = voice_service.as_ref() {
+                service.request_shutdown();
+            }
+        }
+        app.voice_shutdown_requested = true;
+        normal_media.request(false);
+    }
+    if app.voice_event_projection_pending {
+        return;
+    }
+    collect_normal_voice_retirement(app, voice_service).await;
+    if app.voice_shutdown_requested
+        || app.voice_shutdown_batch.is_some()
+        || app
+            .voice_native_retirement
+            .as_ref()
+            .is_some_and(|owner| owner.is_pending())
+    {
+        return;
+    }
+    if onboarding {
+        app.take_voice_runtime_request();
+        normal_media.request(false);
+        return;
+    }
+    // The other role may be off-page while native owners still retire.
+    if app.voice_demo_retirement_pending {
         return;
     }
     if std::mem::take(&mut app.onboarding_voice_suspended) {
-        app.take_voice_runtime_request();
-        if app.voice_settings.enabled {
-            *voice_service = start_voice_service(app, control_plane);
-            if voice_service.is_some() && app.voice_settings.pause_media_while_active {
-                *paused_media_players = crate::media_control::pause_playing_players().await;
-            }
-        }
-        return;
+        app.resume_voice_after_onboarding();
     }
     let Some(request) = app.take_voice_runtime_request() else {
         return;
     };
-    if let Some(service) = voice_service.take() {
-        service.shutdown().await;
+    if voice_service.is_some() {
+        // Never consume an intent while its original actor still owns output.
+        app.resume_voice_after_onboarding();
+        return;
     }
     match request {
         crate::app::VoiceRuntimeRequest::Stop => {
             app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Disabled);
-            let players = std::mem::take(paused_media_players);
-            crate::media_control::resume_players(players).await;
+            normal_media.request(false);
         }
         crate::app::VoiceRuntimeRequest::Start => {
             *voice_service = start_voice_service(app, control_plane);
-            // A Stop can be coalesced away by an immediately-following Start
-            // within the same input batch (see `for_each_ready_input_event`
-            // in lib.rs, and `apply_and_persist_voice_settings` in app.rs),
-            // so `paused_media_players` may still hold an un-resumed set
-            // from the run this Start is replacing. Resume it before this
-            // Start's own pause overwrites the vector, or those bus names
-            // -- and the players behind them -- would stay paused forever.
-            let previously_paused = std::mem::take(paused_media_players);
-            crate::media_control::resume_players(previously_paused).await;
+            normal_media.request(false);
             if voice_service.is_some() && app.voice_settings.pause_media_while_active {
-                *paused_media_players = crate::media_control::pause_playing_players().await;
+                normal_media.restart();
             }
         }
         crate::app::VoiceRuntimeRequest::Reconfigure => {
             *voice_service = start_voice_service(app, control_plane);
-            // A reconfigure that fails to reconnect leaves no live actor to
-            // justify keeping media paused -- without this, a bad API key or
-            // model entered mid-session would strand the user's paused
-            // player for the rest of the process, since neither `Stop` nor
-            // the crash-detection branch in the event loop ever fires here
-            // (this path never produced a service whose event stream could
-            // close).
-            if voice_service.is_none() {
-                let players = std::mem::take(paused_media_players);
-                crate::media_control::resume_players(players).await;
-            }
+            normal_media
+                .request(voice_service.is_some() && app.voice_settings.pause_media_while_active);
         }
     }
 }
@@ -1430,11 +3025,14 @@ async fn deliver_voice_interactions(
     app: &mut App,
     voice_service: Option<&ilium_voice::VoiceService>,
 ) {
-    let requests = app.take_voice_interaction_requests();
+    if app.normal_voice_context_waiting || app.voice_shutdown_requested {
+        return;
+    }
     let Some(service) = voice_service else {
         return;
     };
-    for request in requests {
+    let mut requests = app.take_voice_interaction_requests().into_iter();
+    while let Some(request) = requests.next() {
         let command = match request {
             crate::app::VoiceInteractionRequest::StartPushToTalk => {
                 ilium_voice::VoiceCommand::StartPushToTalk
@@ -1443,12 +3041,20 @@ async fn deliver_voice_interactions(
                 ilium_voice::VoiceCommand::StopPushToTalk
             }
         };
-        if service.command_sender().send(command).await.is_err() {
-            app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
-                "could not deliver push-to-talk input".to_owned(),
-            ));
+        if let Err(original) = app.normal_voice_commands.enqueue(
+            service.instance_identity(),
+            command,
+            &crate::execution::process_quota(),
+        ) {
+            app.status_message = Some(original.reason);
+            app.restore_voice_interaction_requests(
+                std::iter::once(request).chain(requests).collect(),
+            );
             break;
         }
+    }
+    if let Err(error) = app.normal_voice_commands.publish(service, Instant::now()) {
+        app.status_message = Some(error);
     }
 }
 
@@ -1458,39 +3064,151 @@ async fn deliver_voice_interactions(
 /// as user turns and routes them exactly like recognised speech -- and the
 /// server is told what happened. Runs after lifecycle reconciliation, so an
 /// offer that asked to start voice finds its session (or its failure).
+#[derive(Debug)]
+struct VoiceOfferAllocation {
+    // Original strings and independently admitted provider/transcript copies.
+    _original: Option<crate::connection::EventRetention>,
+    _derived: Option<crate::connection::EventRetention>,
+}
+impl ilium_voice::VoiceTextAllocation for VoiceOfferAllocation {}
+
 async fn deliver_voice_text_offers(
     app: &mut App,
     voice_service: Option<&ilium_voice::VoiceService>,
 ) {
-    let offers = app.take_voice_text_offers();
-    if offers.is_empty() {
+    if app.normal_voice_context_waiting || app.voice_shutdown_requested {
+        return;
+    }
+    if voice_service.is_none()
+        && app.voice_settings.enabled
+        && (app.pending_voice_runtime_request().is_some()
+            || app
+                .voice_native_retirement
+                .as_ref()
+                .is_some_and(|owner| owner.is_pending()))
+    {
         return;
     }
     let commands = voice_service.map(ilium_voice::VoiceService::command_sender);
-    for offer in offers {
-        let result = voice_text_offer_result(app, commands.as_ref(), &offer).await;
-        if result.is_ok() {
-            app.record_typed_voice_text(&offer.sentences);
+    let mut fifo = std::mem::take(&mut app.normal_voice_commands);
+    let destination = voice_service.map(|service| (&mut fifo, service.instance_identity()));
+    deliver_voice_text_offers_inner(app, commands.as_ref(), destination);
+    app.normal_voice_commands = fifo;
+    if let Some(service) = voice_service {
+        if let Err(error) = app.normal_voice_commands.publish(service, Instant::now()) {
+            app.status_message = Some(error);
         }
-        app.queue_request(ilium_ipc::ClientRequest::AnswerVoiceText {
-            request_id: offer.request_id,
-            result,
-        });
     }
 }
 
-/// Hands one offer to the voice actor, or explains why it cannot. "Accepted"
-/// means the sentences are in the live session's queue (it may still be
-/// connecting); the provider gives no per-turn acknowledgement to wait for.
-async fn voice_text_offer_result(
-    app: &App,
+#[cfg(test)]
+fn deliver_voice_text_offers_to(
+    app: &mut App,
     commands: Option<&mpsc::Sender<ilium_voice::VoiceCommand>>,
-    offer: &crate::app::VoiceTextOffer,
-) -> ilium_ipc::VoiceTextResult {
-    use ilium_ipc::{VoiceTextAccepted, VoiceTextRejection, VoiceTextRejectionCode};
+) {
+    deliver_voice_text_offers_inner(app, commands, None);
+}
 
+fn deliver_voice_text_offers_inner(
+    app: &mut App,
+    commands: Option<&mpsc::Sender<ilium_voice::VoiceCommand>>,
+    mut fifo: Option<(
+        &mut crate::normal_voice::NormalVoiceCommands,
+        std::sync::Arc<()>,
+    )>,
+) {
+    let mut offers = app.take_voice_text_offers().into_iter();
+    while let Some(mut offer) = offers.next() {
+        // Reply admission precedes every actor side effect. This covers the
+        // longest possible local rejection, including a failed actor's reason.
+        let error_bytes = match &app.voice_connection_state {
+            ilium_voice::VoiceConnectionState::Failed(error) => error.capacity(),
+            _ => 512,
+        };
+        let reservation = match app.outbound_admission.as_ref() {
+            Some(client) => {
+                crate::ipc_preparation::reserve_request(client, error_bytes.saturating_add(4096))
+            }
+            None => Err(ilium_execution::RejectReason::Closed),
+        };
+        let reservation = match reservation {
+            Ok(reservation) => reservation,
+            Err(reason) => {
+                if matches!(
+                    reason,
+                    ilium_execution::RejectReason::Closed
+                        | ilium_execution::RejectReason::InvalidCost
+                        | ilium_execution::RejectReason::AccountingPoisoned
+                ) {
+                    tracing::error!(
+                        request_id = offer.request_id,
+                        ?reason,
+                        "voice offer reply admission owner unavailable"
+                    );
+                    app.status_message =
+                        Some(format!("Voice offer cannot be answered: {reason:?}"));
+                    app.exit_reason = Some(crate::app::ClientExitReason::Quit);
+                }
+                app.restore_voice_text_offers(std::iter::once(offer).chain(offers).collect());
+                break;
+            }
+        };
+        // Retain the typed placeholder before publishing: no fallible
+        // ownership conversion may follow a successful actor acceptance.
+        let placeholder = ilium_ipc::ClientRequest::AnswerVoiceText {
+            request_id: offer.request_id,
+            result: Err(ilium_ipc::VoiceTextRejection::new(
+                ilium_ipc::VoiceTextRejectionCode::VoiceUnavailable,
+                "",
+            )),
+        };
+        let Ok(admitted) = reservation.retain(placeholder) else {
+            app.restore_voice_text_offers(std::iter::once(offer).chain(offers).collect());
+            break;
+        };
+        let (_, reply_retention) = admitted.into_parts();
+        let Some(result) = voice_text_offer_result_with_fifo(
+            app,
+            commands,
+            &mut offer,
+            fifo.as_mut()
+                .map(|(queue, owner)| (&mut **queue, std::sync::Arc::clone(owner))),
+        ) else {
+            app.restore_voice_text_offers(std::iter::once(offer).chain(offers).collect());
+            break;
+        };
+        app.enqueue_admitted_request(reply_retention.retain(
+            ilium_ipc::ClientRequest::AnswerVoiceText {
+                request_id: offer.request_id,
+                result,
+            },
+        ));
+    }
+}
+
+/// `None` is temporary actor/storage pressure. It leaves every original
+/// sentence in the offer; acceptance publishes the whole offer atomically.
+#[cfg(test)]
+fn voice_text_offer_result(
+    app: &mut App,
+    commands: Option<&mpsc::Sender<ilium_voice::VoiceCommand>>,
+    offer: &mut crate::app::VoiceTextOffer,
+) -> Option<ilium_ipc::VoiceTextResult> {
+    voice_text_offer_result_with_fifo(app, commands, offer, None)
+}
+
+fn voice_text_offer_result_with_fifo(
+    app: &mut App,
+    commands: Option<&mpsc::Sender<ilium_voice::VoiceCommand>>,
+    offer: &mut crate::app::VoiceTextOffer,
+    fifo: Option<(
+        &mut crate::normal_voice::NormalVoiceCommands,
+        std::sync::Arc<()>,
+    )>,
+) -> Option<ilium_ipc::VoiceTextResult> {
+    use ilium_ipc::{VoiceTextAccepted, VoiceTextRejection, VoiceTextRejectionCode};
     let Some(commands) = commands else {
-        return Err(if app.voice_settings.enabled {
+        return Some(Err(if app.voice_settings.enabled {
             let reason = match &app.voice_connection_state {
                 ilium_voice::VoiceConnectionState::Failed(error) => error.clone(),
                 _ => "the voice session is not running".to_owned(),
@@ -1501,33 +3219,120 @@ async fn voice_text_offer_result(
                 VoiceTextRejectionCode::VoiceOff,
                 "voice control is off; press F8 in the Ilium client or pass --start",
             )
-        });
+        }));
     };
     if let ilium_voice::VoiceConnectionState::Failed(error) = &app.voice_connection_state {
-        return Err(VoiceTextRejection::new(
+        return Some(Err(VoiceTextRejection::new(
             VoiceTextRejectionCode::VoiceUnavailable,
             error.clone(),
-        ));
+        )));
     }
-    for sentence in &offer.sentences {
-        if commands
-            .send(ilium_voice::VoiceCommand::SendText(sentence.clone()))
-            .await
-            .is_err()
-        {
-            return Err(VoiceTextRejection::new(
-                VoiceTextRejectionCode::VoiceUnavailable,
-                "the voice session ended before the text could be delivered",
+    if offer.sentences.len() > commands.max_capacity() {
+        return Some(Err(VoiceTextRejection::new(
+            VoiceTextRejectionCode::InvalidRequest,
+            "the voice offer exceeds the actor queue capacity",
+        )));
+    }
+    let mut reserved_fifo = match fifo {
+        Some((fifo, owner)) => match fifo.reserve_batch(
+            owner,
+            offer.sentences.len(),
+            &crate::execution::process_quota(),
+        ) {
+            Ok(reservation) => Some(reservation),
+            Err(error) => {
+                app.status_message = Some(error);
+                return None;
+            }
+        },
+        None => None,
+    };
+    let permits = if reserved_fifo.is_none() {
+        match commands.try_reserve_many(offer.sentences.len()) {
+            Ok(permits) => Some(permits),
+            Err(mpsc::error::TrySendError::Full(_)) => return None,
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                return Some(Err(VoiceTextRejection::new(
+                    VoiceTextRejectionCode::VoiceUnavailable,
+                    "the voice session ended before the text could be delivered",
+                )))
+            }
+        }
+    } else {
+        None
+    };
+    // Source-pinned serde_json starts with Vec128 and RawVec doubles. Its
+    // serialized string and tungstenite's copied output Vec coexist (each
+    // <=2*(6*UTF8 bytes + framing/scaffolding)). JSON input, diagnostic clone,
+    // and last-user transcript add three unescaped copies. Logging writer
+    // buffers have their own pre-growth service reservation.
+    let bytes = offer.sentences.iter().try_fold(4096usize, |total, text| {
+        let unescaped_copies = text.capacity().checked_mul(3)?;
+        let escaped = text.capacity().checked_mul(6)?.checked_add(1024)?;
+        let serialized_and_socket = escaped.checked_mul(2)?.checked_mul(2)?;
+        total
+            .checked_add(unescaped_copies)?
+            .checked_add(serialized_and_socket)
+    })?;
+    if offer._retention.as_ref().is_some_and(|owner| {
+        bytes
+            .saturating_add(owner.declared_bytes())
+            .saturating_add(512)
+            > 64 * 1024 * 1024
+    }) {
+        return Some(Err(VoiceTextRejection::new(
+            VoiceTextRejectionCode::VoiceUnavailable,
+            "voice text exceeds the bounded provider publication allocation budget",
+        )));
+    }
+    let derived = match &offer._retention {
+        Some(owner) => match owner.try_reserve_derived(bytes) {
+            Ok(retention) => Some(retention),
+            Err(
+                error @ (ilium_execution::RejectReason::Closed
+                | ilium_execution::RejectReason::InvalidCost
+                | ilium_execution::RejectReason::AccountingPoisoned),
+            ) => {
+                tracing::error!(?error, "voice text publication allocation unavailable");
+                return Some(Err(VoiceTextRejection::new(
+                    VoiceTextRejectionCode::VoiceUnavailable,
+                    "voice text publication allocation owner is unavailable",
+                )));
+            }
+            Err(error) => {
+                app.status_message = Some(format!("Voice text delivery queued: {error:?}"));
+                return None;
+            }
+        },
+        None => None,
+    };
+    app.record_typed_voice_text(&offer.sentences);
+    app.retain_typed_voice_text(derived.clone());
+    let sentence_count = u32::try_from(offer.sentences.len()).unwrap_or(u32::MAX);
+    let allocation: std::sync::Arc<dyn ilium_voice::VoiceTextAllocation> =
+        std::sync::Arc::new(VoiceOfferAllocation {
+            _original: offer._retention.take(),
+            _derived: derived,
+        });
+    if let Some(reserved) = reserved_fifo.as_mut() {
+        for sentence in offer.sentences.drain(..) {
+            reserved.send(ilium_voice::VoiceCommand::SendText(
+                ilium_voice::OwnedVoiceText::charged(sentence, std::sync::Arc::clone(&allocation)),
+            ));
+        }
+    } else if let Some(permits) = permits {
+        for (permit, sentence) in permits.zip(offer.sentences.drain(..)) {
+            permit.send(ilium_voice::VoiceCommand::SendText(
+                ilium_voice::OwnedVoiceText::charged(sentence, std::sync::Arc::clone(&allocation)),
             ));
         }
     }
-    Ok(VoiceTextAccepted {
-        sentence_count: u32::try_from(offer.sentences.len()).unwrap_or(u32::MAX),
+    Some(Ok(VoiceTextAccepted {
+        sentence_count,
         phase: voice_text_phase(&app.voice_connection_state),
         started_voice: offer.started_voice,
-    })
+    }))
 }
-
 fn voice_text_phase(state: &ilium_voice::VoiceConnectionState) -> ilium_ipc::VoiceTextPhase {
     use ilium_ipc::VoiceTextPhase;
     use ilium_voice::VoiceConnectionState;
@@ -1562,82 +3367,155 @@ fn voice_text_phase(state: &ilium_voice::VoiceConnectionState) -> ilium_ipc::Voi
 /// events, so it preserves the stream order while allowing input to run.
 fn apply_server_events(
     app: &mut App,
-    events_rx: &mut mpsc::Receiver<ilium_ipc::ServerEvent>,
-    first: ilium_ipc::ServerEvent,
+    events_rx: &mut mpsc::Receiver<crate::connection::Received<ilium_ipc::ServerEvent>>,
+    first: crate::connection::Received<ilium_ipc::ServerEvent>,
     naming_workers: &mut NamingWorkers,
     icon_search_workers: &mut IconSearchWorkers,
     trigger_execution_lease: &mut TriggerExecutionLease,
     home_dir: Option<&std::path::Path>,
 ) -> ServerEventDamage {
-    use ilium_ipc::ServerEvent;
-
-    let mut pending_screen_update: Option<(ilium_core::NodeId, u64, u64, Vec<u8>)> = None;
     let mut next = Some(first);
     let mut damage = ServerEventDamage::default();
     for _ in 0..MAX_SERVER_EVENTS_PER_BATCH {
-        let event = match next.take() {
+        let received = match next
+            .take()
+            .or_else(|| app.pending_terminal_events.pop_front())
+        {
             Some(event) => event,
             None => match events_rx.try_recv() {
                 Ok(event) => event,
                 Err(_) => break,
             },
         };
-        match event {
-            ServerEvent::ScreenUpdate {
-                pane_id: incoming_pane_id,
-                first_sequence: incoming_first_sequence,
-                sequence: incoming_sequence,
-                bytes: mut incoming_bytes,
-            } => match &mut pending_screen_update {
-                Some((
-                    pending_pane_id,
-                    _pending_first_sequence,
-                    pending_sequence,
-                    pending_bytes,
-                )) if *pending_pane_id == incoming_pane_id
-                    && incoming_first_sequence == pending_sequence.saturating_add(1)
-                    && screen_updates_fit(pending_bytes.len(), incoming_bytes.len()) =>
-                {
-                    pending_bytes.append(&mut incoming_bytes);
-                    *pending_sequence = incoming_sequence;
-                }
-                _ => {
-                    damage.needs_redraw |=
-                        flush_pending_screen_update(app, &mut pending_screen_update);
-                    pending_screen_update = Some((
-                        incoming_pane_id,
-                        incoming_first_sequence,
-                        incoming_sequence,
-                        incoming_bytes,
-                    ));
-                }
-            },
-            ServerEvent::DebugLoggingChanged { enabled } => {
-                damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
-                damage.needs_redraw = true;
-                damage.needs_immediate_redraw = true;
-                synchronize_debug_logging_from_server(app, enabled);
-            }
-            other => {
-                damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
-                let event_damage = server_event_damage(app, &other);
-                damage.needs_redraw |= event_damage.needs_redraw;
-                damage.needs_immediate_redraw |= event_damage.needs_immediate_redraw;
-                if let Some(occurrence) = crate::render_cache::apply(app, other) {
-                    // Trigger routing may synchronously queue user-visible
-                    // work independent of the event's own render-cache edge.
-                    damage.needs_redraw = true;
-                    damage.needs_immediate_redraw = true;
-                    if trigger_execution_lease.claim() {
-                        app.handle_trigger_occurrence(occurrence);
+        let event_damage = server_event_damage(app, received.view());
+        damage.needs_redraw |= event_damage.needs_redraw;
+        damage.needs_immediate_redraw |= event_damage.needs_immediate_redraw;
+        let (event, retention) = received.into_parts();
+        // Register BEFORE admission so a concurrent last-owner release cannot
+        // be lost between refusal and the next event-loop select.
+        let mut admission_wake =
+            Box::pin(crate::execution::admission_notification().notified_owned());
+        admission_wake.as_mut().enable();
+        let mut projection_update =
+            match crate::incoming_projection::ProjectionRetention::prepare_owned(
+                &event,
+                app,
+                retention.as_ref(),
+            ) {
+                Ok(update) => update,
+                Err(reason) => {
+                    app.pending_terminal_events.push_front(
+                        crate::connection::Received::with_retention(event, retention),
+                    );
+                    if matches!(
+                        reason,
+                        ilium_execution::RejectReason::Closed
+                            | ilium_execution::RejectReason::InvalidCost
+                            | ilium_execution::RejectReason::AccountingPoisoned
+                    ) {
+                        app.status_message = Some(format!(
+                            "Incoming projection cannot be admitted: {reason:?}"
+                        ));
+                        app.projection_admission_failure = Some(reason);
+                        app.exit_reason = Some(crate::app::ClientExitReason::Quit);
+                    } else {
+                        app.status_message = Some(
+                            "Incoming projection is waiting for bounded UI storage credit".into(),
+                        );
+                        app.projection_admission_wake = Some(admission_wake);
+                        app.projection_busy_retry_at = (reason
+                            == ilium_execution::RejectReason::Busy)
+                            .then(|| tokio::time::Instant::now() + Duration::from_millis(1));
                     }
+                    damage.needs_redraw = true;
+                    break;
                 }
+            };
+        app.processing_derivation_retention = projection_update.derived_retention.take();
+        app.processing_event_retention = retention;
+        if let ilium_ipc::ServerEvent::DebugLoggingChanged { enabled } = event {
+            synchronize_debug_logging_from_server(app, enabled);
+        } else if let Some(occurrence) = crate::render_cache::apply(app, event) {
+            damage.needs_redraw = true;
+            damage.needs_immediate_redraw = true;
+            if trigger_execution_lease.claim() {
+                app.handle_trigger_occurrence(occurrence);
+            }
+        }
+        app.incoming_projection
+            .commit(projection_update, app.processing_event_retention.as_ref());
+        app.processing_event_retention = None;
+        app.processing_derivation_retention = None;
+        if app.status_message.as_deref()
+            == Some("Incoming projection is waiting for bounded UI storage credit")
+        {
+            app.status_message = None;
+        }
+        app.incoming_projection
+            .prune(&app.tree, &app.agent_debug_logs);
+        if !app.pending_terminal_events.is_empty() {
+            break;
+        }
+    }
+    if !app.pending_terminal_events.is_empty() {
+        while app.pending_terminal_events.len() < MAX_PENDING_SERVER_EVENTS {
+            let Ok(event) = events_rx.try_recv() else {
+                break;
+            };
+            app.pending_terminal_events.push_back(event);
+        }
+        damage.needs_redraw |= confirm_suspended_panes_from_pending_snapshots(app);
+    }
+    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+    damage
+}
+
+/// Network intake appends to the original FIFO. Callers which already popped
+/// its oldest member pass that member directly to `apply_server_events`.
+fn queue_server_event_in_order(
+    app: &mut App,
+    event: crate::connection::Received<ilium_ipc::ServerEvent>,
+) -> Option<crate::connection::Received<ilium_ipc::ServerEvent>> {
+    if app.pending_terminal_events.is_empty() && app.projection_admission_wake.is_none() {
+        return Some(event);
+    }
+    app.pending_terminal_events.push_back(event);
+    confirm_suspended_panes_from_pending_snapshots(app);
+    if app.projection_admission_wake.is_some() {
+        None
+    } else {
+        app.pending_terminal_events.pop_front()
+    }
+}
+
+/// Lookahead proves only cancellation of a suspended instance absent from an
+/// authoritative later snapshot. Every received payload and guard remains in
+/// FIFO custody; snapshot installation and all other effects happen normally.
+fn confirm_suspended_panes_from_pending_snapshots(app: &mut App) -> bool {
+    let mut changed = false;
+    for received in &app.pending_terminal_events {
+        let ilium_ipc::ServerEvent::TreeSnapshot(tree) = received.view() else {
+            continue;
+        };
+        for (pane_id, runtime) in &mut app.panes {
+            let crate::app::PaneRuntime::Terminal(view) = runtime else {
+                continue;
+            };
+            if !view.has_suspended_output() || tree.get(*pane_id).is_some() {
+                continue;
+            }
+            let identity = std::sync::Arc::clone(&view.identity);
+            if view.confirm_removed(&identity) {
+                tracing::warn!(
+                    ?pane_id,
+                    reason = "confirmed_server_snapshot_removal",
+                    "suspended terminal instance canceled after authoritative removal confirmation"
+                );
+                changed = true;
             }
         }
     }
-    damage.needs_redraw |= flush_pending_screen_update(app, &mut pending_screen_update);
-    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
-    damage
+    changed
 }
 
 /// Applies the server-accepted state to this client's writer and UI without
@@ -1645,20 +3523,10 @@ fn apply_server_events(
 /// converge every client already attached to the same detached session.
 fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     if !enabled {
-        tracing::info!("client file logging disabled after server synchronization");
+        tracing::info!("server logging disable synchronization requested");
     }
-    match ilium_logging::set_enabled(enabled) {
-        Ok(()) => {
-            app.debug_settings.file_logging_enabled = enabled;
-            if enabled {
-                tracing::info!("client file logging synchronized from server");
-            }
-        }
-        Err(error) => {
-            tracing::error!(%error, "failed to synchronize client file logging from server");
-            app.status_message = Some(format!("Could not synchronize debug logging: {error}"));
-        }
-    }
+    app.debug_logging.synchronize(enabled);
+    mark_debug_logging_pending(app);
 }
 
 /// Applies one received input event and any immediately queued successors.
@@ -1667,76 +3535,213 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
 /// every non-motion event in order preserves click, drag, and scroll input.
 fn dispatch_ready_input_events(
     app: &mut App,
-    input_rx: &mut mpsc::Receiver<Event>,
+    input_rx: &mut terminal_input_owner::InputReceiver,
     naming_workers: &mut NamingWorkers,
     icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
-    first: Event,
-) {
-    for_each_ready_input_event(input_rx, first, |event| {
-        dispatch_input_event(app, naming_workers, icon_search_workers, home_dir, event);
+    first: Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
+    deferred: &mut Option<
+        Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
+    >,
+) -> Option<terminal_input_owner::InputFailure> {
+    let mut failure = None;
+    *deferred = for_each_ready_input_event_until(input_rx, first, |event| {
+        match event {
+            Ok(event) => {
+                let destination = if matches!(event.view(), Event::Paste(_)) {
+                    app.native_terminal_paste_destination()
+                } else {
+                    None
+                };
+                if let Some(pane_id) = destination {
+                    if !crate::keys::intercept_event(app, event.view()) {
+                        if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
+                            failure = Some(error);
+                        }
+                    }
+                    // Preserve App::handle_event's post-key layout sampling,
+                    // including an event consumed by a protected input owner.
+                    app.tick_layout_animation(Instant::now());
+                    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+                } else {
+                    event.dispatch(|event| {
+                        dispatch_input_event(
+                            app,
+                            naming_workers,
+                            icon_search_workers,
+                            home_dir,
+                            event,
+                        )
+                    });
+                }
+            }
+            Err(error) => failure = Some(error),
+        }
+        if let Some(error) = app.take_native_paste_failure() {
+            failure = Some(terminal_input_owner::InputFailure::combine(
+                failure.take(),
+                error,
+            ));
+        }
+        failure.is_none() && app.pending_native_paste.is_none()
     });
+    failure
 }
 
-/// Visits a bounded batch without ever receiving one more event than the
-/// caller can dispatch. The event after the batch boundary must remain in
-/// `input_rx`; pulling it into a local look-ahead slot would drop that key
-/// when this function returns.
-fn for_each_ready_input_event(
-    input_rx: &mut mpsc::Receiver<Event>,
-    first: Event,
-    mut dispatch: impl FnMut(Event),
-) {
-    let mut next = Some(first);
+trait InputBatchItem: Sized {
+    fn view(&self) -> Option<&Event>;
+    fn coalesce_motion(self) -> Result<(), Self>;
+}
 
-    for event_index in 0..MAX_INPUT_EVENTS_PER_BATCH {
+impl InputBatchItem
+    for Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>
+{
+    fn view(&self) -> Option<&Event> {
+        self.as_ref()
+            .ok()
+            .map(terminal_input_owner::InputEvent::view)
+    }
+
+    fn coalesce_motion(self) -> Result<(), Self> {
+        match self {
+            Ok(event) => event.coalesce_motion().map_err(Ok),
+            Err(error) => Err(Err(error)),
+        }
+    }
+}
+
+trait ReadyInput {
+    type Item: InputBatchItem;
+    fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError>;
+}
+
+impl ReadyInput for terminal_input_owner::InputReceiver {
+    type Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>;
+
+    fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
+        self.try_recv()
+    }
+}
+
+#[cfg(test)]
+impl InputBatchItem for Event {
+    fn view(&self) -> Option<&Event> {
+        Some(self)
+    }
+
+    fn coalesce_motion(self) -> Result<(), Self> {
+        if is_mouse_motion(Some(&self)) {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+}
+
+#[cfg(test)]
+impl ReadyInput for mpsc::Receiver<Event> {
+    type Item = Event;
+
+    fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
+        self.try_recv()
+    }
+}
+
+fn is_mouse_motion(event: Option<&Event>) -> bool {
+    matches!(
+        event,
+        Some(Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Moved,
+            ..
+        }))
+    )
+}
+
+/// Count every consumed original, including superseded motion, toward the
+/// existing fairness limit. Any lookahead already received is dispatched in
+/// this batch; the next original after the boundary remains in the receiver.
+#[cfg(test)]
+fn for_each_ready_input_event<S: ReadyInput>(
+    input_rx: &mut S,
+    first: S::Item,
+    mut dispatch: impl FnMut(S::Item),
+) {
+    let remaining = for_each_ready_input_event_until(input_rx, first, |event| {
+        dispatch(event);
+        true
+    });
+    assert!(
+        remaining.is_none(),
+        "an uninterrupted batch dispatches its lookahead"
+    );
+}
+
+/// A paused consumer returns any already-read lookahead to its bounded owner.
+/// It never consumes the next original after a blocked semantic Paste.
+fn for_each_ready_input_event_until<S: ReadyInput>(
+    input_rx: &mut S,
+    first: S::Item,
+    mut dispatch: impl FnMut(S::Item) -> bool,
+) -> Option<S::Item> {
+    let mut next = Some(first);
+    let mut received = 1;
+    loop {
         let event = match next.take() {
             Some(event) => event,
-            None => match input_rx.try_recv() {
-                Ok(event) => event,
-                Err(_) => break,
-            },
-        };
-        let event = if matches!(
-            event,
-            Event::Mouse(crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Moved,
-                ..
-            })
-        ) && event_index + 1 < MAX_INPUT_EVENTS_PER_BATCH
-        {
-            let mut newest_motion = event;
-            loop {
-                match input_rx.try_recv() {
-                    Ok(candidate)
-                        if matches!(
-                            candidate,
-                            Event::Mouse(crossterm::event::MouseEvent {
-                                kind: crossterm::event::MouseEventKind::Moved,
-                                ..
-                            })
-                        ) =>
-                    {
-                        newest_motion = candidate;
-                    }
-                    Ok(candidate) => {
-                        next = Some(candidate);
-                        break;
+            None => {
+                if received == MAX_INPUT_EVENTS_PER_BATCH {
+                    break;
+                }
+                match input_rx.try_next() {
+                    Ok(event) => {
+                        received += 1;
+                        event
                     }
                     Err(_) => break,
+                }
+            }
+        };
+        let event = if is_mouse_motion(event.view()) {
+            let mut newest_motion = event;
+            while received < MAX_INPUT_EVENTS_PER_BATCH {
+                let candidate = match input_rx.try_next() {
+                    Ok(candidate) => {
+                        received += 1;
+                        candidate
+                    }
+                    Err(_) => break,
+                };
+                if is_mouse_motion(candidate.view()) {
+                    match newest_motion.coalesce_motion() {
+                        Ok(()) => newest_motion = candidate,
+                        Err(original) => {
+                            newest_motion = original;
+                            next = Some(candidate);
+                            break;
+                        }
+                    }
+                } else {
+                    next = Some(candidate);
+                    break;
                 }
             }
             newest_motion
         } else {
             event
         };
-
-        dispatch(event);
+        if !dispatch(event) {
+            return next;
+        }
+        if received == MAX_INPUT_EVENTS_PER_BATCH && next.is_none() {
+            break;
+        }
     }
+    None
 }
 
 /// Applies and clears `pending`, if it holds a merged `ScreenUpdate` run --
 /// see `apply_server_events`.
+#[cfg(test)]
 fn flush_pending_screen_update(
     app: &mut App,
     pending: &mut Option<(ilium_core::NodeId, u64, u64, Vec<u8>)>,
@@ -1783,6 +3788,128 @@ fn dispatch_input_event(
 /// must run after every event-loop branch, not only keyboard input, because
 /// voice tool execution invokes the same semantic methods and can request
 /// tests, icon search, retitling, or restructuring too.
+fn handle_naming_admission(
+    result: Result<(), Box<ilium_execution::Rejected<crate::naming_workers::NamingRequest>>>,
+    app: &mut App,
+) {
+    let Err(rejected) = result else {
+        return;
+    };
+    use ilium_execution::RejectReason;
+    let reason = rejected.reason;
+    if matches!(
+        reason,
+        RejectReason::Busy
+            | RejectReason::QueueFull
+            | RejectReason::JobLimit
+            | RejectReason::InputBytes
+            | RejectReason::ResultBytes
+            | RejectReason::WorkerBytes
+    ) {
+        match app.requeue_naming_request(rejected.value) {
+            Ok(()) => {
+                app.status_message = Some(format!("Inference waiting for admission: {reason:?}"))
+            }
+            Err(original) => reject_naming_original(*original, RejectReason::QueueFull, app),
+        }
+        return;
+    }
+    reject_naming_original(rejected.value, reason, app);
+}
+
+fn reject_naming_original(
+    original: crate::naming_workers::NamingRequest,
+    reason: ilium_execution::RejectReason,
+    app: &mut App,
+) {
+    let provider = original.settings.settings.selected_provider;
+    let message = format!("Inference did not start: {reason:?}");
+    use crate::naming_workers::NamingKind;
+    match original.kind {
+        NamingKind::ProjectName(_) => app.is_project_name_loading = false,
+        NamingKind::SessionTitle(request) => {
+            app.titles_loading.remove(&request.input.pane_id);
+        }
+        NamingKind::TerminalTitle(input, _) => {
+            app.titles_loading.remove(&input.pane_id);
+        }
+        NamingKind::InferenceTest => app.finish_inference_test(
+            provider,
+            Duration::ZERO,
+            Err(anyhow::anyhow!(message.clone())),
+        ),
+        NamingKind::Models(provider) => app.finish_model_discovery(
+            provider,
+            String::new(),
+            Duration::ZERO,
+            Err(message.clone()),
+        ),
+        NamingKind::Restructure(request, _) => {
+            app.fail_project_restructure(request.project_id, anyhow::anyhow!(message.clone()))
+        }
+        #[cfg(test)]
+        NamingKind::LastPrompt(_) => {}
+    }
+    app.status_message = Some(message);
+}
+fn handle_exact_prompt_admission(
+    result: Result<
+        (),
+        Box<ilium_execution::Rejected<crate::naming_workers::ExactAgentPromptTranscriptRequest>>,
+    >,
+    app: &mut App,
+) {
+    if let Err(refused) = result {
+        if matches!(
+            refused.reason,
+            ilium_execution::RejectReason::Closed | ilium_execution::RejectReason::InvalidCost
+        ) {
+            app.status_message = Some(format!(
+                "Exact transcript recovery did not start: {:?}",
+                refused.reason
+            ));
+        } else {
+            app.retain_exact_prompt_retry(refused.value);
+        }
+    }
+}
+fn dispatch_pending_smart_copy_work(app: &mut App, workers: &mut SmartCopyWorkers) {
+    // Keep refused App requests intact until their owner permits another attempt.
+    if app.take_smart_copy_cancel_requested() {
+        workers.cancel();
+    } // Revocation must not wait for the admission deadline.
+    if !workers.begin_retry_turn(Instant::now()) {
+        return;
+    } // Unrelated input or release wakes never accelerate a refused original.
+    let Some(request) = app.take_pending_smart_copy_request() else {
+        return;
+    }; // Move the exact captured request only when eligible.
+    let Err(rejected) = workers.start(request) else {
+        return;
+    }; // Successful custody is now entirely in the worker owner.
+    let reason = rejected.reason; // Classify coordinator admission, never provider response text.
+    use ilium_execution::RejectReason; // Match the worker's actual refusal clock policy.
+    if matches!(
+        reason,
+        RejectReason::Busy
+            | RejectReason::QueueFull
+            | RejectReason::JobLimit
+            | RejectReason::InputBytes
+            | RejectReason::ResultBytes
+            | RejectReason::WorkerBytes
+    ) {
+        // Only bounded resource contention retries.
+        app.retry_pending_smart_copy_request(rejected.value); // Preserve the original strings, settings, generation, and source guard.
+        app.status_message = Some(format!("Smart Copy admission deferred: {reason:?}")); // Keep refusal visible without reconstructing the request.
+        return; // The worker already armed the next admissible attempt time.
+    } // Closed, invalid, or corrupted admission terminates this original.
+    app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+        generation: rejected.value.generation,
+        pane_id: rejected.value.pane_id,
+        update: SmartCopyWorkerUpdate::Failed(format!("Smart Copy admission failed: {reason:?}")),
+        retention: None,
+    }); // Preserve the existing terminal UI disposition.
+} // Streaming results never flow back through this pre-submission retry path.
 fn dispatch_pending_app_work(
     app: &mut App,
     naming_workers: &mut NamingWorkers,
@@ -1790,15 +3917,79 @@ fn dispatch_pending_app_work(
     home_dir: Option<&std::path::Path>,
 ) {
     if let Some(request) = app.take_pending_icon_semantic_search() {
-        icon_search_workers.request(request);
+        if let Err(request) = icon_search_workers.try_request(request) {
+            app.queue_icon_semantic_search(request);
+        }
+    }
+    app.collect_exact_prompt_reports();
+    for original in std::mem::take(&mut app.pending_exact_prompt_retries) {
+        handle_exact_prompt_admission(
+            naming_workers.spawn_exact_agent_prompt_transcript_worker(original),
+            app,
+        );
     }
     naming_workers.set_automatic_ai_decision(
         app.onboarding_revision,
         app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
     );
-    naming_workers.set_inference_settings(app.inference_settings.clone());
-    // Setup may have suppressed the startup inference. Admit one fresh attempt
-    // for this decision after Finish; an error must not retry every frame.
+    naming_workers.collect(); // Publish revocation before collecting any due provider preflight retry.
+    naming_workers.cancel_stale_exact_prompt_workers(|pane_id, session_id| {
+        app.known_agent_history_context(pane_id)
+            .is_some_and(|(_, known_id, _)| known_id == session_id)
+    });
+    for pane_id in app.take_pending_exact_prompt_worker_cancellations() {
+        naming_workers.cancel_exact_prompt_worker(pane_id);
+    }
+
+    // The keypress captured a verified path and its byte length before
+    // queuing Enter. Keep that immutable context even if the agent becomes
+    // historical before this dispatch turn runs.
+    if let Some(home_dir) = home_dir {
+        for check in app.take_pending_last_prompt_transcript_checks() {
+            handle_exact_prompt_admission(
+                naming_workers.spawn_exact_agent_prompt_transcript_worker(
+                    crate::naming_workers::ExactAgentPromptTranscriptRequest {
+                        home: home_dir.to_path_buf(),
+                        pane_id: check.pane_id,
+                        project_path: check.project_path,
+                        agent_class: check.agent_class,
+                        session_id: check.session_id,
+                        verified_path: check.verified_path,
+                        baseline_length: check.baseline_length,
+                        submitted_after: check.submitted_after,
+                        prompt_epoch: check.prompt_epoch,
+                    },
+                ),
+                app,
+            );
+        }
+    } else {
+        app.take_pending_last_prompt_transcript_checks();
+    }
+
+    if naming_workers.begin_retry_turn(Instant::now()) {
+        // Check the absolute deadline before moving App's captured originals.
+        for original in std::mem::take(&mut app.pending_naming_retries) {
+            // Never recapture current settings or decision for a refused request.
+            handle_naming_admission(naming_workers.retry_original(original), app);
+            // Fresh snapshot allocation cannot strand an older admitted snapshot.
+        } // Actual refusals arm the next turn while preserving the same request allocations.
+    } // Every unrelated event leaves a not-yet-due original exactly where it was.
+    if let Err(reason) = naming_workers.set_inference_settings(&app.inference_settings) {
+        // Only fresh provider work needs the latest settings snapshot.
+        let state = if matches!(
+            reason,
+            ilium_execution::RejectReason::Busy | ilium_execution::RejectReason::WorkerBytes
+        ) {
+            "waiting for admission"
+        } else {
+            "admission failed"
+        }; // Only transient storage refusal schedules another attempt.
+        app.status_message = Some(format!("Inference settings {state}: {reason:?}")); // Existing originals and exact transcript work already advanced independently.
+        return; // Preserve fresh App outboxes for a timed retry or an independent settings change.
+    } // Every admitted original retains its original immutable settings Arc.
+      // Setup may have suppressed the startup inference. Admit one fresh attempt
+      // for this decision after Finish; an error must not retry every frame.
     if app.onboarding.is_none()
         && app.onboarding_progress.automatic_ai_allowed()
         && app.project_name.is_none()
@@ -1807,14 +3998,17 @@ fn dispatch_pending_app_work(
     {
         app.project_name_attempt_revision = Some(app.onboarding_revision);
         app.is_project_name_loading = true;
-        naming_workers.spawn_project_name_worker(app.session_cwd.clone());
+        handle_naming_admission(
+            naming_workers.spawn_project_name_worker(app.session_cwd.clone()),
+            app,
+        );
     }
 
     if app.take_pending_inference_test() {
-        naming_workers.spawn_inference_test_worker();
+        handle_naming_admission(naming_workers.spawn_inference_test_worker(), app);
     }
     if let Some(provider) = app.take_pending_model_refresh() {
-        naming_workers.spawn_model_discovery_worker(provider);
+        handle_naming_admission(naming_workers.spawn_model_discovery_worker(provider), app);
     }
 
     for request in app.take_pending_retitle_requests() {
@@ -1832,13 +4026,16 @@ fn dispatch_pending_app_work(
                 title_generation,
                 trigger,
             } => match home_dir {
-                Some(home_dir) => naming_workers.spawn_session_title_worker(
-                    crate::naming_workers::SessionTitleWorkerRequest {
-                        home: home_dir.to_path_buf(),
-                        input,
-                        title_generation,
-                        trigger,
-                    },
+                Some(home_dir) => handle_naming_admission(
+                    naming_workers.spawn_session_title_worker(
+                        crate::naming_workers::SessionTitleWorkerRequest {
+                            home: home_dir.to_path_buf(),
+                            input,
+                            title_generation,
+                            trigger,
+                        },
+                    ),
+                    app,
                 ),
                 None => {
                     app.record_agent_debug_event(
@@ -1861,43 +4058,12 @@ fn dispatch_pending_app_work(
                 }
             },
             crate::app::PendingRetitleRequest::Terminal { input, trigger } => {
-                naming_workers.spawn_terminal_title_worker(input, trigger);
+                handle_naming_admission(
+                    naming_workers.spawn_terminal_title_worker(input, trigger),
+                    app,
+                );
             }
         }
-    }
-
-    naming_workers.cancel_stale_exact_prompt_workers(|pane_id, session_id| {
-        app.known_agent_history_context(pane_id)
-            .is_some_and(|(_, known_id, _)| known_id == session_id)
-    });
-    for pane_id in app.take_pending_exact_prompt_worker_cancellations() {
-        naming_workers.cancel_exact_prompt_worker(pane_id);
-    }
-
-    // The keypress captured a verified path and its byte length before
-    // queuing Enter. Keep that immutable context even if the agent becomes
-    // historical before this dispatch turn runs.
-    if let Some(home_dir) = home_dir {
-        for check in app.take_pending_last_prompt_transcript_checks() {
-            if let Err(error) = naming_workers.spawn_exact_agent_prompt_transcript_worker(
-                crate::naming_workers::ExactAgentPromptTranscriptRequest {
-                    home: home_dir.to_path_buf(),
-                    pane_id: check.pane_id,
-                    project_path: check.project_path,
-                    agent_class: check.agent_class,
-                    session_id: check.session_id,
-                    verified_path: check.verified_path,
-                    baseline_length: check.baseline_length,
-                    submitted_after: check.submitted_after,
-                    prompt_epoch: check.prompt_epoch,
-                },
-            ) {
-                tracing::warn!(pane_id = check.pane_id.0, %error,
-                    "exact agent prompt transcript worker unavailable");
-            }
-        }
-    } else {
-        app.take_pending_last_prompt_transcript_checks();
     }
 
     for request in app.take_pending_restructure_requests() {
@@ -1906,9 +4072,10 @@ fn dispatch_pending_app_work(
             continue;
         }
         match home_dir {
-            Some(home_dir) => {
-                naming_workers.spawn_restructure_worker(request, home_dir.to_path_buf())
-            }
+            Some(home_dir) => handle_naming_admission(
+                naming_workers.spawn_restructure_worker(request, home_dir.to_path_buf()),
+                app,
+            ),
             None => {
                 app.fail_project_restructure(
                     request.project_id,
@@ -1917,39 +4084,6 @@ fn dispatch_pending_app_work(
             }
         }
     }
-}
-
-/// Reads crossterm events on a dedicated `std::thread` (crossterm's
-/// `event::read()` blocks) and forwards each into a tokio channel the
-/// main select loop merges -- same bridging pattern
-/// `crate::naming_workers` uses for its own background workers.
-///
-/// The channel is bounded, but every input event (a keystroke, a mouse
-/// move) still must reach the loop in order -- unlike a `ScreenUpdate`, an
-/// intermediate one can't be dropped without losing a real keypress -- so
-/// this blocks (`blocking_send`) rather than drops on a full buffer. That's
-/// safe here specifically because the producer is this dedicated OS
-/// thread, not a tokio task: it has nothing else to do while the queue
-/// drains, and `crossterm::event::read()` already paces it to real input
-/// anyway (a bounded queue with a generous capacity only ever fills if the
-/// main loop stalls under real load, which is exactly when backpressure
-/// here -- rather than an unbounded backlog -- is wanted).
-fn spawn_input_forwarder() -> mpsc::Receiver<Event> {
-    let (tx, rx) = mpsc::channel(INPUT_CHANNEL_CAPACITY);
-    std::thread::spawn(move || loop {
-        match crossterm::event::read() {
-            Ok(event) => {
-                if tx.blocking_send(event).is_err() {
-                    break;
-                }
-            }
-            Err(error) => {
-                tracing::error!("crossterm event read failed, stopping input thread: {error}");
-                break;
-            }
-        }
-    });
-    rx
 }
 
 #[cfg(test)]
@@ -1962,6 +4096,61 @@ mod responsiveness_tests {
         assert!(screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH - 1, 1));
         assert!(!screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH, 1));
         assert!(!screen_updates_fit(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn blocked_semantic_paste_keeps_later_key_in_native_fifo() {
+        let (tx, mut rx) = mpsc::channel(2);
+        tx.try_send(Event::Key(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+        )))
+        .unwrap();
+        let mut dispatched = Vec::new();
+        let deferred = for_each_ready_input_event_until(
+            &mut rx,
+            Event::Paste("whole\noriginal".into()),
+            |event| {
+                dispatched.push(event);
+                false
+            },
+        );
+        assert!(deferred.is_none());
+        assert_eq!(dispatched, vec![Event::Paste("whole\noriginal".into())]);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('x'),
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn stopped_motion_dispatch_returns_original_paste_lookahead() {
+        let (tx, mut rx) = mpsc::channel(2);
+        tx.try_send(Event::Paste("original lookahead".into()))
+            .unwrap();
+        tx.try_send(Event::Key(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+        )))
+        .unwrap();
+        let motion = Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Moved,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        let deferred = for_each_ready_input_event_until(&mut rx, motion, |_| false);
+        assert_eq!(deferred, Some(Event::Paste("original lookahead".into())));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(Event::Key(KeyEvent {
+                code: KeyCode::Char('x'),
+                ..
+            }))
+        ));
     }
 
     #[test]
@@ -1994,6 +4183,41 @@ mod responsiveness_tests {
             }))
         ));
         assert!(input_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn motion_coalescing_never_consumes_a_paste_past_the_sixty_fourth_original() {
+        use crossterm::event::{MouseEvent, MouseEventKind};
+
+        let motion = |column| {
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Moved,
+                column,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        let (input_tx, mut input_rx) = mpsc::channel(MAX_INPUT_EVENTS_PER_BATCH + 1);
+        for column in 1..MAX_INPUT_EVENTS_PER_BATCH - 1 {
+            input_tx
+                .try_send(motion(column as u16))
+                .expect("motion queued");
+        }
+        input_tx
+            .try_send(Event::Paste("original-64".into()))
+            .expect("boundary paste");
+        input_tx
+            .try_send(Event::Paste("original-65".into()))
+            .expect("deferred paste");
+        let mut dispatched = Vec::new();
+
+        for_each_ready_input_event(&mut input_rx, motion(0), |event| dispatched.push(event));
+
+        assert_eq!(dispatched.len(), 2, "only motion may be coalesced");
+        assert!(matches!(&dispatched[0], Event::Mouse(event)
+            if event.kind == MouseEventKind::Moved && event.column == (MAX_INPUT_EVENTS_PER_BATCH - 2) as u16));
+        assert!(matches!(&dispatched[1], Event::Paste(text) if text == "original-64"));
+        assert!(matches!(input_rx.try_recv(), Ok(Event::Paste(text)) if text == "original-65"));
     }
 
     #[test]
@@ -2166,15 +4390,19 @@ mod responsiveness_tests {
         let outputs = vec![
             ilium_voice::VoiceToolOutput {
                 call_id: "ordinary".to_owned(),
-                result: serde_json::json!({ "status": "ok" }),
+                result: std::sync::Arc::new(serde_json::json!({ "status": "ok" })),
                 request_follow_up: true,
                 terminate_session_after_delivery: false,
+                allocation_hold: None,
+                retained_bytes: 0,
             },
             ilium_voice::VoiceToolOutput {
                 call_id: "stop".to_owned(),
-                result: serde_json::json!({ "status": "ok" }),
+                result: std::sync::Arc::new(serde_json::json!({ "status": "ok" })),
                 request_follow_up: false,
                 terminate_session_after_delivery: true,
+                allocation_hold: None,
+                retained_bytes: 0,
             },
         ];
 
@@ -2222,10 +4450,9 @@ mod responsiveness_tests {
 
         assert_eq!(context, crate::control::VoiceTargetContext::DetectedAgent);
         match command {
-            ilium_voice::VoiceCommand::UpdateContext {
-                instructions,
-                tools,
-            } => {
+            ilium_voice::VoiceCommand::UpdateContext(context) => {
+                let instructions = context.instructions();
+                let tools = context.tools();
                 assert!(instructions.contains("agent-default dictation rule is active"));
                 assert!(instructions.contains("user's complete utterance as `text`"));
                 assert!(tools
@@ -2248,13 +4475,13 @@ mod responsiveness_tests {
         app.stop_voice_control();
         let control_plane = crate::control::ControlPlane::default();
         let mut voice_service = None;
-        let mut paused_media_players = Vec::new();
+        let mut normal_media = crate::media_control::MediaLease::inactive_fixture();
 
         reconcile_voice_runtime(
             &mut app,
             &control_plane,
             &mut voice_service,
-            &mut paused_media_players,
+            &mut normal_media,
         )
         .await;
 
@@ -2281,7 +4508,108 @@ mod responsiveness_tests {
                 .map(|sentence| (*sentence).to_owned())
                 .collect(),
             started_voice,
+            _retention: None,
         }
+    }
+
+    #[test]
+    fn refused_complete_state_updates_and_registration_rearm_until_credit_releases() {
+        let mut app = voice_text_app();
+        let mut limits = crate::ipc_preparation::request_limits();
+        limits.jobs = 1;
+        app.outbound_admission = Some(
+            app.outbound_admission
+                .as_ref()
+                .unwrap()
+                .child(limits)
+                .unwrap(),
+        );
+        assert!(app.queue_request(ilium_ipc::ClientRequest::UpdateDebugLogging { enabled: false }));
+        app.ui_settings.agent_debug_menu_enabled = true;
+        app.request_agent_debug_menu_reconciliation();
+        app.ui_settings.progress_monitor_enabled = false;
+        app.request_progress_monitor_reconciliation();
+        app.pending_debug_logging_server_enabled = Some(true);
+        app.pending_voice_receiver_registration = true;
+        reconcile_agent_debug_menu(&mut app);
+        reconcile_progress_monitor_enabled(&mut app);
+        reconcile_debug_logging_server(&mut app);
+        reconcile_voice_receiver_registration(&mut app);
+        assert!(app.pending_voice_receiver_registration);
+        assert_eq!(app.pending_debug_logging_server_enabled, Some(true));
+        assert_eq!(app.take_outbound_requests().len(), 1);
+        reconcile_agent_debug_menu(&mut app);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::UpdateAgentDebugMenu { enabled: true }]
+        );
+        reconcile_progress_monitor_enabled(&mut app);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::UpdateProgressMonitorEnabled { enabled: false }]
+        );
+        reconcile_debug_logging_server(&mut app);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::UpdateDebugLogging { enabled: true }]
+        );
+        reconcile_voice_receiver_registration(&mut app);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ilium_ipc::ClientRequest::RegisterVoiceTextReceiver]
+        );
+        assert!(!app.pending_voice_receiver_registration);
+        reconcile_voice_receiver_registration(&mut app);
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn voice_actor_acceptance_waits_for_reply_credit_and_all_original_sentence_slots() {
+        let mut app = voice_text_app();
+        app.voice_settings.enabled = true;
+        app.voice_connection_state = ilium_voice::VoiceConnectionState::Listening;
+        let mut limits = crate::ipc_preparation::request_limits();
+        limits.jobs = 1;
+        app.outbound_admission = Some(
+            app.outbound_admission
+                .as_ref()
+                .unwrap()
+                .child(limits)
+                .unwrap(),
+        );
+        assert!(app.queue_request(ilium_ipc::ClientRequest::UpdateDebugLogging { enabled: false }));
+        let first = offer(&["original first", "original second"], false);
+        let pointer = first.sentences[0].as_ptr();
+        app.restore_voice_text_offers(vec![first]);
+        let (commands, mut received) = mpsc::channel(2);
+        deliver_voice_text_offers_to(&mut app, Some(&commands));
+        assert!(received.try_recv().is_err());
+        assert_eq!(app.take_outbound_requests().len(), 1);
+        commands
+            .try_send(ilium_voice::VoiceCommand::StartPushToTalk)
+            .unwrap();
+        deliver_voice_text_offers_to(&mut app, Some(&commands));
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ilium_voice::VoiceCommand::StartPushToTalk)
+        ));
+        deliver_voice_text_offers_to(&mut app, Some(&commands));
+        let ilium_voice::VoiceCommand::SendText(first) = received.try_recv().unwrap() else {
+            panic!("first original text");
+        };
+        assert_eq!(first.as_str().as_ptr(), pointer);
+        assert_eq!(first.as_str(), "original first");
+        let ilium_voice::VoiceCommand::SendText(second) = received.try_recv().unwrap() else {
+            panic!("second original text");
+        };
+        assert_eq!(second.as_str(), "original second");
+        assert!(
+            matches!(app.take_outbound_requests().as_slice(), [ilium_ipc::ClientRequest::AnswerVoiceText { result: Ok(accepted), .. }] if accepted.sentence_count == 2)
+        );
+        deliver_voice_text_offers_to(&mut app, Some(&commands));
+        assert!(received.try_recv().is_err());
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[tokio::test]
@@ -2292,11 +4620,11 @@ mod responsiveness_tests {
         let (commands, mut received) = mpsc::channel(8);
 
         let result = voice_text_offer_result(
-            &app,
+            &mut app,
             Some(&commands),
-            &offer(&["open the settings", "close it"], false),
+            &mut offer(&["open the settings", "close it"], false),
         )
-        .await;
+        .expect("no temporary pressure");
 
         assert_eq!(
             result,
@@ -2308,7 +4636,9 @@ mod responsiveness_tests {
         );
         for expected in ["open the settings", "close it"] {
             match received.try_recv() {
-                Ok(ilium_voice::VoiceCommand::SendText(text)) => assert_eq!(text, expected),
+                Ok(ilium_voice::VoiceCommand::SendText(text)) => {
+                    assert_eq!(text.as_str(), expected)
+                }
                 other => panic!("expected SendText({expected:?}), got {other:?}"),
             }
         }
@@ -2320,9 +4650,9 @@ mod responsiveness_tests {
         use ilium_ipc::VoiceTextRejectionCode::{VoiceOff, VoiceUnavailable};
 
         // Voice switched off.
-        let app = voice_text_app();
-        let refusal = voice_text_offer_result(&app, None, &offer(&["hi"], false))
-            .await
+        let mut app = voice_text_app();
+        let refusal = voice_text_offer_result(&mut app, None, &mut offer(&["hi"], false))
+            .expect("no temporary pressure")
             .unwrap_err();
         assert_eq!(refusal.code, VoiceOff);
         assert!(refusal.message.contains("--start"));
@@ -2333,8 +4663,8 @@ mod responsiveness_tests {
         app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
             "OpenAI API key must not be empty".to_owned(),
         ));
-        let refusal = voice_text_offer_result(&app, None, &offer(&["hi"], false))
-            .await
+        let refusal = voice_text_offer_result(&mut app, None, &mut offer(&["hi"], false))
+            .expect("no temporary pressure")
             .unwrap_err();
         assert_eq!(refusal.code, VoiceUnavailable);
         assert!(refusal.message.contains("API key"));
@@ -2343,9 +4673,10 @@ mod responsiveness_tests {
         let (commands, received) = mpsc::channel(1);
         drop(received);
         app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Listening);
-        let refusal = voice_text_offer_result(&app, Some(&commands), &offer(&["hi"], false))
-            .await
-            .unwrap_err();
+        let refusal =
+            voice_text_offer_result(&mut app, Some(&commands), &mut offer(&["hi"], false))
+                .expect("no temporary pressure")
+                .unwrap_err();
         assert_eq!(refusal.code, VoiceUnavailable);
     }
 
@@ -2406,6 +4737,7 @@ mod responsiveness_tests {
                 request_id: 5,
                 sentences: vec!["open the settings".to_owned()],
                 started_voice: false,
+                _retention: None,
             }]
         );
     }

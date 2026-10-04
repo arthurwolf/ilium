@@ -399,7 +399,7 @@ mod tests {
         let rows = screen_rows(&terminal);
         let row_text = &rows[usize::from(y)];
         assert!(row_text.contains("Renderer"), "{row_text}");
-        assert!(row_text.contains("[ Software"), "{row_text}");
+        assert!(row_text.contains("← Software"), "{row_text}");
         let panel = layout(content).panel;
         let marker_column = row_text
             .chars()
@@ -556,12 +556,7 @@ mod tests {
         let y = select_backend_row(&mut app);
         let software = ControlValue::Index(0);
         assert_eq!(backend_choice(&app), software);
-        for code in [
-            KeyCode::Right,
-            KeyCode::Left,
-            KeyCode::Enter,
-            KeyCode::Char(' '),
-        ] {
+        for code in [KeyCode::Right, KeyCode::Left, KeyCode::Char(' ')] {
             app.status_message = None;
             key(&mut app, code);
             assert_eq!(
@@ -577,6 +572,42 @@ mod tests {
                 app.status_message
             );
         }
+        // Enter opens the complete catalog, retaining the unavailable option
+        // and its exact native reason. Trying it cannot change the renderer.
+        let model = app.animation_row_model();
+        let reason = model.view(backend_row(&app)).unwrap().disabled_options[0]
+            .reason
+            .clone();
+        key(&mut app, KeyCode::Enter);
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("renderer catalog");
+        };
+        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("renderer choices");
+        };
+        assert_eq!(choice.options().len(), 2);
+        let gpu = choice
+            .options()
+            .iter()
+            .find(|option| option.label == "GPU")
+            .unwrap();
+        assert_eq!(gpu.disabled_reason.as_deref(), Some(reason.as_str()));
+        key(&mut app, KeyCode::Down);
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(
+            backend_choice(&app),
+            software,
+            "disabled catalog commit cannot select GPU"
+        );
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("disabled choice retains the catalog");
+        };
+        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("renderer choices");
+        };
+        assert_eq!(choice.notice.as_deref(), Some(reason.as_str()));
+        key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.mode, Mode::Settings(_)));
         // The help line of the selected row leads with the same summary.
         let terminal = draw(&mut app, 80, 24);
         assert!(screen_rows(&terminal)

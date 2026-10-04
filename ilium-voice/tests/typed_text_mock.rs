@@ -125,7 +125,7 @@ fn config() -> VoiceRuntimeConfig {
     }
 }
 
-async fn wait_until_listening(service: &mut VoiceService) {
+async fn wait_until_listening(service: &mut FixtureVoice) {
     tokio::time::timeout(STEP_TIMEOUT, async {
         loop {
             match service.next_event().await.expect("voice event channel") {
@@ -141,7 +141,7 @@ async fn wait_until_listening(service: &mut VoiceService) {
     .expect("session should become ready");
 }
 
-async fn next_tool_invocation(service: &mut VoiceService) -> ilium_voice::VoiceToolInvocation {
+async fn next_tool_invocation(service: &mut FixtureVoice) -> ilium_voice::VoiceToolInvocation {
     tokio::time::timeout(STEP_TIMEOUT, async {
         loop {
             if let VoiceEvent::ToolInvocations(mut invocations) =
@@ -165,7 +165,8 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     std::env::set_var("ILIUM_VOICE_REALTIME_URL", &url);
     std::env::set_var("ILIUM_VOICE_AUDIO", "none");
 
-    let mut service = VoiceService::start(config(), Vec::new()).expect("start voice actor");
+    let mut service =
+        FixtureVoice::start(config(), Vec::new(), test_quota()).expect("start voice actor");
     let sender = service.command_sender();
     assert_eq!(mock.next_client_event().await["type"], "session.update");
     wait_until_listening(&mut service).await;
@@ -173,7 +174,9 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     // Idle session: a typed sentence becomes a user message and a response
     // request immediately, with the text trimmed.
     sender
-        .send(VoiceCommand::SendText("  open the settings  ".to_owned()))
+        .send(VoiceCommand::SendText(
+            "  open the settings  ".to_owned().into(),
+        ))
         .await
         .expect("send first sentence");
     mock.expect_typed_turn("open the settings").await;
@@ -181,15 +184,15 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     // Blank text is ignored, and a sentence sent while the model is still
     // answering waits its turn rather than colliding with the active response.
     sender
-        .send(VoiceCommand::SendText("   ".to_owned()))
+        .send(VoiceCommand::SendText("   ".to_owned().into()))
         .await
         .expect("send blank sentence");
     sender
-        .send(VoiceCommand::SendText("then close it".to_owned()))
+        .send(VoiceCommand::SendText("then close it".to_owned().into()))
         .await
         .expect("send second sentence");
     sender
-        .send(VoiceCommand::SendText("and go back".to_owned()))
+        .send(VoiceCommand::SendText("and go back".to_owned().into()))
         .await
         .expect("send third sentence");
     mock.expect_no_client_event("the first response is still active")
@@ -214,7 +217,7 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     let invocation = next_tool_invocation(&mut service).await;
     assert_eq!(invocation.name, "ilium_ui");
     sender
-        .send(VoiceCommand::SendText("finally, say hi".to_owned()))
+        .send(VoiceCommand::SendText("finally, say hi".to_owned().into()))
         .await
         .expect("send sentence behind a tool call");
     mock.expect_no_client_event("tool outputs are still pending")
@@ -223,9 +226,12 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     sender
         .send(VoiceCommand::SubmitToolOutputs(vec![VoiceToolOutput {
             call_id: invocation.call_id,
-            result: json!({"status": "ok"}),
+            result: std::sync::Arc::new(json!({"status": "ok"})),
             request_follow_up: true,
             terminate_session_after_delivery: false,
+            // This provider fixture does not use the application allocation bank.
+            allocation_hold: None,
+            retained_bytes: 0,
         }]))
         .await
         .expect("submit tool output");
@@ -242,7 +248,7 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     mock.finish_response(vec![function_call("call-2", "ilium_ui", "{}")]);
     let invocation = next_tool_invocation(&mut service).await;
     sender
-        .send(VoiceCommand::SendText("one more thing".to_owned()))
+        .send(VoiceCommand::SendText("one more thing".to_owned().into()))
         .await
         .expect("send sentence behind a silent tool call");
     mock.expect_no_client_event("tool outputs are still pending")
@@ -250,9 +256,12 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     sender
         .send(VoiceCommand::SubmitToolOutputs(vec![VoiceToolOutput {
             call_id: invocation.call_id,
-            result: json!({"status": "ok"}),
+            result: std::sync::Arc::new(json!({"status": "ok"})),
             request_follow_up: false,
             terminate_session_after_delivery: false,
+            // This provider fixture does not use the application allocation bank.
+            allocation_hold: None,
+            retained_bytes: 0,
         }]))
         .await
         .expect("submit silent tool output");
@@ -262,8 +271,120 @@ async fn typed_sentences_reach_the_model_as_ordered_user_turns() {
     );
     mock.expect_typed_turn("one more thing").await;
 
-    service.shutdown().await;
+    shutdown_voice(service).await;
     mock.task.abort();
     std::env::remove_var("ILIUM_VOICE_REALTIME_URL");
     std::env::remove_var("ILIUM_VOICE_AUDIO");
 }
+
+fn test_quota() -> ilium_execution::QuotaGroup {
+    ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+        clients: 1,
+        jobs: 1,
+        service_jobs: 0,
+        input_bytes: 1024,
+        result_bytes: 1024,
+        worker_threads: 8,
+        worker_bytes: 128 * 1024 * 1024,
+    })
+}
+
+async fn shutdown_voice(service: FixtureVoice) {
+    let FixtureVoice {
+        service,
+        _event_allocations,
+        quota: _quota,
+    } = service;
+    let mut outcome = service.shutdown().await;
+    loop {
+        for receipt in outcome.events.drain(..) {
+            if let VoiceEvent::StateChanged(VoiceConnectionState::Failed(error)) = receipt.event() {
+                panic!("shutdown actor failure: {error}");
+            }
+        }
+        match outcome.state {
+            ilium_voice::VoiceShutdownState::Pending(service) => {
+                outcome = service.continue_shutdown().await
+            }
+            ilium_voice::VoiceShutdownState::Complete(exit) => {
+                assert!(matches!(exit, ilium_voice::VoiceActorExit::Completed));
+                assert!(outcome.undelivered_stop_outputs.is_none());
+                assert!(outcome.undelivered_commands.is_empty());
+                tokio::task::spawn_blocking(move || {
+                    outcome
+                        .audio_custody
+                        .join_until(std::time::Instant::now() + std::time::Duration::from_secs(5))
+                })
+                .await
+                .expect("audio retirement observer")
+                .expect("actual audio owners joined");
+                break;
+            }
+        }
+    }
+}
+
+/// Fixture custody follows collected invocations/transcripts until shutdown.
+struct FixtureVoice {
+    service: VoiceService,
+    _event_allocations: Vec<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    quota: ilium_execution::QuotaGroup,
+}
+impl std::ops::Deref for FixtureVoice {
+    type Target = VoiceService;
+    fn deref(&self) -> &VoiceService {
+        &self.service
+    }
+}
+impl FixtureVoice {
+    fn start(
+        config: VoiceRuntimeConfig,
+        tools: Vec<ilium_voice::VoiceToolDefinition>,
+        quota: ilium_execution::QuotaGroup,
+    ) -> Result<Self, ilium_voice::VoiceError> {
+        let retained_bytes =
+            ilium_voice::runtime_capture_bytes(&config, &tools).ok_or_else(|| {
+                ilium_voice::VoiceError::InvalidConfiguration(
+                    "fixture startup layout overflow".into(),
+                )
+            })?;
+        let allocation = quota
+            .reserve_external_storage(retained_bytes)
+            .map_err(|reason| {
+                ilium_voice::VoiceError::AudioPreparation(format!(
+                    "fixture startup admission: {reason:?}"
+                ))
+            })?;
+        let startup = ilium_voice::OwnedVoiceStartup::charged(
+            config,
+            tools,
+            retained_bytes,
+            std::sync::Arc::new(FixtureStartupAllocation {
+                _allocation: allocation,
+            }),
+        )?;
+        let admission = VoiceService::admit_startup(quota.clone()).map_err(|reason| {
+            ilium_voice::VoiceError::AudioPreparation(format!(
+                "fixture actor metadata admission: {reason:?}"
+            ))
+        })?;
+        let service = VoiceService::start(startup, admission);
+        Ok(Self {
+            service,
+            _event_allocations: Vec::new(),
+            quota,
+        })
+    }
+    async fn next_event(&mut self) -> Option<VoiceEvent> {
+        let receipt = self.service.next_event().await?;
+        let (event, allocation) = receipt.into_parts();
+        self._event_allocations.push(allocation);
+        Some(event)
+    }
+}
+
+#[derive(Debug)]
+struct FixtureStartupAllocation {
+    _allocation: ilium_execution::StorageAdmission,
+}
+impl ilium_voice::VoiceTextAllocation for FixtureStartupAllocation {}

@@ -37,12 +37,51 @@ fn is_escape(event: &Event) -> bool {
     matches!(event, Event::Key(key) if key.code == KeyCode::Esc && is_press(key))
 }
 
-/// Top-level per-mode dispatch, called for every non-mouse `Event` (key
-/// presses, resizes are handled by the caller before reaching here).
+/// Existing protected input owners run before terminal capture or per-mode
+/// dispatch. This shared path preserves JS review, onboarding and dialog policy.
+pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
+    if app.onboarding.is_none() && app.handle_plugin_permission_event(event) {
+        return true;
+    }
+    if crate::onboarding::integration::handle_event(app, event) {
+        return true;
+    }
+    if matches!(app.mode, Mode::ValueDialog(_)) {
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("matched value dialog");
+        };
+        let previous_budget = host.inference_budget_draft().map(str::to_owned);
+        let outcome = match event {
+            Event::Key(key) if is_press(key) && host.is_saving() && key.code == KeyCode::Esc => {
+                crate::value_dialog::DialogOutcome::Cancel
+            }
+            _ if host.is_saving() => crate::value_dialog::DialogOutcome::Continue,
+            Event::Key(key) if is_press(key) => {
+                host.dialog.handle_key(app.layout.screen_area, key.code)
+            }
+            Event::Paste(text) => host.dialog.paste(app.layout.screen_area, text),
+            _ => crate::value_dialog::DialogOutcome::Continue,
+        };
+        if matches!(outcome, crate::value_dialog::DialogOutcome::Continue) {
+            app.queue_inference_number_autosave(
+                &mut host,
+                previous_budget.as_deref(),
+                std::time::Instant::now(),
+            );
+        }
+        app.finish_value_dialog(host, outcome);
+        return true;
+    }
+
+    false
+}
+
+/// Top-level per-mode dispatch for ordinary owned events.
 pub fn handle_event(app: &mut App, event: Event) {
-    if crate::onboarding::integration::handle_event(app, &event) {
+    if intercept_event(app, &event) {
         return;
     }
+
     if matches!(&event, Event::Key(key) if is_press(key) && key.code == KeyCode::Esc)
         && app
             .agent_popover
@@ -109,6 +148,7 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_voice_setting_prompt(app, field, state, &event)
         }
         Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
+        Mode::ValueDialog(host) => app.mode = Mode::ValueDialog(host),
         Mode::GitSettingPrompt(field, state) => {
             handle_git_setting_prompt(app, field, state, &event)
         }
@@ -249,6 +289,17 @@ pub fn handle_event(app: &mut App, event: Event) {
 
 fn handle_smart_copy_event(app: &mut App, event: &Event) {
     app.mode = Mode::SmartCopy;
+    if let Some(light_key) = app.smart_copy_light_key() {
+        let released = matches!(
+            event,
+            Event::Key(key)
+                if key.kind == KeyEventKind::Release && light_key.matches_modifier_key(key.code)
+        );
+        if released || matches!(event, Event::FocusLost) {
+            app.finish_smart_copy_light();
+            return;
+        }
+    }
     let Event::Key(key) = event else {
         return;
     };
@@ -289,8 +340,11 @@ fn handle_terminal_pane_context_menu_event(
             app.mode = Mode::TerminalPaneContextMenu(menu);
         }
         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-            let action = menu.actions[menu.selected_index].clone();
-            app.execute_terminal_context_action(action, menu);
+            if let Some(action) = menu.actions.get(menu.selected_index).cloned() {
+                app.execute_terminal_context_action(action, menu);
+            } else {
+                app.mode = Mode::TerminalPaneContextMenu(menu);
+            }
         }
         _ => app.mode = Mode::TerminalPaneContextMenu(menu),
     }
@@ -459,8 +513,8 @@ fn handle_board_column_prompt(
     }
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
+            app.mode = Mode::BoardColumnPrompt(pane_id, state.clone());
             app.commit_board_column(pane_id, state.buf);
-            app.mode = Mode::Normal;
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::BoardColumnPrompt(pane_id, state),
@@ -479,6 +533,10 @@ fn handle_create_board_event(app: &mut App, mut state: CreateBoardState, event: 
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
         KeyCode::Tab => state.editing_path = !state.editing_path,
+        KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.begin_board_storage_dialog(state);
+            return;
+        }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.open_board_path_picker(state);
             return;
@@ -539,8 +597,8 @@ fn handle_board_card_prompt(
     }
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
+            app.mode = Mode::BoardCardPrompt(pane_id, state.clone());
             app.commit_board_card(pane_id, state.buf);
-            app.mode = Mode::Normal;
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::BoardCardPrompt(pane_id, state),
@@ -564,8 +622,8 @@ fn handle_board_rename_prompt(
     }
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
+            app.mode = Mode::BoardRenamePrompt(pane_id, target, state.clone());
             app.commit_board_rename(pane_id, target, state.buf);
-            app.mode = Mode::Normal;
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::BoardRenamePrompt(pane_id, target, state),
@@ -588,8 +646,8 @@ fn handle_board_delete_confirm(
     }
     match key.code {
         KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+            app.mode = Mode::BoardDeleteConfirm(pane_id, target);
             app.commit_board_delete(pane_id, target);
-            app.mode = Mode::Normal;
         }
         KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
         _ => app.mode = Mode::BoardDeleteConfirm(pane_id, target),
@@ -810,8 +868,12 @@ fn execute_action(app: &mut App, action: Action) {
         // `handle_help_event`, which intercepts everything while it is),
         // so this always means "open it".
         Action::Help => app.mode = Mode::Help,
-        Action::Detach => app.request_client_exit(ClientExitReason::Quit),
-        Action::Quit => app.request_session_kill(),
+        Action::Detach => {
+            app.request_client_exit(ClientExitReason::Quit);
+        }
+        Action::Quit => {
+            app.request_session_kill();
+        }
         Action::ToggleEditorViewMode => app.action_toggle_editor_view_mode(),
         Action::ToggleLineNumbers => app.action_toggle_editor_line_numbers(),
         Action::ToggleMinimap => app.action_toggle_editor_minimap(),
@@ -830,8 +892,12 @@ fn handle_move_mode_key(app: &mut App, key: &KeyEvent) {
         return;
     };
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => app.request_move(id, TreeMoveDirection::Up),
-        KeyCode::Down | KeyCode::Char('j') => app.request_move(id, TreeMoveDirection::Down),
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.request_move(id, TreeMoveDirection::Up);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.request_move(id, TreeMoveDirection::Down);
+        }
         KeyCode::Left | KeyCode::Char('h') => {
             if let Some((new_parent, index)) = compute_outdent_target(&app.tree, id) {
                 app.request_reparent(id, new_parent, index);
@@ -998,8 +1064,11 @@ fn handle_explorer_event(
 ) {
     match overlay.handle(event, app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            app.request_new_editor(target, path);
-            app.mode = Mode::Normal;
+            if app.request_new_editor(target, path) {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::Explorer(overlay, target);
+            }
         }
         // Only an Esc the overlay did not consume cancels the picker.
         Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
@@ -1042,8 +1111,11 @@ fn handle_folder_explorer_event(
 ) {
     match overlay.handle(event, app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            app.request_new_folder(target, path);
-            app.mode = Mode::Normal;
+            if app.request_new_folder(target, path) {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::FolderExplorer(overlay, target);
+            }
         }
         // Only an Esc the overlay did not consume cancels the picker.
         Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
@@ -1063,13 +1135,17 @@ fn handle_project_folder_explorer_event(
 ) {
     match overlay.handle(event, app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            match selection {
+            let admitted = match selection {
                 ProjectFolderSelection::NewProject => app.request_new_project(path),
                 ProjectFolderSelection::ChangeProject(project_id) => {
                     app.request_change_project_folder(project_id, path)
                 }
+            };
+            if admitted {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::ProjectFolderExplorer(overlay, selection);
             }
-            app.mode = Mode::Normal;
         }
         // Only an Esc the overlay did not consume cancels the picker.
         Ok(ExplorerOutcome::Ignored) if is_escape(event) => app.mode = Mode::Normal,
@@ -1097,7 +1173,10 @@ fn handle_rename_event(app: &mut App, mut state: TextPromptState, event: &Event)
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
             if let Some(id) = app.selected_node_id() {
-                app.request_rename(id, state.buf, None, None);
+                if !app.request_rename(id, state.buf.clone(), None, None) {
+                    app.mode = Mode::Rename(state);
+                    return;
+                }
             }
             app.mode = Mode::Normal;
         }
@@ -1120,10 +1199,11 @@ fn handle_command_prompt_event(app: &mut App, mut state: TextPromptState, event:
 
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
-            app.mode = Mode::Normal;
-            if !state.buf.trim().is_empty() {
-                app.action_new_command_pane(state.buf);
+            if !state.buf.trim().is_empty() && !app.action_new_command_pane(state.buf.clone()) {
+                app.mode = Mode::CommandPrompt(state);
+                return;
             }
+            app.mode = Mode::Normal;
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::CommandPrompt(state),
@@ -1146,13 +1226,32 @@ fn handle_inference_setting_prompt(
         app.mode = Mode::InferenceSettingPrompt(field, state);
         return;
     }
+    let previous_value = state.buf.clone();
+    let is_budget = field == crate::app::InferenceSettingField::RestructurePromptTokenLimit;
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
-            app.settings_commit_inference_field(field, state.buf);
+            app.restructure_budget_autosave_deadline = None;
+            if is_budget {
+                app.mode = Mode::InferenceSettingPrompt(field, state);
+                app.commit_restructure_budget();
+                return;
+            }
+            app.settings_commit_inference_field(field, state.buf.clone());
             app.pop_modal();
         }
-        PromptOutcome::Cancel => app.pop_modal(),
-        PromptOutcome::Continue => app.mode = Mode::InferenceSettingPrompt(field, state),
+        PromptOutcome::Cancel => {
+            app.restructure_budget_autosave_deadline = None;
+            if is_budget {
+                app.restructure_budget_identity = None;
+            }
+            app.pop_modal();
+        }
+        PromptOutcome::Continue => {
+            if is_budget && state.buf != previous_value {
+                app.queue_restructure_budget_autosave(&state.buf, std::time::Instant::now());
+            }
+            app.mode = Mode::InferenceSettingPrompt(field, state);
+        }
     }
 }
 
@@ -1281,8 +1380,15 @@ fn handle_location_picker_event(
         PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
         PickerOutcome::Cancel => app.pop_modal(),
         PickerOutcome::Confirm(location) => {
-            app.pop_modal();
-            app.settings_set_location(location);
+            match app.confirm_location_picker(&mut picker, location) {
+                Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
+                Ok(()) => app.pop_modal(),
+                Err(error) => {
+                    picker.status = Some(error.clone());
+                    app.status_message = Some(error);
+                    app.mode = Mode::LocationPicker(picker);
+                }
+            }
         }
     }
 }
@@ -1315,11 +1421,8 @@ fn handle_agent_setup_path_prompt(
     }
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
-            if app.settings_set_agent_setup_path(feature, &state.buf) {
-                app.pop_modal();
-            } else {
-                app.mode = Mode::AgentSetupPathPrompt(feature, state);
-            }
+            app.mode = Mode::AgentSetupPathPrompt(feature, state.clone());
+            let _ = app.settings_set_agent_setup_path(feature, &state.buf);
         }
         PromptOutcome::Cancel => app.pop_modal(),
         PromptOutcome::Continue => app.mode = Mode::AgentSetupPathPrompt(feature, state),
@@ -1345,8 +1448,9 @@ fn handle_agent_setup_prompt(
             app.mode = Mode::AgentSetupPrompt(state)
         }
         crate::setup_prompt::SetupPromptOutcome::Apply { chatroom, progress } => {
-            app.mode = Mode::Normal;
+            app.mode = Mode::AgentSetupPrompt(state.clone());
             if app.apply_agent_setup_prompt(&state.scope, chatroom, progress) {
+                app.mode = Mode::Normal;
                 app.maybe_show_agent_setup_prompt();
             } else {
                 app.mode = Mode::AgentSetupPrompt(state);
@@ -1357,12 +1461,8 @@ fn handle_agent_setup_prompt(
             app.maybe_show_agent_setup_prompt();
         }
         crate::setup_prompt::SetupPromptOutcome::NeverAsk => {
-            app.mode = Mode::Normal;
-            if app.suppress_agent_setup_prompt(&state.scope) {
-                app.maybe_show_agent_setup_prompt();
-            } else {
-                app.mode = Mode::AgentSetupPrompt(state);
-            }
+            app.mode = Mode::AgentSetupPrompt(state.clone());
+            let _ = app.suppress_agent_setup_prompt(&state.scope);
         }
     }
 }
@@ -1425,9 +1525,7 @@ fn handle_text_trigger_dialog_event(
             };
             app.mode = Mode::TextTriggerDialog(state);
         }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter
-            if state.focus == TextTriggerFocus::Target =>
-        {
+        KeyCode::Right | KeyCode::Char('l') if state.focus == TextTriggerFocus::Target => {
             state.target = match state.target {
                 ilium_ipc::TextTriggerTarget::Agents => ilium_ipc::TextTriggerTarget::Terminals,
                 ilium_ipc::TextTriggerTarget::Terminals => ilium_ipc::TextTriggerTarget::Both,
@@ -1435,22 +1533,29 @@ fn handle_text_trigger_dialog_event(
             };
             app.mode = Mode::TextTriggerDialog(state);
         }
+        KeyCode::Enter | KeyCode::Char('+') if state.focus == TextTriggerFocus::Target => {
+            app.begin_trigger_scope_dialog(state);
+        }
         KeyCode::Char(' ') if state.focus == TextTriggerFocus::Enabled => {
             state.enabled = !state.enabled;
             app.mode = Mode::TextTriggerDialog(state);
         }
         KeyCode::Enter if state.focus == TextTriggerFocus::Save => {
             let trigger = state.candidate();
-            if let Err(error) = app.commit_text_trigger(
-                state.editing_id.as_deref(),
-                state.editing_base.as_ref(),
-                trigger,
-            ) {
-                state.save_error = Some(error);
-                app.mode = Mode::TextTriggerDialog(state);
+            let editing_id = state.editing_id.clone();
+            let editing_base = state.editing_base.clone();
+            app.mode = Mode::TextTriggerDialog(state);
+            if let Err(error) =
+                app.commit_text_trigger(editing_id.as_deref(), editing_base.as_ref(), trigger)
+            {
+                if let Mode::TextTriggerDialog(state) = &mut app.mode {
+                    state.save_error = Some(error.clone());
+                }
+                app.status_message = Some(error);
                 return;
             }
-            app.pop_modal();
+            // The exact durable receipt closes this dialog. Input remains
+            // editable while saving; a later edit fences the dismissal.
         }
         _ if state.focus == TextTriggerFocus::Regexp => {
             let _ = crate::text_prompt::handle_key(&mut state.regexp, key.code);
@@ -1458,6 +1563,13 @@ fn handle_text_trigger_dialog_event(
         }
         _ if state.focus == TextTriggerFocus::Message => {
             let _ = crate::text_prompt::handle_key(&mut state.message, key.code);
+            app.mode = Mode::TextTriggerDialog(state);
+        }
+        _ if state.focus == TextTriggerFocus::Delay => {
+            // Whole seconds only; editing keys still reach the prompt.
+            if !matches!(key.code, KeyCode::Char(c) if !c.is_ascii_digit()) {
+                let _ = crate::text_prompt::handle_key(&mut state.delay, key.code);
+            }
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ if state.focus == TextTriggerFocus::Sample => {
@@ -1487,8 +1599,9 @@ fn handle_save_as_event(
 
     match text_prompt::handle_key(&mut state, key.code) {
         PromptOutcome::Commit => {
-            app.action_save_as(id, state.buf);
-            app.mode = Mode::Normal;
+            let destination = state.buf.clone();
+            app.mode = Mode::SaveAs(id, state);
+            app.action_save_as(id, destination);
         }
         PromptOutcome::Cancel => app.mode = Mode::Normal,
         PromptOutcome::Continue => app.mode = Mode::SaveAs(id, state),
@@ -1542,7 +1655,11 @@ fn handle_create_group_event(
                 (state.selected_index + 1).min(state.destinations.len().saturating_sub(1));
             app.mode = Mode::CreateGroup(state);
         }
-        KeyCode::Enter => app.commit_create_group(&state),
+        KeyCode::Enter => {
+            if !app.commit_create_group(&state) {
+                app.mode = Mode::CreateGroup(state);
+            }
+        }
         _ => {
             text_prompt::handle_key(&mut state.name, key.code);
             app.mode = Mode::CreateGroup(state);
@@ -1816,8 +1933,9 @@ fn handle_create_agent_from_line_event(
         KeyCode::Char('a') if state.focus == CreateAgentFocus::AgentType => {
             state.agent_type = crate::agent_from_line::AgentLaunchType::Antigravity
         }
-        KeyCode::Enter if state.focus == CreateAgentFocus::AgentType => {
-            state.focus = CreateAgentFocus::Prompt
+        KeyCode::Enter | KeyCode::Char('+') if state.focus == CreateAgentFocus::AgentType => {
+            app.begin_agent_from_line_provider_dialog(state);
+            return;
         }
         KeyCode::Enter if state.focus == CreateAgentFocus::CreateButton => {
             app.commit_create_agent_from_line(state);
@@ -1853,6 +1971,17 @@ fn handle_worktree_manager_event(
     };
     if !is_press(key) {
         app.mode = Mode::WorktreeManager(state);
+        return;
+    }
+    if key.code == KeyCode::Char('+')
+        && state.confirmation_branch().is_some()
+        && (!matches!(state.view, ManagerView::ConfirmDiscard { .. })
+            || key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL))
+    {
+        app.mode = Mode::WorktreeManager(state);
+        app.begin_prune_branch_dialog();
         return;
     }
     #[derive(Clone, Copy)]
@@ -1976,6 +2105,14 @@ fn handle_create_agent_workspace_event(
     if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
         app.submit_create_agent_workspace(state);
         return;
+    }
+    if matches!(key.code, KeyCode::Enter | KeyCode::Char('+'))
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        if let Some(field) = crate::value_worktree::WorkspaceChoice::from_focus(state.focus) {
+            app.begin_workspace_choice_dialog(state, field);
+            return;
+        }
     }
     match key.code {
         KeyCode::Tab => state.focus_next(),
@@ -2147,6 +2284,12 @@ fn handle_prompt_queue_event(app: &mut App, mut state: Box<PromptQueueDialogStat
         app.commit_queued_prompt(state);
         return;
     }
+    if state.focus == PromptQueueFocus::Delivery
+        && matches!(key.code, KeyCode::Enter | KeyCode::Char('+'))
+    {
+        app.begin_queue_delivery_dialog(state);
+        return;
+    }
     match key.code {
         KeyCode::Tab => state.focus = state.focus.next(),
         KeyCode::BackTab => state.focus = state.focus.previous(),
@@ -2201,6 +2344,191 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
 
+    if state.tab == SettingsTab::Animations {
+        use crate::animation_plugins::{AnimationSourceTab, PluginEditorKind, PluginPanelRow};
+        if key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(key.code, KeyCode::Left | KeyCode::Right)
+        {
+            state.animation_source_tab = state.animation_source_tab.adjacent();
+            state.plugin_editor = None;
+            if state.animation_source_tab == AnimationSourceTab::Plugin {
+                app.request_plugin_catalogue();
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if let Some(mut editor) = state.plugin_editor.take() {
+            let mut close = false;
+            match key.code {
+                KeyCode::Esc => close = true,
+                KeyCode::Enter => match app.submit_plugin_editor(&editor) {
+                    Ok(()) => close = true,
+                    Err(error) => editor.error = Some(error),
+                },
+                KeyCode::Up | KeyCode::Left => {
+                    if let PluginEditorKind::Choice { cursor, .. } = &mut editor.kind {
+                        *cursor = cursor.saturating_sub(1);
+                    }
+                }
+                KeyCode::Down | KeyCode::Right => {
+                    if let PluginEditorKind::Choice { options, cursor } = &mut editor.kind {
+                        *cursor = cursor
+                            .saturating_add(1)
+                            .min(options.len().saturating_sub(1));
+                    }
+                }
+                KeyCode::Backspace => {
+                    editor.input.pop();
+                }
+                KeyCode::Char(character)
+                    if !character.is_control()
+                        && !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    let maximum = match editor.kind {
+                        PluginEditorKind::Text { max_length } => max_length,
+                        PluginEditorKind::Number => 160,
+                        PluginEditorKind::Choice { .. } => 0,
+                    };
+                    if editor.input.chars().count() < maximum {
+                        editor.input.push(character);
+                    }
+                }
+                _ => {}
+            }
+            if !close {
+                state.plugin_editor = Some(editor);
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if state.animation_source_tab == AnimationSourceTab::Plugin {
+            let model = app.plugin_panel_model();
+            let area = crate::animation_settings_ui::plugin_panel_area(
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state)
+                    .content_area,
+            );
+            if let Some(control) = crate::value_plugin::panel_control(
+                app,
+                area,
+                &model,
+                &state.plugin_panel,
+                state.plugin_panel.cursor,
+            ) {
+                use crate::value_control::ControlAction;
+                let code = match key.code {
+                    KeyCode::Char('h') => KeyCode::Left,
+                    KeyCode::Char('l') => KeyCode::Right,
+                    KeyCode::Char(' ') => KeyCode::Enter,
+                    code => code,
+                };
+                if matches!(
+                    code,
+                    KeyCode::Left
+                        | KeyCode::Right
+                        | KeyCode::Enter
+                        | KeyCode::Char('-' | '+' | '*')
+                ) {
+                    if let Some(action) = control.key_action(code, true) {
+                        let row = state.plugin_panel.cursor;
+                        match action {
+                            ControlAction::PreviousChoice | ControlAction::Decrement => {
+                                app.settings_adjust_plugin_row(row, -1)
+                            }
+                            ControlAction::NextChoice | ControlAction::Increment => {
+                                app.settings_adjust_plugin_row(row, 1)
+                            }
+                            ControlAction::OpenChoices | ControlAction::EditNumber => {
+                                if let Some(PluginPanelRow::Common(index)) = model.rows.get(row) {
+                                    let index = *index;
+                                    app.mode = Mode::Settings(state);
+                                    app.begin_animation_value_dialog(index);
+                                    return;
+                                }
+                                app.mode = Mode::Settings(state);
+                                app.begin_plugin_value_dialog(row);
+                                return;
+                            }
+                        }
+                    }
+                    app.mode = Mode::Settings(state);
+                    return;
+                }
+            }
+            let handled = match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state
+                        .plugin_panel
+                        .move_cursor(-1, model.rows.len(), usize::from(area.height));
+                    true
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state
+                        .plugin_panel
+                        .move_cursor(1, model.rows.len(), usize::from(area.height));
+                    true
+                }
+                KeyCode::PageUp => {
+                    state.plugin_panel.move_cursor(
+                        -i32::from(area.height.max(1)),
+                        model.rows.len(),
+                        usize::from(area.height),
+                    );
+                    true
+                }
+                KeyCode::PageDown => {
+                    state.plugin_panel.move_cursor(
+                        i32::from(area.height.max(1)),
+                        model.rows.len(),
+                        usize::from(area.height),
+                    );
+                    true
+                }
+                KeyCode::Left | KeyCode::Char('h' | '-') => {
+                    app.settings_adjust_plugin_row(state.plugin_panel.cursor, -1);
+                    true
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    app.settings_adjust_plugin_row(state.plugin_panel.cursor, 1);
+                    true
+                }
+                KeyCode::Enter | KeyCode::Char(' ' | '+') => {
+                    let row = state.plugin_panel.cursor;
+                    if let Some(PluginPanelRow::Common(index)) = model.rows.get(row) {
+                        if matches!(
+                            app.animation_row_model()
+                                .view(*index)
+                                .map(|view| &view.kind),
+                            Some(
+                                crate::animation_rows::RowKind::Choice
+                                    | crate::animation_rows::RowKind::Slider(_)
+                            )
+                        ) {
+                            let index = *index;
+                            app.mode = Mode::Settings(state);
+                            app.begin_animation_value_dialog(index);
+                            return;
+                        }
+                    }
+                    if !app.begin_plugin_editor(&mut state, row) {
+                        app.settings_adjust_plugin_row(row, 1);
+                    }
+                    true
+                }
+                KeyCode::Char('f') => {
+                    state.animation_fullscreen = true;
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+    }
+
     if state.tab == SettingsTab::Cost && app.cost_window_input.is_some() {
         match key.code {
             KeyCode::Esc => app.settings_cancel_cost_window_input(),
@@ -2249,6 +2577,12 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
 
     if let Some(mut picker) = state.icon_picker.take() {
+        if key.code == KeyCode::Char('+') && !picker.is_searching {
+            state.icon_picker = Some(picker);
+            app.mode = Mode::Settings(state);
+            app.begin_icon_column_dialog();
+            return;
+        }
         let entry_count = picker.search_results.entry_count;
         let grid_columns = crate::settings_ui::icon_picker_grid_columns(
             app.layout.screen_area,
@@ -2443,6 +2777,87 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             return;
         }
     }
+    if state.tab == SettingsTab::Keyboard {
+        if let Some(field) = crate::value_keyboard::KeyboardPrefix::ALL
+            .get(state.selected_row)
+            .copied()
+        {
+            if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
+                app.mode = Mode::Settings(state);
+                app.begin_keyboard_prefix_dialog(field);
+                return;
+            }
+            if matches!(
+                key.code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l')
+            ) {
+                app.step_keyboard_prefix(
+                    field,
+                    if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                        -1
+                    } else {
+                        1
+                    },
+                );
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+    }
+    if let Some(field) =
+        crate::value_settings::SettingsNumber::at(app, state.tab, state.selected_row)
+    {
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('*')) {
+            app.mode = Mode::Settings(state);
+            app.begin_settings_number_dialog(field);
+            return;
+        }
+        if matches!(
+            key.code,
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('-') | KeyCode::Char('+')
+        ) {
+            let direction = if matches!(key.code, KeyCode::Left | KeyCode::Char('-')) {
+                -1
+            } else {
+                1
+            };
+            app.step_settings_number(field, direction);
+            app.mode = Mode::Settings(state);
+            return;
+        }
+    }
+
+    if let Some(field) =
+        crate::value_settings_choice::SettingsChoice::at(app, state.tab, state.selected_row)
+    {
+        if matches!(key.code, KeyCode::Char('e') | KeyCode::Char('E')) {
+            let manual = match field {
+                crate::value_settings_choice::SettingsChoice::OllamaModel => {
+                    Some(crate::app::InferenceSettingField::OllamaModel)
+                }
+                crate::value_settings_choice::SettingsChoice::OpenAiModel => {
+                    Some(crate::app::InferenceSettingField::OpenAiModel)
+                }
+                _ => None,
+            };
+            if let Some(manual) = manual {
+                app.mode = Mode::Settings(state);
+                app.settings_open_inference_field(manual);
+                return;
+            }
+        }
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
+            app.mode = Mode::Settings(state);
+            app.begin_settings_choice_dialog(field);
+            return;
+        }
+        if matches!(key.code, KeyCode::Left | KeyCode::Right) {
+            app.step_settings_choice(field, if key.code == KeyCode::Left { -1 } else { 1 });
+            app.mode = Mode::Settings(state);
+            return;
+        }
+    }
+
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.mode = Mode::Normal;
@@ -2495,6 +2910,48 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Left | KeyCode::Char('h') if state.tab == SettingsTab::Animations => {
             app.settings_adjust_animation_row(state.selected_row, -1);
+        }
+        KeyCode::Enter | KeyCode::Char('+')
+            if state.tab == SettingsTab::Animations
+                && matches!(
+                    app.animation_row_model()
+                        .view(state.selected_row)
+                        .map(|view| &view.kind),
+                    Some(crate::animation_rows::RowKind::Choice)
+                ) =>
+        {
+            let row = state.selected_row;
+            app.mode = Mode::Settings(state);
+            app.begin_animation_value_dialog(row);
+            return;
+        }
+        KeyCode::Enter | KeyCode::Char('*')
+            if state.tab == SettingsTab::Animations
+                && matches!(
+                    app.animation_row_model()
+                        .view(state.selected_row)
+                        .map(|view| &view.kind),
+                    Some(crate::animation_rows::RowKind::Slider(_))
+                ) =>
+        {
+            let row = state.selected_row;
+            app.mode = Mode::Settings(state);
+            app.begin_animation_value_dialog(row);
+            return;
+        }
+        KeyCode::Char(character @ ('-' | '+'))
+            if state.tab == SettingsTab::Animations
+                && matches!(
+                    app.animation_row_model()
+                        .view(state.selected_row)
+                        .map(|view| &view.kind),
+                    Some(crate::animation_rows::RowKind::Slider(_))
+                ) =>
+        {
+            app.settings_adjust_animation_row(
+                state.selected_row,
+                if character == '-' { -1 } else { 1 },
+            );
         }
         // Enter on a scene selects it and jumps to that scene's controls.
         KeyCode::Enter
@@ -2583,7 +3040,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_cycle_icon(target, 1);
             }
         }
-        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Icons => {
+        KeyCode::Enter | KeyCode::Char(' ' | '+') if state.tab == SettingsTab::Icons => {
             if let Some(target) = crate::agent_monitoring::general_icon_targets()
                 .get(state.selected_row)
                 .copied()
@@ -2833,6 +3290,31 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Cost => {
             let last = crate::cost_settings_ui::rows(app).len().saturating_sub(1);
             state.selected_row = (state.selected_row + 1).min(last);
+        }
+        KeyCode::Enter | KeyCode::Char('*') | KeyCode::Char('+')
+            if state.tab == SettingsTab::Cost
+                && crate::cost_settings_ui::rows(app)
+                    .get(state.selected_row)
+                    .is_some_and(|row| {
+                        (app.cost_settings.number_spec(*row).is_some()
+                            && matches!(key.code, KeyCode::Enter | KeyCode::Char('*')))
+                            || (crate::value_cost::is_choice(*row)
+                                && matches!(key.code, KeyCode::Enter | KeyCode::Char('+')))
+                    }) =>
+        {
+            let row = crate::cost_settings_ui::rows(app)[state.selected_row];
+            app.mode = Mode::Settings(state);
+            app.begin_cost_value_dialog(row);
+            return;
+        }
+        KeyCode::Char(character @ ('-' | '+'))
+            if state.tab == SettingsTab::Cost
+                && crate::cost_settings_ui::rows(app)
+                    .get(state.selected_row)
+                    .is_some_and(|row| app.cost_settings.number_spec(*row).is_some()) =>
+        {
+            let row = crate::cost_settings_ui::rows(app)[state.selected_row];
+            app.settings_adjust_cost_row(row, if character == '-' { -1 } else { 1 });
         }
         KeyCode::Left
         | KeyCode::Char('h')
@@ -3711,6 +4193,408 @@ mod indent_outdent_tests {
         assert!(app.modal_stack.is_empty());
     }
 
+    mod inference_receipt_regressions {
+        use super::*;
+        use crate::app::InferenceSettingField;
+        use crate::filesystem::configuration::{ConfigurationChange, ConfigurationWrite};
+        use crate::filesystem::configurations::{
+            ConfigurationFiles, ConfigurationIntent, InferenceSaveState,
+        };
+        use crate::filesystem::ordered::{WriteCompletion, WriteId};
+        use ilium_execution::{JobOutcome, RejectReason, Rejected};
+        use std::sync::Arc;
+        use std::time::Duration;
+        type Completion = (Arc<()>, WriteCompletion<ConfigurationWrite>);
+        fn fixture() -> (tempfile::TempDir, App, Arc<tokio::sync::Notify>) {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new("inference-receipt".into(), directory.path().to_path_buf());
+            app.config_dir = Some(directory.path().to_path_buf());
+            let ready = Arc::new(tokio::sync::Notify::new());
+            app.configuration_files = Some(ConfigurationFiles::new(
+                crate::execution::test_client(),
+                Arc::clone(&ready),
+            ));
+            app.mode = Mode::Help;
+            app.push_modal(Mode::Settings(SettingsState {
+                tab: SettingsTab::Inference,
+                selected_row: 4,
+                scroll: 3,
+                ..SettingsState::default()
+            }));
+            app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
+            (directory, app, ready)
+        }
+        fn key(app: &mut App, code: KeyCode) {
+            handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        }
+        fn replace(app: &mut App, value: &str) {
+            let Mode::InferenceSettingPrompt(_, prompt) = &app.mode else {
+                panic!("budget editor missing");
+            };
+            let count = prompt.buf.chars().count();
+            key(app, KeyCode::End);
+            for _ in 0..count {
+                key(app, KeyCode::Backspace);
+            }
+            for character in value.chars() {
+                key(app, KeyCode::Char(character));
+            }
+        }
+        fn prompt(app: &App, expected: &str) {
+            assert!(
+                matches!(&app.mode, Mode::InferenceSettingPrompt(field, state) if *field == InferenceSettingField::RestructurePromptTokenLimit && state.buf == expected)
+            );
+            assert_eq!(app.modal_stack.len(), 2);
+            assert!(matches!(&app.modal_stack[0], Mode::Help));
+            assert!(
+                matches!(&app.modal_stack[1], Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
+            );
+        }
+        fn parent(app: &App) {
+            assert!(
+                matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
+            );
+            assert_eq!(app.modal_stack.len(), 1);
+            assert!(matches!(&app.modal_stack[0], Mode::Help));
+        }
+        async fn completion(app: &mut App, ready: &tokio::sync::Notify) -> Completion {
+            let admission = crate::execution::admission_notification();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let notified = ready.notified();
+                    let admitted = admission.notified();
+                    tokio::pin!(notified, admitted);
+                    notified.as_mut().enable();
+                    admitted.as_mut().enable();
+                    if let Some((intent, outcome)) =
+                        app.configuration_files.as_mut().unwrap().poll()
+                    {
+                        let Some(ConfigurationIntent::Inference { operation }) = intent else {
+                            panic!("inference intent missing");
+                        };
+                        return (operation, outcome);
+                    }
+                    tokio::select! {
+                        _ = notified => {},
+                        _ = admitted => {},
+                    }
+                }
+            })
+            .await
+            .expect("configuration receipt did not arrive")
+        }
+        async fn drain(app: &mut App, ready: &tokio::sync::Notify) {
+            let admission = crate::execution::admission_notification();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let notified = ready.notified();
+                    let admitted = admission.notified();
+                    tokio::pin!(notified, admitted);
+                    notified.as_mut().enable();
+                    admitted.as_mut().enable();
+                    app.collect_configuration_files();
+                    if app.configuration_files.as_ref().unwrap().pending() == 0 {
+                        return;
+                    }
+                    tokio::select! {
+                        _ = notified => {},
+                        _ = admitted => {},
+                    }
+                }
+            })
+            .await
+            .expect("configuration collector did not drain");
+        }
+        fn failure(app: &App, value: &str) {
+            prompt(app, value);
+            let error = app.inference_settings_save_error.as_ref().unwrap();
+            let (hint, is_error) = app.restructure_budget_input_hint(value);
+            assert!(is_error);
+            assert_eq!(&hint, error);
+            assert!(!hint.starts_with("Saved"));
+            let status = app.status_message.as_ref().unwrap();
+            assert!(status.contains("Could not save Inference settings:"));
+            assert!(status.contains(error));
+            assert!(!matches!(
+                &app.inference_save_state,
+                InferenceSaveState::Pending { .. }
+            ));
+        }
+        #[tokio::test(flavor = "current_thread")]
+        async fn own_durable_receipt_closes_exact_parent_and_repeated_enter_is_finite() {
+            let (directory, mut app, ready) = fixture();
+            replace(&mut app, "345678");
+            key(&mut app, KeyCode::Enter);
+            prompt(&app, "345678");
+            let identity = Arc::downgrade(app.restructure_budget_identity.as_ref().unwrap());
+            key(&mut app, KeyCode::Left);
+            for _ in 0..1000 {
+                key(&mut app, KeyCode::Enter);
+            }
+            assert_eq!(app.configuration_admission.attempts, 1);
+            assert_eq!(app.configuration_admission.accepted, 1);
+            let (operation, outcome) = completion(&mut app, &ready).await;
+            let weak_operation = Arc::downgrade(&operation);
+            assert!(
+                matches!(&outcome, WriteCompletion::Outcome { outcome, .. } if matches!(outcome.view(), JobOutcome::Finished(Ok(_))))
+            );
+            assert_eq!(
+                crate::config::load(directory.path())
+                    .unwrap()
+                    .inference
+                    .restructure_prompt_token_limit,
+                345678
+            );
+            prompt(&app, "345678");
+            assert!(matches!(
+                &app.inference_save_state,
+                InferenceSaveState::Pending { .. }
+            ));
+            assert!(!app
+                .restructure_budget_input_hint("345678")
+                .0
+                .starts_with("Saved"));
+            key(&mut app, KeyCode::Enter);
+            assert_eq!(app.configuration_admission.attempts, 1);
+            app.collect_inference_configuration(&operation, outcome);
+            parent(&app);
+            assert!(matches!(
+                &app.inference_save_state,
+                InferenceSaveState::Durable
+            ));
+            assert!(app
+                .restructure_budget_input_hint("345678")
+                .0
+                .starts_with("Saved"));
+            assert!(!app
+                .restructure_budget_input_hint("345679")
+                .0
+                .starts_with("Saved"));
+            assert!(app.restructure_budget_identity.is_none());
+            drop(operation);
+            assert!(weak_operation.upgrade().is_none());
+            assert!(identity.upgrade().is_none());
+            assert_eq!(app.configuration_files.as_ref().unwrap().pending(), 0);
+        }
+        #[tokio::test(flavor = "current_thread")]
+        async fn only_latest_explicit_commit_may_close_during_autosave_races() {
+            for first_is_autosave in [true, false] {
+                let (_directory, mut app, ready) = fixture();
+                replace(&mut app, "123456");
+                if first_is_autosave {
+                    let deadline = app.restructure_budget_autosave_deadline.unwrap();
+                    assert!(app.tick_restructure_budget_autosave(deadline));
+                } else {
+                    key(&mut app, KeyCode::Enter);
+                    key(&mut app, KeyCode::Char('7'));
+                }
+                if first_is_autosave {
+                    key(&mut app, KeyCode::Enter);
+                } else {
+                    let deadline = app.restructure_budget_autosave_deadline.unwrap();
+                    assert!(app.tick_restructure_budget_autosave(deadline));
+                }
+                assert_eq!(app.configuration_admission.accepted, 2);
+                let value = if first_is_autosave {
+                    "123456"
+                } else {
+                    "1234567"
+                };
+                let (old_operation, old_outcome) = completion(&mut app, &ready).await;
+                let pending_status = app.status_message.clone();
+                app.collect_inference_configuration(&old_operation, old_outcome);
+                prompt(&app, value);
+                assert_eq!(app.status_message, pending_status);
+                assert!(!app
+                    .restructure_budget_input_hint(value)
+                    .0
+                    .starts_with("Saved"));
+                drain(&mut app, &ready).await;
+                if first_is_autosave {
+                    parent(&app);
+                    continue;
+                }
+                prompt(&app, value);
+                assert!(app
+                    .restructure_budget_input_hint(value)
+                    .0
+                    .starts_with("Saved"));
+                key(&mut app, KeyCode::Enter);
+                prompt(&app, value);
+                drain(&mut app, &ready).await;
+                parent(&app);
+            }
+        }
+        #[tokio::test(flavor = "current_thread")]
+        async fn stale_success_preserves_newer_error_after_edit_away_and_back() {
+            let (directory, mut app, ready) = fixture();
+            replace(&mut app, "123456");
+            key(&mut app, KeyCode::Enter);
+            let (operation, outcome) = completion(&mut app, &ready).await;
+            key(&mut app, KeyCode::Char('7'));
+            key(&mut app, KeyCode::Backspace);
+            assert!(app.restructure_budget_autosave_deadline.is_some());
+            app.config_dir = None;
+            key(&mut app, KeyCode::Enter);
+            failure(&app, "123456");
+            let expected_error = app.inference_settings_save_error.clone();
+            let expected_status = app.status_message.clone();
+            app.collect_inference_configuration(&operation, outcome);
+            assert_eq!(app.inference_settings_save_error, expected_error);
+            assert_eq!(app.status_message, expected_status);
+            failure(&app, "123456");
+            app.config_dir = Some(directory.path().to_path_buf());
+            key(&mut app, KeyCode::Enter);
+            prompt(&app, "123456");
+            drain(&mut app, &ready).await;
+            parent(&app);
+        }
+        #[tokio::test(flavor = "current_thread")]
+        async fn escaped_reopened_and_covered_dialogs_reject_old_dismissal() {
+            for reopen_budget in [true, false] {
+                let (_directory, mut app, ready) = fixture();
+                replace(&mut app, "123456");
+                key(&mut app, KeyCode::Enter);
+                let (operation, outcome) = completion(&mut app, &ready).await;
+                key(&mut app, KeyCode::Esc);
+                parent(&app);
+                assert!(app.restructure_budget_identity.is_none());
+                assert!(app.restructure_budget_autosave_deadline.is_none());
+                let field = if reopen_budget {
+                    InferenceSettingField::RestructurePromptTokenLimit
+                } else {
+                    InferenceSettingField::OpenAiApiKey
+                };
+                app.settings_open_inference_field(field);
+                app.collect_inference_configuration(&operation, outcome);
+                assert!(
+                    matches!(&app.mode, Mode::InferenceSettingPrompt(current, _) if *current == field)
+                );
+                assert_eq!(app.modal_stack.len(), 2);
+                if !reopen_budget {
+                    continue;
+                }
+                prompt(&app, "123456");
+                assert!(!app
+                    .restructure_budget_input_hint("123456")
+                    .0
+                    .starts_with("Saved"));
+                key(&mut app, KeyCode::Enter);
+                app.push_modal(Mode::Help);
+                drain(&mut app, &ready).await;
+                assert!(matches!(&app.mode, Mode::Help));
+                assert_eq!(app.modal_stack.len(), 3);
+                app.pop_modal();
+                prompt(&app, "123456");
+                key(&mut app, KeyCode::Enter);
+                drain(&mut app, &ready).await;
+                parent(&app);
+            }
+        }
+        #[test]
+        fn invalid_input_cancel_and_admission_failures_keep_the_editor_truthful() {
+            let (directory, mut app, _ready) = fixture();
+            assert!(!app
+                .restructure_budget_input_hint("200000")
+                .0
+                .starts_with("Saved"));
+            for value in ["", "0", "-1", "1.5", "4294967296", "invalid"] {
+                replace(&mut app, value);
+                key(&mut app, KeyCode::Enter);
+                prompt(&app, value);
+                assert!(app.restructure_budget_input_hint(value).1);
+                assert!(app.restructure_budget_autosave_deadline.is_none());
+                assert_eq!(app.configuration_admission.attempts, 0);
+            }
+            replace(&mut app, "123456");
+            let deadline = app.restructure_budget_autosave_deadline.unwrap();
+            key(&mut app, KeyCode::Esc);
+            parent(&app);
+            assert!(!app.tick_restructure_budget_autosave(deadline));
+            assert_eq!(
+                app.inference_settings.restructure_prompt_token_limit,
+                200000
+            );
+            assert!(!directory.path().join("config.toml").exists());
+            for reason in 0..4 {
+                let (_directory, mut app, _ready) = fixture();
+                replace(&mut app, "123456");
+                match reason {
+                    0 => app.config_dir = None,
+                    1 => app.configuration_files = None,
+                    2 => app.configuration_files.as_mut().unwrap().close_admission(),
+                    _ => app.inference_settings.instructions.organization = "x".repeat(70 * 1024),
+                }
+                key(&mut app, KeyCode::Enter);
+                failure(&app, "123456");
+                assert_eq!(app.configuration_admission.accepted, 0);
+                assert_eq!(app.configuration_admission.attempts, 1);
+                key(&mut app, KeyCode::Enter);
+                assert_eq!(app.configuration_admission.attempts, 2);
+                failure(&app, "123456");
+            }
+        }
+        #[tokio::test(flavor = "current_thread")]
+        async fn failed_write_lost_and_rejected_receipts_preserve_retry_and_latest_status() {
+            for kind in 0..3 {
+                let (directory, mut app, ready) = fixture();
+                let non_directory = tempfile::NamedTempFile::new().unwrap();
+                if kind == 0 {
+                    app.config_dir = Some(non_directory.path().to_path_buf());
+                }
+                replace(&mut app, "123456");
+                key(&mut app, KeyCode::Enter);
+                prompt(&app, "123456");
+                let (operation, actual) = completion(&mut app, &ready).await;
+                let outcome = match kind {
+                    0 => {
+                        assert!(
+                            matches!(&actual, WriteCompletion::Outcome { outcome, .. } if matches!(outcome.view(), JobOutcome::Finished(Err(_))))
+                        );
+                        actual
+                    }
+                    1 => {
+                        drop(actual);
+                        WriteCompletion::Lost { id: WriteId(9001) }
+                    }
+                    _ => {
+                        drop(actual);
+                        WriteCompletion::Rejected {
+                            id: WriteId(9002),
+                            rejection: Rejected {
+                                reason: RejectReason::Closed,
+                                value: ConfigurationWrite {
+                                    directory: directory.path().to_path_buf(),
+                                    change: ConfigurationChange::Inference(Box::new(
+                                        app.inference_settings.clone(),
+                                    )),
+                                },
+                            },
+                        }
+                    }
+                };
+                app.collect_inference_configuration(&operation, outcome);
+                failure(&app, "123456");
+                app.config_dir = Some(directory.path().to_path_buf());
+                key(&mut app, KeyCode::Enter);
+                prompt(&app, "123456");
+                drain(&mut app, &ready).await;
+                parent(&app);
+                let status = app.status_message.clone();
+                app.collect_inference_configuration(
+                    &operation,
+                    WriteCompletion::Lost { id: WriteId(9003) },
+                );
+                assert_eq!(app.status_message, status);
+                assert!(app.inference_settings_save_error.is_none());
+                assert!(matches!(
+                    &app.inference_save_state,
+                    InferenceSaveState::Durable
+                ));
+            }
+        }
+    }
+
     #[test]
     fn inference_field_and_file_action_menu_restore_their_exact_parents() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
@@ -3812,6 +4696,58 @@ mod indent_outdent_tests {
     }
 
     #[test]
+    fn cost_star_retains_exact_number_after_disk_failure_then_retries_durably() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[cost\n").unwrap();
+        let mut app = App::new("cost-value-test".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 50));
+        app.cost_settings.calibration = crate::cost_model::Calibration::Budget;
+        let row = crate::cost_settings_ui::rows(&app)
+            .iter()
+            .position(|row| *row == crate::cost_settings::CostRow::Budget)
+            .unwrap();
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            selected_row: row,
+            ..SettingsState::default()
+        });
+        press(&mut app, KeyCode::Char('*'));
+        let Mode::ValueDialog(host) = &mut app.mode else {
+            panic!("number dialog");
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("number");
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("17.125");
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed save retains modal");
+        };
+        assert!(!host.is_saving());
+        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
+            panic!("number");
+        };
+        assert_eq!(number.draft.buf, "17.125");
+        assert!(number.error.is_some());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[cost\n");
+        std::fs::write(&path, "[cost]\n").unwrap();
+        press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .cost
+                .budget_usd,
+            17.125
+        );
+    }
+
+    #[test]
     fn cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view() {
         use crate::cost_model::Calibration;
         use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
@@ -3881,7 +4817,9 @@ mod indent_outdent_tests {
     fn cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo() {
         use crate::cost_settings::CostRow;
 
-        let mut app = App::new("test".to_owned(), std::env::temp_dir());
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_owned(), directory.path().to_owned());
+        app.config_dir = Some(directory.path().to_owned());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 120, 30));
         let window_row = crate::cost_settings_ui::rows(&app)
             .iter()
@@ -3894,15 +4832,30 @@ mod indent_outdent_tests {
         });
 
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.cost_window_input.as_deref(), Some(""));
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("exact window dialog");
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
+            panic!("numeric window draft");
+        };
+        assert_eq!(number.draft.buf, "360");
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Backspace);
+        }
         for character in "5x".chars() {
             press(&mut app, KeyCode::Char(character));
         }
         press(&mut app, KeyCode::Enter);
-        assert_eq!(
-            app.cost_window_input.as_deref(),
-            Some("5x"),
-            "typo keeps the field"
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("typo keeps the dialog");
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
+            panic!("numeric window draft");
+        };
+        assert_eq!(number.draft.buf, "5x", "typo keeps the field");
+        assert!(
+            number.error.is_some(),
+            "invalid duration explains the failure"
         );
         assert_eq!(app.cost_settings.sparkline_window_minutes, 360);
 
@@ -3912,14 +4865,22 @@ mod indent_outdent_tests {
             press(&mut app, KeyCode::Char(character));
         }
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.cost_window_input, None);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
         assert_eq!(app.cost_settings.sparkline_window_minutes, 600);
         assert!(matches!(app.mode, Mode::Settings(_)), "settings stay open");
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .cost
+                .sparkline_window_minutes,
+            600,
+            "the native duration is saved as minutes"
+        );
 
         press(&mut app, KeyCode::Enter);
         press(&mut app, KeyCode::Char('9'));
         press(&mut app, KeyCode::Esc);
-        assert_eq!(app.cost_window_input, None);
         assert_eq!(
             app.cost_settings.sparkline_window_minutes, 600,
             "Esc cancels"
@@ -4245,6 +5206,7 @@ mod text_trigger_draft_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
         let Mode::TextTriggerDialog(editor) = &app.mode else {
             panic!("disk failure must retain draft");
         };
@@ -4305,6 +5267,7 @@ mod text_trigger_draft_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
 
         let Mode::TextTriggerDialog(editor) = &app.mode else {
             panic!("a refused save must keep the actual unsaved editor open");
@@ -4320,6 +5283,7 @@ mod text_trigger_draft_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
         let Mode::Settings(settings) = app.mode else {
             panic!("cancel should return to parent settings");
         };
@@ -4433,6 +5397,7 @@ mod text_trigger_same_rule_conflict_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
 
         let saved = crate::config::load(directory.path()).unwrap().text_triggers;
         assert_eq!(
@@ -4481,6 +5446,7 @@ mod text_trigger_retry_and_delete_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
         let Mode::TextTriggerDialog(editor) = &app.mode else {
             panic!("failed save closed draft");
         };
@@ -4520,6 +5486,7 @@ mod text_trigger_retry_and_delete_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
         assert!(matches!(app.mode, Mode::Settings(_)));
         let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
         assert_eq!(persisted.triggers.len(), 1);
@@ -4557,6 +5524,7 @@ mod text_trigger_retry_and_delete_tests {
             &mut app,
             Event::Key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
         );
+        app.settle_filesystem_for_test();
         let document: toml::Value =
             toml::from_str(&std::fs::read_to_string(directory.path().join("config.toml")).unwrap())
                 .unwrap();

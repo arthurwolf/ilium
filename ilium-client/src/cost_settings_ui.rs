@@ -728,9 +728,108 @@ fn push_control(
     });
 }
 
+pub fn value_control(
+    area: Rect,
+    scroll: u16,
+    span: &RowSpan,
+    app: &App,
+) -> Option<crate::value_control::ValueControl> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+    let number = app.cost_settings.number_text(span.row);
+    if number.is_none() && !crate::value_cost::is_choice(span.row) {
+        return None;
+    }
+    let offset = span.control_line.checked_sub(scroll)?;
+    if offset >= area.height || span.control_x >= area.width {
+        return None;
+    }
+    let rect = Rect::new(
+        area.x + span.control_x,
+        area.y + offset,
+        area.width - span.control_x,
+        1,
+    );
+    let value = match span.row {
+        CostRow::Visibility(display) => app
+            .cost_settings
+            .option(display)
+            .visibility
+            .label()
+            .to_owned(),
+        _ => param_value(span.row, app),
+    };
+    let (previous_enabled, next_enabled) = number.as_ref().map_or((true, true), |current| {
+        (
+            app.cost_settings.stepped_number_text(span.row, -1).as_ref() != Some(current),
+            app.cost_settings.stepped_number_text(span.row, 1).as_ref() != Some(current),
+        )
+    });
+    Some(ValueControl::new(
+        rect,
+        ControlSpec {
+            kind: if number.is_some() {
+                ControlKind::Number
+            } else {
+                ControlKind::Choice
+            },
+            label: "",
+            value: &value,
+            label_width: 0,
+            previous_enabled,
+            next_enabled,
+            open_enabled: true,
+        },
+    ))
+}
+
+pub fn value_hit(
+    area: Rect,
+    scroll: u16,
+    position: Position,
+    button: crate::value_control::PointerButton,
+    app: &App,
+) -> Option<(usize, CostRow, crate::value_control::ControlAction)> {
+    let rows = rows(app);
+    view(app, 0, area.width).rows.iter().find_map(|span| {
+        let action = value_control(area, scroll, span, app)?.hit(position, button)?;
+        Some((
+            rows.iter().position(|row| *row == span.row)?,
+            span.row,
+            action,
+        ))
+    })
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App, selected_row: usize, scroll: u16) {
     let view = view(app, selected_row, area.width);
     crate::settings_ui::render_scrollable(frame, area, view.lines, scroll);
+    let rows = rows(app);
+    for span in &view.rows {
+        let Some(control) = value_control(area, scroll, span, app) else {
+            continue;
+        };
+        let selected = rows.get(selected_row) == Some(&span.row);
+        let style = if selected {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(" ".repeat(usize::from(control.geometry().row.width)))
+                .style(style),
+            control.geometry().row,
+        );
+        control.render(
+            frame,
+            crate::value_control::ControlStyles {
+                background: style,
+                label: style,
+                value: style,
+                button: style,
+                disabled: style.add_modifier(Modifier::DIM),
+            },
+        );
+    }
 }
 
 pub fn max_scroll(app: &App, selected_row: usize, content_area: Rect) -> u16 {
@@ -837,6 +936,70 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn shared_cost_chrome_renders_and_hits_every_numeric_and_choice_variant() {
+        use crate::value_control::{ControlAction, PointerButton};
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = app();
+        for metric in CostMetric::ALL {
+            for calibration in Calibration::ALL {
+                app.cost_settings.metric = metric;
+                app.cost_settings.calibration = calibration;
+                let view = view(&app, 0, 110);
+                let height = view.lines.len() as u16 + 1;
+                let area = Rect::new(0, 0, 110, height);
+                let mut terminal = Terminal::new(TestBackend::new(110, height)).unwrap();
+                terminal
+                    .draw(|frame| render(frame, area, &app, 0, 0))
+                    .unwrap();
+                for span in &view.rows {
+                    if app.cost_settings.number_spec(span.row).is_none()
+                        && !crate::value_cost::is_choice(span.row)
+                    {
+                        continue;
+                    }
+                    let control = value_control(area, 0, span, &app).unwrap();
+                    let geometry = control.geometry();
+                    let is_number = app.cost_settings.number_spec(span.row).is_some();
+                    let (previous, next, open, action) = if is_number {
+                        ("−", "+", "*", ControlAction::EditNumber)
+                    } else {
+                        ("←", "→", "+", ControlAction::OpenChoices)
+                    };
+                    for (rect, symbol) in [
+                        (geometry.previous, previous),
+                        (geometry.next, next),
+                        (geometry.open, open),
+                    ] {
+                        assert_eq!(
+                            terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                            symbol,
+                            "{:?}",
+                            span.row
+                        );
+                    }
+                    let index = rows(&app).iter().position(|row| *row == span.row).unwrap();
+                    assert_eq!(
+                        value_hit(
+                            area,
+                            0,
+                            Position::new(geometry.open.x, geometry.open.y),
+                            PointerButton::Left,
+                            &app
+                        ),
+                        Some((index, span.row, action))
+                    );
+                    if is_number {
+                        assert_eq!(
+                            geometry.value.x - geometry.value_slot.x,
+                            (geometry.value_slot.width - geometry.value.width) / 2
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@
 mod command;
 mod executor;
 mod policy;
+mod preparation;
 mod resolver;
 mod settings;
 mod snapshot;
@@ -90,6 +91,8 @@ pub struct ControlPlane {
     pending_confirmations: HashMap<String, PendingConfirmation>,
     pending_confirmation_order: VecDeque<String>,
     next_confirmation_id: u64,
+    preparation: Option<preparation::Preparation>,
+    completed_bytes: usize,
 }
 
 impl Default for ControlPlane {
@@ -100,11 +103,114 @@ impl Default for ControlPlane {
             pending_confirmations: HashMap::new(),
             pending_confirmation_order: VecDeque::new(),
             next_confirmation_id: 1,
+            preparation: None,
+            completed_bytes: 0,
         }
     }
 }
 
 impl ControlPlane {
+    pub(crate) fn new(client: ilium_execution::Client) -> Self {
+        Self {
+            preparation: Some(preparation::Preparation::new(client)),
+            ..Self::default()
+        }
+    }
+    pub(crate) fn notification(&self) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        self.preparation
+            .as_ref()
+            .map(preparation::Preparation::notification)
+    }
+    pub(crate) fn synchronize_voice_instance(
+        &mut self,
+        identity: Option<std::sync::Arc<()>>,
+    ) -> bool {
+        let changed = self
+            .preparation
+            .as_mut()
+            .is_some_and(|preparation| preparation.synchronize(identity));
+        if changed {
+            self.completed_outputs.clear();
+            self.completed_order.clear();
+            self.completed_bytes = 0;
+        }
+        changed
+    }
+    /// One output per accepted call; later voice actions stay behind pending reads.
+    pub(crate) fn begin_invocation(
+        &mut self,
+        app: &mut App,
+        invocation: VoiceToolInvocation,
+    ) -> Option<VoiceToolOutput> {
+        if self
+            .preparation
+            .as_ref()
+            .is_some_and(|preparation| preparation.has_pending(&invocation.call_id))
+        {
+            return None;
+        }
+        if let Some(output) = self.completed_outputs.get(&invocation.call_id) {
+            return Some(output.clone());
+        }
+        let deferred = invocation.name == tools::GET_STATE_TOOL_NAME
+            || self
+                .preparation
+                .as_ref()
+                .is_some_and(|preparation| !preparation.is_empty());
+        if !deferred {
+            return Some(self.execute_invocation(app, invocation));
+        }
+        let Some(preparation) = &mut self.preparation else {
+            return Some(tool_error(
+                &invocation.call_id,
+                "Voice control preparation owner is unavailable".into(),
+            ));
+        };
+        match preparation.submit(invocation) {
+            Ok(()) => None,
+            Err((invocation, error)) => Some(tool_error(&invocation.call_id, error)),
+        }
+    }
+    pub(crate) fn collect_prepared(&mut self, app: &mut App) -> Option<VoiceToolOutput> {
+        // Reserve staging headroom independently of cached replies. External
+        // provider clones keep their original debit until their actual release.
+        if self
+            .preparation
+            .as_ref()
+            .is_some_and(|preparation| !preparation.is_empty())
+        {
+            while self.completed_bytes > 16 * 1024 * 1024 {
+                let Some(evicted) = self.completed_order.pop_front() else {
+                    break;
+                };
+                if let Some(output) = self.completed_outputs.remove(&evicted) {
+                    self.completed_bytes =
+                        self.completed_bytes.saturating_sub(output.retained_bytes);
+                }
+            }
+        }
+        let result = self.preparation.as_mut()?.collect(app)?;
+        let output = match result {
+            Ok(output) => output,
+            Err(invocation) => {
+                let (invocation, _hold) = invocation.into_parts();
+                self.execute_invocation(app, invocation)
+            }
+        };
+        self.cache_output(output.clone());
+        Some(output)
+    }
+    pub(crate) fn has_pending_preparation(&self) -> bool {
+        self.preparation
+            .as_ref()
+            .is_some_and(|preparation| !preparation.is_empty())
+    }
+    pub(crate) fn cancel_pending(&mut self) {
+        if let Some(preparation) = &mut self.preparation {
+            preparation.cancel();
+        }
+    }
+
     pub fn tool_definitions(&self) -> Vec<VoiceToolDefinition> {
         tools::definitions()
     }
@@ -124,7 +230,7 @@ impl ControlPlane {
             tracing::info!(
                 call_id = %invocation.call_id,
                 tool_name = %invocation.name,
-                result = %output.result,
+                result_status = output.result.get("status").and_then(serde_json::Value::as_str),
                 "voice LLM tool invocation replayed from deduplication cache"
             );
             return output.clone();
@@ -149,14 +255,14 @@ impl ControlPlane {
             tracing::error!(
                 call_id = %invocation.call_id,
                 tool_name = %invocation.name,
-                result = %output.result,
+                result_status = output.result.get("status").and_then(serde_json::Value::as_str),
                 "voice LLM tool invocation failed"
             );
         } else {
             tracing::info!(
                 call_id = %invocation.call_id,
                 tool_name = %invocation.name,
-                result = %output.result,
+                result_status = output.result.get("status").and_then(serde_json::Value::as_str),
                 request_follow_up = output.request_follow_up,
                 terminate_session_after_delivery = output.terminate_session_after_delivery,
                 "voice LLM tool invocation completed"
@@ -201,15 +307,17 @@ impl ControlPlane {
             );
             return VoiceToolOutput {
                 call_id: call_id.to_owned(),
-                result: json!({
+                result: std::sync::Arc::new(json!({
                     "status": "confirmation_required",
                     "token": token,
                     "question": plan.question,
                     "preparation": preparation,
                     "instruction": ilium_prompts::voice::VOICE_MOD_ASK_ONLY_THE_EXACT_QUESTION_DO_NOT,
-                }),
+                })),
                 request_follow_up: true,
                 terminate_session_after_delivery: false,
+                allocation_hold: None,
+                retained_bytes: 0,
             };
         }
 
@@ -238,12 +346,14 @@ impl ControlPlane {
         if !confirmation.confirmed {
             return VoiceToolOutput {
                 call_id: invocation.call_id.clone(),
-                result: json!({
+                result: std::sync::Arc::new(json!({
                     "status": "cancelled",
                     "message": pending.cancellation_message,
-                }),
+                })),
                 request_follow_up: true,
                 terminate_session_after_delivery: false,
+                allocation_hold: None,
+                retained_bytes: 0,
             };
         }
         execution_output(&invocation.call_id, executor::execute(app, pending.command))
@@ -253,12 +363,18 @@ impl ControlPlane {
         if self.completed_outputs.contains_key(&output.call_id) {
             return;
         }
+        self.completed_bytes = self.completed_bytes.saturating_add(output.retained_bytes);
         self.completed_order.push_back(output.call_id.clone());
         self.completed_outputs
             .insert(output.call_id.clone(), output);
-        if self.completed_order.len() > MAX_CACHED_CALLS {
-            if let Some(evicted) = self.completed_order.pop_front() {
-                self.completed_outputs.remove(&evicted);
+        while self.completed_order.len() > MAX_CACHED_CALLS
+            || self.completed_bytes > 64 * 1024 * 1024
+        {
+            let Some(evicted) = self.completed_order.pop_front() else {
+                break;
+            };
+            if let Some(output) = self.completed_outputs.remove(&evicted) {
+                self.completed_bytes = self.completed_bytes.saturating_sub(output.retained_bytes);
             }
         }
     }
@@ -342,14 +458,21 @@ fn execution_output(
 ) -> VoiceToolOutput {
     match result {
         Ok(receipt) => {
-            let terminate_session_after_delivery = receipt.terminate_session_after_delivery;
+            let terminate = receipt.terminate_session_after_delivery;
+            let mut value = serde_json::Map::new();
+            value.insert(
+                "status".into(),
+                serde_json::Value::String(receipt.status.into()),
+            );
+            value.insert("message".into(), serde_json::Value::String(receipt.message));
+            value.insert("data".into(), receipt.data);
             VoiceToolOutput {
                 call_id: call_id.to_owned(),
-                result: serde_json::to_value(receipt).unwrap_or_else(
-                    |error| json!({ "status": "error", "message": error.to_string() }),
-                ),
-                request_follow_up: !terminate_session_after_delivery,
-                terminate_session_after_delivery,
+                result: std::sync::Arc::new(serde_json::Value::Object(value)),
+                request_follow_up: !terminate,
+                terminate_session_after_delivery: terminate,
+                allocation_hold: None,
+                retained_bytes: 0,
             }
         }
         Err(error) => tool_error(call_id, error),
@@ -359,12 +482,14 @@ fn execution_output(
 fn tool_error(call_id: &str, error: String) -> VoiceToolOutput {
     VoiceToolOutput {
         call_id: call_id.to_owned(),
-        result: json!({
+        result: std::sync::Arc::new(json!({
             "status": "error",
             "message": error,
-        }),
+        })),
         request_follow_up: true,
         terminate_session_after_delivery: false,
+        allocation_hold: None,
+        retained_bytes: 0,
     }
 }
 
@@ -375,6 +500,108 @@ mod tests {
     use ilium_core::{AgentActivity, AgentClass, PaneContentKind, PaneStatus, ROOT_ID};
 
     use super::*;
+
+    fn prepared_output(plane: &mut ControlPlane, app: &mut App) -> VoiceToolOutput {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(output) = plane.collect_prepared(app) {
+                return output;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "control CPU completion deadline"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn state_preparation_is_deferred_ordered_and_shares_its_retained_json() {
+        let mut app = App::new("default".into(), PathBuf::from("/tmp/project"));
+        let mut plane = ControlPlane::new(crate::execution::test_client());
+        let identity = std::sync::Arc::new(());
+        assert!(plane.synchronize_voice_instance(Some(identity)));
+        let state = VoiceToolInvocation {
+            call_id: "state-a".into(),
+            name: tools::GET_STATE_TOOL_NAME.into(),
+            arguments_json: "{}".into(),
+        };
+        assert!(plane.begin_invocation(&mut app, state.clone()).is_none());
+        assert!(plane.begin_invocation(&mut app, state.clone()).is_none());
+        assert!(plane
+            .begin_invocation(
+                &mut app,
+                VoiceToolInvocation {
+                    call_id: "help-a".into(),
+                    name: tools::UI_TOOL_NAME.into(),
+                    arguments_json: r#"{"action":"open_help"}"#.into(),
+                }
+            )
+            .is_none());
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
+        let response = prepared_output(&mut plane, &mut app);
+        assert_eq!(response.call_id, "state-a");
+        assert_eq!(response.result["status"], "ok");
+        assert_eq!(response.result["data"]["mode"], "normal");
+        assert!(response.retained_bytes > 0);
+        assert!(response.allocation_hold.is_some());
+        let cached = plane.begin_invocation(&mut app, state).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&response.result, &cached.result));
+        assert!(std::sync::Arc::ptr_eq(
+            response.allocation_hold.as_ref().unwrap(),
+            cached.allocation_hold.as_ref().unwrap()
+        ));
+        let action = prepared_output(&mut plane, &mut app);
+        assert_eq!(action.call_id, "help-a");
+        assert!(matches!(app.mode, crate::app::Mode::Help));
+        assert!(!plane.has_pending_preparation());
+    }
+
+    #[test]
+    fn voice_replacement_cancels_old_reads_and_fences_cached_call_ids() {
+        let mut app = App::new("default".into(), PathBuf::from("/tmp/project"));
+        let mut plane = ControlPlane::new(crate::execution::test_client());
+        plane.synchronize_voice_instance(Some(std::sync::Arc::new(())));
+        let invocation = VoiceToolInvocation {
+            call_id: "reused-call".into(),
+            name: tools::GET_STATE_TOOL_NAME.into(),
+            arguments_json: "{}".into(),
+        };
+        assert!(plane
+            .begin_invocation(&mut app, invocation.clone())
+            .is_none());
+        plane.collect_prepared(&mut app);
+        assert!(plane.synchronize_voice_instance(Some(std::sync::Arc::new(()))));
+        assert!(!plane.has_pending_preparation());
+        assert!(plane.collect_prepared(&mut app).is_none());
+        assert!(plane
+            .begin_invocation(&mut app, invocation.clone())
+            .is_none());
+        let first = prepared_output(&mut plane, &mut app);
+        assert!(plane.synchronize_voice_instance(Some(std::sync::Arc::new(()))));
+        assert!(plane.begin_invocation(&mut app, invocation).is_none());
+        let second = prepared_output(&mut plane, &mut app);
+        assert!(!std::sync::Arc::ptr_eq(&first.result, &second.result));
+    }
+
+    #[test]
+    fn control_argument_overflow_is_truthfully_rejected_before_preparation() {
+        let mut app = App::new("default".into(), PathBuf::from("/tmp/project"));
+        let mut plane = ControlPlane::new(crate::execution::test_client());
+        plane.synchronize_voice_instance(Some(std::sync::Arc::new(())));
+        let output = plane
+            .begin_invocation(
+                &mut app,
+                VoiceToolInvocation {
+                    call_id: "oversized".into(),
+                    name: tools::GET_STATE_TOOL_NAME.into(),
+                    arguments_json: " ".repeat(1024 * 1024 + 1),
+                },
+            )
+            .unwrap();
+        assert_eq!(output.result["status"], "error");
+        assert!(!plane.has_pending_preparation());
+    }
 
     #[test]
     fn diagnostic_tool_arguments_redact_direct_and_path_addressed_credentials() {
@@ -857,9 +1084,11 @@ mod tests {
                     arguments_json: arguments_json.to_owned(),
                 },
             );
-            assert_eq!(result.result["status"], "ok", "{}", result.result);
+            assert_eq!(result.result["status"], "queued", "{}", result.result);
+            assert_eq!(result.result["data"]["durability"], "pending");
         }
 
+        app.settle_filesystem_for_test();
         let saved = crate::config::load(directory.path()).unwrap();
         assert_eq!(saved.git.branch_prefix, "review/");
         assert_eq!(saved.git.branch_line, crate::config::GitBranchLine::Off);
@@ -897,8 +1126,32 @@ mod tests {
                 arguments_json: r#"{"action":"query","query":"voice-control needle"}"#.to_owned(),
             },
         );
-        assert_eq!(search.result["status"], "ok");
-        assert_eq!(search.result["data"]["results"][0]["pane_id"], editor_id.0);
+        assert_eq!(search.result["status"], "queued");
+        assert_eq!(search.result["data"]["preparation"], "pending");
+        let mut workers =
+            crate::search_workers::SearchWorkers::new(crate::execution::test_client());
+        let due = std::time::Instant::now() + crate::search_ui::SEARCH_DEBOUNCE;
+        assert!(app.tick_workspace_search(due, &mut workers));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let completed = loop {
+            if let Some(event) = workers.collect() {
+                break event;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "search completion timeout"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(app.apply_workspace_search_result(completed));
+        let crate::app::Mode::Search(state) = &app.mode else {
+            panic!("completed search should remain open");
+        };
+        assert_eq!(state.results.len(), 1);
+        assert_eq!(state.results[0].pane_id, editor_id);
+        assert_eq!(state.results[0].matched, "voice-control needle");
+        assert_eq!(state.results[0].before, "alpha ");
+        assert_eq!(state.results[0].after, " omega");
 
         let opened = plane.execute_invocation(
             &mut app,

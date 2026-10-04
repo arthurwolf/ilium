@@ -21,21 +21,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
+use crate::filesystem::explorer::{ExplorerEntry, ExplorerRead};
 use crate::layout::centered_rect;
 use crate::theme;
+use ilium_execution::{Client, JobOutcome, JobPoll, Receipt, RejectReason, Retained};
+use std::sync::Arc;
 
 /// One listed directory entry: a real file/directory, or the synthetic
 /// `..` entry that steps up to the parent directory.
-struct ExplorerEntry {
-    name: String,
-    path: PathBuf,
-    is_dir: bool,
-    is_symlink: bool,
-    /// `None` for directories and the `..` entry -- only files show a size.
-    size: Option<u64>,
-    modified: Option<SystemTime>,
-}
-
+///
 /// A modal file-picker overlay, rooted at the originating pane's cwd and
 /// re-listed every time the user navigates into a different directory.
 pub struct ExplorerOverlay {
@@ -54,6 +48,12 @@ pub struct ExplorerOverlay {
     /// An explicit path entry field. Keeping it inside the same overlay
     /// preserves the directory listing while a user pastes/types a path.
     manual_path: Option<String>,
+    revision: u64,
+    desired: Option<ExplorerRead>,
+    active: Option<(ExplorerRead, Receipt<ExplorerRead>)>,
+    execution: Option<Client>,
+    listing_hold: Option<Retained<()>>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +113,12 @@ impl ExplorerOverlay {
             folder_action_focused: false,
             folder_action_label: None,
             manual_path: None,
+            revision: 0,
+            desired: None,
+            active: None,
+            execution: None,
+            listing_hold: None,
+            error: None,
         };
         overlay.reload()?;
         Ok(overlay)
@@ -125,26 +131,146 @@ impl ExplorerOverlay {
     /// state behind because it never has a "new" directory to roll back
     /// to; the directory-changing paths go through `navigate_to` instead.
     fn reload(&mut self) -> anyhow::Result<()> {
-        self.entries = list_entries(&self.current_dir, self.show_hidden, self.selection)?;
-        self.selected = 0;
-        self.offset = 0;
+        self.queue_read(self.current_dir.clone(), self.show_hidden, None)
+    }
+    fn navigate_to(&mut self, dir: PathBuf) -> anyhow::Result<()> {
+        self.queue_read(
+            dir,
+            self.desired
+                .as_ref()
+                .map_or(self.show_hidden, |request| request.show_hidden),
+            None,
+        )
+    }
+    fn queue_read(
+        &mut self,
+        directory: PathBuf,
+        show_hidden: bool,
+        manual_input: Option<String>,
+    ) -> anyhow::Result<()> {
+        if directory.capacity() > 64 * 1024
+            || manual_input
+                .as_ref()
+                .is_some_and(|input| input.capacity() > 64 * 1024)
+        {
+            anyhow::bail!("Explorer path exceeds retained limit");
+        }
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("Explorer revision exhausted"))?;
+        self.desired = Some(ExplorerRead {
+            revision: self.revision,
+            directory,
+            show_hidden,
+            selection: self.selection,
+            manual_input,
+        });
+        if let Some((_, receipt)) = &self.active {
+            receipt.cancel();
+        }
+        self.error = None;
         Ok(())
     }
+    pub(crate) fn attach_execution(
+        mut self,
+        client: Client,
+        ready: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        self.execution = Some(client.with_completion_wake(move || ready.notify_one()));
+        self.poll();
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn preparation_pending(&self) -> bool {
+        self.active.is_some() || self.desired.is_some()
+    }
+    pub(crate) fn close_preparation(&mut self) {
+        self.desired = None;
+        self.execution = None;
+        if let Some((_, receipt)) = &self.active {
+            receipt.cancel();
+        }
+        self.active = None;
+    }
 
-    /// Lists `dir` and, only if that succeeds, commits it as the new
-    /// `current_dir`. Listing before committing keeps `current_dir` and
-    /// `entries` from ever going out of sync: if `dir` turns out to be
-    /// unreadable (e.g. execute-only permissions, or removed mid-session),
-    /// the picker stays on its current, still-valid directory and listing
-    /// instead of showing a title for a directory whose contents were
-    /// never actually loaded.
-    fn navigate_to(&mut self, dir: PathBuf) -> anyhow::Result<()> {
-        let entries = list_entries(&dir, self.show_hidden, self.selection)?;
-        self.current_dir = dir;
-        self.entries = entries;
-        self.selected = 0;
-        self.offset = 0;
-        Ok(())
+    pub(crate) fn poll(&mut self) -> bool {
+        let mut changed = false;
+        if let Some((request, receipt)) = &mut self.active {
+            let mut result = None;
+            match receipt.try_take() {
+                JobPoll::Pending => return false,
+                JobPoll::Ready(outcome) => {
+                    let hold = outcome.map(|outcome| {
+                        result = Some(match outcome {
+                            JobOutcome::Finished(result) => result,
+                            _ => Err("Explorer worker did not complete preparation".into()),
+                        });
+                    });
+                    if request.revision == self.revision
+                        && request
+                            .manual_input
+                            .as_ref()
+                            .is_none_or(|input| self.manual_path.as_ref() == Some(input))
+                    {
+                        match result {
+                            Some(Ok(listing)) => {
+                                self.current_dir = listing.directory;
+                                self.entries = listing.entries;
+                                self.selected = 0;
+                                self.offset = 0;
+                                self.show_hidden = request.show_hidden;
+                                if request.manual_input.is_some() {
+                                    self.manual_path = None;
+                                }
+                                self.listing_hold = Some(hold);
+                                self.error = None;
+                                changed = true;
+                            }
+                            Some(Err(error)) => {
+                                self.error = Some(error);
+                                changed = true;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                JobPoll::Lost | JobPoll::Taken => {
+                    self.error = Some("Explorer receipt lost; listing unchanged".into());
+                    changed = true;
+                }
+            }
+            self.active = None;
+        }
+        let Some(client) = &self.execution else {
+            return changed;
+        };
+        if let Some(request) = self.desired.take() {
+            match client.try_submit(
+                ilium_execution::Lane::Io,
+                ExplorerRead::COST,
+                request.clone(),
+            ) {
+                Ok(receipt) => self.active = Some((request, receipt)),
+                Err(rejected)
+                    if matches!(
+                        rejected.reason,
+                        RejectReason::Busy
+                            | RejectReason::QueueFull
+                            | RejectReason::JobLimit
+                            | RejectReason::InputBytes
+                            | RejectReason::ResultBytes
+                    ) =>
+                {
+                    self.desired = Some(rejected.value)
+                }
+                Err(rejected) => {
+                    self.error = Some(format!("Explorer not admitted: {:?}", rejected.reason));
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     /// Moves the selection by `delta` rows (negative = up), clamped to the
@@ -234,13 +360,12 @@ impl ExplorerOverlay {
     /// committing a directory change: a failed re-list must not leave
     /// `show_hidden` disagreeing with what `entries` actually contains.
     fn toggle_hidden(&mut self) -> anyhow::Result<()> {
-        let show_hidden = !self.show_hidden;
-        let entries = list_entries(&self.current_dir, show_hidden, self.selection)?;
-        self.show_hidden = show_hidden;
-        self.entries = entries;
-        self.selected = 0;
-        self.offset = 0;
-        Ok(())
+        let hidden = self
+            .desired
+            .as_ref()
+            .or_else(|| self.active.as_ref().map(|(request, _)| request))
+            .map_or(self.show_hidden, |request| request.show_hidden);
+        self.queue_read(self.current_dir.clone(), !hidden, None)
     }
 
     /// Feeds a crossterm event to the picker. See `ExplorerOutcome` for the
@@ -291,14 +416,8 @@ impl ExplorerOverlay {
                     } else {
                         self.current_dir.join(entered)
                     };
-                    // The explorer shows this path back to the user, so it
-                    // must not gain a Windows extended-length prefix.
-                    let canonical = ilium_platform::paths::canonicalize(&candidate)?;
-                    if !canonical.is_dir() {
-                        anyhow::bail!("entered path is not a directory");
-                    }
-                    self.navigate_to(canonical)?;
-                    self.manual_path = None;
+                    let input = manual_path.clone();
+                    self.queue_read(candidate, self.show_hidden, Some(input))?;
                     return Ok(ExplorerOutcome::Consumed);
                 }
                 KeyCode::Backspace => {
@@ -307,7 +426,10 @@ impl ExplorerOverlay {
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     manual_path.clear();
                 }
-                KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && manual_path.len() < 64 * 1024 - 4 =>
+                {
                     manual_path.push(character);
                 }
                 _ => {}
@@ -429,66 +551,7 @@ fn activation_outcome(activated: Option<PathBuf>) -> ExplorerOutcome {
 /// Pure with respect to `ExplorerOverlay` -- callers decide whether/when
 /// to commit the result, which is what lets `navigate_to` and
 /// `toggle_hidden` list before mutating any picker state.
-fn list_entries(
-    dir: &Path,
-    show_hidden: bool,
-    selection: ExplorerSelection,
-) -> anyhow::Result<Vec<ExplorerEntry>> {
-    let mut entries = Vec::new();
-    if let Some(parent) = dir.parent() {
-        entries.push(ExplorerEntry {
-            name: "..".to_string(),
-            path: parent.to_path_buf(),
-            is_dir: true,
-            is_symlink: false,
-            size: None,
-            modified: None,
-        });
-    }
-
-    for dir_entry in std::fs::read_dir(dir)? {
-        let Ok(dir_entry) = dir_entry else {
-            continue;
-        };
-        let name = dir_entry.file_name().to_string_lossy().into_owned();
-        if !show_hidden && name.starts_with('.') {
-            continue;
-        }
-        let path = dir_entry.path();
-        let is_symlink = dir_entry
-            .file_type()
-            .map(|file_type| file_type.is_symlink())
-            .unwrap_or(false);
-        // `metadata()` follows symlinks, so a symlink-to-directory is
-        // still browsable; fall back to `symlink_metadata()` so a
-        // broken link still shows up (as a zero-size, non-directory
-        // entry) instead of silently vanishing from the listing.
-        let Ok(metadata) = std::fs::metadata(&path).or_else(|_| path.symlink_metadata()) else {
-            continue;
-        };
-        if selection == ExplorerSelection::Folder && !metadata.is_dir() {
-            continue;
-        }
-        entries.push(ExplorerEntry {
-            name,
-            path,
-            is_dir: metadata.is_dir(),
-            is_symlink,
-            size: (!metadata.is_dir()).then_some(metadata.len()),
-            modified: metadata.modified().ok(),
-        });
-    }
-
-    let parent_offset = usize::from(entries.first().is_some_and(|entry| entry.name == ".."));
-    entries[parent_offset..].sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    Ok(entries)
-}
-
+///
 /// The picker's popup geometry, derived purely from the screen size so
 /// rendering (`render`) and mouse hit-testing (`handle`) always agree on
 /// where each row lands without either one caching the other's output.
@@ -603,7 +666,17 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
         ExplorerSelection::File => "Open File",
         ExplorerSelection::Folder => "Open Folder",
     };
-    let title = theme::chrome_title(&format!("{action} — {}", overlay.current_dir.display()));
+    let preparation = if let Some(error) = &overlay.error {
+        format!(" — {error}")
+    } else if overlay.active.is_some() || overlay.desired.is_some() {
+        " — Loading…".to_owned()
+    } else {
+        String::new()
+    };
+    let title = theme::chrome_title(&format!(
+        "{action} — {}{preparation}",
+        overlay.current_dir.display()
+    ));
     frame.render_widget(theme::block(true).title(title), layout.popup_area);
 
     let columns = visible_columns(layout.rows_area.width);
@@ -770,6 +843,67 @@ mod tests {
         dir
     }
 
+    #[test]
+    fn real_worker_fences_old_listing_and_retains_it_on_scan_error() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("first.txt"), b"first").unwrap();
+        let mut overlay = ExplorerOverlay::open_at(directory.path())
+            .unwrap()
+            .attach_execution(
+                crate::execution::test_client(),
+                Arc::new(tokio::sync::Notify::new()),
+            );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while overlay.active.is_some() || overlay.desired.is_some() {
+            overlay.poll();
+            assert!(std::time::Instant::now() < deadline, "scan never completed");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(overlay
+            .entries
+            .iter()
+            .any(|entry| entry.name == "first.txt"));
+        let original = overlay.current_dir.clone();
+        overlay
+            .navigate_to(directory.path().join("missing"))
+            .unwrap();
+        // Navigation admission leaves the complete old listing available.
+        assert_eq!(overlay.current_dir, original);
+        assert!(overlay
+            .entries
+            .iter()
+            .any(|entry| entry.name == "first.txt"));
+        while overlay.active.is_some() || overlay.desired.is_some() {
+            overlay.poll();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "scan failure never completed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(overlay.current_dir, original);
+        assert!(overlay.error.is_some());
+        // Coalesced replacement fences an obsolete missing-directory result.
+        overlay
+            .navigate_to(directory.path().join("missing"))
+            .unwrap();
+        overlay.poll();
+        overlay.navigate_to(directory.path().to_path_buf()).unwrap();
+        while overlay.active.is_some() || overlay.desired.is_some() {
+            overlay.poll();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "replacement never completed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(overlay.error.is_none());
+        assert!(overlay
+            .entries
+            .iter()
+            .any(|entry| entry.name == "first.txt"));
+    }
+
     fn key_event(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, modifiers))
     }
@@ -785,6 +919,37 @@ mod tests {
 
     const SCREEN: Rect = Rect::new(0, 0, 120, 40);
 
+    impl ExplorerOverlay {
+        fn settle_preparation_for_test(&mut self) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while self.active.is_some() || self.desired.is_some() {
+                self.poll();
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "real explorer preparation did not settle"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        fn prepared_for_test(self) -> Self {
+            let mut overlay = self.attach_execution(
+                crate::execution::test_client(),
+                Arc::new(tokio::sync::Notify::new()),
+            );
+            overlay.settle_preparation_for_test();
+            overlay
+        }
+        fn handle_prepared(
+            &mut self,
+            event: &Event,
+            screen: Rect,
+        ) -> anyhow::Result<ExplorerOutcome> {
+            let outcome = self.handle(event, screen)?;
+            self.settle_preparation_for_test();
+            Ok(outcome)
+        }
+    }
+
     #[test]
     fn lists_directories_before_files_alphabetically_and_skips_hidden_entries() {
         let dir = scratch_dir("listing");
@@ -793,7 +958,9 @@ mod tests {
         std::fs::write(dir.join("beta.txt"), b"hi").expect("write");
         std::fs::write(dir.join(".hidden"), b"hi").expect("write");
 
-        let overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         let names: Vec<&str> = overlay.entries.iter().map(|e| e.name.as_str()).collect();
 
         // ".." (dir has a parent), then dirs alphabetically, then files;
@@ -806,11 +973,13 @@ mod tests {
         let dir = scratch_dir("hidden-toggle");
         std::fs::write(dir.join(".env"), b"secret").expect("write");
 
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         assert!(overlay.entries.iter().all(|e| e.name != ".env"));
 
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('h'), KeyModifiers::CONTROL),
                 SCREEN,
             )
@@ -824,7 +993,9 @@ mod tests {
         std::fs::create_dir(dir.join("sub")).expect("mkdir");
         std::fs::write(dir.join("sub").join("note.txt"), b"hi").expect("write");
 
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         // Entries are ["..", "sub"] -- select "sub".
         overlay.selected = overlay
             .entries
@@ -833,7 +1004,7 @@ mod tests {
             .expect("sub dir listed");
 
         let picked = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("descend should not error");
         assert_eq!(
             picked,
@@ -848,7 +1019,7 @@ mod tests {
             .position(|e| e.name == "note.txt")
             .expect("note.txt listed");
         let picked = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("pick should not error");
         assert_eq!(
             picked,
@@ -861,7 +1032,9 @@ mod tests {
         let dir = scratch_dir("folder-select");
         std::fs::create_dir(dir.join("sub")).expect("mkdir");
         std::fs::write(dir.join("ignored.txt"), b"not selectable").expect("write file");
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("open folder picker")
+            .prepared_for_test();
         assert!(overlay.entries.iter().all(|entry| entry.is_dir));
         overlay.selected = overlay
             .entries
@@ -870,22 +1043,24 @@ mod tests {
             .expect("sub dir listed");
 
         let descended = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("enter should descend");
         assert_eq!(descended, ExplorerOutcome::Consumed);
         assert_eq!(overlay.current_dir, dir.join("sub"));
 
         let selected = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::CONTROL), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::CONTROL), SCREEN)
             .expect("control-enter should confirm the current directory");
         assert_eq!(selected, ExplorerOutcome::Picked(dir.join("sub")));
 
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("reopen folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("reopen folder picker")
+            .prepared_for_test();
         overlay
-            .handle(&key_event(KeyCode::Tab, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Tab, KeyModifiers::NONE), SCREEN)
             .expect("tab should focus the confirmation action");
         let selected = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("action enter should confirm the current directory");
         assert_eq!(selected, ExplorerOutcome::Picked(dir));
     }
@@ -895,23 +1070,25 @@ mod tests {
         let dir = scratch_dir("manual-path");
         let selected_directory = dir.join("nested");
         std::fs::create_dir(&selected_directory).expect("mkdir");
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("open folder picker")
+            .prepared_for_test();
 
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
                 SCREEN,
             )
             .expect("open manual path entry");
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('u'), KeyModifiers::CONTROL),
                 SCREEN,
             )
             .expect("clear manual path entry");
         for character in selected_directory.display().to_string().chars() {
             overlay
-                .handle(
+                .handle_prepared(
                     &key_event(KeyCode::Char(character), KeyModifiers::NONE),
                     SCREEN,
                 )
@@ -919,7 +1096,7 @@ mod tests {
         }
 
         let selected = overlay
-            .handle(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Enter, KeyModifiers::NONE), SCREEN)
             .expect("manual path should navigate to its directory");
         assert_eq!(selected, ExplorerOutcome::Consumed);
         // The overlay resolves what was typed, so the expectation is resolved
@@ -935,7 +1112,9 @@ mod tests {
     fn mouse_events_are_ignored_while_a_manual_path_is_being_typed() {
         let dir = scratch_dir("manual-path-mouse-guard");
         std::fs::create_dir(dir.join("sub")).expect("mkdir");
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("open folder picker")
+            .prepared_for_test();
         let index = overlay
             .entries
             .iter()
@@ -948,19 +1127,19 @@ mod tests {
         );
 
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
                 SCREEN,
             )
             .expect("open manual path entry");
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('u'), KeyModifiers::CONTROL),
                 SCREEN,
             )
             .expect("clear manual path entry");
         overlay
-            .handle(&key_event(KeyCode::Char('x'), KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Char('x'), KeyModifiers::NONE), SCREEN)
             .expect("type into manual path entry");
 
         let layout = layout_for(SCREEN);
@@ -971,7 +1150,7 @@ mod tests {
             row,
         );
         let picked = overlay
-            .handle(&click, SCREEN)
+            .handle_prepared(&click, SCREEN)
             .expect("click while typing a manual path should not error");
 
         assert_eq!(
@@ -995,7 +1174,9 @@ mod tests {
         let dir = scratch_dir("folder-mouse-select");
         let selected_directory = dir.join("docs");
         std::fs::create_dir(&selected_directory).expect("mkdir");
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("open folder picker")
+            .prepared_for_test();
         let index = overlay
             .entries
             .iter()
@@ -1010,7 +1191,9 @@ mod tests {
             row,
         );
         assert_eq!(
-            overlay.handle(&click, SCREEN).expect("navigate to docs"),
+            overlay
+                .handle_prepared(&click, SCREEN)
+                .expect("navigate to docs"),
             ExplorerOutcome::Consumed
         );
         assert_eq!(overlay.current_dir, selected_directory);
@@ -1022,7 +1205,7 @@ mod tests {
         );
         assert_eq!(
             overlay
-                .handle(&confirm_click, SCREEN)
+                .handle_prepared(&confirm_click, SCREEN)
                 .expect("confirm docs folder"),
             ExplorerOutcome::Picked(selected_directory)
         );
@@ -1033,9 +1216,11 @@ mod tests {
         let dir = scratch_dir("ascend");
         std::fs::create_dir(dir.join("sub")).expect("mkdir");
 
-        let mut overlay = ExplorerOverlay::open_at(&dir.join("sub")).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir.join("sub"))
+            .expect("open picker")
+            .prepared_for_test();
         overlay
-            .handle(&key_event(KeyCode::Backspace, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Backspace, KeyModifiers::NONE), SCREEN)
             .expect("ascend should not error");
         assert_eq!(overlay.current_dir, dir);
     }
@@ -1046,21 +1231,23 @@ mod tests {
         for name in ["a", "b", "c"] {
             std::fs::write(dir.join(name), b"hi").expect("write");
         }
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         assert_eq!(overlay.selected, 0);
 
         overlay
-            .handle(&key_event(KeyCode::Up, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Up, KeyModifiers::NONE), SCREEN)
             .expect("up at top should not error");
         assert_eq!(overlay.selected, 0, "cannot move above the first row");
 
         overlay
-            .handle(&key_event(KeyCode::Down, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Down, KeyModifiers::NONE), SCREEN)
             .expect("down should not error");
         assert_eq!(overlay.selected, 1);
 
         overlay
-            .handle(&key_event(KeyCode::End, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::End, KeyModifiers::NONE), SCREEN)
             .expect("end should not error");
         assert_eq!(overlay.selected, overlay.entries.len() - 1);
     }
@@ -1070,7 +1257,9 @@ mod tests {
         let dir = scratch_dir("mouse-click");
         std::fs::write(dir.join("note.txt"), b"hi").expect("write");
 
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         let index = overlay
             .entries
             .iter()
@@ -1081,7 +1270,9 @@ mod tests {
         let column = layout.rows_area.x;
 
         let first_click = mouse_event(MouseEventKind::Down(MouseButton::Left), column, row);
-        let picked = overlay.handle(&first_click, SCREEN).expect("click");
+        let picked = overlay
+            .handle_prepared(&first_click, SCREEN)
+            .expect("click");
         assert_eq!(
             picked,
             ExplorerOutcome::Consumed,
@@ -1090,7 +1281,9 @@ mod tests {
         assert_eq!(overlay.selected, index);
 
         let second_click = mouse_event(MouseEventKind::Down(MouseButton::Left), column, row);
-        let picked = overlay.handle(&second_click, SCREEN).expect("click");
+        let picked = overlay
+            .handle_prepared(&second_click, SCREEN)
+            .expect("click");
         assert_eq!(
             picked,
             ExplorerOutcome::Picked(dir.join("note.txt")),
@@ -1103,7 +1296,9 @@ mod tests {
         let dir = scratch_dir("file-context-target");
         std::fs::create_dir(dir.join("folder")).expect("mkdir");
         std::fs::write(dir.join("board.md"), b"# Backlog\n").expect("write markdown");
-        let overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         let layout = layout_for(SCREEN);
 
         let markdown_index = overlay
@@ -1140,12 +1335,14 @@ mod tests {
         for name in ["a", "b", "c", "d", "e"] {
             std::fs::write(dir.join(name), b"hi").expect("write");
         }
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
         let layout = layout_for(SCREEN);
         let inside = Position::new(layout.rows_area.x, layout.rows_area.y);
 
         overlay
-            .handle(
+            .handle_prepared(
                 &mouse_event(MouseEventKind::ScrollDown, inside.x, inside.y),
                 SCREEN,
             )
@@ -1157,10 +1354,12 @@ mod tests {
     fn clicking_outside_the_row_list_does_nothing() {
         let dir = scratch_dir("outside-click");
         std::fs::write(dir.join("note.txt"), b"hi").expect("write");
-        let mut overlay = ExplorerOverlay::open_at(&dir).expect("open picker");
+        let mut overlay = ExplorerOverlay::open_at(&dir)
+            .expect("open picker")
+            .prepared_for_test();
 
         let picked = overlay
-            .handle(
+            .handle_prepared(
                 &mouse_event(MouseEventKind::Down(MouseButton::Left), 0, 0),
                 SCREEN,
             )
@@ -1172,10 +1371,12 @@ mod tests {
     #[test]
     fn escape_while_typing_a_manual_path_returns_to_the_browser_without_closing() {
         let dir = scratch_dir("manual-path-escape");
-        let mut overlay = ExplorerOverlay::open_folder_at(&dir).expect("open folder picker");
+        let mut overlay = ExplorerOverlay::open_folder_at(&dir)
+            .expect("open folder picker")
+            .prepared_for_test();
 
         overlay
-            .handle(
+            .handle_prepared(
                 &key_event(KeyCode::Char('l'), KeyModifiers::CONTROL),
                 SCREEN,
             )
@@ -1183,7 +1384,7 @@ mod tests {
         assert!(overlay.manual_path.is_some());
 
         let outcome = overlay
-            .handle(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
             .expect("escape should close only the manual path field");
         assert_eq!(
             outcome,
@@ -1194,7 +1395,7 @@ mod tests {
         assert_eq!(overlay.manual_path, None);
 
         let outcome = overlay
-            .handle(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
+            .handle_prepared(&key_event(KeyCode::Esc, KeyModifiers::NONE), SCREEN)
             .expect("escape in the browser is the caller's to handle");
         assert_eq!(
             outcome,
@@ -1240,5 +1441,13 @@ mod tests {
             [Column::Name, Column::Size]
         ));
         assert!(matches!(visible_columns(20).as_slice(), [Column::Name]));
+    }
+}
+
+impl Drop for ExplorerOverlay {
+    fn drop(&mut self) {
+        if let Some((_, receipt)) = &self.active {
+            receipt.cancel();
+        }
     }
 }

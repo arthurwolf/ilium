@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use ilium_core::BoardStorage;
@@ -85,6 +85,222 @@ pub struct BoardPane {
     /// storage adapter. Callers compare it around interactions to avoid
     /// reporting navigation or failed/no-op edits as project activity.
     content_revision: u64,
+    instance_identity: std::sync::Arc<()>,
+    committed_revision: u64,
+    pub(crate) writer: Option<crate::filesystem::boards::BoardWriter>,
+    pending_storage_action: Option<StorageAction>,
+    pub(crate) failed_authored_columns: Option<Vec<BoardColumn>>,
+    source_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    capture_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+
+pub(crate) enum BoardRollback {
+    Whole(
+        Box<BoardPane>,
+        Option<(
+            ratatui_textarea::DataCursor,
+            ratatui_textarea::DataCursor,
+            CardEditorField,
+        )>,
+    ),
+    Detail {
+        column: usize,
+        card: usize,
+        previous: BoardCard,
+        focus: CardEditorField,
+        text: String,
+        cursor: ratatui_textarea::DataCursor,
+    },
+}
+impl BoardRollback {
+    fn whole(mut previous: BoardPane) -> Self {
+        // UI undo histories can contain fifty large deleted chunks. Retain
+        // semantic source/caret only in queued receipts; live histories stay
+        // with the UI and never become unaccounted worker command payloads.
+        let cursors = previous
+            .detail_editor
+            .as_ref()
+            .map(|editor| (editor.title.cursor(), editor.body.cursor(), editor.focus));
+        previous.detail_editor = None;
+        previous.writer = None;
+        previous.failed_authored_columns = None;
+        Self::Whole(Box::new(previous), cursors)
+    }
+}
+fn restore_editor_source(
+    field: &mut TextArea<'static>,
+    text: &str,
+    cursor: ratatui_textarea::DataCursor,
+) {
+    field.select_all();
+    field.insert_str(text);
+    field.move_cursor(CursorMove::Jump(
+        u16::try_from(cursor.0).unwrap_or(u16::MAX),
+        u16::try_from(cursor.1).unwrap_or(u16::MAX),
+    ));
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum StorageAction {
+    RenameColumn { from: String, to: String },
+    DeleteColumn(String),
+}
+pub(crate) struct BoardSource {
+    pub storage: BoardStorage,
+    pub columns: Vec<BoardColumn>,
+    pub markdown_revision: Option<String>,
+    pub(crate) retention: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) capture_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+impl BoardPane {
+    pub(crate) fn from_source(
+        source: BoardSource,
+        writer: crate::filesystem::boards::BoardWriter,
+    ) -> Self {
+        Self {
+            storage: source.storage,
+            columns: source.columns,
+            selected_column: 0,
+            selected_card: None,
+            column_scroll: 0,
+            drag_source: None,
+            drag_target: None,
+            is_detail_panel_open: false,
+            detail_editor: None,
+            markdown_revision: source.markdown_revision,
+            content_revision: 0,
+            instance_identity: std::sync::Arc::new(()),
+            committed_revision: 0,
+            writer: Some(writer),
+            pending_storage_action: None,
+            failed_authored_columns: None,
+            source_hold: source.retention,
+            capture_hold: source.capture_hold,
+        }
+    }
+}
+pub(crate) fn read_source(
+    storage: BoardStorage,
+    create_missing: bool,
+) -> Result<BoardSource, String> {
+    let board = if storage.path().exists() {
+        BoardPane::load(storage)?
+    } else if create_missing {
+        BoardPane::create(storage)?
+    } else {
+        BoardPane::load(storage)?
+    };
+    validate_retained_columns(&board.columns)?;
+    let mut storage = board.storage;
+    if let Ok(canonical) = ilium_platform::paths::canonicalize(storage.path()) {
+        match &mut storage {
+            BoardStorage::Folder { path } | BoardStorage::MarkdownFile { path } => {
+                *path = canonical
+            }
+        }
+    }
+    Ok(BoardSource {
+        storage,
+        columns: board.columns,
+        markdown_revision: board.markdown_revision,
+        retention: board.source_hold,
+        capture_hold: board.capture_hold,
+    })
+}
+pub(crate) fn validate_retained_columns(columns: &[BoardColumn]) -> Result<(), String> {
+    if columns.len() > 1024 {
+        return Err("Board column limit exceeded".into());
+    }
+    let mut bytes = std::mem::size_of_val(columns);
+    let mut cards = 0_usize;
+    for column in columns {
+        cards += column.cards.len();
+        bytes = bytes
+            .checked_add(
+                column.title.capacity()
+                    + column.cards.capacity() * std::mem::size_of::<BoardCard>(),
+            )
+            .ok_or_else(|| "Board byte overflow".to_owned())?;
+        for card in &column.cards {
+            bytes = bytes
+                .checked_add(card.title.capacity() + card.body.capacity())
+                .ok_or_else(|| "Board byte overflow".to_owned())?;
+        }
+        if bytes > 1024 * 1024 || cards > 8192 {
+            return Err("Board content exceeds retained limit".into());
+        }
+    }
+    Ok(())
+}
+pub(crate) fn persist_source(
+    storage: &BoardStorage,
+    columns: &[BoardColumn],
+    expected: Option<&str>,
+    action: Option<&StorageAction>,
+) -> Result<Option<String>, BoardWriteFailure> {
+    validate_retained_columns(columns).map_err(BoardWriteFailure::uncertain)?;
+    match storage {
+        BoardStorage::MarkdownFile { path } => {
+            let source = serialize_markdown_board(columns);
+            save_markdown_board_checked(path, &source, expected)?;
+            Ok(Some(source))
+        }
+        BoardStorage::Folder { path } => (|| -> Result<Option<String>, String> {
+            let parent = path.parent().unwrap_or_else(|| Path::new("."));
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let _lock = ilium_platform::file_lock::ExclusiveFileLock::acquire(
+                &parent.join(format!(".{name}.ilium-write.lock")),
+            )
+            .map_err(|error| error.to_string())?;
+            if let Some(action) = action {
+                match action {
+                    StorageAction::RenameColumn { from, to } => {
+                        let source = path.join(from);
+                        let destination = path.join(to);
+                        if destination.exists() {
+                            return Err(format!("{} already exists", destination.display()));
+                        }
+                        fs::rename(source, destination).map_err(|error| error.to_string())?;
+                    }
+                    StorageAction::DeleteColumn(title) => {
+                        let directory = path.join(title);
+                        if directory.exists() {
+                            fs::remove_dir(directory).map_err(|error| error.to_string())?;
+                        }
+                    }
+                }
+            }
+            save_folder_board(path, columns)?;
+            let metadata_outcome =
+                ilium_platform::secure_fs::sync_parent_directory_if_supported(path)
+                    .map_err(|error| error.to_string())?;
+            tracing::debug!(
+                ?metadata_outcome,
+                "board root directory entry synchronization"
+            );
+            Ok(None)
+        })()
+        .map_err(BoardWriteFailure::uncertain),
+    }
+}
+fn read_bounded_text(path: &Path) -> Result<String, String> {
+    let file =
+        ilium_platform::secure_fs::open_regular_file(path).map_err(|error| error.to_string())?;
+    let mut source = String::new();
+    file.take(512 * 1024 + 1)
+        .read_to_string(&mut source)
+        .map_err(|error| error.to_string())?;
+    if source.len() > 512 * 1024 {
+        return Err("Board source exceeds 512 KiB".into());
+    }
+    // The installed source and writer's predecessor clone share a fixed
+    // admission: normalize and verify physical capacity before publication.
+    source.shrink_to_fit();
+    if source.capacity() > 512 * 1024 {
+        return Err("Board source exceeds retained 512 KiB limit".into());
+    }
+    Ok(source)
 }
 
 impl BoardPane {
@@ -108,6 +324,13 @@ impl BoardPane {
             detail_editor: None,
             markdown_revision,
             content_revision: 0,
+            instance_identity: std::sync::Arc::new(()),
+            committed_revision: 0,
+            writer: None,
+            pending_storage_action: None,
+            failed_authored_columns: None,
+            source_hold: None,
+            capture_hold: None,
         })
     }
     pub fn create(storage: BoardStorage) -> Result<Self, String> {
@@ -136,12 +359,31 @@ impl BoardPane {
             detail_editor: None,
             markdown_revision: None,
             content_revision: 0,
+            instance_identity: std::sync::Arc::new(()),
+            committed_revision: 0,
+            writer: None,
+            pending_storage_action: None,
+            failed_authored_columns: None,
+            source_hold: None,
+            capture_hold: None,
         };
         let mut board = board;
         board.save()?;
         Ok(board)
     }
     pub fn save(&mut self) -> Result<(), String> {
+        if let Some(writer) = &self.writer {
+            let revision = self
+                .content_revision
+                .checked_add(1)
+                .ok_or_else(|| "Board revision exhausted".to_owned())?;
+            return writer.enqueue(
+                &self.storage,
+                &self.columns,
+                revision,
+                self.pending_storage_action.take(),
+            );
+        }
         match &self.storage {
             BoardStorage::Folder { path } => save_folder_board(path, &self.columns),
             BoardStorage::MarkdownFile { path } => {
@@ -157,6 +399,51 @@ impl BoardPane {
     /// when the storage adapter rejects it (for example after an external
     /// Markdown edit). A failed save must never leave the UI showing data that
     /// was not actually committed to disk.
+    fn semantic_snapshot(&self) -> Self {
+        // Rollback captures semantic content/caret, never the textarea undo
+        // payload. UI-owned histories are retained across acknowledged errors
+        // whenever the current detail editor still exists.
+        let detail_editor = self.detail_editor.as_ref().map(|editor| {
+            let mut title = TextArea::from(editor.title.lines().to_vec());
+            let mut body = TextArea::from(editor.body.lines().to_vec());
+            let title_cursor = editor.title.cursor();
+            let body_cursor = editor.body.cursor();
+            title.move_cursor(CursorMove::Jump(
+                u16::try_from(title_cursor.0).unwrap_or(u16::MAX),
+                u16::try_from(title_cursor.1).unwrap_or(u16::MAX),
+            ));
+            body.move_cursor(CursorMove::Jump(
+                u16::try_from(body_cursor.0).unwrap_or(u16::MAX),
+                u16::try_from(body_cursor.1).unwrap_or(u16::MAX),
+            ));
+            CardDetailEditor {
+                title,
+                body,
+                focus: editor.focus,
+            }
+        });
+        Self {
+            storage: self.storage.clone(),
+            columns: self.columns.clone(),
+            selected_column: self.selected_column,
+            selected_card: self.selected_card,
+            column_scroll: self.column_scroll,
+            drag_source: self.drag_source,
+            drag_target: self.drag_target,
+            is_detail_panel_open: self.is_detail_panel_open,
+            detail_editor,
+            markdown_revision: self.markdown_revision.clone(),
+            content_revision: self.content_revision,
+            instance_identity: std::sync::Arc::clone(&self.instance_identity),
+            committed_revision: self.committed_revision,
+            writer: self.writer.clone(),
+            pending_storage_action: self.pending_storage_action.clone(),
+            failed_authored_columns: None,
+            source_hold: None,
+            capture_hold: None,
+        }
+    }
+
     fn persist_or_restore(&mut self, previous: Self) -> Result<(), String> {
         let next_content_revision = self
             .content_revision
@@ -166,19 +453,106 @@ impl BoardPane {
             *self = previous;
             return Err(error);
         }
+        if let Some(writer) = &self.writer {
+            writer.attach_rollback(BoardRollback::whole(previous));
+        }
         self.content_revision = next_content_revision;
         Ok(())
     }
 
     /// Current committed semantic revision for activity-edge detection.
-    pub const fn content_revision(&self) -> u64 {
+    pub fn content_revision(&self) -> u64 {
+        if self.writer.is_some() {
+            self.committed_revision
+        } else {
+            self.content_revision
+        }
+    }
+    pub(crate) fn instance_identity(&self) -> std::sync::Arc<()> {
+        std::sync::Arc::clone(&self.instance_identity)
+    }
+    pub(crate) fn intent_revision(&self) -> u64 {
         self.content_revision
+    }
+    pub(crate) fn set_reload_revision(&mut self, revision: u64) {
+        self.content_revision = revision;
+        self.committed_revision = revision;
+    }
+    pub(crate) fn apply_failed_rollback(&mut self, revision: u64, rollback: BoardRollback) {
+        if self.content_revision != revision {
+            return;
+        }
+        self.failed_authored_columns = Some(self.columns.clone());
+        let failed = self.failed_authored_columns.take();
+        match rollback {
+            BoardRollback::Whole(mut previous, cursors) => {
+                let live_editor = self.detail_editor.take();
+                previous.writer = self.writer.take();
+                previous.committed_revision =
+                    previous.committed_revision.max(self.committed_revision);
+                *self = *previous;
+                if self.is_detail_panel_open {
+                    self.detail_editor = live_editor;
+                    if self.detail_editor.is_none() {
+                        self.sync_detail_editor();
+                    }
+                    if let (Some(card), Some((title_cursor, body_cursor, focus))) =
+                        (self.selected_card().cloned(), cursors)
+                    {
+                        if let Some(editor) = &mut self.detail_editor {
+                            restore_editor_source(&mut editor.title, &card.title, title_cursor);
+                            restore_editor_source(&mut editor.body, &card.body, body_cursor);
+                            editor.focus = focus;
+                        }
+                    }
+                }
+            }
+            BoardRollback::Detail {
+                column,
+                card,
+                previous,
+                focus,
+                text,
+                cursor,
+            } => {
+                if let Some(current) = self
+                    .columns
+                    .get_mut(column)
+                    .and_then(|column| column.cards.get_mut(card))
+                {
+                    *current = previous;
+                }
+                if let Some(editor) = &mut self.detail_editor {
+                    match focus {
+                        CardEditorField::Title => {
+                            restore_editor_source(&mut editor.title, &text, cursor)
+                        }
+                        CardEditorField::Body => {
+                            restore_editor_source(&mut editor.body, &text, cursor)
+                        }
+                    }
+                }
+                self.content_revision = revision.saturating_sub(1);
+            }
+        }
+        self.failed_authored_columns = failed;
+    }
+    pub(crate) fn acknowledge_revision(&mut self, revision: u64) {
+        self.committed_revision = self.committed_revision.max(revision);
+    }
+    pub(crate) fn pending_writes(&self) -> usize {
+        self.writer
+            .as_ref()
+            .map_or(0, crate::filesystem::boards::BoardWriter::pending)
     }
 
     /// Reloads the active storage adapter while preserving the local semantic
     /// revision counter. External content changes are real project activity;
     /// selecting reload without a disk change remains a no-op.
     pub fn reload(&mut self) -> Result<(), String> {
+        if self.writer.is_some() {
+            return Err("Use the board read owner to reload".into());
+        }
         let mut reloaded = Self::load(self.storage.clone())?;
         reloaded.content_revision = if reloaded.columns == self.columns {
             self.content_revision
@@ -332,7 +706,7 @@ impl BoardPane {
 
     pub fn add_card(&mut self, title: String) -> Result<(), String> {
         let title = validate_card_title(&title)?;
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let column = self
             .columns
             .get_mut(self.selected_column)
@@ -363,7 +737,7 @@ impl BoardPane {
         if self.columns.iter().any(|column| column.title == title) {
             return Err("A column with that name already exists".to_string());
         }
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         self.columns.push(BoardColumn {
             title,
             cards: Vec::new(),
@@ -379,7 +753,7 @@ impl BoardPane {
         let selected_card = self
             .selected_card
             .ok_or_else(|| "No card selected".to_string())?;
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let card = self
             .columns
             .get_mut(self.selected_column)
@@ -410,11 +784,17 @@ impl BoardPane {
             .content_revision
             .checked_add(1)
             .ok_or_else(|| "board content revision exhausted".to_string())?;
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         // Captured up front (rather than re-derived from `self` in the
         // failure branch below) so the rollback path does not depend on how
         // much of `self` the save failure already reverted.
-        let renamed_directory = if let BoardStorage::Folder { path } = &self.storage {
+        let renamed_directory = if self.writer.is_some() {
+            self.pending_storage_action = Some(StorageAction::RenameColumn {
+                from: current_title.clone(),
+                to: title.clone(),
+            });
+            None
+        } else if let BoardStorage::Folder { path } = &self.storage {
             let source = path.join(&current_title);
             let destination = path.join(&title);
             if destination.exists() {
@@ -438,6 +818,9 @@ impl BoardPane {
             *self = previous;
             return Err(error);
         }
+        if let Some(writer) = &self.writer {
+            writer.attach_rollback(BoardRollback::whole(previous));
+        }
         self.content_revision = next_content_revision;
         Ok(())
     }
@@ -452,7 +835,7 @@ impl BoardPane {
         title: Option<String>,
         body: Option<String>,
     ) -> Result<(), String> {
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let card = self
             .columns
             .get_mut(column_index)
@@ -487,7 +870,7 @@ impl BoardPane {
         let selected_card = self
             .selected_card
             .ok_or_else(|| "No card selected".to_string())?;
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let column = self
             .columns
             .get_mut(self.selected_column)
@@ -510,7 +893,7 @@ impl BoardPane {
         if self.columns.len() <= 1 {
             return Err("A board must keep at least one column".to_string());
         }
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let column = self
             .columns
             .get(self.selected_column)
@@ -525,7 +908,10 @@ impl BoardPane {
         // Captured up front so the rollback path below can recreate exactly
         // the (empty, per the check above) directory that was removed, even
         // after `*self = previous` restores the in-memory column list.
-        let removed_directory = if let BoardStorage::Folder { path } = &self.storage {
+        let removed_directory = if self.writer.is_some() {
+            self.pending_storage_action = Some(StorageAction::DeleteColumn(column.title.clone()));
+            None
+        } else if let BoardStorage::Folder { path } = &self.storage {
             let column_path = path.join(&column.title);
             if column_path.exists() {
                 fs::remove_dir(&column_path).map_err(|error| {
@@ -557,6 +943,9 @@ impl BoardPane {
             }
             *self = previous;
             return Err(error);
+        }
+        if let Some(writer) = &self.writer {
+            writer.attach_rollback(BoardRollback::whole(previous));
         }
         self.content_revision = next_content_revision;
         Ok(())
@@ -685,6 +1074,16 @@ impl BoardPane {
             }
             return Err(error);
         }
+        if let Some(writer) = &self.writer {
+            writer.attach_rollback(BoardRollback::Detail {
+                column: selected_column,
+                card: selected_card,
+                previous: card_before,
+                focus,
+                text: field_before.lines().join("\n"),
+                cursor: field_before.cursor(),
+            });
+        }
         self.content_revision = next_content_revision;
         Ok(true)
     }
@@ -706,7 +1105,7 @@ impl BoardPane {
         card_index: usize,
         checkbox_index: usize,
     ) -> Result<(), String> {
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let card = self
             .columns
             .get_mut(column_index)
@@ -791,7 +1190,7 @@ impl BoardPane {
             return Err("Card changed before it could be moved".to_string());
         }
 
-        let previous = self.clone();
+        let previous = self.semantic_snapshot();
         let card = self.columns[source_column].cards.remove(source_card);
         let destination_card = destination_card.min(self.columns[destination_column].cards.len());
         self.columns[destination_column]
@@ -877,6 +1276,7 @@ fn load_folder_board(path: &Path) -> Result<Vec<BoardColumn>, String> {
         return Ok(Vec::new());
     }
     let mut columns = Vec::new();
+    let mut retained = 0_usize;
     for entry in read_sorted(path)? {
         if !entry.is_dir() {
             continue;
@@ -887,7 +1287,7 @@ fn load_folder_board(path: &Path) -> Result<Vec<BoardColumn>, String> {
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             {
-                let source = fs::read_to_string(&card_path)
+                let source = read_bounded_text(&card_path)
                     .map_err(|error| format!("Could not read {}: {error}", card_path.display()))?;
                 let fallback_title = card_path
                     .file_stem()
@@ -895,6 +1295,12 @@ fn load_folder_board(path: &Path) -> Result<Vec<BoardColumn>, String> {
                     .to_string_lossy()
                     .replace('-', " ");
                 let (title, body) = parse_folder_card(&source, fallback_title);
+                retained = retained
+                    .checked_add(title.len() + body.len() + std::mem::size_of::<BoardCard>())
+                    .ok_or_else(|| "Board byte overflow".to_owned())?;
+                if retained > 1024 * 1024 {
+                    return Err("Board content exceeds retained limit".into());
+                }
                 cards.push(BoardCard { title, body });
             }
         }
@@ -942,7 +1348,7 @@ fn load_markdown_board(path: &Path) -> Result<(Vec<BoardColumn>, Option<String>)
     if !path.exists() {
         return Ok((Vec::new(), None));
     }
-    let source = fs::read_to_string(path)
+    let source = read_bounded_text(path)
         .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
     Ok((parse_markdown_board(&source), Some(source)))
 }
@@ -1111,12 +1517,7 @@ fn save_folder_board(path: &Path, columns: &[BoardColumn]) -> Result<(), String>
             let card_path =
                 column_path.join(format!("{:03}-{}.md", index + 1, safe_name(&card.title)));
             let body = serialize_folder_card(card);
-            let temporary_path = column_path.join(format!(
-                ".{}.ilium-tmp-{}-{index}",
-                card_path.file_name().unwrap_or_default().to_string_lossy(),
-                std::process::id()
-            ));
-            let _ = fs::remove_file(&temporary_path);
+            let temporary_path = column_path.join(format!(".ilium-tmp-{}", uuid::Uuid::new_v4()));
             let stage_result = (|| -> Result<(), String> {
                 let mut file = fs::File::create(&temporary_path)
                     .map_err(|error| format!("Could not stage {}: {error}", card_path.display()))?;
@@ -1136,7 +1537,9 @@ fn save_folder_board(path: &Path, columns: &[BoardColumn]) -> Result<(), String>
             staged_cards.push((temporary_path, card_path));
         }
         for (temporary_path, card_path) in &staged_cards {
-            if let Err(error) = fs::rename(temporary_path, card_path) {
+            if let Err(error) =
+                ilium_platform::secure_fs::replace_file_durably(temporary_path, card_path)
+            {
                 for (remaining_temporary_path, _) in &staged_cards {
                     let _ = fs::remove_file(remaining_temporary_path);
                 }
@@ -1159,7 +1562,20 @@ fn save_folder_board(path: &Path, columns: &[BoardColumn]) -> Result<(), String>
                 })?;
             }
         }
+        let metadata_outcome = ilium_platform::secure_fs::sync_parent_directory_if_supported(
+            &column_path.join(".ilium-directory-entry"),
+        )
+        .map_err(|error| format!("Column publication metadata sync failed: {error}"))?;
+        tracing::debug!(
+            ?metadata_outcome,
+            "board column directory entry synchronization"
+        );
     }
+    let metadata_outcome = ilium_platform::secure_fs::sync_parent_directory_if_supported(
+        &path.join(".ilium-directory-entry"),
+    )
+    .map_err(|error| format!("Board publication metadata sync failed: {error}"))?;
+    tracing::debug!(?metadata_outcome, "board directory entry synchronization");
     Ok(())
 }
 
@@ -1233,72 +1649,92 @@ fn serialize_markdown_board(columns: &[BoardColumn]) -> String {
 /// replace the file's inode entirely, so the lock held on the old inode
 /// would not even apply to them -- those cases are still caught below by
 /// the plain revision-content comparison, not by this lock.
-fn save_markdown_board(
+#[derive(Debug)]
+pub(crate) struct BoardWriteFailure {
+    pub message: String,
+    pub unchanged: bool,
+}
+impl BoardWriteFailure {
+    pub fn uncertain(message: String) -> Self {
+        Self {
+            message,
+            unchanged: false,
+        }
+    }
+}
+pub(crate) fn save_markdown_board(
     path: &Path,
     source: &str,
     expected_revision: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    // `File::lock` is the portable exclusive lock: `flock` on Unix,
-    // `LockFileEx` on Windows.
-    if let Err(error) = file.lock() {
-        return Err(format!("Could not lock {}: {error}", path.display()));
-    }
-    let write_result = (|| -> Result<(), String> {
-        let mut current_source = String::new();
-        file.read_to_string(&mut current_source)
-            .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-        let revision_matches = match expected_revision {
-            Some(expected) => current_source == expected,
-            None => current_source.is_empty(),
-        };
-        if !revision_matches {
-            let display_name = path
-                .file_name()
-                .map(|name| name.to_string_lossy())
-                .unwrap_or_else(|| path.as_os_str().to_string_lossy());
-            return Err(format!(
-                "{} changed outside this board; press r to reload before editing",
-                display_name
-            ));
-        }
-        file.set_len(0)
-            .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
-        file.seek(SeekFrom::Start(0))
-            .map_err(|error| format!("Could not update {}: {error}", path.display()))?;
-        file.write_all(source.as_bytes())
-            .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
-        file.sync_all()
-            .map_err(|error| format!("Could not sync {}: {error}", path.display()))
-    })();
-    // Best-effort: the descriptor closing at end of scope would release the
-    // lock regardless, but unlocking explicitly keeps the held-lock window
-    // as tight as the read-compare-write section it protects.
-    let _ = file.unlock();
-    write_result
+    save_markdown_board_checked(path, source, expected_revision).map_err(|error| error.message)
 }
+fn save_markdown_board_checked(
+    path: &Path,
+    source: &str,
+    expected_revision: Option<&str>,
+) -> Result<(), BoardWriteFailure> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| BoardWriteFailure::uncertain(error.to_string()))?;
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let _lock = ilium_platform::file_lock::ExclusiveFileLock::acquire(
+        &parent.join(format!(".{name}.ilium-write.lock")),
+    )
+    .map_err(|error| BoardWriteFailure::uncertain(error.to_string()))?;
+    let current = match read_bounded_text(path) {
+        Ok(source) => source,
+        Err(_) if !path.exists() => String::new(),
+        Err(error) => return Err(BoardWriteFailure::uncertain(error)),
+    };
+    if expected_revision.map_or(!current.is_empty(), |expected| current != expected) {
+        return Err(BoardWriteFailure {
+            message: format!(
+                "{} changed outside this board; press r to reload before editing",
+                path.display()
+            ),
+            unchanged: true,
+        });
+    }
+    let temporary = parent.join(format!(".{name}.ilium-tmp-{}", uuid::Uuid::new_v4()));
+    let result = (|| -> std::io::Result<()> {
+        let mut file = ilium_platform::secure_fs::private_open_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(source.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        ilium_platform::secure_fs::replace_file_durably(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.map_err(|error| {
+        BoardWriteFailure::uncertain(format!(
+            "Could not durably save {}: {error}; publication may be partial",
+            path.display()
+        ))
+    })
+}
+
 fn read_sorted(path: &Path) -> Result<Vec<PathBuf>, String> {
-    // `.flatten()` on the per-entry `Result`s below would silently drop any
-    // entry the OS failed to read instead of surfacing it, which could make
-    // a column or card quietly vanish from a load with no indication why.
-    let mut paths = fs::read_dir(path)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?
-        .map(|entry| {
-            entry
-                .map(|entry| entry.path())
-                .map_err(|error| format!("Could not read an entry in {}: {error}", path.display()))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let entries = fs::read_dir(path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let mut paths = Vec::new();
+    let mut bytes = 0_usize;
+    for entry in entries {
+        if paths.len() >= 8192 {
+            return Err("Board directory entry limit exceeded".into());
+        }
+        let path = entry.map_err(|error| error.to_string())?.path();
+        bytes = bytes
+            .checked_add(path.capacity() + std::mem::size_of::<PathBuf>())
+            .ok_or_else(|| "Board scan byte overflow".to_owned())?;
+        if bytes > 1024 * 1024 {
+            return Err("Board scan retained byte limit exceeded".into());
+        }
+        paths.push(path);
+    }
     paths.sort();
     Ok(paths)
 }
@@ -1640,6 +2076,15 @@ mod tests {
         let storage = BoardStorage::MarkdownFile { path: path.clone() };
         let mut board = BoardPane::create(storage).unwrap();
         board.add_card("Original".to_string()).unwrap();
+        let instance = board.instance_identity();
+        assert!(std::sync::Arc::ptr_eq(
+            &instance,
+            &board.clone().instance_identity()
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &instance,
+            &board.semantic_snapshot().instance_identity()
+        ));
         let columns_before_conflict = board.columns.clone();
         let external_source = "# Board\n\n## To do\n- External\n\n## Doing\n\n## Done\n";
         fs::write(&path, external_source).unwrap();
@@ -1648,6 +2093,15 @@ mod tests {
 
         assert!(error.contains("press r to reload"));
         assert_eq!(board.columns, columns_before_conflict);
+        assert!(std::sync::Arc::ptr_eq(
+            &instance,
+            &board.instance_identity()
+        ));
+        let replacement = BoardPane::load(board.storage.clone()).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(
+            &instance,
+            &replacement.instance_identity()
+        ));
         assert_eq!(fs::read_to_string(&path).unwrap(), external_source);
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }

@@ -286,6 +286,31 @@ pub fn sync_scrolls(area: Rect, model: &RowModel, state: &mut SettingsState) {
     scrolls.store(state);
 }
 
+/// A durable scene change may alter the credit footer after its initiating
+/// keyboard event. Recompute native Settings scrolling against that new view.
+pub(crate) fn sync_active_scrolls(app: &mut App) {
+    let crate::app::Mode::Settings(state) = &app.mode else {
+        return;
+    };
+    if state.tab != crate::app::SettingsTab::Animations
+        || state.animation_source_tab != crate::animation_plugins::AnimationSourceTab::Native
+        || state.animation_fullscreen
+    {
+        return;
+    }
+    let mut area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+        .content_area;
+    let instructions = crate::instruction_settings::panel_height(state.tab, area);
+    area.y += instructions;
+    area.height = area.height.saturating_sub(instructions);
+    let model = app.animation_row_model();
+    let crate::app::Mode::Settings(state) = &mut app.mode else {
+        return;
+    };
+    state.selected_row = state.selected_row.min(model.len().saturating_sub(1));
+    sync_scrolls(area, &model, state);
+}
+
 /// The region under a screen position: the left column splits at the global
 /// heading, the right column is the controls.
 pub fn region_at(area: Rect, model: &RowModel, position: Position) -> Option<Region> {
@@ -363,12 +388,15 @@ pub fn slider_geometry(
     if usable < 12 {
         return None;
     }
-    let value_width = 5;
-    let label_width = if usable >= 36 {
-        18
-    } else {
-        usable.saturating_sub(10).min(14)
-    };
+    let spec = model.view(row)?.slider()?;
+    let digits = spec
+        .minimum
+        .to_string()
+        .len()
+        .max(spec.maximum.to_string().len());
+    let value_width = (digits as u16 + 6).max(10).min(usable);
+    let label_width =
+        if usable >= 36 { 18 } else { 14 }.min(usable.saturating_sub(value_width + 4));
     let track_width = usable.saturating_sub(label_width + value_width + 2);
     if track_width < 2 {
         return None;
@@ -378,6 +406,97 @@ pub fn slider_geometry(
         track: Rect::new(rect.x + label_width + 1, rect.y, track_width, 1),
         value: Rect::new(rect.right() - value_width, rect.y, value_width, 1),
     })
+}
+
+/// Button/value hit regions are prepared from the same geometry as painted ink.
+pub fn value_control(
+    area: Rect,
+    model: &RowModel,
+    row: usize,
+    scrolls: Scrolls,
+) -> Option<crate::value_control::ValueControl> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+    let view = model.view(row)?;
+    let rect = row_rect(area, model, row, scrolls)?;
+    let metadata = model.control(row)?;
+    let (kind, control_area, label, label_width, previous_enabled, next_enabled) = match view.kind {
+        RowKind::Slider(spec) => {
+            let geometry = slider_geometry(area, model, row, scrolls);
+            (
+                ControlKind::Number,
+                geometry.map_or(rect, |geometry| geometry.value),
+                if geometry.is_some() {
+                    ""
+                } else {
+                    view.label.as_str()
+                },
+                if geometry.is_some() {
+                    0
+                } else {
+                    label_cap(model.region(row)?) as u16
+                },
+                spec.value > spec.minimum,
+                spec.value < spec.maximum,
+            )
+        }
+        RowKind::Choice => {
+            let cap = label_cap(model.region(row)?);
+            let marker = disabled_marker(view, rect.width, cap);
+            let control_area = marker.as_ref().map_or(rect, |marker| {
+                Rect::new(rect.x, rect.y, marker.offset.saturating_sub(1), 1)
+            });
+            let label_width = marker.as_ref().map_or(cap, |marker| marker.label_width) as u16;
+            (
+                ControlKind::Choice,
+                control_area,
+                view.label.as_str(),
+                label_width,
+                metadata
+                    .stepped(-1)
+                    .is_some_and(|value| value != metadata.value),
+                metadata
+                    .stepped(1)
+                    .is_some_and(|value| value != metadata.value),
+            )
+        }
+        _ => return None,
+    };
+    Some(ValueControl::new(
+        control_area,
+        ControlSpec {
+            kind,
+            label,
+            value: &view.value,
+            label_width,
+            previous_enabled,
+            next_enabled,
+            open_enabled: true,
+        },
+    ))
+}
+
+pub fn value_hit(
+    area: Rect,
+    model: &RowModel,
+    scrolls: Scrolls,
+    position: Position,
+    button: crate::value_control::PointerButton,
+) -> Option<(usize, crate::value_control::ControlAction)> {
+    (0..model.len()).find_map(|row| {
+        value_control(area, model, row, scrolls)?
+            .hit(position, button)
+            .map(|action| (row, action))
+    })
+}
+
+fn value_styles(style: Style) -> crate::value_control::ControlStyles {
+    crate::value_control::ControlStyles {
+        background: style,
+        label: style,
+        value: style,
+        button: style,
+        disabled: style.add_modifier(Modifier::DIM),
+    }
 }
 
 /// Dragging uses the owned row, independent of the pointer's vertical position.
@@ -468,10 +587,12 @@ pub fn hit(
         }
     }
     Some(match view.kind {
-        RowKind::Choice | RowKind::Toggle | RowKind::Text | RowKind::Location | RowKind::Action => {
+        RowKind::Toggle | RowKind::Text | RowKind::Location | RowKind::Action => {
             AnimationHit::Activate(row)
         }
-        RowKind::Scene { .. } | RowKind::Slider(_) | RowKind::Status => AnimationHit::Select(row),
+        RowKind::Choice | RowKind::Scene { .. } | RowKind::Slider(_) | RowKind::Status => {
+            AnimationHit::Select(row)
+        }
     })
 }
 
@@ -520,24 +641,18 @@ fn draw_slider(
     };
     let y = rect.y;
     let Some(geometry) = slider_geometry(area, model, row, scrolls) else {
-        frame.render_widget(
-            Paragraph::new(fit(
-                &format!("{} {}", view.label, view.value),
-                usize::from(rect.width),
-            ))
-            .style(style),
-            rect,
-        );
+        if let Some(control) = value_control(area, model, row, scrolls) {
+            control.render(frame, value_styles(style));
+        }
         return;
     };
     frame.render_widget(
         Paragraph::new(fit(&view.label, usize::from(geometry.label.width))).style(style),
         geometry.label,
     );
-    frame.render_widget(
-        Paragraph::new(format!("{:>5}", fit(&view.value, 5))).style(style),
-        geometry.value,
-    );
+    if let Some(control) = value_control(area, model, row, scrolls) {
+        control.render(frame, value_styles(style));
+    }
     let thumb = spec.thumb_offset(geometry.track.width);
     for offset in 0..geometry.track.width {
         let symbol = if offset == thumb {
@@ -767,6 +882,131 @@ fn draw_scene_nav(frame: &mut Frame, area: Rect, model: &RowModel, app: &App, in
     );
 }
 
+pub fn source_tab_area(area: Rect) -> Rect {
+    layout(area).scene_heading
+}
+
+pub fn plugin_panel_area(area: Rect) -> Rect {
+    let panel = layout(area).panel;
+    Rect::new(
+        panel.x,
+        panel.y.saturating_add(panel.height.min(2)),
+        panel.width,
+        panel.height.saturating_sub(3),
+    )
+}
+
+pub fn plugin_editor_option_at(
+    area: Rect,
+    editor: &crate::animation_plugins::PluginEditor,
+    position: Position,
+) -> Option<usize> {
+    let crate::animation_plugins::PluginEditorKind::Choice { options, cursor } = &editor.kind
+    else {
+        return None;
+    };
+    let panel = layout(area).panel;
+    let body = Rect::new(
+        panel.x,
+        panel.y.saturating_add(2),
+        panel.width,
+        panel.height.saturating_sub(4),
+    );
+    let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
+    crate::animation_plugins::plugin_row_at(body, scroll, options.len(), position)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginEditorAction {
+    Apply,
+    Cancel,
+}
+
+pub fn plugin_editor_action_at(area: Rect, position: Position) -> Option<PluginEditorAction> {
+    let panel = layout(area).panel;
+    if panel.height == 0 {
+        return None;
+    }
+    let apply = Rect::new(panel.x, panel.bottom() - 1, panel.width.min(9), 1);
+    let cancel = Rect::new(
+        panel.x.saturating_add(9),
+        panel.bottom() - 1,
+        panel.width.saturating_sub(9).min(9),
+        1,
+    );
+    if apply.contains(position) {
+        Some(PluginEditorAction::Apply)
+    } else if cancel.contains(position) {
+        Some(PluginEditorAction::Cancel)
+    } else {
+        None
+    }
+}
+
+fn render_plugin_editor(
+    frame: &mut Frame,
+    panel: Rect,
+    editor: &crate::animation_plugins::PluginEditor,
+    ink: Style,
+) {
+    frame.render_widget(Clear, panel);
+    frame.render_widget(Block::default().style(ink), panel);
+    frame.render_widget(
+        Paragraph::new(editor.label.as_str()).style(ink.add_modifier(Modifier::BOLD)),
+        Rect::new(panel.x, panel.y, panel.width, panel.height.min(1)),
+    );
+    let body = Rect::new(
+        panel.x,
+        panel.y.saturating_add(2),
+        panel.width,
+        panel.height.saturating_sub(4),
+    );
+    match &editor.kind {
+        crate::animation_plugins::PluginEditorKind::Choice { options, cursor } => {
+            let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
+            for (index, option) in options
+                .iter()
+                .enumerate()
+                .skip(scroll)
+                .take(usize::from(body.height))
+            {
+                if let Some(rectangle) =
+                    crate::animation_plugins::plugin_row_rect(body, scroll, index)
+                {
+                    let style = if index == *cursor {
+                        ink.add_modifier(Modifier::REVERSED)
+                    } else {
+                        ink
+                    };
+                    frame.render_widget(
+                        Paragraph::new(option.label.as_str()).style(style),
+                        rectangle,
+                    );
+                }
+            }
+        }
+        _ => {
+            frame.render_widget(Paragraph::new(editor.input.as_str()).style(ink), body);
+        }
+    }
+    if panel.height >= 2 {
+        frame.render_widget(
+            Paragraph::new(
+                editor
+                    .error
+                    .as_deref()
+                    .unwrap_or("Enter applies · Esc cancels"),
+            )
+            .style(ink),
+            Rect::new(panel.x, panel.bottom() - 2, panel.width, 1),
+        );
+        frame.render_widget(
+            Paragraph::new("[Apply]  [Cancel]").style(ink),
+            Rect::new(panel.x, panel.bottom() - 1, panel.width, 1),
+        );
+    }
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -778,16 +1018,59 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let scrolls = Scrolls::of(state).clamped(area, &model);
     frame.render_widget(Clear, panel);
     frame.render_widget(Block::default().style(ink), panel);
+    if state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Plugin {
+        crate::animation_plugins::draw_source_tabs(
+            frame,
+            source_tab_area(area),
+            state.animation_source_tab,
+            ink,
+        );
+        let model = app.plugin_panel_model();
+        crate::animation_plugins::draw_plugin_panel(
+            frame,
+            plugin_panel_area(area),
+            &model,
+            &state.plugin_panel,
+            ink,
+        );
+        let controls_area = plugin_panel_area(area);
+        let values = crate::value_plugin::PanelValues::new(app);
+        for row in state.plugin_panel.scroll
+            ..state
+                .plugin_panel
+                .scroll
+                .saturating_add(usize::from(controls_area.height))
+                .min(model.rows.len())
+        {
+            if let Some(control) = values.control(controls_area, &model, &state.plugin_panel, row) {
+                let style = if state.plugin_panel.cursor == row {
+                    ink.add_modifier(Modifier::REVERSED)
+                } else {
+                    ink
+                };
+                control.render(frame, value_styles(style));
+            }
+        }
+        if area.height > 0 {
+            frame.render_widget(
+                Paragraph::new("Alt+←/→ tabs · ←/→ step · + catalog · * number · f preview")
+                    .style(ink),
+                Rect::new(panel.x, panel.bottom().saturating_sub(1), panel.width, 1),
+            );
+        }
+        if let Some(editor) = &state.plugin_editor {
+            render_plugin_editor(frame, panel, editor, ink);
+        }
+        return;
+    }
+
     let bold = ink.add_modifier(Modifier::BOLD);
-    let scene_heading = if layout.scene_heading.width >= 24 {
-        "Animations \u{2014} select to preview"
-    } else {
-        "Animations"
-    };
     if layout.scene_heading.height > 0 {
-        frame.render_widget(
-            Paragraph::new(fit(scene_heading, usize::from(layout.scene_heading.width))).style(bold),
+        crate::animation_plugins::draw_source_tabs(
+            frame,
             layout.scene_heading,
+            state.animation_source_tab,
+            bold,
         );
     }
     if layout.global_heading.height > 0 {
@@ -844,6 +1127,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             }
             RowKind::Slider(_) => {
                 draw_slider(frame, area, &model, row, view, scrolls, style);
+            }
+            RowKind::Choice => {
+                if let Some(control) = value_control(area, &model, row, scrolls) {
+                    control.render(frame, value_styles(style));
+                }
+                if let Some(marker) = disabled_marker(
+                    view,
+                    row_area.width,
+                    label_cap(model.region(row).unwrap_or(Region::Controls)),
+                ) {
+                    frame.render_widget(
+                        Paragraph::new(marker.text).style(style.add_modifier(Modifier::DIM)),
+                        Rect::new(row_area.x + marker.offset, row_area.y, marker.width, 1),
+                    );
+                }
             }
             _ => draw_value_row(
                 frame,
@@ -997,6 +1295,151 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn shared_animation_chrome_paints_the_exact_button_hit_regions() {
+        use crate::value_control::{ControlAction, PointerButton};
+        let (app, _probe, _project) = settings_app(140, 120);
+        let model = app.animation_row_model();
+        let area = content_area(&app);
+        let mut terminal = Terminal::new(TestBackend::new(140, 120)).unwrap();
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings");
+        };
+        let scrolls = Scrolls::of(state);
+        terminal
+            .draw(|frame| render(frame, area, &app, state))
+            .unwrap();
+        let mut choices = 0;
+        let mut numbers = 0;
+        for row in 0..model.len() {
+            let Some(control) = value_control(area, &model, row, scrolls) else {
+                continue;
+            };
+            let geometry = control.geometry();
+            let (previous, next, open, action) = match model.view(row).unwrap().kind {
+                RowKind::Choice => {
+                    choices += 1;
+                    ("←", "→", "+", ControlAction::OpenChoices)
+                }
+                RowKind::Slider(_) => {
+                    numbers += 1;
+                    ("−", "+", "*", ControlAction::EditNumber)
+                }
+                _ => unreachable!(),
+            };
+            for (rect, glyph) in [
+                (geometry.previous, previous),
+                (geometry.next, next),
+                (geometry.open, open),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph,
+                    "row {row}"
+                );
+            }
+            assert_eq!(
+                value_hit(
+                    area,
+                    &model,
+                    scrolls,
+                    Position::new(geometry.open.x, geometry.open.y),
+                    PointerButton::Left
+                ),
+                Some((row, action))
+            );
+            assert_eq!(
+                value_hit(
+                    area,
+                    &model,
+                    scrolls,
+                    Position::new(geometry.open.x, geometry.open.y),
+                    PointerButton::Right
+                ),
+                None
+            );
+        }
+        assert!(choices > 0 && numbers > 0);
+    }
+
+    #[test]
+    fn animation_star_opens_exact_number_and_receipt_restores_settings_parent() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        let row = row_index(&app, &AnimationRow::Common("speed"));
+        set_selected_row(&mut app, row);
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('*'), KeyModifiers::NONE)),
+        );
+        let Mode::ValueDialog(host) = &mut app.mode else {
+            panic!("number dialog");
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("number");
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("37");
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(
+            app.animation_settings
+                .common_control("speed")
+                .unwrap()
+                .value,
+            ControlValue::Number(37)
+        );
+        assert_eq!(
+            crate::project_config::load(project.path())
+                .unwrap()
+                .animation
+                .common_control("speed")
+                .unwrap()
+                .value,
+            ControlValue::Number(37)
+        );
+    }
+
+    #[test]
+    fn animation_choice_value_left_steps_forward_and_right_steps_backward() {
+        let (mut app, _probe, _project) = settings_app(140, 120);
+        let row = row_index(&app, &AnimationRow::Common("dither"));
+        let model = app.animation_row_model();
+        let control = value_control(content_area(&app), &model, row, Scrolls::default()).unwrap();
+        let value = control.geometry().value;
+        let before = model.control(row).unwrap().value.clone();
+        let forward = model.control(row).unwrap().stepped(1).unwrap();
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            value.x,
+            value.y,
+        );
+        assert_eq!(
+            app.animation_settings
+                .common_control("dither")
+                .unwrap()
+                .value,
+            forward
+        );
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Right),
+            value.x,
+            value.y,
+        );
+        assert_eq!(
+            app.animation_settings
+                .common_control("dither")
+                .unwrap()
+                .value,
+            before
+        );
+    }
+
+    #[test]
     fn narrow_scene_heading_stays_inside_its_column() {
         if std::env::var_os("ILIUM_DUMP_ANIMATION_UI").is_some() {
             let project = tempfile::tempdir().unwrap();
@@ -1072,6 +1515,8 @@ mod tests {
 
     fn key(app: &mut App, code: KeyCode) {
         crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
     }
 
     fn pointer(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
@@ -1084,6 +1529,8 @@ mod tests {
                 modifiers: KeyModifiers::NONE,
             },
         );
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
     }
 
     fn rendered_dots(terminal: &Terminal<TestBackend>, rectangle: Rect) -> Vec<(String, Color)> {
@@ -1115,6 +1562,99 @@ mod tests {
     }
 
     #[test]
+    fn plugin_common_projection_uses_shared_choice_ink_pointer_and_number_star() {
+        for width in [100, 140] {
+            let (mut app, _probe, _project) = settings_app(width, 60);
+            let native = app.animation_row_model();
+            let choice = native
+                .rows()
+                .iter()
+                .position(|row| *row == AnimationRow::Common("dither"))
+                .unwrap();
+            let number = native
+                .rows()
+                .iter()
+                .position(|row| *row == AnimationRow::Common("density"))
+                .unwrap();
+            if let Mode::Settings(state) = &mut app.mode {
+                state.animation_source_tab = crate::animation_plugins::AnimationSourceTab::Plugin;
+            }
+            let model = app.plugin_panel_model();
+            let choice_row = model
+                .rows
+                .iter()
+                .position(|row| *row == crate::animation_plugins::PluginPanelRow::Common(choice))
+                .unwrap();
+            if let Mode::Settings(state) = &mut app.mode {
+                state.plugin_panel.cursor = choice_row;
+            }
+            let area = plugin_panel_area(content_area(&app));
+            let Mode::Settings(state) = &app.mode else {
+                panic!("plugin panel");
+            };
+            let control = crate::value_plugin::panel_control(
+                &app,
+                area,
+                &model,
+                &state.plugin_panel,
+                choice_row,
+            )
+            .unwrap();
+            let geometry = control.geometry();
+            let rendered = draw(&mut app, width, 60);
+            for (rect, glyph) in [
+                (geometry.previous, "←"),
+                (geometry.open, "+"),
+                (geometry.next, "→"),
+            ] {
+                assert_eq!(
+                    rendered.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph
+                );
+            }
+            let original = app.animation_settings.dither;
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                geometry.value.x,
+                geometry.value.y,
+            );
+            assert_ne!(app.animation_settings.dither, original);
+            app.settle_filesystem_for_test();
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Right),
+                geometry.value.x,
+                geometry.value.y,
+            );
+            app.settle_filesystem_for_test();
+            assert_eq!(app.animation_settings.dither, original);
+            key(&mut app, KeyCode::Char(' '));
+            assert!(matches!(&app.mode, Mode::ValueDialog(host)
+                if matches!(host.dialog, crate::value_dialog::ValueDialogState::Choice(_))));
+            key(&mut app, KeyCode::Esc);
+            assert!(matches!(&app.mode, Mode::Settings(state)
+                if state.plugin_editor.is_none()));
+            let number_row = model
+                .rows
+                .iter()
+                .position(|row| *row == crate::animation_plugins::PluginPanelRow::Common(number))
+                .unwrap();
+            if let Mode::Settings(state) = &mut app.mode {
+                state.plugin_panel.cursor = number_row;
+            }
+            key(&mut app, KeyCode::Char('*'));
+            assert!(
+                matches!(&app.mode, Mode::ValueDialog(host) if matches!(host.dialog, crate::value_dialog::ValueDialogState::Number(_)))
+            );
+            key(&mut app, KeyCode::Esc);
+            key(&mut app, KeyCode::Char(' '));
+            assert!(matches!(&app.mode, Mode::ValueDialog(host)
+                if matches!(host.dialog, crate::value_dialog::ValueDialogState::Number(_))));
+        }
+    }
+
+    #[test]
     fn semantic_scope_row_persists_through_real_project_configuration() {
         use crate::background_animation::SemanticScope;
         let (mut app, _probe, project) = settings_app(80, 24);
@@ -1127,6 +1667,7 @@ mod tests {
         );
         let scope_row = row_index(&app, &AnimationRow::SceneControl("semantic_scope"));
         app.settings_adjust_animation_row(scope_row, 1);
+        app.settle_filesystem_for_test();
         let saved = crate::project_config::load(project.path())
             .unwrap()
             .animation;
@@ -1153,12 +1694,29 @@ mod tests {
 
     fn draw(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| crate::ui::draw(frame, app)).unwrap();
+        let elapsed = app.started_at.elapsed();
+        app.animation_frame.settle_for_test();
+        terminal
+            .draw(|frame| crate::ui::draw_at(frame, app, elapsed))
+            .unwrap();
+        app.animation_frame.settle_for_test();
+        terminal
+            .draw(|frame| crate::ui::draw_at(frame, app, elapsed))
+            .unwrap();
         terminal
     }
 
     fn content_area(app: &App) -> Rect {
-        crate::settings_ui::compute_layout(app.layout.screen_area).content_area
+        let Mode::Settings(state) = &app.mode else {
+            panic!("Settings stays open");
+        };
+        let mut area =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+                .content_area;
+        let instructions = crate::instruction_settings::panel_height(state.tab, area);
+        area.y += instructions;
+        area.height = area.height.saturating_sub(instructions);
+        area
     }
 
     fn row_index(app: &App, wanted: &AnimationRow) -> usize {
@@ -1328,8 +1886,10 @@ mod tests {
                 assert!(list.contains(&AnimationRow::SceneStatus));
                 assert_eq!(
                     list.contains(&AnimationRow::Location),
-                    kind.ambient()
-                        .is_some_and(|ambient| ambient.uses_location()),
+                    kind == AnimationKind::OpenStreetMap
+                        || kind
+                            .ambient()
+                            .is_some_and(|ambient| ambient.uses_location()),
                     "{kind:?}"
                 );
             }
@@ -1424,6 +1984,8 @@ mod tests {
             .rows()
             .contains(&AnimationRow::SceneStatus));
         *probe.status.lock().unwrap() = Some("Downloading 40%".to_owned());
+        app.started_at -= std::time::Duration::from_secs(1);
+        draw(&mut app, 140, 40);
         let view = app
             .animation_row_model()
             .view(row_index(&app, &AnimationRow::SceneStatus))
@@ -1502,7 +2064,6 @@ mod tests {
                 app.animation_settings.lightness_percent = lightness;
                 app.animation_settings.hue_degrees = hue;
                 app.animation_settings.saturation_percent = saturation;
-                app.animation_cache = Default::default();
                 let terminal = draw(&mut app, 140, 40);
                 let dots = rendered_dots(&terminal, Rect::new(0, 0, 140, 40));
                 assert!(!dots.is_empty());
@@ -1569,6 +2130,8 @@ mod tests {
         let before = app.animation_settings.quiet_pond.drift_percent;
         let drift = row_index(&app, &AnimationRow::SceneControl("scene_control_3"));
         app.settings_set_animation_slider(drift, 175);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         assert!(app.animation_settings.quiet_pond.drift_percent > before);
         assert_eq!(
             crate::project_config::load(project.path())
@@ -1731,14 +2294,31 @@ mod tests {
         let hue = row(&app, "hue");
         let saturation = row(&app, "saturation");
         app.settings_set_animation_slider(lightness, 35);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_set_animation_slider(hue, 125);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_set_animation_slider(saturation, 50);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_adjust_animation_row(5, 1);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         let first_control = app.animation_row_model().first_control_index();
         app.settings_set_animation_slider(first_control, 175);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_adjust_animation_row(1, 1);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_set_animation_slider(first_control, 35);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
         app.settings_adjust_animation_row(5, 1);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
+        app.settle_filesystem_for_test();
         assert_eq!(app.animation_settings.kelp.plant_density_percent, 175);
         assert_eq!(
             app.animation_settings.moonlit_water.wave_strength_percent,
@@ -1764,6 +2344,9 @@ mod tests {
         // The scene was switched above, and scenes list different row counts.
         let lightness = row(&app, "lightness");
         app.settings_set_animation_slider(lightness, 80);
+        app.settle_filesystem_for_test();
+        app.animation_frame.settle_for_test();
+        app.settle_filesystem_for_test();
         assert_eq!(app.animation_settings, before);
         assert!(app
             .status_message
@@ -1842,12 +2425,15 @@ mod tests {
         assert!(!app.animation_settings.enabled);
         let dither = row_index(&app, &AnimationRow::Common("dither"));
         let model = app.animation_row_model();
-        let row_area = row_rect(area, &model, dither, Scrolls::default()).unwrap();
+        let value = value_control(area, &model, dither, Scrolls::default())
+            .unwrap()
+            .geometry()
+            .value;
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
-            row_area.x + 2,
-            row_area.y,
+            value.x,
+            value.y,
         );
         assert_eq!(
             app.animation_settings.dither,
@@ -2133,11 +2719,9 @@ mod tests {
                 if let Some(y) = row_y(area, &model, row, scroll) {
                     assert!(layout(area).panel.contains(Position::new(area.x, y)));
                     let expected = match model.view(row).unwrap().kind {
-                        RowKind::Choice
-                        | RowKind::Toggle
-                        | RowKind::Text
-                        | RowKind::Location
-                        | RowKind::Action => AnimationHit::Activate(row),
+                        RowKind::Toggle | RowKind::Text | RowKind::Location | RowKind::Action => {
+                            AnimationHit::Activate(row)
+                        }
                         _ => AnimationHit::Select(row),
                     };
                     assert_eq!(
@@ -2473,6 +3057,29 @@ mod tests {
     }
 
     #[test]
+    fn acknowledged_scene_credit_change_keeps_the_selected_scene_rendered() {
+        let (mut app, _probe, _project) = settings_app(80, 24);
+        let target = AnimationKind::ALL
+            .iter()
+            .position(|kind| *kind == AnimationKind::AtlanticDusk)
+            .unwrap();
+        for _ in 0..target {
+            key(&mut app, KeyCode::Down);
+        }
+        assert_eq!(app.animation_settings.kind, AnimationKind::AtlanticDusk);
+        assert_eq!(state_of(&app).selected_row, target);
+        let terminal = draw(&mut app, 80, 24);
+        let area = content_area(&app);
+        let model = app.animation_row_model();
+        let row = row_y(area, &model, target, state_of(&app).scrolls())
+            .expect("the acknowledged scene must remain inside its list window");
+        assert!(
+            screen_text(&terminal)[usize::from(row)].contains("Atlantic dusk"),
+            "the selected scene must be rendered in the list, not only in the heading"
+        );
+    }
+
+    #[test]
     fn every_row_stays_visible_in_its_region_for_each_screen_size_and_keyboard_walk() {
         for (width, height) in [(80, 24), (120, 40), (160, 50)] {
             let (mut app, _probe, _project) = settings_app(width, height);
@@ -2509,7 +3116,8 @@ mod tests {
             let joined = text.join("\n");
             let wide = width >= 120;
             for needle in [
-                "Animations",
+                "Native",
+                "Plugin",
                 "Prev",
                 "Next",
                 "Look and display",

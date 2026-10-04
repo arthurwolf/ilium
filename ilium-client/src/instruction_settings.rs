@@ -184,6 +184,7 @@ mod tests {
         for field in InstructionField::ALL {
             let value = format!("{}\n{{{{literal}}}} & unicode 🦀\n", field.label());
             app.settings_commit_instruction(field, value.clone());
+            app.settle_filesystem_for_test();
             assert_eq!(field.value(&app), value);
             app.settings_open_instruction(field);
             let crate::app::Mode::VoicePromptEditor(editor) = &app.mode else {
@@ -193,6 +194,7 @@ mod tests {
             assert_eq!(editor.text(), value);
             app.pop_modal();
         }
+        app.settle_filesystem_for_test();
         let loaded = crate::config::load(directory.path()).unwrap();
         assert_eq!(
             loaded.inference.instructions,
@@ -201,8 +203,10 @@ mod tests {
         assert_eq!(loaded.voice.custom_prompt, app.voice_settings.custom_prompt);
         for field in InstructionField::ALL {
             app.settings_commit_instruction(field, String::new());
+            app.settle_filesystem_for_test();
             assert!(field.value(&app).is_empty());
         }
+        app.settle_filesystem_for_test();
     }
     #[test]
     fn every_input_has_a_specific_location_and_the_shared_location() {

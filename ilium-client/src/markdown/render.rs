@@ -3,12 +3,8 @@
 //! (ready to hand straight to `ratatui_image::Image` widgets), everything
 //! else passed through unchanged as styled text.
 //!
-//! Runs synchronously on the UI thread. Deliberately so: rendering only
-//! happens when the user toggles into Rendered mode or resizes while
-//! already in it (see `EditorPane::view_mode` in `editor_pane.rs`) --
-//! rare, user-initiated moments, not a per-keystroke cost -- so the
-//! `mdfried`-style background worker thread this could otherwise need
-//! isn't earning its complexity here.
+//! Production preparation runs on the shared CPU bank; local image reads run
+//! on its I/O bank. The synchronous entrypoint is retained for focused tests.
 
 use std::sync::Arc;
 
@@ -52,6 +48,15 @@ pub enum RenderedBlock {
 
 pub struct RenderedDocument {
     pub blocks: Vec<RenderedBlock>,
+    pub(crate) layout: Option<PreparedLayout>,
+}
+
+pub(crate) struct PreparedLayout {
+    pub width: u16,
+    pub line_display: crate::config::LineDisplay,
+    pub buffers: Vec<Option<ratatui::buffer::Buffer>>,
+    pub heights: Vec<u16>,
+    pub total_height: u16,
 }
 
 /// Content images are capped to this many terminal rows so one huge
@@ -80,7 +85,10 @@ pub fn render(
             )
         })
         .collect();
-    RenderedDocument { blocks }
+    RenderedDocument {
+        blocks,
+        layout: None,
+    }
 }
 
 fn render_block(
@@ -96,6 +104,9 @@ fn render_block(
         Block::BlankLines(lines) => RenderedBlock::BlankLines(Arc::clone(lines)),
         Block::Heading { text, level } => {
             if heading_rendering == HeadingRendering::PlainText {
+                return RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]));
+            }
+            if !safe_geometry(width_cols, cell_px) || text.len() > 1024 {
                 return RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]));
             }
             let image = rasterizer.rasterize(text, *level, width_cols, cell_px);
@@ -136,32 +147,18 @@ fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -
         }
     };
 
-    let dyn_image = image::ImageReader::open(path)
-        .inspect_err(|error| {
-            tracing::warn!(%error, path = %path.display(), "failed to open markdown image file");
-        })
-        .ok()
-        .and_then(|reader| {
-            reader
-                .with_guessed_format()
-                .inspect_err(|error| {
-                    tracing::warn!(
-                        %error,
-                        path = %path.display(),
-                        "failed to guess markdown image format"
-                    );
-                })
-                .ok()
-        })
-        .and_then(|reader| {
-            reader
-                .decode()
-                .inspect_err(|error| {
-                    tracing::warn!(%error, path = %path.display(), "failed to decode markdown image");
-                })
-                .ok()
-        });
+    let bytes = read_image_bytes(path);
+    render_loaded_image(alt, path, bytes.as_deref(), picker, width_cols)
+}
 
+fn render_loaded_image(
+    alt: &str,
+    path: &std::path::Path,
+    bytes: Option<&[u8]>,
+    picker: &Picker,
+    width_cols: u16,
+) -> RenderedBlock {
+    let dyn_image = bytes.and_then(decode_image);
     let Some(dyn_image) = dyn_image else {
         return RenderedBlock::Placeholder(Line::styled(
             format!("[image unavailable: {alt} ({})]", path.display()),
@@ -186,6 +183,174 @@ fn render_image(alt: &str, path: &ImagePath, picker: &Picker, width_cols: u16) -
             ))
         }
     }
+}
+
+/// Reads only regular, bounded local files. A growing file is bounded by take,
+/// rather than trusting its earlier metadata. Never opens FIFOs/devices.
+pub(crate) fn read_image_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const LIMIT: usize = 4 * 1024 * 1024;
+    let file = ilium_platform::secure_fs::open_regular_file(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if metadata.len() > LIMIT as u64 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take((LIMIT + 1) as u64).read_to_end(&mut bytes).ok()?;
+    (bytes.len() <= LIMIT).then_some(bytes)
+}
+
+pub(crate) fn decode_image(bytes: &[u8]) -> Option<image::DynamicImage> {
+    use std::io::Cursor;
+    let mut dimension_reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut dimension_limits = image::Limits::default();
+    dimension_limits.max_image_width = Some(4096);
+    dimension_limits.max_image_height = Some(4096);
+    dimension_limits.max_alloc = Some(32 * 1024 * 1024);
+    dimension_reader.limits(dimension_limits);
+    let dimensions = dimension_reader.into_dimensions().ok()?;
+    if dimensions.0 > 4096
+        || dimensions.1 > 4096
+        || u64::from(dimensions.0) * u64::from(dimensions.1) > 4 * 1024 * 1024
+    {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    reader.limits(limits);
+    reader.decode().ok()
+}
+
+fn safe_geometry(width: u16, cell: (u16, u16)) -> bool {
+    width > 0 && width <= 512 && cell.0 > 0 && cell.0 <= 32 && cell.1 > 0 && cell.1 <= 64
+}
+
+/// No filesystem access here: encoding and rasterization are CPU work.
+pub(crate) fn render_prepared(
+    document: &Document,
+    images: &std::collections::HashMap<std::path::PathBuf, Vec<u8>>,
+    picker: &Picker,
+    rasterizer: &mut HeaderRasterizer,
+    width: u16,
+    heading: HeadingRendering,
+    cancelled: impl Fn() -> bool,
+) -> Result<RenderedDocument, &'static str> {
+    let cell = super::raster::cell_pixel_size(picker);
+    let mut blocks = Vec::with_capacity(document.blocks.len());
+    let mut graphics = 0usize;
+    let mut graphics_pixels = 0usize;
+    for block in &document.blocks {
+        if cancelled() {
+            return Err("document preparation cancelled");
+        }
+        let rows = if matches!(block, Block::Image { .. }) {
+            24
+        } else {
+            2
+        };
+        let pixels = usize::from(width) * usize::from(cell.0) * usize::from(cell.1) * rows;
+        let graphics_admitted = safe_geometry(width, cell)
+            && graphics < 16
+            && graphics_pixels.saturating_add(pixels) <= 262144;
+        let prepared = match block {
+            Block::Image {
+                alt,
+                path: ImagePath::Local(path),
+            } if graphics_admitted => render_loaded_image(
+                alt,
+                path,
+                images.get(path).map(Vec::as_slice),
+                picker,
+                width,
+            ),
+            Block::Image {
+                path: ImagePath::Unsupported(_),
+                ..
+            } => render_block(block, picker, rasterizer, width, cell, heading),
+            Block::Image { alt, .. } => {
+                RenderedBlock::Placeholder(Line::from(format!("[image unavailable: {alt}]")))
+            }
+            Block::Heading { text, .. } if !graphics_admitted => {
+                RenderedBlock::Text(Arc::new(vec![plain_heading_line(text)]))
+            }
+            _ => render_block(block, picker, rasterizer, width, cell, heading),
+        };
+        if matches!(prepared, RenderedBlock::Image(_) | RenderedBlock::Header(_)) {
+            graphics += 1;
+            graphics_pixels += pixels;
+        }
+        blocks.push(prepared);
+    }
+    Ok(RenderedDocument {
+        blocks,
+        layout: None,
+    })
+}
+
+/// Uses Ratatui's exact wrapping engine once on the worker, then the UI only
+/// copies visible prepared cells. Total output cells are capped before allocation.
+pub(crate) fn prepare_layout(
+    document: &mut RenderedDocument,
+    width: u16,
+    display: crate::config::LineDisplay,
+) -> Result<(), &'static str> {
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        widgets::{Paragraph, Widget, Wrap},
+    };
+    let mut layout = PreparedLayout {
+        width,
+        line_display: display,
+        buffers: Vec::new(),
+        heights: Vec::new(),
+        total_height: 0,
+    };
+    let mut cells = 0usize;
+    for block in &document.blocks {
+        let lines = match block {
+            RenderedBlock::Text(lines) | RenderedBlock::BlankLines(lines) => Some(lines.as_slice()),
+            RenderedBlock::Placeholder(line) => Some(std::slice::from_ref(line)),
+            _ => None,
+        };
+        let (height, buffer) = if let Some(lines) = lines {
+            let mut paragraph = Paragraph::new(lines.to_vec());
+            if display == crate::config::LineDisplay::Wrap {
+                paragraph = paragraph.wrap(Wrap { trim: false });
+            }
+            let height = u16::try_from(paragraph.line_count(width.max(1)))
+                .map_err(|_| "document layout has too many rows")?;
+            cells = cells
+                .checked_add(usize::from(width) * usize::from(height))
+                .ok_or("document layout overflow")?;
+            if cells > 131072 {
+                return Err("document layout exceeds prepared-cell budget; use source view");
+            }
+            let area = Rect::new(0, 0, width, height);
+            let mut buffer = Buffer::empty(area);
+            paragraph.render(area, &mut buffer);
+            (height, Some(buffer))
+        } else {
+            match block {
+                RenderedBlock::Image(protocol) | RenderedBlock::Header(protocol) => {
+                    (protocol.size().height, None)
+                }
+                _ => (0, None),
+            }
+        };
+        layout.heights.push(height);
+        layout.buffers.push(buffer);
+        layout.total_height = layout.total_height.saturating_add(height);
+    }
+    document.layout = Some(layout);
+    Ok(())
 }
 
 /// Creates the graphics-free heading shown when the current terminal cannot
@@ -447,5 +612,76 @@ mod tests {
             .unwrap();
         let cell = terminal.backend().buffer().cell((0, 0)).unwrap();
         assert_eq!(cell.bg, Color::Rgb(65, 105, 225));
+    }
+}
+
+#[cfg(test)]
+mod preparation_limit_tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    #[test]
+    fn prepared_wrapping_paints_exactly_the_original_ratatui_layout() {
+        let document = super::super::document::parse(
+            "one two three four\n\n**Wide 中文** body\n\n> quote",
+            std::path::Path::new("."),
+        );
+        let picker = Picker::halfblocks();
+        let mut rasterizer = HeaderRasterizer::new();
+        let reference = render(
+            &document,
+            &picker,
+            &mut rasterizer,
+            8,
+            HeadingRendering::PlainText,
+        );
+        let mut prepared = render(
+            &document,
+            &picker,
+            &mut rasterizer,
+            8,
+            HeadingRendering::PlainText,
+        );
+        prepare_layout(&mut prepared, 8, crate::config::LineDisplay::Wrap).unwrap();
+        let paint = |document: &RenderedDocument| {
+            let mut terminal = Terminal::new(TestBackend::new(8, 20)).unwrap();
+            terminal
+                .draw(|frame| {
+                    super::super::view::render(
+                        frame,
+                        Rect::new(0, 0, 8, 20),
+                        document,
+                        0,
+                        crate::config::LineDisplay::Wrap,
+                    )
+                })
+                .unwrap();
+            terminal.backend().buffer().clone()
+        };
+        assert_eq!(paint(&reference), paint(&prepared));
+        assert_eq!(
+            super::super::view::content_height(&reference, 8, crate::config::LineDisplay::Wrap),
+            super::super::view::content_height(&prepared, 8, crate::config::LineDisplay::Wrap)
+        );
+    }
+    #[test]
+    fn malformed_and_oversized_images_and_cell_layout_are_rejected() {
+        assert!(decode_image(b"not an image").is_none());
+        let mut bitmap = vec![0u8; 54];
+        bitmap[0..2].copy_from_slice(b"BM");
+        bitmap[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&100000u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&100000u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24u16.to_le_bytes());
+        assert!(decode_image(&bitmap).is_none());
+        let mut document = RenderedDocument {
+            blocks: vec![RenderedBlock::Text(Arc::new(
+                (0..1000).map(|_| Line::from("body")).collect(),
+            ))],
+            layout: None,
+        };
+        assert!(prepare_layout(&mut document, 512, crate::config::LineDisplay::Clip).is_err());
+        assert!(document.layout.is_none());
+        assert!(!safe_geometry(u16::MAX, (u16::MAX, u16::MAX)));
     }
 }

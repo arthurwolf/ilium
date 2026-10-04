@@ -315,7 +315,9 @@ mod tests {
         let dir = scratch_dir();
         let path = dir.join(file_name);
         std::fs::write(&path, source).expect("write fixture");
-        EditorPane::load(path).expect("load fixture")
+        let mut pane = EditorPane::load(path).expect("load fixture");
+        pane.install_test_highlighting();
+        pane
     }
 
     /// Renders one editor pane's Source-mode highlighting into a
@@ -460,6 +462,132 @@ mod tests {
         assert_eq!(
             second_row, "12  XYZ ",
             "tab should expand relative to this visual row's own start, not the physical line's"
+        );
+    }
+}
+
+#[cfg(test)]
+mod source_window_pixel_tests {
+    use crate::editor_pane::EditorPane;
+    use ratatui::style::{Color, Modifier};
+    use ratatui_textarea::TextArea;
+
+    fn editor(source: &str) -> EditorPane {
+        let mut editor = EditorPane::empty();
+        editor.path = Some(std::path::PathBuf::from("window-fixture.rs"));
+        editor.textarea = TextArea::from(source.lines());
+        editor
+    }
+    fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, start: u16, end: u16) -> String {
+        (start..end)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect()
+    }
+
+    #[test]
+    fn window_keyword_and_string_literal_get_different_colors() {
+        let mut editor = editor("fn main() { let s = \"hi\"; }");
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 80, 3);
+        let gutter = super::line_number_gutter_width(1);
+        let rendered = row_text(&buffer, 0, gutter, 80);
+        assert!(rendered.starts_with("fn main"), "rendered: {rendered:?}");
+        let fn_color = buffer[(gutter, 0)].fg;
+        let quote_offset = rendered.find('"').expect("string literal present");
+        let string_color = buffer[(gutter + quote_offset as u16, 0)].fg;
+        assert_ne!(
+            fn_color, string_color,
+            "keyword and string literal should carry different syntax colors"
+        );
+        assert_ne!(fn_color, Color::Reset);
+        assert_ne!(string_color, Color::Reset);
+        assert!(editor.installed_window().unwrap().viewport.styles.is_some());
+    }
+
+    #[test]
+    fn window_line_number_gutter_shows_one_based_row_numbers() {
+        let mut editor = editor("fn a() {}\nfn b() {}\nfn c() {}");
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 40, 4);
+        for (row, expected_number) in [(0u16, '1'), (1, '2'), (2, '3')] {
+            assert_eq!(
+                buffer[(1, row)].symbol(),
+                expected_number.to_string(),
+                "row {row} gutter digit"
+            );
+        }
+    }
+
+    #[test]
+    fn window_cursor_cell_is_reversed_and_current_line_is_underlined() {
+        let mut editor = editor("fn main() {}\nlet x = 1;");
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 40, 3);
+        let gutter = super::line_number_gutter_width(2);
+        let cursor_cell = &buffer[(gutter, 0)];
+        assert!(cursor_cell.modifier.contains(Modifier::REVERSED));
+        assert!(cursor_cell.modifier.contains(Modifier::UNDERLINED));
+        let other_row_cell = &buffer[(gutter, 1)];
+        assert!(!other_row_cell.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn window_wrapping_keeps_syntax_highlighting_on_every_visual_row() {
+        let mut editor = editor("let greeting = \"hello\";");
+        editor.apply_defaults(&crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        });
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 8, 4);
+        let first_row = row_text(&buffer, 0, 0, 8);
+        let second_row = row_text(&buffer, 1, 0, 8);
+        assert!(
+            first_row.starts_with("let gree"),
+            "first row: {first_row:?}"
+        );
+        assert!(
+            second_row.starts_with("ting = \""),
+            "second row: {second_row:?}"
+        );
+        assert_ne!(
+            buffer[(6, 1)].fg,
+            Color::Reset,
+            "wrapped string text should retain its token color"
+        );
+    }
+
+    #[test]
+    fn window_wrapped_continuation_expands_tab_from_its_own_start() {
+        let mut editor = editor("//abcdefgh12\tXYZ");
+        editor.apply_defaults(&crate::config::EditorSettings {
+            line_display: crate::config::LineDisplay::Wrap,
+            show_line_numbers: false,
+            ..crate::config::EditorSettings::default()
+        });
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 10, 3);
+        assert_eq!(
+            row_text(&buffer, 1, 0, 8),
+            "12  XYZ ",
+            "tab should expand relative to this visual row's own start, not the physical line's"
+        );
+    }
+
+    #[test]
+    fn window_multiline_comment_keeps_sequential_syntax_across_physical_lines() {
+        let mut editor =
+            editor("/* opening\ninside block comment\n*/ fn main() { let s = \"hi\"; }");
+        editor.show_line_numbers = false;
+        let buffer = crate::ui::test_source_window_pixels(&mut editor, 64, 4);
+        assert!(row_text(&buffer, 1, 0, 64).starts_with("inside block comment"));
+        let opening_comment = buffer[(0, 0)].fg;
+        let continuation_comment = buffer[(0, 1)].fg;
+        assert_ne!(continuation_comment, Color::Reset);
+        assert_eq!(
+            continuation_comment, opening_comment,
+            "physical-line continuation must use the opening comment's parser state"
+        );
+        assert_ne!(
+            buffer[(3, 2)].fg,
+            continuation_comment,
+            "fn after closing the comment must regain keyword syntax"
         );
     }
 }

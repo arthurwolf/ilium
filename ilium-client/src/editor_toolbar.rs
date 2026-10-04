@@ -20,6 +20,7 @@ pub enum ToolbarAction {
     ViewRendered,
     ToggleHeadingRendering,
     ToggleLineDisplay,
+    ChooseLineDisplay,
     ToggleLineNumbers,
     ToggleMinimap,
     ToggleAutosave,
@@ -136,8 +137,44 @@ fn right_buttons_for(pane: &EditorPane) -> Vec<Button> {
 fn button_rects(area: Rect, pane: &EditorPane) -> Vec<(ToolbarAction, Rect, String, bool)> {
     let mut x = area.x;
     let mut rects = Vec::new();
-    for button in buttons_for(pane) {
-        let width = button.label.chars().count() as u16;
+    let mut left_buttons = buttons_for(pane);
+    let right_buttons = right_buttons_for(pane);
+    let left_width = |compact: bool| {
+        left_buttons
+            .iter()
+            .map(|button| {
+                let width = if button.action == ToolbarAction::ToggleLineDisplay {
+                    10
+                } else if compact {
+                    button.label.trim().chars().count()
+                } else {
+                    button.label.chars().count()
+                };
+                width + 1
+            })
+            .sum::<usize>()
+    };
+    let right_width = right_buttons
+        .iter()
+        .map(|button| button.label.chars().count())
+        .sum::<usize>()
+        + right_buttons.len().saturating_sub(1);
+    // Shared selector chrome must not displace Save at widths that previously
+    // fit the complete toolbar. Remove decorative padding only if every
+    // existing button then fits; otherwise retain the narrow-screen policy.
+    if left_width(false) + right_width > usize::from(area.width)
+        && left_width(true) + right_width <= usize::from(area.width)
+    {
+        for button in &mut left_buttons {
+            button.label = button.label.trim().to_owned();
+        }
+    }
+    for button in left_buttons {
+        let width = if button.action == ToolbarAction::ToggleLineDisplay {
+            10 // Four value cells and the shared arrow/catalog chrome.
+        } else {
+            button.label.chars().count() as u16
+        };
 
         // Saturating math throughout: `area` comes from the live terminal
         // size, so near-u16::MAX coordinates must degrade to "button
@@ -163,7 +200,7 @@ fn button_rects(area: Rect, pane: &EditorPane) -> Vec<(ToolbarAction, Rect, Stri
     // right like `buttons_for`'s half does.
     let mut right_x = area.right();
     let mut right_rects = Vec::new();
-    for button in right_buttons_for(pane).into_iter().rev() {
+    for button in right_buttons.into_iter().rev() {
         let width = button.label.chars().count() as u16;
         if right_x < left_edge.saturating_add(width) {
             break;
@@ -190,13 +227,64 @@ pub fn action_at(area: Rect, pane: &EditorPane, position: Position) -> Option<To
     button_rects(area, pane)
         .into_iter()
         .find(|(_, rect, _, _)| rect.contains(position))
-        .map(|(action, ..)| action)
+        .and_then(|(action, rect, ..)| {
+            if action == ToolbarAction::ToggleLineDisplay {
+                line_display_control(rect, pane)
+                    .hit(position, crate::value_control::PointerButton::Left)
+                    .map(line_display_action)
+            } else {
+                Some(action)
+            }
+        })
+}
+
+fn line_display_action(action: crate::value_control::ControlAction) -> ToolbarAction {
+    match action {
+        crate::value_control::ControlAction::OpenChoices => ToolbarAction::ChooseLineDisplay,
+        _ => ToolbarAction::ToggleLineDisplay,
+    }
+}
+
+fn line_display_control(rect: Rect, pane: &EditorPane) -> crate::value_control::ValueControl {
+    crate::value_control::ValueControl::new(
+        rect,
+        crate::value_control::ControlSpec {
+            kind: crate::value_control::ControlKind::Choice,
+            label: "",
+            value: match pane.line_display {
+                crate::config::LineDisplay::Clip => "Clip",
+                crate::config::LineDisplay::Wrap => "Wrap",
+            },
+            label_width: 0,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
+}
+
+/// Right clicks act only on the choice value, leaving other toolbar actions untouched.
+pub(crate) fn right_action_at(
+    area: Rect,
+    pane: &EditorPane,
+    position: Position,
+) -> Option<ToolbarAction> {
+    button_rects(area, pane)
+        .into_iter()
+        .find(|(action, rect, ..)| {
+            *action == ToolbarAction::ToggleLineDisplay && rect.contains(position)
+        })
+        .and_then(|(_, rect, ..)| {
+            line_display_control(rect, pane)
+                .hit(position, crate::value_control::PointerButton::Right)
+        })
+        .map(line_display_action)
 }
 
 /// Draws the toolbar into `area` (one row, reserved above every editor
 /// pane's content -- see `editor_chrome::compute`).
 pub fn render(frame: &mut Frame, area: Rect, pane: &EditorPane) {
-    for (_, rect, label, active) in button_rects(area, pane) {
+    for (action, rect, label, active) in button_rects(area, pane) {
         let style = if active {
             Style::new()
                 .fg(Color::Black)
@@ -205,7 +293,18 @@ pub fn render(frame: &mut Frame, area: Rect, pane: &EditorPane) {
         } else {
             Style::new().fg(Color::DarkGray)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(label, style))), rect);
+        if action == ToolbarAction::ToggleLineDisplay {
+            line_display_control(rect, pane).render(
+                frame,
+                crate::value_control::ControlStyles {
+                    value: style,
+                    button: Style::new().fg(Color::Cyan),
+                    ..Default::default()
+                },
+            );
+        } else {
+            frame.render_widget(Paragraph::new(Line::from(Span::styled(label, style))), rect);
+        }
     }
 }
 
@@ -218,6 +317,72 @@ mod tests {
         let mut pane = EditorPane::empty();
         pane.path = Some(PathBuf::from("notes.md"));
         pane
+    }
+
+    #[test]
+    fn line_display_choice_has_arrows_and_catalog_in_plain_and_markdown_toolbars() {
+        use ratatui::{backend::TestBackend, Terminal};
+        for path in ["notes.txt", "notes.md"] {
+            for line_display in [
+                crate::config::LineDisplay::Clip,
+                crate::config::LineDisplay::Wrap,
+            ] {
+                let minimum_width = if path.ends_with(".md") { 40 } else { 24 };
+                for width in [minimum_width, 80, 140] {
+                    let mut pane = EditorPane::empty();
+                    pane.path = Some(PathBuf::from(path));
+                    pane.line_display = line_display;
+                    let area = Rect::new(0, 0, width, 1);
+                    let mut terminal = Terminal::new(TestBackend::new(width, 1)).unwrap();
+                    terminal.draw(|frame| render(frame, area, &pane)).unwrap();
+                    let symbols: String = (0..width)
+                        .map(|column| terminal.backend().buffer()[(column, 0)].symbol())
+                        .collect();
+                    for glyph in ["←", "+", "→"] {
+                        assert!(
+                            symbols.contains(glyph),
+                            "{path}/{line_display:?}/{width}: {symbols}"
+                        );
+                    }
+                    assert!(symbols.contains(match line_display {
+                        crate::config::LineDisplay::Clip => "Clip",
+                        crate::config::LineDisplay::Wrap => "Wrap",
+                    }));
+                    let (_, rect, ..) = button_rects(area, &pane)
+                        .into_iter()
+                        .find(|(action, ..)| *action == ToolbarAction::ToggleLineDisplay)
+                        .unwrap();
+                    let geometry = line_display_control(rect, &pane).geometry();
+                    for (target, expected) in [
+                        (geometry.previous, ToolbarAction::ToggleLineDisplay),
+                        (geometry.next, ToolbarAction::ToggleLineDisplay),
+                        (geometry.open, ToolbarAction::ChooseLineDisplay),
+                        (geometry.value, ToolbarAction::ToggleLineDisplay),
+                    ] {
+                        assert_eq!(
+                            action_at(area, &pane, Position::new(target.x, target.y)),
+                            Some(expected)
+                        );
+                    }
+                    assert_eq!(
+                        right_action_at(
+                            area,
+                            &pane,
+                            Position::new(geometry.value.x, geometry.value.y)
+                        ),
+                        Some(ToolbarAction::ToggleLineDisplay)
+                    );
+                    assert_eq!(
+                        right_action_at(
+                            area,
+                            &pane,
+                            Position::new(geometry.open.x, geometry.open.y)
+                        ),
+                        None
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -306,6 +471,52 @@ mod tests {
         assert_eq!(save_as_action, ToolbarAction::SaveAs);
         assert!(save_rect.x < save_as_rect.x);
         assert_eq!(save_as_rect.right(), area.right());
+    }
+
+    #[test]
+    fn eighty_columns_keep_every_markdown_source_action_and_full_selector_chrome() {
+        use ratatui::{backend::TestBackend, Terminal};
+        for line_display in [
+            crate::config::LineDisplay::Clip,
+            crate::config::LineDisplay::Wrap,
+        ] {
+            let mut pane = markdown_pane();
+            pane.line_display = line_display;
+            let area = Rect::new(0, 0, 80, 1);
+            let rects = button_rects(area, &pane);
+            assert_eq!(
+                rects.len(),
+                buttons_for(&pane).len() + right_buttons_for(&pane).len()
+            );
+            for pair in rects.windows(2) {
+                assert!(pair[0].1.right() <= pair[1].1.x, "buttons must not overlap");
+            }
+            let mut terminal = Terminal::new(TestBackend::new(80, 1)).unwrap();
+            terminal.draw(|frame| render(frame, area, &pane)).unwrap();
+            let (_, rect, ..) = rects
+                .iter()
+                .find(|(action, ..)| *action == ToolbarAction::ToggleLineDisplay)
+                .unwrap();
+            let geometry = line_display_control(*rect, &pane).geometry();
+            for (rect, glyph) in [
+                (geometry.previous, "←"),
+                (geometry.open, "+"),
+                (geometry.next, "→"),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                    glyph
+                );
+            }
+            for (action, rect, ..) in &rects {
+                if matches!(action, ToolbarAction::Save | ToolbarAction::SaveAs) {
+                    assert_eq!(
+                        action_at(area, &pane, Position::new(rect.x, rect.y)),
+                        Some(*action)
+                    );
+                }
+            }
+        }
     }
 
     #[test]

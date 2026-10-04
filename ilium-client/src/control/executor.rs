@@ -50,6 +50,15 @@ impl ExecutionReceipt {
         }
     }
 
+    pub(super) fn local_write_pending(domain: &str, target: Value, revision: u64) -> Self {
+        Self {
+            status: "queued",
+            message: format!("{domain} write accepted; durable completion is pending"),
+            data: json!({"write_domain":domain,"target":target,"source_revision":revision,"durability":"pending"}),
+            terminate_session_after_delivery: false,
+        }
+    }
+
     /// Completes a function call without asking the provider for another
     /// response because this result is the final frame of the voice session.
     fn terminating(message: impl Into<String>) -> Self {
@@ -69,7 +78,7 @@ pub fn execute(app: &mut App, command: ControlCommand) -> Result<ExecutionReceip
             Ok(ExecutionReceipt {
                 status: "ok",
                 message: ilium_prompts::voice::VOICE_EXECUTOR_CURRENT_ILIUM_STATE.to_owned(),
-                data: serde_json::to_value(snapshot).map_err(|error| error.to_string())?,
+                data: snapshot.prepare()?,
                 terminate_session_after_delivery: false,
             })
         }
@@ -95,7 +104,11 @@ fn execute_terminal_submission(
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
     let text = required_nonempty(Some(command.text), "text")?;
-    app.send_terminal_submission(pane_id, text, PromptSubmissionSource::VoiceControl);
+    app.send_terminal_submission(pane_id, text, PromptSubmissionSource::VoiceControl)
+        .map_err(|_original_request| {
+            "Terminal submission rejected before admission; retry the original voice command"
+                .to_string()
+        })?;
     Ok(ExecutionReceipt::queued(
         ilium_prompts::voice::VOICE_EXECUTOR_QUEUED_TEXT_AND_ENTER_FOR_THE_TERMINAL,
     ))
@@ -110,7 +123,11 @@ fn execute_terminal_typing(
     let pane_id = resolve_node(app, &command.target)?;
     require_terminal(app, pane_id)?;
     let bytes = required_nonempty(Some(command.text), "text")?.into_bytes();
-    app.send_user_terminal_bytes(pane_id, bytes, None);
+    app.send_user_terminal_bytes(pane_id, bytes, None)
+        .map_err(|_original_request| {
+            "Terminal typing rejected before admission; retry the original voice command"
+                .to_string()
+        })?;
     Ok(ExecutionReceipt::queued(
         ilium_prompts::voice::VOICE_EXECUTOR_STAGED_TEXT_IN_THE_TERMINAL,
     ))
@@ -128,22 +145,59 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
     };
     match command.action {
         SearchAction::Query => {
-            state.query = TextPromptState::new(requested_query.unwrap_or_default());
-            app.refresh_search_results(&mut state);
+            let query = requested_query.unwrap_or_default();
+            state.query = TextPromptState::new(&query);
+            state.note_query_changed(std::time::Instant::now());
             if let Some(index) = command.index {
-                if index >= state.results.len() {
-                    app.mode = Mode::Search(state);
-                    return Err(ilium_prompts::render_value(
-                        "voice/executor/search-result-index-v0-does-not-exist",
-                        &serde_json::json!({"v0": (index).to_string()}),
-                    ));
-                }
-                state.selected_index = index;
+                state.queue_control(crate::search_ui::SearchContinuationAction::Select(index))?;
             }
+            let revision = state.revision();
+            app.mode = Mode::Search(state);
+            return Ok(ExecutionReceipt {
+                status: "queued",
+                message: "Workspace search accepted; results and optional selection are pending preparation".into(),
+                data: json!({ "query": query, "revision": revision, "preparation": "pending", "index": command.index, "verification": "Read ilium_get_state after search preparation completes" }),
+                terminate_session_after_delivery: false,
+            });
         }
-        SearchAction::SelectNext => state.move_selection(1, usize::MAX),
-        SearchAction::SelectPrevious => state.move_selection(-1, usize::MAX),
+        SearchAction::SelectNext | SearchAction::SelectPrevious => {
+            let delta = if matches!(command.action, SearchAction::SelectNext) {
+                1
+            } else {
+                -1
+            };
+            if state.is_preparing() {
+                let queued =
+                    state.queue_control(crate::search_ui::SearchContinuationAction::Move(delta));
+                let revision = state.revision();
+                app.mode = Mode::Search(state);
+                queued?;
+                return Ok(ExecutionReceipt {
+                    status: "queued",
+                    message: "Search navigation is pending preparation of the current query".into(),
+                    data: json!({ "revision": revision, "preparation": "pending" }),
+                    terminate_session_after_delivery: false,
+                });
+            }
+            state.move_selection(delta, usize::MAX);
+        }
         SearchAction::OpenResult => {
+            if state.is_preparing() {
+                let queued = state.queue_control(crate::search_ui::SearchContinuationAction::Open(
+                    command.index,
+                ));
+                let revision = state.revision();
+                app.mode = Mode::Search(state);
+                queued?;
+                return Ok(ExecutionReceipt {
+                    status: "queued",
+                    message:
+                        "Opening the search result is pending preparation of the current query"
+                            .into(),
+                    data: json!({ "revision": revision, "preparation": "pending", "index": command.index }),
+                    terminate_session_after_delivery: false,
+                });
+            }
             if let Some(index) = command.index {
                 if index >= state.results.len() {
                     app.mode = Mode::Search(state);
@@ -161,6 +215,7 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
                         .to_owned(),
                 );
             };
+            app.mode = Mode::Search(state);
             app.activate_search_result(result);
             return Ok(ExecutionReceipt::immediate(
                 ilium_prompts::voice::VOICE_EXECUTOR_OPENED_THE_SELECTED_SEARCH_RESULT,
@@ -173,31 +228,15 @@ fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionRece
             ));
         }
     }
-    let results = state
-        .results
-        .iter()
-        .enumerate()
-        .map(|(index, result)| {
-            json!({
-                "index": index,
-                "selected": index == state.selected_index,
-                "pane_id": result.pane_id.0,
-                "kind": result.kind.label(),
-                "name": result.object_name,
-                "path": result.path.as_ref().map(|path| path.display().to_string()),
-                "context": format!("{}{}{}", result.before, result.matched, result.after),
-            })
-        })
-        .collect::<Vec<_>>();
-    let query = state.query.buf.clone();
+    let revision = state.revision();
+    let selected_index = state.selected_index;
+    let result_count = state.results.len();
     app.mode = Mode::Search(state);
     Ok(ExecutionReceipt {
         status: "ok",
-        message: ilium_prompts::render_value(
-            "voice/executor/found-v0-workspace-results-for",
-            &serde_json::json!({"v0": (results.len()).to_string(), "v1": format!("{:?}", query)}),
-        ),
-        data: json!({ "query": query, "results": results }),
+        message: "Workspace search selection updated; read ilium_get_state for completed results"
+            .into(),
+        data: json!({ "revision": revision, "selected_index": selected_index, "result_count": result_count }),
         terminate_session_after_delivery: false,
     })
 }
@@ -315,7 +354,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
     match command.action {
         TreeAction::CreateTerminal => {
             let parent = resolve_parent(app, &command.parent)?;
-            app.request_new_terminal(parent);
+            let admitted = app.request_new_terminal(parent);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CREATING_A_TERMINAL_PANE,
             ))
@@ -355,20 +395,23 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                         base_ref: workspace.base,
                     },
                     command.initial_input,
-                );
+                )?;
                 return Ok(ExecutionReceipt::queued(ilium_prompts::render_value(
                     "voice/executor/creating-a-v0-agent-in-a-git",
                     &serde_json::json!({"v0": (provider.label()).to_string()}),
                 )));
             }
             if let Some(initial_input) = command.initial_input {
-                app.request_new_command_pane_with_input(
+                let admitted = app.request_new_command_pane_with_input(
                     parent,
                     provider.command_line().to_owned(),
                     initial_input,
                 );
+                require_request_admission(app, admitted)?;
             } else {
-                app.request_new_command_pane(parent, provider.command_line().to_owned());
+                let admitted =
+                    app.request_new_command_pane(parent, provider.command_line().to_owned());
+                require_request_admission(app, admitted)?;
             }
             Ok(ExecutionReceipt::queued(ilium_prompts::render_value(
                 "voice/executor/creating-a-v0-agent-pane",
@@ -379,9 +422,12 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             let parent = resolve_parent(app, &command.parent)?;
             let command_line = required_nonempty(command.command_line, "command_line")?;
             if let Some(initial_input) = command.initial_input {
-                app.request_new_command_pane_with_input(parent, command_line, initial_input);
+                let admitted =
+                    app.request_new_command_pane_with_input(parent, command_line, initial_input);
+                require_request_admission(app, admitted)?;
             } else {
-                app.request_new_command_pane(parent, command_line);
+                let admitted = app.request_new_command_pane(parent, command_line);
+                require_request_admission(app, admitted)?;
             }
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CREATING_THE_COMMAND_PANE,
@@ -390,7 +436,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::OpenEditor => {
             let parent = resolve_parent(app, &command.parent)?;
             let path = resolve_filesystem_path(app, required_nonempty(command.path, "path")?);
-            app.request_new_editor(parent, path);
+            let admitted = app.request_new_editor(parent, path);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_OPENING_THE_FILE_IN_AN_EDITOR_PANE,
             ))
@@ -398,14 +445,16 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::AddFolder => {
             let parent = resolve_parent(app, &command.parent)?;
             let path = resolve_filesystem_path(app, required_nonempty(command.path, "path")?);
-            app.request_new_folder(parent, path);
+            let admitted = app.request_new_folder(parent, path);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_ADDING_THE_FOLDER_TO_THE_LEFT_PANEL,
             ))
         }
         TreeAction::AddProject => {
             let path = resolve_filesystem_path(app, required_nonempty(command.path, "path")?);
-            app.request_new_project(path);
+            let admitted = app.request_new_project(path);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_ADDING_THE_PROJECT,
             ))
@@ -413,7 +462,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::ChangeProjectFolder => {
             let project_id = resolve_node(app, &command.target)?;
             let path = resolve_filesystem_path(app, required_nonempty(command.path, "path")?);
-            app.request_change_project_folder(project_id, path);
+            let admitted = app.request_change_project_folder(project_id, path);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CHANGING_THE_PROJECT_S_FOLDER,
             ))
@@ -421,7 +471,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::CreateGroup => {
             let parent = resolve_parent(app, &command.parent)?;
             let name = required_nonempty(command.name, "name")?;
-            app.request_new_group(parent, name);
+            let admitted = app.request_new_group(parent, name);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CREATING_THE_GROUP,
             ))
@@ -474,12 +525,13 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
                     &serde_json::json!({"v0": (MAXIMUM_SPLIT_VIEW_PANES).to_string()}),
                 ));
             }
-            app.queue_request(ClientRequest::CreateSplitView {
+            let admitted = app.queue_request(ClientRequest::CreateSplitView {
                 parent_group,
                 name,
                 orientation,
                 pane_ids,
             });
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CREATING_THE_SPLIT_VIEW,
             ))
@@ -487,7 +539,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::Rename => {
             let node_id = resolve_node(app, &command.target)?;
             let name = required_nonempty(command.name, "name")?;
-            app.request_rename(node_id, name, None, None);
+            let admitted = app.request_rename(node_id, name, None, None);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_RENAMING_THE_TREE_ITEM,
             ))
@@ -499,7 +552,8 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
             } else {
                 TreeMoveDirection::Down
             };
-            app.request_move(node_id, direction);
+            let admitted = app.request_move(node_id, direction);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_MOVING_THE_TREE_ITEM,
             ))
@@ -507,14 +561,16 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         TreeAction::Reparent => {
             let node_id = resolve_node(app, &command.target)?;
             let new_parent = resolve_parent(app, &command.parent)?;
-            app.request_reparent(node_id, new_parent, command.index);
+            let admitted = app.request_reparent(node_id, new_parent, command.index);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_REPARENTING_THE_TREE_ITEM,
             ))
         }
         TreeAction::Close => {
             let node_id = resolve_node(app, &command.target)?;
-            app.request_close(node_id);
+            let admitted = app.request_close(node_id);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CLOSING_THE_TREE_ITEM,
             ))
@@ -565,11 +621,22 @@ fn execute_tree(app: &mut App, command: TreeCommand) -> Result<ExecutionReceipt,
         }
         TreeAction::RevertProjectRestructure => {
             let project_id = resolve_node(app, &command.target)?;
-            app.request_revert_project_restructure(project_id);
+            let admitted = app.request_revert_project_restructure(project_id);
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_REVERTING_THE_PROJECT_S_LATEST_RESTRUCTURE,
             ))
         }
+    }
+}
+
+fn require_request_admission(app: &App, admitted: bool) -> Result<(), String> {
+    if admitted {
+        Ok(())
+    } else {
+        Err(app.status_message.clone().unwrap_or_else(|| {
+            "Request admission refused; retry after pending work completes".into()
+        }))
     }
 }
 
@@ -581,13 +648,14 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
             let key = command
                 .key
                 .ok_or(ilium_prompts::voice::VOICE_EXECUTOR_KEY_IS_REQUIRED)?;
-            app.queue_request(ClientRequest::UserKeyInput {
+            let admitted = app.queue_request(ClientRequest::UserKeyInput {
                 pane_id,
                 bytes: terminal_key_bytes(key).to_vec(),
                 submission: matches!(key, TerminalKey::Enter)
                     .then_some(PromptSubmissionSource::VoiceControl),
                 prompt_epoch: None,
             });
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_SENT_THE_KEY_TO_THE_TERMINAL,
             ))
@@ -618,12 +686,13 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
         }
         TerminalAction::ScheduleInput => {
             let text = command.text.unwrap_or_default();
-            app.queue_request(ClientRequest::SchedulePaneInput {
+            let admitted = app.queue_request(ClientRequest::SchedulePaneInput {
                 pane_id,
                 delay_seconds: command.delay_seconds.unwrap_or(0),
                 text,
                 send_enter: true,
             });
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_SCHEDULED_TERMINAL_INPUT,
             ))
@@ -639,17 +708,19 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
                 },
                 PromptDeliveryChoice::Forever => PromptQueueDelivery::Forever,
             };
-            app.queue_request(ClientRequest::EnqueuePrompt {
+            let admitted = app.queue_request(ClientRequest::EnqueuePrompt {
                 pane_id,
                 text,
                 delivery,
             });
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_QUEUED_THE_PROMPT_FOR_THE_AGENT_S,
             ))
         }
         TerminalAction::ClearPromptQueue => {
-            app.queue_request(ClientRequest::ClearPromptQueue { pane_id });
+            let admitted = app.queue_request(ClientRequest::ClearPromptQueue { pane_id });
+            require_request_admission(app, admitted)?;
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_EXECUTOR_CLEARING_THE_PANE_S_PROMPT_QUEUE,
             ))
@@ -669,48 +740,43 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
             )
         }
     };
-    // Only `Save`/`SaveAs` route their outcome through `app.status_message`;
-    // every other action here never touches that field, so reading it
-    // unconditionally after the match would report whatever unrelated status
-    // text some earlier command left behind instead of what this action
-    // actually did.
     let message = match command.action {
         EditorAction::Save => {
-            // A pane with no path yet makes `action_save_focused_editor`
-            // fall through to `action_start_save_as`, which opens an
-            // interactive filename-prompt overlay the voice flow cannot
-            // drive. Decide from the pane itself (not by sniffing `app.mode`
-            // afterwards, which false-errors when the user already had a
-            // Save As overlay open for another pane), close the overlay the
-            // fall-through opened, and report through this receipt instead.
-            let has_file_path = match app.panes.get(&pane_id) {
-                Some(PaneRuntime::Editor(editor)) => editor.path.is_some(),
-                _ => {
-                    return Err(
-                        ilium_prompts::voice::VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE
-                            .to_owned(),
-                    )
-                }
-            };
-            app.action_save_focused_editor();
-            if !has_file_path {
-                if matches!(app.mode, Mode::SaveAs(id, _) if id == pane_id) {
-                    app.mode = Mode::Normal;
-                }
-                return Err(
-                    ilium_prompts::voice::VOICE_EXECUTOR_THIS_EDITOR_HAS_NO_FILE_PATH_YET
-                        .to_owned(),
-                );
+            let path = match app.panes.get(&pane_id) {
+                Some(PaneRuntime::Editor(editor)) => editor.path.clone(),
+                _ => None,
             }
-            app.status_message
-                .clone()
-                .unwrap_or_else(|| ilium_prompts::voice::VOICE_EXECUTOR_EDITOR_UPDATED.to_owned())
+            .ok_or_else(|| {
+                ilium_prompts::voice::VOICE_EXECUTOR_THIS_EDITOR_HAS_NO_FILE_PATH_YET.to_owned()
+            })?;
+            app.enqueue_editor_save(
+                pane_id,
+                path.clone(),
+                crate::filesystem::editors::SavePurpose::Explicit,
+            )?;
+            return Ok(ExecutionReceipt::local_write_pending(
+                "Editor",
+                json!({"pane_id":pane_id.0,"path":path}),
+                content_revision_before,
+            ));
         }
         EditorAction::SaveAs => {
-            app.action_save_as(pane_id, required_nonempty(command.path, "path")?);
-            app.status_message
-                .clone()
-                .unwrap_or_else(|| ilium_prompts::voice::VOICE_EXECUTOR_EDITOR_UPDATED.to_owned())
+            let path = PathBuf::from(required_nonempty(command.path, "path")?);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                app.session_cwd.join(path)
+            };
+            app.enqueue_editor_save(
+                pane_id,
+                path.clone(),
+                crate::filesystem::editors::SavePurpose::SaveAs,
+            )?;
+            return Ok(ExecutionReceipt::local_write_pending(
+                "Editor",
+                json!({"pane_id":pane_id.0,"path":path}),
+                content_revision_before,
+            ));
         }
         EditorAction::InsertText => {
             let text = command
@@ -789,6 +855,7 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
         return Err(ilium_prompts::voice::VOICE_POLICY_TARGET_IS_NOT_A_BOARD_PANE.to_owned());
     };
     let content_revision_before = board.content_revision();
+    let intent_revision_before = board.intent_revision();
     match command.action {
         BoardAction::SelectColumn => select_column(
             board,
@@ -890,22 +957,28 @@ fn execute_board(app: &mut App, command: BoardCommand) -> Result<ExecutionReceip
             board.delete_selected_column()?;
         }
     }
+    if board.intent_revision() != intent_revision_before && board.pending_writes() != 0 {
+        return Ok(ExecutionReceipt::local_write_pending(
+            "Board",
+            json!({"pane_id":pane_id.0}),
+            board.intent_revision(),
+        ));
+    }
     let did_change_content = board.content_revision() != content_revision_before;
     if did_change_content {
         app.record_client_node_activity(pane_id);
     }
-    Ok(ExecutionReceipt::immediate(
-        ilium_prompts::voice::VOICE_EXECUTOR_BOARD_UPDATED_AND_PERSISTED,
-    ))
+    Ok(ExecutionReceipt::immediate("Board command completed"))
 }
 
 fn execute_session(app: &mut App, command: SessionCommand) -> Result<ExecutionReceipt, String> {
-    match command.action {
+    let admitted = match command.action {
         SessionAction::Detach => app.request_client_exit(ClientExitReason::Quit),
         SessionAction::RestartClient => app.request_client_exit(ClientExitReason::RestartRequested),
         SessionAction::RestartServer => app.queue_request(ClientRequest::RestartServer),
         SessionAction::KillSession => app.request_session_kill(),
-    }
+    };
+    require_request_admission(app, admitted)?;
     Ok(ExecutionReceipt::queued(
         ilium_prompts::voice::VOICE_EXECUTOR_SESSION_LIFECYCLE_REQUEST_QUEUED,
     ))
@@ -1059,4 +1132,68 @@ fn settings_tab(label: &str) -> Result<SettingsTab, String> {
                 &serde_json::json!({"v0": format!("{:?}", label)}),
             )
         })
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn full_shared_outbound_credit_refuses_semantic_control_and_exit_receipts() {
+        let mut app = App::new(
+            "bounded-control-fixture".into(),
+            PathBuf::from("/tmp/bounded-control-fixture"),
+        );
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane,
+            PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(24, 80))),
+        );
+        let mut limits = crate::ipc_preparation::request_limits();
+        limits.jobs = 1;
+        app.outbound_admission = Some(
+            app.outbound_admission
+                .as_ref()
+                .unwrap()
+                .child(limits)
+                .unwrap(),
+        );
+        assert!(app.queue_request(ClientRequest::UpdateDebugLogging { enabled: true }));
+        for action in [
+            "press_key",
+            "schedule_input",
+            "queue_prompt",
+            "clear_prompt_queue",
+        ] {
+            let command:TerminalCommand=serde_json::from_value(json!({"action":action,"target":{"id":pane.0},"key":"enter","text":"original text"})).unwrap();
+            let error = execute_terminal(&mut app, command)
+                .expect_err("no success receipt before actual admission");
+            assert!(error.contains("rejected before admission"));
+        }
+        let command: SessionCommand = serde_json::from_value(json!({"action":"detach"})).unwrap();
+        assert!(execute_session(&mut app, command).is_err());
+        assert!(
+            app.exit_reason.is_none(),
+            "refused detach cannot terminate accepted work"
+        );
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::UpdateDebugLogging { enabled: true }]
+        );
+        let command: TerminalCommand = serde_json::from_value(
+            json!({"action":"schedule_input","target":{"id":pane.0},"text":"original text"}),
+        )
+        .unwrap();
+        assert_eq!(
+            execute_terminal(&mut app, command).unwrap().status,
+            "queued"
+        );
+        assert!(
+            matches!(app.take_outbound_requests().as_slice(),[ClientRequest::SchedulePaneInput{text,..}] if text=="original text")
+        );
+    }
 }

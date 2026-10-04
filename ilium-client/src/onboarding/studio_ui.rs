@@ -156,6 +156,7 @@ impl StudioPreset {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StudioAction {
+    EditNumber(SoundControl),
     SetValue(SoundControl, i32),
     SetPosition {
         control: SoundControl,
@@ -518,6 +519,86 @@ fn slider_track(rect: Rect) -> Rect {
     )
 }
 
+fn numeric_control_at(
+    area: Rect,
+    studio: &SoundStudio,
+    ui: &StudioUiState,
+    control: SoundControl,
+) -> Option<(Rect, crate::value_control::ValueControl)> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+    let geometry = geometry(area, ui);
+    let element = geometry.elements.iter().find(|element| {
+        matches!(element.kind,
+        ElementKind::Target(StudioTarget::Slider(value)) if value == control)
+    })?;
+    let rect = geometry.rect(element, ui.scroll.min(geometry.max_scroll()))?;
+    let (minimum, maximum) = control.range();
+    let value = control.value(&studio.draft.design);
+    let display = control.display(&studio.draft.design);
+    let chrome = ValueControl::new(
+        Rect::new(rect.x, rect.y, rect.width, 1),
+        ControlSpec {
+            kind: ControlKind::Number,
+            label: control.label(),
+            value: &display,
+            label_width: (rect.width / 2).min(20),
+            previous_enabled: value > minimum,
+            next_enabled: value < maximum,
+            open_enabled: true,
+        },
+    );
+    Some((rect, chrome))
+}
+
+/// Only a track press starts dragging; clicking the exact-entry star cannot.
+pub fn is_slider_track(area: Rect, ui: &StudioUiState, position: Position) -> bool {
+    let geometry = geometry(area, ui);
+    geometry.elements.iter().any(|element| {
+        matches!(element.kind, ElementKind::Target(StudioTarget::Slider(_)))
+            && geometry
+                .rect(element, ui.scroll.min(geometry.max_scroll()))
+                .is_some_and(|rect| slider_track(rect).contains(position))
+    })
+}
+
+pub fn control_hit(
+    area: Rect,
+    studio: &SoundStudio,
+    ui: &StudioUiState,
+    position: Position,
+    button: crate::value_control::PointerButton,
+) -> Option<StudioAction> {
+    use crate::value_control::ControlAction;
+    for control in SoundControl::ALL
+        .into_iter()
+        .filter(|value| *value != SoundControl::Waveform)
+    {
+        let Some((_, chrome)) = numeric_control_at(area, studio, ui, control) else {
+            continue;
+        };
+        let Some(action) = chrome.hit(position, button) else {
+            continue;
+        };
+        return match action {
+            ControlAction::EditNumber => Some(StudioAction::EditNumber(control)),
+            ControlAction::Decrement | ControlAction::Increment => {
+                let mut design = studio.draft.design.clone();
+                control.adjust(
+                    &mut design,
+                    if action == ControlAction::Decrement {
+                        -1
+                    } else {
+                        1
+                    },
+                );
+                Some(StudioAction::SetValue(control, control.value(&design)))
+            }
+            _ => None,
+        };
+    }
+    None
+}
+
 fn slider_action(control: SoundControl, track: Rect, column: u16) -> StudioAction {
     let denominator = track.width.saturating_sub(1);
     StudioAction::SetPosition {
@@ -598,15 +679,18 @@ pub fn render(frame: &mut Frame, area: Rect, studio: &SoundStudio, ui: &StudioUi
             ElementKind::WavePlot => render_wave(frame, rect, studio),
             ElementKind::Envelope => render_envelope(frame, rect, &studio.draft.design),
             ElementKind::Target(StudioTarget::Slider(control)) => {
-                let label = format!(
-                    " {}  ·  {}",
-                    control.label(),
-                    control.display(&studio.draft.design)
-                );
-                frame.render_widget(
-                    Paragraph::new(label).style(style),
-                    Rect::new(rect.x, rect.y, rect.width, 1),
-                );
+                if let Some((_, chrome)) = numeric_control_at(area, studio, ui, control) {
+                    chrome.render(
+                        frame,
+                        crate::value_control::ControlStyles {
+                            background: style,
+                            label: style,
+                            value: style,
+                            button: style,
+                            disabled: Style::new().bg(PANEL).fg(MUTED),
+                        },
+                    );
+                }
                 let track = slider_track(rect);
                 let position = (control.position(&studio.draft.design)
                     * f64::from(track.width.saturating_sub(1)))
@@ -817,6 +901,64 @@ mod tests {
                     focus_at(area, &ui, Position::new(rect.x, rect.y)),
                     Some(index)
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_chrome_and_drag_track_use_separate_exact_hit_regions() {
+        use crate::value_control::{ControlAction, PointerButton};
+        let studio = SoundStudio::new(ilium_sound::SoundSettings::default());
+        for width in [24, 40, 80, 140] {
+            let area = Rect::new(0, 0, width, 28);
+            let mut terminal = Terminal::new(TestBackend::new(width, 28)).unwrap();
+            for control in SoundControl::ALL
+                .into_iter()
+                .filter(|value| *value != SoundControl::Waveform)
+            {
+                let mut ui = StudioUiState {
+                    focus: focus_targets()
+                        .iter()
+                        .position(|target| *target == StudioTarget::Slider(control))
+                        .unwrap(),
+                    ..StudioUiState::default()
+                };
+                ui.reveal_focus(area);
+                let (_, chrome) = numeric_control_at(area, &studio, &ui, control).unwrap();
+                terminal
+                    .draw(|frame| render(frame, area, &studio, &ui))
+                    .unwrap();
+                let geometry = chrome.geometry();
+                assert_eq!(
+                    terminal.backend().buffer()[(geometry.open.x, geometry.open.y)].symbol(),
+                    "*"
+                );
+                assert_eq!(
+                    chrome.hit(
+                        Position::new(geometry.open.x, geometry.open.y),
+                        PointerButton::Left
+                    ),
+                    Some(ControlAction::EditNumber)
+                );
+                assert_eq!(
+                    control_hit(
+                        area,
+                        &studio,
+                        &ui,
+                        Position::new(geometry.open.x, geometry.open.y),
+                        PointerButton::Left
+                    ),
+                    Some(StudioAction::EditNumber(control))
+                );
+                assert!(!is_slider_track(
+                    area,
+                    &ui,
+                    Position::new(geometry.open.x, geometry.open.y)
+                ));
+                let track =
+                    slider_track(numeric_control_at(area, &studio, &ui, control).unwrap().0);
+                assert!(is_slider_track(area, &ui, Position::new(track.x, track.y)));
+                assert!(hit(area, &ui, Position::new(track.x, track.y)).is_some());
             }
         }
     }

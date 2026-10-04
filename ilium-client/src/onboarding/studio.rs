@@ -135,6 +135,58 @@ impl SoundControl {
         }
     }
 
+    pub const fn number_unit(self) -> &'static str {
+        match self {
+            Self::Pitch | Self::PulseRate => "Hz",
+            Self::Sweep => "cents",
+            Self::Attack | Self::Decay | Self::Release | Self::Duration => "ms",
+            Self::Harmony => "semitones",
+            Self::Waveform => "",
+            _ => "%",
+        }
+    }
+
+    /// Direct entry uses display units and never applies slider-step rounding.
+    pub fn number_text(self, design: &SoundDesign) -> String {
+        if self == Self::PulseRate {
+            format!("{:.1}", f64::from(self.value(design)) / 10.0)
+        } else {
+            self.value(design).to_string()
+        }
+    }
+
+    pub fn parse_number(self, text: &str) -> Result<i32, String> {
+        use crate::value_number::{NumberSpec, NumberValue};
+        if self == Self::Waveform {
+            return Err("Choose a wave shape from its catalog".into());
+        }
+        let (minimum, maximum) = self.range();
+        if self == Self::PulseRate {
+            let NumberValue::Decimal(value) = (NumberSpec::Decimal {
+                minimum: f64::from(minimum) / 10.0,
+                maximum: f64::from(maximum) / 10.0,
+            })
+            .parse(text)?
+            else {
+                return Err("Enter a pulse rate in Hz".into());
+            };
+            let tenths = value * 10.0;
+            if tenths != tenths.round() {
+                return Err("Pulse rate supports increments of 0.1 Hz".into());
+            }
+            return Ok(tenths as i32);
+        }
+        let NumberValue::Integer(value) = (NumberSpec::Integer {
+            minimum: i128::from(minimum),
+            maximum: i128::from(maximum),
+        })
+        .parse(text)?
+        else {
+            return Err("Enter a whole number".into());
+        };
+        i32::try_from(value).map_err(|_| "The value exceeds the control's storage range".into())
+    }
+
     pub fn adjust(self, design: &mut SoundDesign, direction: i32) {
         let step = match self {
             Self::Pitch => 20,
@@ -193,6 +245,7 @@ impl SoundControl {
 
 #[derive(Debug)]
 pub struct SoundStudio {
+    pub(crate) identity: std::sync::Arc<()>,
     pub draft: SoundSettings,
     pub preview: Vec<WaveformColumn>,
 }
@@ -201,7 +254,11 @@ impl SoundStudio {
     pub fn new(mut draft: SoundSettings) -> Self {
         draft.design = draft.design.normalized();
         let preview = ilium_sound::waveform_preview(&draft.design, 120);
-        Self { draft, preview }
+        Self {
+            identity: std::sync::Arc::new(()),
+            draft,
+            preview,
+        }
     }
 
     pub fn changed(&mut self) {
@@ -213,6 +270,38 @@ impl SoundStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_studio_entries_preserve_non_step_values_and_reject_invalid_input() {
+        assert_eq!(SoundControl::Pitch.parse_number("0731"), Ok(731));
+        assert_eq!(SoundControl::Sweep.parse_number("-173"), Ok(-173));
+        assert_eq!(SoundControl::PulseRate.parse_number("1.7"), Ok(17));
+        assert_eq!(SoundControl::PulseRate.parse_number("16.0"), Ok(160));
+        for text in ["1.75", "NaN", "inf", "16.1", "-0.1"] {
+            assert!(
+                SoundControl::PulseRate.parse_number(text).is_err(),
+                "{text}"
+            );
+        }
+        assert!(SoundControl::Waveform.parse_number("1").is_err());
+        for control in SoundControl::ALL
+            .into_iter()
+            .filter(|value| *value != SoundControl::Waveform)
+        {
+            let (minimum, maximum) = control.range();
+            let mut design = SoundDesign::default();
+            for value in [minimum, maximum] {
+                control.set(&mut design, value);
+                assert_eq!(
+                    control.parse_number(&control.number_text(&design)),
+                    Ok(value)
+                );
+            }
+            assert!(control
+                .parse_number("99999999999999999999999999999999999999999")
+                .is_err());
+        }
+    }
 
     #[test]
     fn every_control_can_reach_its_entire_safe_range() {

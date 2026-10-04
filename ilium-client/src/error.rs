@@ -2,10 +2,67 @@
 
 use std::path::PathBuf;
 
+pub use crate::terminal_input_owner::{
+    InputEvent, InputFailure, InputRetirement, InputRetirementDeadline, InputShutdownReport,
+    InputStartError,
+};
+
+#[derive(Debug, thiserror::Error)]
+pub enum InputRetirementError {
+    #[error(transparent)]
+    Failed(InputFailure),
+    #[error(transparent)]
+    Deadline(InputRetirementDeadline),
+}
+
+/// Both input outcomes and the earlier client error survive cleanup. A native
+/// failure can own a refused Event; a retirement failure can own the rest of
+/// the FIFO or a still-live native ticket. Neither may lose to Result::and.
+#[derive(Debug)]
+pub struct InputRunError {
+    pub failure: Option<InputFailure>,
+    pub retirement: Option<InputRetirementError>,
+    pub other: Option<ClientError>,
+}
+
+impl std::fmt::Display for InputRunError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("terminal input did not complete")?;
+        if let Some(failure) = &self.failure {
+            write!(formatter, "; {failure}")?;
+        }
+        if let Some(retirement) = &self.retirement {
+            write!(formatter, "; {retirement}")?;
+        }
+        if let Some(other) = &self.other {
+            write!(formatter, "; client cleanup: {other}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for InputRunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let Some(failure) = &self.failure {
+            Some(failure)
+        } else if let Some(retirement) = &self.retirement {
+            Some(retirement)
+        } else {
+            self.other.as_ref().map(|error| error as _)
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("could not resolve ilium's data directory (no valid home directory found)")]
     NoProjectDirs,
+    #[error("failed to initialize client process resources: {0}")]
+    ProcessResources(#[source] std::io::Error),
+    #[error("failed to acquire terminal input ownership: {0}")]
+    InputStartup(#[from] InputStartError),
+    #[error("{0}")]
+    Input(#[source] Box<InputRunError>),
     #[error("failed to enter raw/alternate-screen terminal mode: {0}")]
     TerminalSetup(#[source] std::io::Error),
     #[error(transparent)]

@@ -10,7 +10,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -345,7 +345,7 @@ pub fn draw_detail_card(
     anchor_x: u16,
     anchor_y: u16,
     title: &str,
-    lines: Vec<Line<'static>>,
+    lines: &[Line<'static>],
 ) {
     const CARD_WIDTH: u16 = 46;
     let width = CARD_WIDTH.min(bounds.width);
@@ -366,7 +366,14 @@ pub fn draw_detail_card(
         .borders(Borders::ALL)
         .border_style(theme::border_style(true))
         .title(format!(" {title} "));
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (offset, line) in lines.iter().take(usize::from(inner.height)).enumerate() {
+        frame.render_widget(
+            line,
+            Rect::new(inner.x, inner.y + offset as u16, inner.width, 1),
+        );
+    }
 }
 
 /// Paints `segments` right-aligned so the strip ends just left of
@@ -686,6 +693,7 @@ mod tests {
             reported_usd: None,
             quota: vec![("primary".to_owned(), 41.0)],
             spend_points: Vec::new(),
+            storage: Default::default(),
         };
         let page = text(detail_card_lines(&cost, &row(3, 7.5), &overlay));
         assert!(page.contains("Quota  7.5%"), "{page}");

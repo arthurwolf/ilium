@@ -122,7 +122,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
         assert_eq!(kind_for(&id).unwrap(), kind);
     }
     assert_eq!(
-        count, 40,
+        count, 41,
         "Review the frozen inventory when concrete scenes change"
     );
     assert!(
@@ -273,12 +273,38 @@ fn paris_is_offline_even_when_authored_osm_was_custom() {
     base.ambient.openstreetmap.endpoint = "authored endpoint sentinel".into();
     base.ambient.openstreetmap.place = 9;
     base.ambient.openstreetmap.tour = 2;
+    base.kind = AnimationKind::OpenStreetMap;
+    base.set_scene_control("selection", Index(1)).unwrap();
+    base.ambient.openstreetmap.place_list = "authored list sentinel".into();
+    base.ambient.openstreetmap.destination_id = "authored destination sentinel".into();
+    base.ambient.openstreetmap.coordinates = "10,20".into();
     let before = base.clone();
     let rec = validate_recommendation(&paris(), &base).unwrap();
     let resolved = resolve_recommendation(&rec, &base).unwrap();
     assert_eq!(resolved.ambient.openstreetmap.source, 0);
     assert_eq!(resolved.ambient.openstreetmap.place, 0);
     assert_eq!(resolved.ambient.openstreetmap.tour, 0);
+    assert_eq!(
+        resolved.ambient.openstreetmap.search,
+        before.ambient.openstreetmap.search
+    );
+    assert_eq!(
+        resolved.ambient.openstreetmap.place_list,
+        before.ambient.openstreetmap.place_list
+    );
+    assert_eq!(
+        resolved.ambient.openstreetmap.destination_id,
+        before.ambient.openstreetmap.destination_id
+    );
+    assert_eq!(resolved.ambient.openstreetmap.coordinates, "10,20");
+    for id in ["selection", "place_list", "destination", "address_provider"] {
+        let mut raw = paris();
+        raw.parameters.push(ProposedParameter {
+            id: id.into(),
+            value: Index(0),
+        });
+        assert!(validate_recommendation(&raw, &base).is_err(), "{id}");
+    }
     assert_eq!(base, before);
     assert!(!resolved.enabled);
     for source in [1, 2, 3] {

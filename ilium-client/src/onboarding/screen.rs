@@ -18,6 +18,7 @@ const ACCENT: Color = Color::Rgb(242, 188, 105);
 
 #[derive(Debug, Default)]
 pub struct WizardUi {
+    pub(crate) identity: std::sync::Arc<()>,
     pub focus: usize,
     pub footer_focus: Option<usize>,
     pub hovered: Option<usize>,

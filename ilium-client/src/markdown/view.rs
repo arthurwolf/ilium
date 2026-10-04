@@ -17,6 +17,11 @@ use crate::config::LineDisplay;
 /// Total content height (in terminal rows) of `document` at `width` under
 /// `line_display` -- the caller uses this to clamp scroll offsets.
 pub fn content_height(document: &RenderedDocument, width: u16, line_display: LineDisplay) -> u16 {
+    if let Some(layout) = &document.layout {
+        if layout.width == width && layout.line_display == line_display {
+            return layout.total_height;
+        }
+    }
     document
         .blocks
         .iter()
@@ -85,6 +90,36 @@ pub fn render(
     scroll: u16,
     line_display: LineDisplay,
 ) {
+    if let Some(layout) = &document.layout {
+        if layout.width != area.width || layout.line_display != line_display {
+            return;
+        }
+        let mut y = i64::from(area.y) - i64::from(scroll);
+        for (index, block) in document.blocks.iter().enumerate() {
+            let height = layout.heights[index];
+            if let Some(buffer) = &layout.buffers[index] {
+                if let Some((top, rows, rect)) =
+                    visible_rect(area, i64::from(area.y), i64::from(area.bottom()), y, height)
+                {
+                    let skip = (top - y) as u16;
+                    for row in 0..rows {
+                        for col in 0..area.width {
+                            if let (Some(source), Some(target)) = (
+                                buffer.cell((col, skip + row)),
+                                frame.buffer_mut().cell_mut((rect.x + col, rect.y + row)),
+                            ) {
+                                *target = source.clone();
+                            }
+                        }
+                    }
+                }
+            } else {
+                draw_block(frame, area, block, y, line_display);
+            }
+            y += i64::from(height);
+        }
+        return;
+    }
     let mut y = i64::from(area.y) - i64::from(scroll);
     for block in &document.blocks {
         y += draw_block(frame, area, block, y, line_display);
@@ -205,6 +240,7 @@ mod tests {
     /// share one vertical-layout contract.
     fn spaced_document() -> RenderedDocument {
         RenderedDocument {
+            layout: None,
             blocks: vec![
                 RenderedBlock::Text(Arc::new(vec![Line::from("before")])),
                 RenderedBlock::BlankLines(Arc::new(vec![Line::default(), Line::default()])),
@@ -271,6 +307,7 @@ mod tests {
     #[test]
     fn line_display_changes_both_rendered_height_and_visible_text() {
         let document = RenderedDocument {
+            layout: None,
             blocks: vec![RenderedBlock::Text(Arc::new(vec![Line::from("abcdef")]))],
         };
         assert_eq!(content_height(&document, 3, LineDisplay::Clip), 1);

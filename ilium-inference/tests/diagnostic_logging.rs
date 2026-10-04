@@ -64,7 +64,24 @@ fn spawn_http_error_fixture() -> (String, mpsc::Receiver<String>) {
 fn file_log_records_complete_llm_and_http_failure_context_without_credentials() {
     let directory = tempfile::tempdir().expect("temporary log directory");
     let log_path = directory.path().join("diagnostic-log.txt");
-    ilium_logging::initialize(&log_path, true, "inference-diagnostic-test")
+    // This integration-test process owns one supervisor and one logger.
+    // Derive its finite storage declaration from the actor and controls,
+    // following the logger's own process-level integration fixture.
+    let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+        clients: 0,
+        jobs: 0,
+        service_jobs: 0,
+        input_bytes: 0,
+        result_bytes: 0,
+        worker_threads: 2,
+        worker_bytes: ilium_platform::owned_worker::supervisor_declared_bytes()
+            + ilium_logging::LOGGER_STACK_BYTES
+            + ilium_logging::logger_storage_bytes(&log_path).expect("logger declaration")
+            + 258 * ilium_logging::logger_control_bytes(&log_path).expect("control declaration"),
+    });
+    ilium_execution::initialize_process_supervisor(&quota)
+        .expect("admit process supervisor before diagnostics");
+    ilium_logging::initialize(&log_path, true, "inference-diagnostic-test", &quota)
         .expect("initialize diagnostics");
 
     let (base_url, request_receiver) = spawn_http_error_fixture();
@@ -85,6 +102,14 @@ fn file_log_records_complete_llm_and_http_failure_context_without_credentials() 
     };
 
     let result = provider_from_settings(&settings).complete(&request);
+
+    // Complete and join the original writer before checking durable contents.
+    ilium_logging::request_shutdown_joined()
+        .expect("admit diagnostic logger shutdown")
+        .wait_until(std::time::Instant::now() + Duration::from_secs(5))
+        .expect("diagnostic logger joined")
+        .into_result()
+        .expect("accepted diagnostics flushed");
 
     assert!(matches!(
         result,

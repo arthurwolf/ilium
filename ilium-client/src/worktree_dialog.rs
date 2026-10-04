@@ -58,6 +58,7 @@ pub enum WorktreeDialogStatus {
 }
 
 pub struct WorktreeDialogState {
+    pub(crate) identity: std::sync::Arc<()>,
     pub project_id: NodeId,
     pub parent_group: NodeId,
     pub provider: BuiltinAgentProvider,
@@ -75,6 +76,9 @@ pub struct WorktreeDialogState {
     git_settings: GitSettings,
     pub facts: Option<RepoFacts>,
     pub status: WorktreeDialogStatus,
+    pub(crate) facts_retention: Option<crate::connection::EventRetention>,
+    pub(crate) status_retention: Option<crate::connection::EventRetention>,
+    pub(crate) derivation_retention: Option<crate::connection::EventRetention>,
 }
 
 impl WorktreeDialogState {
@@ -106,6 +110,7 @@ impl WorktreeDialogState {
         prompt.set_cursor_line_style(Style::new());
         prompt.set_cursor_style(Style::new().fg(Color::Black).bg(Color::Cyan));
         Self {
+            identity: std::sync::Arc::new(()),
             project_id,
             parent_group,
             provider,
@@ -126,7 +131,76 @@ impl WorktreeDialogState {
             git_settings,
             facts: None,
             status: WorktreeDialogStatus::Loading,
+            facts_retention: None,
+            status_retention: None,
+            derivation_retention: None,
         }
+    }
+
+    /// Cooperative source-shaped budget for the copies created by apply_facts.
+    /// Template placeholders are counted only in the authored template, never
+    /// recursively inside server paths. Lossy UTF-8 expands at most threefold.
+    pub(crate) fn facts_derivation_bytes(&self, facts: &RepoFacts) -> Option<usize> {
+        let base = match self.git_settings.default_base {
+            GitDefaultBase::Current => facts
+                .current_branch
+                .as_deref()
+                .unwrap_or(&facts.default_base_ref),
+            GitDefaultBase::DefaultBranch => &facts.default_base_ref,
+        }
+        .len();
+        let prompt = self
+            .prompt
+            .lines()
+            .iter()
+            .try_fold(0usize, |sum, line| sum.checked_add(line.len()))?
+            .checked_add(self.prompt.lines().len().saturating_sub(1))?;
+        // Prompt join, prefix formatting, bounded48-byte slug, collision suffix,
+        // and their concurrent old/new RawVec buffers.
+        let mut bytes = base
+            .checked_add(prompt)?
+            .checked_add(
+                self.git_settings
+                    .branch_prefix
+                    .len()
+                    .checked_add(64)?
+                    .checked_mul(8)?,
+            )?
+            .checked_add(4096)?;
+        if let Some(main) = facts.worktrees.first() {
+            let parent = main.path.parent().unwrap_or(&main.path);
+            let name = main.path.file_name().map_or(7, |name| name.len());
+            let replacements = [
+                ("{repo_parent}", parent.as_os_str().len().checked_mul(3)?),
+                ("{repo_name}", name.checked_mul(3)?),
+                ("{project}", main.path.as_os_str().len().checked_mul(3)?),
+                ("{branch_slug}", 48),
+            ];
+            let template = &self.git_settings.worktree_location_template;
+            let mut literal = template.len();
+            let mut replacement_bytes = 0usize;
+            for (token, length) in replacements {
+                let count = template.matches(token).count();
+                literal = literal.checked_sub(count.checked_mul(token.len())?)?;
+                replacement_bytes = replacement_bytes.checked_add(count.checked_mul(length)?)?;
+            }
+            let expanded = literal.checked_add(replacement_bytes)?;
+            // Template initial buffer, cumulative old/new expanded buffer growth,
+            // native separator copy, and TextPrompt display copy. Fallback joins
+            // create three old/new path buffers with fixed suffix and bounded slug.
+            bytes = bytes
+                .checked_add(template.len())?
+                .checked_add(expanded.checked_mul(8)?)?
+                .checked_add(
+                    main.path
+                        .as_os_str()
+                        .len()
+                        .checked_add(128)?
+                        .checked_mul(6)?,
+                )?
+                .checked_add(name.checked_mul(3)?)?;
+        }
+        Some(bytes)
     }
 
     pub fn apply_facts(&mut self, facts: RepoFacts) {
@@ -140,20 +214,27 @@ impl WorktreeDialogState {
         self.base_ref = TextPromptState::new(suggested_base);
         self.facts = Some(facts);
         self.status = WorktreeDialogStatus::Ready;
+        self.status_retention = None;
+        self.facts_retention = None;
         self.refresh_auto_fields();
+        self.derivation_retention = None;
     }
 
     pub fn apply_facts_error(&mut self, error: impl Into<String>) {
         self.facts = None;
         self.status = WorktreeDialogStatus::Error(error.into());
+        self.facts_retention = None;
+        self.status_retention = None;
     }
 
     pub fn set_stage(&mut self, stage: WorkspaceCreateStage) {
         self.status = WorktreeDialogStatus::Creating(stage);
+        self.status_retention = None;
     }
 
     pub fn set_create_error(&mut self, error: impl Into<String>) {
         self.status = WorktreeDialogStatus::Error(error.into());
+        self.status_retention = None;
     }
 
     pub fn prompt_text(&self) -> String {
@@ -265,10 +346,13 @@ impl WorktreeDialogState {
             WorktreeDialogMode::New => choices.push(WorktreeDialogFocus::Branch),
             WorktreeDialogMode::Existing => choices.push(WorktreeDialogFocus::ExistingWorktree),
         }
-        choices.extend([WorktreeDialogFocus::Where, WorktreeDialogFocus::Advanced]);
+        choices.extend([
+            WorktreeDialogFocus::Where,
+            WorktreeDialogFocus::Provider,
+            WorktreeDialogFocus::Advanced,
+        ]);
         if self.advanced {
             choices.extend([
-                WorktreeDialogFocus::Provider,
                 WorktreeDialogFocus::Base,
                 WorktreeDialogFocus::Path,
                 WorktreeDialogFocus::ClosePolicy,
@@ -281,6 +365,7 @@ impl WorktreeDialogState {
     fn clear_create_error(&mut self) {
         if matches!(self.status, WorktreeDialogStatus::Error(_)) && self.facts.is_some() {
             self.status = WorktreeDialogStatus::Ready;
+            self.status_retention = None;
         }
     }
 
@@ -318,14 +403,14 @@ impl WorktreeDialogState {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "project".to_string());
-        let rendered = self
-            .git_settings
-            .worktree_location_template
-            .replace("{repo_parent}", &parent.to_string_lossy())
-            .replace("{repo_name}", &name)
-            .replace("{project}", &main.path.to_string_lossy())
-            .replace("{branch_slug}", &slug);
-        let path = PathBuf::from(native_separators(&rendered));
+        let rendered = ilium_core::expand_worktree_path_template(
+            &self.git_settings.worktree_location_template,
+            &main.path,
+            parent,
+            &name,
+            &slug,
+        );
+        let path = PathBuf::from(native_separators(&rendered.to_string_lossy()));
         if path.is_absolute() {
             path
         } else {
@@ -518,8 +603,6 @@ pub struct WorktreeDialogLayout {
     pub prompt_area: Rect,
     pub branch_row: Rect,
     pub where_row: Rect,
-    pub where_new: Rect,
-    pub where_existing: Rect,
     pub existing_list: Rect,
     pub advanced_row: Rect,
     pub base_row: Rect,
@@ -571,31 +654,12 @@ pub fn dialog_layout(screen_area: Rect, state: &WorktreeDialogState) -> Worktree
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[12]);
-    let where_options = Rect::new(
-        rows[3].x.saturating_add(8),
-        rows[3].y,
-        rows[3].width.saturating_sub(8),
-        rows[3].height,
-    );
-    let where_new_width = where_options.width.min(23);
     WorktreeDialogLayout {
         popup,
         provider_row: rows[0],
         prompt_area: rows[1],
         branch_row: rows[2],
         where_row: rows[3],
-        where_new: Rect::new(
-            where_options.x,
-            where_options.y,
-            where_new_width,
-            where_options.height,
-        ),
-        where_existing: Rect::new(
-            where_options.x.saturating_add(where_new_width),
-            where_options.y,
-            where_options.width.saturating_sub(where_new_width),
-            where_options.height,
-        ),
         existing_list: rows[4],
         advanced_row: rows[5],
         base_row: rows[6],
@@ -668,35 +732,6 @@ pub fn existing_row_at(
         .and_then(|facts| (index < facts.worktrees.len()).then_some(index))
 }
 
-/// The provider chips are evenly spaced inside the same row used by the
-/// renderer. A click can select one without cycling through the registry.
-pub fn provider_at(
-    layout: &WorktreeDialogLayout,
-    position: Position,
-) -> Option<BuiltinAgentProvider> {
-    if !layout.provider_row.contains(position) || layout.provider_row.width == 0 {
-        return None;
-    }
-    let areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(1, 3); 3])
-        .split(layout.provider_row);
-    areas
-        .iter()
-        .position(|area| area.contains(position))
-        .and_then(|index| BuiltinAgentProvider::ALL.get(index).copied())
-}
-
-pub fn mode_at(layout: &WorktreeDialogLayout, position: Position) -> Option<WorktreeDialogMode> {
-    if layout.where_new.contains(position) {
-        Some(WorktreeDialogMode::New)
-    } else if layout.where_existing.contains(position) {
-        Some(WorktreeDialogMode::Existing)
-    } else {
-        None
-    }
-}
-
 impl WorktreeDialogState {
     pub fn existing_window(&self, layout: &WorktreeDialogLayout) -> (usize, usize) {
         let count = self.facts.as_ref().map_or(0, |facts| facts.worktrees.len());
@@ -715,20 +750,12 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
         theme::block(true).title(theme::chrome_title("New agent in a worktree")),
         layout.popup,
     );
-    let provider_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(1, 3); 3])
-        .split(layout.provider_row);
-    for (area, agent) in provider_areas.iter().zip(BuiltinAgentProvider::ALL) {
-        let marker = if state.provider == agent { "[" } else { " " };
-        let suffix = if state.provider == agent { "]" } else { " " };
-        frame.render_widget(
-            Paragraph::new(format!(" {marker}{}{suffix}", agent.label())).style(selected_style(
-                state.focus == WorktreeDialogFocus::Provider && state.provider == agent,
-            )),
-            *area,
-        );
-    }
+    render_choice(
+        frame,
+        screen_area,
+        state,
+        crate::value_worktree::WorkspaceChoice::Provider,
+    );
     let block = theme::block(state.focus == WorktreeDialogFocus::Prompt)
         .title(theme::chrome_title("Prompt · optional first message"));
     let prompt_inner = block.inner(layout.prompt_area);
@@ -754,32 +781,11 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
             false,
         );
     }
-    draw_line(frame, layout.where_row, "Where".into(), false);
-    draw_line(
+    render_choice(
         frame,
-        layout.where_new,
-        format!(
-            "{} New worktree",
-            if state.mode == WorktreeDialogMode::New {
-                "●"
-            } else {
-                "○"
-            }
-        ),
-        state.focus == WorktreeDialogFocus::Where && state.mode == WorktreeDialogMode::New,
-    );
-    draw_line(
-        frame,
-        layout.where_existing,
-        format!(
-            "{} Existing worktree",
-            if state.mode == WorktreeDialogMode::Existing {
-                "●"
-            } else {
-                "○"
-            }
-        ),
-        state.focus == WorktreeDialogFocus::Where && state.mode == WorktreeDialogMode::Existing,
+        screen_area,
+        state,
+        crate::value_worktree::WorkspaceChoice::Where,
     );
     if state.mode == WorktreeDialogMode::Existing {
         if let Some(facts) = &state.facts {
@@ -844,18 +850,11 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
             ),
             state.focus == WorktreeDialogFocus::Path,
         );
-        draw_line(
+        render_choice(
             frame,
-            layout.close_policy_row,
-            format!(
-                "On close: {}",
-                if state.close_policy == WorktreeClosePolicy::Keep {
-                    "keep worktree"
-                } else {
-                    "offer safe removal"
-                }
-            ),
-            state.focus == WorktreeDialogFocus::ClosePolicy,
+            screen_area,
+            state,
+            crate::value_worktree::WorkspaceChoice::ClosePolicy,
         );
     }
     frame.render_widget(
@@ -989,6 +988,22 @@ mod tests {
             state.validated_request().unwrap().1,
             WorkspaceCreateSpec::New { .. }
         ));
+    }
+
+    #[test]
+    fn default_path_preserves_inserted_placeholder_literals_in_repository_name() {
+        let mut state = dialog(WorktreeDialogMode::New);
+        let mut snapshot = facts();
+        snapshot.worktrees[0].path = projects_root().join("{branch_slug}-repo");
+        state.apply_facts(snapshot);
+        assert_eq!(
+            state.path.buf,
+            path_text(
+                projects_root()
+                    .join("{branch_slug}-repo.worktrees")
+                    .join("agent-task-2")
+            )
+        );
     }
 
     #[test]
@@ -1164,4 +1179,23 @@ mod tests {
             .draw(|frame| draw_dialog(frame, frame.area(), &state))
             .unwrap();
     }
+}
+
+fn render_choice(
+    frame: &mut Frame,
+    screen: Rect,
+    state: &WorktreeDialogState,
+    field: crate::value_worktree::WorkspaceChoice,
+) {
+    let style = selected_style(state.focus == field.focus());
+    field.control(screen, state).render(
+        frame,
+        crate::value_control::ControlStyles {
+            label: style,
+            value: style,
+            button: style,
+            disabled: Style::new().fg(Color::DarkGray),
+            ..Default::default()
+        },
+    );
 }

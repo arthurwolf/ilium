@@ -118,6 +118,8 @@ pub struct WorkspaceSearchText {
 /// late worker results harmless after the user has continued typing.
 #[derive(Debug, Clone)]
 pub struct WorkspaceSearchRequest {
+    pub(crate) fences: Vec<crate::search_workers::SourceFence>,
+    pub(crate) identity: std::sync::Arc<()>,
     pub revision: u64,
     pub query: String,
     pub sources: Vec<WorkspaceSearchSource>,
@@ -126,15 +128,32 @@ pub struct WorkspaceSearchRequest {
 /// Full-screen search interaction state. Results are re-derived from live
 /// client caches after every query edit; no stale index survives tree/editor
 /// mutations or terminal replay.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SearchContinuationAction {
+    Select(usize),
+    Open(Option<usize>),
+    Move(i32),
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SearchContinuation {
+    pub revision: u64,
+    pub action: SearchContinuationAction,
+}
+
 pub struct SearchState {
+    pub(crate) identity: std::sync::Arc<()>,
     pub query: TextPromptState,
-    pub results: Vec<SearchResult>,
+    pub results: std::sync::Arc<Vec<SearchResult>>,
     pub selected_index: usize,
     pub scroll: usize,
     query_revision: u64,
     completed_revision: Option<u64>,
     search_in_flight_revision: Option<u64>,
     last_query_edit: Option<Instant>,
+    pub(crate) pending_control: std::collections::VecDeque<SearchContinuation>,
+    pub(crate) control_error: Option<String>,
+    pub(crate) source_fences: Vec<crate::search_workers::SourceFence>,
+    pub(crate) result_retention: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
 /// A full second of silence intentionally favors fluid input over constantly
@@ -150,23 +169,39 @@ impl Default for SearchState {
 impl SearchState {
     pub fn new() -> Self {
         Self {
+            identity: std::sync::Arc::new(()),
             query: TextPromptState::new(""),
-            results: Vec::new(),
+            results: std::sync::Arc::new(Vec::new()),
             selected_index: 0,
             scroll: 0,
             query_revision: 0,
             completed_revision: Some(0),
             search_in_flight_revision: None,
             last_query_edit: None,
+            pending_control: std::collections::VecDeque::new(),
+            control_error: None,
+            source_fences: Vec::new(),
+            result_retention: None,
         }
     }
 
     pub fn replace_results(&mut self, results: Vec<SearchResult>) {
-        self.results = results;
+        self.results = std::sync::Arc::new(results);
+        self.source_fences = Vec::new();
+        self.result_retention = None;
         self.selected_index = self
             .selected_index
             .min(self.results.len().saturating_sub(1));
         self.scroll = self.scroll.min(self.selected_index);
+    }
+
+    fn advance_revision(&mut self) {
+        if let Some(next) = self.query_revision.checked_add(1) {
+            self.query_revision = next;
+        } else {
+            self.identity = std::sync::Arc::new(());
+            self.query_revision = 0;
+        }
     }
 
     pub fn selected_result(&self) -> Option<&SearchResult> {
@@ -179,7 +214,7 @@ impl SearchState {
     /// clobbering these results later. Selection resets because an index into
     /// the previous query's results is meaningless against the new ones.
     pub fn adopt_synchronous_results(&mut self, results: Vec<SearchResult>) {
-        self.query_revision = self.query_revision.wrapping_add(1);
+        self.advance_revision();
         self.completed_revision = Some(self.query_revision);
         self.last_query_edit = None;
         self.selected_index = 0;
@@ -205,10 +240,17 @@ impl SearchState {
     /// pending worker may finish later, but its revision will no longer be
     /// accepted after this increment.
     pub fn note_query_changed(&mut self, now: Instant) {
-        self.query_revision = self.query_revision.wrapping_add(1);
+        if !self.pending_control.is_empty() {
+            self.pending_control.clear();
+            self.control_error =
+                Some("Previous search continuations cancelled by a newer query".into());
+        }
+        self.advance_revision();
         self.completed_revision = None;
         self.last_query_edit = Some(now);
-        self.results.clear();
+        self.results = std::sync::Arc::new(Vec::new());
+        self.source_fences = Vec::new();
+        self.result_retention = None;
         self.selected_index = 0;
         self.scroll = 0;
     }
@@ -258,6 +300,27 @@ impl SearchState {
             && self.completed_revision != Some(self.query_revision)
     }
 
+    pub(crate) fn is_preparing(&self) -> bool {
+        !self.query.buf.trim().is_empty() && self.completed_revision != Some(self.query_revision)
+    }
+    pub(crate) fn queue_control(&mut self, action: SearchContinuationAction) -> Result<(), String> {
+        if self.pending_control.len() >= 32 {
+            return Err(
+                "Search continuation queue is full; retry the original command after preparation"
+                    .into(),
+            );
+        }
+        self.pending_control.push_back(SearchContinuation {
+            revision: self.query_revision,
+            action,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.query_revision
+    }
+
     pub fn is_searching(&self) -> bool {
         self.search_in_flight_revision.is_some()
     }
@@ -294,7 +357,11 @@ pub fn search_workspace(
                 // the same stripped text/offset-map instead of each running
                 // its own full-history strip over a multi-megabyte journal.
                 let history_bytes = history.to_vec();
-                let searchable = strip_terminal_controls(&history_bytes);
+                let Some(searchable) =
+                    strip_terminal_controls_bounded(&history_bytes, &should_cancel)
+                else {
+                    return Vec::new();
+                };
                 let last_command = last_command_from_text(&searchable.text);
                 find_terminal_results(
                     &searchable,
@@ -311,6 +378,7 @@ pub fn search_workspace(
                         )
                     },
                     &mut results,
+                    &should_cancel,
                 );
             }
             WorkspaceSearchContent::Text(entries) => {
@@ -323,7 +391,7 @@ pub fn search_workspace(
                         SearchLocation::Editor { line } => line,
                         SearchLocation::Terminal { .. } | SearchLocation::Board => 0,
                     };
-                    find_text_results(
+                    find_text_results_bounded(
                         &entry.text,
                         &request.query,
                         |before, matched, after, _| {
@@ -331,6 +399,7 @@ pub fn search_workspace(
                         },
                         line,
                         &mut results,
+                        &should_cancel,
                     );
                 }
             }
@@ -390,6 +459,17 @@ pub fn find_text_results(
     line: usize,
     results: &mut Vec<SearchResult>,
 ) {
+    find_text_results_bounded(text, query, make_result, line, results, &|| false);
+}
+
+fn find_text_results_bounded(
+    text: &str,
+    query: &str,
+    make_result: impl Fn(&str, &str, &str, usize) -> SearchResult,
+    line: usize,
+    results: &mut Vec<SearchResult>,
+    should_cancel: &impl Fn() -> bool,
+) {
     if query.is_empty() || results.len() >= MAX_RESULTS {
         return;
     }
@@ -397,6 +477,9 @@ pub fn find_text_results(
     let folded_query = query.to_ascii_lowercase();
     let mut start = 0;
     while let Some(found) = folded_text[start..].find(&folded_query) {
+        if should_cancel() {
+            return;
+        }
         let match_start = start + found;
         let match_end = match_start + folded_query.len();
         if !text.is_char_boundary(match_start) || !text.is_char_boundary(match_end) {
@@ -416,7 +499,7 @@ pub fn find_text_results(
 }
 
 /// Searches text already stripped of terminal control sequences by
-/// [`strip_terminal_controls`]. Callers that need both the last command and
+/// control stripping. Callers that need both the last command and
 /// the match scan strip the raw history once and reuse the same
 /// [`SearchableTerminalText`] for both, instead of each re-running the strip
 /// over the full retained PTY journal. `raw_len` is only the fallback used
@@ -429,6 +512,7 @@ fn find_terminal_results(
     query: &str,
     make_result: impl Fn(&str, &str, &str, usize) -> SearchResult,
     results: &mut Vec<SearchResult>,
+    should_cancel: &impl Fn() -> bool,
 ) {
     if query.is_empty() || results.len() >= MAX_RESULTS {
         return;
@@ -437,6 +521,9 @@ fn find_terminal_results(
     let folded_query = query.to_ascii_lowercase();
     let mut start = 0;
     while let Some(found) = folded_text[start..].find(&folded_query) {
+        if should_cancel() {
+            return;
+        }
         let match_start = start + found;
         let match_end = match_start + folded_query.len();
         if !searchable.text.is_char_boundary(match_start)
@@ -465,7 +552,7 @@ fn find_terminal_results(
 
 /// Scans already-stripped terminal text for the most recent shell prompt
 /// line, without re-stripping the raw history. Kept separate from
-/// [`find_terminal_results`] so a single [`strip_terminal_controls`] call can
+/// [`find_terminal_results`] so one terminal-control stripping pass can
 /// feed both without either re-deriving the other's input.
 fn last_command_from_text(text: &str) -> Option<String> {
     text.lines().rev().find_map(|line| {
@@ -483,6 +570,15 @@ fn last_command_from_text(text: &str) -> Option<String> {
 /// layout gives the query room to breathe while keeping object facts and
 /// evidence dense enough to scan without opening every hit.
 pub fn render(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
+    render_cursor(frame, area, state, icons);
+}
+
+pub fn render_cursor(
+    frame: &mut Frame,
+    area: Rect,
+    state: &SearchState,
+    icons: &IconSettings,
+) -> Option<Position> {
     frame.render_widget(Clear, area);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -493,10 +589,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSe
             Constraint::Length(2),
         ])
         .split(area);
-    render_header(frame, vertical[0], state, icons);
+    let cursor = render_header(frame, vertical[0], state, icons);
     render_summary(frame, vertical[1], state);
     render_results(frame, vertical[2], state, icons);
     render_footer(frame, vertical[3]);
+    cursor
 }
 
 pub fn result_at(area: Rect, state: &SearchState, position: Position) -> Option<usize> {
@@ -533,7 +630,12 @@ pub fn visible_result_rows(area: Rect) -> usize {
 const RESULT_HEIGHT: usize = 5;
 const MAX_RESULTS: usize = 800;
 
-fn render_header(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
+fn render_header(
+    frame: &mut Frame,
+    area: Rect,
+    state: &SearchState,
+    icons: &IconSettings,
+) -> Option<Position> {
     let header = Line::from(vec![
         Span::styled(
             format!(
@@ -553,7 +655,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &SearchState, icons: &Ico
     let inner = block.inner(input_area);
     frame.render_widget(block, input_area);
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
 
     let prompt = format!("{}  ", icons.glyph(IconTarget::ToolbarSearch));
@@ -582,14 +684,16 @@ fn render_header(frame: &mut Frame, area: Rect, state: &SearchState, icons: &Ico
     // This is the actual terminal cursor, rather than a painted glyph. It
     // remains aligned with the editable `TextPromptState` even while result
     // scans run elsewhere, which makes the field behave like a real input.
-    frame.set_cursor_position(Position::new(
+    let cursor_position = Position::new(
         inner
             .x
             .saturating_add(prompt_width)
             .saturating_add(cursor_offset)
             .min(inner.right().saturating_sub(1)),
         inner.y,
-    ));
+    );
+    frame.set_cursor_position(cursor_position);
+    Some(cursor_position)
 }
 
 fn render_summary(frame: &mut Frame, area: Rect, state: &SearchState) {
@@ -813,11 +917,26 @@ struct SearchableTerminalText {
     raw_ends: Vec<u32>,
 }
 
+#[cfg(test)]
 fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
+    strip_terminal_controls_bounded(bytes, &|| false).expect("uncancelled fixture")
+}
+
+fn strip_terminal_controls_bounded(
+    bytes: &[u8],
+    should_cancel: &impl Fn() -> bool,
+) -> Option<SearchableTerminalText> {
     let mut text = String::with_capacity(bytes.len());
     let mut raw_ends = Vec::with_capacity(bytes.len());
     let mut index = 0;
+    let mut cancellation_boundary = 0;
     while index < bytes.len() {
+        if index >= cancellation_boundary && should_cancel() {
+            return None;
+        }
+        if index >= cancellation_boundary {
+            cancellation_boundary = index.saturating_add(4096);
+        }
         if bytes[index] == 0x1b {
             index = skip_escape(bytes, index);
             continue;
@@ -855,7 +974,7 @@ fn strip_terminal_controls(bytes: &[u8]) -> SearchableTerminalText {
             index += 1;
         }
     }
-    SearchableTerminalText { text, raw_ends }
+    Some(SearchableTerminalText { text, raw_ends })
 }
 
 /// Decodes the single UTF-8 character starting at the front of `remaining`,
@@ -964,6 +1083,7 @@ mod tests {
                 location: SearchLocation::Terminal { history_end_byte },
             },
             &mut results,
+            &|| false,
         );
 
         assert_eq!(results.len(), 1);
@@ -1024,7 +1144,7 @@ mod tests {
     fn full_screen_render_shows_object_metadata_and_highlighted_match() {
         let mut state = SearchState::new();
         state.query = TextPromptState::new("needle");
-        state.results = vec![SearchResult {
+        state.results = std::sync::Arc::new(vec![SearchResult {
             pane_id: NodeId(3),
             kind: SearchObjectKind::Agent,
             object_name: "Investigate checkout".to_string(),
@@ -1037,7 +1157,7 @@ mod tests {
             location: SearchLocation::Terminal {
                 history_end_byte: 42,
             },
-        }];
+        }]);
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).expect("test terminal");
 
         terminal
@@ -1139,5 +1259,21 @@ mod tests {
             state.take_due_search(start + SEARCH_DEBOUNCE + SEARCH_DEBOUNCE),
             Some((2, "second".to_string()))
         );
+    }
+}
+
+#[cfg(test)]
+mod preparation_cancellation_tests {
+    use super::*;
+    #[test]
+    fn cancelled_terminal_preparation_does_not_publish_partial_matches() {
+        let history = vec![b'x'; 1024 * 1024];
+        let checks = std::cell::Cell::new(0);
+        let result = strip_terminal_controls_bounded(&history, &|| {
+            checks.set(checks.get() + 1);
+            checks.get() > 2
+        });
+        assert!(result.is_none());
+        assert_eq!(checks.get(), 3);
     }
 }

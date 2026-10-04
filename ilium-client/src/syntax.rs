@@ -95,6 +95,89 @@ pub fn highlight(path: &Path, lines: &[String]) -> Option<Vec<LineTokens>> {
     )
 }
 
+/// A document job owns one sequential parser so multi-line scopes survive.
+/// Admission bounds the source; this additionally bounds token amplification.
+pub(crate) fn highlight_bounded(
+    path: &Path,
+    lines: &[String],
+    cancelled: impl Fn() -> bool,
+) -> Result<Option<Vec<LineTokens>>, &'static str> {
+    let Some(syntax) = syntax_for_path(path) else {
+        return Ok(None);
+    };
+    let mut highlighter = HighlightLines::new(syntax, &THEME);
+    let mut output = Vec::with_capacity(lines.len());
+    let mut tokens = 0usize;
+    for line in lines {
+        if cancelled() {
+            return Err("highlighting cancelled");
+        }
+        let highlighted = highlighter
+            .highlight_line(line, &SYNTAX_SET)
+            .map_err(|_| "syntax highlighting failed")?;
+        tokens = tokens.saturating_add(highlighted.len());
+        if tokens.saturating_mul(std::mem::size_of::<(Range<usize>, Style)>()) > 8 * 1024 * 1024 {
+            return Err("highlighting exceeds token budget; showing source");
+        }
+        let mut offset = 0;
+        output.push(
+            highlighted
+                .into_iter()
+                .map(|(style, text)| {
+                    let start = offset;
+                    offset += text.len();
+                    (start..offset, to_style(style))
+                })
+                .collect(),
+        );
+    }
+    Ok(Some(output))
+}
+
+/// One physical-line parser transported with a finite CPU continuation.
+/// Source assembly completes before a line is parsed, preserving grammar
+/// anchors, multiline comments and heredocs across arbitrary capture pages.
+pub(crate) struct SequentialHighlight {
+    parser: HighlightLines<'static>,
+}
+impl SequentialHighlight {
+    pub fn new(path: &Path) -> Option<Self> {
+        Some(Self {
+            parser: HighlightLines::new(syntax_for_path(path)?, &THEME),
+        })
+    }
+    pub fn style_window_line(
+        &mut self,
+        line: &str,
+        physical: usize,
+        rows: &[crate::source_stream::Row],
+        styles: &mut [Vec<Style>],
+    ) -> Result<(), String> {
+        let spans = self
+            .parser
+            .highlight_line(line, &SYNTAX_SET)
+            .map_err(|error| format!("physical-line syntax preparation failed: {error}"))?;
+        let mut span = 0usize;
+        let mut start = 0usize;
+        for (row, output) in rows
+            .iter()
+            .zip(styles)
+            .filter(|(row, _)| row.physical == physical)
+        {
+            for (glyph, style) in row.glyphs.iter().zip(output) {
+                while span < spans.len() && start + spans[span].1.len() <= glyph.byte {
+                    start += spans[span].1.len();
+                    span += 1;
+                }
+                if let Some((source_style, _)) = spans.get(span) {
+                    *style = to_style(*source_style);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Converts a `syntect` scope style to a ratatui one, foreground and font
 /// weight only -- see the module doc for why background is dropped.
 fn to_style(style: syntect::highlighting::Style) -> Style {

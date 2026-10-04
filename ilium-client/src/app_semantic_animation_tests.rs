@@ -158,7 +158,11 @@ fn install_probe(app: &mut App) -> Arc<Probe> {
 }
 fn compose(app: &mut App, seconds: u64) -> Buffer {
     let mut buffer = Buffer::empty(app.layout.screen_area);
-    crate::background_composition::compose(&mut buffer, app, Duration::from_secs(seconds));
+    crate::background_composition::compose_ready_for_test(
+        &mut buffer,
+        app,
+        Duration::from_secs(seconds),
+    );
     buffer
 }
 #[test]
@@ -277,6 +281,7 @@ fn semantic_invalid_or_missing_recommendation_releases_field_host_and_timer() {
     label.push_str(" changed");
     snapshot_recommendation(&mut fixture.app.tree, fixture.project, Some(invalid), 0);
     fixture.app.reconcile_animation_presentation();
+    fixture.app.animation_frame.settle_for_test();
     assert!(fixture.app.effective_animation_settings().is_none());
     assert!(fixture.app.semantic_animation_error().is_some());
     assert_eq!(probe.alive.load(Ordering::SeqCst), 0);
@@ -286,10 +291,7 @@ fn semantic_invalid_or_missing_recommendation_releases_field_host_and_timer() {
         .packed_cells()
         .iter()
         .all(|cell| *cell == 0));
-    assert_eq!(
-        fixture.app.animation_cache.borrow().status().resident_bytes,
-        0
-    );
+    assert_eq!(fixture.app.animation_frame.cache_status().resident_bytes, 0);
     assert_eq!(
         crate::background_composition::animation_frame_delay(&fixture.app, Duration::ZERO),
         None
@@ -341,6 +343,7 @@ fn semantic_paris_attribution_and_wikipedia_policy_use_effective_kind() {
     terminal
         .draw(|frame| crate::ui::draw(frame, &mut fixture.app))
         .unwrap();
+    fixture.app.animation_frame.settle_for_test();
     let text = terminal
         .backend()
         .buffer()
@@ -362,6 +365,7 @@ fn semantic_paris_attribution_and_wikipedia_policy_use_effective_kind() {
     );
     fixture.app.reconcile_animation_presentation();
     assert_eq!(fixture.app.animation_frames_per_second(), 4);
+    fixture.app.animation_frame.settle_for_test();
     assert!(fixture.app.layout.osm_attribution_area.is_empty());
     assert_eq!(probe.alive.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.app.animation_settings.kind, AnimationKind::Semantic);
@@ -389,6 +393,7 @@ fn semantic_authored_video_reuse_and_missing_input_are_revalidated() {
     fixture.app.animation_settings.ambient.video.source.clear();
     fixture.app.reconcile_animation_presentation();
     assert!(fixture.app.effective_animation_settings().is_none());
+    fixture.app.animation_frame.settle_for_test();
     assert_eq!(probe.alive.load(Ordering::SeqCst), 0);
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
 }
@@ -515,8 +520,10 @@ fn semantic_project_binding_and_failed_authored_save_preserve_other_settings() {
     );
     app.select_node(second_id);
     app.synchronize_animation_project_settings();
+    app.settle_filesystem_for_test();
     assert_eq!(app.animation_settings, second_settings.normalized());
     app.settings_select_animation_scene(AnimationKind::Semantic);
+    app.settle_filesystem_for_test();
     assert_eq!(
         crate::project_config::load(first.path()).unwrap().animation,
         first_settings.normalized()
@@ -530,9 +537,11 @@ fn semantic_project_binding_and_failed_authored_save_preserve_other_settings() {
     std::fs::write(&blocker, b"fixture").unwrap();
     let blocked_id = app.tree.add_project(blocker.clone()).unwrap();
     app.select_node(blocked_id);
+    app.settle_filesystem_for_test();
     app.install_animation_project_settings(blocker.clone(), Ok(second_settings.clone()));
     let before = app.animation_settings.clone();
     app.settings_select_animation_scene(AnimationKind::Semantic);
+    app.settle_filesystem_for_test();
     assert_eq!(app.animation_settings, before);
     assert!(app
         .status_message

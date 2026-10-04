@@ -110,29 +110,31 @@ pub fn animation_frame_delay(app: &App, elapsed: Duration) -> Option<Duration> {
     Some(Duration::from_nanos(delay_nanos as u64))
 }
 
-/// Renders the field for the current settings into the shared frame, through
-/// the loop cache when the configuration allows it.
+/// Requests worker preparation and leases the latest valid immutable frame.
+/// Scene construction, cache preparation and rendering stay on the worker.
 fn render_field(
     app: &mut App,
     settings: &crate::background_animation::AnimationSettings,
     area: Rect,
     elapsed: Duration,
-) {
+) -> bool {
     let pointer = app.animation_pointer(area);
-    app.animation_frame.pointer(pointer);
-    let cache_ready = if settings.uses_loop_cache() {
-        let mut cache = app.animation_cache.borrow_mut();
-        cache.step(settings, area.width, area.height, 8);
-        cache.status().is_ready && cache.copy_frame_into(elapsed, &mut app.animation_frame)
-    } else {
-        app.animation_cache.borrow_mut().pause();
-        false
-    };
-    if !cache_ready {
+    if let Err(error) =
         app.animation_frame
-            .render(settings, area.width, area.height, elapsed);
+            .request(settings, area.width, area.height, elapsed, pointer)
+    {
+        app.status_message = Some(format!("Animation request pending: {error:?}"));
     }
+    app.animation_frame.collect();
     app.note_animation_field_settings();
+    app.animation_frame.begin_composition()
+}
+
+fn needs_screen_occupancy(settings: &crate::background_animation::AnimationSettings) -> bool {
+    settings.kind == crate::background_animation::AnimationKind::Wind
+        || (settings.source == crate::animation_plugins::AnimationSourceTab::Native
+            && settings.kind == crate::background_animation::AnimationKind::Frost
+            && settings.ambient.frost.mode == ilium_ambient::FrostMode::Characters)
 }
 
 /// Render one screen-wide field, then reveal it only through safe workspace
@@ -148,12 +150,10 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     let is_preview = app.is_animation_preview_visible();
     if buffer.area.is_empty() || !(is_preview || ambient_is_visible(app)) {
         app.animation_frame.release_hosts();
-        app.animation_cache.borrow_mut().pause();
         return;
     }
     let Some(effective) = app.effective_animation_settings() else {
         app.animation_frame.release_hosts();
-        app.animation_cache.borrow_mut().pause();
         return;
     };
     let mut settings = effective.normalized();
@@ -162,7 +162,6 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     {
         // A tiny terminal cannot show both a map and the complete credit.
         app.animation_frame.release_hosts();
-        app.animation_cache.borrow_mut().pause();
         return;
     }
     let frozen_article = !is_preview
@@ -179,7 +178,17 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         } else {
             quantized_elapsed_at(elapsed, app.animation_frames_per_second())
         };
-    render_field(app, &settings, buffer.area, elapsed);
+    // Screen-reactive Wind and native character Frost receive the exclusion
+    // mask before their frame request; unrelated scenes pay no mask cost.
+    app.animation_frame
+        .set_occupancy(if needs_screen_occupancy(&settings) {
+            Some(screen_occupancy(buffer, app, &settings, is_preview))
+        } else {
+            None
+        });
+    if !render_field(app, &settings, buffer.area, elapsed) {
+        return;
+    }
     let area = buffer.area;
     let receipt_cells = usize::from(area.width) * usize::from(area.height);
     let mut painted_bits = if !is_preview && receipt_cells <= MAX_RECEIPT_CELLS {
@@ -195,13 +204,8 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     };
     let (red, green, blue) = settings.foreground_rgb();
     let foreground = Color::Rgb(red, green, blue);
-    let look = LookPaint {
-        appearance: &settings.appearance,
-        ink: [red, green, blue],
-        columns: app.animation_frame.width(),
-        rows: app.animation_frame.height(),
-        seconds: elapsed.as_secs_f32(),
-    };
+    let black_backdrop = settings.source == crate::animation_plugins::AnimationSourceTab::Native
+        && settings.kind == crate::background_animation::AnimationKind::Aurora;
     if is_preview {
         let area = buffer.area;
         // Article letters in label whitespace become part of the UI wording.
@@ -225,15 +229,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             } else {
                 area
             };
-        let opaque_panel = match &app.mode {
-            Mode::Settings(state) if !state.animation_fullscreen => Some(
-                crate::animation_settings_ui::layout(
-                    crate::settings_ui::compute_layout_for_mode(area, app, state).content_area,
-                )
-                .panel,
-            ),
-            _ => None,
-        };
+        let opaque_panel = preview_opaque_panel(app, area);
         paint_region_with_field_receipt(
             buffer,
             preview_area,
@@ -245,7 +241,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
                 }) {
                     FieldCell::Empty
                 } else {
-                    field_cell(app, &look, column, row)
+                    field_cell(app, column, row, black_backdrop)
                 }
             },
             app.animation_frame.is_wikipedia(),
@@ -262,7 +258,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             panel_inner(app.layout.tree_area),
             None,
             foreground,
-            |column, row| field_cell(app, &look, column, row),
+            |column, row| field_cell(app, column, row, black_backdrop),
             app.animation_frame.is_wikipedia(),
             &mut mark_painted,
         );
@@ -283,7 +279,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             panel_inner(app.layout.pane_area),
             None,
             foreground,
-            |column, row| field_cell(app, &look, column, row),
+            |column, row| field_cell(app, column, row, black_backdrop),
             app.animation_frame.is_wikipedia(),
             &mut mark_painted,
         );
@@ -303,7 +299,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
                 area,
                 Some(screen),
                 foreground,
-                |column, row| field_cell(app, &look, column, row),
+                |column, row| field_cell(app, column, row, black_backdrop),
                 app.animation_frame.is_wikipedia(),
                 &mut mark_painted,
             );
@@ -312,58 +308,114 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     app.animation_frame.composed(painted_bits);
 }
 
-/// Everything needed to colour one ink cell through the shared look.
-struct LookPaint<'a> {
-    appearance: &'a ilium_ambient::style::Appearance,
-    ink: [u8; 3],
-    /// Field size in cells, for the position of a cell on the screen.
-    columns: u16,
-    rows: u16,
-    seconds: f32,
+/// The Settings controls panel of the full-field preview, which stays opaque.
+fn preview_opaque_panel(app: &App, area: Rect) -> Option<Rect> {
+    match &app.mode {
+        Mode::Settings(state) if !state.animation_fullscreen => Some(
+            crate::animation_settings_ui::layout(
+                crate::settings_ui::compute_layout_for_mode(area, app, state).content_area,
+            )
+            .panel,
+        ),
+        _ => None,
+    }
 }
 
-impl LookPaint<'_> {
-    /// The colour of a cell. `None` means "paint the plain ink": nothing in
-    /// the look changes it and the scene supplied no colour.
-    fn color(&self, app: &App, column: u16, row: u16, is_text: bool) -> Option<Color> {
-        let scene = app
-            .animation_frame
-            .cell_color(column, row)
-            .map(|(r, g, b)| [r, g, b]);
-        if self.appearance.is_neutral() {
-            return scene.map(|[r, g, b]| Color::Rgb(r, g, b));
-        }
-        let coverage = if is_text {
-            1.0
-        } else {
-            app.animation_frame
-                .packed_cells()
-                .get(usize::from(row) * usize::from(self.columns) + usize::from(column))
-                .map_or(1.0, |bits| f32::from(bits.count_ones() as u8) / 8.0)
-        };
-        let fraction = |value: u16, extent: u16| {
-            if extent <= 1 {
-                0.5
-            } else {
-                f32::from(value) / f32::from(extent - 1)
+/// Which cells of the final workspace buffer the animation may not use: every
+/// cell outside the regions `compose` paints, and every cell inside them that
+/// is not a safe blank. Coordinates are relative to the buffer, like the field.
+fn screen_occupancy(
+    buffer: &Buffer,
+    app: &App,
+    settings: &crate::background_animation::AnimationSettings,
+    is_preview: bool,
+) -> ilium_ambient::OccupancyMask {
+    let area = buffer.area;
+    let width = usize::from(area.width);
+    let mut free = vec![false; width * usize::from(area.height)];
+    let mut characters = vec![false; free.len()];
+    let mut mark_free = |region: Rect, cursor: Option<Position>| {
+        let clipped = region.intersection(area);
+        for row in clipped.top()..clipped.bottom() {
+            let mut remaining_continuations = 0;
+            for column in area.left()..clipped.right() {
+                if remaining_continuations > 0 {
+                    remaining_continuations -= 1;
+                    continue;
+                }
+                let cell = &buffer[(column, row)];
+                remaining_continuations = UnicodeWidthStr::width(cell.symbol()).saturating_sub(1);
+                if column >= clipped.left() && !is_inkless_symbol(cell.symbol()) {
+                    characters[usize::from(row - area.y) * width + usize::from(column - area.x)] =
+                        true;
+                }
+                if column >= clipped.left()
+                    && UnicodeWidthStr::width(cell.symbol()) == 1
+                    && is_safe_blank(cell)
+                    && cursor != Some(Position::new(column, row))
+                {
+                    free[usize::from(row - area.y) * width + usize::from(column - area.x)] = true;
+                }
             }
-        };
-        let [r, g, b] = self.appearance.shade(
-            self.ink,
-            scene,
-            &ilium_ambient::style::CellContext {
-                coverage,
-                x: fraction(column, self.columns),
-                y: fraction(row, self.rows),
-                seconds: self.seconds,
-            },
-        );
-        Some(Color::Rgb(r, g, b))
+        }
+    };
+    if is_preview {
+        let opaque = preview_opaque_panel(app, area);
+        mark_free(area, None);
+        if let Some(panel) = opaque {
+            for row in panel.top()..panel.bottom() {
+                for column in panel.left()..panel.right() {
+                    if let Some(cell) = column
+                        .checked_sub(area.x)
+                        .zip(row.checked_sub(area.y))
+                        .and_then(|(x, y)| free.get_mut(usize::from(y) * width + usize::from(x)))
+                    {
+                        *cell = false;
+                        characters
+                            [usize::from(row - area.y) * width + usize::from(column - area.x)] =
+                            false;
+                    }
+                }
+            }
+        }
+    } else {
+        if settings.panels.shows_left() {
+            mark_free(panel_inner(app.layout.tree_area), None);
+        }
+        if settings.panels.shows_right()
+            && !matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+        {
+            let viewports = app.pane_viewports();
+            if viewports.is_empty() {
+                mark_free(panel_inner(app.layout.pane_area), None);
+            }
+            for viewport in viewports {
+                let Some(PaneRuntime::Terminal(terminal)) = app.panes.get(&viewport.pane_id) else {
+                    continue;
+                };
+                let region = app
+                    .completed_agent_close_action(viewport)
+                    .map_or(viewport.content_area, |action| action.terminal_area);
+                terminal.with_screen(|screen| mark_free(region, visible_cursor(screen, region)));
+            }
+        }
     }
+    let mut mask = ilium_ambient::OccupancyMask::from_fn(area.width, area.height, |column, row| {
+        !free[usize::from(row) * width + usize::from(column)]
+    });
+    for row in 0..area.height {
+        for column in 0..area.width {
+            if characters[usize::from(row) * width + usize::from(column)] {
+                mask.set_character(column, row, true);
+            }
+        }
+    }
+    mask
 }
 
 enum FieldCell {
     Empty,
+    Black,
     Continuation,
     Native {
         symbol: char,
@@ -374,9 +426,13 @@ enum FieldCell {
         color: Option<Color>,
         modifier: Modifier,
     },
+    BlackInk {
+        symbol: String,
+        color: Option<Color>,
+    },
 }
 
-fn field_cell(app: &App, look: &LookPaint<'_>, column: u16, row: u16) -> FieldCell {
+fn field_cell(app: &App, column: u16, row: u16, black_backdrop: bool) -> FieldCell {
     let frame = &app.animation_frame;
     if frame.is_wikipedia() {
         if frame.article_is_continuation(column, row) {
@@ -395,24 +451,42 @@ fn field_cell(app: &App, look: &LookPaint<'_>, column: u16, row: u16) -> FieldCe
         }
         return FieldCell::Ink {
             symbol: symbol.to_owned(),
-            color: look.color(app, column, row, true),
+            color: frame
+                .cell_color(column, row)
+                .map(|(red, green, blue)| Color::Rgb(red, green, blue)),
             modifier,
         };
     }
     if let Some(symbol) = frame.native_glyph(column, row) {
         return FieldCell::Native {
             symbol,
-            color: look.color(app, column, row, true),
+            color: frame
+                .cell_color(column, row)
+                .map(|(red, green, blue)| Color::Rgb(red, green, blue)),
         };
     }
     let symbol = frame.glyph(column, row);
     if symbol == ' ' {
-        return FieldCell::Empty;
+        return if black_backdrop {
+            FieldCell::Black
+        } else {
+            FieldCell::Empty
+        };
     }
-    FieldCell::Ink {
-        symbol: symbol.to_string(),
-        color: look.color(app, column, row, false),
-        modifier: Modifier::empty(),
+    let color = frame
+        .cell_color(column, row)
+        .map(|(red, green, blue)| Color::Rgb(red, green, blue));
+    if black_backdrop {
+        FieldCell::BlackInk {
+            symbol: symbol.to_string(),
+            color,
+        }
+    } else {
+        FieldCell::Ink {
+            symbol: symbol.to_string(),
+            color,
+            modifier: Modifier::empty(),
+        }
     }
 }
 
@@ -611,15 +685,26 @@ fn paint_region_with_field_receipt(
             {
                 continue;
             }
-            let (symbol, color, modifier, is_native) =
+            let (symbol, color, modifier, is_native, background) =
                 match field(column - buffer.area.x, row - buffer.area.y) {
                     FieldCell::Ink {
                         symbol,
                         color,
                         modifier,
-                    } => (symbol, color, modifier, false),
-                    FieldCell::Native { symbol, color } => {
-                        (symbol.to_string(), color, Modifier::empty(), true)
+                    } => (symbol, color, modifier, false, Color::Reset),
+                    FieldCell::BlackInk { symbol, color } => {
+                        (symbol, color, Modifier::empty(), false, Color::Black)
+                    }
+                    FieldCell::Native { symbol, color } => (
+                        symbol.to_string(),
+                        color,
+                        Modifier::empty(),
+                        true,
+                        Color::Reset,
+                    ),
+                    FieldCell::Black => {
+                        buffer[(column, row)].set_bg(Color::Black);
+                        continue;
                     }
                     FieldCell::Empty | FieldCell::Continuation => continue,
                 };
@@ -668,13 +753,13 @@ fn paint_region_with_field_receipt(
             }
             let color = color.unwrap_or(foreground);
             let cell = &mut buffer[(column, row)];
-            // Drop the blank's bold/dim/italic so the field keeps one look, and
-            // reset an explicit black fill to the default background.
-            cell.set_symbol(&symbol).set_fg(color).set_bg(Color::Reset);
+            // Aurora deliberately keeps a black backdrop on otherwise safe
+            // cells; other scenes reset an explicit black fill as before.
+            cell.set_symbol(&symbol).set_fg(color).set_bg(background);
             cell.modifier = modifier & (Modifier::BOLD | Modifier::ITALIC);
             if symbol_width == 2 {
                 let next = &mut buffer[(column + 1, row)];
-                next.set_symbol(" ").set_fg(color).set_bg(Color::Reset);
+                next.set_symbol(" ").set_fg(color).set_bg(background);
                 next.modifier = Modifier::empty();
                 remaining_continuations = 1;
             }
@@ -724,14 +809,29 @@ fn surviving_braille_bits(buffer: &Buffer, bits: &[u8]) -> Option<Vec<u8>> {
     Some(surviving)
 }
 
-/// Call only after successful final terminal draw of this exact buffer.
-pub(crate) fn acknowledge_final(buffer: &Buffer, area: Rect, app: &mut App) {
-    if buffer.area != area {
-        return;
-    }
-    if let Some(surviving) = surviving_braille_bits(buffer, app.animation_frame.composed_bits()) {
-        app.animation_frame.presented_final(&surviving);
-    }
+/// Capture after every overlay and platform skip, before presenter submission.
+/// The token holds scene retirement until actual emission acknowledges it.
+pub fn capture_final(
+    buffer: &Buffer,
+    area: Rect,
+    app: &mut App,
+) -> Option<crate::background_animation::ComposedPresentation> {
+    let surviving = (buffer.area == area)
+        .then(|| surviving_braille_bits(buffer, app.animation_frame.composed_bits()))
+        .flatten();
+    app.animation_frame.capture(surviving)
+}
+
+/// Test-only completion barrier around the real asynchronous production path.
+/// Never used by UI code; controlled worker-blocking tests call compose itself.
+#[cfg(test)]
+pub(crate) fn compose_ready_for_test(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
+    let original = buffer.clone();
+    app.animation_frame.settle_for_test();
+    compose(buffer, app, elapsed);
+    app.animation_frame.settle_for_test();
+    *buffer = original;
+    compose(buffer, app, elapsed);
 }
 
 #[cfg(test)]
@@ -746,6 +846,40 @@ mod tests {
     fn paint_all(buffer: &mut Buffer) {
         let area = buffer.area;
         paint_region(buffer, area, None, Color::White, |_, _| '\u{28ff}');
+    }
+
+    #[test]
+    fn aurora_black_backdrop_touches_only_safe_blanks() {
+        let area = Rect::new(0, 0, 5, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(1, 0)].set_char('A').set_fg(Color::Yellow);
+        buffer[(2, 0)].set_bg(Color::Blue);
+        buffer[(3, 0)].modifier = Modifier::UNDERLINED;
+        let original = buffer.clone();
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |column, _| {
+                if column == 4 {
+                    FieldCell::BlackInk {
+                        symbol: "⣿".to_owned(),
+                        color: None,
+                    }
+                } else {
+                    FieldCell::Black
+                }
+            },
+            false,
+        );
+        assert_eq!(buffer[(0, 0)].bg, Color::Black);
+        assert_eq!(buffer[(0, 0)].symbol(), " ");
+        assert_eq!(buffer[(4, 0)].bg, Color::Black);
+        assert_eq!(buffer[(4, 0)].symbol(), "⣿");
+        for column in 1..=3 {
+            assert_eq!(buffer[(column, 0)], original[(column, 0)]);
+        }
     }
 
     #[test]
@@ -920,7 +1054,7 @@ mod tests {
         let mut buffer = Buffer::empty(area);
         buffer.set_string(2, 6, "Agent Cost", ratatui::style::Style::default());
         let before = buffer.clone();
-        compose(&mut buffer, &mut app, Duration::ZERO);
+        compose_ready_for_test(&mut buffer, &mut app, Duration::ZERO);
         for region in [
             geometry.header_area,
             geometry.tab_list_area,
@@ -1392,6 +1526,100 @@ mod tests {
     }
 
     #[test]
+    fn wind_occupancy_marks_text_borders_and_unpainted_cells_but_not_blanks() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("wind".to_owned(), project.path().to_path_buf());
+        let screen = Rect::new(0, 0, 80, 24);
+        app.set_screen_area(screen);
+        app.layout.tree_area = Rect::new(0, 0, 20, 24);
+        app.layout.pane_area = Rect::new(20, 0, 60, 24);
+        let settings = crate::background_animation::AnimationSettings {
+            kind: crate::background_animation::AnimationKind::Wind,
+            panels: crate::background_animation::PanelTarget::Both,
+            ..Default::default()
+        };
+        let mut buffer = Buffer::empty(screen);
+        buffer.set_string(25, 5, "hello", ratatui::style::Style::default());
+        let mask = screen_occupancy(&buffer, &app, &settings, false);
+        assert_eq!((mask.width(), mask.height()), (80, 24));
+        assert!(mask.is_occupied(25, 5), "text cell is occupied");
+        assert!(mask.is_occupied(29, 5), "last letter is occupied");
+        assert!(!mask.is_occupied(30, 5), "blank after text is free");
+        assert!(!mask.is_occupied(40, 12), "blank pane cell is free");
+        assert!(!mask.is_occupied(5, 5), "blank tree cell is free");
+        assert!(mask.is_occupied(0, 0), "panel border is never painted");
+        assert!(mask.is_occupied(-1, 3), "outside the screen is a wall");
+        assert!(mask.is_character(25, 5), "foreground letters are anchors");
+        assert!(!mask.is_character(30, 5), "adjacent blank is no anchor");
+        assert!(!mask.is_character(0, 0), "unpainted border is no anchor");
+    }
+
+    #[test]
+    fn character_frost_requests_occupancy_only_for_native_character_mode() {
+        let mut settings = crate::background_animation::AnimationSettings {
+            kind: crate::background_animation::AnimationKind::Frost,
+            source: crate::animation_plugins::AnimationSourceTab::Native,
+            ..Default::default()
+        };
+        assert!(
+            !needs_screen_occupancy(&settings),
+            "edge frost is frame-only"
+        );
+        settings.ambient.frost.mode = ilium_ambient::FrostMode::Characters;
+        assert!(needs_screen_occupancy(&settings));
+        settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
+        assert!(!needs_screen_occupancy(&settings));
+        settings.kind = crate::background_animation::AnimationKind::Wind;
+        assert!(
+            needs_screen_occupancy(&settings),
+            "Wind keeps its existing mask"
+        );
+    }
+
+    #[test]
+    fn frost_mask_marks_glyph_anchors_and_blocks_wide_continuations() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("frost-mask".to_owned(), project.path().to_path_buf());
+        let screen = Rect::new(0, 0, 80, 24);
+        app.set_screen_area(screen);
+        app.layout.tree_area = Rect::new(0, 0, 20, 24);
+        app.layout.pane_area = Rect::new(20, 0, 60, 24);
+        let settings = crate::background_animation::AnimationSettings {
+            kind: crate::background_animation::AnimationKind::Frost,
+            source: crate::animation_plugins::AnimationSourceTab::Native,
+            panels: crate::background_animation::PanelTarget::Both,
+            ..Default::default()
+        };
+        let mut buffer = Buffer::empty(screen);
+        buffer.set_string(25, 5, "hi界", ratatui::style::Style::default());
+
+        let mask = screen_occupancy(&buffer, &app, &settings, false);
+
+        assert!(mask.is_character(25, 5), "visible letters are anchors");
+        assert!(mask.is_character(27, 5), "the wide glyph has one anchor");
+        assert!(
+            mask.is_occupied(28, 5),
+            "wide-glyph continuation stays blocked"
+        );
+        assert!(
+            !mask.is_character(28, 5),
+            "continuation is not a second glyph"
+        );
+        assert!(
+            !mask.is_occupied(29, 5),
+            "the blank after text remains available"
+        );
+        assert!(
+            mask.is_occupied(0, 0),
+            "an unpainted panel border is blocked"
+        );
+        assert!(
+            !mask.is_character(0, 0),
+            "a panel border is not a text anchor"
+        );
+    }
+
+    #[test]
     fn exact_clock_reuses_buckets_and_has_positive_absolute_deadlines() {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("clock".to_owned(), project.path().to_path_buf());
@@ -1438,24 +1666,27 @@ mod tests {
         app.animation_settings.kind = crate::background_animation::AnimationKind::WindyHillside;
         app.animation_settings.loop_seconds = 1;
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !app
-            .animation_cache
-            .borrow_mut()
-            .step(&app.animation_settings, 40, 12, 8)
-        {
+        let mut warm = Buffer::empty(area);
+        while !app.animation_frame.cache_status().is_ready {
+            compose_ready_for_test(&mut warm, &mut app, Duration::ZERO);
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
+            // A fresh clock request polls existing cache completion; no second
+            // cache or synchronous UI cache generator is constructed.
+            app.animation_frame
+                .render(&app.animation_settings, 40, 12, Duration::from_nanos(1));
         }
+        let render_count = app.animation_frame.geometry_render_count;
         for index in 0..120 {
             let mut buffer = Buffer::empty(area);
-            compose(&mut buffer, &mut app, Duration::from_millis(index * 33));
+            compose_ready_for_test(&mut buffer, &mut app, Duration::from_millis(index * 33));
         }
-        assert_eq!(app.animation_frame.geometry_render_count, 0);
+        assert_eq!(app.animation_frame.geometry_render_count, render_count);
         assert_eq!(
             (app.animation_frame.width(), app.animation_frame.height()),
             (40, 12)
         );
-        assert!(app.animation_cache.borrow().status().is_ready);
+        assert!(app.animation_frame.cache_status().is_ready);
     }
 
     #[test]
@@ -1494,13 +1725,12 @@ mod tests {
         app.set_screen_area(Rect::new(0, 0, 40, 12));
         app.animation_settings.enabled = true;
         let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
-        compose(&mut buffer, &mut app, Duration::ZERO);
-        assert!(app.animation_cache.borrow().status().total_frames > 0);
+        compose_ready_for_test(&mut buffer, &mut app, Duration::ZERO);
+        assert!(app.animation_frame.cache_status().total_frames > 0);
         app.animation_settings.playback_mode =
             crate::background_animation::AnimationPlaybackMode::Live;
-        app.animation_cache = Default::default();
-        compose(&mut buffer, &mut app, Duration::ZERO);
-        assert_eq!(app.animation_cache.borrow().status().total_frames, 0);
+        compose_ready_for_test(&mut buffer, &mut app, Duration::ZERO);
+        assert_eq!(app.animation_frame.cache_status().total_frames, 0);
     }
 
     fn ambient_app() -> (
@@ -1522,7 +1752,7 @@ mod tests {
 
     fn compose_at(app: &mut App, seconds: u64) -> Buffer {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
-        compose(&mut buffer, app, Duration::from_secs(seconds));
+        compose_ready_for_test(&mut buffer, app, Duration::from_secs(seconds));
         buffer
     }
 
@@ -1580,6 +1810,7 @@ mod tests {
             probe
                 .fps
                 .store(frames_per_second, std::sync::atomic::Ordering::SeqCst);
+            compose_at(&mut app, u64::from(frames_per_second));
             assert_eq!(app.animation_frames_per_second(), frames_per_second);
             let mut now = Duration::ZERO;
             let mut wakeups = 0;
@@ -1595,6 +1826,7 @@ mod tests {
             assert_eq!(wakeups, expected_wakeups, "{frames_per_second} fps");
         }
         probe.fps.store(1, std::sync::atomic::Ordering::SeqCst);
+        compose_at(&mut app, 13);
         assert_eq!(
             animation_frame_delay(&app, Duration::from_millis(250)),
             Some(Duration::from_millis(750))
@@ -1609,8 +1841,10 @@ mod tests {
         );
         // A hosted scene's rate is clamped to 1..=30.
         probe.fps.store(500, std::sync::atomic::Ordering::SeqCst);
+        compose_at(&mut app, 14);
         assert_eq!(app.animation_frames_per_second(), 30);
         probe.fps.store(0, std::sync::atomic::Ordering::SeqCst);
+        compose_at(&mut app, 15);
         assert_eq!(app.animation_frames_per_second(), 1);
     }
 
@@ -1858,7 +2092,7 @@ mod tests {
         probe.panic_next_render.store(true, Ordering::SeqCst);
         let buffer = compose_at(&mut app, 1);
         assert_eq!(braille_cells(&buffer), 0, "the failed frame is blank");
-        let status = app.animation_frame.host().status().unwrap();
+        let status = app.animation_frame.status().unwrap();
         assert!(status.contains("fake scene exploded"), "{status}");
         // Later frames keep running the message scene: no panic, no rebuild loop.
         compose_at(&mut app, 2);

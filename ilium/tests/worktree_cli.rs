@@ -230,19 +230,31 @@ impl IsolatedSession {
         )
     }
 
-    async fn tree(&self) -> ilium_core::Tree {
+    async fn tree(&self) -> ilium_client::connection::Received<ilium_core::Tree> {
         let mut connection = Connection::connect(&self.socket, SESSION_NAME.to_string())
             .await
             .expect("connect isolated snapshot observer");
         let event = tokio::time::timeout(Duration::from_secs(5), async {
             let mut tree = None;
             loop {
-                match connection.events.recv().await {
+                let received = connection.events.recv().await;
+                let (event, retention) = match received {
+                    Some(received) => {
+                        let (event, retention) = received.into_parts();
+                        (Some(event), retention)
+                    }
+                    None => (None, None),
+                };
+                match event {
                     Some(ServerEvent::PaneStateSnapshot { tree: snapshot, .. }) => {
-                        tree = Some(snapshot)
+                        tree = Some(ilium_client::connection::Received::with_retention(
+                            snapshot, retention,
+                        ))
                     }
                     Some(ServerEvent::TreeSnapshot(snapshot)) if tree.is_none() => {
-                        tree = Some(snapshot)
+                        tree = Some(ilium_client::connection::Received::with_retention(
+                            snapshot, retention,
+                        ))
                     }
                     Some(ServerEvent::InitialStateSyncComplete) => {
                         return tree.expect("initial state includes a tree")

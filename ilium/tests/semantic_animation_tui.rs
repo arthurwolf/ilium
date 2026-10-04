@@ -234,13 +234,24 @@ async fn verify_scene_motion(tui: &PtySession) {
     });
 }
 
-async fn initial_tree(connection: &mut Connection) -> Tree {
+async fn initial_tree(connection: &mut Connection) -> ilium_client::connection::Received<Tree> {
     tokio::time::timeout(TIMEOUT, async {
         let mut tree = None;
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
-                ServerEvent::PaneStateSnapshot { tree: value, .. } => tree = Some(value),
-                ServerEvent::TreeSnapshot(value) => tree = Some(value),
+                ServerEvent::PaneStateSnapshot { tree: value, .. } => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        value,
+                        _event_retention,
+                    ))
+                }
+                ServerEvent::TreeSnapshot(value) => {
+                    tree = Some(ilium_client::connection::Received::with_retention(
+                        value,
+                        _event_retention,
+                    ))
+                }
                 ServerEvent::InitialStateSyncComplete => return tree.unwrap(),
                 _ => {}
             }
@@ -285,7 +296,10 @@ fn recommendation(kind: &str) -> AnimationRecommendation {
     recommendation
 }
 
-async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree {
+async fn apply_recommendations(
+    connection: &mut Connection,
+    tree: &Tree,
+) -> ilium_client::connection::Received<Tree> {
     let project = tree.project_ids()[0];
     let pane = tree.pane_ids_in_tree_order()[0];
     let expected_generation = tree.project_animation_generation(project).unwrap() + 1;
@@ -300,6 +314,7 @@ async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree
     connection
         .requests
         .send(ClientRequest::ApplyRecommendedProjectRestructurePlan {
+            title_observations: Vec::new(),
             project_id: project,
             inference_activity_revisions: tree.project_activity_revisions(project).unwrap(),
             plan: RecommendedRestructurePlan {
@@ -318,12 +333,16 @@ async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree
         let mut updated = None;
         let mut acknowledged = false;
         while let Some(event) = connection.events.recv().await {
+            let (event, _event_retention) = event.into_parts();
             match event {
                 ServerEvent::TreeSnapshot(value)
                     if value.project_animation_generation(project).unwrap()
                         == expected_generation =>
                 {
-                    updated = Some(value);
+                    updated = Some(ilium_client::connection::Received::with_retention(
+                        value,
+                        _event_retention,
+                    ));
                 }
                 ServerEvent::ProjectRestructureApplied { project_id, .. }
                     if project_id == project =>
@@ -350,7 +369,10 @@ async fn apply_recommendations(connection: &mut Connection, tree: &Tree) -> Tree
 }
 
 async fn open_animation_settings(tui: &PtySession) {
-    tui.write(b"\x02:").unwrap();
+    tui.write(b"\x02").unwrap();
+    screen_contains(tui, "LEADER (press a letter").await;
+    retain_screen(tui, "settings-leader");
+    tui.write(b":").unwrap();
     screen_contains(tui, "⚙ Settings").await;
     let tabs = ilium_client::app::SettingsTab::ALL;
     let from = tabs
@@ -363,12 +385,15 @@ async fn open_animation_settings(tui: &PtySession) {
         .unwrap();
     tui.write(&vec![b'\t'; (to + tabs.len() - from) % tabs.len()])
         .unwrap();
-    screen_contains(tui, "Animations — select to preview").await;
+    screen_contains(tui, "Look and display — all animations").await;
+    screen_contains(tui, "Scene settings").await;
 }
 
 fn retain_screen(tui: &PtySession, name: &str) {
     if let Some(directory) = std::env::var_os("ILIUM_SEMANTIC_SCREEN_DIR") {
-        let path = Path::new(&directory).join(format!("{name}.txt"));
+        let directory = Path::new(&directory);
+        std::fs::create_dir_all(directory).unwrap();
+        let path = directory.join(format!("{name}.txt"));
         std::fs::write(path, tui.screen_text()).unwrap();
     }
 }
@@ -412,8 +437,41 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
                 .kind,
             "carpet"
         );
-        // Select the actual pane after its old default group was removed.
-        screen_contains(&tui, "SemanticEntry").await;
+        // The animation-only request supplies no title grant. Select the
+        // preserved authored pane label after its old group was removed.
+        let preserved_title = accepted
+            .get(accepted.pane_ids_in_tree_order()[0])
+            .unwrap()
+            .name
+            .clone();
+        // An unchanged pane label can still be visible in the old tree.
+        // Wait for the rendered removal before deriving mouse coordinates.
+        let removed_names: Vec<_> = before
+            .all_ids()
+            .filter(|id| accepted.get(*id).is_none())
+            .map(|id| before.get(id).unwrap().name.clone())
+            .collect();
+        assert!(
+            !removed_names.is_empty(),
+            "fixture must remove its old group"
+        );
+        tokio::time::timeout(TIMEOUT, async {
+            while removed_names.iter().any(|name| {
+                tui.screen_text()
+                    .lines()
+                    .any(|line| line.chars().take(44).collect::<String>().contains(name))
+            }) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "old groups still rendered: {removed_names:?}\n{}",
+                tui.screen_text()
+            )
+        });
+        screen_contains(&tui, &preserved_title).await;
         let row = tui
             .screen_text()
             .lines()
@@ -421,7 +479,7 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
                 line.chars()
                     .take(30)
                     .collect::<String>()
-                    .contains("SemanticEntry")
+                    .contains(&preserved_title)
             })
             .unwrap()
             + 1;

@@ -1,10 +1,13 @@
 //! Deterministic dot scenes. Decoration never enters PTY/source state.
 
+#[cfg(test)]
 use ilium_ambient::raster::PaintedOwner;
 use ilium_ambient::style::Appearance;
 use ilium_ambient::{AmbientKind, AmbientSettings};
+#[cfg(test)]
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
 
@@ -12,14 +15,18 @@ mod cache;
 mod controls;
 mod host;
 mod parameters;
+mod plugin_backend;
 mod raster;
 mod scenes;
 mod shoreline;
+mod surface;
+pub use surface::{AnimationSurface, ComposedPresentation};
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 mod wikipedia;
+pub mod worker;
 
 pub use cache::{AnimationCacheStatus, AnimationLoopCache};
 #[cfg(test)]
@@ -83,11 +90,29 @@ pub enum AnimationKind {
     Chess,
     OpenStreetMap,
     Carpet,
+    Wind,
     Semantic,
+    Aurora,
+    Pollen,
+    Fireflies,
+    WindowSunlight,
+    Frost,
+    Lighthouse,
+    PaperFold,
+    Embroidery,
+    PrimeConstellations,
+    Wallpaper,
+    UnfinishedCircle,
+    NeedleThreads,
+    HesitatingInk,
+    CropCircles,
+    DelayedReflection,
+    AlmostTouching,
+    HiddenWheel,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 59] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -128,7 +153,25 @@ impl AnimationKind {
         Self::Chess,
         Self::OpenStreetMap,
         Self::Carpet,
+        Self::Wind,
         Self::Semantic,
+        Self::Aurora,
+        Self::Pollen,
+        Self::Fireflies,
+        Self::WindowSunlight,
+        Self::Frost,
+        Self::Lighthouse,
+        Self::PaperFold,
+        Self::Embroidery,
+        Self::PrimeConstellations,
+        Self::Wallpaper,
+        Self::UnfinishedCircle,
+        Self::NeedleThreads,
+        Self::HesitatingInk,
+        Self::CropCircles,
+        Self::DelayedReflection,
+        Self::AlmostTouching,
+        Self::HiddenWheel,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
@@ -139,6 +182,24 @@ impl AnimationKind {
             Self::TopographicMaps => Some(AmbientKind::TopographicMaps),
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
             Self::Carpet => Some(AmbientKind::Carpet),
+            Self::Wind => Some(AmbientKind::Wind),
+            Self::Aurora => Some(AmbientKind::Aurora),
+            Self::Pollen => Some(AmbientKind::Pollen),
+            Self::Fireflies => Some(AmbientKind::Fireflies),
+            Self::WindowSunlight => Some(AmbientKind::WindowSunlight),
+            Self::Frost => Some(AmbientKind::Frost),
+            Self::Lighthouse => Some(AmbientKind::Lighthouse),
+            Self::PaperFold => Some(AmbientKind::PaperFold),
+            Self::Embroidery => Some(AmbientKind::Embroidery),
+            Self::PrimeConstellations => Some(AmbientKind::PrimeConstellations),
+            Self::Wallpaper => Some(AmbientKind::Wallpaper),
+            Self::UnfinishedCircle => Some(AmbientKind::UnfinishedCircle),
+            Self::NeedleThreads => Some(AmbientKind::NeedleThreads),
+            Self::HesitatingInk => Some(AmbientKind::HesitatingInk),
+            Self::CropCircles => Some(AmbientKind::CropCircles),
+            Self::DelayedReflection => Some(AmbientKind::DelayedReflection),
+            Self::AlmostTouching => Some(AmbientKind::AlmostTouching),
+            Self::HiddenWheel => Some(AmbientKind::HiddenWheel),
             Self::Graph => Some(AmbientKind::Graph),
             Self::Pi => Some(AmbientKind::Pi),
             Self::Earthquakes => Some(AmbientKind::Earthquakes),
@@ -293,6 +354,8 @@ pub enum AnimationPlaybackMode {
 pub struct AnimationSettings {
     pub enabled: bool,
     pub kind: AnimationKind,
+    pub source: crate::animation_plugins::AnimationSourceTab,
+    pub plugin: crate::animation_plugins::PluginPreferences,
     pub semantic_scope: SemanticScope,
     pub playback_mode: AnimationPlaybackMode,
     pub loop_seconds: u16,
@@ -332,6 +395,8 @@ impl Default for AnimationSettings {
         Self {
             enabled: false,
             kind: AnimationKind::default(),
+            source: Default::default(),
+            plugin: Default::default(),
             semantic_scope: SemanticScope::default(),
             playback_mode: AnimationPlaybackMode::Loop,
             loop_seconds: 60,
@@ -505,6 +570,8 @@ struct AmbientRenderKey {
     width: u16,
     height: u16,
     elapsed: Duration,
+    /// Moves on whenever the screen occupancy a mask-aware scene saw changed.
+    occupancy_revision: u64,
 }
 
 /// One screen-sized field: a Braille cell grid plus, for hosted scenes that
@@ -530,14 +597,22 @@ pub struct AnimationFrame {
     host: AmbientHost,
     last_ambient: Option<AmbientRenderKey>,
     /// Braille bits actually committed by safe_target during composition.
+    #[cfg(test)]
     composed_bits: Vec<u8>,
+    #[cfg(test)]
     composed_key: Option<AmbientRenderKey>,
     pointer: Option<[f32; 2]>,
+    occupancy: Option<std::sync::Arc<ilium_ambient::OccupancyMask>>,
+    occupancy_revision: u64,
     wikipedia: WikipediaPresentation,
     is_wikipedia: bool,
 }
 
 impl AnimationFrame {
+    pub fn configure_resources(&mut self, resources: ilium_ambient::resources::AmbientResources) {
+        self.host.configure_resources(resources);
+    }
+
     pub fn width(&self) -> u16 {
         self.width
     }
@@ -555,6 +630,16 @@ impl AnimationFrame {
         self.pointer = position
             .filter(|point| point.iter().all(|coordinate| coordinate.is_finite()))
             .map(|point| point.map(|coordinate| coordinate.clamp(0.0, 1.0)));
+    }
+
+    /// Screen occupancy for mask-aware scenes. `revision` changes with the mask.
+    pub fn set_occupancy(
+        &mut self,
+        mask: Option<std::sync::Arc<ilium_ambient::OccupancyMask>>,
+        revision: u64,
+    ) {
+        self.occupancy = mask;
+        self.occupancy_revision = revision;
     }
 
     pub fn host_mut(&mut self) -> &mut AmbientHost {
@@ -575,8 +660,14 @@ impl AnimationFrame {
         self.is_wikipedia = false;
         self.has_cell_colors = false;
         self.last_ambient = None;
-        self.composed_key = None;
-        self.composed_bits.fill(0);
+        #[cfg(test)]
+        {
+            #[cfg(test)]
+            {
+                self.composed_key = None;
+                self.composed_bits.fill(0);
+            }
+        }
         self.raster.owner_ids.fill(0);
         self.last_geometry = None;
         self.cells.fill(0);
@@ -661,8 +752,11 @@ impl AnimationFrame {
             self.is_wikipedia = true;
             self.last_geometry = None;
             self.last_ambient = None;
-            self.composed_key = None;
-            self.composed_bits.fill(0);
+            #[cfg(test)]
+            {
+                self.composed_key = None;
+                self.composed_bits.fill(0);
+            }
             if width != self.width || height != self.height {
                 self.resize(width, height);
             }
@@ -683,8 +777,11 @@ impl AnimationFrame {
         self.host.release();
         self.has_cell_colors = false;
         self.last_ambient = None;
-        self.composed_key = None;
-        self.composed_bits.fill(0);
+        #[cfg(test)]
+        {
+            self.composed_key = None;
+            self.composed_bits.fill(0);
+        }
         let key = FrameKey {
             kind: settings.kind,
             controls: settings.scene_sliders().map(|slider| slider.value),
@@ -735,6 +832,7 @@ impl AnimationFrame {
         // The raster is about to hold hosted-scene pixels, not the built-in
         // scene the geometry key describes.
         self.last_geometry = None;
+        self.host.set_palette(settings.appearance.scene_palette());
         let generation = self.host.sync(kind, &settings.ambient, elapsed);
         let key = AmbientRenderKey {
             generation,
@@ -742,6 +840,11 @@ impl AnimationFrame {
             width,
             height,
             elapsed,
+            occupancy_revision: if self.host.wants_occupancy() {
+                self.occupancy_revision
+            } else {
+                0
+            },
         };
         let is_reused = self.last_ambient == Some(key);
         if !is_reused {
@@ -765,6 +868,9 @@ impl AnimationFrame {
                     now: SystemTime::now(),
                 };
                 self.host.pointer(self.pointer);
+                if let Some(mask) = self.occupancy.as_deref() {
+                    self.host.occupancy(mask);
+                }
                 self.host.render(&mut frame);
             }
             self.last_ambient = Some(key);
@@ -834,6 +940,7 @@ impl AnimationFrame {
 
     /// Store only cells the compositor actually wrote through safe_target.
     /// A final-stage caller must filter this mask after all later overlays.
+    #[cfg(test)]
     pub(crate) fn composed(&mut self, bits: Vec<u8>) {
         if self.is_wikipedia || self.last_ambient.is_none() || bits.len() != self.cells.len() {
             self.composed_key = None;
@@ -844,6 +951,7 @@ impl AnimationFrame {
         self.composed_bits = bits;
     }
 
+    #[cfg(test)]
     pub(crate) fn composed_bits(&self) -> &[u8] {
         &self.composed_bits
     }
@@ -851,6 +959,7 @@ impl AnimationFrame {
     /// Remove possible saved-scene attribution under a later opaque UI write.
     /// This is conservative for a region: unchanged or identical overpaint
     /// cannot be mistaken for scene-owned ink.
+    #[cfg(test)]
     pub(crate) fn occlude_composed(&mut self, screen: Rect, region: Rect) {
         if self.composed_key.is_none()
             || self.composed_bits.len() != usize::from(screen.width) * usize::from(screen.height)
@@ -868,6 +977,7 @@ impl AnimationFrame {
 
     /// Late overlays without a cheap exact paint rectangle withhold this
     /// draw's receipt. The next draw can still credit the same cached raster.
+    #[cfg(test)]
     pub(crate) fn discard_composed_receipt(&mut self) {
         self.composed_key = None;
         self.composed_bits.fill(0);
@@ -875,6 +985,7 @@ impl AnimationFrame {
 
     /// The sole acknowledgement handoff. `surviving` must be produced after
     /// every overlay and a successful terminal flush for this exact frame.
+    #[cfg(test)]
     pub(crate) fn presented_final(&mut self, surviving: &[u8]) {
         const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
         let Some(key) = self.composed_key else {
@@ -1046,6 +1157,7 @@ mod paint_receipt_tests {
             width: 1,
             height: 1,
             elapsed: Duration::ZERO,
+            occupancy_revision: 0,
         };
         frame.last_ambient = Some(key);
         assert!(frame.raster.owned_dot(0, 0, 1.0, 7));

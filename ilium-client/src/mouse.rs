@@ -105,7 +105,19 @@ fn trace_mouse_event(app: &App, mouse: &MouseEvent) {
 
 /// Top-level mouse dispatch, called for every `Event::Mouse`.
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    if !app.pointer_geometry_is_current() {
+        // A completed menu action changes mode before its matching release.
+        // Discard that stale release without replacing the action's result.
+        if !matches!(mouse.kind, MouseEventKind::Up(_)) {
+            app.status_message =
+                Some("Waiting for terminal presentation before pointer input".into());
+        }
+        return;
+    }
     if crate::onboarding::integration::handle_mouse(app, mouse) {
+        return;
+    }
+    if app.handle_plugin_permission_mouse(mouse) {
         return;
     }
     trace_mouse_event(app, &mouse);
@@ -118,6 +130,55 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
 
     if ends_tree_double_click_pair(app, &mouse, position) {
         app.last_tree_click = None;
+    }
+
+    if matches!(app.mode, Mode::ValueDialog(_)) {
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("matched value dialog");
+        };
+        let screen = app.layout.screen_area;
+        let outcome = match mouse.kind {
+            _ if host.is_saving() => crate::value_dialog::DialogOutcome::Continue,
+            MouseEventKind::Down(MouseButton::Left) => host.dialog.handle_pointer(
+                screen,
+                position,
+                crate::value_control::PointerButton::Left,
+            ),
+            MouseEventKind::Down(MouseButton::Right) => host.dialog.handle_pointer(
+                screen,
+                position,
+                crate::value_control::PointerButton::Right,
+            ),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                match &mut host.dialog {
+                    crate::value_dialog::ValueDialogState::Choice(choice)
+                        if crate::value_dialog::dialog_layout(screen)
+                            .document
+                            .contains(position) =>
+                    {
+                        choice.scroll_by(
+                            screen,
+                            if mouse.kind == MouseEventKind::ScrollUp {
+                                -3
+                            } else {
+                                3
+                            },
+                        )
+                    }
+                    _ => {}
+                }
+                crate::value_dialog::DialogOutcome::Continue
+            }
+            _ => crate::value_dialog::DialogOutcome::Continue,
+        };
+        app.finish_value_dialog(host, outcome);
+        return;
+    }
+
+    // Holding the Smart Copy light key over a terminal starts the model-free
+    // selection mode; the triggering event is consumed.
+    if app.try_start_smart_copy_light(&mouse, position) {
+        return;
     }
 
     // Smart Copy owns mouse events for the frozen pane, including releases
@@ -303,6 +364,52 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_create_split_members_mouse(app, state, mouse);
         return;
     }
+    if let Mode::TextTriggerDialog(state) = &app.mode {
+        let control = crate::text_trigger_dialog::target_control(app.layout.screen_area, state);
+        if control.geometry().row.contains(position)
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+            )
+        {
+            let Mode::TextTriggerDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+            else {
+                unreachable!("matched trigger dialog");
+            };
+            state.focus = crate::text_trigger_dialog::TextTriggerFocus::Target;
+            let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+                crate::value_control::PointerButton::Right
+            } else {
+                crate::value_control::PointerButton::Left
+            };
+            match control.hit(position, button) {
+                Some(crate::value_control::ControlAction::OpenChoices) => {
+                    app.begin_trigger_scope_dialog(state)
+                }
+                Some(
+                    action @ (crate::value_control::ControlAction::NextChoice
+                    | crate::value_control::ControlAction::PreviousChoice),
+                ) => {
+                    let choices = ilium_ipc::TextTriggerTarget::ALL;
+                    let index = choices
+                        .iter()
+                        .position(|value| *value == state.target)
+                        .unwrap_or(0);
+                    let direction = if action == crate::value_control::ControlAction::PreviousChoice
+                    {
+                        -1
+                    } else {
+                        1
+                    };
+                    state.target = choices
+                        [(index as i32 + direction).rem_euclid(choices.len() as i32) as usize];
+                    app.mode = Mode::TextTriggerDialog(state);
+                }
+                _ => app.mode = Mode::TextTriggerDialog(state),
+            }
+            return;
+        }
+    }
     if matches!(app.mode, Mode::CreateBoard(_)) {
         let Mode::CreateBoard(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::CreateBoard");
@@ -425,6 +532,19 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
 }
 
 fn handle_smart_copy_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
+    if let Some(light_key) = app.smart_copy_light_key() {
+        // Terminals report held modifiers on mouse events but not the key
+        // release itself, so an event without the modifier means "released".
+        if !mouse.modifiers.contains(light_key.modifier()) {
+            app.finish_smart_copy_light();
+            return;
+        }
+        app.note_smart_copy_light_key_held(Instant::now());
+        if app.smart_copy_session.is_none() {
+            // The frame is still being captured; nothing to hover yet.
+            return;
+        }
+    }
     let Some(pane_id) = app
         .smart_copy_session
         .as_ref()
@@ -572,7 +692,9 @@ fn handle_agent_setup_prompt_mouse(app: &mut App, mouse: MouseEvent) {
             app.mode = Mode::AgentSetupPrompt(state)
         }
         crate::setup_prompt::SetupPromptOutcome::Apply { chatroom, progress } => {
+            app.mode = Mode::AgentSetupPrompt(state.clone());
             if app.apply_agent_setup_prompt(&state.scope, chatroom, progress) {
+                app.mode = Mode::Normal;
                 app.maybe_show_agent_setup_prompt();
             } else {
                 app.mode = Mode::AgentSetupPrompt(state);
@@ -653,15 +775,26 @@ fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
     }
     let position = Position::new(mouse.column, mouse.row);
     let screen = app.layout.screen_area;
-    let Mode::LocationPicker(picker) = &mut app.mode else {
-        return;
+    let mut picker = match std::mem::replace(&mut app.mode, Mode::Normal) {
+        Mode::LocationPicker(picker) => picker,
+        other => {
+            app.mode = other;
+            return;
+        }
     };
     match picker.click(position, screen) {
-        PickerOutcome::Continue => {}
+        PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
         PickerOutcome::Cancel => app.pop_modal(),
         PickerOutcome::Confirm(location) => {
-            app.pop_modal();
-            app.settings_set_location(location);
+            match app.confirm_location_picker(&mut picker, location) {
+                Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
+                Ok(()) => app.pop_modal(),
+                Err(error) => {
+                    picker.status = Some(error.clone());
+                    app.status_message = Some(error);
+                    app.mode = Mode::LocationPicker(picker);
+                }
+            }
         }
     }
 }
@@ -811,7 +944,11 @@ fn handle_create_split_members_mouse(
 /// Selects tree rows, opens the right-click menu, scrolls, and handles the
 /// toolbar/row hover controls.
 fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
-    app.leave_pane_focus();
+    // The press may focus a terminal leaf. Its release must finish the gesture
+    // without reversing that focus and routing recalled-prompt keys to the tree.
+    if !matches!(mouse.kind, MouseEventKind::Up(_)) {
+        app.leave_pane_focus();
+    }
     update_tree_hover(app, position);
 
     if let Some(popover) = &app.agent_popover {
@@ -847,7 +984,7 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         return;
     }
 
-    if let Some(action) = tree_ui::toolbar_action_at(app.layout.tree_area, position) {
+    if let Some(action) = app.emitted_tree_toolbar_at(position) {
         if let TreeToolbarAction::Agent(provider) = action {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
                 if let Some((_, anchor)) = tree_ui::toolbar_button_rects(app.layout.tree_area)
@@ -866,21 +1003,12 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         return;
     }
 
-    if let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 0) {
-        if let Some(action) = tree_ui::row_action_at(
-            &app.tree,
-            hit.id,
-            app.layout.tree_area,
-            hit.row,
-            position,
-            app.ui_settings.show_tree_row_management_controls,
-        ) {
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                app.last_tree_click = None;
-                handle_tree_row_action(app, hit.id, action);
-            }
-            return;
+    if let Some((hit, action)) = app.emitted_tree_action_at(position) {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            app.last_tree_click = None;
+            handle_tree_row_action(app, hit.id, action);
         }
+        return;
     }
 
     match mouse.kind {
@@ -900,18 +1028,22 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
             let target =
-                tree_ui::chatroom_project(&app.tree, selected_target).unwrap_or(selected_target);
+                tree_ui::chatroom_project(&app.tree, selected_target, &app.chatroom_projects)
+                    .unwrap_or(selected_target);
             app.select_node(target);
             app.open_context_menu(target, mouse.column, mouse.row);
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(hit) = app.tree_node_at(position) {
-                if let Some(project_id) = tree_ui::chatroom_project(&app.tree, hit.id) {
+                if let Some(project_id) =
+                    tree_ui::chatroom_project(&app.tree, hit.id, &app.chatroom_projects)
+                {
                     app.last_tree_click = None;
                     app.show_chatroom(project_id);
                     return;
                 }
-                if let Some(entry) = tree_ui::folder_entry(&app.tree, hit.id) {
+                if let Some(entry) = tree_ui::folder_entry(&app.tree, hit.id, &app.sidebar_snapshot)
+                {
                     app.last_tree_click = None;
                     app.select_tree_path(entry.identifier_path);
                     if entry.is_directory {
@@ -1073,8 +1205,12 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
     app.select_node(id);
     match action {
         TreeRowAction::Rename => app.action_start_rename(),
-        TreeRowAction::MoveUp => app.request_move(id, ilium_core::TreeMoveDirection::Up),
-        TreeRowAction::MoveDown => app.request_move(id, ilium_core::TreeMoveDirection::Down),
+        TreeRowAction::MoveUp => {
+            app.request_move(id, ilium_core::TreeMoveDirection::Up);
+        }
+        TreeRowAction::MoveDown => {
+            app.request_move(id, ilium_core::TreeMoveDirection::Down);
+        }
         TreeRowAction::Close => app.action_close_selected(),
         TreeRowAction::Retitle => app.action_request_retitle(id),
         TreeRowAction::ProjectRestructure => app.action_request_project_restructure(id),
@@ -1403,18 +1539,41 @@ fn handle_create_agent_from_line_mouse(
 
     let layout = crate::agent_from_line::dialog_layout(app.layout.screen_area);
     let position = Position::new(mouse.column, mouse.row);
+    let control = crate::agent_from_line::provider_control(app.layout.screen_area, &state);
+    if control.geometry().row.contains(position)
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+        )
+    {
+        state.focus = CreateAgentFocus::AgentType;
+        let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+            crate::value_control::PointerButton::Right
+        } else {
+            crate::value_control::PointerButton::Left
+        };
+        match control.hit(position, button) {
+            Some(crate::value_control::ControlAction::OpenChoices) => {
+                app.begin_agent_from_line_provider_dialog(state)
+            }
+            Some(crate::value_control::ControlAction::PreviousChoice) => {
+                state.agent_type = state.agent_type.stepped(-1);
+                app.mode = Mode::CreateAgentFromLine(state);
+            }
+            Some(crate::value_control::ControlAction::NextChoice) => {
+                state.agent_type = state.agent_type.stepped(1);
+                app.mode = Mode::CreateAgentFromLine(state);
+            }
+            _ => app.mode = Mode::CreateAgentFromLine(state),
+        }
+        return;
+    }
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::CreateAgentFromLine(state);
         return;
     }
     if !layout.popup.contains(position) {
         app.mode = Mode::Normal;
-        return;
-    }
-    if let Some(agent_type) = crate::agent_from_line::agent_type_at(layout.agent_row, position) {
-        state.agent_type = agent_type;
-        state.focus = CreateAgentFocus::AgentType;
-        app.mode = Mode::CreateAgentFromLine(state);
         return;
     }
     let prompt_inner = Rect::new(
@@ -1459,6 +1618,34 @@ fn handle_worktree_manager_mouse(
         app.mode = Mode::WorktreeManager(state);
         return;
     }
+    if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind {
+        if let Some(control) =
+            crate::worktree_manager::branch_control(app.layout.screen_area, &state)
+        {
+            let position = Position::new(mouse.column, mouse.row);
+            if control.geometry().row.contains(position) {
+                use crate::value_control::{ControlAction, PointerButton};
+                let pointer = if button == MouseButton::Left {
+                    PointerButton::Left
+                } else {
+                    PointerButton::Right
+                };
+                match control.hit(position, pointer) {
+                    Some(ControlAction::OpenChoices) => {
+                        app.mode = Mode::WorktreeManager(state);
+                        app.begin_prune_branch_dialog();
+                        return;
+                    }
+                    Some(ControlAction::PreviousChoice | ControlAction::NextChoice) => {
+                        state.toggle_branch_policy()
+                    }
+                    _ => {}
+                }
+                app.mode = Mode::WorktreeManager(state);
+                return;
+            }
+        }
+    }
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::WorktreeManager(state);
         return;
@@ -1497,13 +1684,51 @@ fn handle_create_agent_workspace_mouse(
     mut state: Box<crate::worktree_dialog::WorktreeDialogState>,
     mouse: MouseEvent,
 ) {
-    use crate::worktree_dialog::{
-        self, WorktreeClosePolicy, WorktreeDialogFocus, WorktreeDialogStatus,
-    };
+    use crate::worktree_dialog::{self, WorktreeDialogFocus, WorktreeDialogStatus};
     use ratatui_textarea::CursorMove;
 
     let position = Position::new(mouse.column, mouse.row);
     let layout = worktree_dialog::dialog_layout(app.layout.screen_area, &state);
+    if matches!(state.status, WorktreeDialogStatus::Creating(_)) {
+        app.mode = Mode::CreateAgentWorkspace(state);
+        return;
+    }
+    if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind {
+        use crate::value_control::{ControlAction, PointerButton};
+        for field in crate::value_worktree::WorkspaceChoice::ALL {
+            if field == crate::value_worktree::WorkspaceChoice::ClosePolicy && !state.advanced {
+                continue;
+            }
+            let control = field.control(app.layout.screen_area, &state);
+            if !control.geometry().row.contains(position) {
+                continue;
+            }
+            let pointer = if button == MouseButton::Left {
+                PointerButton::Left
+            } else {
+                PointerButton::Right
+            };
+            state.focus = field.focus();
+            match control.hit(position, pointer) {
+                Some(ControlAction::OpenChoices) => app.begin_workspace_choice_dialog(state, field),
+                Some(ControlAction::NextChoice | ControlAction::PreviousChoice) => {
+                    let direction =
+                        if control.hit(position, pointer) == Some(ControlAction::NextChoice) {
+                            1
+                        } else {
+                            -1
+                        };
+                    if let Err(error) = field.step(&mut state, direction) {
+                        app.status_message = Some(error);
+                    }
+                    app.mode = Mode::CreateAgentWorkspace(state);
+                }
+                _ => app.mode = Mode::CreateAgentWorkspace(state),
+            }
+            return;
+        }
+    }
+
     if matches!(
         mouse.kind,
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -1521,10 +1746,6 @@ fn handle_create_agent_workspace_mouse(
         app.mode = Mode::CreateAgentWorkspace(state);
         return;
     }
-    if matches!(state.status, WorktreeDialogStatus::Creating(_)) {
-        app.mode = Mode::CreateAgentWorkspace(state);
-        return;
-    }
     if !layout.popup.contains(position) {
         app.mode = Mode::Normal;
         return;
@@ -1535,11 +1756,7 @@ fn handle_create_agent_workspace_mouse(
     };
     state.focus = focus;
     match focus {
-        WorktreeDialogFocus::Provider => {
-            if let Some(provider) = worktree_dialog::provider_at(&layout, position) {
-                state.provider = provider;
-            }
-        }
+        WorktreeDialogFocus::Provider => {}
         WorktreeDialogFocus::Prompt => {
             let inner = Rect::new(
                 layout.prompt_area.x.saturating_add(1),
@@ -1554,24 +1771,14 @@ fn handle_create_agent_workspace_mouse(
                 ));
             }
         }
-        WorktreeDialogFocus::Where => {
-            if let Some(mode) = worktree_dialog::mode_at(&layout, position) {
-                state.set_mode(mode);
-            }
-        }
+        WorktreeDialogFocus::Where => {}
         WorktreeDialogFocus::ExistingWorktree => {
             if let Some(index) = worktree_dialog::existing_row_at(&state, &layout, position) {
                 state.selected_existing = index;
             }
         }
         WorktreeDialogFocus::Advanced => state.advanced = !state.advanced,
-        WorktreeDialogFocus::ClosePolicy => {
-            state.close_policy = if state.close_policy == WorktreeClosePolicy::Keep {
-                WorktreeClosePolicy::OfferRemovalWhenSafe
-            } else {
-                WorktreeClosePolicy::Keep
-            };
-        }
+        WorktreeDialogFocus::ClosePolicy => {}
         WorktreeDialogFocus::Create => {
             app.submit_create_agent_workspace(state);
             return;
@@ -1604,14 +1811,41 @@ fn handle_scheduled_input_mouse(
         return;
     }
     if layout.hours.contains(position) {
-        state.focus = ScheduledInputFocus::Hours;
-        place_prompt_cursor(&mut state.hours, layout.hours, position);
+        let error = state
+            .duration_control(ScheduledInputFocus::Hours, layout.hours)
+            .hit(position, crate::value_control::PointerButton::Left)
+            .and_then(|action| {
+                state
+                    .apply_duration_control(ScheduledInputFocus::Hours, action)
+                    .err()
+            });
+        if let Some(message) = error {
+            app.status_message = Some(message);
+        }
     } else if layout.minutes.contains(position) {
-        state.focus = ScheduledInputFocus::Minutes;
-        place_prompt_cursor(&mut state.minutes, layout.minutes, position);
+        let error = state
+            .duration_control(ScheduledInputFocus::Minutes, layout.minutes)
+            .hit(position, crate::value_control::PointerButton::Left)
+            .and_then(|action| {
+                state
+                    .apply_duration_control(ScheduledInputFocus::Minutes, action)
+                    .err()
+            });
+        if let Some(message) = error {
+            app.status_message = Some(message);
+        }
     } else if layout.seconds.contains(position) {
-        state.focus = ScheduledInputFocus::Seconds;
-        place_prompt_cursor(&mut state.seconds, layout.seconds, position);
+        let error = state
+            .duration_control(ScheduledInputFocus::Seconds, layout.seconds)
+            .hit(position, crate::value_control::PointerButton::Left)
+            .and_then(|action| {
+                state
+                    .apply_duration_control(ScheduledInputFocus::Seconds, action)
+                    .err()
+            });
+        if let Some(message) = error {
+            app.status_message = Some(message);
+        }
     } else if layout.text.contains(position) {
         state.focus = ScheduledInputFocus::Text;
         place_prompt_cursor(&mut state.text, layout.text, position);
@@ -1631,23 +1865,54 @@ fn handle_prompt_queue_mouse(
     mut state: Box<PromptQueueDialogState>,
     mouse: MouseEvent,
 ) {
+    let position = Position::new(mouse.column, mouse.row);
+    let layout = crate::prompt_queue::dialog_layout(app.layout.screen_area);
+    if matches!(
+        mouse.kind,
+        MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+    ) && layout.delivery.contains(position)
+    {
+        let button = if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
+            crate::value_control::PointerButton::Right
+        } else {
+            crate::value_control::PointerButton::Left
+        };
+        if let Some(action) = state
+            .delivery_control(layout.delivery)
+            .hit(position, button)
+        {
+            state.focus = PromptQueueFocus::Delivery;
+            match action {
+                crate::value_control::ControlAction::PreviousChoice => state.cycle_delivery(-1),
+                crate::value_control::ControlAction::NextChoice => state.cycle_delivery(1),
+                crate::value_control::ControlAction::OpenChoices => {
+                    app.begin_queue_delivery_dialog(state);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        app.mode = Mode::QueuePrompt(state);
+        return;
+    }
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::QueuePrompt(state);
         return;
     }
-    let position = Position::new(mouse.column, mouse.row);
-    let layout = crate::prompt_queue::dialog_layout(app.layout.screen_area);
     if !layout.popup.contains(position) {
         app.mode = Mode::Normal;
         return;
     }
     if layout.text.contains(position) {
         state.focus = PromptQueueFocus::Text;
-    } else if layout.delivery.contains(position) {
-        state.focus = PromptQueueFocus::Delivery;
-        state.cycle_delivery(1);
     } else if layout.times.contains(position) {
-        state.focus = PromptQueueFocus::Times;
+        let error = state
+            .times_control(layout.times)
+            .hit(position, crate::value_control::PointerButton::Left)
+            .and_then(|action| state.apply_times_control(action).err());
+        if let Some(message) = error {
+            app.status_message = Some(message);
+        }
     } else if layout.enqueue_button.contains(position) {
         state.focus = PromptQueueFocus::EnqueueButton;
         app.commit_queued_prompt(state);
@@ -1688,7 +1953,9 @@ fn handle_create_group_mouse(app: &mut App, state: CreateGroupState, mouse: Mous
         Some(index) => {
             let mut state = state;
             state.selected_index = index;
-            app.commit_create_group(&state);
+            if !app.commit_create_group(&state) {
+                app.mode = Mode::CreateGroup(state);
+            }
         }
         None => app.mode = Mode::CreateGroup(state),
     }
@@ -1701,6 +1968,44 @@ fn handle_create_board_mouse(
     mut state: crate::app::CreateBoardState,
     mouse: MouseEvent,
 ) {
+    let position = Position::new(mouse.column, mouse.row);
+    let control = crate::modal::create_board_storage_control(
+        app.layout.screen_area,
+        state.storage_kind.label(),
+    );
+    if control.geometry().row.contains(position)
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+        )
+    {
+        let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+            crate::value_control::PointerButton::Right
+        } else {
+            crate::value_control::PointerButton::Left
+        };
+        match control.hit(position, button) {
+            Some(crate::value_control::ControlAction::OpenChoices) => {
+                app.begin_board_storage_dialog(state)
+            }
+            Some(
+                crate::value_control::ControlAction::PreviousChoice
+                | crate::value_control::ControlAction::NextChoice,
+            ) => {
+                state.storage_kind = match state.storage_kind {
+                    crate::app::BoardStorageKind::Folder => {
+                        crate::app::BoardStorageKind::MarkdownFile
+                    }
+                    crate::app::BoardStorageKind::MarkdownFile => {
+                        crate::app::BoardStorageKind::Folder
+                    }
+                };
+                app.mode = Mode::CreateBoard(state);
+            }
+            _ => app.mode = Mode::CreateBoard(state),
+        }
+        return;
+    }
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         app.mode = Mode::CreateBoard(state);
         return;
@@ -1715,14 +2020,6 @@ fn handle_create_board_mouse(
     if layout.name_box.contains(position) {
         state.editing_path = false;
         place_prompt_cursor(&mut state.name, layout.name_box, position);
-        app.mode = Mode::CreateBoard(state);
-        return;
-    }
-    if layout.storage_row.contains(position) {
-        state.storage_kind = match state.storage_kind {
-            crate::app::BoardStorageKind::Folder => crate::app::BoardStorageKind::MarkdownFile,
-            crate::app::BoardStorageKind::MarkdownFile => crate::app::BoardStorageKind::Folder,
-        };
         app.mode = Mode::CreateBoard(state);
         return;
     }
@@ -1759,8 +2056,9 @@ fn update_animation_hover(
     mouse: MouseEvent,
     position: Position,
 ) {
-    let is_animations_controls =
-        state.tab == crate::app::SettingsTab::Animations && !state.animation_fullscreen;
+    let is_animations_controls = state.tab == crate::app::SettingsTab::Animations
+        && !state.animation_fullscreen
+        && state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Native;
     if !is_animations_controls || !matches!(mouse.kind, MouseEventKind::Moved) {
         app.clear_animation_hover();
         return;
@@ -1855,6 +2153,71 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
     }
 
+    if state.tab == crate::app::SettingsTab::Icons && state.icon_picker.is_none() {
+        if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind
+        {
+            use crate::value_control::{ControlAction, PointerButton};
+            let pointer = if button == MouseButton::Left {
+                PointerButton::Left
+            } else {
+                PointerButton::Right
+            };
+            for (index, target) in crate::agent_monitoring::general_icon_targets()
+                .into_iter()
+                .enumerate()
+            {
+                let Some(control) = crate::settings_ui::icon_assignment_control(
+                    layout.content_area,
+                    state.scroll,
+                    index,
+                    app.ui_settings.icons.glyph(target),
+                ) else {
+                    continue;
+                };
+                if !control.geometry().row.contains(position) {
+                    continue;
+                }
+                match control.hit(position, pointer) {
+                    Some(ControlAction::OpenChoices) => {
+                        state.selected_row = index;
+                        state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                    }
+                    Some(ControlAction::PreviousChoice | ControlAction::NextChoice) => {
+                        state.selected_row = index;
+                        app.settings_cycle_icon(
+                            target,
+                            if control.hit(position, pointer) == Some(ControlAction::PreviousChoice)
+                            {
+                                -1
+                            } else {
+                                1
+                            },
+                        );
+                    }
+                    _ => {}
+                }
+                app.mode = Mode::Settings(state);
+                return;
+            }
+            if button == MouseButton::Right {
+                if let Some(hit) =
+                    crate::settings_ui::icons_table_hit(layout.content_area, state.scroll, position)
+                {
+                    match hit.action {
+                        crate::settings_ui::IconTableAction::OpenCatalogue => {
+                            state.icon_picker = Some(crate::app::IconPickerState::new(hit.target))
+                        }
+                        crate::settings_ui::IconTableAction::CycleSuggestion => {
+                            app.settings_cycle_icon(hit.target, -1)
+                        }
+                    }
+                    app.mode = Mode::Settings(state);
+                    return;
+                }
+            }
+        }
+    }
+
     // The full-screen animation preview hides every control: any click returns.
     if state.tab == crate::app::SettingsTab::Animations && state.animation_fullscreen {
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
@@ -1862,6 +2225,148 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
         app.mode = Mode::Settings(state);
         return;
+    }
+
+    if state.tab == crate::app::SettingsTab::Animations && layout.content_area.contains(position) {
+        use crate::animation_plugins::{AnimationSourceTab, PluginEditorKind, PluginPanelRow};
+        if let Some(mut editor) = state.plugin_editor.take() {
+            let mut close = false;
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                match crate::animation_settings_ui::plugin_editor_action_at(
+                    layout.content_area,
+                    position,
+                ) {
+                    Some(crate::animation_settings_ui::PluginEditorAction::Apply) => {
+                        match app.submit_plugin_editor(&editor) {
+                            Ok(()) => close = true,
+                            Err(error) => editor.error = Some(error),
+                        }
+                    }
+                    Some(crate::animation_settings_ui::PluginEditorAction::Cancel) => close = true,
+                    None => {}
+                }
+                if let Some(index) = crate::animation_settings_ui::plugin_editor_option_at(
+                    layout.content_area,
+                    &editor,
+                    position,
+                ) {
+                    if let PluginEditorKind::Choice { cursor, .. } = &mut editor.kind {
+                        *cursor = index;
+                    }
+                }
+            }
+            if !close {
+                state.plugin_editor = Some(editor);
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if let Some(tab) = crate::animation_plugins::source_tabs(
+                crate::animation_settings_ui::source_tab_area(layout.content_area),
+            )
+            .hit_test(position)
+            {
+                state.animation_source_tab = tab;
+                state.animation_slider_drag = None;
+                if tab == AnimationSourceTab::Plugin {
+                    app.request_plugin_catalogue();
+                }
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+        if state.animation_source_tab == AnimationSourceTab::Plugin {
+            let model = app.plugin_panel_model();
+            let area = crate::animation_settings_ui::plugin_panel_area(layout.content_area);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
+                    if let Some(row) = crate::animation_plugins::plugin_row_at(
+                        area,
+                        state.plugin_panel.scroll,
+                        model.rows.len(),
+                        position,
+                    ) {
+                        state.plugin_panel.cursor = row;
+                        if let Some(control) = crate::value_plugin::panel_control(
+                            app,
+                            area,
+                            &model,
+                            &state.plugin_panel,
+                            row,
+                        ) {
+                            use crate::value_control::{ControlAction, PointerButton};
+                            let button = if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
+                                PointerButton::Right
+                            } else {
+                                PointerButton::Left
+                            };
+                            if let Some(action) = control.hit(position, button) {
+                                match action {
+                                    ControlAction::PreviousChoice | ControlAction::Decrement => {
+                                        app.settings_adjust_plugin_row(row, -1)
+                                    }
+                                    ControlAction::NextChoice | ControlAction::Increment => {
+                                        app.settings_adjust_plugin_row(row, 1)
+                                    }
+                                    ControlAction::OpenChoices | ControlAction::EditNumber => {
+                                        if let Some(PluginPanelRow::Common(index)) =
+                                            model.rows.get(row)
+                                        {
+                                            let index = *index;
+                                            app.mode = Mode::Settings(state);
+                                            app.begin_animation_value_dialog(index);
+                                            return;
+                                        }
+                                        app.mode = Mode::Settings(state);
+                                        app.begin_plugin_value_dialog(row);
+                                        return;
+                                    }
+                                }
+                            }
+                        } else if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
+                            app.settings_adjust_plugin_row(row, -1);
+                        } else {
+                            if let Some(PluginPanelRow::Common(index)) = model.rows.get(row) {
+                                if matches!(
+                                    app.animation_row_model()
+                                        .view(*index)
+                                        .map(|view| &view.kind),
+                                    Some(
+                                        crate::animation_rows::RowKind::Choice
+                                            | crate::animation_rows::RowKind::Slider(_)
+                                    )
+                                ) {
+                                    let index = *index;
+                                    app.mode = Mode::Settings(state);
+                                    app.begin_animation_value_dialog(index);
+                                    return;
+                                }
+                            }
+                            if !app.begin_plugin_editor(&mut state, row) {
+                                app.settings_adjust_plugin_row(row, 1);
+                            }
+                        }
+                    }
+                }
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    let delta = usize::from(SETTINGS_WHEEL_SCROLL_LINES);
+                    state.plugin_panel.scroll = if mouse.kind == MouseEventKind::ScrollUp {
+                        state.plugin_panel.scroll.saturating_sub(delta)
+                    } else {
+                        state
+                            .plugin_panel
+                            .scroll
+                            .saturating_add(delta)
+                            .min(model.rows.len().saturating_sub(usize::from(area.height)))
+                    };
+                }
+                _ => {}
+            }
+            app.clear_animation_hover();
+            app.mode = Mode::Settings(state);
+            return;
+        }
     }
 
     update_animation_hover(app, &state, &layout, mouse, position);
@@ -1886,7 +2391,38 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         return;
     }
 
-    if let Some(picker) = state.icon_picker.take() {
+    if let Some(mut picker) = state.icon_picker.take() {
+        if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind
+        {
+            let control = crate::value_icon::column_control(app.layout.screen_area, &picker);
+            if control.geometry().row.contains(position) {
+                use crate::value_control::{ControlAction, PointerButton};
+                let pointer = if button == MouseButton::Left {
+                    PointerButton::Left
+                } else {
+                    PointerButton::Right
+                };
+                match control.hit(position, pointer) {
+                    Some(ControlAction::OpenChoices) => {
+                        state.icon_picker = Some(picker);
+                        app.mode = Mode::Settings(state);
+                        app.begin_icon_column_dialog();
+                        return;
+                    }
+                    Some(ControlAction::PreviousChoice | ControlAction::NextChoice) => {
+                        picker.column_mode = picker.column_mode.toggle();
+                        picker.scroll_row = crate::settings_ui::icon_picker_scroll_for_entry(
+                            app.layout.screen_area,
+                            &picker,
+                        );
+                    }
+                    _ => {}
+                }
+                state.icon_picker = Some(picker);
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
         if matches!(
             mouse.kind,
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
@@ -1918,7 +2454,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         let next_picker = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             match crate::settings_ui::icon_picker_hit(app.layout.screen_area, &picker, position) {
                 Some(crate::settings_ui::IconPickerHit::Close) => None,
-                Some(crate::settings_ui::IconPickerHit::ToggleColumnMode) => {
+                Some(crate::settings_ui::IconPickerHit::ColumnMode(_)) => {
                     let mut next_picker = picker;
                     next_picker.column_mode = next_picker.column_mode.toggle();
                     next_picker.scroll_row = crate::settings_ui::icon_picker_scroll_for_entry(
@@ -1955,6 +2491,193 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         state.icon_picker = next_picker;
         app.mode = Mode::Settings(state);
         return;
+    }
+
+    if matches!(
+        mouse.kind,
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Down(MouseButton::Right)
+    ) {
+        use crate::value_control::{ControlAction, PointerButton};
+        let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            PointerButton::Left
+        } else {
+            PointerButton::Right
+        };
+        if state.tab == crate::app::SettingsTab::Keyboard {
+            for field in crate::value_keyboard::KeyboardPrefix::ALL {
+                let Some(control) = field.settings_control(
+                    layout.content_area,
+                    state.scroll,
+                    app.keyboard_settings,
+                ) else {
+                    continue;
+                };
+                if !control.geometry().row.contains(position) {
+                    continue;
+                }
+                state.selected_row = field.row();
+                match control.hit(position, button) {
+                    Some(ControlAction::PreviousChoice) => app.step_keyboard_prefix(field, -1),
+                    Some(ControlAction::NextChoice) => app.step_keyboard_prefix(field, 1),
+                    Some(ControlAction::OpenChoices) => {
+                        app.mode = Mode::Settings(state);
+                        app.begin_keyboard_prefix_dialog(field);
+                        return;
+                    }
+                    _ => {}
+                }
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+        // A bounded inventory: unrecognized rows retain their own handlers.
+        let rows = crate::settings_ui::settings_number_row_count(app, state.tab);
+        for row in 0..rows {
+            if let Some((field, control)) =
+                crate::settings_ui::settings_choice_control(layout.content_area, app, &state, row)
+            {
+                if control.geometry().row.contains(position) {
+                    state.selected_row = row;
+                    match control.hit(position, button) {
+                        Some(ControlAction::PreviousChoice) => app.step_settings_choice(field, -1),
+                        Some(ControlAction::NextChoice) => app.step_settings_choice(field, 1),
+                        Some(ControlAction::OpenChoices) => {
+                            app.mode = Mode::Settings(state);
+                            app.begin_settings_choice_dialog(field);
+                            return;
+                        }
+                        _ => {}
+                    }
+                    app.mode = Mode::Settings(state);
+                    return;
+                }
+            }
+            let Some((field, control)) =
+                crate::settings_ui::settings_number_control(layout.content_area, app, &state, row)
+            else {
+                continue;
+            };
+            if !control.geometry().row.contains(position) {
+                continue;
+            }
+            state.selected_row = row;
+            match control.hit(position, button) {
+                Some(ControlAction::Decrement) => app.step_settings_number(field, -1),
+                Some(ControlAction::Increment) => app.step_settings_number(field, 1),
+                Some(ControlAction::EditNumber) => {
+                    app.mode = Mode::Settings(state);
+                    app.begin_settings_number_dialog(field);
+                    return;
+                }
+                _ => {}
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+    }
+
+    if state.tab == crate::app::SettingsTab::Animations {
+        use crate::value_control::{ControlAction, PointerButton};
+        let button = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => Some(PointerButton::Left),
+            MouseEventKind::Down(MouseButton::Right) => Some(PointerButton::Right),
+            _ => None,
+        };
+        if let Some((row, action)) = button.and_then(|button| {
+            crate::animation_settings_ui::value_hit(
+                layout.content_area,
+                &app.animation_row_model(),
+                crate::animation_settings_ui::Scrolls::of(&state),
+                position,
+                button,
+            )
+        }) {
+            state.selected_row = row;
+            state.animation_slider_drag = None;
+            match action {
+                ControlAction::PreviousChoice | ControlAction::Decrement => {
+                    app.settings_adjust_animation_row(row, -1)
+                }
+                ControlAction::NextChoice | ControlAction::Increment => {
+                    app.settings_adjust_animation_row(row, 1)
+                }
+                ControlAction::OpenChoices | ControlAction::EditNumber => {
+                    app.mode = Mode::Settings(state);
+                    app.begin_animation_value_dialog(row);
+                    return;
+                }
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if button.is_some() {
+            let model = app.animation_row_model();
+            if let Some(row) = (0..model.len()).find(|&row| {
+                crate::animation_settings_ui::value_control(
+                    layout.content_area,
+                    &model,
+                    row,
+                    crate::animation_settings_ui::Scrolls::of(&state),
+                )
+                .is_some_and(|control| control.geometry().row.contains(position))
+            }) {
+                state.selected_row = row;
+                state.animation_slider_drag = None;
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
+    }
+
+    if state.tab == crate::app::SettingsTab::Cost {
+        use crate::value_control::{ControlAction, PointerButton};
+        let button = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => Some(PointerButton::Left),
+            MouseEventKind::Down(MouseButton::Right) => Some(PointerButton::Right),
+            _ => None,
+        };
+        if let Some((index, row, action)) = button.and_then(|button| {
+            crate::cost_settings_ui::value_hit(
+                layout.content_area,
+                state.scroll,
+                position,
+                button,
+                app,
+            )
+        }) {
+            state.selected_row = index;
+            match action {
+                ControlAction::PreviousChoice | ControlAction::Decrement => {
+                    app.settings_adjust_cost_row(row, -1)
+                }
+                ControlAction::NextChoice | ControlAction::Increment => {
+                    app.settings_adjust_cost_row(row, 1)
+                }
+                ControlAction::OpenChoices | ControlAction::EditNumber => {
+                    app.mode = Mode::Settings(state);
+                    app.begin_cost_value_dialog(row);
+                    return;
+                }
+            }
+            app.mode = Mode::Settings(state);
+            return;
+        }
+        if button.is_some() {
+            let rows = crate::cost_settings_ui::rows(app);
+            let view =
+                crate::cost_settings_ui::view(app, state.selected_row, layout.content_area.width);
+            if let Some(span) = view.rows.iter().find(|span| {
+                crate::cost_settings_ui::value_control(layout.content_area, state.scroll, span, app)
+                    .is_some_and(|control| control.geometry().row.contains(position))
+            }) {
+                state.selected_row = rows
+                    .iter()
+                    .position(|row| *row == span.row)
+                    .unwrap_or(state.selected_row);
+                app.mode = Mode::Settings(state);
+                return;
+            }
+        }
     }
 
     match mouse.kind {
@@ -2274,7 +2997,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 {
                     state.selected_row = hit.index;
                     app.mode = Mode::Settings(state);
-                    app.settings_adjust_cost_row(hit.row, hit.direction);
+                    if app.cost_settings.number_spec(hit.row).is_none()
+                        && !crate::value_cost::is_choice(hit.row)
+                    {
+                        app.settings_adjust_cost_row(hit.row, hit.direction);
+                    }
                     return;
                 }
             } else if state.tab == crate::app::SettingsTab::ResetPlanning {
@@ -2572,8 +3299,11 @@ fn handle_explorer_mouse(
     }
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            app.request_new_editor(target, path);
-            app.mode = Mode::Normal;
+            if app.request_new_editor(target, path) {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::Explorer(overlay, target);
+            }
         }
         Ok(_) => app.mode = Mode::Explorer(overlay, target),
         Err(err) => {
@@ -2610,8 +3340,11 @@ fn handle_folder_explorer_mouse(
 ) {
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            app.request_new_folder(target, path);
-            app.mode = Mode::Normal;
+            if app.request_new_folder(target, path) {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::FolderExplorer(overlay, target);
+            }
         }
         Ok(_) => app.mode = Mode::FolderExplorer(overlay, target),
         Err(err) => {
@@ -2629,13 +3362,17 @@ fn handle_project_folder_explorer_mouse(
 ) {
     match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
         Ok(ExplorerOutcome::Picked(path)) => {
-            match selection {
+            let admitted = match selection {
                 crate::app::ProjectFolderSelection::NewProject => app.request_new_project(path),
                 crate::app::ProjectFolderSelection::ChangeProject(project_id) => {
                     app.request_change_project_folder(project_id, path)
                 }
+            };
+            if admitted {
+                app.mode = Mode::Normal;
+            } else {
+                app.mode = Mode::ProjectFolderExplorer(overlay, selection);
             }
-            app.mode = Mode::Normal;
         }
         Ok(_) => app.mode = Mode::ProjectFolderExplorer(overlay, selection),
         Err(err) => {
@@ -2643,6 +3380,26 @@ fn handle_project_folder_explorer_mouse(
             app.mode = Mode::ProjectFolderExplorer(overlay, selection);
         }
     }
+}
+
+/// A hit is valid only for the exact source instance/revision that reached the terminal.
+pub(crate) fn emitted_editor_position(
+    app: &App,
+    pane_id: ilium_core::NodeId,
+    position: ratatui::layout::Position,
+) -> Option<(usize, usize)> {
+    let source = app.emitted_editor_source(pane_id)?;
+    let crate::app::PaneRuntime::Editor(editor) = app.panes.get(&pane_id)? else {
+        return None;
+    };
+    if !std::sync::Arc::ptr_eq(&source.installed.key.identity, &editor.instance_identity())
+        || source.installed.key.revision != editor.content_revision()
+        || source.installed.key.path.as_path()
+            != editor.path.as_deref().unwrap_or(std::path::Path::new(""))
+    {
+        return None;
+    }
+    source.position(position.x, position.y)
 }
 
 #[cfg(test)]
@@ -3322,6 +4079,7 @@ mod markdown_board_context_mouse_tests {
             },
         );
 
+        app.settle_filesystem_for_test();
         let requests = app.take_outbound_requests();
         assert!(
             matches!(
@@ -3849,6 +4607,68 @@ mod shared_dialog_mouse_tests {
     }
 
     #[test]
+    fn line_provider_pointer_cycles_both_directions_and_picker_retains_prompt() {
+        use crate::agent_from_line::{
+            AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorSourceLine,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("line-provider".into(), directory.path().into());
+        app.set_screen_area(Rect::new(0, 0, 100, 30));
+        let mut state = CreateAgentFromLineState::new(
+            EditorSourceLine {
+                pane_id: NodeId(12),
+                path: directory.path().join("source.rs"),
+                line_number: 17,
+                text: "source line".into(),
+            },
+            ROOT_ID,
+        );
+        state.prompt =
+            ratatui_textarea::TextArea::from(["authored first line", "authored second line"]);
+        state.focus = CreateAgentFocus::AgentType;
+        let original_provider = state.agent_type;
+        let authored = state.prompt_text();
+        let geometry =
+            crate::agent_from_line::provider_control(app.layout.screen_area, &state).geometry();
+        app.mode = Mode::CreateAgentFromLine(Box::new(state));
+        click(&mut app, geometry.value);
+        assert!(
+            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == original_provider.stepped(1) && state.prompt_text() == authored)
+        );
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: geometry.value.x,
+                row: geometry.value.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == original_provider)
+        );
+        click(&mut app, geometry.open);
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("full provider catalog");
+        };
+        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("choice");
+        };
+        assert_eq!(choice.options().len(), AgentLaunchType::ALL.len());
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("catalog");
+        };
+        app.finish_value_dialog(
+            host,
+            crate::value_dialog::DialogOutcome::Choose("Codex".into()),
+        );
+        assert!(
+            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == AgentLaunchType::Codex && state.prompt_text() == authored)
+        );
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
     fn board_form_fields_and_create_button_are_fully_mouse_operable() {
         let project_path = std::env::temp_dir().join(format!(
             "ilium-board-dialog-mouse-{}-{}",
@@ -3869,7 +4689,11 @@ mod shared_dialog_mouse_tests {
         });
         let layout = crate::modal::create_board_dialog_layout(app.layout.screen_area);
 
-        click(&mut app, layout.storage_row);
+        let storage = crate::modal::create_board_storage_control(
+            app.layout.screen_area,
+            BoardStorageKind::Folder.label(),
+        );
+        click(&mut app, storage.geometry().next);
         assert!(matches!(
             &app.mode,
             Mode::CreateBoard(state)
@@ -3883,6 +4707,7 @@ mod shared_dialog_mouse_tests {
         ));
 
         click(&mut app, layout.actions.confirm_button);
+        app.settle_filesystem_for_test();
         assert!(board_path.is_file());
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
@@ -3928,6 +4753,7 @@ mod smart_copy_mouse_tests {
         app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::SmartCopy);
         let request = app.take_pending_smart_copy_request().unwrap();
         app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
+            retention: None,
             generation: request.generation,
             pane_id,
             update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
@@ -3961,6 +4787,209 @@ mod smart_copy_mouse_tests {
             row: position.y,
             modifiers: KeyModifiers::NONE,
         }
+    }
+
+    fn app_with_plain_terminal() -> (App, NodeId) {
+        let mut app = App::new("smart-copy-light-test".to_owned(), std::env::temp_dir());
+        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(4, 40);
+        view.feed(b"curl https://example.test/api\r\n");
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        (app, pane_id)
+    }
+
+    fn modified(kind: MouseEventKind, position: Position, modifiers: KeyModifiers) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: position.x,
+            row: position.y,
+            modifiers,
+        }
+    }
+
+    fn inside_pane(app: &App, pane_id: NodeId) -> Position {
+        let area = app.pane_viewport(pane_id).unwrap().content_area;
+        Position::new(area.x + 1, area.y)
+    }
+
+    #[test]
+    fn holding_the_light_key_selects_clicks_and_copies_on_release() {
+        let (mut app, pane_id) = app_with_plain_terminal();
+        let inside = inside_pane(&app, pane_id);
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, inside, KeyModifiers::CONTROL),
+        );
+        assert!(matches!(app.mode, Mode::SmartCopy));
+        assert!(app.smart_copy_light.is_some());
+        let session = app.smart_copy_session.as_ref().expect("session");
+        assert!(session.is_light);
+        assert!(
+            app.take_pending_smart_copy_request().is_none(),
+            "no model call"
+        );
+
+        let url = candidate_position(&app, pane_id);
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, url, KeyModifiers::CONTROL),
+        );
+        handle_mouse_event(
+            &mut app,
+            modified(
+                MouseEventKind::Up(MouseButton::Left),
+                url,
+                KeyModifiers::CONTROL,
+            ),
+        );
+        assert_eq!(app.smart_copy_session.as_ref().unwrap().selected_count(), 1);
+        assert!(
+            app.smart_copy_preview.is_none(),
+            "nothing is copied before release"
+        );
+
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, url, KeyModifiers::NONE),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.smart_copy_light.is_none());
+        let preview = app
+            .smart_copy_preview
+            .as_ref()
+            .expect("preview after release");
+        assert_eq!(preview.text, "https://example.test/api");
+        assert_eq!(preview.region_count, 1);
+    }
+
+    #[test]
+    fn light_mode_respects_the_setting_and_the_configured_key() {
+        let (mut app, pane_id) = app_with_plain_terminal();
+        let position = inside_pane(&app, pane_id);
+        let mut settings = app.terminal_settings;
+        settings.smart_copy_light = false;
+        app.apply_terminal_settings(settings);
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, position, KeyModifiers::CONTROL),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+
+        settings.smart_copy_light = true;
+        settings.smart_copy_light_key = crate::config::SmartCopyLightKey::Alt;
+        app.apply_terminal_settings(settings);
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, position, KeyModifiers::CONTROL),
+        );
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "Ctrl is not the configured key"
+        );
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::Moved, position, KeyModifiers::ALT),
+        );
+        assert!(matches!(app.mode, Mode::SmartCopy));
+    }
+
+    #[test]
+    fn the_wheel_with_the_modifier_does_not_start_light_mode() {
+        let (mut app, pane_id) = app_with_plain_terminal();
+        let position = inside_pane(&app, pane_id);
+        handle_mouse_event(
+            &mut app,
+            modified(MouseEventKind::ScrollUp, position, KeyModifiers::CONTROL),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn key_release_event_escape_and_idle_grace_end_light_mode() {
+        use crossterm::event::{
+            Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, ModifierKeyCode,
+        };
+        let start = |app: &mut App, pane_id: NodeId| {
+            let inside = inside_pane(app, pane_id);
+            handle_mouse_event(
+                app,
+                modified(MouseEventKind::Moved, inside, KeyModifiers::CONTROL),
+            );
+            let url = candidate_position(app, pane_id);
+            handle_mouse_event(
+                app,
+                modified(MouseEventKind::Moved, url, KeyModifiers::CONTROL),
+            );
+            handle_mouse_event(
+                app,
+                modified(
+                    MouseEventKind::Up(MouseButton::Left),
+                    url,
+                    KeyModifiers::CONTROL,
+                ),
+            );
+        };
+
+        let (mut app, pane_id) = app_with_plain_terminal();
+        start(&mut app, pane_id);
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent {
+                code: KeyCode::Modifier(ModifierKeyCode::LeftControl),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Release,
+                state: KeyEventState::NONE,
+            }),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.smart_copy_preview.is_some());
+
+        let (mut app, pane_id) = app_with_plain_terminal();
+        start(&mut app, pane_id);
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.smart_copy_preview.is_none(), "Escape copies nothing");
+
+        let (mut app, pane_id) = app_with_plain_terminal();
+        start(&mut app, pane_id);
+        let now = Instant::now();
+        assert!(!app.tick_smart_copy_light(now) || app.smart_copy_light.is_some());
+        assert!(
+            app.smart_copy_light.is_some(),
+            "still held within the grace period"
+        );
+        app.tick_smart_copy_light(
+            now + crate::smart_copy_light::RELEASE_IDLE_GRACE + Duration::from_millis(10),
+        );
+        assert!(app.smart_copy_light.is_none());
+        assert!(app.smart_copy_preview.is_some());
+    }
+
+    #[test]
+    fn preview_disappears_after_a_second() {
+        let (mut app, _pane_id) = app_with_plain_terminal();
+        let now = Instant::now();
+        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
+            "text".into(),
+            1,
+            true,
+            now,
+        ));
+        assert!(app.tick_smart_copy_light(now + Duration::from_millis(500)));
+        assert!(app.smart_copy_preview.is_some());
+        app.tick_smart_copy_light(now + Duration::from_millis(1001));
+        assert!(app.smart_copy_preview.is_none());
     }
 
     #[test]
@@ -4012,15 +5041,22 @@ mod cost_settings_mouse_tests {
     use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-    fn cost_app() -> (App, ratatui::layout::Rect) {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+    fn cost_app() -> (tempfile::TempDir, App, ratatui::layout::Rect) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("test-session".to_string(), directory.path().to_owned());
+        app.config_dir = Some(directory.path().to_owned());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 130, 260));
         app.mode = Mode::Settings(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
         });
-        let content = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
-        (app, content)
+        let Mode::Settings(state) = &app.mode else {
+            panic!("cost settings fixture");
+        };
+        let content =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+                .content_area;
+        (directory, app, content)
     }
 
     fn click(app: &mut App, column: u16, row: u16) {
@@ -4050,7 +5086,7 @@ mod cost_settings_mouse_tests {
     #[test]
     fn clicks_toggle_options_choose_calibrations_and_step_values() {
         use crate::cost_model::Calibration;
-        let (mut app, content) = cost_app();
+        let (_directory, mut app, content) = cost_app();
 
         // Checkbox line of an option.
         let sparkline = span_of(&app, content, CostRow::Display(CostDisplay::Sparkline));
@@ -4059,7 +5095,10 @@ mod cost_settings_mouse_tests {
 
         // Its visibility selector.
         let visibility = span_of(&app, content, CostRow::Visibility(CostDisplay::Sparkline));
-        click(&mut app, content.x + 8, content.y + visibility.first_line);
+        let visibility_control =
+            crate::cost_settings_ui::value_control(content, 0, &visibility, &app).unwrap();
+        let visibility_value = visibility_control.geometry().value;
+        click(&mut app, visibility_value.x, visibility_value.y);
         assert_eq!(
             app.cost_settings.sparkline.visibility,
             CostVisibility::Always
@@ -4070,28 +5109,23 @@ mod cost_settings_mouse_tests {
         click(&mut app, content.x + 10, content.y + budget.first_line + 1);
         assert_eq!(app.cost_settings.calibration, Calibration::Budget);
 
-        // The parameter row that appeared: increment and decrement halves.
+        // The parameter row that appeared: its rendered increment/decrement buttons.
         let amount = span_of(&app, content, CostRow::Budget);
+        let amount_control =
+            crate::cost_settings_ui::value_control(content, 0, &amount, &app).unwrap();
+        let amount_geometry = amount_control.geometry();
         assert_eq!(app.cost_settings.budget_usd, 10.0);
-        click(
-            &mut app,
-            content.x + amount.control_x + 6,
-            content.y + amount.control_line,
-        );
+        click(&mut app, amount_geometry.next.x, amount_geometry.next.y);
         assert_eq!(app.cost_settings.budget_usd, 20.0);
         click(
             &mut app,
-            content.x + amount.control_x,
-            content.y + amount.control_line,
+            amount_geometry.previous.x,
+            amount_geometry.previous.y,
         );
         assert_eq!(app.cost_settings.budget_usd, 10.0);
 
         // A click on a stepper's description changes nothing.
-        click(
-            &mut app,
-            content.x + amount.control_x + 6,
-            content.y + amount.control_line + 1,
-        );
+        click(&mut app, amount_geometry.next.x, amount_geometry.next.y + 1);
         assert_eq!(app.cost_settings.budget_usd, 10.0);
 
         let Mode::Settings(state) = &app.mode else {
@@ -4216,5 +5250,158 @@ mod text_trigger_mouse_tests {
             matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(0) && state.regexp.buf == "test")
         );
         assert_eq!(app.text_trigger_settings.triggers, vec![rule]);
+    }
+}
+
+#[cfg(test)]
+mod tree_pane_focus_release_tests {
+    use super::*;
+    use crate::app::{FocusTarget, PaneRuntime};
+    use crossterm::event::KeyModifiers;
+
+    #[test]
+    fn stale_release_keeps_completed_action_status_and_still_fences_new_press() {
+        let mut app = App::new("release-status-fixture".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.mode = Mode::Settings(crate::app::SettingsState::default());
+        let emitted = app.capture_emitted_geometry(1);
+        app.commit_emitted_geometry(emitted);
+        // Completion closes the presented dialog before its queued release.
+        app.mode = Mode::Normal;
+        app.status_message = Some("History file path copied to clipboard".into());
+        assert!(!app.pointer_geometry_is_current());
+        let event = |kind| MouseEvent {
+            kind,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, event(MouseEventKind::Up(MouseButton::Left)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("History file path copied to clipboard")
+        );
+        assert!(app.take_outbound_requests().is_empty());
+        handle_mouse_event(&mut app, event(MouseEventKind::Down(MouseButton::Left)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Waiting for terminal presentation before pointer input")
+        );
+        assert!(app.take_outbound_requests().is_empty());
+    }
+    #[test]
+    fn terminal_tree_click_keeps_pane_focus_after_presented_press_and_release() {
+        let mut app = App::new("tree-focus-fixture".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.ui_settings.show_tree_row_management_controls = false;
+        let group = app.tree.add_group(ROOT_ID, "recovery").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(crate::terminal_view::TerminalView::new(24, 80))),
+        );
+        app.tree_state.open(vec![group]);
+        let area = app.layout.tree_area;
+        let row = (area.y..area.bottom())
+            .find(|&row| {
+                app.tree_node_at(Position::new(area.x + 12, row))
+                    .is_some_and(|hit| hit.id == pane_id)
+            })
+            .expect("the exact terminal row must be visible");
+        let event = |kind| MouseEvent {
+            kind,
+            column: area.x + 12,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, event(MouseEventKind::Down(MouseButton::Left)));
+        assert_eq!(
+            app.focus,
+            FocusTarget::Pane,
+            "the terminal press must focus its pane"
+        );
+        assert_eq!(app.active_pane_id(), Some(pane_id));
+        app.take_outbound_requests();
+        // Accept a matching emitted frame between press and release. A stale
+        // geometry refusal must not accidentally hide the release regression.
+        let emitted = app.capture_emitted_geometry(1);
+        app.commit_emitted_geometry(emitted);
+        assert!(app.pointer_geometry_is_current());
+        handle_mouse_event(&mut app, event(MouseEventKind::Up(MouseButton::Left)));
+        assert_eq!(
+            app.focus,
+            FocusTarget::Pane,
+            "accepted tree release stole recalled-prompt keyboard focus"
+        );
+        assert_eq!(app.active_pane_id(), Some(pane_id));
+        assert!(!app.take_outbound_requests().iter().any(|request| matches!(request,
+            ilium_ipc::ClientRequest::SetPaneFocus { pane_id: id, focused: false } if *id == pane_id)),
+            "click release must not publish a false pane blur");
+    }
+}
+
+#[cfg(test)]
+mod icon_assignment_control_tests {
+    use super::*;
+
+    #[test]
+    fn assignment_pointer_preserves_label_and_reverses_value_then_opens_full_catalog() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("icon-assignment-pointer".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        let screen = Rect::new(0, 0, 140, 45);
+        app.set_screen_area(screen);
+        let target = crate::agent_monitoring::general_icon_targets()[0];
+        let suggestions = target.suggestions();
+        app.ui_settings.icons.set(target, suggestions[0].into());
+        let mut state = crate::app::SettingsState {
+            tab: crate::app::SettingsTab::Icons,
+            ..Default::default()
+        };
+        let mut area =
+            crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
+        let height = crate::instruction_settings::panel_height(state.tab, area);
+        area.y += height;
+        area.height = area.height.saturating_sub(height);
+        for (button, part, expected, opens) in [
+            (MouseButton::Left, 0, 0, false),
+            (MouseButton::Left, 1, 1, false),
+            (MouseButton::Right, 1, 0, false),
+            (MouseButton::Left, 2, 0, true),
+        ] {
+            let g = crate::settings_ui::icon_assignment_control(
+                area,
+                0,
+                0,
+                app.ui_settings.icons.glyph(target),
+            )
+            .unwrap()
+            .geometry();
+            let rect = match part {
+                0 => g.label,
+                1 => g.value,
+                _ => g.open,
+            };
+            handle_settings_mouse(
+                &mut app,
+                state,
+                MouseEvent {
+                    kind: MouseEventKind::Down(button),
+                    column: rect.x,
+                    row: rect.y,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            );
+            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                panic!("settings retained")
+            };
+            state = next;
+            assert_eq!(state.icon_picker.is_some(), opens);
+        }
+        assert_eq!(state.icon_picker.unwrap().target, target);
     }
 }

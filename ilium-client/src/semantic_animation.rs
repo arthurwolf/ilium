@@ -110,6 +110,16 @@ fn adaptable(kind: AnimationKind, row: &Control) -> bool {
     if !exposable(row) {
         return false;
     }
+    // Named destinations and lookup providers remain explicit user choices.
+    // Their conditional indices are not a stable semantic catalogue schema.
+    if kind == AnimationKind::OpenStreetMap
+        && matches!(
+            row.id,
+            "selection" | "place_list" | "destination" | "address_provider"
+        )
+    {
+        return false;
+    }
     kind != AnimationKind::VoxelLandscape
         || matches!(
             row.id,
@@ -167,6 +177,17 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
                 (Some(left), Some(right)) => left == right,
                 _ => false,
             }
+        }
+        AnimationKind::OpenStreetMap => {
+            let left = &before.ambient.openstreetmap;
+            let right = &after.ambient.openstreetmap;
+            left.search == right.search
+                && left.endpoint == right.endpoint
+                && left.local_path == right.local_path
+                && left.coordinates == right.coordinates
+                && left.location_label == right.location_label
+                && left.place_list == right.place_list
+                && left.destination_id == right.destination_id
         }
         AnimationKind::Clouds => {
             before.ambient.clouds.refresh_minutes == after.ambient.clouds.refresh_minutes
@@ -383,6 +404,9 @@ fn prepare(
     match kind {
         AnimationKind::OpenStreetMap => {
             write(&mut settings, "source", &ControlValue::Index(0))?;
+            // Semantic recommendations retain the original offline place contract.
+            // Initialize the mode without exposing authored lists to recommendations.
+            settings.set_scene_control("selection", ControlValue::Index(0))?;
         }
         AnimationKind::Images if resources == ResourcePolicy::Catalog => {
             write(&mut settings, "mode", &ControlValue::Index(0))?;

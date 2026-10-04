@@ -36,6 +36,12 @@ use crate::tree_transitions::{TreeRowMotion, TreeTransitions};
 /// regardless of the (much slower) detection poll interval.
 pub(crate) const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 pub(crate) const SPINNER_FRAME_MS: u128 = 90;
+/// Row text shown in place of a tree entry's name while AI auto-naming runs.
+pub(crate) const AUTO_NAMING_LABEL: &str = "{auto-naming}";
+/// One-cell figure-eight loop for AI auto-naming: a two-dot braille comet
+/// traces the eight dot positions of a 2x4 cell as an "8" (top loop, a
+/// diagonal crossing, bottom loop). Eight frames, one cell wide.
+pub(crate) const AUTO_NAMING_FRAMES: &[char] = &['⠃', '⠉', '⠘', '⠔', '⡄', '⣀', '⢠', '⠢'];
 /// Half-period of the Attention-mode pulsing running dot.
 const ATTENTION_PULSE_MS: u128 = 600;
 
@@ -363,6 +369,227 @@ pub struct TreeNodeHit {
     pub line: u16,
 }
 
+/// Hit targets captured from the exact rows composed into one complete frame.
+/// Labels/tree projections are borrowed during construction, never retained.
+pub(crate) struct PaintedRowValues {
+    pub node_id: NodeId,
+    pub status: [Option<crate::status_icons::TooltipContent>; 3],
+    pub worktree: Option<crate::status_icons::TooltipContent>,
+    pub cost_title: String,
+    pub cost_card: Option<std::sync::Arc<crate::cost_tracker::PreparedCostCard>>,
+}
+pub(crate) struct PaintedTreeRows {
+    list: Rect,
+    area: Rect,
+    toolbar: bool,
+    rows: Vec<(TreeNodeHit, u16)>,
+    values: Vec<PaintedRowValues>,
+    cost_option: crate::cost_settings::DisplayOption,
+    selected_node: Option<NodeId>,
+    action: Option<(TreeNodeHit, TreeRowActionStrip, &'static [TreeRowAction])>,
+    // Release the declaration only after all retained row/value allocations.
+    _metadata: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+impl PaintedTreeRows {
+    #[cfg(test)]
+    pub(crate) fn cost_row_for_test(
+        id: NodeId,
+        row: u16,
+        title: String,
+        card: std::sync::Arc<crate::cost_tracker::PreparedCostCard>,
+        option: crate::cost_settings::DisplayOption,
+        selected_node: Option<NodeId>,
+    ) -> Self {
+        let area = Rect::new(0, row.saturating_sub(1), 80, 4);
+        Self {
+            list: area,
+            area,
+            toolbar: false,
+            rows: vec![(TreeNodeHit { id, row, line: 0 }, 2)],
+            values: vec![PaintedRowValues {
+                node_id: id,
+                status: [None, None, None],
+                worktree: None,
+                cost_title: title,
+                cost_card: Some(card),
+            }],
+            cost_option: option,
+            selected_node,
+            action: None,
+            _metadata: None,
+        }
+    }
+    fn capture(state: &TreeState<NodeId>, area: Rect, options: &TreeRenderOptions<'_>) -> Self {
+        let list = list_area(area);
+        let padding = match options.sidebar_density {
+            SidebarDensity::Compact => 0,
+            SidebarDensity::Standard => 1,
+            SidebarDensity::Comfortable => 2,
+        };
+        let mut rows = Vec::with_capacity(usize::from(list.height));
+        // Moving/removed presentation rows have no stable semantic target.
+        if options
+            .transitions
+            .presentation_tree(options.elapsed_ms)
+            .is_none()
+        {
+            for (path, first_row, height) in state.rendered_rows() {
+                let Some(id) = path.last().copied() else {
+                    continue;
+                };
+                if options
+                    .transitions
+                    .row_motion(id, options.elapsed_ms)
+                    .is_some()
+                {
+                    continue;
+                }
+                let depth = u16::try_from(path.len().saturating_sub(1)).unwrap_or(u16::MAX);
+                let label = list
+                    .x
+                    .saturating_add(depth)
+                    .saturating_add(TREE_EXPAND_SYMBOL_WIDTH)
+                    .saturating_add(padding);
+                for line in 0..height {
+                    let row = first_row.saturating_add(line);
+                    if row >= list.bottom() {
+                        break;
+                    }
+                    rows.push((TreeNodeHit { id, row, line }, label));
+                }
+            }
+        }
+        Self {
+            list,
+            area,
+            toolbar: is_toolbar_visible(options.focused, options.hover.toolbar_hovered),
+            _metadata: None,
+            rows,
+            values: Vec::new(),
+            cost_option: options
+                .cost
+                .map_or_else(Default::default, |cost| cost.settings.detail_card),
+            selected_node: state.selected().last().copied(),
+            action: None,
+        }
+    }
+    pub(crate) fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.rows
+            .iter()
+            .filter(|(hit, _)| hit.line == 0)
+            .map(|(hit, _)| hit.id)
+    }
+    pub(crate) fn retain_values(&mut self, values: Vec<PaintedRowValues>) {
+        self.values = values;
+    }
+    pub(crate) fn cost_card_target(
+        &self,
+        hovered: Option<TreeNodeHit>,
+    ) -> Option<(u16, &PaintedRowValues)> {
+        if !self.cost_option.enabled {
+            return None;
+        }
+        let target = hovered
+            .and_then(|hit| {
+                self.values
+                    .iter()
+                    .find(|value| value.node_id == hit.id && value.cost_card.is_some())
+            })
+            .or_else(|| {
+                (self.cost_option.visibility == crate::cost_settings::CostVisibility::Always)
+                    .then(|| self.selected_node)
+                    .flatten()
+                    .and_then(|id| {
+                        self.values
+                            .iter()
+                            .find(|value| value.node_id == id && value.cost_card.is_some())
+                    })
+            })?;
+        let row = self
+            .rows
+            .iter()
+            .find(|(hit, _)| hit.id == target.node_id && hit.line == 0)?
+            .0
+            .row;
+        Some((row, target))
+    }
+    pub(crate) fn status_tooltip(
+        &self,
+        node_id: NodeId,
+        slot: crate::status_icons::StatusSlot,
+    ) -> Option<&crate::status_icons::TooltipContent> {
+        let index = match slot {
+            crate::status_icons::StatusSlot::Identity => 0,
+            crate::status_icons::StatusSlot::Objective => 1,
+            crate::status_icons::StatusSlot::Now => 2,
+        };
+        self.values
+            .iter()
+            .find(|values| values.node_id == node_id)?
+            .status[index]
+            .as_ref()
+    }
+    pub(crate) fn worktree_tooltip(
+        &self,
+        node_id: NodeId,
+    ) -> Option<&crate::status_icons::TooltipContent> {
+        self.values
+            .iter()
+            .find(|values| values.node_id == node_id)?
+            .worktree
+            .as_ref()
+    }
+    pub(crate) fn retain_metadata(
+        &mut self,
+        hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    ) {
+        self._metadata = hold;
+    }
+    pub(crate) fn toolbar_at(&self, position: Position) -> Option<TreeToolbarAction> {
+        self.toolbar.then_some(())?;
+        toolbar_action_at(self.area, position)
+    }
+    pub(crate) fn node_at(&self, position: Position) -> Option<TreeNodeHit> {
+        self.list.contains(position).then_some(())?;
+        self.rows
+            .iter()
+            .find(|(hit, _)| hit.row == position.y)
+            .map(|(hit, _)| *hit)
+    }
+    pub(crate) fn status_at(
+        &self,
+        position: Position,
+    ) -> Option<(NodeId, crate::status_icons::StatusSlot, Position)> {
+        use crate::status_icons::{StatusSlot, NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
+        let hit = self.node_at(position)?;
+        if hit.line != 0 {
+            return None;
+        }
+        let label = self.rows.iter().find(|(row, _)| row.row == position.y)?.1;
+        let objective = label.saturating_add(OBJECTIVE_SLOT_OFFSET);
+        let now = label.saturating_add(NOW_SLOT_OFFSET);
+        let (slot, column) = if (label..objective).contains(&position.x) {
+            (StatusSlot::Identity, label)
+        } else if (objective..objective.saturating_add(OBJECTIVE_COLUMN_WIDTH as u16))
+            .contains(&position.x)
+        {
+            (StatusSlot::Objective, objective)
+        } else if (now..now.saturating_add(NOW_COLUMN_WIDTH as u16)).contains(&position.x) {
+            (StatusSlot::Now, now)
+        } else {
+            return None;
+        };
+        Some((hit.id, slot, Position::new(column, position.y)))
+    }
+    pub(crate) fn action_at(&self, position: Position) -> Option<(TreeNodeHit, TreeRowAction)> {
+        let (hit, strip, actions) = self.action?;
+        if position.y != hit.row {
+            return None;
+        }
+        Some((hit, strip.action_at(position, actions)?))
+    }
+}
+
 /// Hover-only rendering state supplied by `App`; grouping it keeps the tree
 /// renderer's contract compact as additional hover affordances are added.
 #[derive(Debug, Clone, Copy, Default)]
@@ -435,6 +662,8 @@ pub struct TreeRenderOptions<'a> {
     /// which historically left an editor's `Node::name` equal to its
     /// filename) -- see `pane_label`'s Editor arms for how the two are
     /// composed.
+    pub sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
+    pub chatroom_projects: &'a HashSet<NodeId>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
 }
 
@@ -466,6 +695,8 @@ struct TreeItemBuildContext<'a> {
     /// are materialized only along these paths, so a large unopened subtree
     /// never becomes render work merely because another row animates.
     opened_paths: &'a HashSet<Vec<NodeId>>,
+    sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
+    chatroom_projects: &'a HashSet<NodeId>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
 }
 
@@ -616,8 +847,8 @@ fn build_item(
     match &node.kind {
         NodeKind::Container(container) => {
             let mut children = build_children(tree, node.id, context, identifier_path);
-            if let ContainerKind::Project { path } = &container.kind {
-                if crate::chatroom::exists(path) {
+            if let ContainerKind::Project { .. } = &container.kind {
+                if context.chatroom_projects.contains(&node.id) {
                     children.insert(
                         0,
                         TreeItem::new_leaf(
@@ -930,7 +1161,7 @@ pub(crate) fn apply_sidebar_density(
 /// Virtual rows occupy the high-id range and never cross the IPC boundary.
 /// This keeps filesystem paths out of the shared tree while allowing the
 /// existing tree widget to own expansion, selection, and scrolling.
-fn virtual_folder_node_id(root: NodeId, path: &Path) -> NodeId {
+pub(crate) fn virtual_folder_node_id(root: NodeId, path: &Path) -> NodeId {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     path.hash(&mut hasher);
@@ -947,14 +1178,11 @@ pub fn chatroom_node_id(project_id: NodeId) -> NodeId {
 /// Resolves a virtual chatroom row to its real owning project. The file check
 /// makes delayed mouse/key input safe when another process removed the room
 /// after the last render.
-pub fn chatroom_project(tree: &Tree, id: NodeId) -> Option<NodeId> {
+pub fn chatroom_project(tree: &Tree, id: NodeId, available: &HashSet<NodeId>) -> Option<NodeId> {
     tree.project_ids().into_iter().find(|project_id| {
         *project_id != ROOT_ID
             && chatroom_node_id(*project_id) == id
-            && tree
-                .get(*project_id)
-                .and_then(Node::project_path)
-                .is_some_and(crate::chatroom::exists)
+            && available.contains(project_id)
     })
 }
 
@@ -964,30 +1192,23 @@ fn folder_children(
     context: &TreeItemBuildContext<'_>,
     ancestor_path: &[NodeId],
 ) -> Vec<TreeItem<'static, NodeId>> {
-    let Ok(entries) = std::fs::read_dir(path) else {
+    let Some(entries) = context
+        .sidebar_files
+        .directories
+        .get(&(root, path.to_path_buf()))
+    else {
         return Vec::new();
     };
-    let mut entries: Vec<_> = entries
-        .flatten()
-        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
-        .collect();
-    entries.sort_by(|left, right| {
-        let left_is_dir = left.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
-        let right_is_dir = right.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
-        right_is_dir
-            .cmp(&left_is_dir)
-            .then_with(|| left.file_name().cmp(&right.file_name()))
-    });
     let mut children = Vec::with_capacity(entries.len());
     let mut identifier_path = Vec::with_capacity(ancestor_path.len().saturating_add(1));
     identifier_path.extend_from_slice(ancestor_path);
     for entry in entries {
-        let path = entry.path();
-        let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+        let path = entry.path.clone();
+        let is_dir = entry.is_directory;
         let label = node_label(
             Span::raw(if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" }),
             None,
-            Span::raw(entry.file_name().to_string_lossy().into_owned()),
+            Span::raw(entry.name.clone()),
         );
         let id = virtual_folder_node_id(root, &path);
         identifier_path.push(id);
@@ -1026,21 +1247,21 @@ pub struct FolderEntry {
 /// Resolves a virtual file/folder row to its current path and full widget
 /// identifier path. Re-reading makes a click safe when the filesystem
 /// changed after the previous render.
-pub fn folder_entry(tree: &Tree, id: NodeId) -> Option<FolderEntry> {
-    for node in tree.all_ids().filter_map(|node_id| tree.get(node_id)) {
-        let NodeKind::Folder { path, .. } = &node.kind else {
-            continue;
-        };
-        if let Some(found) = find_folder_entry(node.id, path, &tree_path(tree, node.id), id) {
-            return Some(found);
-        }
-    }
-    None
+pub fn folder_entry(
+    tree: &Tree,
+    id: NodeId,
+    snapshot: &crate::filesystem::sidebar::SidebarSnapshot,
+) -> Option<FolderEntry> {
+    let entry = snapshot.rows.get(&id)?;
+    let NodeKind::Folder { path, .. } = &tree.get(entry.root_id)?.kind else {
+        return None;
+    };
+    (snapshot.roots.get(&entry.root_id) == Some(path)).then(|| entry.clone())
 }
 
 /// Reconstructs one persisted node's widget identifier path without leaking
 /// client `App` concerns into the filesystem renderer.
-fn tree_path(tree: &Tree, id: NodeId) -> Vec<NodeId> {
+pub(crate) fn tree_path(tree: &Tree, id: NodeId) -> Vec<NodeId> {
     let mut path = vec![id];
     let mut current = id;
     while let Some(parent) = tree.parent_of(current) {
@@ -1052,38 +1273,6 @@ fn tree_path(tree: &Tree, id: NodeId) -> Vec<NodeId> {
     }
     path.reverse();
     path
-}
-
-fn find_folder_entry(
-    root: NodeId,
-    path: &Path,
-    ancestor_path: &[NodeId],
-    target: NodeId,
-) -> Option<FolderEntry> {
-    for entry in std::fs::read_dir(path).ok()?.flatten() {
-        if entry.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        let entry_path = entry.path();
-        let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
-        let id = virtual_folder_node_id(root, &entry_path);
-        let mut identifier_path = ancestor_path.to_vec();
-        identifier_path.push(id);
-        if id == target {
-            return Some(FolderEntry {
-                root_id: root,
-                path: entry_path,
-                is_directory: is_dir,
-                identifier_path,
-            });
-        }
-        if is_dir {
-            if let Some(found) = find_folder_entry(root, &entry_path, &identifier_path, target) {
-                return Some(found);
-            }
-        }
-    }
-    None
 }
 
 /// Picks a pane's short- or long-form title text for `panel_width`,
@@ -1224,11 +1413,11 @@ fn pane_label_with_icons(
         attention_running_indicator,
     } = context;
 
-    // Keep the last known name visible while inference is pending. Replacing
-    // it with only a spinner leaves long-running agent rows nameless.
+    // While inference is pending the row says so explicitly, followed by the
+    // figure-eight animation, instead of a bare spinner.
     let title = if is_title_loading {
-        let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-        format!("{name} {}", SPINNER_FRAMES[frame_index])
+        let frame_index = (elapsed_ms / SPINNER_FRAME_MS) as usize % AUTO_NAMING_FRAMES.len();
+        format!("{AUTO_NAMING_LABEL} {}", AUTO_NAMING_FRAMES[frame_index])
     } else {
         name.to_string()
     };
@@ -1966,7 +2155,14 @@ impl TreeItemCache {
         tree_order: TreeOrder,
         opened_paths: &HashSet<Vec<NodeId>>,
     ) -> &[TreeItem<'static, NodeId>] {
-        self.get_or_build_ranked(tree, version, tree_order, opened_paths, &HashMap::new(), 0)
+        self.get_or_build_ranked(
+            tree,
+            version,
+            tree_order,
+            opened_paths,
+            (&HashMap::new(), 0),
+            (&Default::default(), &HashSet::new()),
+        )
     }
 
     /// [`Self::get_or_build`] for `CostDescending`: `cost_epoch` changes
@@ -1977,9 +2173,14 @@ impl TreeItemCache {
         version: u64,
         tree_order: TreeOrder,
         opened_paths: &HashSet<Vec<NodeId>>,
-        cost_ranks: &HashMap<NodeId, f64>,
-        cost_epoch: u64,
+        cost: (&HashMap<NodeId, f64>, u64),
+        filesystem: (
+            &crate::filesystem::sidebar::SidebarSnapshot,
+            &HashSet<NodeId>,
+        ),
     ) -> &[TreeItem<'static, NodeId>] {
+        let (cost_ranks, cost_epoch) = cost;
+        let (sidebar_files, chatroom_projects) = filesystem;
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
@@ -2011,6 +2212,8 @@ impl TreeItemCache {
                     show_inferred_title_icons: false,
                     panel_width: 0,
                     opened_paths,
+                    sidebar_files,
+                    chatroom_projects,
                     panes: &HashMap::new(),
                 },
             );
@@ -2038,13 +2241,13 @@ fn any_recently_created_within_window(
 
 /// Draws the tree panel into `area`, bordered brighter when `focused`.
 /// `elapsed_ms` drives the Working spinner, WaitingBackground clock, and Done pulse animations.
-pub fn render(
+pub(crate) fn render(
     frame: &mut Frame,
     area: Rect,
     tree: &Tree,
     state: &mut TreeState<NodeId>,
     options: TreeRenderOptions<'_>,
-) {
+) -> PaintedTreeRows {
     // Only ordering by cost reads the ranks, so skip copying them otherwise.
     let cost_ranks: HashMap<NodeId, f64> = match options.cost {
         Some(cost) if options.tree_order == TreeOrder::CostDescending => cost.ranks.clone(),
@@ -2073,6 +2276,8 @@ pub fn render(
             show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: area.width,
             opened_paths: state.opened(),
+            sidebar_files: options.sidebar_files,
+            chatroom_projects: options.chatroom_projects,
             panes: options.panes,
         },
     );
@@ -2131,6 +2336,8 @@ pub fn render(
                 show_inferred_title_icons: options.show_inferred_title_icons,
                 panel_width: area.width,
                 opened_paths: state.opened(),
+                sidebar_files: options.sidebar_files,
+                chatroom_projects: options.chatroom_projects,
                 panes: options.panes,
             },
         );
@@ -2170,16 +2377,24 @@ pub fn render(
         rendered_rows = collect_rendered_rows(state);
     }
 
+    let mut painted = PaintedTreeRows::capture(state, area, &options);
     draw_scrollbar(frame, area, visible_line_count, state);
 
     // A row that is sliding into or out of place is not a stable hover target.
-    let hovered = options.hover.node.filter(|hit| {
-        hit.line == 0
-            && options
-                .transitions
-                .row_motion(hit.id, options.elapsed_ms)
-                .is_none()
-    });
+    let hovered = options
+        .hover
+        .node
+        .filter(|hit| {
+            hit.line == 0
+                && options
+                    .transitions
+                    .row_motion(hit.id, options.elapsed_ms)
+                    .is_none()
+        })
+        .and_then(|mut hit| {
+            hit.row = rendered_rows.iter().find(|(id, _, _)| *id == hit.id)?.1;
+            Some(hit)
+        });
     if let Some(hit) = hovered {
         // The whole item gets the highlight, like the selection does: the
         // action buttons alone would otherwise tint only the row's right end.
@@ -2200,6 +2415,15 @@ pub fn render(
         );
     }
     if let Some(hit) = hovered {
+        let actions = applicable_row_actions(tree, hit.id, options.hover.show_management_actions);
+        if painted
+            .rows
+            .iter()
+            .any(|(row, _)| row.id == hit.id && row.row == hit.row && row.line == 0)
+        {
+            painted.action = TreeRowActionStrip::for_actions(area, actions.len())
+                .map(|strip| (hit, strip, actions));
+        }
         draw_row_actions(
             frame,
             area,
@@ -2212,6 +2436,7 @@ pub fn render(
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
         draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
     }
+    painted
 }
 
 /// Applies the selected-row palette across every list cell, including empty
@@ -2614,6 +2839,119 @@ mod tests {
     use ilium_core::GoalState;
 
     #[test]
+    fn painted_row_targets_remain_bound_to_original_rows_and_action_strip() {
+        let first = TreeNodeHit {
+            id: NodeId(41),
+            row: 3,
+            line: 0,
+        };
+        let second = TreeNodeHit {
+            id: NodeId(42),
+            row: 5,
+            line: 1,
+        };
+        let area = Rect::new(0, 0, 40, 10);
+        let actions = &[TreeRowAction::Close];
+        let strip = TreeRowActionStrip::for_actions(area, actions.len()).unwrap();
+        let painted = PaintedTreeRows {
+            list: list_area(area),
+            area,
+            toolbar: false,
+            _metadata: None,
+            rows: vec![(first, 4), (second, 5)],
+            values: Vec::new(),
+            action: Some((first, strip, actions)),
+            cost_option: Default::default(),
+            selected_node: Some(first.id),
+        };
+        assert_eq!(painted.node_at(Position::new(1, 3)), Some(first));
+        assert_eq!(painted.node_at(Position::new(1, 4)), None);
+        assert_eq!(painted.node_at(Position::new(1, 5)), Some(second));
+        assert!(painted.status_at(Position::new(5, 5)).is_none());
+        assert_eq!(
+            painted.action_at(Position::new(strip.area.x, 3)),
+            Some((first, TreeRowAction::Close))
+        );
+        assert!(painted.action_at(Position::new(strip.area.x, 5)).is_none());
+        assert!(painted.toolbar_at(Position::new(1, 0)).is_none());
+    }
+
+    #[test]
+    fn stopped_agent_tree_row_keeps_recovery_indicator_in_normal_and_attention_modes() {
+        use crate::agent_monitoring::{AgentMonitoringMode, AttentionRunningIndicator};
+
+        let icons = IconSettings::default();
+        let identifiers = AgentIdentifierSettings::default();
+        for class in [AgentClass::Codex, AgentClass::Claude] {
+            for (mode, stable) in [
+                (AgentMonitoringMode::Normal, false),
+                (AgentMonitoringMode::Attention, false),
+                (AgentMonitoringMode::Normal, true),
+                (AgentMonitoringMode::Attention, true),
+            ] {
+                let status = PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        class.clone(),
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process: ilium_core::AgentProcessKey {
+                        class: class.clone(),
+                        process_id: 42,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: ilium_core::AgentAvailability::Exited(
+                        ilium_core::AgentExitOutcome::ExitCode(42),
+                    ),
+                    signal_name: None,
+                    session_id: Some("synthetic-retained-session".to_string()),
+                    last_prompt: Some("retained authored text".to_string()),
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                }));
+                let line = pane_label_with_icons(
+                    &status,
+                    "Recover authored work",
+                    PaneLabelContext {
+                        elapsed_ms: 0,
+                        is_title_loading: false,
+                        terminal_activity_phase: None,
+                        agent_identifiers: &identifiers,
+                        icons: &icons,
+                        editor_filename: None,
+                        progress: None,
+                        has_scheduled_input: false,
+                        use_stable_glyphs: stable,
+                        agent_monitoring_mode: mode,
+                        attention_running_indicator: AttentionRunningIndicator::Off,
+                    },
+                );
+                let marker = icons.glyph_for_display(IconTarget::AgentUnavailable, stable);
+                assert_eq!(line.spans[2].content.trim_end(), marker);
+                let mut terminal = Terminal::new(TestBackend::new(100, 1)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        frame.render_widget(ratatui::widgets::Paragraph::new(line), frame.area());
+                    })
+                    .unwrap();
+                let rendered: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(
+                    rendered.contains(marker),
+                    "{class:?} {mode:?} stable={stable}"
+                );
+                assert!(rendered.contains("Recover authored work [unavailable]"));
+                assert!(status.agent_state().is_none());
+            }
+        }
+    }
+
+    #[test]
     fn node_label_aligns_text_after_narrow_and_wide_icons() {
         let labels = [
             node_label(Span::raw(">"), None, Span::raw("shell")),
@@ -2863,6 +3201,8 @@ mod tests {
                         show_inferred_title_icons: false,
                         cost: None,
                         hover: TreeHoverState::default(),
+                        sidebar_files: &Default::default(),
+                        chatroom_projects: &HashSet::new(),
                         panes: &HashMap::new(),
                     },
                 );
@@ -3646,6 +3986,8 @@ mod tests {
                         show_inferred_title_icons: false,
                         cost: None,
                         hover: TreeHoverState::default(),
+                        sidebar_files: &Default::default(),
+                        chatroom_projects: &HashSet::new(),
                         panes: &HashMap::new(),
                     },
                 );
@@ -3703,6 +4045,8 @@ mod tests {
                             show_management_actions: true,
                             ..TreeHoverState::default()
                         },
+                        sidebar_files: &Default::default(),
+                        chatroom_projects: &HashSet::new(),
                         panes: &HashMap::new(),
                     },
                 );
@@ -3772,6 +4116,8 @@ mod tests {
                         show_inferred_title_icons: false,
                         cost: None,
                         hover: TreeHoverState::default(),
+                        sidebar_files: &Default::default(),
+                        chatroom_projects: &HashSet::new(),
                         panes: &HashMap::new(),
                     },
                 );
@@ -4511,6 +4857,8 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: area.width,
                 opened_paths: state.opened(),
+                sidebar_files: &Default::default(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -4602,7 +4950,15 @@ mod tests {
         let virtual_id = virtual_folder_node_id(folder, &file_path);
 
         assert_eq!(
-            folder_entry(&tree, virtual_id),
+            folder_entry(
+                &tree,
+                virtual_id,
+                crate::filesystem::sidebar::prepared_for_test(
+                    &tree,
+                    &HashSet::from([vec![group, folder], vec![group, folder, nested_id]])
+                )
+                .view()
+            ),
             Some(FolderEntry {
                 root_id: folder,
                 path: file_path,
@@ -4656,6 +5012,9 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
+                    .view(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -4686,6 +5045,9 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
+                    .view(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -4719,12 +5081,19 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
+                    .view(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
         let deep_file = &deep_items[0].children()[0].children()[0].children()[0].children()[0];
         assert_eq!(
-            folder_entry(&tree, *deep_file.identifier()),
+            folder_entry(
+                &tree,
+                *deep_file.identifier(),
+                crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths).view()
+            ),
             Some(FolderEntry {
                 root_id: folder,
                 path: file_path,
@@ -4771,6 +5140,8 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: &Default::default(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -4905,22 +5276,28 @@ mod tests {
     }
 
     #[test]
-    fn pane_label_keeps_the_agent_name_visible_while_title_inference_is_in_flight() {
-        let line = pane_label(
-            &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None),
-            "claude",
-            0,
-            true,
-            &AgentIdentifierSettings::default(),
-            None,
-        );
-        let text: String = line
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
-        assert!(text.contains("[done] claude"));
-        assert!(text.ends_with(SPINNER_FRAMES[0]));
+    fn pane_label_shows_auto_naming_with_figure_eight_while_title_inference_is_in_flight() {
+        let label = |elapsed_ms| {
+            let line = pane_label(
+                &PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None),
+                "claude",
+                elapsed_ms,
+                true,
+                &AgentIdentifierSettings::default(),
+                None,
+            );
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        };
+        let text = label(0);
+        assert!(text.contains(AUTO_NAMING_LABEL));
+        assert!(!text.contains("claude"));
+        assert!(text.ends_with(AUTO_NAMING_FRAMES[0]));
+        assert!(!text.chars().any(|c| SPINNER_FRAMES.contains(&c)));
+        let later = label(SPINNER_FRAME_MS * 3);
+        assert!(later.ends_with(AUTO_NAMING_FRAMES[3]));
     }
 
     #[test]
@@ -5013,6 +5390,8 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: &Default::default(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -5301,6 +5680,8 @@ mod tests {
                 show_inferred_title_icons: false,
                 panel_width: 0,
                 opened_paths: &opened_paths,
+                sidebar_files: &Default::default(),
+                chatroom_projects: &HashSet::new(),
                 panes: &HashMap::new(),
             },
         );
@@ -5529,6 +5910,8 @@ mod cost_indicator_tests {
                         show_inferred_title_icons: false,
                         cost,
                         hover,
+                        sidebar_files: &Default::default(),
+                        chatroom_projects: &HashSet::new(),
                         panes: &HashMap::new(),
                     },
                 );

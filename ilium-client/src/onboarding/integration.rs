@@ -23,6 +23,9 @@ use crate::{
 };
 
 pub fn open(app: &mut App, from_explicit_entry: bool) {
+    // A reopened wizard is a new intent; an older dismissal receipt must
+    // neither close it nor mark this new begin command as a dismissal.
+    app.onboarding_dismiss_pending = false;
     app.onboarding_progress.begin();
     app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
     if from_explicit_entry {
@@ -33,12 +36,23 @@ pub fn open(app: &mut App, from_explicit_entry: bool) {
 }
 
 fn persist(app: &mut App) {
-    if let Some(directory) = &app.config_dir {
-        if let Err(error) =
-            crate::config::save_onboarding_progress(directory, &app.onboarding_progress)
-        {
-            app.status_message = Some(format!("Could not save setup progress: {error}"));
+    if let Some(directory) = app.config_dir.clone() {
+        let dismiss = app.onboarding_dismiss_pending;
+        let intent = crate::filesystem::configurations::ConfigurationIntent::Onboarding {
+            revision: app.onboarding_revision,
+            dismiss,
+        };
+        let change = crate::filesystem::configuration::ConfigurationChange::Onboarding(
+            app.onboarding_progress.clone(),
+        );
+        if let Err(error) = app.enqueue_configuration(directory, change, intent) {
+            app.status_message = Some(format!("Setup progress remains unsaved: {error}"));
+            app.onboarding_dismiss_pending = false;
         }
+    } else if app.onboarding_dismiss_pending {
+        app.status_message =
+            Some("Setup progress remains unsaved: configuration directory unavailable".into());
+        app.onboarding_dismiss_pending = false;
     }
 }
 
@@ -63,6 +77,16 @@ enum Control {
     OpenAiModel,
     Refresh,
     Test,
+}
+
+fn ai_choice_field(control: Control) -> Option<crate::value_inference::OnboardingInference> {
+    use crate::value_inference::OnboardingInference as Field;
+    match control {
+        Control::PaidProvider => Some(Field::PaidProvider),
+        Control::Model => Some(Field::KiloModel),
+        Control::OpenAiModel => Some(Field::OpenAiModel),
+        _ => None,
+    }
 }
 
 fn provider_rows(app: &App) -> Vec<(String, Control)> {
@@ -267,6 +291,39 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             &ui.voice_state,
             &ui.voice_ui,
         );
+        for (index, row) in super::voice_ui::CONFIG_ROWS.into_iter().enumerate() {
+            if let Some(control) =
+                crate::value_voice::VoiceValue::from_row(row).and_then(|control| {
+                    super::voice_ui::config_row_area(
+                        geometry.content,
+                        &ui.voice_ui,
+                        &ui.voice_state,
+                        index,
+                    )
+                    .map(|area| control.control(area, app))
+                })
+            {
+                let style = if ui.voice_ui.focus == index || ui.voice_ui.hovered == Some(index) {
+                    Style::new()
+                        .fg(Color::Rgb(13, 16, 23))
+                        .bg(Color::Rgb(242, 188, 105))
+                } else {
+                    Style::new()
+                        .fg(Color::Rgb(224, 231, 244))
+                        .bg(Color::Rgb(13, 16, 23))
+                };
+                control.render(
+                    frame,
+                    crate::value_control::ControlStyles {
+                        background: style,
+                        label: style,
+                        value: style,
+                        button: style,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         return;
     }
     if step == Step::AiConfiguration {
@@ -294,6 +351,29 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             })
             .collect::<Vec<_>>();
         frame.render_widget(Paragraph::new(lines).scroll((ui.scroll, 0)), form_area);
+        for (index, (_, control)) in rows.iter().enumerate() {
+            if let Some(control) = ai_choice_field(*control)
+                .and_then(|field| field.control(form_area, ui.scroll, index, app))
+            {
+                let style =
+                    if ui.hovered == Some(index) || (ui.hovered.is_none() && ui.focus == index) {
+                        Style::new()
+                            .fg(Color::Rgb(13, 16, 23))
+                            .bg(Color::Rgb(242, 188, 105))
+                    } else {
+                        Style::new().fg(Color::Rgb(224, 231, 244))
+                    };
+                control.render(
+                    frame,
+                    crate::value_control::ControlStyles {
+                        label: style,
+                        value: style,
+                        button: style,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         let test_message = match &app.inference_test_state {
             crate::app::InferenceTestState::Idle => None,
             crate::app::InferenceTestState::Running {
@@ -354,7 +434,7 @@ fn activate(app: &mut App, hit: Hit) {
                 Ok(Navigation::Finish) => {
                     app.onboarding_progress.finish();
                     app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
-                    app.onboarding = None;
+                    app.onboarding_dismiss_pending = true;
                 }
                 Ok(Navigation::Moved) => {}
                 Err(_) => {
@@ -370,7 +450,7 @@ fn activate(app: &mut App, hit: Hit) {
         Hit::Skip if step == Step::Voice => {
             app.onboarding_progress.finish();
             app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
-            app.onboarding = None;
+            app.onboarding_dismiss_pending = true;
         }
         Hit::Skip if matches!(step, Step::SoundChoice | Step::SoundConfiguration) => {
             app.settings_select_sound_source(ilium_sound::SoundSourceKind::Muted);
@@ -451,21 +531,11 @@ fn activate(app: &mut App, hit: Hit) {
                 };
                 match control {
                     Control::Field(field) => app.settings_open_inference_field(field),
-                    Control::PaidProvider => {
-                        let providers =
-                            [Provider::OpenAi, Provider::Anthropic, Provider::OpenRouter];
-                        let index = providers
-                            .iter()
-                            .position(|provider| {
-                                *provider == app.inference_settings.selected_provider
-                            })
-                            .unwrap_or(0);
-                        app.settings_select_inference_provider(
-                            providers[(index + 1) % providers.len()],
-                        );
+                    choice @ (Control::PaidProvider | Control::Model | Control::OpenAiModel) => {
+                        if let Some(field) = ai_choice_field(choice) {
+                            app.begin_onboarding_inference_dialog(field);
+                        }
                     }
-                    Control::Model => app.settings_adjust_kilo_gateway_model(1),
-                    Control::OpenAiModel => app.settings_adjust_openai_model(1),
                     Control::Refresh => app.request_model_refresh(),
                     Control::Test => app.request_inference_test(),
                 }
@@ -631,6 +701,36 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
         || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Enter)
         || (key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left);
     if step == Step::Voice && !wizard_navigation_key {
+        let control = app
+            .onboarding
+            .as_ref()
+            .and_then(|ui| super::voice_ui::CONFIG_ROWS.get(ui.voice_ui.focus).copied())
+            .and_then(crate::value_voice::VoiceValue::from_row);
+        if let Some(control) = control {
+            match key.code {
+                KeyCode::Left | KeyCode::Right => {
+                    app.step_onboarding_voice_value(control, key.code == KeyCode::Left);
+                    return true;
+                }
+                KeyCode::Char('+') if control == crate::value_voice::VoiceValue::Volume => {
+                    app.step_onboarding_voice_value(control, false);
+                    return true;
+                }
+                KeyCode::Char('-') if control == crate::value_voice::VoiceValue::Volume => {
+                    app.step_onboarding_voice_value(control, true);
+                    return true;
+                }
+                KeyCode::Char('*') if control == crate::value_voice::VoiceValue::Volume => {
+                    app.begin_onboarding_voice_dialog(control);
+                    return true;
+                }
+                KeyCode::Enter | KeyCode::Char(' ' | '+') => {
+                    app.begin_onboarding_voice_dialog(control);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         let action = if let Some(ui) = &mut app.onboarding {
             match key.code {
                 KeyCode::Tab | KeyCode::Down => {
@@ -694,7 +794,16 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                     ui.studio_ui
                         .adjust_focused(studio, if key.code == KeyCode::Left { -1 } else { 1 })
                 }),
-                KeyCode::Enter | KeyCode::Char(' ') => ui.studio_ui.focused_action(),
+                KeyCode::Enter | KeyCode::Char('*') => {
+                    match super::studio_ui::focus_targets().get(ui.studio_ui.focus) {
+                        Some(super::studio_ui::StudioTarget::Slider(control)) => {
+                            Some(super::studio_ui::StudioAction::EditNumber(*control))
+                        }
+                        _ if key.code == KeyCode::Enter => ui.studio_ui.focused_action(),
+                        _ => None,
+                    }
+                }
+                KeyCode::Char(' ') => ui.studio_ui.focused_action(),
                 KeyCode::PageUp => {
                     ui.studio_ui.scroll_by(geometry.content, -8);
                     None
@@ -727,9 +836,30 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
     } else {
         0
     };
+    if step == Step::AiConfiguration && !key.modifiers.contains(KeyModifiers::ALT) {
+        let field = app.onboarding.as_ref().and_then(|ui| {
+            provider_rows(app)
+                .get(ui.focus)
+                .and_then(|(_, control)| ai_choice_field(*control))
+        });
+        if let Some(field) = field {
+            match key.code {
+                KeyCode::Left | KeyCode::Right => {
+                    app.step_onboarding_inference(field, key.code == KeyCode::Left);
+                    return true;
+                }
+                KeyCode::Char('+') => {
+                    app.begin_onboarding_inference_dialog(field);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
     match key.code {
         KeyCode::Esc => {
-            app.onboarding = None;
+            app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
+            app.onboarding_dismiss_pending = true;
             persist(app);
         }
         KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => activate(app, Hit::Back),
@@ -787,6 +917,46 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
     let step = app.onboarding_progress.wizard.step;
     let scroll = app.onboarding.as_ref().map_or(0, |ui| ui.scroll);
     let position = Position::new(mouse.column, mouse.row);
+    if step == Step::AiConfiguration {
+        if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind
+        {
+            let form_area = Rect {
+                height: geometry.content.height.saturating_sub(2),
+                ..geometry.content
+            };
+            for (index, (_, control)) in provider_rows(app).into_iter().enumerate() {
+                let Some(field) = ai_choice_field(control) else {
+                    continue;
+                };
+                let Some(control) = field.control(form_area, scroll, index, app) else {
+                    continue;
+                };
+                if !control.geometry().row.contains(position) {
+                    continue;
+                }
+                use crate::value_control::{ControlAction, PointerButton};
+                let pointer = if button == MouseButton::Left {
+                    PointerButton::Left
+                } else {
+                    PointerButton::Right
+                };
+                match control.hit(position, pointer) {
+                    Some(ControlAction::OpenChoices) => {
+                        if let Some(ui) = &mut app.onboarding {
+                            ui.focus = index;
+                        }
+                        app.begin_onboarding_inference_dialog(field);
+                    }
+                    Some(ControlAction::PreviousChoice) => {
+                        app.step_onboarding_inference(field, true)
+                    }
+                    Some(ControlAction::NextChoice) => app.step_onboarding_inference(field, false),
+                    _ => {}
+                }
+                return true;
+            }
+        }
+    }
     if step == Step::KeyboardPractice
         && app
             .onboarding
@@ -814,12 +984,19 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
                     ui.keyboard_ui.hover(&keyboard_geometry, position);
                     None
                 }
-                MouseEventKind::Down(MouseButton::Left) => ui.keyboard_ui.click(
-                    &keyboard_geometry,
-                    position,
-                    &app.keyboard_settings,
-                    &app.keybindings,
-                ),
+                MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) => {
+                    ui.keyboard_ui.click_button(
+                        &keyboard_geometry,
+                        position,
+                        &app.keyboard_settings,
+                        &app.keybindings,
+                        if button == MouseButton::Left {
+                            crate::value_control::PointerButton::Left
+                        } else {
+                            crate::value_control::PointerButton::Right
+                        },
+                    )
+                }
                 MouseEventKind::ScrollUp => {
                     ui.keyboard_ui.scroll_by(-3, &app.keybindings);
                     None
@@ -839,6 +1016,49 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
         return true;
     }
     if step == Step::Voice && geometry.content.contains(position) {
+        if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind
+        {
+            for (index, row) in super::voice_ui::CONFIG_ROWS.into_iter().enumerate() {
+                let Some(control) = crate::value_voice::VoiceValue::from_row(row) else {
+                    continue;
+                };
+                let Some(area) = app.onboarding.as_ref().and_then(|ui| {
+                    super::voice_ui::config_row_area(
+                        geometry.content,
+                        &ui.voice_ui,
+                        &ui.voice_state,
+                        index,
+                    )
+                }) else {
+                    continue;
+                };
+                if !area.contains(position) {
+                    continue;
+                }
+                use crate::value_control::{ControlAction, PointerButton};
+                let pointer = if button == MouseButton::Left {
+                    PointerButton::Left
+                } else {
+                    PointerButton::Right
+                };
+                match control.control(area, app).hit(position, pointer) {
+                    Some(ControlAction::OpenChoices | ControlAction::EditNumber) => {
+                        if let Some(ui) = &mut app.onboarding {
+                            ui.voice_ui.focus = index;
+                        }
+                        app.begin_onboarding_voice_dialog(control);
+                    }
+                    Some(ControlAction::PreviousChoice | ControlAction::Decrement) => {
+                        app.step_onboarding_voice_value(control, true)
+                    }
+                    Some(ControlAction::NextChoice | ControlAction::Increment) => {
+                        app.step_onboarding_voice_value(control, false)
+                    }
+                    _ => {}
+                }
+                return true;
+            }
+        }
         let action = if let Some(ui) = &mut app.onboarding {
             match mouse.kind {
                 MouseEventKind::Moved => {
@@ -894,11 +1114,32 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
                     {
                         ui.studio_ui.focus = focus;
                         ui.studio_ui.dragging = match super::studio_ui::focus_targets().get(focus) {
-                            Some(super::studio_ui::StudioTarget::Slider(control)) => Some(*control),
+                            Some(super::studio_ui::StudioTarget::Slider(control))
+                                if super::studio_ui::is_slider_track(
+                                    geometry.content,
+                                    &ui.studio_ui,
+                                    position,
+                                ) =>
+                            {
+                                Some(*control)
+                            }
                             _ => None,
                         };
                     }
-                    super::studio_ui::hit(geometry.content, &ui.studio_ui, position)
+                    ui.studio
+                        .as_ref()
+                        .and_then(|studio| {
+                            super::studio_ui::control_hit(
+                                geometry.content,
+                                studio,
+                                &ui.studio_ui,
+                                position,
+                                crate::value_control::PointerButton::Left,
+                            )
+                        })
+                        .or_else(|| {
+                            super::studio_ui::hit(geometry.content, &ui.studio_ui, position)
+                        })
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
                     super::studio_ui::drag(geometry.content, &ui.studio_ui, position)
@@ -1008,8 +1249,110 @@ pub fn is_animating(app: &App) -> bool {
     })
 }
 
+impl App {
+    pub(crate) fn begin_studio_number_dialog(&mut self, control: super::studio::SoundControl) {
+        let result = (|| {
+            if self.onboarding_progress.wizard.step != Step::SoundConfiguration
+                || self.onboarding_progress.wizard.sound != Some(SoundChoice::Custom)
+            {
+                return Err("The custom sound studio is no longer open".to_owned());
+            }
+            if control == super::studio::SoundControl::Waveform {
+                return Err("Choose a wave shape from its catalog".to_owned());
+            }
+            let directory = self
+                .config_dir
+                .clone()
+                .filter(|path| path.is_absolute())
+                .ok_or_else(|| "The sound configuration directory is unavailable".to_owned())?;
+            let studio = self
+                .onboarding
+                .as_ref()
+                .and_then(|ui| ui.studio.as_ref())
+                .ok_or_else(|| "The sound studio is no longer open".to_owned())?;
+            let host = crate::value_dialog_host::ValueDialogHost::studio_number(
+                control,
+                studio,
+                self.onboarding_revision,
+                directory,
+            );
+            Ok(host)
+        })();
+        match result {
+            Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
+            Err(error) => self.status_message = Some(error),
+        }
+    }
+
+    pub(crate) fn commit_studio_number_dialog(
+        &mut self,
+        host: &mut crate::value_dialog_host::ValueDialogHost,
+        outcome: &crate::value_dialog::DialogOutcome,
+    ) -> Result<(), String> {
+        use crate::value_dialog_host::ValueTarget;
+        let ValueTarget::SoundStudio {
+            control,
+            identity,
+            revision,
+            directory,
+        } = &host.target
+        else {
+            return Err("This dialog belongs to a different control".into());
+        };
+        if host.is_saving() {
+            return Err("The previous value is still being saved".into());
+        }
+        if self.config_dir.as_ref() != Some(directory)
+            || *revision != self.onboarding_revision
+            || self.onboarding_progress.wizard.step != Step::SoundConfiguration
+            || self.onboarding_progress.wizard.sound != Some(SoundChoice::Custom)
+            || !matches!(
+                self.modal_stack.last(),
+                Some(Mode::Normal | Mode::Settings(_))
+            )
+        {
+            return Err("The sound studio destination changed; reopen this dialog".into());
+        }
+        let studio = self
+            .onboarding
+            .as_ref()
+            .and_then(|ui| ui.studio.as_ref())
+            .ok_or_else(|| "The sound studio is no longer open".to_owned())?;
+        if !std::sync::Arc::ptr_eq(identity, &studio.identity) {
+            return Err("This is a replacement sound design; reopen its value editor".into());
+        }
+        let crate::value_dialog::DialogOutcome::CommitNumber(text) = outcome else {
+            return Err("Enter a number for this sound control".into());
+        };
+        let value = control.parse_number(text)?;
+        let mut settings = studio.draft.clone();
+        control.set(&mut settings.design, value);
+        let token = std::sync::Arc::new(());
+        self.enqueue_configuration(
+            directory.clone(),
+            crate::filesystem::configuration::ConfigurationChange::Sound(settings.clone()),
+            crate::filesystem::configurations::ConfigurationIntent::ValueDialog {
+                token: token.clone(),
+            },
+        )?;
+        // Writer admission precedes mutation; rebuild exactly the existing preview.
+        if let Some(studio) = self.onboarding.as_mut().and_then(|ui| ui.studio.as_mut()) {
+            studio.draft = settings.clone();
+            studio.changed();
+        }
+        self.apply_sound_settings(settings.clone());
+        self.queue_request(ilium_ipc::ClientRequest::UpdateSoundSettings { settings });
+        host.begin_save(token);
+        Ok(())
+    }
+}
+
 fn apply_studio_action(app: &mut App, action: super::studio_ui::StudioAction) {
     use super::studio_ui::StudioAction;
+    if let StudioAction::EditNumber(control) = action {
+        app.begin_studio_number_dialog(control);
+        return;
+    }
     let Some(ui) = &mut app.onboarding else {
         return;
     };
@@ -1017,6 +1360,7 @@ fn apply_studio_action(app: &mut App, action: super::studio_ui::StudioAction) {
         return;
     };
     match action {
+        StudioAction::EditNumber(_) => return,
         StudioAction::SetValue(control, value) => control.set(&mut studio.draft.design, value),
         StudioAction::SetPosition {
             control,
@@ -1141,10 +1485,13 @@ fn apply_voice_action(app: &mut App, action: super::voice_ui::VoiceAction, direc
 fn apply_keyboard_request(app: &mut App, request: super::keyboard_ui::KeyboardRequest) {
     use super::keyboard_ui::KeyboardRequest;
     match request {
+        KeyboardRequest::OpenPrefix(field) => app.begin_keyboard_prefix_dialog(field),
         KeyboardRequest::ApplyPreset(preset) => app.settings_apply_keymap_preset(preset),
-        KeyboardRequest::SetGeneralPrefix(prefix) => app.settings_set_shortcut_base(prefix),
+        KeyboardRequest::SetGeneralPrefix(prefix) => {
+            app.set_keyboard_prefix(crate::value_keyboard::KeyboardPrefix::General, prefix)
+        }
         KeyboardRequest::SetNavigationPrefix(prefix) => {
-            app.settings_set_navigation_shortcut_base(prefix)
+            app.set_keyboard_prefix(crate::value_keyboard::KeyboardPrefix::Navigation, prefix)
         }
         KeyboardRequest::AssignKey(action, key) => {
             app.status_message = Some("Shortcut updated. Try it in the playground.".into());
@@ -1229,6 +1576,14 @@ mod tests {
             &mut app,
             &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("Enter opens full model catalog")
+        };
+        app.finish_value_dialog(
+            host,
+            crate::value_dialog::DialogOutcome::Choose("model-b".into()),
+        );
+        app.settle_filesystem_for_test();
         assert_eq!(app.inference_settings.openai.model, "model-b");
         assert_eq!(
             crate::config::load(directory.path())
@@ -1425,11 +1780,107 @@ mod tests {
         let invalid_directory = tempfile::NamedTempFile::new().unwrap();
         app.config_dir = Some(invalid_directory.path().to_path_buf());
         apply_studio_action(&mut app, super::super::studio_ui::StudioAction::Save);
+        app.settle_filesystem_for_test();
         assert!(app
             .status_message
             .as_deref()
             .unwrap()
             .starts_with("Could not save sound settings:"));
+    }
+
+    #[test]
+    fn studio_number_retains_exact_draft_after_disk_failure_and_retries() {
+        use super::super::studio::SoundControl;
+        use crate::value_dialog::{DialogOutcome, ValueDialogState};
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(Step::SoundChoice);
+        app.config_dir = Some(directory.path().to_path_buf());
+        activate(&mut app, Hit::Choice(2));
+        app.settle_filesystem_for_test();
+        app.take_outbound_requests();
+        let obstruction = directory.path().join("config.toml");
+        let valid_config = std::fs::read(&obstruction).unwrap();
+        std::fs::write(&obstruction, "[sound\n").unwrap();
+        app.begin_studio_number_dialog(SoundControl::Pitch);
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("numeric dialog");
+        };
+        let ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("number");
+        };
+        number.draft.buf = "0731".into();
+        number.draft.cursor = 4;
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0731".into()));
+        assert_eq!(app.sound_settings.design.pitch_hz, 731);
+        assert_eq!(
+            app.onboarding
+                .as_ref()
+                .unwrap()
+                .studio
+                .as_ref()
+                .unwrap()
+                .preview,
+            ilium_sound::waveform_preview(&app.sound_settings.design, 120)
+        );
+        assert!(
+            matches!(app.take_outbound_requests().as_slice(), [ClientRequest::UpdateSoundSettings { settings }] if settings.design.pitch_hz == 731)
+        );
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed save retains dialog");
+        };
+        let ValueDialogState::Number(number) = &host.dialog else {
+            panic!("number");
+        };
+        assert_eq!(number.draft.buf, "0731");
+        assert_eq!(number.draft.cursor, 4);
+        assert!(number.error.is_some());
+        assert!(!host.is_saving());
+        std::fs::write(&obstruction, valid_config).unwrap();
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("retry");
+        };
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0731".into()));
+        app.settle_filesystem_for_test();
+        assert!(!matches!(app.mode, Mode::ValueDialog(_)));
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .sound
+                .design
+                .pitch_hz,
+            731
+        );
+    }
+
+    #[test]
+    fn studio_number_rejects_replacement_parent_and_out_of_range_without_mutation() {
+        use super::super::studio::{SoundControl, SoundStudio};
+        use crate::value_dialog::DialogOutcome;
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(Step::SoundChoice);
+        app.config_dir = Some(directory.path().to_path_buf());
+        activate(&mut app, Hit::Choice(2));
+        app.settle_filesystem_for_test();
+        app.take_outbound_requests();
+        app.begin_studio_number_dialog(SoundControl::Pitch);
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("dialog");
+        };
+        let original = app.sound_settings.clone();
+        let attempts = app.configuration_admission.attempts;
+        assert!(app
+            .commit_studio_number_dialog(&mut host, &DialogOutcome::CommitNumber("1801".into()))
+            .is_err());
+        assert_eq!(app.sound_settings, original);
+        assert!(app.take_outbound_requests().is_empty());
+        app.onboarding.as_mut().unwrap().studio = Some(SoundStudio::new(original.clone()));
+        assert!(app
+            .commit_studio_number_dialog(&mut host, &DialogOutcome::CommitNumber("731".into()))
+            .is_err());
+        assert_eq!(app.sound_settings, original);
+        assert!(app.take_outbound_requests().is_empty());
+        assert_eq!(app.configuration_admission.attempts, attempts);
     }
 
     #[test]
@@ -1485,5 +1936,170 @@ mod tests {
         );
         assert_eq!(app.onboarding_progress.wizard.step, Step::Voice);
         assert!(app.take_outbound_requests().is_empty());
+    }
+    #[test]
+    fn ai_choice_rows_render_exact_chrome_and_value_pointer_cycles_both_directions() {
+        use ratatui::{backend::TestBackend, Terminal};
+        for width in [40, 80, 140] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = app_at(Step::AiConfiguration);
+            app.config_dir = Some(directory.path().into());
+            app.onboarding_progress.wizard.ai = Some(AiChoice::Paid);
+            app.inference_settings.selected_provider = Provider::OpenAi;
+            app.inference_settings.openai.model = "synthetic-a".into();
+            app.openai_models = vec!["synthetic-a".into(), "synthetic-b".into()];
+            let screen = Rect::new(0, 0, width, 40);
+            app.set_screen_area(screen);
+            let geometry = Geometry::new(screen);
+            let area = Rect {
+                height: geometry.content.height.saturating_sub(2),
+                ..geometry.content
+            };
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal.draw(|frame| render(frame, screen, &app)).unwrap();
+            for (index, (_, control)) in provider_rows(&app).iter().enumerate() {
+                let Some(field) = ai_choice_field(*control) else {
+                    continue;
+                };
+                let g = field.control(area, 0, index, &app).unwrap().geometry();
+                for (rect, glyph) in [(g.previous, "←"), (g.open, "+"), (g.next, "→")] {
+                    assert_eq!(
+                        terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                        glyph
+                    );
+                }
+            }
+            let index = provider_rows(&app)
+                .iter()
+                .position(|(_, control)| matches!(control, Control::OpenAiModel))
+                .unwrap();
+            let field = crate::value_inference::OnboardingInference::OpenAiModel;
+            for (button, expected) in [
+                (MouseButton::Left, "synthetic-b"),
+                (MouseButton::Right, "synthetic-a"),
+            ] {
+                let g = field.control(area, 0, index, &app).unwrap().geometry();
+                assert!(handle_mouse(
+                    &mut app,
+                    MouseEvent {
+                        kind: MouseEventKind::Down(button),
+                        column: g.value.x,
+                        row: g.value.y,
+                        modifiers: KeyModifiers::NONE
+                    }
+                ));
+                assert_eq!(app.inference_settings.openai.model, expected);
+            }
+            app.settle_filesystem_for_test();
+            let g = field.control(area, 0, index, &app).unwrap().geometry();
+            assert!(handle_mouse(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: g.open.x,
+                    row: g.open.y,
+                    modifiers: KeyModifiers::NONE
+                }
+            ));
+            assert!(matches!(app.mode, Mode::ValueDialog(_)));
+        }
+    }
+
+    #[test]
+    fn voice_value_controls_render_scrolled_native_rows_and_volume_pointer_opens_exact_entry() {
+        use crate::value_voice::VoiceValue;
+        use ratatui::{backend::TestBackend, Terminal};
+        for width in [40, 80, 140] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = app_at(Step::Voice);
+            app.config_dir = Some(directory.path().into());
+            app.voice_settings.output_volume_percent = 50;
+            let screen = Rect::new(0, 0, width, 60);
+            app.set_screen_area(screen);
+            let area = Geometry::new(screen).content;
+            for scroll in [0, 8] {
+                app.onboarding.as_mut().unwrap().voice_ui.scroll = scroll;
+                let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
+                terminal.draw(|frame| render(frame, screen, &app)).unwrap();
+                let ui = app.onboarding.as_ref().unwrap();
+                for (index, row) in super::super::voice_ui::CONFIG_ROWS.into_iter().enumerate() {
+                    let Some(value) = VoiceValue::from_row(row) else {
+                        continue;
+                    };
+                    let Some(rect) = super::super::voice_ui::config_row_area(
+                        area,
+                        &ui.voice_ui,
+                        &ui.voice_state,
+                        index,
+                    ) else {
+                        continue;
+                    };
+                    let g = value.control(rect, &app).geometry();
+                    let symbols = if value == VoiceValue::Volume {
+                        [(g.previous, "−"), (g.next, "+"), (g.open, "*")]
+                    } else {
+                        [(g.previous, "←"), (g.open, "+"), (g.next, "→")]
+                    };
+                    for (rect, glyph) in symbols {
+                        assert_eq!(
+                            terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
+                            glyph
+                        );
+                    }
+                    if value == VoiceValue::Volume {
+                        let left = g.value.x - g.value_slot.x;
+                        let right = g.value_slot.right() - g.value.right();
+                        assert!(left.abs_diff(right) <= 1);
+                    }
+                }
+            }
+            app.onboarding.as_mut().unwrap().voice_ui.scroll = 0;
+            let index = super::super::voice_ui::CONFIG_ROWS
+                .iter()
+                .position(|row| *row == crate::voice_settings::VoiceRow::OutputVolume)
+                .unwrap();
+            for (part, expected) in [(0, 50), (1, 55), (2, 50)] {
+                let ui = app.onboarding.as_ref().unwrap();
+                let row = super::super::voice_ui::config_row_area(
+                    area,
+                    &ui.voice_ui,
+                    &ui.voice_state,
+                    index,
+                )
+                .unwrap();
+                let g = VoiceValue::Volume.control(row, &app).geometry();
+                let rect = match part {
+                    0 => row,
+                    1 => g.next,
+                    _ => g.previous,
+                };
+                assert!(handle_mouse(
+                    &mut app,
+                    MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: rect.x,
+                        row: rect.y,
+                        modifiers: KeyModifiers::NONE
+                    }
+                ));
+                assert_eq!(app.voice_settings.output_volume_percent, expected);
+            }
+            app.settle_filesystem_for_test();
+            let ui = app.onboarding.as_ref().unwrap();
+            let row =
+                super::super::voice_ui::config_row_area(area, &ui.voice_ui, &ui.voice_state, index)
+                    .unwrap();
+            let g = VoiceValue::Volume.control(row, &app).geometry();
+            assert!(handle_mouse(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: g.open.x,
+                    row: g.open.y,
+                    modifiers: KeyModifiers::NONE
+                }
+            ));
+            assert!(matches!(app.mode, Mode::ValueDialog(_)));
+        }
     }
 }

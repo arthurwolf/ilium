@@ -13,7 +13,8 @@ fn galactic_empires_uses_live_host_and_project_settings() {
         ..Default::default()
     };
     let controls = settings.scene_controls();
-    assert!(controls.len() >= 3);
+    assert_eq!(controls.len(), 27);
+    assert_eq!(settings.ambient.galactic_empires.star_count, 480);
     let key = settings.ambient.scene_key(AmbientKind::GalacticEmpires);
     for control in controls {
         if let Some(value) = control.stepped(1) {

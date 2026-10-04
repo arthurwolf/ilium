@@ -7,23 +7,28 @@
 //! "the ratatui TUI" -- the bin becomes a thin CLI dispatcher in the next
 //! stage, not the thing that manages raw mode.
 
-use std::io;
+use std::{
+    io,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    EnableFocusChange, EnableMouseCapture, PopKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, DisableLineWrap,
-    EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
+    LeaveAlternateScreen,
 };
 
 use crate::error::ClientError;
 
 pub struct TerminalGuard {
-    keyboard_enhancement_pushed: bool,
+    keyboard_enhancement_pushed: Arc<AtomicBool>,
 }
 
 impl TerminalGuard {
@@ -73,31 +78,16 @@ impl TerminalGuard {
             return Err(ClientError::TerminalSetup(source));
         }
 
-        // Not every terminal supports the Kitty keyboard protocol; only
-        // push the enhancement flags when the terminal says it can
-        // disambiguate keys, and remember to pop them again in `Drop`.
-        let keyboard_enhancement_pushed = supports_keyboard_enhancement().unwrap_or(false);
-        if keyboard_enhancement_pushed {
-            if let Err(source) = execute!(
-                io::stdout(),
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-            ) {
-                let _ = execute!(
-                    io::stdout(),
-                    DisableFocusChange,
-                    DisableMouseCapture,
-                    DisableBracketedPaste,
-                    EnableLineWrap,
-                    LeaveAlternateScreen
-                );
-                let _ = disable_raw_mode();
-                return Err(ClientError::TerminalSetup(source));
-            }
-        }
-
+        // The admitted input worker performs all response-reading queries,
+        // including the conditional keyboard enhancement probe. This guard
+        // retains restoration custody even if that worker reports an error.
         Ok(Self {
-            keyboard_enhancement_pushed,
+            keyboard_enhancement_pushed: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    pub(crate) fn keyboard_enhancement_state(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.keyboard_enhancement_pushed)
     }
 }
 
@@ -106,7 +96,7 @@ impl Drop for TerminalGuard {
         // Best-effort at every step: this runs during panic unwinding too,
         // where an earlier failure shouldn't stop us from attempting the
         // rest -- it's the last chance to leave the terminal usable.
-        if self.keyboard_enhancement_pushed {
+        if self.keyboard_enhancement_pushed.load(Ordering::Acquire) {
             let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         }
         let _ = execute!(

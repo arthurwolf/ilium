@@ -3,7 +3,6 @@
 //! Naming summaries trim text and fold records. Recovery must retain the
 //! provider's raw string and must observe a record appended after Enter.
 
-use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
@@ -21,25 +20,47 @@ pub fn exact_user_prompt_after(
     baseline_length: u64,
     submitted_after: DateTime<Utc>,
 ) -> Result<Option<String>> {
-    let mut file = File::open(path)?;
+    let mut file = ilium_platform::secure_fs::open_regular_file(path)?;
     if file.metadata()?.len() < baseline_length {
         return Ok(None);
     }
     file.seek(SeekFrom::Start(baseline_length))?;
     let mut lines = BufReader::new(file);
-    let mut line = String::new();
+    let mut line = Vec::new();
+    let mut read_bytes = 0usize;
     let mut latest_user = None;
     loop {
         line.clear();
-        if lines.read_line(&mut line)? == 0 {
+        loop {
+            let buffer = lines.fill_buf()?;
+            if buffer.is_empty() {
+                break;
+            }
+            let count = buffer
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(buffer.len(), |index| index + 1);
+            if line.len().saturating_add(count) > 1024 * 1024
+                || read_bytes.saturating_add(count) > 16 * 1024 * 1024
+            {
+                anyhow::bail!("Exact prompt transcript exceeded bounded evidence limits; no exact recovery claimed");
+            }
+            line.extend_from_slice(&buffer[..count]);
+            read_bytes += count;
+            lines.consume(count);
+            if line.last() == Some(&b'\n') {
+                break;
+            }
+        }
+        if line.is_empty() {
             break;
         }
         // The provider may still be writing this record. Never parse a
         // partial JSONL row as evidence for a completed user message.
-        if !line.ends_with('\n') {
+        if line.last() != Some(&b'\n') {
             break;
         }
-        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+        let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
         let Some(recorded_at) = entry
@@ -49,7 +70,9 @@ pub fn exact_user_prompt_after(
         else {
             continue;
         };
-        if recorded_at < submitted_after {
+        if recorded_at < submitted_after
+            || ilium_agent_session::genuine_request_text(class, &entry).is_none()
+        {
             continue;
         }
         match class {
@@ -211,5 +234,13 @@ mod tests {
             exact_user_prompt_after(&AgentClass::Codex, &path, 0, cutoff()).unwrap(),
             None
         );
+    }
+    #[test]
+    fn oversized_suffix_record_is_an_error_not_partial_exact_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.jsonl");
+        std::fs::write(&path, vec![b' '; 1024 * 1024 + 1]).unwrap();
+        let error = exact_user_prompt_after(&AgentClass::Codex, &path, 0, cutoff()).unwrap_err();
+        assert!(error.to_string().contains("bounded evidence limits"));
     }
 }

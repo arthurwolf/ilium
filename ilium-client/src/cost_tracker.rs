@@ -1,8 +1,8 @@
 //! Per-agent spend derived from transcript statistics, plus the immutable
 //! [`CostOverlay`] the tree renders.
 //!
-//! The tracker owns no threads besides the history scan it delegates to
-//! [`crate::cost_history`]. It reads the already-parsed
+//! Finite jobs on the existing shared CPU bank own all derivation; history
+//! scans use the same bounded I/O bank. The engine reads already-parsed
 //! [`SessionStats`] snapshots that [`crate::session_stats_store`] maintains,
 //! prices them, calibrates "a lot" against the configured policy, and rebuilds
 //! one overlay value only when an input changed (new statistics, settings, tree
@@ -11,12 +11,18 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+
+mod preparation;
+pub(crate) use preparation::MAX_PANES;
+pub use preparation::{CostTracker, PreparedCostCard};
 use std::time::{Duration, Instant};
 
 use ilium_core::{NodeId, NodeKind, Tree, ROOT_ID};
 
-use crate::cost_history::{default_cache_path, sorted_quota, sorted_totals, CostHistory};
+use crate::cost_history::{
+    default_cache_path, sorted_quota, sorted_totals, CostHistory, HistorySnapshot,
+};
 use crate::cost_model::{
     budget_fill, burn_usd_per_hour, calibrate, is_burn_spike, sparkline_glyphs, spend_cells,
     Calibrated, Calibration, CalibrationInputs, CostLevel, CostMetric, ModelPrice, PriceTable,
@@ -46,7 +52,7 @@ pub struct ModelCost {
 }
 
 /// Everything derived from one agent's statistics.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PaneCost {
     pub usd: f64,
     /// Some tokens had no price and no CLI-reported total covered them.
@@ -69,6 +75,7 @@ pub struct PaneCost {
     /// Codex rate-limit windows: name and percent used.
     pub quota: Vec<(String, f64)>,
     pub spend_points: Vec<SpendPoint>,
+    pub(crate) storage: CostStorage,
 }
 
 impl PaneCost {
@@ -141,6 +148,7 @@ impl PaneCost {
                 .map(|(name, window)| (name.clone(), window.used_percent))
                 .collect(),
             spend_points,
+            storage: CostStorage::default(),
         }
     }
 }
@@ -193,7 +201,7 @@ pub struct RowCost {
 }
 
 /// Immutable presentation snapshot consumed by the tree renderer.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct CostOverlay {
     pub settings: CostSettings,
     /// What `amount` and every total below are measured in.
@@ -217,6 +225,9 @@ pub struct CostOverlay {
     pub peer_totals: Vec<f64>,
     /// Ascending totals of past sessions, for previewing the history scale.
     pub history_sorted: Vec<f64>,
+    pub overlay_revision: u64,
+    pub(crate) cards: HashMap<NodeId, Arc<PreparedCostCard>>,
+    pub(crate) storage: CostStorage,
 }
 
 impl Default for CostOverlay {
@@ -237,12 +248,19 @@ impl Default for CostOverlay {
             details: HashMap::new(),
             peer_totals: Vec::new(),
             history_sorted: Vec::new(),
+            overlay_revision: 0,
+            cards: HashMap::new(),
+            storage: CostStorage::default(),
         }
     }
 }
 
 impl CostOverlay {
     /// Amount of `id` in the overlay's metric; unknown rows count as free.
+    pub fn prepared_card(&self, id: NodeId) -> Option<Arc<PreparedCostCard>> {
+        self.cards.get(&id).map(Arc::clone)
+    }
+
     pub fn amount_of(&self, id: NodeId) -> f64 {
         self.rows.get(&id).map_or(0.0, |row| row.amount)
     }
@@ -275,8 +293,8 @@ struct Rollup {
 
 struct PaneEntry {
     cost: Arc<PaneCost>,
-    /// Address of the statistics snapshot this was derived from.
-    source: usize,
+    /// A weak identity keeps the old allocation address from being reused.
+    source: Weak<SessionStats>,
 }
 
 /// Inputs of one [`CostTracker::tick`].
@@ -292,11 +310,64 @@ pub struct TickInput<'a> {
     pub home: Option<&'a Path>,
 }
 
-pub struct CostTracker {
-    history: CostHistory,
-    history_cache_path: Option<PathBuf>,
+#[derive(Debug, Default, Clone)]
+pub(crate) struct CostStorage(Option<Arc<ilium_execution::StorageAdmission>>);
+impl Drop for CostStorage {
+    fn drop(&mut self) {
+        let _ = self.0.take();
+    }
+}
+impl PartialEq for CostStorage {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+trait CostTopology {
+    fn is_pane(&self, id: NodeId) -> bool;
+    fn children(&self, id: NodeId) -> Option<&[NodeId]>;
+}
+impl CostTopology for Tree {
+    fn is_pane(&self, id: NodeId) -> bool {
+        self.get(id)
+            .is_some_and(|node| matches!(node.kind, NodeKind::Pane { .. }))
+    }
+    fn children(&self, id: NodeId) -> Option<&[NodeId]> {
+        self.children_of(id).ok()
+    }
+}
+trait CostStatistics {
+    fn stats(&self, id: NodeId) -> Option<&Arc<SessionStats>>;
+}
+impl CostStatistics for SessionStatsStore {
+    fn stats(&self, id: NodeId) -> Option<&Arc<SessionStats>> {
+        self.entry(id).and_then(|entry| entry.stats.as_ref())
+    }
+}
+struct DerivationInput<'a> {
+    settings: &'a CostSettings,
+    tree: &'a dyn CostTopology,
+    tree_version: u64,
+    store: &'a dyn CostStatistics,
+    agent_panes: &'a [NodeId],
+    now: Instant,
+    now_ms: i64,
+}
+impl<'a> From<&'a TickInput<'a>> for DerivationInput<'a> {
+    fn from(input: &'a TickInput<'a>) -> Self {
+        Self {
+            settings: input.settings,
+            tree: input.tree,
+            tree_version: input.tree_version,
+            store: input.store,
+            agent_panes: input.agent_panes,
+            now: input.now,
+            now_ms: input.now_ms,
+        }
+    }
+}
+struct DerivedCosts {
+    history: HistorySnapshot,
     panes: HashMap<NodeId, PaneEntry>,
-    last_requested: HashMap<NodeId, Instant>,
     prices: PriceTable,
     price_overrides: BTreeMap<String, ModelPrice>,
     overlay: Arc<CostOverlay>,
@@ -308,6 +379,7 @@ pub struct CostTracker {
     history_for: (CostMetric, QuotaWindow),
     /// Settings every `PaneCost` was derived under; a change recomputes all.
     pane_key: (CostMetric, QuotaWindow, u32, u8),
+    capture_storage: CostStorage,
 }
 
 /// The inputs an overlay was last built from; any difference forces a rebuild.
@@ -320,13 +392,11 @@ struct BuiltFor {
     scanning: bool,
 }
 
-impl Default for CostTracker {
+impl Default for DerivedCosts {
     fn default() -> Self {
         Self {
-            history: CostHistory::default(),
-            history_cache_path: default_cache_path(),
+            history: HistorySnapshot::default(),
             panes: HashMap::new(),
-            last_requested: HashMap::new(),
             prices: PriceTable::default(),
             price_overrides: BTreeMap::new(),
             overlay: Arc::new(CostOverlay::default()),
@@ -336,11 +406,12 @@ impl Default for CostTracker {
             sorted_history: Vec::new(),
             history_for: (CostMetric::Dollars, QuotaWindow::Primary),
             pane_key: (CostMetric::Dollars, QuotaWindow::Primary, 0, 0),
+            capture_storage: CostStorage::default(),
         }
     }
 }
 
-impl std::fmt::Debug for CostTracker {
+impl std::fmt::Debug for DerivedCosts {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("CostTracker")
@@ -349,56 +420,9 @@ impl std::fmt::Debug for CostTracker {
     }
 }
 
-impl CostTracker {
-    pub fn overlay(&self) -> &Arc<CostOverlay> {
-        &self.overlay
-    }
-
-    pub fn pane_cost(&self, pane_id: NodeId) -> Option<&PaneCost> {
-        self.panes.get(&pane_id).map(|entry| entry.cost.as_ref())
-    }
-
-    pub fn prices(&self) -> &PriceTable {
-        &self.prices
-    }
-
-    /// Overrides where the history cache lives (tests and alternate homes).
-    pub fn set_history_cache_path(&mut self, path: Option<PathBuf>) {
-        self.history_cache_path = path;
-    }
-
-    /// Panes whose statistics should be refreshed now, honouring the
-    /// tracker's own cadence and the concurrent-reader cap.
-    pub fn plan_refreshes(
-        &mut self,
-        agent_panes: &[NodeId],
-        busy_workers: usize,
-        now: Instant,
-    ) -> Vec<NodeId> {
-        let mut budget = MAX_CONCURRENT_STATS_WORKERS.saturating_sub(busy_workers);
-        let mut due = Vec::new();
-        let alive: HashSet<NodeId> = agent_panes.iter().copied().collect();
-        self.last_requested
-            .retain(|pane_id, _| alive.contains(pane_id));
-        for pane_id in agent_panes {
-            if budget == 0 {
-                break;
-            }
-            let is_due = self
-                .last_requested
-                .get(pane_id)
-                .is_none_or(|last| now.duration_since(*last) >= PANE_REFRESH_INTERVAL);
-            if is_due {
-                self.last_requested.insert(*pane_id, now);
-                due.push(*pane_id);
-                budget -= 1;
-            }
-        }
-        due
-    }
-
+impl DerivedCosts {
     /// Re-derives whatever changed. Returns whether the overlay was rebuilt.
-    pub fn tick(&mut self, input: &TickInput<'_>) -> bool {
+    fn tick(&mut self, input: &DerivationInput<'_>) -> Result<bool, String> {
         if input.settings.prices != self.price_overrides {
             self.price_overrides = input.settings.prices.clone();
             self.prices = PriceTable::with_overrides(&self.price_overrides);
@@ -411,26 +435,19 @@ impl CostTracker {
             let was_active = !self.panes.is_empty() || !self.overlay.rows.is_empty();
             if was_active {
                 self.panes.clear();
-                self.overlay = Arc::new(CostOverlay {
+                let storage = preparation::overlay_storage(input, &self.panes, 0)?;
+                let mut overlay = CostOverlay {
                     settings: input.settings.clone(),
+                    overlay_revision: self.overlay.overlay_revision.wrapping_add(1),
                     ..CostOverlay::default()
-                });
+                };
+                preparation::prepare_cards(&mut overlay, storage)?;
+                self.overlay = Arc::new(overlay);
                 self.built_for = None;
             }
-            return was_active;
+            return Ok(was_active);
         }
 
-        self.history.drain_events(input.now);
-        if input.settings.calibration == Calibration::OwnHistory {
-            if let Some(home) = input.home {
-                self.history.request_scan(
-                    home.to_path_buf(),
-                    self.history_cache_path.clone(),
-                    input.settings.history_days,
-                    input.now,
-                );
-            }
-        }
         let history_for = (input.settings.metric, input.settings.quota_window);
         if self.history.revision() != self.history_revision || self.history_for != history_for {
             self.history_revision = self.history.revision();
@@ -453,17 +470,12 @@ impl CostTracker {
             || self
                 .last_rebuild
                 .is_none_or(|last| input.now.duration_since(last) >= REBUILD_INTERVAL);
-        let mut panes_changed = self.refresh_panes(input, window_moved);
+        let mut panes_changed = self.refresh_panes(input, window_moved)?;
 
         let alive: HashSet<NodeId> = input.agent_panes.iter().copied().collect();
         let before = self.panes.len();
-        self.panes.retain(|pane_id, _| {
-            alive.contains(pane_id)
-                && input
-                    .store
-                    .entry(*pane_id)
-                    .is_some_and(|entry| entry.stats.is_some())
-        });
+        self.panes
+            .retain(|pane_id, _| alive.contains(pane_id) && input.store.stats(*pane_id).is_some());
         if self.panes.len() != before {
             panes_changed += 1;
         }
@@ -484,40 +496,44 @@ impl CostTracker {
                 } != built_for
             });
         if !needs_rebuild {
-            return false;
+            return Ok(false);
         }
-        self.overlay = Arc::new(self.build_overlay(input));
+        let overlay_storage =
+            preparation::overlay_storage(input, &self.panes, self.sorted_history.len())?;
+        let mut overlay = self.build_overlay(input);
+        overlay.overlay_revision = self.overlay.overlay_revision.wrapping_add(1);
+        preparation::prepare_cards(&mut overlay, overlay_storage)?;
+        self.overlay = Arc::new(overlay);
         self.built_for = Some(built_for);
         self.last_rebuild = Some(input.now);
-        true
+        Ok(true)
     }
 
     /// Recomputes each tracked pane whose statistics snapshot changed (or
     /// whose sparkline window moved). Returns how many panes changed.
-    fn refresh_panes(&mut self, input: &TickInput<'_>, window_moved: bool) -> u64 {
+    fn refresh_panes(
+        &mut self,
+        input: &DerivationInput<'_>,
+        window_moved: bool,
+    ) -> Result<u64, String> {
         let mut changed = 0;
         for pane_id in input.agent_panes {
-            let Some(stats) = input
-                .store
-                .entry(*pane_id)
-                .and_then(|entry| entry.stats.as_ref())
-            else {
+            let Some(stats) = input.store.stats(*pane_id) else {
                 continue;
             };
-            let source = Arc::as_ptr(stats) as usize;
+            let source = Arc::downgrade(stats);
             let is_current = self
                 .panes
                 .get(pane_id)
-                .is_some_and(|entry| entry.source == source);
+                .is_some_and(|entry| Weak::ptr_eq(&entry.source, &source));
             if is_current && !window_moved {
                 continue;
             }
-            let cost = Arc::new(PaneCost::from_stats(
-                stats,
-                &self.prices,
-                input.settings,
-                input.now_ms,
-            ));
+            let storage = preparation::pane_storage(stats)?;
+            let mut cost = PaneCost::from_stats(stats, &self.prices, input.settings, input.now_ms);
+            preparation::check_pane_capacity(&cost, storage.1)?;
+            cost.storage = CostStorage(Some(storage.0));
+            let cost = Arc::new(cost);
             let was_different = self
                 .panes
                 .get(pane_id)
@@ -527,10 +543,10 @@ impl CostTracker {
                 changed += 1;
             }
         }
-        changed
+        Ok(changed)
     }
 
-    fn build_overlay(&self, input: &TickInput<'_>) -> CostOverlay {
+    fn build_overlay(&self, input: &DerivationInput<'_>) -> CostOverlay {
         let settings = input.settings;
         let metric = settings.metric;
         let peer_totals: Vec<f64> = self
@@ -687,24 +703,24 @@ impl CostTracker {
                 .collect(),
             peer_totals,
             history_sorted: self.sorted_history.clone(),
+            overlay_revision: 0,
+            cards: HashMap::new(),
+            storage: CostStorage::default(),
         }
     }
 }
 
 /// Sums every pane beneath each container, returning the total of `id`.
 fn rollup_groups(
-    tree: &Tree,
+    tree: &dyn CostTopology,
     id: NodeId,
     panes: &HashMap<NodeId, Rollup>,
     groups: &mut HashMap<NodeId, Rollup>,
 ) -> Rollup {
-    let Some(node) = tree.get(id) else {
-        return Rollup::default();
-    };
-    if matches!(node.kind, NodeKind::Pane { .. }) {
+    if tree.is_pane(id) {
         return panes.get(&id).copied().unwrap_or_default();
     }
-    let Ok(children) = tree.children_of(id) else {
+    let Some(children) = tree.children(id) else {
         return Rollup::default();
     };
     let mut sum = Rollup::default();
@@ -872,7 +888,7 @@ mod tests {
     #[test]
     fn overlay_rolls_group_totals_up_and_keeps_loading_agents_unrated() {
         let (tree, project, first, second) = agent_tree();
-        let mut tracker = CostTracker::default();
+        let mut tracker = DerivedCosts::default();
         let settings = CostSettings {
             calibration: Calibration::FixedBands,
             group_totals: crate::cost_settings::DisplayOption {
@@ -888,7 +904,7 @@ mod tests {
             first,
             PaneEntry {
                 cost: Arc::new(PaneCost::from_stats(&stats, &tracker.prices, &settings, 0)),
-                source: 1,
+                source: Weak::new(),
             },
         );
         let input = TickInput {
@@ -901,7 +917,7 @@ mod tests {
             now_ms: 0,
             home: None,
         };
-        let overlay = tracker.build_overlay(&input);
+        let overlay = tracker.build_overlay(&DerivationInput::from(&input));
         assert_eq!(overlay.agent_count, 2);
         assert!((overlay.total_amount - 6.0).abs() < 1e-9);
         let rated = &overlay.rows[&first];
@@ -937,7 +953,7 @@ mod tests {
     #[test]
     fn budget_calibration_flags_agents_over_budget() {
         let (tree, _, first, _) = agent_tree();
-        let mut tracker = CostTracker::default();
+        let mut tracker = DerivedCosts::default();
         let settings = CostSettings {
             calibration: Calibration::Budget,
             budget_usd: 2.0,
@@ -948,7 +964,7 @@ mod tests {
             first,
             PaneEntry {
                 cost: Arc::new(PaneCost::from_stats(&stats, &tracker.prices, &settings, 0)),
-                source: 1,
+                source: Weak::new(),
             },
         );
         let input = TickInput {
@@ -961,7 +977,7 @@ mod tests {
             now_ms: 0,
             home: None,
         };
-        let overlay = tracker.build_overlay(&input);
+        let overlay = tracker.build_overlay(&DerivationInput::from(&input));
         assert!(overlay.rows[&first].is_over_budget);
         assert_eq!(
             overlay.rows[&first].level.unwrap().index(),
@@ -1051,7 +1067,7 @@ mod tests {
     #[test]
     fn quota_overlay_rates_codex_agents_and_leaves_claude_agents_unavailable() {
         let (tree, project, first, second) = agent_tree();
-        let mut tracker = CostTracker::default();
+        let mut tracker = DerivedCosts::default();
         let settings = CostSettings {
             group_totals: crate::cost_settings::DisplayOption {
                 enabled: true,
@@ -1066,7 +1082,7 @@ mod tests {
                 pane,
                 PaneEntry {
                     cost: Arc::new(PaneCost::from_stats(stats, &tracker.prices, &settings, 0)),
-                    source: 1,
+                    source: Weak::new(),
                 },
             );
         }
@@ -1080,7 +1096,7 @@ mod tests {
             now_ms: 0,
             home: None,
         };
-        let overlay = tracker.build_overlay(&input);
+        let overlay = tracker.build_overlay(&DerivationInput::from(&input));
         assert_eq!(overlay.metric, CostMetric::Quota);
         let codex_row = &overlay.rows[&first];
         assert_eq!(codex_row.amount, 9.0);
@@ -1099,7 +1115,7 @@ mod tests {
     #[test]
     fn quota_budget_is_a_share_of_the_window() {
         let (tree, _, first, _) = agent_tree();
-        let mut tracker = CostTracker::default();
+        let mut tracker = DerivedCosts::default();
         let settings = CostSettings {
             calibration: Calibration::Budget,
             quota_budget_percent: 5.0,
@@ -1110,7 +1126,7 @@ mod tests {
             first,
             PaneEntry {
                 cost: Arc::new(PaneCost::from_stats(&stats, &tracker.prices, &settings, 0)),
-                source: 1,
+                source: Weak::new(),
             },
         );
         let input = TickInput {
@@ -1123,7 +1139,7 @@ mod tests {
             now_ms: 0,
             home: None,
         };
-        let overlay = tracker.build_overlay(&input);
+        let overlay = tracker.build_overlay(&DerivationInput::from(&input));
         assert!(overlay.rows[&first].is_over_budget);
     }
 
@@ -1139,7 +1155,7 @@ mod tests {
             ..CostSettings::default()
         };
         let tick = |tracker: &mut CostTracker, settings: &CostSettings| {
-            tracker.tick(&TickInput {
+            tracker.settle_for_test(&TickInput {
                 settings,
                 tree: &tree,
                 tree_version: 1,
@@ -1171,7 +1187,7 @@ mod tests {
             ..quota_settings()
         };
         let now = Instant::now();
-        assert!(tracker.tick(&TickInput {
+        assert!(tracker.settle_for_test(&TickInput {
             settings: &settings,
             tree: &tree,
             tree_version: 1,
@@ -1181,9 +1197,9 @@ mod tests {
             now_ms: 0,
             home: None
         }));
-        assert!(tracker.panes.contains_key(&first));
+        assert!(tracker.pane_cost(first).is_some());
         store.forget(first);
-        assert!(tracker.tick(&TickInput {
+        assert!(tracker.settle_for_test(&TickInput {
             settings: &settings,
             tree: &tree,
             tree_version: 1,
@@ -1194,7 +1210,7 @@ mod tests {
             home: None
         }));
         assert!(
-            !tracker.panes.contains_key(&first),
+            tracker.pane_cost(first).is_none(),
             "old session cost cannot remain after transcript ownership disappears"
         );
     }

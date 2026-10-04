@@ -27,6 +27,7 @@ static CASCADIA_CODE: &[u8] = include_bytes!("../../assets/fonts/CascadiaCode-Re
 /// -- so clearing on overflow is cheap and simpler than the LRU
 /// bookkeeping `cosmic_text` doesn't expose hooks for anyway.
 const MAX_SWASH_CACHE_ENTRIES: usize = 4096;
+const MAX_SWASH_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Owns the `cosmic-text` font state used to rasterize header text.
 /// Construction loads/indexes the bundled font (a few milliseconds), so
@@ -130,6 +131,25 @@ impl HeaderRasterizer {
             },
         );
 
+        let image_bytes: usize = self
+            .swash_cache
+            .image_cache
+            .values()
+            .filter_map(Option::as_ref)
+            .map(|image| image.data.capacity())
+            .sum();
+        let outline_bytes: usize = self
+            .swash_cache
+            .outline_command_cache
+            .values()
+            .filter_map(Option::as_ref)
+            .map(|commands| std::mem::size_of_val(commands.as_ref()))
+            .sum();
+        // Entry cap includes hash metadata; byte cap accounts glyph/outline
+        // payload. Clear after each bounded heading as well as before the next.
+        if image_bytes.saturating_add(outline_bytes) > MAX_SWASH_CACHE_BYTES {
+            self.swash_cache = SwashCache::new();
+        }
         image
     }
 }

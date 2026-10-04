@@ -54,8 +54,8 @@ impl Drop for BuilderPermit {
     }
 }
 
-#[derive(Default)]
 pub struct AnimationLoopCache {
+    resources: ilium_ambient::resources::AmbientResources,
     width: u16,
     height: u16,
     settings: Option<AnimationSettings>,
@@ -77,6 +77,18 @@ impl Drop for AnimationLoopCache {
 }
 
 impl AnimationLoopCache {
+    /// Every nested scene uses the host's original execution/quota identity.
+    pub fn new(resources: ilium_ambient::resources::AmbientResources) -> Self {
+        Self {
+            resources,
+            width: 0,
+            height: 0,
+            settings: None,
+            frames: Vec::new(),
+            build: None,
+            status: AnimationCacheStatus::default(),
+        }
+    }
     fn cancel_build(&mut self) {
         if let Some(build) = self.build.take() {
             build.worker.stop_in_background();
@@ -154,6 +166,7 @@ impl AnimationLoopCache {
             return;
         };
         let (width, height, total) = (self.width, self.height, self.status.total_frames);
+        let resources = self.resources.clone();
         let progress = Arc::new(BuildProgress::default());
         let worker_progress = Arc::clone(&progress);
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -163,7 +176,9 @@ impl AnimationLoopCache {
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             );
             let mut generator = AnimationFrame::default();
+            generator.configure_resources(resources.clone());
             let mut head = AnimationFrame::default();
+            head.configure_resources(resources);
             let mut frames = Vec::with_capacity(total);
             let mut resident = frames.capacity() * std::mem::size_of::<Vec<u8>>();
             worker_progress.resident.store(resident, Ordering::Release);
@@ -301,7 +316,9 @@ mod tests {
     use crate::background_animation::AnimationKind;
 
     fn ready_cache(settings: &AnimationSettings) -> AnimationLoopCache {
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         let deadline = Instant::now() + Duration::from_secs(10);
         while !cache.step(settings, 24, 12, 8) {
             assert!(Instant::now() < deadline, "background cache must complete");
@@ -330,7 +347,9 @@ mod tests {
 
     #[test]
     fn oversized_cache_is_rejected_without_allocating_or_starting_a_worker() {
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         cache.begin(&AnimationSettings::default(), u16::MAX, u16::MAX);
         assert!(cache.status().is_limited);
         assert_eq!(cache.status().resident_bytes, 0);
@@ -340,7 +359,9 @@ mod tests {
 
     #[test]
     fn starting_and_cancelling_long_caches_does_not_render_or_join_on_the_caller() {
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         let mut settings = AnimationSettings {
             kind: AnimationKind::Kelp,
             loop_seconds: 120,
@@ -361,7 +382,9 @@ mod tests {
 
     #[test]
     fn replacement_generation_never_uses_stale_dimensions_or_settings() {
-        let mut cache = AnimationLoopCache::default();
+        let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
+            crate::execution::test_client(),
+        ));
         cache.begin(&AnimationSettings::default(), 80, 24);
         let settings = AnimationSettings {
             kind: AnimationKind::Kelp,

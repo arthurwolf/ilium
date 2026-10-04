@@ -14,7 +14,7 @@
 //! and the help screen read (see `keymap`'s module doc).
 
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use ilium_inference::InferenceSettings;
@@ -423,12 +423,77 @@ impl SidebarDensity {
 pub struct TerminalSettings {
     pub scrollback_budget_mib: u16,
     pub new_pane_directory: NewPaneDirectory,
+    /// Holding `smart_copy_light_key` over a terminal pane starts Smart Copy
+    /// light: click regions to select them, release the key to copy them.
+    pub smart_copy_light: bool,
+    pub smart_copy_light_key: SmartCopyLightKey,
 }
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             scrollback_budget_mib: 8,
             new_pane_directory: NewPaneDirectory::ProjectRoot,
+            smart_copy_light: true,
+            smart_copy_light_key: SmartCopyLightKey::Control,
+        }
+    }
+}
+
+/// The modifier key that, while held, runs Smart Copy light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SmartCopyLightKey {
+    #[default]
+    Control,
+    Alt,
+    Shift,
+}
+impl SmartCopyLightKey {
+    pub const ALL: [Self; 3] = [Self::Control, Self::Alt, Self::Shift];
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Control => "Ctrl",
+            Self::Alt => "Alt",
+            Self::Shift => "Shift",
+        }
+    }
+    pub const fn config_name(self) -> &'static str {
+        match self {
+            Self::Control => "ctrl",
+            Self::Alt => "alt",
+            Self::Shift => "shift",
+        }
+    }
+    pub fn stepped(self, direction: i32) -> Self {
+        stepped_value(&Self::ALL, self, direction)
+    }
+    /// The mouse-event modifier bit that is set while this key is held.
+    pub const fn modifier(self) -> crossterm::event::KeyModifiers {
+        match self {
+            Self::Control => crossterm::event::KeyModifiers::CONTROL,
+            Self::Alt => crossterm::event::KeyModifiers::ALT,
+            Self::Shift => crossterm::event::KeyModifiers::SHIFT,
+        }
+    }
+    /// Whether `code` is a modifier-only key event for this key (reported by
+    /// terminals that support the Kitty key-release protocol).
+    pub fn matches_modifier_key(self, code: crossterm::event::KeyCode) -> bool {
+        use crossterm::event::{KeyCode, ModifierKeyCode};
+        let KeyCode::Modifier(modifier) = code else {
+            return false;
+        };
+        match self {
+            Self::Control => matches!(
+                modifier,
+                ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl
+            ),
+            Self::Alt => matches!(
+                modifier,
+                ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt
+            ),
+            Self::Shift => matches!(
+                modifier,
+                ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift
+            ),
         }
     }
 }
@@ -518,12 +583,14 @@ impl LineDisplay {
 impl EditorSettings {
     pub fn stepped_autosave_delay_ms(self, direction: i32) -> u16 {
         const VALUES: [u16; 5] = [250, 500, 1000, 2000, 5000];
-        let current = VALUES
-            .iter()
-            .position(|value| *value == self.autosave_delay_ms)
-            .unwrap_or(2);
-        let offset = if direction < 0 { VALUES.len() - 1 } else { 1 };
-        VALUES[(current + offset) % VALUES.len()]
+        let current = self.autosave_delay_ms.clamp(250, 5000);
+        // Direct entry can produce values between presets; step from that actual value.
+        match direction.cmp(&0) {
+            std::cmp::Ordering::Less => VALUES.into_iter().rev().find(|value| *value < current),
+            std::cmp::Ordering::Greater => VALUES.into_iter().find(|value| *value > current),
+            std::cmp::Ordering::Equal => None,
+        }
+        .unwrap_or(current)
     }
 }
 
@@ -1007,6 +1074,10 @@ pub struct UiSettings {
     /// hides the gesture and the menu action; it does not clear an
     /// already-locked entry's persisted state.
     pub lock_closed_enabled: bool,
+    /// Closing the last remaining entry of a group or folder also closes
+    /// that now-empty container (cascading upward through ancestor groups).
+    /// Projects, split views and the root are never auto-closed.
+    pub auto_remove_empty_groups: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -1038,6 +1109,7 @@ impl Default for UiSettings {
             completed_progress_hide_after_seconds: 60,
             terminal_text_selection_enabled: true,
             lock_closed_enabled: true,
+            auto_remove_empty_groups: true,
             icons: IconSettings::default(),
         }
     }
@@ -1148,6 +1220,7 @@ struct RawUiConfig {
     completed_progress_hide_after_seconds: Option<u32>,
     terminal_text_selection_enabled: Option<bool>,
     lock_closed_enabled: Option<bool>,
+    auto_remove_empty_groups: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
     task_progress_frames: Option<Vec<String>>,
@@ -1157,6 +1230,8 @@ struct RawUiConfig {
 struct RawTerminalConfig {
     scrollback_budget_mib: Option<u16>,
     new_pane_directory: Option<String>,
+    smart_copy_light: Option<bool>,
+    smart_copy_light_key: Option<String>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawEditorConfig {
@@ -1276,6 +1351,8 @@ pub enum ConfigLoadError {
     InvalidScrollbackBudget(u16),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
     InvalidNewPaneDirectory(String),
+    #[error("terminal.smart_copy_light_key = {0:?} must be \"ctrl\", \"alt\" or \"shift\"")]
+    InvalidSmartCopyLightKey(String),
     #[error("editor.line_display = {0:?} must be \"clip\" or \"wrap\"")]
     InvalidEditorLineDisplay(String),
     #[error("session.recovery_policy = {0:?} is not supported")]
@@ -1340,7 +1417,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     if !path.exists() {
         return Ok(ClientConfig::default());
     }
-    let contents = std::fs::read_to_string(&path).map_err(|source| ClientError::ConfigLoad {
+    let contents = read_config_text(&path).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source: ConfigLoadError::Read(source),
     })?;
@@ -1647,6 +1724,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         lock_closed_enabled: raw
             .lock_closed_enabled
             .unwrap_or(defaults.lock_closed_enabled),
+        auto_remove_empty_groups: raw
+            .auto_remove_empty_groups
+            .unwrap_or(defaults.auto_remove_empty_groups),
         icons,
     })
 }
@@ -1669,10 +1749,26 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
         .map(parse_new_pane_directory)
         .transpose()?
         .unwrap_or(defaults.new_pane_directory);
+    let smart_copy_light_key = raw
+        .smart_copy_light_key
+        .as_deref()
+        .map(parse_smart_copy_light_key)
+        .transpose()?
+        .unwrap_or(defaults.smart_copy_light_key);
     Ok(TerminalSettings {
         scrollback_budget_mib,
         new_pane_directory,
+        smart_copy_light: raw.smart_copy_light.unwrap_or(defaults.smart_copy_light),
+        smart_copy_light_key,
     })
+}
+fn parse_smart_copy_light_key(value: &str) -> Result<SmartCopyLightKey, ConfigLoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Ok(SmartCopyLightKey::Control),
+        "alt" | "option" => Ok(SmartCopyLightKey::Alt),
+        "shift" => Ok(SmartCopyLightKey::Shift),
+        _ => Err(ConfigLoadError::InvalidSmartCopyLightKey(value.to_string())),
+    }
 }
 fn merge_editor(raw: RawEditorConfig) -> Result<EditorSettings, ConfigLoadError> {
     let defaults = EditorSettings::default();
@@ -2570,6 +2666,18 @@ impl std::ops::DerefMut for ConfigDocument {
     }
 }
 
+fn read_config_text(path: &Path) -> std::io::Result<String> {
+    let file = secure_fs::open_regular_file(path)?;
+    let mut contents = String::new();
+    file.take(256 * 1024 + 1).read_to_string(&mut contents)?;
+    if contents.len() > 256 * 1024 {
+        return Err(std::io::Error::other(
+            "Configuration document exceeds 256 KiB",
+        ));
+    }
+    Ok(contents)
+}
+
 fn read_toml_document(path: &Path) -> Result<ConfigDocument, ClientError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     // The server detector saver already uses this lock. Every client table
@@ -2580,7 +2688,7 @@ fn read_toml_document(path: &Path) -> Result<ConfigDocument, ClientError> {
             source: Box::new(ConfigSaveError::Write(source)),
         },
     )?;
-    let value = match std::fs::read_to_string(path) {
+    let value = match read_config_text(path) {
         Ok(contents) => toml::from_str(&contents).map_err(|source| ClientError::ConfigSave {
             path: path.to_path_buf(),
             source: Box::new(ConfigSaveError::Parse(source)),
@@ -2636,9 +2744,10 @@ fn write_toml_document(path: &Path, document: &ConfigDocument) -> Result<(), Cli
         file.write_all(serialized.as_bytes())?;
         file.sync_all()?;
         drop(file);
-        // No fallible operation follows this commit point: a reported refusal
-        // must mean the destination was not changed.
-        std::fs::rename(&temporary_path, path)?;
+        // Durability includes the directory entry. A post-rename flush error
+        // is an uncertain commit; acknowledged callers must read back before
+        // deciding whether to retry or roll back live state.
+        secure_fs::replace_file_durably(&temporary_path, path)?;
         Ok(())
     })();
 
@@ -2791,6 +2900,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "lock_closed_enabled".to_string(),
         toml::Value::Boolean(ui.lock_closed_enabled),
     );
+    table.insert(
+        "auto_remove_empty_groups".to_string(),
+        toml::Value::Boolean(ui.auto_remove_empty_groups),
+    );
     let icons = IconTarget::ALL
         .into_iter()
         .map(|target| {
@@ -2831,6 +2944,14 @@ fn terminal_settings_to_toml(settings: &TerminalSettings) -> toml::Value {
             }
             .into(),
         ),
+    );
+    table.insert(
+        "smart_copy_light".into(),
+        toml::Value::Boolean(settings.smart_copy_light),
+    );
+    table.insert(
+        "smart_copy_light_key".into(),
+        toml::Value::String(settings.smart_copy_light_key.config_name().into()),
     );
     toml::Value::Table(table)
 }
@@ -2918,7 +3039,53 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn smart_copy_light_settings_default_on_and_round_trip() {
+        let defaults = TerminalSettings::default();
+        assert!(defaults.smart_copy_light);
+        assert_eq!(defaults.smart_copy_light_key, SmartCopyLightKey::Control);
+
+        let changed = TerminalSettings {
+            smart_copy_light: false,
+            smart_copy_light_key: SmartCopyLightKey::Alt,
+            ..defaults
+        };
+        let table = terminal_settings_to_toml(&changed);
+        let raw: RawTerminalConfig = table.try_into().expect("written table parses back");
+        assert_eq!(merge_terminal(raw).expect("valid"), changed);
+
+        let raw: RawTerminalConfig = toml::from_str("smart_copy_light_key = \"Option\"").unwrap();
+        assert_eq!(
+            merge_terminal(raw).expect("alias").smart_copy_light_key,
+            SmartCopyLightKey::Alt
+        );
+        let raw: RawTerminalConfig = toml::from_str("smart_copy_light_key = \"hyper\"").unwrap();
+        assert!(matches!(
+            merge_terminal(raw),
+            Err(ConfigLoadError::InvalidSmartCopyLightKey(_))
+        ));
+    }
+
     use super::*;
+
+    #[test]
+    fn autosave_delay_steps_saturate_and_preserve_custom_values() {
+        for (current, direction, expected) in [
+            (250, -1, 250),
+            (5000, 1, 5000),
+            (1100, -1, 1000),
+            (1100, 1, 2000),
+            (1100, 0, 1100),
+            (1000, -1, 500),
+            (1000, 1, 2000),
+        ] {
+            let settings = EditorSettings {
+                autosave_delay_ms: current,
+                ..EditorSettings::default()
+            };
+            assert_eq!(settings.stepped_autosave_delay_ms(direction), expected);
+        }
+    }
 
     #[test]
     fn onboarding_progress_reload_preserves_unrelated_configuration() {
@@ -3203,6 +3370,7 @@ mod tests {
                 message: "continue".to_owned(),
                 target: ilium_ipc::TextTriggerTarget::Agents,
                 sample_text: "Ready for the next task".to_owned(),
+                delay_seconds: 60,
             }],
         };
 
@@ -4022,6 +4190,7 @@ mod tests {
             completed_progress_hide_after_seconds: 17,
             terminal_text_selection_enabled: false,
             lock_closed_enabled: false,
+            auto_remove_empty_groups: false,
             use_stable_glyphs: true,
             icons,
         };
@@ -4625,6 +4794,7 @@ mod text_trigger_config_exclusion_tests {
                                 message: "synthetic-continue".to_owned(),
                                 target: ilium_ipc::TextTriggerTarget::Agents,
                                 sample_text: "synthetic-ready".to_owned(),
+                                delay_seconds: 60,
                             }],
                         },
                     )

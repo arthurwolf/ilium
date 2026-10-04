@@ -235,6 +235,7 @@ pub enum AnimationRowOutcome {
 pub struct RowModel {
     rows: Vec<AnimationRow>,
     views: Vec<RowView>,
+    controls: Vec<Option<Control>>,
     effective_kind: Option<AnimationKind>,
 }
 
@@ -242,9 +243,26 @@ impl RowModel {
     pub fn new(settings: &AnimationSettings, context: &RowContext) -> Self {
         let rows = rows(settings, context);
         let scene_controls = settings.scene_controls();
+        let controls: Vec<_> = rows
+            .iter()
+            .map(|row| match row {
+                AnimationRow::Common(id) => settings.common_control(id),
+                AnimationRow::SceneControl(id) => scene_controls
+                    .iter()
+                    .find(|control| control.id == *id)
+                    .cloned(),
+                _ => None,
+            })
+            .collect();
         let views = rows
             .iter()
-            .map(|row| row.view(settings, &scene_controls, context))
+            .zip(&controls)
+            .map(|(row, control)| {
+                control.as_ref().map_or_else(
+                    || row.view(settings, &scene_controls, context),
+                    control_view,
+                )
+            })
             .collect();
         let effective_kind = context
             .effective_kind
@@ -252,6 +270,7 @@ impl RowModel {
         Self {
             rows,
             views,
+            controls,
             effective_kind,
         }
     }
@@ -346,6 +365,12 @@ impl RowModel {
         self.views.get(index)
     }
 
+    /// The exact options/bounds behind this displayed row. Dialogs retain this
+    /// snapshot and revalidate it against current settings before committing.
+    pub fn control(&self, index: usize) -> Option<&Control> {
+        self.controls.get(index).and_then(Option::as_ref)
+    }
+
     pub fn views(&self) -> &[RowView] {
         &self.views
     }
@@ -415,9 +440,10 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
             .into_iter()
             .map(|control| AnimationRow::SceneControl(control.id)),
     );
-    if kind
-        .ambient()
-        .is_some_and(|ambient| ambient.uses_location())
+    if kind == AnimationKind::OpenStreetMap
+        || kind
+            .ambient()
+            .is_some_and(|ambient| ambient.uses_location())
     {
         rows.push(AnimationRow::Location);
     }
@@ -557,6 +583,18 @@ impl AnimationRow {
                 .find(|control| control.id == *id)
                 .map_or_else(missing, control_view),
             Self::Location => {
+                if settings.kind == AnimationKind::OpenStreetMap {
+                    let value = settings.ambient.openstreetmap.picker_location()
+                        .map(|location| format!("{} ({})", location.label, location.coordinate_text()))
+                        .unwrap_or_else(|error| format!("Invalid saved map location: {error}"));
+                    return RowView {
+                        label: "Map location".to_owned(),
+                        value,
+                        kind: RowKind::Location,
+                        help: "Choose a world-map point, coordinates or an address for this OSM scene. Other scenes keep their observer location. New points need your configured Overpass geometry service.".to_owned(),
+                        disabled_options: Vec::new(),
+                    };
+                }
                 let location = &settings.ambient.location;
                 RowView {
                     label: "Location".to_owned(),
@@ -631,6 +669,24 @@ impl AnimationRow {
             Self::Scene(AnimationKind::Chess) => "AN-62".to_owned(),
             Self::Scene(AnimationKind::Carpet) => "AN-63".to_owned(),
             Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
+            Self::Scene(AnimationKind::Wind) => "AN-66".to_owned(),
+            Self::Scene(AnimationKind::Aurora) => "AN-67".to_owned(),
+            Self::Scene(AnimationKind::Pollen) => "AN-68".to_owned(),
+            Self::Scene(AnimationKind::Fireflies) => "AN-69".to_owned(),
+            Self::Scene(AnimationKind::WindowSunlight) => "AN-70".to_owned(),
+            Self::Scene(AnimationKind::Frost) => "AN-71".to_owned(),
+            Self::Scene(AnimationKind::Lighthouse) => "AN-72".to_owned(),
+            Self::Scene(AnimationKind::PaperFold) => "AN-73".to_owned(),
+            Self::Scene(AnimationKind::Embroidery) => "AN-74".to_owned(),
+            Self::Scene(AnimationKind::PrimeConstellations) => "AN-75".to_owned(),
+            Self::Scene(AnimationKind::Wallpaper) => "AN-76".to_owned(),
+            Self::Scene(AnimationKind::UnfinishedCircle) => "AN-77".to_owned(),
+            Self::Scene(AnimationKind::NeedleThreads) => "AN-78".to_owned(),
+            Self::Scene(AnimationKind::HesitatingInk) => "AN-79".to_owned(),
+            Self::Scene(AnimationKind::CropCircles) => "AN-80".to_owned(),
+            Self::Scene(AnimationKind::DelayedReflection) => "AN-81".to_owned(),
+            Self::Scene(AnimationKind::AlmostTouching) => "AN-82".to_owned(),
+            Self::Scene(AnimationKind::HiddenWheel) => "AN-83".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()
@@ -674,7 +730,7 @@ impl AnimationRow {
 
 /// Help topic ids of the shared look, display and pattern rows. They are
 /// separate from the numbered scene topics so they never renumber them.
-pub const STYLE_HELP_IDS: [(&str, &str); 20] = [
+pub const STYLE_HELP_IDS: [(&str, &str); 22] = [
     ("look_preset", "AN-C01"),
     ("look_mode", "AN-C02"),
     ("look_palette", "AN-C03"),
@@ -695,6 +751,8 @@ pub const STYLE_HELP_IDS: [(&str, &str); 20] = [
     ("look_pattern_invert", "AN-C18"),
     ("fps_limit", "AN-C19"),
     ("panels", "AN-C20"),
+    ("look_filter", "AN-C21"),
+    ("look_filter_strength", "AN-C22"),
 ];
 
 fn style_help_id(id: &str) -> Option<&'static str> {
@@ -728,7 +786,7 @@ pub fn help_ids() -> Vec<String> {
     if !ids.iter().any(|id| id == "AN-56") {
         ids.push("AN-56".to_owned());
     }
-    for number in 57..=65 {
+    for number in 57..=83 {
         ids.push(format!("AN-{number:02}"));
     }
     ids
@@ -737,6 +795,34 @@ pub fn help_ids() -> Vec<String> {
 #[cfg(test)]
 mod overhaul_tests {
     use super::*;
+
+    #[test]
+    fn displayed_controls_retain_their_full_option_and_numeric_metadata() {
+        for kind in AnimationKind::ALL {
+            let settings = AnimationSettings {
+                kind,
+                ..Default::default()
+            };
+            let scene_controls = settings.scene_controls();
+            let model = RowModel::new(&settings, &RowContext::default());
+            for (index, row) in model.rows().iter().enumerate() {
+                let expected = match row {
+                    AnimationRow::Common(id) => settings.common_control(id),
+                    AnimationRow::SceneControl(id) => scene_controls
+                        .iter()
+                        .find(|control| control.id == *id)
+                        .cloned(),
+                    _ => None,
+                };
+                assert_eq!(model.control(index), expected.as_ref(), "{kind:?}: {row:?}");
+                if let Some(control) = model.control(index) {
+                    assert_eq!(model.view(index).unwrap().value, control.display_value());
+                }
+            }
+            assert!(model.control(model.len()).is_none());
+        }
+    }
+
     #[test]
     fn overhaul_ram_usage_is_visible_before_progress_details() {
         let context = RowContext {
@@ -763,6 +849,25 @@ mod overhaul_tests {
         assert_eq!(slider.value_at(0, 101), 1);
         assert_eq!(slider.value_at(100, 101), 120);
         assert!((10..=12).contains(&slider.value_at(50, 101)));
+    }
+
+    #[test]
+    fn osm_location_row_displays_the_scene_selection_not_the_shared_observer() {
+        let mut settings = AnimationSettings {
+            kind: AnimationKind::OpenStreetMap,
+            ..Default::default()
+        };
+        settings.ambient.location.label = "Shared observer".into();
+        let model = RowModel::new(&settings, &RowContext::default());
+        let index = model
+            .rows()
+            .iter()
+            .position(|row| *row == AnimationRow::Location)
+            .unwrap();
+        let view = model.view(index).unwrap();
+        assert_eq!(view.label, "Map location");
+        assert!(!view.value.contains("Shared observer"));
+        assert!(view.value.contains("Paris"));
     }
 }
 
