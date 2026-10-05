@@ -1,0 +1,17 @@
+[package]
+name = "ilium-compaction-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure analysis of agent session transcripts: compaction events, trace-driven cost replay and trigger optimization"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# `raw_value` lets the Codex parser measure a huge `replacement_history`
+# without materialising it.
+serde_json = { version = "1.0.149", features = ["raw_value"] }
+thiserror = "2.0.18"
+
+[dev-dependencies]

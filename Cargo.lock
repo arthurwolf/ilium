@@ -2760,6 +2760,7 @@ dependencies = [
  "fdeflate",
  "flate2",
  "ilium-execution",
+ "ilium-http",
  "ilium-platform",
  "image",
  "png",
@@ -2786,6 +2787,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
  "unicode-segmentation",
  "unicode-width",
@@ -2811,14 +2813,17 @@ dependencies = [
  "ilium-agent-session",
  "ilium-ambient",
  "ilium-animation-js",
+ "ilium-compaction-analysis",
  "ilium-core",
  "ilium-execution",
  "ilium-gpu",
+ "ilium-http",
  "ilium-inference",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
  "ilium-prompts",
+ "ilium-remote-compaction",
  "ilium-server",
  "ilium-session-convert",
  "ilium-sound",
@@ -2843,6 +2848,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "toml",
+ "toml_edit 0.25.12+spec-1.1.0",
  "tracing",
  "tui-term",
  "tui-tree-widget",
@@ -2853,6 +2859,16 @@ dependencies = [
  "uuid",
  "vt100",
  "zbus",
+ "zip",
+]
+
+[[package]]
+name = "ilium-compaction-analysis"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2906,10 +2922,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-http"
+version = "0.1.0"
+dependencies = [
+ "ureq",
+]
+
+[[package]]
 name = "ilium-inference"
 version = "0.1.0"
 dependencies = [
  "ilium-execution",
+ "ilium-http",
  "ilium-kilo-gateway",
  "ilium-logging",
  "ilium-platform",
@@ -2941,6 +2965,7 @@ dependencies = [
 name = "ilium-kilo-gateway"
 version = "0.1.0"
 dependencies = [
+ "ilium-http",
  "ilium-logging",
  "rand 0.10.2",
  "serde",
@@ -2971,6 +2996,7 @@ dependencies = [
  "getrandom 0.3.4",
  "libc",
  "portable-pty",
+ "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "tracing",
@@ -3000,6 +3026,20 @@ dependencies = [
  "tokio",
  "tracing",
  "vt100",
+]
+
+[[package]]
+name = "ilium-remote-compaction"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ilium-agent-session",
+ "ilium-prompts",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -3120,6 +3160,7 @@ dependencies = [
  "ego-tree",
  "html5ever",
  "ilium-ambient",
+ "ilium-http",
  "ilium-platform",
  "image",
  "percent-encoding",
@@ -6837,6 +6878,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.3",
 ]
 
@@ -6854,6 +6896,12 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+
+[[package]]
+name = "toml_writer"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tower"

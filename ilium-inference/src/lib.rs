@@ -234,8 +234,12 @@ impl Default for KiloGatewaySettings {
 /// the configured list rather than pinning to one egress IP.
 fn kilo_gateway_client(
     settings: &KiloGatewaySettings,
+    timeout: Option<Duration>,
 ) -> Result<KiloGatewayClient, InferenceError> {
-    let client = KiloGatewayClient::default();
+    let mut client = KiloGatewayClient::default();
+    if let Some(timeout) = timeout {
+        client = client.with_request_timeout(timeout);
+    }
     if !settings.paid_proxies_enabled {
         return Ok(client);
     }
@@ -326,6 +330,9 @@ pub struct InferenceRequest {
     pub system_prompt: String,
     pub user_prompt: String,
     pub max_tokens: u32,
+    /// Whole-request transport timeout. `None` keeps the short default meant
+    /// for titles and JSON helpers; long summarization calls set it higher.
+    pub timeout: Option<Duration>,
 }
 impl InferenceRequest {
     pub fn json_only(user_prompt: impl Into<String>) -> Self {
@@ -333,6 +340,7 @@ impl InferenceRequest {
             system_prompt: ilium_prompts::naming::JSON_ONLY.to_string(),
             user_prompt: user_prompt.into(),
             max_tokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+            timeout: None,
         }
     }
 }
@@ -575,6 +583,7 @@ impl InferenceProvider for KiloGatewayProvider {
             &self.0.model,
             "Select a Kilo Gateway model before testing or using inference",
         )?;
+        let timeout = request.timeout;
         let request = CompletionRequest::new(
             &self.0.model,
             vec![
@@ -583,7 +592,7 @@ impl InferenceProvider for KiloGatewayProvider {
             ],
             request.max_tokens,
         );
-        kilo_gateway_client(&self.0)?
+        kilo_gateway_client(&self.0, timeout)?
             .complete_text(&request)
             .map(|text| InferenceResponse { text })
             .map_err(map_gateway_error)
@@ -598,6 +607,7 @@ impl InferenceProvider for KiloGatewayProvider {
             &self.0.model,
             "Select a Kilo Gateway model before using inference",
         )?;
+        let timeout = request.timeout;
         let request = CompletionRequest::new(
             &self.0.model,
             vec![
@@ -606,7 +616,7 @@ impl InferenceProvider for KiloGatewayProvider {
             ],
             request.max_tokens,
         );
-        kilo_gateway_client(&self.0)?
+        kilo_gateway_client(&self.0, timeout)?
             .stream_text(&request, &mut |event| match event {
                 CompletionStreamEvent::TextDelta(text) => {
                     on_event(InferenceStreamEvent::TextDelta(text))
@@ -619,7 +629,7 @@ impl InferenceProvider for KiloGatewayProvider {
     }
 
     fn list_models(&self) -> Result<Vec<String>, InferenceError> {
-        let models = kilo_gateway_client(&self.0)?
+        let models = kilo_gateway_client(&self.0, None)?
             .list_free_models()
             .map_err(map_gateway_error)?;
         if models.is_empty() {
@@ -675,6 +685,7 @@ impl InferenceProvider for OllamaProvider {
             &format_url(&self.0.base_url, "api/chat"),
             &[],
             serde_json::json!({"model":self.0.model,"stream":false,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"options":{"temperature":0.0,"num_predict":request.max_tokens}}),
+            request.timeout,
         )?;
         response_text(&response, &["message", "content"])
     }
@@ -691,6 +702,7 @@ impl InferenceProvider for OllamaProvider {
             &format_url(&self.0.base_url, "api/chat"),
             &[],
             serde_json::json!({"model":self.0.model,"stream":true,"messages":[{"role":"system","content":request.system_prompt},{"role":"user","content":request.user_prompt}],"options":{"temperature":0.0,"num_predict":request.max_tokens}}),
+            request.timeout,
             StreamProtocol::OllamaJsonLines,
             on_event,
         )
@@ -1007,6 +1019,7 @@ fn complete_openai_compatible(
         &format_url(base_url, "chat/completions"),
         &[("Authorization", format!("Bearer {}", api_key))],
         openai_chat_payload(base_url, model, request, false),
+        request.timeout,
     )?;
     openai_compatible_response_text(&response)
 }
@@ -1024,6 +1037,7 @@ fn stream_openai_compatible(
         &format_url(base_url, "chat/completions"),
         &[("Authorization", format!("Bearer {api_key}"))],
         openai_chat_payload(base_url, model, request, true),
+        request.timeout,
         StreamProtocol::OpenAiSse,
         on_event,
     )
@@ -1123,6 +1137,7 @@ impl InferenceProvider for AnthropicProvider {
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
             serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0}),
+            request.timeout,
         )?;
         anthropic_response_text(&response)
     }
@@ -1143,6 +1158,7 @@ impl InferenceProvider for AnthropicProvider {
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
             serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0,"stream":true}),
+            request.timeout,
             StreamProtocol::AnthropicSse,
             on_event,
         )
@@ -1176,7 +1192,7 @@ fn resolve_base_url<'settings>(
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
-        ureq::Agent::new_with_config(
+        ilium_http::agent(
             ureq::Agent::config_builder()
                 .timeout_global(Some(REQUEST_TIMEOUT))
                 .http_status_as_error(false)
@@ -1202,6 +1218,7 @@ fn post_json(
     url: &str,
     headers: &[(&str, String)],
     body: serde_json::Value,
+    timeout: Option<Duration>,
 ) -> Result<serde_json::Value, InferenceError> {
     let diagnostic_url = ilium_logging::redacted_url(url);
     tracing::info!(
@@ -1213,6 +1230,9 @@ fn post_json(
     );
     tracing::debug!(method = "POST", url = %diagnostic_url, request_body = %body, "HTTP request payload");
     let mut request = agent().post(url).header("Content-Type", "application/json");
+    if let Some(timeout) = timeout {
+        request = request.config().timeout_global(Some(timeout)).build();
+    }
     for (name, value) in headers {
         request = request.header(*name, value);
     }
@@ -1285,6 +1305,7 @@ fn post_stream(
     url: &str,
     headers: &[(&str, String)],
     body: serde_json::Value,
+    timeout: Option<Duration>,
     protocol: StreamProtocol,
     on_event: &mut dyn FnMut(InferenceStreamEvent) -> bool,
 ) -> Result<(), InferenceError> {
@@ -1292,6 +1313,9 @@ fn post_stream(
     tracing::info!(method = "POST", url = %diagnostic_url, headers = ?redacted_headers(headers), request_characters = body.to_string().chars().count(), "HTTP stream request started");
     tracing::debug!(method = "POST", url = %diagnostic_url, request_body = %body, "HTTP stream request payload");
     let mut request = agent().post(url).header("Content-Type", "application/json");
+    if let Some(timeout) = timeout {
+        request = request.config().timeout_global(Some(timeout)).build();
+    }
     for (name, value) in headers {
         request = request.header(*name, value);
     }
@@ -1596,6 +1620,7 @@ mod tests {
             system_prompt: "Return JSON only.".to_string(),
             user_prompt: "A quoted \"value\" and a newline:\nnext".to_string(),
             max_tokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+            timeout: None,
         };
 
         for stream in [false, true] {
@@ -1687,6 +1712,7 @@ mod tests {
             system_prompt: "system fixture".to_string(),
             user_prompt: "user fixture".to_string(),
             max_tokens: 731,
+            timeout: None,
         };
 
         for base in [
@@ -2133,6 +2159,7 @@ mod tests {
             &url,
             &[],
             serde_json::json!({"stream": true}),
+            None,
             StreamProtocol::OpenAiSse,
             &mut |event| {
                 events.push(event);
@@ -2167,6 +2194,7 @@ mod tests {
             &url,
             &[],
             serde_json::json!({"stream": true}),
+            None,
             StreamProtocol::AnthropicSse,
             &mut |event| {
                 events.push(event);
@@ -2198,6 +2226,7 @@ mod tests {
             &url,
             &[],
             serde_json::json!({"stream": true}),
+            None,
             StreamProtocol::OllamaJsonLines,
             &mut |event| {
                 events.push(event);
@@ -2234,7 +2263,7 @@ mod tests {
         // real behavioral guarantee (proxy actually used) is covered by
         // `kilo_gateway_provider_routes_through_a_configured_paid_proxy`
         // below, since `proxy_url` is private to `KiloGatewayClient`.
-        let _client = kilo_gateway_client(&settings);
+        let _client = kilo_gateway_client(&settings, None);
     }
 
     #[test]
@@ -2245,7 +2274,7 @@ mod tests {
         };
 
         assert!(matches!(
-            kilo_gateway_client(&settings),
+            kilo_gateway_client(&settings, None),
             Err(InferenceError::Configuration(message))
                 if message.contains("no proxies were loaded from MongoDB")
         ));
@@ -2314,6 +2343,7 @@ mod tests {
             &url,
             &[("Authorization", "Bearer test-secret".to_owned())],
             request_body,
+            None,
         );
 
         assert!(matches!(

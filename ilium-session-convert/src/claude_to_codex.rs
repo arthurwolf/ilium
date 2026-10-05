@@ -72,6 +72,8 @@ pub(crate) fn convert(
 
     // Step 2: inspect it, for the counts reported at the end.
     reporter.step(2, "Inspect the transcript", 0.05);
+    // Progress callbacks may cancel synchronously; settle before opening the file.
+    reporter.check_cancel()?;
     let counts = count_transcript_lines(&transcript.path)?;
     reporter.log(format!(
         "{} user/assistant lines, {} other bookkeeping lines",

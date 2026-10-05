@@ -99,6 +99,7 @@ fn file_log_records_complete_llm_and_http_failure_context_without_credentials() 
         system_prompt: "diagnostic-system-prompt".to_owned(),
         user_prompt: "diagnostic-user-prompt".to_owned(),
         max_tokens: 73,
+        timeout: None,
     };
 
     let result = provider_from_settings(&settings).complete(&request);

@@ -2,7 +2,7 @@
 
 All application-authored model instructions, examples, tool descriptions, generated agent messages and their context layouts live in `templates/**/*.hbs`. Rust supplies typed state, serialization, clipping budgets and runtime user text.
 
-The `naming`, `voice`, `agent` and `conversion` catalogs explicitly embed these files using `include_str!`. Editing a template changes the next compiled artifact; rebuild to use it. Both debug and release binaries render embedded text without reading template files, locating a source checkout or accepting a template-directory setting.
+The `naming`, `voice`, `agent`, `conversion` and `compaction` catalogs explicitly embed these files using `include_str!`. Editing a template changes the next compiled artifact; rebuild to use it. Both debug and release binaries render embedded text without reading template files, locating a source checkout or accepting a template-directory setting.
 
 ## Edit or add a prompt
 

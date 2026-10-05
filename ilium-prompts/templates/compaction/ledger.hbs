@@ -1,0 +1,19 @@
+{{#if files_modified}}Files modified or created:
+{{#each files_modified}}- {{this}}
+{{/each}}
+{{/if}}{{#if files_read}}Files read:
+{{#each files_read}}- {{this}}
+{{/each}}
+{{/if}}{{#if commands}}Shell commands run:
+{{#each commands}}- {{this}}
+{{/each}}
+{{/if}}{{#if errors}}Errors and failures (first lines, verbatim):
+{{#each errors}}- {{this}}
+{{/each}}
+{{/if}}{{#if urls}}URLs mentioned:
+{{#each urls}}- {{this}}
+{{/each}}
+{{/if}}{{#if ids}}Identifiers mentioned:
+{{#each ids}}- {{this}}
+{{/each}}
+{{/if}}

@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ilium-http = { version = "0.1.0", path = "../ilium-http" }
 ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
 ilium-kilo-gateway = { version = "0.1.0", path = "../ilium-kilo-gateway" }
 ilium-logging = { version = "0.1.0", path = "../ilium-logging" }

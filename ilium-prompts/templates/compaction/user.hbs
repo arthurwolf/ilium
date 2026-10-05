@@ -1,0 +1,21 @@
+{{#if prior_summary}}<prior-summary>
+{{prior_summary}}
+</prior-summary>
+
+The <prior-summary> summarizes everything that happened before the <conversation>. Produce one new summary, in the required format, that combines both. The <prior-summary> is discarded afterwards: anything you do not carry into the new summary is lost. Carry forward objectives, constraints, user directives, decisions and unfinished work from it even when the <conversation> does not mention them, and drop only what is finished and no longer needed. The <conversation> is more recent: where they conflict, the conversation wins.
+
+{{/if}}<conversation>
+{{conversation}}
+</conversation>
+{{#if facts}}
+
+<facts>
+{{facts}}
+</facts>
+{{/if}}
+{{#if part_label}}
+
+The <conversation> above is {{part_label}} of the history to summarize; the rest is handled separately.
+{{/if}}
+
+{{#if is_claude_code}}Write an <analysis> block followed by a <summary> block with the nine sections described above.{{/if}}{{#if is_codex}}Write the handoff summary now, as plain text.{{/if}}{{#if is_opencode}}Write the summary now, using exactly the section structure described above.{{/if}}{{#if is_gemini_cli}}Write the <scratchpad> block followed by the <state_snapshot> block now.{{/if}}{{#if is_best_of_all_worlds}}Write the <scratchpad> block followed by the <summary> block with the nine sections now.{{/if}}{{#if is_custom}}Write the summary now, following the instructions above.{{/if}}

@@ -394,3 +394,23 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/restructure.rs clip_restructure_evidence` | [naming/clipped-context](templates/naming/clipped-context.hbs) | `render by name` |
 | `ilium-client/src/naming.rs encode_untrusted_context` | [naming/unavailable-context](templates/naming/unavailable-context.hbs) | `render by name` |
 | `ilium-server/src/ipc/handlers.rs monitor restoration fallback` | [agent/progress-observation-stopped](templates/agent/progress-observation-stopped.hbs) | `PROGRESS_OBSERVATION_STOPPED` |
+| `ilium-remote-compaction/src/technique.rs system prompt guard shared by every technique` | [compaction/guard](templates/compaction/guard.hbs) | `GUARD` |
+| `ilium-remote-compaction/src/technique.rs Claude Code technique system prompt` | [compaction/claude-code-system](templates/compaction/claude-code-system.hbs) | `CLAUDE_CODE_SYSTEM` |
+| `ilium-remote-compaction/src/technique.rs Codex technique system prompt` | [compaction/codex-system](templates/compaction/codex-system.hbs) | `CODEX_SYSTEM` |
+| `ilium-remote-compaction/src/write_codex.rs Codex summary prefix` | [compaction/codex-summary-prefix](templates/compaction/codex-summary-prefix.hbs) | `CODEX_SUMMARY_PREFIX` |
+| `ilium-remote-compaction/src/technique.rs opencode technique system prompt` | [compaction/opencode-system](templates/compaction/opencode-system.hbs) | `OPENCODE_SYSTEM` |
+| `ilium-remote-compaction/src/technique.rs Gemini CLI technique system prompt` | [compaction/gemini-cli-system](templates/compaction/gemini-cli-system.hbs) | `GEMINI_CLI_SYSTEM` |
+| `ilium-remote-compaction/src/technique.rs Best of all worlds technique system prompt` | [compaction/best-of-all-worlds-system](templates/compaction/best-of-all-worlds-system.hbs) | `BEST_OF_ALL_WORLDS_SYSTEM` |
+| `ilium-remote-compaction/src/technique.rs Custom technique system prompt` | [compaction/custom-system](templates/compaction/custom-system.hbs) | `CUSTOM_SYSTEM` |
+| `ilium-remote-compaction/src/technique.rs chunk user message` | [compaction/user](templates/compaction/user.hbs) | `USER` |
+| `ilium-remote-compaction/src/technique.rs merge user message` | [compaction/merge-user](templates/compaction/merge-user.hbs) | `MERGE_USER` |
+| `ilium-remote-compaction/src/summarize.rs retry note` | [compaction/retry-note](templates/compaction/retry-note.hbs) | `RETRY_NOTE` |
+| `ilium-remote-compaction/src/write_claude.rs summary record wrapper` | [compaction/claude-summary-wrapper](templates/compaction/claude-summary-wrapper.hbs) | `CLAUDE_SUMMARY_WRAPPER` |
+| `ilium-remote-compaction/src/input.rs deterministic ledger layout` | [compaction/ledger](templates/compaction/ledger.hbs) | `LEDGER` |
+| `ilium-remote-compaction/src/summarize.rs deterministic fallback summary` | [compaction/fallback-summary](templates/compaction/fallback-summary.hbs) | `FALLBACK_SUMMARY` |
+| `ilium-remote-compaction/src/write_codex.rs retained-tail activity note` | [compaction/tail-activity](templates/compaction/tail-activity.hbs) | `TAIL_ACTIVITY` |
+| `ilium-remote-compaction/src/input.rs omitted tool-result marker` | [compaction/tool-result-omitted](templates/compaction/tool-result-omitted.hbs) | `TOOL_RESULT_OMITTED` |
+| `ilium-remote-compaction/src/input.rs truncated turn marker` | [compaction/turn-truncated](templates/compaction/turn-truncated.hbs) | `TURN_TRUNCATED` |
+| `ilium-remote-compaction/src/neutral.rs image placeholder` | [compaction/image-placeholder](templates/compaction/image-placeholder.hbs) | `IMAGE_PLACEHOLDER` |
+| `ilium-remote-compaction/src/neutral.rs encrypted earlier compaction note` | [compaction/opaque-compaction-note](templates/compaction/opaque-compaction-note.hbs) | `OPAQUE_COMPACTION_NOTE` |
+| `ilium-remote-compaction/src/summarize.rs ledger appendix` | [compaction/ledger-appendix](templates/compaction/ledger-appendix.hbs) | `LEDGER_APPENDIX` |

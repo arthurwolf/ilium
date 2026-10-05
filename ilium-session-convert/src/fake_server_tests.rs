@@ -451,3 +451,38 @@ fn a_transcript_of_another_project_is_not_imported() {
         "codex must not start for a missing source"
     );
 }
+
+#[test]
+fn cancellation_at_inspection_step_precedes_transcript_reads() {
+    // Synthetic owned transcript only. Its path is verified at step one.
+    // Invalidating the file at step two distinguishes a read from a cancel
+    // checkpoint without depending on elapsed time or allocator behaviour.
+    let fixture = Fixture::new();
+    let request = fixture.request(&fixture.root.join("must-not-spawn-codex"));
+    let cancel = AtomicBool::new(false);
+    let mut reached_inspection = false;
+    let error = {
+        let mut sink = |event: ConversionEvent| {
+            if matches!(event, ConversionEvent::Step { index: 2, .. }) {
+                reached_inspection = true;
+                std::fs::write(&fixture.transcript, [0xff]).unwrap();
+                cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        let mut reporter = Reporter::new(&mut sink, &cancel, 6);
+        convert(&request, &mut reporter, &quick_timeouts()).unwrap_err()
+    };
+    assert!(
+        reached_inspection,
+        "fixture must reach the actual inspection step"
+    );
+    assert!(
+        matches!(error, ConvertError::Cancelled),
+        "cancellation must settle before inspection reads, got: {error}"
+    );
+    assert!(!fixture.pid_file().exists(), "no importer was spawned");
+    assert!(
+        !fixture.rollout_path().exists(),
+        "no target transcript was created"
+    );
+}

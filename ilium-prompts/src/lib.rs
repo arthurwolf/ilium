@@ -1,7 +1,7 @@
 //! Application prompt sources embedded at compilation, rendered without file I/O.
 
 mod catalog;
-pub use catalog::{agent, catalog, conversion, naming, voice};
+pub use catalog::{agent, catalog, compaction, conversion, naming, voice};
 
 use std::sync::OnceLock;
 
