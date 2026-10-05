@@ -11,13 +11,17 @@ use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::animation_files::{
     validate_leaf, DirectoryEntry, FileIdentity, PinnedDirectory, PinnedFile, WriteMode,
 };
+use ilium_platform::secure_fs::NoFollowDirectory;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
+    io,
+    path::{Component, Path},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::{Duration, Instant},
 };
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 fn invalid(message: &str) -> AnimationError {
@@ -132,6 +136,205 @@ pub struct SelectedStorage {
     _admission: Arc<StorageAdmission>,
 }
 impl SelectedStorage {
+    /// Only a trusted UI picker passes a user-entered host path here. Walk
+    /// every component from a pinned root with nofollow opens; a guest never
+    /// supplies a pathname to this constructor or the saved registry.
+    pub fn pin_user_path(
+        path: &Path,
+        selection: Selection,
+        slot: String,
+        writable: bool,
+        quota: QuotaGroup,
+    ) -> Result<Self> {
+        let text = path
+            .to_str()
+            .filter(|text| text.len() <= 4096)
+            .ok_or_else(|| invalid("selected host path must be bounded UTF-8"))?;
+        if !path.is_absolute() || text.chars().any(char::is_control) {
+            return Err(invalid("selected host path must be absolute"));
+        }
+        let _walk_admission = reserve(&quota, 8192)?;
+        let mut parts = Vec::new();
+        for component in path.components() {
+            match component {
+                Component::RootDir => {}
+                Component::Normal(part) => {
+                    let part = part
+                        .to_str()
+                        .ok_or_else(|| invalid("selected path component encoding"))?;
+                    validate_leaf(part)?;
+                    if parts.len() >= 128 {
+                        return Err(invalid("selected path depth"));
+                    }
+                    parts.push(part);
+                }
+                _ => return Err(invalid("selected host path traversal")),
+            }
+        }
+        if parts.is_empty() {
+            return Err(invalid("selected path cannot be filesystem root"));
+        }
+        let mut current = NoFollowDirectory::open_root(Path::new("/"))?;
+        let directory_parts = if selection == Selection::File {
+            &parts[..parts.len() - 1]
+        } else {
+            parts.as_slice()
+        };
+        for part in directory_parts {
+            current = current.open_directory(std::ffi::OsStr::new(part))?;
+        }
+        match selection {
+            Selection::Folder => Self::folder_from_host(
+                Arc::new(PinnedDirectory::from_host(Arc::new(current))?),
+                slot,
+                writable,
+                quota,
+            ),
+            Selection::File => {
+                if writable {
+                    return Err(invalid("selected file write requires parent-entry policy"));
+                }
+                let file = current.open_regular(std::ffi::OsStr::new(parts[parts.len() - 1]))?;
+                Self::file_from_host(Arc::new(PinnedFile::from_host(file)?), slot, quota)
+            }
+        }
+    }
+    pub fn matches_right(&self, right: &Right) -> bool {
+        let Scope::Disk { slot, selection } = &right.scope else {
+            return false;
+        };
+        let correct_selection = matches!(
+            (&self.native, selection),
+            (SelectedNative::File(_), Selection::File)
+                | (SelectedNative::Folder(_), Selection::Folder)
+        );
+        if slot != &self.slot || !correct_selection {
+            return false;
+        }
+        match right.id {
+            Capability::DiskRead => true,
+            Capability::DiskWrite => self.writable,
+            _ => false,
+        }
+    }
+    /// Call only inside an actual committed finite IO job. The original
+    /// operation ticket and completion ACK stay with its outer native owner.
+    pub fn read_after_issue(
+        &self,
+        relative: &str,
+        maximum: usize,
+        cancellation: &StorageCancellation,
+        quota: &QuotaGroup,
+    ) -> Result<Arc<RetainedBytes>> {
+        self.check_quota(quota)?;
+        if relative.len() > 240 {
+            return Err(invalid("selected relative path length"));
+        }
+        let _path_admission = reserve(quota, 8192)?;
+        let file = match &self.native {
+            SelectedNative::File(file) if relative.is_empty() => Arc::clone(file),
+            SelectedNative::Folder(root) => {
+                if !crate::package::valid_path(relative) {
+                    return Err(invalid("selected relative path"));
+                }
+                let mut segments = relative.split('/').peekable();
+                let mut folder = Arc::clone(root);
+                let mut file = None;
+                while let Some(segment) = segments.next() {
+                    if segments.peek().is_some() {
+                        folder = Arc::new(folder.child(segment, false)?);
+                    } else {
+                        file = Some(Arc::new(folder.open_file(segment)?));
+                    }
+                }
+                file.ok_or_else(|| invalid("selected relative file"))?
+            }
+            _ => return Err(invalid("selected file relative path")),
+        };
+        bounded_read(&file, maximum, cancellation, quota)
+    }
+    pub fn list_after_issue(
+        &self,
+        relative: &str,
+        maximum: usize,
+        cancellation: &StorageCancellation,
+        quota: &QuotaGroup,
+    ) -> Result<RetainedListing> {
+        self.check_quota(quota)?;
+        if maximum == 0 || maximum > 1024 || relative.len() > 240 {
+            return Err(invalid("selected directory listing bound"));
+        }
+        let SelectedNative::Folder(root) = &self.native else {
+            return Err(invalid("selected file cannot be listed"));
+        };
+        let admission = reserve(quota, maximum * 512 + 65536)?;
+        cancellation.check()?;
+        let mut folder = Arc::clone(root);
+        if !relative.is_empty() {
+            if !crate::package::valid_path(relative) {
+                return Err(invalid("selected relative directory"));
+            }
+            for segment in relative.split('/') {
+                cancellation.check()?;
+                folder = Arc::new(folder.child(segment, false)?);
+            }
+        }
+        let entries = folder.list(maximum)?;
+        cancellation.check()?;
+        Ok(RetainedListing {
+            entries,
+            _admission: admission,
+        })
+    }
+    pub fn write_after_issue(
+        &self,
+        relative: &str,
+        bytes: &[u8],
+        overwrite: bool,
+        cancellation: &StorageCancellation,
+        quota: &QuotaGroup,
+    ) -> Result<[u8; 32]> {
+        self.check_quota(quota)?;
+        if !self.writable
+            || relative.len() > 240
+            || !crate::package::valid_path(relative)
+            || bytes.len() > MAX_BYTES
+        {
+            return Err(invalid("selected write path, right or byte bound"));
+        }
+        let SelectedNative::Folder(root) = &self.native else {
+            return Err(invalid("selected file entry cannot be atomically replaced"));
+        };
+        let _custody = reserve(quota, 32768)?;
+        let mut segments = relative.split('/').peekable();
+        let mut folder = Arc::clone(root);
+        let mut leaf = None;
+        while let Some(segment) = segments.next() {
+            cancellation.check()?;
+            if segments.peek().is_some() {
+                folder = Arc::new(folder.child(segment, false)?);
+            } else {
+                leaf = Some(segment);
+            }
+        }
+        let leaf = leaf.ok_or_else(|| invalid("selected write leaf"))?;
+        let mode = if overwrite {
+            WriteMode::ReplaceEntry
+        } else {
+            WriteMode::CreateNew
+        };
+        cancellation.check()?;
+        let mut stage = folder.begin_atomic(leaf, mode)?;
+        for chunk in bytes.chunks(16384) {
+            cancellation.check()?;
+            stage.write(chunk, MAX_BYTES)?;
+        }
+        stage.prepare_durable()?;
+        cancellation.check()?;
+        stage.publish_entry()?;
+        stage.durable_ack()?;
+        Ok(Sha256::digest(bytes).into())
+    }
     pub fn folder_from_host(
         root: Arc<PinnedDirectory>,
         slot: String,
@@ -224,6 +427,9 @@ impl SelectedStorage {
         )
         .map_err(auth)
     }
+    pub fn operation_need(&self, write: bool) -> Result<OperationNeed> {
+        self.need(write)
+    }
     fn open(&self, leaf: Option<&str>) -> Result<Arc<PinnedFile>> {
         match (&self.native, leaf) {
             (SelectedNative::File(file), None) => Ok(Arc::clone(file)),
@@ -252,10 +458,10 @@ fn bounded_read(
         return Err(invalid("storage read size outside limits"));
     }
     cancellation.check()?;
+    let admission = reserve(quota, maximum + 16384)?;
     if file.len()? > maximum as u64 {
         return Err(invalid("selected file exceeds read limit"));
     }
-    let admission = reserve(quota, maximum + 16384)?;
     let mut bytes = Vec::with_capacity(maximum);
     let mut chunk = [0u8; 16384];
     loop {
@@ -274,6 +480,253 @@ fn bounded_read(
         bytes,
         _admission: admission,
     }))
+}
+const PERSISTENT_MAGIC: &[u8; 8] = b"ILCACHE1";
+const PERSISTENT_HEADER: usize = 52;
+/// Disk I/O only. A native service operation must dispatch, commit and deliver
+/// the original StatePersist ticket around the finite job using this owner.
+pub struct PersistentCache {
+    host_root: Arc<PinnedDirectory>,
+    principal_directory: String,
+    quota: QuotaGroup,
+    _metadata: StorageAdmission,
+}
+impl PersistentCache {
+    pub fn new(
+        principal: &PackageIdentity,
+        host_root: Arc<PinnedDirectory>,
+        quota: QuotaGroup,
+    ) -> Result<Self> {
+        let metadata = reserve(&quota, 65536)?;
+        let principal_directory = format!(
+            "principal-{:x}",
+            Sha256::digest(serde_json::to_vec(&(principal, "cache-session"))?)
+        );
+        Ok(Self {
+            host_root,
+            principal_directory,
+            quota,
+            _metadata: metadata,
+        })
+    }
+    fn leaf(key: &str) -> Result<String> {
+        validate_leaf(key)?;
+        if key.len() > 128 {
+            return Err(invalid("persistent cache key bound"));
+        }
+        Ok(format!("cache-{:x}.bin", Sha256::digest(key.as_bytes())))
+    }
+    fn now_seconds() -> Result<u64> {
+        Ok(std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| invalid("persistent clock precedes epoch"))?
+            .as_secs())
+    }
+    pub fn get(
+        &self,
+        key: &str,
+        maximum: usize,
+        cancellation: &StorageCancellation,
+    ) -> Result<Option<Arc<RetainedBytes>>> {
+        if maximum == 0 || maximum > MAX_BYTES {
+            return Err(invalid("persistent read bound"));
+        }
+        let admission = reserve(&self.quota, maximum + PERSISTENT_HEADER + 16384)?;
+        let leaf = Self::leaf(key)?;
+        cancellation.check()?;
+        let directory = match self.host_root.child(&self.principal_directory, false) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let file = match directory.open_file(&leaf) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if file.len()? > (maximum + PERSISTENT_HEADER) as u64 {
+            return Err(invalid("persistent file size bound"));
+        }
+        let size = usize::try_from(file.len()?).map_err(|_| invalid("persistent file size"))?;
+        let mut bytes = Vec::with_capacity(size);
+        let mut chunk = [0u8; 16384];
+        while bytes.len() < size {
+            cancellation.check()?;
+            let available = chunk.len().min(size - bytes.len());
+            let count = file.read_at(&mut chunk[..available], bytes.len() as u64)?;
+            if count == 0 {
+                return Err(invalid("persistent file changed while reading"));
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        if bytes.len() < PERSISTENT_HEADER || &bytes[..8] != PERSISTENT_MAGIC {
+            return Err(invalid("persistent envelope header"));
+        }
+        let expiry = u64::from_le_bytes(
+            bytes[8..16]
+                .try_into()
+                .map_err(|_| invalid("persistent TTL"))?,
+        );
+        let body_len = u32::from_le_bytes(
+            bytes[16..20]
+                .try_into()
+                .map_err(|_| invalid("persistent length"))?,
+        ) as usize;
+        if body_len > MAX_BYTES || body_len > maximum || bytes.len() != PERSISTENT_HEADER + body_len
+        {
+            return Err(invalid("persistent envelope length/max_bytes"));
+        }
+        let expected: [u8; 32] = Sha256::digest(&bytes[PERSISTENT_HEADER..]).into();
+        if bytes[20..52] != expected[..] {
+            return Err(invalid("persistent digest changed"));
+        }
+        if expiry != 0 && expiry <= Self::now_seconds()? {
+            return Ok(None);
+        }
+        bytes.copy_within(PERSISTENT_HEADER.., 0);
+        bytes.truncate(body_len);
+        Ok(Some(Arc::new(RetainedBytes {
+            bytes,
+            _admission: admission,
+        })))
+    }
+    pub fn put(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl_seconds: Option<u64>,
+        cancellation: &StorageCancellation,
+    ) -> Result<[u8; 32]> {
+        if value.len() > MAX_BYTES || ttl_seconds.is_some_and(|ttl| ttl == 0 || ttl > 31_536_000) {
+            return Err(invalid("persistent value/TTL bound"));
+        }
+        let envelope_bytes = PERSISTENT_HEADER
+            .checked_add(value.len())
+            .ok_or_else(|| invalid("persistent envelope overflow"))?;
+        let _admission = reserve(&self.quota, envelope_bytes + 128 * 512 + 65536)?;
+        let leaf = Self::leaf(key)?;
+        let expiry = ttl_seconds
+            .map(|ttl| {
+                Self::now_seconds()?
+                    .checked_add(ttl)
+                    .ok_or_else(|| invalid("persistent TTL overflow"))
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let hash: [u8; 32] = Sha256::digest(value).into();
+        let mut envelope = Vec::with_capacity(envelope_bytes);
+        envelope.extend_from_slice(PERSISTENT_MAGIC);
+        envelope.extend_from_slice(&expiry.to_le_bytes());
+        envelope.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        envelope.extend_from_slice(&hash);
+        envelope.extend_from_slice(value);
+        cancellation.check()?;
+        let directory = Arc::new(self.host_root.child(&self.principal_directory, true)?);
+        let _lease = directory.try_exclusive_lease()?;
+        let entries = directory.list(128)?;
+        let now = Self::now_seconds()?;
+        let mut removed_expired = false;
+        for entry in &entries {
+            if entry.is_directory
+                || !entry.name.starts_with("cache-")
+                || !entry.name.ends_with(".bin")
+            {
+                continue;
+            }
+            cancellation.check()?;
+            let file = directory.open_file(&entry.name)?;
+            let mut prefix = [0u8; 16];
+            if file.read_at(&mut prefix, 0)? != prefix.len() || &prefix[..8] != PERSISTENT_MAGIC {
+                return Err(invalid("persistent namespace envelope changed"));
+            }
+            let deadline = u64::from_le_bytes(
+                prefix[8..16]
+                    .try_into()
+                    .map_err(|_| invalid("persistent inventory TTL"))?,
+            );
+            if deadline != 0 && deadline <= now {
+                directory.remove_pinned_file(&entry.name, &file)?;
+                removed_expired = true;
+            }
+        }
+        if removed_expired {
+            directory.sync()?;
+        }
+        let entries = if removed_expired {
+            directory.list(128)?
+        } else {
+            entries
+        };
+        if entries.iter().any(|entry| entry.is_directory) {
+            return Err(invalid("persistent namespace contains directories"));
+        }
+        let total = entries
+            .iter()
+            .try_fold(0u64, |acc, entry| acc.checked_add(entry.bytes))
+            .ok_or_else(|| invalid("persistent namespace size overflow"))?;
+        let prior = entries
+            .iter()
+            .find(|entry| entry.name == leaf)
+            .map_or(0, |entry| entry.bytes);
+        if entries.len() == 128 && prior == 0
+            || total
+                .checked_sub(prior)
+                .and_then(|base| base.checked_add(envelope.len() as u64))
+                .is_none_or(|size| size > (MAX_BYTES + 128 * PERSISTENT_HEADER) as u64)
+        {
+            return Err(invalid("persistent namespace byte/count bound"));
+        }
+        cancellation.check()?;
+        let mut stage = directory.begin_atomic(&leaf, WriteMode::ReplaceEntry)?;
+        for chunk in envelope.chunks(16384) {
+            cancellation.check()?;
+            stage.write(chunk, MAX_BYTES + PERSISTENT_HEADER)?;
+        }
+        stage.prepare_durable()?;
+        cancellation.check()?;
+        stage.publish_entry()?;
+        stage.durable_ack()?;
+        Ok(hash)
+    }
+    pub fn remove(&self, key: &str, cancellation: &StorageCancellation) -> Result<bool> {
+        let _admission = reserve(&self.quota, 32768)?;
+        let leaf = Self::leaf(key)?;
+        cancellation.check()?;
+        let directory = match self.host_root.child(&self.principal_directory, false) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        let _lease = directory.try_exclusive_lease()?;
+        let file = match directory.open_file(&leaf) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        let mut header = [0u8; PERSISTENT_HEADER];
+        let mut read = 0usize;
+        while read < header.len() {
+            cancellation.check()?;
+            let count = file.read_at(&mut header[read..], read as u64)?;
+            if count == 0 {
+                return Err(invalid("persistent remove header changed"));
+            }
+            read += count;
+        }
+        if &header[..8] != PERSISTENT_MAGIC {
+            return Err(invalid("persistent remove envelope"));
+        }
+        let expiry = u64::from_le_bytes(
+            header[8..16]
+                .try_into()
+                .map_err(|_| invalid("persistent remove TTL"))?,
+        );
+        let live = expiry == 0 || expiry > Self::now_seconds()?;
+        cancellation.check()?;
+        directory.remove_pinned_file(&leaf, &file)?;
+        directory.sync()?;
+        Ok(live)
+    }
 }
 /// One native operation's authorization/cancellation fence. Borrowing the broker
 /// does not grant authority: dispatch, effect, and delivery still check tickets.
@@ -467,9 +920,13 @@ pub fn write_selected(
 pub struct MemoryNamespace {
     principal_digest: [u8; 32],
     quota: QuotaGroup,
-    entries: BTreeMap<String, Arc<RetainedBytes>>,
+    entries: BTreeMap<String, MemoryEntry>,
     bytes: usize,
     _admission: StorageAdmission,
+}
+struct MemoryEntry {
+    value: Arc<RetainedBytes>,
+    expires_at: Option<Instant>,
 }
 impl MemoryNamespace {
     pub fn new(principal: &PackageIdentity, quota: QuotaGroup) -> Result<Self> {
@@ -487,12 +944,38 @@ impl MemoryNamespace {
         self.principal_digest
     }
     pub fn put(&mut self, key: &str, bytes: &[u8]) -> Result<()> {
+        self.put_with_ttl(key, bytes, None)
+    }
+    pub fn put_with_ttl(
+        &mut self,
+        key: &str,
+        bytes: &[u8],
+        ttl_seconds: Option<u64>,
+    ) -> Result<()> {
         validate_leaf(key)?;
-        if key.len() > 128 || self.entries.len() >= 64 && !self.entries.contains_key(key) {
+        if key.len() > 128 || ttl_seconds.is_some_and(|ttl| ttl == 0 || ttl > 31_536_000) {
+            return Err(invalid("cache key/TTL bound"));
+        }
+        let expires_at = ttl_seconds
+            .map(|ttl| {
+                Instant::now()
+                    .checked_add(Duration::from_secs(ttl))
+                    .ok_or_else(|| invalid("cache TTL overflow"))
+            })
+            .transpose()?;
+        self.prune_expired();
+        if self.entries.len() >= 64 && !self.entries.contains_key(key) {
             return Err(invalid("cache key/count bound"));
         }
-        let previous = self.entries.get(key).map_or(0, |entry| entry.view().len());
-        let total = self.bytes - previous + bytes.len();
+        let previous = self
+            .entries
+            .get(key)
+            .map_or(0, |entry| entry.value.view().len());
+        let total = self
+            .bytes
+            .checked_sub(previous)
+            .and_then(|size| size.checked_add(bytes.len()))
+            .ok_or_else(|| invalid("in-memory namespace size overflow"))?;
         if total > MAX_BYTES {
             return Err(invalid("in-memory namespace byte bound"));
         }
@@ -501,13 +984,57 @@ impl MemoryNamespace {
             bytes: bytes.to_vec(),
             _admission: admission,
         });
-        self.entries.insert(key.to_owned(), value);
+        self.entries
+            .insert(key.to_owned(), MemoryEntry { value, expires_at });
         self.bytes = total;
         Ok(())
     }
     pub fn get(&self, key: &str) -> Result<Option<Arc<RetainedBytes>>> {
+        self.get_bounded(key, MAX_BYTES)
+    }
+    pub fn get_bounded(&self, key: &str, maximum: usize) -> Result<Option<Arc<RetainedBytes>>> {
         validate_leaf(key)?;
-        Ok(self.entries.get(key).map(Arc::clone))
+        if maximum == 0 || maximum > MAX_BYTES {
+            return Err(invalid("cache get max_bytes"));
+        }
+        let Some(entry) = self.entries.get(key) else {
+            return Ok(None);
+        };
+        if entry
+            .expires_at
+            .is_some_and(|deadline| deadline <= Instant::now())
+        {
+            return Ok(None);
+        }
+        if entry.value.view().len() > maximum {
+            return Err(invalid("cache value exceeds caller max_bytes"));
+        }
+        Ok(Some(Arc::clone(&entry.value)))
+    }
+    pub fn remove(&mut self, key: &str) -> Result<bool> {
+        validate_leaf(key)?;
+        let existed = self.entries.remove(key);
+        if let Some(entry) = existed {
+            self.bytes = self.bytes.saturating_sub(entry.value.view().len());
+            Ok(entry
+                .expires_at
+                .is_none_or(|deadline| deadline > Instant::now()))
+        } else {
+            Ok(false)
+        }
+    }
+    fn prune_expired(&mut self) {
+        let now = Instant::now();
+        let mut released = 0usize;
+        self.entries.retain(|_, entry| {
+            if entry.expires_at.is_some_and(|deadline| deadline <= now) {
+                released = released.saturating_add(entry.value.view().len());
+                false
+            } else {
+                true
+            }
+        });
+        self.bytes = self.bytes.saturating_sub(released);
     }
 }
 /// Host-owned persistence root. JS receives only cache/state keys; names are

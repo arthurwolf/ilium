@@ -13,6 +13,7 @@ const MAX_SCOPE_ITEMS: usize = 16; // Bound each origin, method, product, or ker
 const MAX_DECISIONS: usize = 256; // Include session decisions in this retention limit.
 const MAX_INSTANCES: usize = 8; // Active instances and pending reviews share this cap.
 const MAX_OPERATIONS: usize = 128; // Revoked operations occupy slots until settled.
+const MAX_FRAME_EMISSIONS: usize = MAX_OPERATIONS; // Native output commitments retain bounded unsettled slots.
 const MAX_WIRE_BYTES: usize = 65_536; // Bound each permission projection before cloning.
 const MAX_STATE_BYTES: usize = 262_144; // Bound the complete remembered/session ledger.
 #[derive(Debug, thiserror::Error)] // Errors never imply permission or completed effects.
@@ -369,6 +370,22 @@ impl OperationTicket {
         self.operation_id
     } // Native owners retain the ticket itself.
 } // Helper RPC IDs must map to these host-owned tickets.
+/// Private native output commitment. It is issued under the original broker
+/// lock and cannot be reconstructed from frame identity coordinates.
+#[derive(Debug)]
+pub(crate) struct FrameEmissionTicket {
+    issuer: Arc<()>,
+    emission_id: u64,
+    stamp: Stamp,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameEmissionOutcome {
+    BackendFlushed,
+    BackendFailureUncertain,
+}
+struct PendingFrameEmission {
+    stamp: Stamp,
+}
 #[derive(Debug)] // Invalidation does not claim that effects were undone.
 pub struct InvalidatedOperation {
     pub operation_id: u64,
@@ -506,6 +523,7 @@ pub struct PermissionBroker {
     block_all: bool, // Explicit denial survives automatic grant policy.
     instances: BTreeMap<u64, InstanceSlot>,
     operations: BTreeMap<u64, PendingOperation>, // No unbounded queues.
+    frame_emissions: BTreeMap<u64, PendingFrameEmission>, // Held through actual backend settlement.
     _authority_storage: Option<ilium_execution::StorageAdmission>, // Last: retained through final shared native owner.
 } // Native resource owners retain their own quota guards outside this module.
 impl PermissionBroker {
@@ -558,6 +576,7 @@ impl PermissionBroker {
             block_all: false,
             instances: BTreeMap::new(),
             operations: BTreeMap::new(),
+            frame_emissions: BTreeMap::new(),
             _authority_storage: None,
         }) // Empty policy denies everything.
     } // Initialization creates no resources, subprocesses, or subscriptions.
@@ -916,6 +935,56 @@ impl PermissionBroker {
             active.plan.authorization_epoch,
         ))
     }
+    /// Commit a trusted host frame to the terminal owner before its first
+    /// backend call. This operation uses the current private channel, not a
+    /// guest grant. Revocation after this point blocks later commitments but
+    /// cannot undo this already admitted in-flight effect.
+    pub(crate) fn begin_frame_emission(
+        &mut self,
+        channel: &Channel,
+    ) -> Result<FrameEmissionTicket> {
+        self.active(channel)?;
+        if self.frame_emissions.len() >= MAX_FRAME_EMISSIONS {
+            return Err(PermissionError::Capacity);
+        }
+        let emission_id = self.allocate_id()?;
+        self.frame_emissions.insert(
+            emission_id,
+            PendingFrameEmission {
+                stamp: channel.stamp,
+            },
+        );
+        Ok(FrameEmissionTicket {
+            issuer: Arc::clone(&self.issuer),
+            emission_id,
+            stamp: channel.stamp,
+        })
+    }
+    /// Settle only the original committed operation. A stale channel is allowed
+    /// here because the write may have completed after revocation. The outcome
+    /// is an output fact, not permission for another operation or source credit.
+    pub(crate) fn settle_frame_emission(
+        &mut self,
+        ticket: &FrameEmissionTicket,
+        _outcome: FrameEmissionOutcome,
+    ) -> Result<()> {
+        if !Arc::ptr_eq(&ticket.issuer, &self.issuer) {
+            return Err(PermissionError::WrongBroker);
+        }
+        let pending = self
+            .frame_emissions
+            .get(&ticket.emission_id)
+            .ok_or(PermissionError::UnknownOperation)?;
+        if pending.stamp != ticket.stamp {
+            return Err(PermissionError::Stale);
+        }
+        self.frame_emissions.remove(&ticket.emission_id);
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn pending_frame_emissions(&self) -> usize {
+        self.frame_emissions.len()
+    }
     pub(crate) fn check_operation_lineage(
         &self,
         ticket: &OperationTicket,
@@ -940,6 +1009,55 @@ impl PermissionBroker {
             return Err(PermissionError::NotCommitted);
         }
         Ok(())
+    }
+    /// Return the actual accepted grants that covered this already committed
+    /// operation. The caller can record lineage; the returned data is not an
+    /// operation ticket and cannot authorize a later effect by itself.
+    pub(crate) fn committed_operation_grants(
+        &self,
+        ticket: &OperationTicket,
+        channel: &Channel,
+    ) -> Result<Vec<Grant>> {
+        self.check_committed_operation(ticket, channel)?;
+        let operation = self.operation(ticket)?;
+        let active = self.active(channel)?;
+        let demand = active
+            .plan
+            .demands
+            .get(&operation.demand_id)
+            .ok_or(PermissionError::Denied)?;
+        let mut chosen = Vec::new();
+        let mut seen = BTreeSet::new();
+        for need in &operation.needs {
+            let grant = demand
+                .request_ids
+                .iter()
+                .filter_map(|id| active.plan.grants.get(id))
+                .find(|grant| {
+                    grant.right.covers(&need.right)
+                        && grant.binding == need.binding
+                        && self.verdict(&need.right, need.binding.as_ref()) == Verdict::Allowed
+                })
+                .ok_or(PermissionError::Denied)?;
+            if seen.insert(grant.request_id.clone()) {
+                chosen.push(grant.clone());
+            }
+        }
+        Ok(chosen)
+    }
+    /// Replay checks the live original broker and policy for every lineage
+    /// member at prepare, delivery, playback and emitted-pixel boundaries.
+    pub(crate) fn current_grant(&self, channel: &Channel, request_id: &str) -> Result<Grant> {
+        let grant = self
+            .active(channel)?
+            .plan
+            .grants
+            .get(request_id)
+            .ok_or(PermissionError::Denied)?;
+        if self.verdict(&grant.right, grant.binding.as_ref()) != Verdict::Allowed {
+            return Err(PermissionError::Denied);
+        }
+        Ok(grant.clone())
     }
     pub(crate) fn check_committed_needs(
         &self,
@@ -1590,6 +1708,54 @@ mod tests {
     fn need() -> Vec<OperationNeed> {
         vec![OperationNeed::new(net(), None).expect("valid actual need")]
     } // Native-derived fixture.
+    #[test]
+    fn recorded_source_lineage_requires_original_committed_current_grant() {
+        let mut original = broker(true, vec![net()]);
+        let active = net_active(&mut original, 1, 1);
+        let ticket = original
+            .dispatch(&active.channel, CallPhase::Async, "work_net", need())
+            .expect("accepted original demand");
+        assert!(matches!(
+            original.committed_operation_grants(&ticket, &active.channel),
+            Err(PermissionError::NotCommitted)
+        ));
+        original
+            .commit(&ticket, || ())
+            .expect("original issued effect");
+        let grants = original
+            .committed_operation_grants(&ticket, &active.channel)
+            .expect("actual committed covering grant");
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].request_id, "net");
+        assert_eq!(
+            original
+                .current_grant(&active.channel, "net")
+                .unwrap()
+                .request_id,
+            grants[0].request_id
+        );
+        let foreign = broker(true, vec![net()]);
+        assert!(matches!(
+            foreign.current_grant(&active.channel, "net"),
+            Err(PermissionError::WrongBroker)
+        ));
+        let invalidation = original.revoke(net()).expect("host revocation");
+        assert_eq!(invalidation.operations.len(), 1);
+        assert_eq!(
+            invalidation.operations[0].operation_id,
+            ticket.operation_id()
+        );
+        assert!(invalidation.operations[0].may_have_effects);
+        assert!(original.current_grant(&active.channel, "net").is_err());
+        assert!(original
+            .committed_operation_grants(&ticket, &active.channel)
+            .is_err());
+        assert_eq!(original.pending_operations(), 1);
+        original
+            .settle_without_delivery(&ticket)
+            .expect("original physical completion cleanup");
+        assert_eq!(original.pending_operations(), 0);
+    }
     #[test] // Canonical origins are stable but ports/methods are not widened.
     fn canonical_scopes_and_exact_containment() {
         // Exercise normalization and containment together.

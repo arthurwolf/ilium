@@ -2,9 +2,9 @@
 //! This deliberately excludes protected-helper IPC, UI composition and terminal
 //! output. Logical Surface acceptance never certifies terminal presentation.
 //! Native Beach lacks a public factory in this crate; TV lacks an injected
-//! native feed; automatic chess lacks a deterministic native completion barrier.
+//! native feed. Original chess searches finish at fixed logical times.
 //! Beach/TV are BLOCKED; automatic chess is measured diagnostically with
-//! parity blocked. No case is replaced with copied algorithms.
+//! parity blocked pending output qualification. No case uses copied algorithms.
 #[cfg(all(feature = "v8-runtime", feature = "native-host"))]
 fn main() {
     if let Err(error) = benchmark::run() {
@@ -223,6 +223,7 @@ mod benchmark {
         _storage: StorageAdmission,
     }
     fn load(path: &Path, expected: &str, id: &str, quota: &QuotaGroup) -> Result<Loaded> {
+        let started = Instant::now();
         let limits = PackageLimits::default();
         let file = std::fs::File::open(path)?;
         let length = file.metadata()?.len();
@@ -246,6 +247,9 @@ mod benchmark {
         if package.manifest().id != id {
             return Err(fail("package id does not match selected native baseline"));
         }
+        emit(
+            json!({"type":"result","stage":"archive_loading","package_id":id,"elapsed_ns":started.elapsed().as_nanos(),"clock":"monotonic elapsed wall time","includes":["file open and read","quota admission","archive SHA256","RAM expansion and package validation"],"excludes":["V8 platform initialization","module evaluation","animation creation","helper IPC"],"filesystem_cache":"uncontrolled; not claimed as cold-cache IO"}),
+        );
         emit(
             json!({"type":"artifact","path":path,"archive_sha256":archive_sha,"package_digest":package.digest(),"canonical_manifest_sha256":digest(&serde_json::to_vec(package.manifest())?),"manifest":package.manifest()}),
         );
@@ -311,7 +315,7 @@ mod benchmark {
             .map(|(path, source)| (*path, digest(source.as_bytes())))
             .collect();
         emit(
-            json!({"type":"manifest","benchmark":"production_performance","benchmark_source_sha256":digest(include_bytes!("production_performance.rs")),"bootstrap_sha256":digest(TRUSTED_BOOTSTRAP.as_bytes()),"native_baselines":baselines,"width_cells":options.width,"height_cells":options.height,"fps":options.fps,"warmup":options.warmup,"measured_frames":options.frames,"civil_epoch_ms":options.epoch_ms,"ordered_cases":options.cases,"root_limits":format!("{:?}",quota.snapshot().limits),"scope":"trusted in-process native scene and embedded V8 render, binary handoff and logical Surface acceptance","excludes":["protected helper IPC","permission broker acquisition","UI composition","terminal emission","package startup timing"],"cpu_time_ns":null,"cpu_time_limitation":"No portable platform CPU-time API is available; durations use monotonic elapsed wall time, never claimed as CPU time.","pack_policy":"identity tone, fixed 0.5 threshold; no protected source owner or terminal credit"}),
+            json!({"type":"manifest","benchmark":"production_performance","benchmark_source_sha256":digest(include_bytes!("production_performance.rs")),"bootstrap_sha256":digest(TRUSTED_BOOTSTRAP.as_bytes()),"native_baselines":baselines,"width_cells":options.width,"height_cells":options.height,"fps":options.fps,"warmup":options.warmup,"measured_frames":options.frames,"civil_epoch_ms":options.epoch_ms,"ordered_cases":options.cases,"root_limits":format!("{:?}",quota.snapshot().limits),"scope":"trusted in-process native scene and embedded V8 render, binary handoff and logical Surface acceptance","excludes":["protected helper IPC","permission broker acquisition","UI composition","terminal emission","process-global V8 platform initialization"],"cpu_time_ns":null,"cpu_time_limitation":"No portable platform CPU-time API is available; durations use monotonic elapsed wall time, never claimed as CPU time.","pack_policy":"identity tone, fixed 0.5 threshold; no protected source owner or terminal credit"}),
         );
         let mut blocked = 0;
         let mut measured = 0;
@@ -495,6 +499,7 @@ mod benchmark {
             .min(package.manifest().limits.preparation_ms);
         let mut engine = Engine::new(Arc::clone(package), limits, quota.clone())?;
         engine.install_bootstrap(TRUSTED_BOOTSTRAP)?;
+        engine.configure_ambient(AnimationMode::Live, ambient.carpet.seed as u32)?;
         engine.load()?;
         let environment = json!({"viewport":{"cell_width":options.width,"cell_height":options.height,"dot_width":options.width*2,"dot_height":options.height*4,"revision":1},"available":{"pointer":mode==0,"audio":false,"gpu":false,"location":false}});
         let plan = engine.plan(&settings, AnimationMode::Live, &environment)?;
@@ -540,6 +545,11 @@ mod benchmark {
         let mut native_mask_hash = Sha256::new();
         let mut js_mask_hash = Sha256::new();
         let mut thinking_frames = 0_u64;
+        // Component barrier: finish the original search at the same logical
+        // time. This measures completion wall time, not live scheduling cadence.
+        let js_sequence = std::cell::Cell::new(0_u64);
+        let native_completion_callbacks = std::cell::Cell::new(0_u64);
+        let js_completion_callbacks = std::cell::Cell::new(0_u64);
         let mut native_status_transitions = 0_u64;
         let mut last_native_status: Option<String> = None;
         for index in 0..options.warmup + options.frames {
@@ -587,6 +597,35 @@ mod benchmark {
                     wall: time,
                     now,
                 });
+                if mode == 3 {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while native.status().as_deref() == Some("Automatic chess: thinking") {
+                        if Instant::now() >= deadline {
+                            return Err(fail("original native chess completion deadline"));
+                        }
+                        // Yield to the original admitted CPU search owner; do
+                        // not copy the search or advance its animation clock.
+                        std::thread::yield_now();
+                        raster.dots.fill(0.0);
+                        raster.owner_ids.fill(0);
+                        native.render(&mut Frame {
+                            raster: &mut *raster,
+                            cell_colors: &mut *colors,
+                            width: options.width as u16,
+                            height: options.height as u16,
+                            time,
+                            wall: time,
+                            now,
+                        });
+                        native_completion_callbacks.set(native_completion_callbacks.get() + 1);
+                    }
+                    if native
+                        .status()
+                        .is_some_and(|status| !status.starts_with("Automatic chess:"))
+                    {
+                        return Err(fail("native chess search failed instead of completing"));
+                    }
+                }
                 let render_ns = render.elapsed().as_nanos() as f64;
                 let seed = surface.begin(sequence)?;
                 commit(
@@ -616,22 +655,64 @@ mod benchmark {
                             context: &mut Value|
              -> Result<(f64, f64)> {
                 let full = Instant::now();
-                let seed = surface.begin(sequence)?;
-                let Data::F32(data) = seed.data else {
-                    return Err(fail("unexpected seed format"));
-                };
-                let metadata = json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,"invalid_rects":seed.invalid_rects,"input_specs":[]}});
-                let binary = BTreeMap::from([("work_data".into(), f32_bytes(&data))]);
-                engine.seed_frame(&metadata, &seed_spec, &binary)?;
-                context["_ilium_frame"] = json!({"key":seed.key,"shape":seed.shape});
-                let render = Instant::now();
-                let output = engine.render(context, &returned)?;
-                let render_ns = render.elapsed().as_nanos() as f64;
-                let meta = FrameMeta::parse(&serde_json::to_vec(&output.metadata)?)?;
-                let sealed = returned_planes(&output, layout.samples)?;
-                let committed = commit(surface, meta, sealed, quota);
-                engine.accept_frame(committed.is_ok())?;
-                committed?;
+                let mut render_ns = 0.0;
+                let mut callbacks = 0_u32;
+                let mut thinking = false;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut step_context = context.clone();
+                loop {
+                    let next_sequence = js_sequence
+                        .get()
+                        .checked_add(1)
+                        .ok_or_else(|| fail("V8 completion frame sequence exhausted"))?;
+                    js_sequence.set(next_sequence);
+                    let seed = surface.begin(next_sequence)?;
+                    let Data::F32(data) = seed.data else {
+                        return Err(fail("unexpected seed format"));
+                    };
+                    let metadata = json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,"invalid_rects":seed.invalid_rects,"input_specs":[]}});
+                    let binary = BTreeMap::from([("work_data".into(), f32_bytes(&data))]);
+                    engine.seed_frame(&metadata, &seed_spec, &binary)?;
+                    step_context["_ilium_frame"] = json!({"key":seed.key,"shape":seed.shape});
+                    let render = Instant::now();
+                    let output = engine.render(&step_context, &returned)?;
+                    render_ns += render.elapsed().as_nanos() as f64;
+                    let meta = FrameMeta::parse(&serde_json::to_vec(&output.metadata)?)?;
+                    let sealed = returned_planes(&output, layout.samples)?;
+                    let committed = commit(surface, meta, sealed, quota);
+                    engine.accept_frame(committed.is_ok())?;
+                    committed?;
+                    // Drain actual diagnostics; missing/overflowed observations
+                    // cannot silently certify the completion barrier.
+                    let diagnostics = engine.take_status()?;
+                    if diagnostics.get("dropped").and_then(Value::as_u64) != Some(0) {
+                        return Err(fail("V8 chess completion diagnostics dropped records"));
+                    }
+                    let records = diagnostics
+                        .get("records")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| fail("V8 completion diagnostics schema"))?;
+                    for record in records {
+                        if record.get("level").and_then(Value::as_str) == Some("error") {
+                            return Err(fail("V8 search emitted an error diagnostic"));
+                        }
+                        if let Some(message) = record.get("message").and_then(Value::as_str) {
+                            if message.starts_with("Automatic chess:") || message.is_empty() {
+                                thinking = message == "Automatic chess: thinking";
+                            }
+                        }
+                    }
+                    if mode != 3 || !thinking {
+                        break;
+                    }
+                    callbacks += 1;
+                    if callbacks >= 4096 || Instant::now() >= deadline {
+                        return Err(fail("original V8 cooperative chess completion deadline"));
+                    }
+                    js_completion_callbacks.set(js_completion_callbacks.get() + 1);
+                    step_context["delta"] = json!(0);
+                    step_context["wall_delta"] = json!(0);
+                }
                 Ok((render_ns, full.elapsed().as_nanos() as f64))
             };
             let (n, j) = if index.is_multiple_of(2) {
@@ -653,6 +734,11 @@ mod benchmark {
                 )?;
                 (n, j)
             };
+            if index == 0 {
+                emit(
+                    json!({"type":"result","stage":"first_frame","case":case,"native_render_elapsed_ns":n.0,"native_plus_common_surface_elapsed_ns":n.1,"v8_render_and_binary_handoff_elapsed_ns":j.0,"v8_seed_render_and_accepted_surface_elapsed_ns":j.1,"included_in_frame_distribution":options.warmup == 0,"clock":"monotonic elapsed wall time","qualification":"first frame after construction; no guarantee of cold CPU, filesystem or process-global V8 state"}),
+                );
+            }
             if mode == 3 {
                 let status = native.status();
                 if status.as_deref() == Some("Automatic chess: thinking") {
@@ -724,7 +810,7 @@ mod benchmark {
         // Timings remain diagnostic until differential output is qualified.
         // This emits no synthetic CPU measurement or unqualified speed ratio.
         emit(
-            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else{"measured"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"qualification":"decision and body equality must be established before interpreting any ratio; no public native completion barrier or decision snapshot exists"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"cold_preparation_included":false}),
+            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else{"measured"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"native_completion_callbacks":native_completion_callbacks.get(),"v8_completion_callbacks":js_completion_callbacks.get(),"completion_policy":"original native Scene.status and V8 status records; same logical time and zero delta for continuation; monotonic Surface sequences","qualification":"completion-aligned component diagnostic; total native render elapsed includes original search scheduling/wait; V8 full elapsed includes cooperative continuation handoffs; worker CPU and live cadence unmeasured; output/decision qualification still required before ratios"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"construction_preparation_included_in_frame_distribution":false,"first_frame_included_in_distribution":options.warmup==0}),
         );
         Ok(())
     }

@@ -30,6 +30,7 @@ use ilium_platform::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque}, // Bound unissued requests and terminal inventories by retained leases.
     io::{Read, Write},
@@ -46,6 +47,38 @@ const MAX_JSON: usize = 256 * 1024;
 const MAX_BINARY: usize = 32 * 1024 * 1024;
 const MAX_PLANES: usize = 48; // Up to 16 surface/working planes plus 32 borrowed inputs.
 const MAX_REQUESTS: usize = 64;
+
+fn loaded_helper_digest() -> Result<[u8; 32]> {
+    let mut image = animation_sandbox::open_running_helper_image()?;
+    let mut digest = Sha256::new();
+    let mut scratch = [0u8; 64 * 1024];
+    loop {
+        let count = image.read(&mut scratch)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&scratch[..count]);
+    }
+    Ok(digest.finalize().into())
+}
+fn parse_helper_digest(value: &str) -> Result<[u8; 32]> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid("helper build digest missing or malformed"));
+    }
+    let mut result = [0u8; 32];
+    for (index, byte) in result.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| invalid("helper build digest malformed"))?;
+    }
+    if result == [0; 32] {
+        return Err(invalid("helper build digest absent"));
+    }
+    Ok(result)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -490,6 +523,8 @@ enum Command {
         bootstrap: String,
         sandbox: ResourceConfig,
         engine: EngineConfig,
+        mode: AnimationMode,
+        ambient_seed: u32,
         service_wire_version: u16, // Negotiate the exact bounded binary service schema.
         service_byte_order: String, // Reject incompatible same-host typed-array byte order.
     },
@@ -544,6 +579,7 @@ enum Command {
 impl Command {
     /// Derived exclusively from the trusted outbound command, never a response
     /// phase string or helper assertion.
+    #[cfg(test)]
     fn permits_acquisition(&self) -> bool {
         matches!(
             self,
@@ -822,6 +858,7 @@ struct PendingSeed {
 }
 pub struct HelperSession {
     authority: HelperAuthority,
+    helper_build_digest: [u8; 32],
     child: Option<SandboxChild>, // Keep the original process owner available for conservative failed-join quarantine.
     writer: SyncSender<Option<Packet>>,
     reader: Receiver<Result<Packet>>,
@@ -846,6 +883,13 @@ pub struct HelperSession {
     deferred_retirement: bool, // Uncertain transport keeps original custody until scope exits.
     pending_seed: Option<PendingSeed>,
 }
+/// Initial playback choices, passed unchanged into the helper initialization.
+#[derive(Debug, Clone)]
+pub struct HelperPlayback {
+    pub mode: AnimationMode,
+    pub ambient_seed: u32,
+}
+
 impl HelperSession {
     pub fn launch(
         executable: &Path,
@@ -854,7 +898,9 @@ impl HelperSession {
         authority: HelperAuthority,
         limits: HelperLimits,
         quota: QuotaGroup,
+        playback: HelperPlayback,
     ) -> Result<Self> {
+        let HelperPlayback { mode, ambient_seed } = playback;
         authority.validate()?;
         if limits.engine.pending_requests == 0
             || limits.engine.pending_requests > MAX_REQUESTS
@@ -901,21 +947,22 @@ impl HelperSession {
         let mut session = Self {
             // Own native startup before any further fallible operation.
             authority, // Keep immutable session identity independent from accepted activation.
+            helper_build_digest: [0; 32], // Filled only from the actual loaded helper's sealed startup response.
             child: Some(child), // Preserve original ownership for actual terminal verification.
-            writer,    // Retain the original bounded command sender.
-            reader,    // Retain the original bounded response receiver.
+            writer,             // Retain the original bounded command sender.
+            reader,             // Retain the original bounded response receiver.
             workers: Vec::new(), // Own every later worker before another fallible startup step.
-            sequence: 0, // Initialization owns sequence zero.
+            sequence: 0,        // Initialization owns sequence zero.
             requests: Vec::new(), // No parent request has been issued yet.
-            status: None, // No retained diagnostic snapshot exists.
+            status: None,       // No retained diagnostic snapshot exists.
             pending: BTreeMap::new(), // No admitted parent service requests exist yet.
             cancelled: VecDeque::new(), // Start with no terminal notifications.
-            active: None, // Native consent must bind before seed or creation.
-            creation: None, // No acquiring phase has started.
-            service_budget, // All escaped requests retain this same bounded fence.
+            active: None,       // Native consent must bind before seed or creation.
+            creation: None,     // No acquiring phase has started.
+            service_budget,     // All escaped requests retain this same bounded fence.
             last_request_id: 0, // No native request identity has been observed.
-            limits,    // Preserve the original configured engine and sandbox ceilings.
-            quota,     // Retain the original parent quota root.
+            limits,             // Preserve the original configured engine and sandbox ceilings.
+            quota,              // Retain the original parent quota root.
             _storage: Some(Arc::clone(&storage)), // Hold original pipe scratch through actual shutdown.
             _physical: Some(Arc::clone(&admission)), // Keep the original physical worker debit through failed joins.
             closed: false,                           // The new session can accept initialization.
@@ -1010,6 +1057,8 @@ impl HelperSession {
             bootstrap: bootstrap.into(),
             sandbox: session.limits.sandbox.into(),
             engine: session.limits.engine.clone().into(),
+            mode,
+            ambient_seed,
             service_wire_version: engine::SERVICE_WIRE_VERSION, // Negotiate the concrete raw-data service ABI.
             service_byte_order: engine::SERVICE_BYTE_ORDER.into(), // Preserve exact same-host typed-array interpretation.
         })?;
@@ -1024,7 +1073,18 @@ impl HelperSession {
         {
             return Err(invalid("helper did not seal before loading package"));
         }
+        session.helper_build_digest = parse_helper_digest(
+            response
+                .envelope
+                .payload
+                .get("helper_build_sha256")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid("helper build digest missing"))?,
+        )?;
         Ok(session)
+    }
+    pub(crate) fn build_digest(&self) -> [u8; 32] {
+        self.helper_build_digest
     }
     pub fn resource_usage(&self) -> std::io::Result<animation_sandbox::SandboxUsage> {
         self.child
@@ -2056,6 +2116,8 @@ pub fn run_helper_ipc() -> Result<()> {
         bootstrap,
         sandbox,
         engine,
+        mode,
+        ambient_seed,
         service_wire_version, // The parent selected the concrete service protocol.
         service_byte_order,   // The parent supplied its native typed-array byte order.
     } = serde_json::from_value(initial.envelope.payload.clone())?
@@ -2072,6 +2134,7 @@ pub fn run_helper_ipc() -> Result<()> {
     }
     let limits: SandboxLimits = sandbox.into();
     animation_sandbox::verify_helper_environment(limits)?;
+    let helper_build_digest = loaded_helper_digest()?;
     let memory_bytes =
         usize::try_from(limits.memory_bytes).map_err(|_| invalid("memory bound overflow"))?;
     let quota = QuotaGroup::new(QuotaLimits {
@@ -2103,6 +2166,9 @@ pub fn run_helper_ipc() -> Result<()> {
     let engine_limits: EngineLimits = engine.into(); // Retain actual configured service bounds for native completion copies.
     let mut engine = Engine::new(package, engine_limits.clone(), quota.clone())?; // Keep the existing precharged child root for every later copy.
     engine.install_bootstrap(&bootstrap)?;
+    // Both modes need the trusted lifecycle declaration. Live configuration
+    // returns before changing Date or Math.random; replay alone seals them.
+    engine.configure_ambient(mode, ambient_seed)?;
     let proof = animation_sandbox::seal_current_helper()?;
     engine.load()?;
     write_packet(
@@ -2111,7 +2177,7 @@ pub fn run_helper_ipc() -> Result<()> {
             0,
             authority.clone(),
             "response",
-            json!({"ready":true,"requests":[],"service_wire_version":engine::SERVICE_WIRE_VERSION,"service_byte_order":engine::SERVICE_BYTE_ORDER,"isolation":{"all_threads_filtered":proof.all_threads_filtered,"descriptors_scrubbed":proof.descriptors_scrubbed,"physical_memory_max":limits.memory_bytes,"maximum_tasks":limits.maximum_tasks}}), // Acknowledge the exact native binary ABI after sealing and loading.
+            json!({"ready":true,"requests":[],"service_wire_version":engine::SERVICE_WIRE_VERSION,"service_byte_order":engine::SERVICE_BYTE_ORDER,"helper_build_sha256":helper_build_digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),"isolation":{"all_threads_filtered":proof.all_threads_filtered,"descriptors_scrubbed":proof.descriptors_scrubbed,"physical_memory_max":limits.memory_bytes,"maximum_tasks":limits.maximum_tasks}}), // Acknowledge the exact native binary ABI after sealing and loading.
             BTreeMap::new(),
         ),
     )?;
@@ -2964,6 +3030,10 @@ pub(crate) mod isolation_qualification {
             },
             HelperLimits::default(),
             quota,
+            HelperPlayback {
+                mode: AnimationMode::Live,
+                ambient_seed: 0,
+            },
         )
         .unwrap(); // Successful launch alone does not activate package service acquisition.
         helper
@@ -2975,6 +3045,18 @@ pub(crate) mod isolation_qualification {
             .unwrap(); // Bind through the real authenticated helper command before seed or create.
         helper // The original immutable IPC authority remains unchanged.
     }
+    #[test]
+    fn helper_build_digest_requires_exact_nonzero_lowercase_sha256() {
+        assert_eq!(parse_helper_digest(&"ab".repeat(32)).unwrap(), [0xab; 32]);
+        for malformed in [
+            "0".repeat(64),
+            "A".repeat(64),
+            "g".repeat(64),
+            "a".repeat(63),
+        ] {
+            assert!(parse_helper_digest(&malformed).is_err());
+        }
+    }
     /// Explicit integration gate: build the real helper, set its absolute path,
     /// then run this ignored test. Ordinary unit checks cannot qualify isolation.
     #[test]
@@ -2984,6 +3066,23 @@ pub(crate) mod isolation_qualification {
         let mut helper = launch(
             "export function plan(){return {fps:20};} export async function create(host){const result=await host.http.request({url:'https://example.org'});return {render(context,frame){frame.gray.fill(result.value);frame.present();},dispose(){}};}",
             quota.clone(),
+        );
+        let mut installed =
+            std::fs::File::open(std::env::var("ILIUM_ANIMATION_HELPER").unwrap()).unwrap();
+        let mut digest = Sha256::new();
+        let mut scratch = [0u8; 64 * 1024];
+        loop {
+            let count = installed.read(&mut scratch).unwrap();
+            if count == 0 {
+                break;
+            }
+            digest.update(&scratch[..count]);
+        }
+        let expected: [u8; 32] = digest.finalize().into();
+        assert_eq!(
+            helper.build_digest(),
+            expected,
+            "the ready response must name the actual loaded helper image"
         );
         let resources = helper.resource_usage().unwrap();
         eprintln!("actual sealed V8 helper resources: {resources:?}");

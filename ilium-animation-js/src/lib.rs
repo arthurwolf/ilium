@@ -2,6 +2,7 @@
 //! Host services remain subject to package identity, accepted-plan authority,
 //! resource admission and immutable presentation ownership.
 
+pub mod clip_chunk_store;
 pub mod clock;
 
 /// Host-owned facade installed before untrusted package evaluation.
@@ -15,6 +16,8 @@ pub mod helper;
 #[cfg(feature = "native-network")]
 pub mod http;
 pub mod manifest;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_asset_host;
 #[cfg(feature = "native-host")]
 pub mod native_audio;
 #[cfg(feature = "native-host")]
@@ -37,6 +40,8 @@ pub(crate) mod native_http_authority;
     feature = "native-network"
 ))]
 pub mod native_http_host;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_image_host;
 #[cfg(feature = "native-host")]
 pub mod native_math;
 #[cfg(all(feature = "native-host", feature = "v8-runtime"))]
@@ -51,8 +56,18 @@ pub mod native_media;
 mod native_source_baseline;
 pub mod native_source_host;
 pub mod native_storage;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_task_host;
 pub mod native_video;
 pub mod native_video_decoder;
+#[cfg(all(
+    feature = "native-host",
+    feature = "v8-runtime",
+    feature = "native-network"
+))]
+pub mod native_video_host;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_world_region;
 #[cfg(feature = "native-host")]
 pub mod native_worlds;
 pub mod network;
@@ -70,6 +85,10 @@ pub mod settings;
 pub mod sources;
 pub mod surface;
 pub mod trust;
+#[cfg(feature = "native-host")]
+pub mod world_region;
+#[cfg(feature = "native-host")]
+pub mod world_region_encoding;
 
 #[cfg(all(test, feature = "v8-runtime"))]
 mod v8_dependency_tests {

@@ -1,8 +1,8 @@
 //! Worker-only native source broker. No adapter fetches through ambient workers.
 //! Caller owns execution admission, cancellation and broker authorization.
-mod astronomy;
+pub(crate) mod astronomy;
 mod documents;
-mod geography;
+pub(crate) mod geography;
 mod satellite;
 mod series;
 mod terrain;
@@ -881,8 +881,30 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
     pub fn dispatch(
         &mut self,
         request: SourceRequest,
+        clock: SourceClock,
+        stop: &AtomicBool,
+    ) -> Result<Arc<AdmittedSourceValue>> {
+        self.dispatch_with_format(request, clock, stop, false)
+    }
+    #[cfg(all(
+        feature = "v8-runtime",
+        feature = "native-host",
+        feature = "native-network"
+    ))]
+    pub fn dispatch_native(
+        &mut self,
+        request: SourceRequest,
+        clock: SourceClock,
+        stop: &AtomicBool,
+    ) -> Result<Arc<AdmittedSourceValue>> {
+        self.dispatch_with_format(request, clock, stop, true)
+    }
+    fn dispatch_with_format(
+        &mut self,
+        request: SourceRequest,
         _clock: SourceClock,
         stop: &AtomicBool,
+        binary_elevation: bool,
     ) -> Result<Arc<AdmittedSourceValue>> {
         cancelled(stop)?;
         self.client.authorize_operation(&request)?;
@@ -890,6 +912,7 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
         let _peak = source_storage(&self.quota, operation_peak(&request)?)?;
         self.client.images.clear();
         self.client.terrain = None;
+        let mut binary_f32 = None;
         let result = match &request {
             SourceRequest::GeographyCoastlines {
                 body,
@@ -903,15 +926,33 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
                 width,
                 height,
                 seed,
-            } => terrain::elevation(
-                &mut self.client,
-                body,
-                *bounds,
-                *width,
-                *height,
-                seed.unwrap_or(0),
-                stop,
-            ),
+            } => {
+                if binary_elevation {
+                    terrain::elevation_binary(
+                        &mut self.client,
+                        body,
+                        *bounds,
+                        *width,
+                        *height,
+                        seed.unwrap_or(0),
+                        stop,
+                    )
+                    .map(|product| {
+                        binary_f32 = Some(product.samples);
+                        product.metadata
+                    })
+                } else {
+                    terrain::elevation(
+                        &mut self.client,
+                        body,
+                        *bounds,
+                        *width,
+                        *height,
+                        seed.unwrap_or(0),
+                        stop,
+                    )
+                }
+            }
             SourceRequest::GeographyProject {
                 latitude,
                 longitude,
@@ -953,13 +994,28 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
         };
         cancelled(stop)?;
         self.client.authorize_operation(&request)?;
-        if json_owned_bytes(&output)? > operation_retained(&request)? {
+        let binary_bytes = binary_f32
+            .as_ref()
+            .map(|values: &Vec<f32>| {
+                values
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<f32>())
+                    .ok_or_else(|| AnimationError::Budget("source f32 capacity".into()))
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let retained_bytes = operation_retained(&request)?;
+        if json_owned_bytes(&output)?
+            .checked_add(binary_bytes)
+            .is_none_or(|bytes| bytes > retained_bytes)
+        {
             return types::fail("source output budget");
         }
         Ok(Arc::new(AdmittedSourceValue::new(
             output,
             admission,
             std::mem::take(&mut self.client.images),
+            binary_f32,
         )))
     }
 }

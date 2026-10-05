@@ -2,13 +2,14 @@
 //! This module never waits for a bank callback, invents a script handle, or
 //! considers a native transport suspension to be a provider failure.
 use crate::{
-    engine::{HostRequest, ServiceValue},
+    engine::{ArraySpec, HostRequest, ServiceValue, TypedArrayKind},
     error::{AnimationError, Result},
     http::{self, DnsResolver, HttpOptions},
+    native_draw_host::NativeDrawHost,
     native_http_authority::NativeHttpAuthorityFactory,
     native_media::{MediaLimits, NativeMedia},
     permissions::{Channel, PermissionBroker},
-    runtime::{PackageInstance, ServiceOperation},
+    runtime::{PackageInstance, ServiceOperation, SourceFeedOperation},
     sources::{
         self, AdmittedSourceSnapshot, AdmittedSourceValue, NativeSourceClient,
         NativeSourceHeightfield, NativeSourceImage, SourceClock, SourceDemand, SourceDispatcher,
@@ -19,15 +20,27 @@ use ilium_execution::{
     Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, QuotaGroup, Receipt, Retained,
     Retention, StorageAdmission,
 };
+use ilium_platform::owned_worker::StopToken;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    cell::Cell,
     collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
+
+/// Original feed authority and its current refresh deadline; no new admission.
+pub(crate) type FeedContext = (
+    Arc<Mutex<PermissionBroker>>,
+    Channel,
+    QuotaGroup,
+    StopToken,
+    Instant,
+);
 
 fn invalid(text: &'static str) -> AnimationError {
     AnimationError::Runtime(text.into())
@@ -47,15 +60,21 @@ pub enum SourceCall {
     Operation(SourceRequest),
 }
 impl SourceCall {
-    pub(crate) fn recognized(method: &str) -> bool {
+    pub fn recognized(method: &str) -> bool {
         matches!(
             method,
             "sources.series.open"
+                | "sources.series.close"
                 | "sources.earthquakes.open"
+                | "sources.earthquakes.close"
                 | "sources.aircraft.open"
+                | "sources.aircraft.close"
                 | "sources.boats.open"
+                | "sources.boats.close"
                 | "sources.chess.open"
+                | "sources.chess.close"
                 | "sources.weather.open"
+                | "sources.weather.close"
                 | "sources.geography.coastlines"
                 | "sources.geography.elevation"
                 | "sources.geography.project"
@@ -171,7 +190,12 @@ pub(crate) struct SourcePlanningAuthority {
     channel: Channel,
     request: HostRequest,
     quota: QuotaGroup,
+    feed: Option<SourceFeedLifetime>,
     _admission: StorageAdmission,
+}
+struct SourceFeedLifetime {
+    stop: StopToken,
+    cycle_deadline: Option<Instant>,
 }
 impl SourcePlanningAuthority {
     pub(crate) fn from_runtime(
@@ -186,13 +210,22 @@ impl SourcePlanningAuthority {
             channel,
             request,
             quota,
+            feed: None,
             _admission: admission,
         };
         value.check()?;
         Ok(value)
     }
-    fn check(&self) -> Result<()> {
-        if self.request.is_cancelled() || !self.request.payload.shares_root(&self.quota) {
+    pub(crate) fn check(&self) -> Result<()> {
+        if let Some(feed) = &self.feed {
+            if feed.stop.is_stopped()
+                || feed
+                    .cycle_deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Err(denied("source persistent feed cancelled or cycle expired"));
+            }
+        } else if self.request.is_cancelled() || !self.request.payload.shares_root(&self.quota) {
             return Err(denied("source planning original request retired"));
         }
         let broker = self
@@ -212,6 +245,92 @@ impl SourcePlanningAuthority {
             return Err(denied("source planning private channel mismatch"));
         }
         Ok(())
+    }
+    fn promote_to_feed(&mut self, stop: StopToken) -> Result<()> {
+        if self.feed.is_some() || stop.is_stopped() {
+            return Err(denied(
+                "source feed ownership already transferred or stopped",
+            ));
+        }
+        // Called while the opener is still retained, before its helper copy.
+        // A refused ACK stops and drops this prepared lifetime; a Delivered
+        // ACK can transfer it without any later fallible admission.
+        let coordinates = self
+            .broker
+            .lock()
+            .map_err(|_| denied("source native owner poisoned"))?
+            .channel_coordinates(&self.channel)
+            .map_err(|error| AnimationError::PermissionDenied(error.to_string()))?;
+        if coordinates
+            != (
+                self.request.authority.instance_id,
+                self.request.authority.plan_generation,
+                self.request.authority.authorization_epoch,
+            )
+        {
+            return Err(denied("source feed channel changed before transfer"));
+        }
+        self.feed = Some(SourceFeedLifetime {
+            stop,
+            cycle_deadline: None,
+        });
+        Ok(())
+    }
+    fn begin_feed_cycle(&mut self) -> Result<Instant> {
+        self.check()?;
+        let feed = self
+            .feed
+            .as_mut()
+            .ok_or_else(|| denied("source feed lifetime not transferred"))?;
+        if feed.cycle_deadline.is_some() {
+            return Err(denied("source feed cycle already active"));
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        feed.cycle_deadline = Some(deadline);
+        Ok(deadline)
+    }
+    fn finish_feed_cycle(&mut self) -> Result<()> {
+        let feed = self
+            .feed
+            .as_mut()
+            .ok_or_else(|| denied("source feed lifetime not transferred"))?;
+        feed.cycle_deadline = None;
+        Ok(())
+    }
+    fn remaining_ms(&self) -> u64 {
+        match &self.feed {
+            Some(feed) => feed.cycle_deadline.map_or(0, |deadline| {
+                u64::try_from(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX)
+            }),
+            None => self.request.remaining_ms(),
+        }
+    }
+    fn stop_token(&self) -> StopToken {
+        self.feed
+            .as_ref()
+            .map_or_else(|| self.request.stop_token(), |feed| feed.stop.clone())
+    }
+    pub(crate) fn feed_context(&self) -> Result<FeedContext> {
+        self.check()?;
+        let feed = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| denied("source feed not transferred"))?;
+        let deadline = feed
+            .cycle_deadline
+            .ok_or_else(|| denied("source feed refresh not begun"))?;
+        Ok((
+            Arc::clone(&self.broker),
+            self.channel.clone(),
+            self.quota.clone(),
+            feed.stop.clone(),
+            deadline,
+        ))
     }
 }
 /// Native supplied policy; never grow these limits on refusal. Media policy is
@@ -286,6 +405,9 @@ impl SourceCadence {
             entries: Mutex::new(BTreeMap::new()),
             _admission: admission,
         })
+    }
+    pub fn shares_root(&self, quota: &QuotaGroup) -> bool {
+        self.quota.shares_root(quota)
     }
     fn admit(&self, quota: &QuotaGroup, key: &str, now: u64, interval: u64) -> Result<bool> {
         if !self.quota.shares_root(quota) || key.is_empty() || key.len() > 64 || interval == 0 {
@@ -441,6 +563,65 @@ struct Exchange {
     key: [u8; 32],
     transport: CachedTransport,
 }
+/// Offline qualification replaces only the socket/body transport. The real
+/// package review, committed ticket, original IO job and native URL/hop
+/// authority still run. No test-only path is compiled into production.
+#[cfg(test)]
+struct OfflineSourceHttp {
+    exact_url: String,
+    public_address: std::net::SocketAddr,
+    bodies: Mutex<std::collections::VecDeque<Vec<u8>>>,
+}
+#[cfg(test)]
+impl OfflineSourceHttp {
+    fn receive(
+        &self,
+        options: &HttpOptions,
+        kind: TransportKind,
+        authority: &mut crate::native_http_authority::NativeHttpAuthority,
+        quota: &QuotaGroup,
+        stop: &AtomicBool,
+    ) -> Result<CachedTransport> {
+        use crate::{
+            http::{HttpAuthority, HttpPhase},
+            permissions::HttpMethod,
+        };
+        options.validate()?;
+        if !matches!(kind, TransportKind::Body)
+            || options.method != "GET"
+            || options.url != self.exact_url
+            || options.body.is_some()
+            || options.credential.is_some()
+            || !options.headers.is_empty()
+            || stop.load(Ordering::Acquire)
+        {
+            return Err(denied("offline source transport target or kind mismatch"));
+        }
+        let url = url::Url::parse(&options.url)
+            .map_err(|error| AnimationError::Runtime(error.to_string()))?;
+        if url.scheme() != "https" || self.public_address.port() != 443 {
+            return Err(denied("offline source transport requires exact HTTPS"));
+        }
+        authority.authorize(HttpPhase::Preflight, HttpMethod::Get, &url, &[])?;
+        let address = [self.public_address];
+        authority.authorize(HttpPhase::Dispatch, HttpMethod::Get, &url, &address)?;
+        authority.authorize(HttpPhase::Delivery, HttpMethod::Get, &url, &address)?;
+        let body = self
+            .bodies
+            .lock()
+            .map_err(|_| denied("offline source body owner poisoned"))?
+            .pop_front()
+            .ok_or_else(|| invalid("offline source body sequence exhausted"))?;
+        let response = SourceHttpResponse::read(
+            200,
+            &mut std::io::Cursor::new(body),
+            quota,
+            options.max_bytes,
+            stop,
+        )?;
+        authority.with_body_delivery(|| Ok(CachedTransport::Body(response)))
+    }
+}
 struct ReplayState {
     authority: SourcePlanningAuthority,
     call: SourceCall,
@@ -455,6 +636,8 @@ struct ReplayState {
     refresh: Option<(String, u64, u64, bool)>,
     refresh_checked: bool,
     limits: SourceActorLimits,
+    #[cfg(test)]
+    offline_http: Option<Arc<OfflineSourceHttp>>,
     _admission: StorageAdmission,
 }
 #[derive(Clone)]
@@ -600,7 +783,7 @@ impl NativeSourceClient for ReplayClient {
         if let Some(image) = s.images.get(&key) {
             return Ok(image.clone());
         }
-        let token = s.authority.request.stop_token();
+        let token = s.authority.stop_token();
         let handle = s.media.decode(bytes, &token)?;
         let image = NativeSourceImage::from_native(&s.media, handle)?;
         s.images.insert(key, image.clone());
@@ -645,6 +828,33 @@ struct SourceRun {
     stop: Arc<AtomicBool>,
 }
 impl SourceRun {
+    fn prepare_refresh(&mut self, clock: SourceClock) -> Result<()> {
+        let mut state = self.dispatcher.actor_client().state()?;
+        state.authority.check()?;
+        if state.pending.is_some() {
+            return Err(invalid("source previous transport still pending"));
+        }
+        // The dispatcher snapshot and prepared drawing handles retain their
+        // own admitted pixel Arcs. Release this cycle's decoder handles before
+        // admitting the next native image batch.
+        let handles: Vec<_> = state
+            .images
+            .values()
+            .map(NativeSourceImage::native_handle)
+            .collect();
+        for handle in handles {
+            state.media.close(handle)?;
+        }
+        state.images.clear();
+        state.authority.begin_feed_cycle()?;
+        state.cursor = 0;
+        state.exchanges.clear();
+        state.encoded = 0;
+        state.refresh = None;
+        state.refresh_checked = false;
+        self.clock = clock;
+        Ok(())
+    }
     fn cpu_step(&mut self) -> Result<Option<NativeSourceOutput>> {
         {
             let mut s = self.dispatcher.actor_client().state()?;
@@ -666,7 +876,7 @@ impl SourceRun {
                 .map(NativeSourceOutput::Snapshot),
             SourceCall::Operation(request) => self
                 .dispatcher
-                .dispatch(request.clone(), self.clock, &self.stop)
+                .dispatch_native(request.clone(), self.clock, &self.stop)
                 .map(NativeSourceOutput::Operation),
         };
         if self.dispatcher.actor_client().suspended()? {
@@ -790,7 +1000,6 @@ impl Job for SourceIoJob {
             .actor_client()
             .state()?
             .authority
-            .request
             .remaining_ms();
         if remaining == 0 {
             return Err(denied("source original deadline"));
@@ -809,6 +1018,16 @@ impl Job for SourceIoJob {
                     "source encoded retention exhausted".into(),
                 ));
             }
+        }
+        #[cfg(test)]
+        let offline_http = { run.dispatcher.actor_client().state()?.offline_http.clone() };
+        #[cfg(test)]
+        if let Some(fixture) = offline_http {
+            let transport =
+                fixture.receive(&options, self.plan.kind, &mut authority, &self.quota, &stop);
+            run.install(self.plan, transport)?;
+            drop(previous);
+            return Ok(SourceIoStep { run });
         }
         let transport = match self.plan.kind {
             TransportKind::Body => http::request_with_reader(
@@ -887,6 +1106,22 @@ fn io_cost(plan: &HttpPlan) -> Result<JobCost> {
             .ok_or_else(|| invalid("source IO cost overflow"))?,
     })
 }
+
+fn try_submit_preserving_rejection<J: Job>(
+    client: &Client,
+    lane: Lane,
+    cost: JobCost,
+    pending: &Cell<Option<J>>,
+) -> Option<Receipt<J>> {
+    let job = pending.take().expect("one source job issue");
+    match client.try_submit(lane, cost, job) {
+        Ok(receipt) => Some(receipt),
+        Err(rejected) => {
+            pending.set(Some(rejected.value));
+            None
+        }
+    }
+}
 enum SourceStage {
     Cpu {
         receipt: Receipt<SourceCpuJob>,
@@ -912,6 +1147,8 @@ pub struct SourceActorEnvironment {
     pub cadence: Arc<SourceCadence>,
     pub limits: SourceActorLimits,
     pub credentials: Option<Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>>,
+    #[cfg(test)]
+    offline_http: Option<Arc<OfflineSourceHttp>>,
 }
 struct SourceCredentialAdapter(Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>);
 impl crate::native_http_host::HostCredentialAdapter for SourceCredentialAdapter {
@@ -948,6 +1185,67 @@ pub struct SourceCompletion {
     step: Retained<CpuStep>,
     operation: Option<ServiceOperation>,
 }
+/// A native feed descriptor and its distinct retained JSON charge. Image IDs
+/// are actual prepared allocations; the caller rolls them back on refused ACK.
+pub struct ProjectedFeedDescriptor {
+    metadata: Value,
+    imported: Vec<String>,
+    metadata_bound: usize,
+    _admission: StorageAdmission,
+}
+pub struct PreparedFeedRegistration {
+    owner: Arc<Mutex<PermissionBroker>>,
+    quota: QuotaGroup,
+    worker_stop: Arc<AtomicBool>,
+    stop: StopToken,
+    registry: StorageAdmission,
+}
+impl PreparedFeedRegistration {
+    pub fn stop(&self) {
+        self.stop.stop();
+        self.worker_stop.store(true, Ordering::Release);
+    }
+}
+impl ProjectedFeedDescriptor {
+    pub fn metadata(&self) -> &Value {
+        &self.metadata
+    }
+    pub fn imported(&self) -> &[String] {
+        &self.imported
+    }
+    pub fn metadata_bound(&self) -> usize {
+        self.metadata_bound
+    }
+    pub fn mark_error(&mut self) -> Result<()> {
+        let revision = self.metadata["revision"]
+            .as_u64()
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| invalid("source feed status revision exhausted"))?;
+        self.metadata["revision"] = json!(revision);
+        self.metadata["status"] = json!({"state":"error"});
+        if sources::types::json_owned_bytes(&self.metadata)? > self.metadata_bound {
+            return Err(invalid("source feed error status admission"));
+        }
+        Ok(())
+    }
+    /// A delivered image-close ACK retires its native draw registration. Do
+    /// not reseed the old image ID from a still-cached weather snapshot.
+    pub fn image_closed(&mut self, id: &str) -> Result<()> {
+        if !self.imported.iter().any(|image| image == id) || self.metadata["latest"].is_null() {
+            return Ok(());
+        }
+        let revision = self.metadata["revision"]
+            .as_u64()
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| invalid("source feed image-close revision exhausted"))?;
+        self.metadata["revision"] = json!(revision);
+        self.metadata["latest"] = Value::Null;
+        if sources::types::json_owned_bytes(&self.metadata)? > self.metadata_bound {
+            return Err(invalid("source feed image-close admission"));
+        }
+        Ok(())
+    }
+}
 impl SourceCompletion {
     pub fn request(&self) -> &HostRequest {
         &self.request
@@ -961,10 +1259,236 @@ impl SourceCompletion {
             .as_ref()
             .ok_or_else(|| invalid("source terminal output absent"))
     }
+    /// Check the same original channel and quota immediately before a native
+    /// client binds images or copies typed planes from this terminal receipt.
+    pub fn authorized_output(&self, instance: &PackageInstance) -> Result<&NativeSourceOutput> {
+        {
+            let state = self.step.view().run.dispatcher.actor_client().state()?;
+            state.authority.check()?;
+            instance.check_http_owner(&state.authority.broker, &state.authority.quota)?;
+        }
+        self.output()
+    }
+    /// A complete native result copy is separately charged before helper ACK.
+    /// This does not publish, settle, or reinterpret source slot integers.
+    pub fn copy_result(
+        &self,
+        instance: &PackageInstance,
+        metadata: &Value,
+        arrays: &[crate::engine::ArraySpec],
+        planes: &BTreeMap<String, Vec<u8>>,
+    ) -> Result<ServiceValue> {
+        self.authorized_output(instance)?;
+        let state = self.step.view().run.dispatcher.actor_client().state()?;
+        ServiceValue::copy_from_host(
+            metadata,
+            arrays,
+            planes,
+            instance.engine_limits(),
+            state.authority.quota.clone(),
+        )
+    }
+    /// Construct a real helper completion from the admitted provider result.
+    /// The only image descriptors accepted here are imported from the exact
+    /// output's native allocations. Imported IDs remain caller-owned until
+    /// Delivered ACK; the caller releases them on any other terminal outcome.
+    pub fn copy_operation_result(
+        &self,
+        instance: &mut PackageInstance,
+        drawing: &mut NativeDrawHost,
+    ) -> Result<(ServiceValue, Vec<String>)> {
+        let NativeSourceOutput::Operation(output) = self.authorized_output(instance)? else {
+            return Err(invalid("feed opening requires retained native feed owner"));
+        };
+        let images = output.native_images();
+        if images.len() > 64 {
+            return Err(invalid("source image facade inventory"));
+        }
+        let quota = {
+            let state = self.step.view().run.dispatcher.actor_client().state()?;
+            state.authority.quota.clone()
+        };
+        if let Some(samples) = output.binary_f32() {
+            if self.request.method != "sources.geography.elevation"
+                || !images.is_empty()
+                || samples.is_empty()
+                || samples.iter().any(|sample| !sample.is_finite())
+            {
+                return Err(invalid("native source f32 output identity"));
+            }
+            let bytes = samples
+                .len()
+                .checked_mul(4)
+                .ok_or_else(|| invalid("native source f32 byte overflow"))?;
+            let _scratch = charge(&quota, bytes)?;
+            let mut plane = Vec::new();
+            plane
+                .try_reserve_exact(bytes)
+                .map_err(|_| invalid("source f32 copy allocation"))?;
+            for sample in samples {
+                plane.extend_from_slice(&sample.to_ne_bytes());
+            }
+            let mut planes = BTreeMap::new();
+            planes.insert("b0".into(), plane);
+            let value = self.copy_result(
+                instance,
+                &json!({"ok":true,"value":{"$ilium_binary":"b0"}}),
+                &[ArraySpec {
+                    name: "b0".into(),
+                    kind: TypedArrayKind::F32,
+                    elements: samples.len(),
+                }],
+                &planes,
+            )?;
+            return Ok((value, Vec::new()));
+        }
+        if self.request.method == "sources.geography.elevation" {
+            return Err(invalid("native elevation missing typed product"));
+        }
+        let scratch_bytes = sources::types::json_owned_bytes(output.view())?
+            .checked_add(64 * 1024)
+            .ok_or_else(|| invalid("source descriptor copy size"))?;
+        let _scratch = charge(&quota, scratch_bytes)?;
+        let mut projected = output.view().clone();
+        let mut imported = Vec::new();
+        imported
+            .try_reserve_exact(images.len())
+            .map_err(|_| invalid("source import list allocation"))?;
+        let mut used = vec![false; images.len()];
+        let result = (|| -> Result<ServiceValue> {
+            match self.request.method.as_str() {
+                "sources.osm.tile" if !images.is_empty() => {
+                    import_image_slot(
+                        &mut projected["image"],
+                        images,
+                        &mut used,
+                        drawing,
+                        instance,
+                        &mut imported,
+                    )?;
+                }
+                "sources.wikipedia.article" if !images.is_empty() => {
+                    let entries = projected["images"]
+                        .as_array_mut()
+                        .ok_or_else(|| invalid("article image result schema"))?;
+                    for entry in entries {
+                        import_image_slot(
+                            &mut entry["image"],
+                            images,
+                            &mut used,
+                            drawing,
+                            instance,
+                            &mut imported,
+                        )?;
+                    }
+                }
+                _ if !images.is_empty() => return Err(invalid("unmapped source image result")),
+                _ => {}
+            }
+            if used.iter().any(|seen| !seen) {
+                return Err(invalid("source image allocation not projected"));
+            }
+            self.copy_result(
+                instance,
+                &json!({"ok":true,"value":projected}),
+                &[],
+                &BTreeMap::new(),
+            )
+        })();
+        match result {
+            Ok(value) => Ok((value, imported)),
+            Err(error) => {
+                for key in imported.iter().rev() {
+                    drawing.release_source_image(key)?;
+                }
+                Err(error)
+            }
+        }
+    }
+    pub fn is_feed(&self) -> bool {
+        matches!(self.step.view().run.call, SourceCall::Feed(_))
+    }
+    pub fn prepare_feed_transfer(
+        &self,
+        instance: &PackageInstance,
+        client: &Client,
+        stop: StopToken,
+    ) -> Result<PreparedFeedRegistration> {
+        if !self.is_feed() {
+            return Err(invalid("operation cannot transfer feed"));
+        }
+        self.authorized_output(instance)?;
+        let mut state = self.step.view().run.dispatcher.actor_client().state()?;
+        let quota = state.authority.quota.clone();
+        if !client.quota_group().shares_root(&quota) {
+            return Err(denied("feed client original quota mismatch"));
+        }
+        let registry = charge(&quota, 64 * 1024)?;
+        state.authority.promote_to_feed(stop.clone())?;
+        Ok(PreparedFeedRegistration {
+            owner: Arc::clone(&state.authority.broker),
+            quota,
+            worker_stop: Arc::clone(&self.step.view().run.stop),
+            stop,
+            registry,
+        })
+    }
+    pub fn copy_feed_open_result(
+        &self,
+        instance: &mut PackageInstance,
+        drawing: &mut NativeDrawHost,
+        native_id: &str,
+    ) -> Result<(ServiceValue, ProjectedFeedDescriptor)> {
+        let NativeSourceOutput::Snapshot(snapshot) = self.authorized_output(instance)? else {
+            return Err(invalid("operation cannot open native feed"));
+        };
+        let descriptor = project_feed_descriptor(
+            instance,
+            drawing,
+            native_id,
+            &self.request.method,
+            snapshot.as_deref(),
+            &self
+                .step
+                .view()
+                .run
+                .dispatcher
+                .actor_client()
+                .state()?
+                .authority
+                .quota,
+            FeedProjectionState {
+                service_revision: None,
+                provider_failed: false,
+            },
+        )?;
+        match self.copy_result(
+            instance,
+            &json!({"ok":true,"value":descriptor.metadata}),
+            &[],
+            &BTreeMap::new(),
+        ) {
+            Ok(value) => Ok((value, descriptor)),
+            Err(error) => {
+                for image in descriptor.imported.iter().rev() {
+                    drawing.release_source_image(image)?;
+                }
+                Err(error)
+            }
+        }
+    }
+    /// The original receipt charge remains attached to the entire dispatcher
+    /// when a successfully delivered opener becomes a long-lived feed actor.
+    pub fn into_feed_run(self) -> NativeSourceFeedRun {
+        let (step, hold) = self.step.into_parts();
+        NativeSourceFeedRun {
+            run: hold.retain(step.run),
+        }
+    }
     /// Native root first binds genuine image/feed handles and binary elevation;
     /// this owner does not turn slot numbers/native metadata into script handles.
     /// Keep self (and original receipts/images) alive through actual copy ACK.
-    pub(crate) fn publish(
+    pub fn publish(
         &self,
         instance: &mut PackageInstance,
         value: ServiceValue,
@@ -981,7 +1505,7 @@ impl SourceCompletion {
     }
     /// Actual terminal receipt custody permits cleanup after failed publication;
     /// cancellation alone never creates this completion owner.
-    pub(crate) fn settle(&self, instance: &mut PackageInstance) -> Result<()> {
+    pub fn settle(&self, instance: &mut PackageInstance) -> Result<()> {
         {
             let state = self.step.view().run.dispatcher.actor_client().state()?;
             instance.check_http_owner(&state.authority.broker, &state.authority.quota)?;
@@ -991,6 +1515,875 @@ impl SourceCompletion {
         }
         Ok(())
     }
+}
+pub struct NativeSourceFeedRun {
+    run: Retained<SourceRun>,
+}
+impl NativeSourceFeedRun {
+    pub fn next_due_ms(&self) -> Result<u64> {
+        self.run
+            .view()
+            .dispatcher
+            .next_due_ms(
+                self.run
+                    .view()
+                    .handle
+                    .ok_or_else(|| invalid("feed handle absent"))?,
+            )
+            .ok_or_else(|| invalid("feed due state absent"))
+    }
+    pub fn close(self) -> Result<()> {
+        let (mut run, hold) = self.run.into_parts();
+        run.dispatcher
+            .close(run.handle.ok_or_else(|| invalid("feed handle absent"))?)?;
+        drop(run);
+        drop(hold);
+        Ok(())
+    }
+}
+enum FeedStage {
+    Cpu {
+        receipt: Receipt<SourceCpuJob>,
+        operation: Option<SourceFeedOperation>,
+    },
+    Io {
+        receipt: Receipt<SourceIoJob>,
+        operation: SourceFeedOperation,
+    },
+    LostCpu {
+        _receipt: Receipt<SourceCpuJob>,
+        _operation: Option<SourceFeedOperation>,
+    },
+    LostIo {
+        _receipt: Receipt<SourceIoJob>,
+        _operation: SourceFeedOperation,
+    },
+    Closed,
+}
+enum FeedOwnedState {
+    Ready(Retained<SourceRun>),
+    Completion(SourceFeedCompletion),
+}
+pub struct NativeSourceFeedHost {
+    client: Client,
+    quota: QuotaGroup,
+    owner: Arc<Mutex<PermissionBroker>>,
+    dns: Arc<dyn DnsResolver + Send + Sync>,
+    credentials: Option<Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>>,
+    stop: StopToken,
+    worker_stop: Arc<AtomicBool>,
+    owned: Option<FeedOwnedState>,
+    stage: Option<FeedStage>,
+    blocked_until_ms: u64,
+    _registry: StorageAdmission,
+}
+pub struct SourceFeedCompletion {
+    step: Retained<CpuStep>,
+    operation: Option<SourceFeedOperation>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceFeedEvent {
+    Complete,
+    Failed(&'static str),
+    Lost,
+}
+impl SourceFeedCompletion {
+    pub fn project(
+        &self,
+        instance: &mut PackageInstance,
+        drawing: &mut NativeDrawHost,
+        native_id: &str,
+        service_revision: u64,
+    ) -> Result<ProjectedFeedDescriptor> {
+        let run = &self.step.view().run;
+        let state = run.dispatcher.actor_client().state()?;
+        state.authority.check()?;
+        instance.check_http_owner(&state.authority.broker, &state.authority.quota)?;
+        let quota = state.authority.quota.clone();
+        drop(state);
+        let snapshot = match &self.step.view().output {
+            Ok(Some(NativeSourceOutput::Snapshot(value))) => value.clone(),
+            Ok(Some(NativeSourceOutput::Operation(_))) => {
+                return Err(invalid("feed produced operation"));
+            }
+            _ => run
+                .dispatcher
+                .latest(run.handle.ok_or_else(|| invalid("feed handle missing"))?)?,
+        };
+        let method = match &run.call {
+            SourceCall::Feed(SourceDemand::Series(_)) => "sources.series.open",
+            SourceCall::Feed(SourceDemand::Earthquakes(_)) => "sources.earthquakes.open",
+            SourceCall::Feed(SourceDemand::Aircraft(_)) => "sources.aircraft.open",
+            SourceCall::Feed(SourceDemand::Boats(_)) => "sources.boats.open",
+            SourceCall::Feed(SourceDemand::Chess(_)) => "sources.chess.open",
+            SourceCall::Feed(SourceDemand::Weather(_)) => "sources.weather.open",
+            SourceCall::Operation(_) => return Err(invalid("operation cannot refresh feed")),
+        };
+        let failed = self.step.view().output.is_err();
+        project_feed_descriptor(
+            instance,
+            drawing,
+            native_id,
+            method,
+            snapshot.as_deref(),
+            &quota,
+            FeedProjectionState {
+                service_revision: Some(service_revision),
+                provider_failed: failed,
+            },
+        )
+    }
+    pub fn deliver<T>(
+        &self,
+        instance: &mut PackageInstance,
+        publish: impl FnOnce() -> T,
+    ) -> Result<T> {
+        if let Some(operation) = &self.operation {
+            instance.deliver_source_feed(operation, publish)
+        } else {
+            let context = self
+                .step
+                .view()
+                .run
+                .dispatcher
+                .actor_client()
+                .state()?
+                .authority
+                .feed_context()?;
+            instance.with_source_feed_planning(context, publish)
+        }
+    }
+    pub fn settle(&self, instance: &mut PackageInstance) -> Result<()> {
+        if let Some(operation) = &self.operation {
+            instance.settle_source_feed_terminal(operation)?;
+        }
+        Ok(())
+    }
+    pub fn into_run(self) -> NativeSourceFeedRun {
+        let (step, hold) = self.step.into_parts();
+        NativeSourceFeedRun {
+            run: hold.retain(step.run),
+        }
+    }
+}
+impl NativeSourceFeedHost {
+    pub fn from_delivered(
+        run: NativeSourceFeedRun,
+        client: Client,
+        dns: Arc<dyn DnsResolver + Send + Sync>,
+        credentials: Option<Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>>,
+        prepared: PreparedFeedRegistration,
+    ) -> Self {
+        Self {
+            client,
+            quota: prepared.quota,
+            owner: prepared.owner,
+            dns,
+            credentials,
+            stop: prepared.stop,
+            worker_stop: prepared.worker_stop,
+            owned: Some(FeedOwnedState::Ready(run.run)),
+            stage: None,
+            blocked_until_ms: 0,
+            _registry: prepared.registry,
+        }
+    }
+    pub fn next_due_ms(&self) -> Result<Option<u64>> {
+        if self.stage.is_some() {
+            return Ok(None);
+        }
+        let Some(FeedOwnedState::Ready(run)) = self.owned.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some(
+            run.view()
+                .dispatcher
+                .next_due_ms(
+                    run.view()
+                        .handle
+                        .ok_or_else(|| invalid("feed handle absent"))?,
+                )
+                .ok_or_else(|| invalid("feed due state absent"))?
+                .max(self.blocked_until_ms),
+        ))
+    }
+    pub fn begin_due(&mut self, instance: &PackageInstance, clock: SourceClock) -> Result<bool> {
+        if self.stop.is_stopped()
+            || self
+                .next_due_ms()?
+                .is_none_or(|due| clock.monotonic_ms < due)
+        {
+            return Ok(false);
+        }
+        if self.stage.is_some() {
+            return Ok(false);
+        }
+        if !matches!(self.owned.as_ref(), Some(FeedOwnedState::Ready(_))) {
+            return Ok(false);
+        }
+        let Some(FeedOwnedState::Ready(retained)) = self.owned.take() else {
+            unreachable!("checked source feed ready state");
+        };
+        let (mut run, hold) = retained.into_parts();
+        if let Err(error) = run.prepare_refresh(clock) {
+            self.owned = Some(FeedOwnedState::Ready(hold.retain(run)));
+            self.blocked_until_ms = clock.monotonic_ms.saturating_add(1_000);
+            return Err(error);
+        }
+        let context = match run
+            .dispatcher
+            .actor_client()
+            .state()
+            .and_then(|state| state.authority.feed_context())
+        {
+            Ok(context) => context,
+            Err(error) => {
+                if let Ok(mut state) = run.dispatcher.actor_client().state() {
+                    let _ = state.authority.finish_feed_cycle();
+                }
+                self.owned = Some(FeedOwnedState::Ready(hold.retain(run)));
+                self.blocked_until_ms = clock.monotonic_ms.saturating_add(1_000);
+                return Err(error);
+            }
+        };
+        let fallback = hold.clone();
+        let job = SourceCpuJob {
+            run,
+            previous: Some(hold),
+        };
+        let pending = Cell::new(Some(job));
+        let issued = instance.with_source_feed_planning(context, || {
+            // This synchronous gate invokes its issue closure at most once.
+            try_submit_preserving_rejection(&self.client, Lane::Cpu, cpu_cost(), &pending)
+        });
+        match issued {
+            Ok(Some(receipt)) => {
+                self.stage = Some(FeedStage::Cpu {
+                    receipt,
+                    operation: None,
+                })
+            }
+            Ok(None) => {
+                let job = pending
+                    .take()
+                    .expect("rejected source CPU job must remain in caller custody");
+                let run = job.run;
+                run.dispatcher
+                    .actor_client()
+                    .state()?
+                    .authority
+                    .finish_feed_cycle()?;
+                self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                self.blocked_until_ms = clock.monotonic_ms.saturating_add(1_000);
+                return Err(AnimationError::Budget(
+                    "source feed CPU admission refused".into(),
+                ));
+            }
+            Err(error) => {
+                if let Some(job) = pending.take() {
+                    let run = job.run;
+                    run.dispatcher
+                        .actor_client()
+                        .state()?
+                        .authority
+                        .finish_feed_cycle()?;
+                    self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                }
+                return Err(error);
+            }
+        }
+        Ok(true)
+    }
+    fn cpu_resume(
+        &mut self,
+        instance: &mut PackageInstance,
+        run: SourceRun,
+        hold: Retention,
+        operation: Option<SourceFeedOperation>,
+    ) -> Result<()> {
+        let context = match run
+            .dispatcher
+            .actor_client()
+            .state()
+            .and_then(|state| state.authority.feed_context())
+        {
+            Ok(context) => context,
+            Err(error) => {
+                if let Ok(mut state) = run.dispatcher.actor_client().state() {
+                    let _ = state.authority.finish_feed_cycle();
+                }
+                self.owned = Some(FeedOwnedState::Ready(hold.retain(run)));
+                if let Some(ticket) = operation.as_ref() {
+                    instance.settle_source_feed_terminal(ticket)?;
+                }
+                return Err(error);
+            }
+        };
+        let fallback = hold.clone();
+        let job = SourceCpuJob {
+            run,
+            previous: Some(hold),
+        };
+        let pending = Cell::new(Some(job));
+        let issued = match &operation {
+            Some(ticket) => instance.with_source_feed_cpu_authority(ticket, || {
+                try_submit_preserving_rejection(&self.client, Lane::Cpu, cpu_cost(), &pending)
+            }),
+            None => instance.with_source_feed_planning(context, || {
+                try_submit_preserving_rejection(&self.client, Lane::Cpu, cpu_cost(), &pending)
+            }),
+        };
+        match issued {
+            Ok(Some(receipt)) => self.stage = Some(FeedStage::Cpu { receipt, operation }),
+            Ok(None) => {
+                let job = pending
+                    .take()
+                    .expect("rejected source CPU continuation must remain in caller custody");
+                let run = job.run;
+                run.dispatcher
+                    .actor_client()
+                    .state()?
+                    .authority
+                    .finish_feed_cycle()?;
+                self.blocked_until_ms = run.clock.monotonic_ms.saturating_add(1_000);
+                self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                if let Some(ticket) = operation {
+                    instance.settle_source_feed_terminal(&ticket)?;
+                }
+                return Err(AnimationError::Budget(
+                    "source feed CPU continuation refused".into(),
+                ));
+            }
+            Err(error) => {
+                if let Some(job) = pending.take() {
+                    let run = job.run;
+                    run.dispatcher
+                        .actor_client()
+                        .state()?
+                        .authority
+                        .finish_feed_cycle()?;
+                    self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                }
+                if let Some(ticket) = operation {
+                    instance.settle_source_feed_terminal(&ticket)?;
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    fn fetch(
+        &mut self,
+        instance: &mut PackageInstance,
+        mut run: SourceRun,
+        hold: Retention,
+        operation: Option<SourceFeedOperation>,
+    ) -> Result<()> {
+        let mut cleanup_operation = operation.clone();
+        let result = (|| -> Result<()> {
+            let plan = run.take_plan()?;
+            let need = crate::permissions::OperationNeed::http_preflight(
+                &plan.options.url,
+                crate::permissions::HttpMethod::Get,
+            )
+            .map_err(|_| invalid("source feed endpoint invalid"))?;
+            let initial = operation.is_none();
+            let operation = match operation {
+                Some(ticket) => ticket,
+                None => {
+                    let state = run.dispatcher.actor_client().state()?;
+                    instance.dispatch_source_feed_http_service(&state.authority, need.clone())?
+                }
+            };
+            cleanup_operation = Some(operation.clone());
+            if initial {
+                let admitted = instance
+                    .with_source_feed_unissued(&operation, || run.admit_refresh_at_issue())?;
+                if !admitted {
+                    instance.settle_source_feed_terminal(&operation)?;
+                    return self.cpu_resume(instance, run, hold, None);
+                }
+            }
+            let selected = self.credentials.as_ref().map(|value| {
+                Box::new(SourceCredentialAdapter(Arc::clone(value)))
+                    as Box<dyn crate::native_http_host::HostCredentialAdapter>
+            });
+            let factory = instance.source_feed_http_authority_factory(&operation, selected)?;
+            let cost = io_cost(&plan)?;
+            let fallback = hold.clone();
+            let job = SourceIoJob {
+                run: hold.retain(run),
+                plan,
+                factory,
+                client: self.client.clone(),
+                dns: Arc::clone(&self.dns),
+                quota: self.quota.clone(),
+            };
+            let pending = Cell::new(Some(job));
+            let issued = if initial {
+                instance.commit_source_feed(&operation, || {
+                    try_submit_preserving_rejection(&self.client, Lane::Io, cost, &pending)
+                })
+            } else {
+                instance.with_source_feed_http_authority(&operation, &[need], || {
+                    try_submit_preserving_rejection(&self.client, Lane::Io, cost, &pending)
+                })
+            };
+            match issued {
+                Ok(Some(receipt)) => self.stage = Some(FeedStage::Io { receipt, operation }),
+                Ok(None) => {
+                    let job = pending
+                        .take()
+                        .expect("rejected source IO job must remain in caller custody");
+                    let (run, _held) = job.run.into_parts();
+                    run.dispatcher
+                        .actor_client()
+                        .state()?
+                        .authority
+                        .finish_feed_cycle()?;
+                    self.blocked_until_ms = run.clock.monotonic_ms.saturating_add(1_000);
+                    self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                    instance.settle_source_feed_terminal(&operation)?;
+                    return Err(AnimationError::Budget(
+                        "source feed IO admission refused".into(),
+                    ));
+                }
+                Err(error) => {
+                    if let Some(job) = pending.take() {
+                        let (run, _original_hold) = job.run.into_parts();
+                        run.dispatcher
+                            .actor_client()
+                            .state()?
+                            .authority
+                            .finish_feed_cycle()?;
+                        self.owned = Some(FeedOwnedState::Ready(fallback.retain(run)));
+                    }
+                    instance.settle_source_feed_terminal(&operation)?;
+                    return Err(error);
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            if let Some(ticket) = cleanup_operation.as_ref() {
+                instance.settle_source_feed_terminal(ticket)?;
+            }
+            if self.stage.is_none() && self.owned.is_none() {
+                self.stage = Some(FeedStage::Closed);
+            }
+        }
+        result
+    }
+    /// Only a genuine finite completion wake takes receipts; frame ticks call
+    /// begin_due only and never infer worker completion from elapsed time.
+    pub fn on_completion_wake(
+        &mut self,
+        instance: &mut PackageInstance,
+    ) -> Result<Option<SourceFeedEvent>> {
+        instance.check_http_owner(&self.owner, &self.quota)?;
+        let Some(stage) = self.stage.take() else {
+            return Ok(None);
+        };
+        match stage {
+            FeedStage::Cpu {
+                mut receipt,
+                operation,
+            } => match receipt.try_take() {
+                JobPoll::Pending => {
+                    self.stage = Some(FeedStage::Cpu { receipt, operation });
+                    Ok(None)
+                }
+                JobPoll::Lost | JobPoll::Taken => {
+                    self.stage = Some(FeedStage::LostCpu {
+                        _receipt: receipt,
+                        _operation: operation,
+                    });
+                    Ok(Some(SourceFeedEvent::Lost))
+                }
+                JobPoll::Ready(held) => {
+                    let (outcome, hold) = held.into_parts();
+                    if self.stop.is_stopped() {
+                        if let Some(ticket) = operation.as_ref() {
+                            instance.settle_source_feed_terminal(ticket)?;
+                        }
+                        drop(outcome);
+                        drop(hold);
+                        self.stage = Some(FeedStage::Closed);
+                        return Ok(Some(SourceFeedEvent::Failed("source_feed_cancelled")));
+                    }
+                    match outcome {
+                        JobOutcome::Finished(Ok(step))
+                            if step.output.as_ref().is_ok_and(Option::is_none) =>
+                        {
+                            self.fetch(instance, step.run, hold, operation)?;
+                            Ok(None)
+                        }
+                        JobOutcome::Finished(Ok(step)) => {
+                            if self.owned.is_some() {
+                                self.stage = Some(FeedStage::Closed);
+                                return Err(invalid("source feed completion already retained"));
+                            }
+                            self.owned = Some(FeedOwnedState::Completion(SourceFeedCompletion {
+                                step: hold.retain(step),
+                                operation,
+                            }));
+                            Ok(Some(SourceFeedEvent::Complete))
+                        }
+                        JobOutcome::NotStarted { job, .. } => {
+                            let (run, previous) = (job.run, job.previous);
+                            run.dispatcher
+                                .actor_client()
+                                .state()?
+                                .authority
+                                .finish_feed_cycle()?;
+                            self.owned = Some(FeedOwnedState::Ready(hold.retain(run)));
+                            drop(previous);
+                            if let Some(ticket) = operation {
+                                instance.settle_source_feed_terminal(&ticket)?;
+                            }
+                            Ok(Some(SourceFeedEvent::Failed("source_feed_cpu_not_started")))
+                        }
+                        JobOutcome::Finished(Err(_)) | JobOutcome::Panicked => {
+                            self.stage = Some(FeedStage::Closed);
+                            if let Some(ticket) = operation {
+                                instance.settle_source_feed_terminal(&ticket)?;
+                            }
+                            Ok(Some(SourceFeedEvent::Failed("source_feed_cpu_failed")))
+                        }
+                    }
+                }
+            },
+            FeedStage::Io {
+                mut receipt,
+                operation,
+            } => match receipt.try_take() {
+                JobPoll::Pending => {
+                    self.stage = Some(FeedStage::Io { receipt, operation });
+                    Ok(None)
+                }
+                JobPoll::Lost | JobPoll::Taken => {
+                    self.stage = Some(FeedStage::LostIo {
+                        _receipt: receipt,
+                        _operation: operation,
+                    });
+                    Ok(Some(SourceFeedEvent::Lost))
+                }
+                JobPoll::Ready(held) => {
+                    let (outcome, hold) = held.into_parts();
+                    if self.stop.is_stopped() {
+                        instance.settle_source_feed_terminal(&operation)?;
+                        drop(outcome);
+                        drop(hold);
+                        self.stage = Some(FeedStage::Closed);
+                        return Ok(Some(SourceFeedEvent::Failed("source_feed_cancelled")));
+                    }
+                    match outcome {
+                        JobOutcome::Finished(Ok(step)) => self
+                            .cpu_resume(instance, step.run, hold, Some(operation))
+                            .map(|_| None),
+                        JobOutcome::NotStarted { job, .. } => {
+                            let (run, previous) = job.run.into_parts();
+                            run.dispatcher
+                                .actor_client()
+                                .state()?
+                                .authority
+                                .finish_feed_cycle()?;
+                            self.owned = Some(FeedOwnedState::Ready(hold.retain(run)));
+                            drop(previous);
+                            instance.settle_source_feed_terminal(&operation)?;
+                            Ok(Some(SourceFeedEvent::Failed("source_feed_io_not_started")))
+                        }
+                        JobOutcome::Finished(Err(_)) | JobOutcome::Panicked => {
+                            self.stage = Some(FeedStage::Closed);
+                            instance.settle_source_feed_terminal(&operation)?;
+                            Ok(Some(SourceFeedEvent::Failed("source_feed_io_failed")))
+                        }
+                    }
+                }
+            },
+            other => {
+                self.stage = Some(other);
+                Ok(None)
+            }
+        }
+    }
+    pub fn take_completion(&mut self) -> Result<SourceFeedCompletion> {
+        match self.owned.take() {
+            Some(FeedOwnedState::Completion(completion)) => Ok(completion),
+            other => {
+                self.owned = other;
+                Err(invalid("source feed completion custody absent"))
+            }
+        }
+    }
+    pub fn resume(&mut self, completion: SourceFeedCompletion) -> Result<()> {
+        if self.stage.is_some() || self.owned.is_some() {
+            return Err(invalid("feed completion while actor active"));
+        }
+        let run = completion.into_run();
+        run.run
+            .view()
+            .dispatcher
+            .actor_client()
+            .state()?
+            .authority
+            .finish_feed_cycle()?;
+        self.owned = Some(FeedOwnedState::Ready(run.run));
+        Ok(())
+    }
+    pub fn cancel(&mut self) {
+        self.stop.stop();
+        self.worker_stop.store(true, Ordering::Release);
+        match self.stage.as_ref() {
+            Some(FeedStage::Cpu { receipt, .. })
+            | Some(FeedStage::LostCpu {
+                _receipt: receipt, ..
+            }) => receipt.cancel(),
+            Some(FeedStage::Io { receipt, .. })
+            | Some(FeedStage::LostIo {
+                _receipt: receipt, ..
+            }) => receipt.cancel(),
+            _ => {}
+        }
+        if self.owned.take().is_some() {
+            self.stage = Some(FeedStage::Closed);
+        }
+    }
+    pub fn is_drained(&self) -> bool {
+        matches!(self.stage, Some(FeedStage::Closed))
+    }
+}
+struct FeedProjectionState {
+    service_revision: Option<u64>,
+    provider_failed: bool,
+}
+
+fn project_feed_descriptor(
+    instance: &mut PackageInstance,
+    drawing: &mut NativeDrawHost,
+    native_id: &str,
+    method: &str,
+    snapshot: Option<&AdmittedSourceSnapshot>,
+    quota: &QuotaGroup,
+    state: FeedProjectionState,
+) -> Result<ProjectedFeedDescriptor> {
+    let FeedProjectionState {
+        service_revision,
+        provider_failed,
+    } = state;
+    let kind = method
+        .strip_suffix(".open")
+        .ok_or_else(|| invalid("feed method suffix"))?;
+    if !matches!(
+        kind,
+        "sources.series"
+            | "sources.earthquakes"
+            | "sources.aircraft"
+            | "sources.boats"
+            | "sources.chess"
+            | "sources.weather"
+    ) || native_id.len() > 128
+        || !native_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return Err(invalid("native feed descriptor identity"));
+    }
+    let bytes = match snapshot {
+        Some(value) => value.view().owned_bytes()?,
+        None => 0,
+    };
+    let bound = bytes
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(64 * 1024))
+        .ok_or_else(|| invalid("feed snapshot projection bound"))?;
+    let admission = charge(quota, bound)?;
+    let mut imported = Vec::new();
+    let result = (|| -> Result<Value> {
+        let mut latest = match snapshot {
+            Some(value) => serde_json::to_value(value.view())?,
+            None => Value::Null,
+        };
+        if let Some(value) = snapshot {
+            let images = value.native_images();
+            if images.len() > 64 {
+                return Err(invalid("feed image inventory"));
+            }
+            if kind == "sources.weather" {
+                let mut used = BTreeMap::new();
+                let layers = latest["layers"]
+                    .as_array_mut()
+                    .ok_or_else(|| invalid("weather layers schema"))?;
+                for layer in layers {
+                    if let Some(tiles) = layer.get_mut("tiles").and_then(Value::as_array_mut) {
+                        for tile in tiles {
+                            import_feed_image_slot(
+                                &mut tile["image"],
+                                images,
+                                &mut used,
+                                drawing,
+                                instance,
+                                &mut imported,
+                            )?;
+                        }
+                    }
+                    if let Some(frames) = layer.get_mut("frames").and_then(Value::as_array_mut) {
+                        for frame in frames {
+                            if frame.get("image").is_some() {
+                                import_feed_image_slot(
+                                    &mut frame["image"],
+                                    images,
+                                    &mut used,
+                                    drawing,
+                                    instance,
+                                    &mut imported,
+                                )?;
+                            }
+                            if let Some(tiles) =
+                                frame.get_mut("tiles").and_then(Value::as_array_mut)
+                            {
+                                for tile in tiles {
+                                    import_feed_image_slot(
+                                        &mut tile["image"],
+                                        images,
+                                        &mut used,
+                                        drawing,
+                                        instance,
+                                        &mut imported,
+                                    )?;
+                                }
+                            }
+                        }
+                    }
+                }
+                if used.len() != images.len() {
+                    return Err(invalid("weather image allocation not projected"));
+                }
+            } else if !images.is_empty() {
+                return Err(invalid("nonweather feed contains native images"));
+            }
+        }
+        let revision = service_revision
+            .unwrap_or_else(|| latest.get("revision").and_then(Value::as_u64).unwrap_or(0));
+        let state = if provider_failed || latest["status"] == "error" {
+            "error"
+        } else if snapshot.is_none() {
+            "preparing"
+        } else {
+            "ready"
+        };
+        Ok(
+            json!({"id":native_id,"kind":kind,"revision":revision,"status":{"state":state},"latest":latest}),
+        )
+    })();
+    match result {
+        Ok(metadata) => match sources::types::json_owned_bytes(&metadata) {
+            Ok(owned) if owned <= bound => Ok(ProjectedFeedDescriptor {
+                metadata,
+                imported,
+                metadata_bound: bound,
+                _admission: admission,
+            }),
+            outcome => {
+                for image in imported.iter().rev() {
+                    drawing.release_source_image(image)?;
+                }
+                match outcome {
+                    Err(error) => Err(error),
+                    Ok(_) => Err(invalid("feed snapshot projection exceeded admission")),
+                }
+            }
+        },
+        Err(error) => {
+            for image in imported.iter().rev() {
+                drawing.release_source_image(image)?;
+            }
+            Err(error)
+        }
+    }
+}
+fn import_feed_image_slot(
+    marker: &mut Value,
+    images: &[NativeSourceImage],
+    used: &mut BTreeMap<usize, Value>,
+    drawing: &mut NativeDrawHost,
+    instance: &mut PackageInstance,
+    imported: &mut Vec<String>,
+) -> Result<()> {
+    let source = marker
+        .as_object()
+        .ok_or_else(|| invalid("feed image marker"))?;
+    if source.len() != 3 {
+        return Err(invalid("feed image marker fields"));
+    }
+    let slot = source
+        .get("native_image_slot")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| invalid("feed image slot"))?;
+    let image = images
+        .get(slot)
+        .ok_or_else(|| invalid("feed image slot bound"))?;
+    let pixels = image.admitted_pixels().view();
+    if source.get("width").and_then(Value::as_u64) != Some(u64::from(pixels.width))
+        || source.get("height").and_then(Value::as_u64) != Some(u64::from(pixels.height))
+    {
+        return Err(invalid("feed image dimensions"));
+    }
+    if let Some(descriptor) = used.get(&slot) {
+        *marker = descriptor.clone();
+        return Ok(());
+    }
+    let descriptor = drawing.retain_source_image(instance, image)?;
+    let key = descriptor["id"]
+        .as_str()
+        .ok_or_else(|| invalid("feed image registration"))?
+        .to_owned();
+    imported.push(key);
+    used.insert(slot, descriptor.clone());
+    *marker = descriptor;
+    Ok(())
+}
+fn import_image_slot(
+    marker: &mut Value,
+    images: &[NativeSourceImage],
+    used: &mut [bool],
+    drawing: &mut NativeDrawHost,
+    instance: &mut PackageInstance,
+    imported: &mut Vec<String>,
+) -> Result<()> {
+    let source = marker
+        .as_object()
+        .ok_or_else(|| invalid("source image marker"))?;
+    if source.len() != 3 {
+        return Err(invalid("source image marker fields"));
+    }
+    let slot = source
+        .get("native_image_slot")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| invalid("source image slot"))?;
+    let image = images
+        .get(slot)
+        .ok_or_else(|| invalid("source image slot bound"))?;
+    if used[slot] {
+        return Err(invalid("source image slot duplicated"));
+    }
+    let pixels = image.admitted_pixels().view();
+    if source.get("width").and_then(Value::as_u64) != Some(u64::from(pixels.width))
+        || source.get("height").and_then(Value::as_u64) != Some(u64::from(pixels.height))
+    {
+        return Err(invalid("source image marker dimensions"));
+    }
+    let descriptor = drawing.retain_source_image(instance, image)?;
+    let key = descriptor["id"]
+        .as_str()
+        .ok_or_else(|| invalid("native source image registration ID"))?
+        .to_owned();
+    imported.push(key);
+    *marker = descriptor;
+    used[slot] = true;
+    Ok(())
 }
 pub struct SourceFailure {
     owner: Arc<Mutex<PermissionBroker>>,
@@ -1002,9 +2395,22 @@ pub struct SourceFailure {
     _run: Option<Retained<SourceRun>>,
 }
 impl SourceFailure {
+    pub fn copy_error(&self, instance: &PackageInstance) -> Result<ServiceValue> {
+        instance.check_http_owner(&self.owner, &self.quota)?;
+        if self.request.is_cancelled() {
+            return Err(denied("source error request retired"));
+        }
+        ServiceValue::copy_from_host(
+            &json!({"ok":false,"error":{"code":self.code,"message":"Native source operation failed."}}),
+            &[],
+            &BTreeMap::new(),
+            instance.engine_limits(),
+            self.quota.clone(),
+        )
+    }
     /// Only an admitted, native-produced structured error may be passed here.
     /// The original ticket and terminal retention survive a refused copy ACK.
-    pub(crate) fn publish_error(
+    pub fn publish_error(
         &self,
         instance: &mut PackageInstance,
         value: ServiceValue,
@@ -1020,7 +2426,7 @@ impl SourceFailure {
     }
     /// Actual callback terminal/not-started input is already held here. A Lost
     /// receipt NEVER produces this token. Root may publish a fixed error first.
-    pub(crate) fn settle(&self, instance: &mut PackageInstance) -> Result<()> {
+    pub fn settle(&self, instance: &mut PackageInstance) -> Result<()> {
         instance.check_http_owner(&self.owner, &self.quota)?;
         if let Some(operation) = &self.operation {
             instance.settle_http_terminal(operation)?;
@@ -1049,6 +2455,8 @@ impl NativeSourceHost {
             cadence,
             limits,
             credentials,
+            #[cfg(test)]
+            offline_http,
         } = environment;
         let limits = limits.constrained(&request, instance.plan())?;
         let quota = client.quota_group();
@@ -1076,6 +2484,8 @@ impl NativeSourceHost {
             refresh: None,
             refresh_checked: false,
             limits,
+            #[cfg(test)]
+            offline_http,
             _admission: metadata,
         })));
         let mut dispatcher = SourceDispatcher::new(replay, quota.clone())?;
@@ -1458,6 +2868,10 @@ impl Drop for NativeSourceHost {
 } // Signal active stages only; original guards survive until actual bank exit.
 
 #[cfg(test)]
+#[path = "native_source_qualification_tests.rs"]
+mod native_source_qualification_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
@@ -1485,6 +2899,25 @@ mod tests {
         quota: &QuotaGroup,
     ) -> (HostRequest, Arc<Mutex<PermissionBroker>>, Channel) {
         native_request_with_phase(method, metadata, quota, ServicePhase::Async)
+    }
+    #[test]
+    fn process_cadence_shares_one_original_quota_and_last_owner_charge() {
+        let quota = quota();
+        let baseline = quota.snapshot().worker_bytes;
+        let cadence = Arc::new(SourceCadence::new(quota.clone()).unwrap());
+        assert!(cadence.shares_root(&quota));
+        assert_eq!(quota.snapshot().worker_bytes, baseline + 128 * 1024);
+        let second_actor = Arc::clone(&cadence);
+        assert!(cadence.admit(&quota, "usgs", 1000, 5000).unwrap());
+        assert!(!second_actor.admit(&quota, "usgs", 2000, 5000).unwrap());
+        assert!(second_actor.admit(&quota, "usgs", 6000, 5000).unwrap());
+        let foreign = self::quota();
+        assert!(!second_actor.shares_root(&foreign));
+        assert!(second_actor.admit(&foreign, "usgs", 12_000, 5000).is_err());
+        drop(cadence);
+        assert_eq!(quota.snapshot().worker_bytes, baseline + 128 * 1024);
+        drop(second_actor);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
     }
     fn native_request_with_phase(
         method: &str,
@@ -1614,6 +3047,7 @@ mod tests {
                 encoded_bytes: 16 * 1024 * 1024,
                 media: media_limits,
             },
+            offline_http: None,
             _admission: charge(quota, 4 * 1024 * 1024).unwrap(),
         };
         let mut dispatcher =
@@ -1740,6 +3174,74 @@ mod tests {
         assert!(run.dispatcher.next_due_ms(handle).unwrap() > due);
     }
     #[test]
+    fn admitted_feed_dispatcher_refreshes_after_opener_retirement_with_injected_body() {
+        let quota = quota();
+        let mut run = run("sources.earthquakes.open", geo(), &quota);
+        let handle = run.handle.unwrap();
+        assert!(run.cpu_step().unwrap().is_none());
+        let first = run.take_plan().unwrap();
+        let fixture = br#"{"type":"FeatureCollection","features":[]}"#;
+        let response = SourceHttpResponse::read(
+            200,
+            &mut Cursor::new(fixture),
+            &quota,
+            4096,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        run.install(first, Ok(CachedTransport::Body(response)))
+            .unwrap();
+        let Some(NativeSourceOutput::Snapshot(Some(first))) = run.cpu_step().unwrap() else {
+            panic!("first injected provider snapshot missing")
+        };
+        let sources::SourceSnapshot::Geographic(first) = first.view() else {
+            panic!("first geographic snapshot missing")
+        };
+        assert_eq!(first.metadata.revision, 1);
+
+        let stop = StopToken::default();
+        {
+            let mut state = run.dispatcher.actor_client().state().unwrap();
+            state.authority.promote_to_feed(stop.clone()).unwrap();
+            state.authority.request.stop_token().stop();
+        }
+        let due = run.dispatcher.next_due_ms(handle).unwrap();
+        run.prepare_refresh(SourceClock {
+            monotonic_ms: due.saturating_add(1),
+            epoch_ms: 1_700_000_000_000_i64 + due as i64,
+        })
+        .unwrap();
+        assert!(run.cpu_step().unwrap().is_none());
+        let second = run.take_plan().unwrap();
+        let response = SourceHttpResponse::read(
+            200,
+            &mut Cursor::new(fixture),
+            &quota,
+            4096,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        run.install(second, Ok(CachedTransport::Body(response)))
+            .unwrap();
+        let Some(NativeSourceOutput::Snapshot(Some(second))) = run.cpu_step().unwrap() else {
+            panic!("refresh provider snapshot missing")
+        };
+        let sources::SourceSnapshot::Geographic(second) = second.view() else {
+            panic!("refresh geographic snapshot missing")
+        };
+        assert_eq!(second.metadata.revision, 2);
+        assert!(run.dispatcher.next_due_ms(handle).unwrap() > due);
+        run.dispatcher
+            .actor_client()
+            .state()
+            .unwrap()
+            .authority
+            .finish_feed_cycle()
+            .unwrap();
+        stop.stop();
+        assert!(run.dispatcher.actor_client().check().is_err());
+    }
+    #[test]
     fn actual_provider_error_uses_existing_backoff_while_suspension_does_not() {
         let quota = quota();
         let mut run = run("sources.earthquakes.open", geo(), &quota);
@@ -1847,6 +3349,94 @@ mod tests {
             .stop_token()
             .stop();
         assert!(replay.check().is_err());
+    }
+    #[test]
+    fn delivered_feed_transfer_outlives_opener_but_not_feed_stop_or_broker_epoch() {
+        let quota = quota();
+        let mut run = run(
+            "sources.series.open",
+            json!({"provider":"crypto","max_samples":1,"interval_ms":60000}),
+            &quota,
+        );
+        let token = StopToken::default();
+        let broker = {
+            let mut state = run.dispatcher.actor_client().state().unwrap();
+            let broker = Arc::clone(&state.authority.broker);
+            state.authority.promote_to_feed(token.clone()).unwrap();
+            state.authority.request.stop_token().stop();
+            broker
+        };
+        assert!(run.dispatcher.actor_client().check().is_ok());
+        run.prepare_refresh(SourceClock {
+            monotonic_ms: 61_000,
+            epoch_ms: 1_700_000_060_000,
+        })
+        .unwrap();
+        assert!(run
+            .dispatcher
+            .actor_client()
+            .state()
+            .unwrap()
+            .authority
+            .feed_context()
+            .is_ok());
+        assert!(
+            run.dispatcher
+                .actor_client()
+                .state()
+                .unwrap()
+                .authority
+                .remaining_ms()
+                > 0
+        );
+        run.dispatcher
+            .actor_client()
+            .state()
+            .unwrap()
+            .authority
+            .finish_feed_cycle()
+            .unwrap();
+        token.stop();
+        assert!(run.dispatcher.actor_client().check().is_err());
+
+        let run = super::tests::run(
+            "sources.series.open",
+            json!({"provider":"crypto","max_samples":1,"interval_ms":60000}),
+            &quota,
+        );
+        let replay = run.dispatcher.actor_client().clone();
+        replay
+            .state()
+            .unwrap()
+            .authority
+            .promote_to_feed(StopToken::default())
+            .unwrap();
+        let owner = Arc::clone(&replay.state().unwrap().authority.broker);
+        let _invalidation = owner.lock().unwrap().reset_all_decisions().unwrap();
+        assert!(replay.check().is_err());
+        drop(broker);
+    }
+    #[test]
+    fn closed_native_weather_image_is_not_reseeded_from_cached_feed_latest() {
+        let quota = quota();
+        let baseline = quota.snapshot().worker_bytes;
+        let mut descriptor = ProjectedFeedDescriptor {
+            metadata: json!({"id":"source-feed-1","kind":"sources.weather","revision":1,
+                "status":{"state":"ready"},"latest":{"revision":1,"available":true,
+                "layers":[{"tiles":[{"image":{"id":"source-image-1","kind":"image"}}]}]}}),
+            imported: vec!["source-image-1".into()],
+            metadata_bound: 64 * 1024,
+            _admission: charge(&quota, 64 * 1024).unwrap(),
+        };
+        descriptor.image_closed("source-image-foreign").unwrap();
+        assert_eq!(descriptor.metadata()["revision"], 1);
+        descriptor.image_closed("source-image-1").unwrap();
+        assert_eq!(descriptor.metadata()["revision"], 2);
+        assert!(descriptor.metadata()["latest"].is_null());
+        descriptor.image_closed("source-image-1").unwrap();
+        assert_eq!(descriptor.metadata()["revision"], 2);
+        drop(descriptor);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
     }
     #[test]
     fn real_original_cpu_wake_returns_native_observation_without_io_bank() {
@@ -1965,6 +3555,162 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn refused_source_submit_restores_exact_unqueued_job_without_new_debit() {
+        use ilium_execution::{ClientLimits, Execution, ExecutionConfig, LaneConfig, ShutdownMode};
+        let quota = quota();
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 1024,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 8 * 1024 * 1024,
+                result_bytes: 8 * 1024 * 1024,
+            })
+            .unwrap();
+        let run = run(
+            "sources.astronomy.observe",
+            json!({"epoch_ms":0,"latitude":0.0,"longitude":0.0}),
+            &quota,
+        );
+        let stop = Arc::clone(&run.stop);
+        let baseline = quota.snapshot();
+        let pending = Cell::new(Some(SourceCpuJob {
+            run,
+            previous: None,
+        }));
+        assert!(
+            try_submit_preserving_rejection(&client, Lane::Cpu, cpu_cost(), &pending,).is_none()
+        );
+        let recovered = pending
+            .take()
+            .expect("disabled source lane must return the exact unqueued job");
+        assert!(Arc::ptr_eq(&recovered.run.stop, &stop));
+        assert_eq!(quota.snapshot().jobs, baseline.jobs);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
+        let stage_bytes = std::hint::black_box(std::mem::size_of::<FeedStage>());
+        let ready_bytes = std::hint::black_box(std::mem::size_of::<Retained<SourceRun>>());
+        let event_bytes = std::hint::black_box(std::mem::size_of::<SourceFeedEvent>());
+        let pointer_bytes = std::hint::black_box(std::mem::size_of::<usize>());
+        let owned_bytes = std::hint::black_box(std::mem::size_of::<FeedOwnedState>());
+        let completion_bytes = std::hint::black_box(std::mem::size_of::<SourceFeedCompletion>());
+        assert!(
+            stage_bytes < ready_bytes,
+            "ready payload must not be stored inline in the feed stage enum"
+        );
+        assert!(
+            event_bytes <= 3 * pointer_bytes,
+            "feed completion payload must stay in its already admitted host owner"
+        );
+        assert!(
+            owned_bytes < ready_bytes + completion_bytes,
+            "mutually exclusive retained feed owners must share one inline slot"
+        );
+        drop(recovered);
+        drop(client);
+        execution.request_shutdown(ShutdownMode::Drain);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(report.remaining_workers, 0);
+    }
+
+    #[test]
+    fn ready_feed_cancel_releases_retention_only_after_original_run_is_dropped() {
+        use ilium_execution::{ClientLimits, Execution, ExecutionConfig, LaneConfig, ShutdownMode};
+        let quota = quota();
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 1024,
+                },
+                io: disabled,
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 8 * 1024 * 1024,
+                result_bytes: 8 * 1024 * 1024,
+            })
+            .unwrap();
+        let run = run(
+            "sources.series.open",
+            json!({"provider":"crypto","max_samples":1,"interval_ms":60000}),
+            &quota,
+        );
+        let worker_stop = Arc::clone(&run.stop);
+        let owner = Arc::clone(
+            &run.dispatcher
+                .actor_client()
+                .state()
+                .unwrap()
+                .authority
+                .broker,
+        );
+        let baseline_jobs = quota.snapshot().jobs;
+        let reservation = client.try_reserve(Lane::Cpu, cpu_cost()).unwrap();
+        let retained = reservation.retention().retain(run);
+        drop(reservation);
+        assert_eq!(quota.snapshot().jobs, baseline_jobs + 1);
+        let mut feed = NativeSourceFeedHost {
+            client: client.clone(),
+            quota: quota.clone(),
+            owner,
+            dns: Arc::new(http::SystemDns),
+            credentials: None,
+            stop: StopToken::default(),
+            worker_stop: Arc::clone(&worker_stop),
+            owned: Some(FeedOwnedState::Ready(retained)),
+            stage: None,
+            blocked_until_ms: 0,
+            _registry: charge(&quota, 64 * 1024).unwrap(),
+        };
+        feed.cancel();
+        assert!(feed.is_drained());
+        assert!(worker_stop.load(Ordering::Acquire));
+        assert_eq!(quota.snapshot().jobs, baseline_jobs);
+        drop(feed);
+        drop(client);
+        execution.request_shutdown(ShutdownMode::Drain);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(report.remaining_workers, 0);
+    }
+
     #[test]
     fn raw_framer_supports_source_line_budget_and_preserves_bytes_without_json_parsing() {
         let quota = quota();

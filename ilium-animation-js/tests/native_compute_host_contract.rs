@@ -100,7 +100,7 @@ fn resources() -> (Execution, AmbientResources, QuotaGroup, mpsc::Receiver<()>) 
                 priority: None,
                 resident_bytes_per_thread: 1024 * 1024,
             },
-            io: disabled.clone(),
+            io: disabled,
             service: disabled,
         },
     )

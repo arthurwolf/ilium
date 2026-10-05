@@ -43,7 +43,14 @@ fn provenance(identity: WorldId) -> Result<Value> {
         .cloned()
         .ok_or_else(|| AnimationError::Runtime("native terrain provenance missing".into()))
 }
-pub fn elevation<C: BrokerSourceClient>(
+pub(crate) struct ElevationProduct {
+    pub metadata: Value,
+    pub samples: Vec<f32>,
+}
+
+/// Native delivery keeps actual sampled f32 values out of JSON. The caller
+/// retains the existing result and peak admissions through the binary copy.
+pub(crate) fn elevation_binary<C: BrokerSourceClient>(
     client: &mut C,
     body: &str,
     bounds: GeographicBounds,
@@ -51,7 +58,7 @@ pub fn elevation<C: BrokerSourceClient>(
     height: usize,
     seed: u32,
     stop: &AtomicBool,
-) -> Result<Value> {
+) -> Result<ElevationProduct> {
     bounds.validate()?;
     validate_pixels(width, height)?;
     let (identity, field) = admitted(client, body, seed, stop)?;
@@ -70,9 +77,26 @@ pub fn elevation<C: BrokerSourceClient>(
             elevations.push(field.sample(longitude, latitude));
         }
     }
-    Ok(
-        json!({"body":body,"name":field.name,"seed":if identity.is_fictional(){Some(seed)}else{None},"fictional":identity.is_fictional(),"bounds":bounds,"width":width,"height":height,"units":"metres_relative_to_native_zero_level","row_order":"north_to_south","elevations":elevations,"provenance":provenance(identity)?}),
-    )
+    Ok(ElevationProduct {
+        metadata: json!({"body":body,"name":field.name,"seed":if identity.is_fictional(){Some(seed)}else{None},"fictional":identity.is_fictional(),"bounds":bounds,"width":width,"height":height,"units":"metres_relative_to_native_zero_level","row_order":"north_to_south","provenance":provenance(identity)?}),
+        samples: elevations,
+    })
+}
+
+/// Preserve the existing plain source-dispatcher contract for non-helper
+/// consumers. The protected V8 source host selects elevation_binary instead.
+pub fn elevation<C: BrokerSourceClient>(
+    client: &mut C,
+    body: &str,
+    bounds: GeographicBounds,
+    width: usize,
+    height: usize,
+    seed: u32,
+    stop: &AtomicBool,
+) -> Result<Value> {
+    let mut product = elevation_binary(client, body, bounds, width, height, seed, stop)?;
+    product.metadata["elevations"] = json!(product.samples);
+    Ok(product.metadata)
 }
 pub fn coastlines<C: BrokerSourceClient>(
     client: &mut C,

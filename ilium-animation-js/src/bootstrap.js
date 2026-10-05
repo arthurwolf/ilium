@@ -3,10 +3,10 @@
     const native_bigint = BigInt, native_number = Number; // Capture conversion before package mutation.
     let context_random_state = null; // One versioned reproducible stream per helper instance.
     const global = globalThis; // Capture the embedding realm once.
-    const { create, freeze, defineProperty: define_property, getOwnPropertyDescriptor: descriptor, getPrototypeOf: prototype, keys, preventExtensions: prevent_extensions } = Object; // Capture primordials before package code.
+    const { create, freeze, defineProperty: define_property, getOwnPropertyDescriptor: descriptor, getPrototypeOf: prototype, setPrototypeOf: set_prototype, keys, preventExtensions: prevent_extensions } = Object; // Capture primordials before package code.
     const apply = Reflect.apply, own_keys = Reflect.ownKeys, stringify = JSON.stringify, parse = JSON.parse, is_array = Array.isArray, integer = Number.isSafeInteger, finite = Number.isFinite; // Capture every structural operation before package code can replace it.
     const u8 = Uint8Array, f32 = Float32Array, u16 = Uint16Array, u32 = Uint32Array, array_buffer = ArrayBuffer, error_type = Error; // Only these typed kinds are supported.
-    const set_type = Set, weak_map_type = WeakMap, string_type = String, max_integer = Number.MAX_SAFE_INTEGER, ceil = Math.ceil, floor = Math.floor, abs = Math.abs, min = Math.min, max = Math.max; // Never reread mutable collection, string, or geometry bindings during handoff.
+    const set_type = Set, weak_map_type = WeakMap, string_type = String, max_integer = Number.MAX_SAFE_INTEGER, ceil = Math.ceil, floor = Math.floor, round = Math.round, abs = Math.abs, min = Math.min, max = Math.max; // Never reread mutable collection, string, or geometry bindings during handoff.
     const constructors = freeze({ u8, f32, u16, u32 }), sizes = freeze({ u8: 1, f32: 4, u16: 2, u32: 4 }); // Match the frozen engine's ArraySpec kinds.
     const names = freeze({ u8: "Uint8Array", f32: "Float32Array", u16: "Uint16Array", u32: "Uint32Array" }); // Branded typed-array validation.
     const typed = prototype(u8.prototype), typed_set = typed.set, typed_fill = typed.fill; // Intrinsics operate on validated typed arrays.
@@ -16,11 +16,12 @@
     for (const value of [array_prototype, String.prototype, RegExp.prototype, Set.prototype, WeakMap.prototype, Promise.prototype, typed, u8.prototype, f32.prototype, u16.prototype, u32.prototype]) freeze(value); // Protect captured collection operations and native Promise constructor lookup from package mutation.
     const get_buffer = descriptor(typed, "buffer").get, get_length = descriptor(typed, "length").get, get_offset = descriptor(typed, "byteOffset").get, get_kind = descriptor(typed, Symbol.toStringTag).get; // Do not trust shadow properties.
     const buffer_length = descriptor(array_buffer.prototype, "byteLength").get, buffer_resizable = descriptor(array_buffer.prototype, "resizable")?.get, buffer_detached = descriptor(array_buffer.prototype, "detached")?.get; // Verify physical handoff when the engine returns.
-    const native_dispatch = global.__ilium_dispatch, native_phase = global.__ilium_service_phase, weak_get = WeakMap.prototype.get, weak_set = WeakMap.prototype.set, frames = new weak_map_type(), handles = new weak_map_type(); // Keep genuine frame/handle brands and sealed native entrypoints private.
-    require_value(typeof native_dispatch === "function" && typeof native_phase === "function" && global.__ilium_service_wire_version === 1, "native_service_wire_version"); // Require the actual binary service boundary instead of silently falling back to JSON.
+    const native_dispatch = global.__ilium_dispatch, native_phase = global.__ilium_service_phase, native_project = global.__ilium_geography_project, native_observe = global.__ilium_astronomy_observe, native_text_measure = global.__ilium_text_measure, weak_get = WeakMap.prototype.get, weak_set = WeakMap.prototype.set, frames = new weak_map_type(), handles = new weak_map_type(); // Keep genuine frame/handle brands and sealed native entrypoints private.
+    require_value(typeof native_dispatch === "function" && typeof native_phase === "function" && typeof native_project === "function" && typeof native_observe === "function" && typeof native_text_measure === "function" && global.__ilium_service_wire_version === 1, "native_service_wire_version"); // Require the actual binary service boundary instead of silently falling back to JSON.
     const max_cells = 131072, max_meta = 65536, max_commands = 256, max_edits = 4194304, max_handoff = 67108864; // Match surface.rs exactly.
     let seed = null, active = null, awaiting = null, pending_rpc = 0, opening_handles = 0, bundle_handle = null, seeding = false; // Frame lifetime, pending RPCs, and native-handle materialization have separate local state.
-    const handle_entries = [], service_kinds = freeze(["http.stream", "http.poll", "media.video", "compute", "worlds", "sources.series", "sources.earthquakes", "sources.aircraft", "sources.boats", "sources.chess", "sources.weather"]); let service_snapshots = freeze(create(null)); // Bound live wrapper references and accept only the exact native service-handle inventory.
+    let ambient_configured = false, ambient_mode = null, ambient_ms = 0; // Native launch selects deterministic ambient behavior before guest modules load.
+    const handle_entries = [], service_kinds = freeze(["http.stream", "http.poll", "media.video", "compute", "worlds", "sources.series", "sources.earthquakes", "sources.aircraft", "sources.boats", "sources.chess", "sources.weather", "tasks.poll"]); let service_snapshots = freeze(create(null)); // Bound live wrapper references and accept only the exact native service-handle inventory.
     let status_records = [], status_bytes = 0, status_dropped = 0; // Bounded informational diagnostics; never a service request or drawing command.
     let host_info = freeze(create(null)); // Informational metadata starts empty, never default-allow.
     function fail(code) { throw new error_type(code); } // Static bounded error codes avoid retaining arbitrary user strings.
@@ -100,7 +101,37 @@
     function register_handle(kind, id, handle) { require_value(handle_entries.length + opening_handles < 64, "handle_limit"); const state = { kind, id, handle, projection: freeze({ __proto__: null, id, kind }), revision: -1, snapshot: null, latest: undefined, closed: false, close_requested: false, control_pending: false, read_pending: false, result_promise: null, eof: false, callback: null }; append_data(handle_entries, state); apply(weak_set, handles, [handle, state]); return state; } // The strong registry is bounded; old closed wrappers retain only their own local state through WeakMap reachability.
     function source_latest(kind, value) { // Interpret only native snapshots; frame seed buffers are never cached here.
         if (value === null) return null; const source = record(value); number(source.revision); require_value(typeof source.available === "boolean", "native_source_snapshot"); // Every source follows the SDK's common Snapshot prefix.
-        if (kind === "sources.weather") { require_value(is_array(source.layers) && source.layers.length <= 64, "native_weather_layers"); const first = handle_entries.length, layers = []; try { for (const layer of source.layers) { const copy = record(layer, ["name", "image", "bounds", "epoch_ms"]); copy.image = image_handle(copy.image); append_data(layers, freeze(copy)); } source.layers = freeze(layers); return native_json(source); } catch (error) { discard_unpublished_handles(first); throw error; } } // Failed multi-image conversion drops only unpublished local wrappers; actual native image and body cleanup remains independently owned.
+        if (kind === "sources.weather") {
+            require_value(is_array(source.layers) && source.layers.length <= 64, "native_weather_layers");
+            const first = handle_entries.length, layers = [];
+            const convert_tiles = (tiles) => {
+                require_value(is_array(tiles) && tiles.length <= 64, "native_weather_tiles");
+                const converted = [];
+                for (const tile of tiles) { const copy = record(tile); copy.image = image_handle(copy.image); append_data(converted, freeze(copy)); }
+                return freeze(converted);
+            };
+            try {
+                for (const layer of source.layers) {
+                    const copy = record(layer);
+                    if (copy.tiles !== undefined) copy.tiles = convert_tiles(copy.tiles);
+                    if (copy.frames !== undefined) {
+                        require_value(is_array(copy.frames) && copy.frames.length <= 64, "native_weather_frames");
+                        const frames = [];
+                        for (const frame of copy.frames) {
+                            const item = record(frame);
+                            if (item.image !== undefined) item.image = image_handle(item.image);
+                            if (item.tiles !== undefined) item.tiles = convert_tiles(item.tiles);
+                            append_data(frames, freeze(item));
+                        }
+                        copy.frames = freeze(frames);
+                    }
+                    require_value(copy.tiles !== undefined || copy.frames !== undefined, "native_weather_image_location");
+                    append_data(layers, freeze(copy));
+                }
+                source.layers = freeze(layers);
+                return native_json(source);
+            } catch (error) { discard_unpublished_handles(first); throw error; }
+        } // Match native satellite snapshots: direct night tiles, or cloud frames with an image or tiles.
         return native_json(value); // Series, geographic feeds, and chess retain authenticated immutable metadata.
     } // Freshness, revisions, provider floors, grants, and attribution remain native service responsibilities.
     function video_latest(value) { if (value === null) return null; const source = record(value, ["image", "time_seconds", "revision"]); require_value(typeof source.time_seconds === "number" && finite(source.time_seconds) && source.time_seconds >= 0, "native_video_time"); number(source.revision); source.image = image_handle(source.image); return freeze(source); } // Synchronous latest returns only an already registered native-decoded image snapshot.
@@ -133,7 +164,7 @@
         if (handle_entries.length + opening_handles >= 64) return error_result("handle_limit", "The bounded native-handle facade inventory is full."); opening_handles += 1; let reserved = true; try { if (validate) validate(options); const result = await rpc(method, options); if (!result.ok) return result; opening_handles -= 1; reserved = false; return result_ok(kind === "image" ? image_handle(result.value) : service_handle(kind, result.value)); } catch { return error_result("invalid_result", "Native handle creation or its bounded descriptor was rejected."); } finally { if (reserved) opening_handles -= 1; } // Native remains responsible for request-owned handles whose publication fails or whose instance retires.
     } // This is a facade admission bound, not a replacement storage quota or a native grant.
     function seed_services(source) { // Called only inside the native phase-3 seed hook, before package execution resumes.
-        const entries = own(source, "services", false); if (entries === undefined) return; require_value(is_array(entries) && entries.length <= 64, "native_service_snapshot_count"); const next = create(null); for (const value of entries) { const entry = record(value, ["id", "kind", "revision", "status", "latest", "identity"]); handle_id(entry.id); require_value(service_kinds.includes(entry.kind) || entry.kind === "image", "native_snapshot_kind"); number(entry.revision); const status = service_status(entry.status); require_value(entry.kind !== "image" || (status.state === "closed" && entry.latest === undefined && entry.identity === undefined), "native_image_terminal_snapshot"); const key = `${entry.kind}/${entry.id}`; require_value(!descriptor(next, key), "duplicate_native_snapshot"); next[key] = native_json(entry); } service_snapshots = freeze(next); // All snapshot bytes remain under the existing native seed metadata bounds.
+        const entries = own(source, "services", false); if (entries === undefined) return; require_value(is_array(entries) && entries.length <= 64, "native_service_snapshot_count"); const next = create(null); for (const value of entries) { const entry = record(value, ["id", "kind", "revision", "status", "latest", "identity"]); handle_id(entry.id); require_value(service_kinds.includes(entry.kind) || entry.kind === "image", "native_snapshot_kind"); number(entry.revision); const status = service_status(entry.status); require_value(entry.kind !== "image" || (status.state === "closed" && entry.latest === undefined && entry.identity === undefined), "native_image_terminal_snapshot"); const key = `${entry.kind}/${entry.id}`; require_value(!descriptor(next, key), "duplicate_native_snapshot"); next[key] = native_json(entry); } service_snapshots = freeze(next); for (let index = handle_entries.length - 1; index >= 0; index -= 1) { const state = handle_entries[index]; if (state.kind === "tasks.poll" || state.kind === "image") refresh_handle(state); } // Apply authenticated task and image closure before seed ACK, so native terminal identities can be retired without losing wrapper observation.
     } // Missing entries preserve a wrapper's last authenticated observation and do not grant new identities.
     function seed_asset_handles(source) { const supplied_host = own(source, "host", false); if (supplied_host === undefined) return; const supplied_bundle = own(supplied_host, "bundle", false); if (supplied_bundle && typeof supplied_bundle === "object") bundle_handle = asset_handle(supplied_bundle); const grants = own(supplied_host, "permissions", false); if (grants === undefined) return; require_value(is_array(grants) && grants.length <= 64, "native_grant_count"); for (const grant of grants) { const handle = own(grant, "handle", false); if (handle && typeof handle === "object") asset_handle(handle); } } // Only genuinely native-seeded handle records are branded; accepted request descriptions and the legacy string bundle label remain informational.
     function guard(state) { require_value(state && active === state && !state.closed && !state.finished && !state.error, "closed_frame"); } // Drawing belongs to the one synchronous render callback.
@@ -181,7 +212,7 @@
     } // Empty rectangles do not read a source sample.
     function command(state, value) { const copy = json_copy(value); require_value(state.commands.length < max_commands, "command_limit"); copy.order = next(state); const candidate = state.commands.concat([copy]); json_text({ wire_version: 1, key: state.key, shape: state.layout.shape, presented: true, error: "frame_operation_failed", commands: candidate }); state.commands = candidate; } // Reserve full metadata and failure diagnostic space before adding a command.
     function vector(op, value) { // host.draw calls only a local frame encoder.
-        const state = active; require_value(state, "no_active_frame"); return run(state, () => { const v = record(value, ["points", "width", "fill", "closed", "value", "blend"]); const points = json_copy(v.points); require_value(is_array(points) && points.length >= 2 && points.length <= 1024 && points.every((p) => is_array(p) && p.length === 2 && p.every((n) => typeof n === "number" && finite(n) && abs(n) <= 1000000)), "vector_points"); require_value((op === "path") || points.length === (op === "triangle" ? 3 : 2), "primitive_points"); const width = v.width ?? 1, blend = v.blend ?? "overwrite"; require_value(finite(width) && width >= 0 && width <= 1024 && ["overwrite", "max", "alpha"].includes(blend) && (blend !== "alpha" || state.layout.shape.format === "rgba8"), "vector_style"); require_value(op !== "ellipse" || (points[1][0] >= 0 && points[1][1] >= 0), "ellipse_radii"); command(state, { kind: "vector", op, points, width, fill: v.fill ?? false, closed: v.closed ?? false, value: sample_value(state, v.value), blend }); }); // Native validates and clips the same closed schema.
+        const state = active; require_value(state, "no_active_frame"); return run(state, () => { const v = record(value, ["points", "width", "fill", "closed", "value", "blend", "rgb"]); const points = json_copy(v.points); require_value(is_array(points) && points.length >= 2 && points.length <= 1024 && points.every((p) => is_array(p) && p.length === 2 && p.every((n) => typeof n === "number" && finite(n) && abs(n) <= 1000000)), "vector_points"); require_value((op === "path") || points.length === (op === "triangle" ? 3 : 2), "primitive_points"); const width = v.width ?? 1, blend = v.blend ?? "overwrite"; require_value(finite(width) && width >= 0 && width <= 1024 && ["overwrite", "max", "alpha"].includes(blend) && (blend !== "alpha" || state.layout.shape.format === "rgba8"), "vector_style"); require_value(op !== "ellipse" || (points[1][0] >= 0 && points[1][1] >= 0), "ellipse_radii"); command(state, { kind: "vector", op, points, width, fill: v.fill ?? false, closed: v.closed ?? false, value: sample_value(state, v.value), blend, ...(v.rgb === undefined ? {} : {rgb: json_copy(v.rgb)}) }); }); // Native validates and clips the same closed schema.
     } // Geometry/rasterization is the primary's native adapter, not a hidden scene renderer.
     function native_blit(value) { const state = active; require_value(state, "no_active_frame"); return run(state, () => { const v = record(value, ["handle", "source", "target", "blend"]); require_value(typeof v.handle === "string" && /^[a-zA-Z0-9_.-]{1,128}$/.test(v.handle), "source_handle"); const source = record(v.source, ["x", "y", "width", "height"]); for (const key of keys(source)) number(source[key], 4294967295); require_value(source.width > 0 && source.height > 0 && source.x + source.width <= 4294967295 && source.y + source.height <= 4294967295, "source_rect"); const target = rect(state, v.target, state.layout.shape.mode), blend = v.blend ?? "overwrite"; require_value(["overwrite", "max", "alpha"].includes(blend) && (blend !== "alpha" || state.layout.shape.format === "rgba8"), "blit_blend"); command(state, { kind: "blit", handle: v.handle, source, target: { x: target.x, y: target.y, width: target.width, height: target.height }, blend }); }); } // Prepared handles confer no authority without native validation.
     function text_span(value) { const state = active; require_value(state, "no_active_frame"); return run(state, () => { const v = record(value, ["x", "y", "text", "rgb", "bold", "italic", "underline"]); number(v.x, state.layout.shape.cell_width - 1); number(v.y, state.layout.shape.cell_height - 1); require_value(typeof v.text === "string" && v.text.length > 0 && utf8_length(v.text) <= 16384 && !/[\u0000-\u001f\u007f-\u009f]/.test(v.text), "text"); const rgb = v.rgb === undefined ? null : json_copy(v.rgb); require_value(rgb === null || (is_array(rgb) && rgb.length === 3 && rgb.every((c) => integer(c) && c >= 0 && c <= 255)), "text_rgb"); command(state, { kind: "text", x: v.x, y: v.y, text: v.text, style: { rgb, bold: v.bold ?? false, italic: v.italic ?? false, underline: v.underline ?? false } }); }); } // Native Unicode layout supplies widths/continuations and clipping.
@@ -234,6 +265,73 @@
         } }); // Derive the unrequested representation without extra native gathering or plane allocation.
     }
     function install(name, value) { define_property(global, name, { __proto__: null, value, writable: false, configurable: false, enumerable: false }); } // Package code cannot replace trusted hooks.
+    install("__ilium_configure_ambient", (mode, initial_seed) => {
+        require_value(!ambient_configured && native_phase() === 0 && !seed && !active, "ambient_configuration_phase");
+        require_value(mode === "live" || mode === "pre_rendered", "ambient_mode");
+        number(initial_seed, 0xffffffff);
+        ambient_configured = true; ambient_mode = mode;
+        if (mode !== "pre_rendered") return;
+        context_random_state = native_bigint(initial_seed);
+        const native_date = global.Date, native_math = global.Math;
+        // The guest never receives native Date.prototype: its local-time and
+        // locale methods would make a "sealed" replay depend on the host TZ.
+        const date_prototype = create(null);
+        const date_methods = ["getTime", "valueOf", "toISOString", "toUTCString",
+            "getUTCFullYear", "getUTCMonth", "getUTCDate", "getUTCDay",
+            "getUTCHours", "getUTCMinutes", "getUTCSeconds", "getUTCMilliseconds",
+            "setTime", "setUTCFullYear", "setUTCMonth", "setUTCDate",
+            "setUTCHours", "setUTCMinutes", "setUTCSeconds", "setUTCMilliseconds"];
+        for (const name of date_methods) {
+            const method = native_date.prototype[name];
+            define_property(date_prototype, name, { __proto__: null,
+                value: function (...args) { return apply(method, this, args); },
+                writable: false, configurable: false });
+        }
+        const utc_string = native_date.prototype.toUTCString;
+        const make_utc_string = function () { return apply(utc_string, this, []); };
+        for (const name of ["toString", "toDateString", "toTimeString"]) {
+            define_property(date_prototype, name, { __proto__: null,
+                value: make_utc_string, writable: false, configurable: false });
+        }
+        define_property(date_prototype, "getTimezoneOffset", { __proto__: null,
+            value: function () {
+                const time = apply(native_date.prototype.valueOf, this, []);
+                return finite(time) ? 0 : NaN;
+            }, writable: false, configurable: false });
+        define_property(date_prototype, Symbol.toPrimitive, { __proto__: null,
+            value: function (hint) {
+                require_value(hint === "default" || hint === "number" || hint === "string", "replay_date_hint");
+                return hint === "number" ? apply(native_date.prototype.valueOf, this, []) : make_utc_string.call(this);
+            }, writable: false, configurable: false });
+        const parse_utc = function (value) {
+            require_value(typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(value), "replay_date_parse");
+            return apply(native_date.parse, native_date, [value]);
+        };
+        function ReplayDate(...args) {
+            if (!new.target) return apply(utc_string, new native_date(ambient_ms), []);
+            let result;
+            if (args.length === 0) result = new native_date(ambient_ms);
+            else if (args.length === 1 && typeof args[0] === "string") result = new native_date(parse_utc(args[0]));
+            else if (args.length === 1) result = new native_date(args[0]);
+            else result = new native_date(apply(native_date.UTC, native_date, args));
+            return set_prototype(result, date_prototype);
+        }
+        define_property(date_prototype, "constructor", { __proto__: null, value: ReplayDate, writable: false, configurable: false });
+        define_property(ReplayDate, "prototype", { __proto__: null, value: freeze(date_prototype), writable: false, configurable: false });
+        define_property(ReplayDate, "now", { __proto__: null, value: () => ambient_ms, writable: false, configurable: false });
+        define_property(ReplayDate, "parse", { __proto__: null, value: parse_utc, writable: false, configurable: false });
+        define_property(ReplayDate, "UTC", { __proto__: null, value: (...args) => apply(native_date.UTC, native_date, args), writable: false, configurable: false });
+        freeze(ReplayDate);
+        define_property(global, "Date", { __proto__: null, value: ReplayDate, writable: false, configurable: false });
+        // These realm facilities can observe wall time, locale, GC timing or
+        // ambient randomness independently of the replay clock/seed.
+        for (const name of ["Intl", "Temporal", "performance", "crypto", "WeakRef", "FinalizationRegistry", "SharedArrayBuffer", "Atomics"]) {
+            define_property(global, name, { __proto__: null, value: undefined, writable: false, configurable: false });
+        }
+        define_property(native_math, "random", { __proto__: null, value: () => native_number(random_word() >> 11n) / 9007199254740992, writable: false, configurable: false });
+        freeze(native_math);
+        define_property(global, "Math", { __proto__: null, value: native_math, writable: false, configurable: false });
+    }); // The native helper calls exactly once before module instantiation/evaluation.
     install("__ilium_seed_frame", (metadata, planes) => { // Native-only binary baseline/input and authenticated informational snapshot injection.
         require_value(native_phase() === 3, "native_seed_phase"); require_value(!seeding && !active && !awaiting && !seed, "seed_busy"); seeding = true; try { if (typeof metadata === "string") require_value(utf8_length(metadata) <= max_meta, "seed_metadata_limit"); const source = typeof metadata === "string" ? parse(metadata) : metadata, info = json_copy(source); json_text(info); const supplied = record(planes); // Native must bound input before this call too.
         seed_services(source); seed_asset_handles(source); if (info.host !== undefined) host_info = frozen_json(info.host); // Only this native phase may update service snapshots and brand genuine handle records; permission/package fields stay informational.
@@ -250,6 +348,7 @@
     install("__ilium_make_frame", (context_json) => { // Frozen hook: input may be a parsed object or bounded JSON string.
         require_value(!active && !awaiting && seed, "frame_lifecycle"); if (typeof context_json === "string") require_value(utf8_length(context_json) <= max_meta, "context_limit"); const original = typeof context_json === "string" ? parse(context_json) : context_json, context = json_copy(original); // Binary inputs are injected after JSON validation.
         json_text(context); require_value(json_text(context._ilium_frame) === json_text({ key: seed.frame.key, shape: seed.frame.shape }), "seed_context_mismatch"); const entry = seed, l = entry.layout; // A rejected base cannot be guessed locally.
+        if (ambient_mode === "pre_rendered") { require_value(typeof context.time === "number" && finite(context.time) && context.time >= 0 && context.time * 1000 <= max_integer, "replay_ambient_time"); ambient_ms = round(context.time * 1000); } // Explicit native sample time, never physical wall time.
         const state = { __proto__: null, layout: l, key: frozen_json(entry.frame.key), context, work_data: entry.planes.work_data, work_touch: alloc("u8", l.samples), work_order: alloc("u32", l.samples), data: alloc(l.kind, l.elements), touch: alloc("u8", l.samples), order_plane: alloc("u32", l.samples), commands: [], sealed_commands: freeze([]), callbacks: [], order: 0, presented: false, closed: false, finished: false, error: null, rgb_exposed: false, data_direct: false, rgb_direct: false }; // Null-prototype private state prevents inherited setters from exposing working or sealed planes during later field installation.
         if (l.shape.cell_rgb) { state.work_cell_rgb = entry.planes.work_cell_rgb; state.work_colour_touch = alloc("u8", l.cells); state.work_colour_order = alloc("u32", l.cells); state.cell_rgb = alloc("u8", l.cells * 3); state.colour_touch = alloc("u8", l.cells); state.colour_order = alloc("u32", l.cells); } // No extra RGB companion on rgb8/rgba8.
         if (l.shape.update === "replace") { apply(typed_fill, state.work_data, [0]); if (state.work_cell_rgb) apply(typed_fill, state.work_cell_rgb, [0]); } // Empty-present replacement starts known empty.
@@ -296,8 +395,80 @@
         try { while (!state.closed && !state.close_requested && state.callback) { const result = await rpc("http.poll.next", { __proto__: null, id: state.id, kind: state.kind }); refresh_handle(state); if (state.closed || state.close_requested || !state.callback) return; require_value(acquiring(), "poll_callback_phase"); if (!result.ok) { await apply(state.callback, undefined, [result]); return; } if (result.value === null) return; const notification = service_result(result.value), delivered = notification.ok ? result_ok(http_response(notification.value, "json")) : notification; await apply(state.callback, undefined, [delivered]); } } catch { status_record("log", "error", "HTTP polling callback or native notification failed; polling is stopped."); } finally { state.callback = null; } // Callback failure never fabricates a native closed/error status or loops on immediate rejection.
     } // The parent owns provider timing, minimum interval, cancellation, record bounds, and completion authorization for http.poll.next.
     async function http_poll(options, callback) { if (typeof callback !== "function") return error_result("invalid_callback", "HTTP polling requires a result callback."); const result = await open_rpc("http.poll", options, "http.poll"); if (!result.ok) return result; const state = apply(weak_get, handles, [result.value]); if (state.closed) return result; if (state.callback) return error_result("invalid_result", "Native polling returned an already subscribed identity."); state.callback = callback; void poll_loop(state); return result; } // Callback functions stay inside this isolate and are never serialized into a request.
+    async function task_loop(state) { // One native next and one awaited callback; no JS timer or local cadence.
+        try {
+            while (!state.closed && !state.close_requested && state.callback) {
+                const result = await rpc("tasks.poll.next", { __proto__: null, id: state.id, kind: state.kind });
+                refresh_handle(state);
+                if (state.closed || state.close_requested || !state.callback) return;
+                if (!result.ok) { status_record("log", "warning", "Native task next failed; callback stopped."); return; }
+                if (result.value === null) { remove_handle(state); return; } // Null is the native terminal ACK.
+                const notification = record(result.value, ["tick"]);
+                require_value(keys(notification).length === 1 && notification.tick === true && acquiring(), "native_task_tick");
+                await apply(state.callback, undefined, []);
+            }
+        } catch {
+            status_record("log", "error", "Task callback rejected or native task notification was invalid.");
+            if (!state.closed && !state.close_requested) {
+                try { close_handle(state); } catch { status_record("log", "warning", "Native task close was not admitted after callback failure."); }
+            }
+        } finally { state.callback = null; }
+    }
+    async function task_poll(options, callback) {
+        if (typeof callback !== "function") return error_result("invalid_callback", "Task polling needs a callback.");
+        if (ambient_mode === "pre_rendered") return error_result("live_only", "Periodic task time has no frozen replay clock.");
+        try { const fields = record(options, ["interval_ms", "deadline_ms"]); require_value(keys(fields).length === 2, "task_options"); number(fields.interval_ms); number(fields.deadline_ms); }
+        catch { return error_result("invalid_request", "Task cadence and deadline must be integers."); }
+        const result = await open_rpc("tasks.poll.open", options, "tasks.poll");
+        if (!result.ok) return result;
+        const state = apply(weak_get, handles, [result.value]);
+        if (!state || state.closed || state.callback) return error_result("invalid_result", "Native task handle is unavailable.");
+        state.callback = callback; void task_loop(state);
+        return result;
+    }
+    async function task_yield() {
+        if (!ambient_configured) return error_result("task_unavailable", "Native ambient mode has not been configured.");
+        const result = await rpc("tasks.yield", create(null));
+        if (!result.ok) return result;
+        return result.value === null ? result_ok(null) : error_result("invalid_result", "Native yield must resolve to null.");
+    }
     function asset_read_result(value) { const source = record(value, ["bytes", "sha256", "name"]); binary(source.bytes, ["u8"]); require_value(typeof source.sha256 === "string" && /^[a-f0-9]{64}$/.test(source.sha256) && typeof source.name === "string", "native_asset_result"); return freeze(source); } // Preserve byte results and native content identity exactly.
-    function world_region_result(value, world) { const source = record(value, ["blocks", "identity"]); binary(source.blocks, ["u16"]); require_value(source.identity === world.identity, "native_world_region_identity"); return freeze(source); } // Block arrays cannot select a different native world or create provenance.
+    function world_region_result(value, world) {
+        const source = record(value, ["origin", "size", "blocks", "palette", "identity"]);
+        require_value(keys(source).length === 5 && source.identity === world.identity, "native_world_region_identity");
+        binary(source.blocks, ["u16"]); // Retain the original typed plane; no JSON or numeric coercion.
+        const origin = [], size = [];
+        require_value(is_array(source.origin) && own(source.origin, "length") === 3 && is_array(source.size) && own(source.size, "length") === 3, "native_world_region_dimensions");
+        let cells = 1;
+        for (let axis = 0; axis < 3; axis += 1) {
+            const coordinate = own(source.origin, string_type(axis)), extent = own(source.size, string_type(axis));
+            require_value(integer(coordinate) && coordinate >= -2147483648 && coordinate <= 2147483647, "native_world_region_origin");
+            require_value(integer(extent) && extent > 0 && extent <= 4294967295 && coordinate + extent - 1 <= 2147483647, "native_world_region_extent");
+            cells *= extent; require_value(integer(cells) && cells <= max_handoff / 2, "native_world_region_cell_limit");
+            append_data(origin, coordinate); append_data(size, extent);
+        }
+        require_value(apply(get_length, source.blocks, []) === cells, "native_world_region_shape");
+        require_value(is_array(source.palette), "native_world_region_palette");
+        const count = own(source.palette, "length"), palette = [];
+        require_value(integer(count) && count > 0 && count <= 65536 && count <= cells, "native_world_region_palette_limit");
+        let text_bytes = 0;
+        for (let index = 0; index < count; index += 1) {
+            const state = record(own(source.palette, string_type(index)), ["name", "properties"]);
+            require_value(keys(state).length === 2 && typeof state.name === "string" && state.name.length > 0 && state.name.length <= max_meta, "native_world_region_state");
+            const properties = record(state.properties);
+            text_bytes += utf8_length(state.name);
+            for (const key of keys(properties)) {
+                require_value(typeof properties[key] === "string" && properties[key].length <= max_meta, "native_world_region_property");
+                text_bytes += utf8_length(key) + utf8_length(properties[key]);
+                require_value(text_bytes <= max_meta, "native_world_region_text_limit");
+            }
+            require_value(text_bytes <= max_meta, "native_world_region_text_limit");
+            state.properties = freeze(properties); append_data(palette, freeze(state));
+        }
+        for (let index = 0; index < cells; index += 1) require_value(source.blocks[index] < count, "native_world_region_palette_index");
+        source.origin = freeze(origin); source.size = freeze(size); source.palette = freeze(palette);
+        return freeze(source);
+    } // Complete semantic SDK volume, X-fast/Z-next/Y-last; native identity never creates source authority.
     function world_model_result(value) { const source = record(value, ["vertices", "indices", "texture"]); binary(source.vertices, ["f32"]); binary(source.indices, ["u32"]); if (source.texture !== undefined) source.texture = image_handle(source.texture); return freeze(source); } // Model and GPU indices retain the SDK's exact uint32 type.
     async function world_region(options) { try { const state = lookup_handle(own(options, "world"), ["worlds"]); return await checked_rpc("worlds.region", options, null, (value) => world_region_result(value, state.handle)); } catch { return error_result("invalid_request", "World region requires a current native world handle."); } } // Native substitutes the genuine wrapper without cloning caller options.
     function require_frame(value) { const state = apply(weak_get, frames, [value]); guard(state); return state; } // Synchronous SDK drawing can target only the current unclosed frame.
@@ -308,9 +479,123 @@
         } catch { if (state) state.error = "frame_operation_failed"; return error_result("image_blit_rejected", "Image blit metadata or the current frame was invalid."); } // A caught local drawing error still poisons the complete transaction.
     } // Facade encoding does not claim that the unsupplied native drawing adapter is implemented.
     function unavailable_result(code, message) { return error_result(code, message); } // Missing native synchronous facilities return explicit failures, never fabricated successful data.
-    function sdk_draw_batch(frame, commands, blend = "overwrite") { try { require_frame(frame); require_value(is_array(commands) && commands.length <= max_commands && ["max", "overwrite", "alpha"].includes(blend), "draw_batch_shape"); } catch { return error_result("invalid_request", "Drawing batch requires the current frame and a bounded command list."); } return unavailable_result("native_draw_batch_adapter_unavailable", "The native SDK DrawCommand adapter must be connected before batch drawing is available."); } // Preserve existing line/path/triangle/ellipse/blit helpers without inventing unsupplied raster semantics.
-    function sdk_text_measure(options) { record(options, ["text", "font"]); fail("native_text_measure_unavailable"); } // Exact Unicode/font metrics require the actual native text adapter, not a guessed character width.
-    function sdk_text_result(options) { try { require_frame(own(options, "frame")); } catch { return error_result("invalid_request", "Text rendering requires the current frame."); } return unavailable_result("native_text_adapter_unavailable", "The native SDK raster/span adapter must be connected before this operation is available."); } // Existing text.span/text.draw encoders remain supported independently.
+    // SDK intensity is normalized; geometry is measured in Braille dots.
+    // Colour samples respect the accepted transfer space. Optional scalar
+    // tinting requires a declared cell_rgb plane and colours only touched cells.
+    function sdk_draw_batch(frame, commands, blend = "overwrite") {
+        let state;
+        try { state = require_frame(frame); } catch { return error_result("invalid_request", "Drawing batch requires the current frame."); }
+        try {
+            return run(state, () => {
+                require_value(is_array(commands) && commands.length <= max_commands && ["max", "overwrite", "alpha"].includes(blend), "draw_batch_shape");
+                require_value(blend !== "alpha" || state.layout.shape.format === "rgba8", "draw_batch_alpha_format");
+                const format = state.layout.shape.format;
+                const point = (value) => {
+                    const p = record(value, ["x", "y"]);
+                    require_value(typeof p.x === "number" && finite(p.x) && abs(p.x) <= 1000000 && typeof p.y === "number" && finite(p.y) && abs(p.y) <= 1000000, "draw_point");
+                    return [p.x, p.y];
+                };
+                for (let index = 0; index < commands.length; index += 1) {
+                    const item = descriptor(commands, string_type(index));
+                    require_value(item && descriptor(item, "value"), "draw_command_accessor");
+                    const kind = own(item.value, "kind");
+                    const allowed = kind === "line" ? ["kind", "from", "to", "width", "intensity", "rgb"]
+                        : kind === "circle" ? ["kind", "centre", "radius", "fill", "intensity", "rgb"]
+                        : kind === "path" ? ["kind", "points", "closed", "width", "intensity", "rgb"]
+                        : kind === "triangle" ? ["kind", "vertices", "intensity", "rgb"] : null;
+                    require_value(allowed, "draw_command_kind");
+                    const c = record(item.value, allowed), intensity = c.intensity;
+                    require_value(typeof intensity === "number" && finite(intensity) && intensity >= 0 && intensity <= 1, "draw_intensity");
+                    const colour = c.rgb === undefined ? {r:255,g:255,b:255} : record(c.rgb, ["r", "g", "b"]);
+                    const rgb = [number(colour.r, 255), number(colour.g, 255), number(colour.b, 255)];
+                    let value, tint;
+                    if (format === "rgb8" || format === "rgba8") {
+                        const convert = (byte) => {
+                            const srgb = byte / 255;
+                            const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+                            const scaled = linear * (format === "rgb8" ? intensity : 1);
+                            const encoded = state.layout.shape.colour_space === "linear" ? scaled : scaled <= 0.0031308 ? scaled * 12.92 : 1.055 * scaled ** (1 / 2.4) - 0.055;
+                            return round(encoded * 255);
+                        };
+                        value = {r:convert(rgb[0]),g:convert(rgb[1]),b:convert(rgb[2])};
+                        if (format === "rgba8") value.a = round(intensity * 255);
+                    } else {
+                        value = format === "gray32" ? intensity : format === "gray8" ? round(intensity * 255) : intensity >= 0.5 ? (format === "mask8" ? 255 : 1) : 0;
+                        if (c.rgb !== undefined) { require_value(state.work_cell_rgb, "undeclared_cell_rgb"); tint = rgb; }
+                    }
+                    let op = kind, points, width = 1, fill = false, closed = false;
+                    if (kind === "line") { points = [point(c.from), point(c.to)]; width = c.width; }
+                    else if (kind === "circle") {
+                        require_value(typeof c.radius === "number" && finite(c.radius) && c.radius >= 0 && c.radius <= 1000000 && typeof c.fill === "boolean", "draw_circle");
+                        op = "ellipse"; points = [point(c.centre), [c.radius, c.radius]]; fill = c.fill;
+                    } else {
+                        const values = kind === "path" ? c.points : c.vertices;
+                        require_value(is_array(values) && (kind === "path" ? values.length >= 2 && values.length <= 1024 : values.length === 3), "draw_points");
+                        points = [];
+                        for (let i = 0; i < values.length; i += 1) {
+                            const entry = descriptor(values, string_type(i)); require_value(entry && descriptor(entry, "value"), "draw_point_accessor");
+                            append_data(points, point(entry.value));
+                        }
+                        if (kind === "path") { require_value(typeof c.closed === "boolean", "draw_path_closed"); width = c.width; closed = c.closed; }
+                        else { fill = true; closed = true; width = 0; }
+                    }
+                    vector(op, {points,width,fill,closed,value,blend,rgb:tint});
+                }
+                return {ok:true,value:null};
+            });
+        } catch { return error_result("invalid_request", "Invalid drawing batch; the frame transaction is rejected."); }
+    }
+    const default_font = "CascadiaCode-Regular", default_size_px = 16;
+    function text_font(value) { const font = value ?? default_font; require_value(font === default_font, "unsupported_font"); return font; }
+    function text_size(value) { const size = value ?? default_size_px; require_value(typeof size === "number" && finite(size) && size >= 8 && size <= 128, "font_size_px"); return size; }
+    function text_colour(value) { if (value === undefined) return undefined; const colour = record(value, ["r", "g", "b"]); return [number(colour.r, 255), number(colour.g, 255), number(colour.b, 255)]; }
+    function sdk_text_measure(options) {
+        const value = record(options, ["text", "font", "size_px"]);
+        require_value(typeof value.text === "string" && utf8_length(value.text) <= 16384 && !/[\u0000-\u001f\u007f-\u009f]/.test(value.text), "text");
+        const answer = service_result(native_text_measure({ __proto__: null, text: value.text, font: text_font(value.font), size_px: text_size(value.size_px) }));
+        if (!answer.ok) fail(answer.error.code);
+        const metrics = record(answer.value, ["width", "height"]);
+        number(metrics.width, 16384); number(metrics.height, 16384);
+        return freeze({ __proto__: null, width: metrics.width, height: metrics.height });
+    }
+    function sdk_text_raster(options) {
+        const state = active;
+        try { return run(state, () => {
+            const value = record(options, ["frame", "text", "x", "y", "font", "size_px", "intensity", "rgb"]);
+            require_frame(value.frame);
+            const x = number(value.x, state.layout.shape.cell_width * 2 - 1), y = number(value.y, state.layout.shape.cell_height * 4 - 1);
+            require_value(typeof value.text === "string" && utf8_length(value.text) <= 16384 && !/[\u0000-\u001f\u007f-\u009f]/.test(value.text), "text");
+            const font = text_font(value.font), size_px = text_size(value.size_px);
+            require_value(typeof value.intensity === "number" && finite(value.intensity) && value.intensity >= 0 && value.intensity <= 1, "text_intensity");
+            const rgb = text_colour(value.rgb);
+            if (value.text.length > 0) command(state, { kind: "raster_text", x, y, text: value.text, font, size_px, intensity: value.intensity, ...(rgb === undefined ? {} : {rgb}) });
+            return result_ok(null);
+        }); } catch { return error_result("invalid_request", "Raster text was rejected; the frame transaction is invalid."); }
+    }
+    function sdk_text_spans(options) {
+        const state = active;
+        try { return run(state, () => {
+            const value = record(options, ["frame", "x", "y", "spans", "max_cells"]);
+            require_frame(value.frame);
+            const x = number(value.x, state.layout.shape.cell_width - 1), y = number(value.y, state.layout.shape.cell_height - 1);
+            const max_cells = number(value.max_cells, state.layout.shape.cell_width - x);
+            require_value(is_array(value.spans) && value.spans.length <= 64, "text_spans");
+            const spans = []; let bytes = 0;
+            for (let index = 0; index < value.spans.length; index += 1) {
+                const slot = descriptor(value.spans, string_type(index)); require_value(slot && descriptor(slot, "value"), "text_span_accessor");
+                const item = record(slot.value, ["text", "foreground", "background", "bold", "italic", "underline"]);
+                require_value(typeof item.text === "string" && item.text.length > 0 && !/[\u0000-\u001f\u007f-\u009f]/.test(item.text), "text_span");
+                bytes += utf8_length(item.text); require_value(bytes <= 16384, "text_bytes");
+                for (const flag of ["bold", "italic", "underline"]) require_value(item[flag] === undefined || typeof item[flag] === "boolean", "text_style_flag");
+                append_data(spans, { __proto__: null, text: item.text, style: { __proto__: null,
+                    rgb: text_colour(item.foreground) ?? null, background: text_colour(item.background) ?? null,
+                    bold: item.bold ?? false, italic: item.italic ?? false, underline: item.underline ?? false } });
+            }
+            require_value(spans.length === 0 || max_cells > 0, "text_max_cells");
+            if (spans.length > 0) command(state, { kind: "text_spans", x, y, spans, max_cells });
+            return result_ok(null);
+        }); } catch { return error_result("invalid_request", "Styled text was rejected; the frame transaction is invalid."); }
+    }
     function synchronous_factory(code) { require_value(acquiring(), "service_phase"); fail(code); } // The asynchronous dispatcher cannot honestly return a newly native-issued handle synchronously.
     function replay_metadata() { const value = host_info.replay?.metadata; require_value(value && ["live", "pre_rendered"].includes(value.mode), "native_replay_metadata_unavailable"); number(value.seed); number(value.sample_index); return value; } // Never infer replay identity from accepted plan JSON or invent a seed/sample index.
     function replay_eligibility() { const value = host_info.replay?.eligibility; if (!value) return freeze({ __proto__: null, supported: false, reason: "Native replay eligibility has not been supplied." }); require_value(typeof value.supported === "boolean" && (value.reason === undefined || typeof value.reason === "string"), "native_replay_eligibility"); return value; } // Absence is explicit unavailability, while positive eligibility comes only from a native seed.
@@ -323,16 +608,16 @@
     const video = family("media.video", "poll seek pause close status"); video.open = async (options) => await open_rpc("media.video.open", options, "media.video", (value) => handle_field(value, "asset", ["asset"], true)); // Actual VideoHandle methods live on the returned branded instance.
     const http = family("http", "open_stream close"); http.request = http_request; http.stream = async (options) => await open_rpc("http.stream", options, "http.stream"); http.poll = http_poll; // The SDK spells the async stream factory stream(), with next()/close()/status() on its native handle.
     const sources = create(null); for (const [name, methods] of [["series", "catalogue poll close"], ["earthquakes", "poll close"], ["aircraft", "poll close"], ["boats", "poll close"], ["chess", "poll close"], ["weather", "poll close"]]) { const source = family(`sources.${name}`, methods); source.open = async (options) => await open_rpc(`sources.${name}.open`, options, `sources.${name}`); sources[name] = source; } // Each public feed returns a real SourceHandle with synchronous seeded/returned latest and status.
-    sources.chess.discover = async (options) => await checked_rpc("sources.chess.discover", options, null, json_result); sources.geography = family("sources.geography", "open sample close"); sources.geography.coastlines = async (options) => await checked_rpc("sources.geography.coastlines", options, null, json_result); sources.geography.elevation = async (options) => await checked_rpc("sources.geography.elevation", options, null, (value) => binary(value, ["f32"])); sources.geography.project = (options) => { record(options, ["latitude", "longitude", "projection"]); fail("native_geography_projection_unavailable"); }; // Synchronous projection units/origin must come from the actual native geography contract, never an async RPC disguised as Point.
-    sources.wikipedia = family("sources.wikipedia", "image close"); sources.wikipedia.search = async (options) => await checked_rpc("sources.wikipedia.search", options, null, json_result); sources.wikipedia.article = async (options) => await checked_rpc("sources.wikipedia.article", options, null, json_result); sources.osm = family("sources.osm", "tiles tour close"); sources.osm.geocode = async (options) => await checked_rpc("sources.osm.geocode", options, null, json_result); sources.osm.tile = async (options) => await checked_rpc("sources.osm.tile", options, null, (value) => { const source = record(value, ["image", "paths", "attribution"]); if (source.paths !== undefined) native_json(source.paths); require_value(typeof source.attribution === "string", "native_osm_attribution"); if (source.image !== undefined) source.image = image_handle(source.image); return freeze(source); }); // The frozen SDK's public tile() is singular; legacy tiles() remains an explicit extension only.
-    sources.astronomy = family("sources.astronomy", "orbits sun close"); sources.astronomy.catalogue = async (options) => await checked_rpc("sources.astronomy.catalogue", options, null, json_result); sources.astronomy.observe = (options) => { try { record(options, ["epoch_ms", "latitude", "longitude"]); } catch { return error_result("invalid_request", "Astronomy observation options are invalid."); } return unavailable_result("native_astronomy_observer_unavailable", "A synchronous native astronomy observation adapter has not been installed."); }; // Catalogue presence does not imply an implemented synchronous observer.
+    sources.chess.discover = async (options) => await checked_rpc("sources.chess.discover", options, null, json_result); sources.geography = family("sources.geography", "open sample close"); sources.geography.coastlines = async (options) => await checked_rpc("sources.geography.coastlines", options, null, json_result); sources.geography.elevation = async (options) => await checked_rpc("sources.geography.elevation", options, null, (value) => binary(value, ["f32"])); sources.geography.project = (options) => native_json(native_project(options)); // The native callback validates the original object without invoking getters and returns a synchronous normalized point.
+    sources.wikipedia = family("sources.wikipedia", "image close"); sources.wikipedia.search = async (options) => await checked_rpc("sources.wikipedia.search", options, null, json_result); sources.wikipedia.article = async (options) => await checked_rpc("sources.wikipedia.article", options, null, (value) => { const source = record(value, ["title", "url", "revision", "blocks", "images", "warnings", "attribution"]); require_value(is_array(source.images) && source.images.length <= 32, "native_article_images"); const first = handle_entries.length, images = []; try { for (const entry of source.images) { const copy = record(entry, ["url", "image"]); require_value(typeof copy.url === "string", "native_article_image_url"); copy.image = image_handle(copy.image); append_data(images, freeze(copy)); } source.images = freeze(images); return native_json(source); } catch (error) { discard_unpublished_handles(first); throw error; } }); sources.osm = family("sources.osm", "tiles tour close"); sources.osm.geocode = async (options) => await checked_rpc("sources.osm.geocode", options, null, json_result); sources.osm.tile = async (options) => await checked_rpc("sources.osm.tile", options, null, (value) => { const source = record(value, ["image", "paths", "attribution"]); if (source.paths !== undefined) native_json(source.paths); require_value(typeof source.attribution === "string", "native_osm_attribution"); if (source.image !== undefined) source.image = image_handle(source.image); return freeze(source); }); // The frozen SDK's public tile() is singular; legacy tiles() remains an explicit extension only.
+    sources.astronomy = family("sources.astronomy", "orbits sun close"); sources.astronomy.catalogue = async (options) => await checked_rpc("sources.astronomy.catalogue", options, null, json_result); sources.astronomy.observe = (options) => { const answer = service_result(native_observe(options)); return answer.ok ? result_ok(native_json(answer.value)) : answer; }; // Native computation remains synchronous; invalid options and quota refusals return the SDK Result envelope.
     const worlds = family("worlds", "prepare close"); worlds.list = async (options) => await checked_rpc("worlds.list", options, (value) => handle_field(value, "grant", ["asset"]), json_result); worlds.open = async (options) => await open_rpc("worlds.open", options, "worlds", (value) => handle_field(value, "grant", ["asset"], true)); worlds.region = world_region; worlds.model = async (options) => await checked_rpc("worlds.model", options, (value) => handle_field(value, "world", ["worlds"]), world_model_result); // WorldHandle methods and readonly identity now match the SDK without encoding methods as JSON.
     const compute = family("compute", "poll cancel"); compute.submit = async (options) => await open_rpc("compute.submit", options, "compute", (value) => request_binary(value, "input", ["f32"])); // Native math validation, original-root admissions, actual job handles, and retained results remain concrete parent integrations.
     const gpu = family("gpu", "status run cancel"); define_property(gpu, "available", { __proto__: null, get: () => host_info.gpu?.available === true, enumerable: true }); gpu.render = async (options) => await open_rpc("gpu.render", options, "image", (value) => { request_binary(value, "vertices", ["f32"]); request_binary(value, "indices", ["u32"]); request_binary(value, "camera", ["f32"]); handle_field(value, "texture", ["image"], true); }); // Capability observation is informational; native GPU permissions and resource availability are rechecked on actual issue.
     const presentation = family("presentation", "status"); presentation.subscribe = (callback) => { require_value(typeof callback === "function", "invalid_callback"); return synchronous_factory("native_synchronous_presentation_subscription_unavailable"); }; presentation.blit_source = (options) => { try { require_frame(own(options, "frame")); lookup_handle(own(options, "source"), ["worlds"]); lookup_handle(own(options, "image"), ["image"]); } catch { return error_result("invalid_request", "Presentation blit requires current native world/image handles and frame."); } return unavailable_result("native_presentation_source_adapter_unavailable", "The native protected source-binding command adapter must be connected before this operation is available."); }; // No JSON source identity or facade call can mint protected drawing provenance.
-    const tasks = family("tasks", "cancel yield"); tasks.poll = (options, callback) => { require_value(typeof callback === "function", "invalid_callback"); record(options, ["interval_ms", "deadline_ms"]); return synchronous_factory("native_synchronous_task_poll_unavailable"); }; tasks.cancelled = () => { require_value(typeof host_info.cancelled === "boolean", "native_cancellation_snapshot_unavailable"); return host_info.cancelled; }; // Scheduled native callback admission and cancellation observations are distinct from an async request receipt.
+    const tasks = family("tasks", "cancel"); tasks.poll = task_poll; tasks.yield = task_yield; tasks.cancelled = () => { require_value(typeof host_info.cancelled === "boolean", "native_cancellation_snapshot_unavailable"); return host_info.cancelled; }; // Native deadlines and one-pending-next cadence belong to the scene actor.
     const replay = family("replay", "prepare capture status cancel seek"); replay.freeze = async (options) => await checked_rpc("replay.freeze", options, (value) => { const list = own(value, "sources"); require_value(is_array(list) && list.length <= 64, "replay_source_limit"); for (let index = 0; index < list.length; index += 1) lookup_handle(own(list, string_type(index)), service_kinds); }, json_result); replay.metadata = replay_metadata; replay.eligibility = replay_eligibility; // Native replay capture still owns authorization, actual source provenance, eligibility, and storage retention.
-    const host = { permissions, draw, text: { ...family("text", "metrics"), span: text_span, draw: text_span, measure: sdk_text_measure, raster: sdk_text_result, spans: sdk_text_result }, http, assets, cache, media: { images, video }, inputs: family("inputs", "poll"), sources, worlds, models: family("models", "decode prepare release"), textures: family("textures", "decode prepare release"), compute, gpu, presentation, tasks, status: { ...family("status", "report"), log: (level, message) => status_record("log", level, message), progress: (percent, message) => status_record("progress", "info", message, percent) }, replay }; // Existing local drawing/status extensions remain available without claiming all named native services are implemented.
+    const host = { permissions, draw, text: { ...family("text", "metrics"), span: text_span, draw: text_span, measure: sdk_text_measure, raster: sdk_text_raster, spans: sdk_text_spans }, http, assets, cache, media: { images, video }, inputs: family("inputs", "poll"), sources, worlds, models: family("models", "decode prepare release"), textures: family("textures", "decode prepare release"), compute, gpu, presentation, tasks, status: { ...family("status", "report"), log: (level, message) => status_record("log", level, message), progress: (percent, message) => status_record("progress", "info", message, percent) }, replay }; // Existing local drawing/status extensions remain available without claiming all named native services are implemented.
     define_property(host.assets, "bundle", { __proto__: null, get: () => { require_value(bundle_handle, "native_bundle_handle_unavailable"); return bundle_handle; }, enumerable: true }); define_property(host, "package", { __proto__: null, get: () => host_info.package, enumerable: true }); define_property(host, "selection", { __proto__: null, get: () => host_info.selection, enumerable: true }); // Package/selection snapshots remain informational, and bundle requires an actual native registry handle record.
     const freeze_host = (value) => { for (const key of keys(value)) { const field = descriptor(value, key); if (field && descriptor(field, "value") && field.value && typeof field.value === "object") freeze_host(field.value); } freeze(value); }; freeze_host(host); install("__ilium_host", host); // Seal non-enumerable hooks and the public facade without invoking dynamic getters.
 })(); // End the complete standalone trusted bootstrap.

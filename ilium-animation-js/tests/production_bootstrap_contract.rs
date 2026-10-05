@@ -227,18 +227,20 @@ fn begin(
             json!({"path":input.path,"kind":kind_name(input.kind),"elements":input.elements})
         })
         .collect();
+    let mut metadata = json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,
+        "invalid_rects":seed.invalid_rects,"input_specs":input_specs}});
+    if let Some(services) = extra.get("__test_native_services") {
+        metadata["services"] = services.clone();
+    }
     engine
-        .seed_frame(
-            &json!({"frame":{"key":seed.key,"shape":seed.shape,"reset":seed.reset,
-        "invalid_rects":seed.invalid_rects,"input_specs":input_specs}}),
-            &seed_specs,
-            &seed_planes,
-        )
+        .seed_frame(&metadata, &seed_specs, &seed_planes)
         .unwrap();
     let mut context = json!({"time":1.0,"wall":1.0,"delta":0.05,"wall_delta":0.05,"inputs":{},
         "_ilium_frame":{"key":seed.key,"shape":seed.shape}});
     for (key, value) in extra.as_object().unwrap() {
-        context[key] = value.clone();
+        if key != "__test_native_services" {
+            context[key] = value.clone();
+        }
     }
     (context, returned)
 }
@@ -877,3 +879,909 @@ fn completion_has_no_checkpoint_and_service_bytes_survive_frame_detachment() {
     drop(native_bytes); // Destroy producer bytes before their guard.
     drop(producer_admission); // Release custody after physical source destruction.
 } // Actual HTTP authorization, redirects, registries, and network issue remain owner acceptance gates.
+
+#[test]
+fn pure_sources_render_synchronously_without_opening_a_service() {
+    let _serial = serial();
+    let script = source(
+        r#"
+        const point=__ilium_host.sources.geography.project({
+            latitude:0,longitude:0,projection:'orthographic'
+        });
+        const observed=__ilium_host.sources.astronomy.observe({
+            epoch_ms:1700000000000,latitude:0,longitude:0
+        });
+        globalThis.pure_render=[point.visible,observed.ok,observed.value.bodies.length];
+        if(point.visible && observed.ok) f.cells.set_cell(0,0,{mask:1});
+        f.present();
+    "#,
+    );
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Mask8, Update::Retain, false));
+    let (context, arrays) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &arrays).unwrap();
+    assert_eq!(
+        engine.evaluate_json("pure_render").unwrap(),
+        json!([true, true, 7])
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+    finish(&mut engine, &mut owner, &output, false).unwrap();
+    assert_eq!(masks(&owner)[0] & 1, 1);
+}
+
+#[test]
+fn native_elevation_completion_reaches_the_real_sdk_as_float32() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const result=await host.sources.geography.elevation({body:'earth',bounds:[0,0,1,1],width:2,height:2});
+            if(!result.ok)throw new Error(result.error.code);
+            globalThis.source_heights=result.value;
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sources.geography.elevation");
+    let samples = [1.25_f32, -2.5, 3.75, 4.0];
+    let bytes = samples
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect::<Vec<_>>();
+    let producer_admission = quota().reserve_external_storage(bytes.capacity()).unwrap();
+    let planes = BTreeMap::from([("b0".to_owned(), bytes)]);
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"$ilium_binary":"b0"}}),
+        &[spec("b0", TypedArrayKind::F32, 4)],
+        &planes,
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine
+            .evaluate_json("[source_heights instanceof Float32Array,Array.from(source_heights)]")
+            .unwrap(),
+        json!([true, [1.25, -2.5, 3.75, 4]])
+    );
+    drop(planes);
+    drop(producer_admission);
+}
+
+#[test]
+fn native_article_image_descriptor_becomes_a_branded_sdk_handle() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const result=await host.sources.wikipedia.article({title:'Fixture',max_bytes:4096,max_images:1});
+            if(!result.ok)throw new Error(result.error.code);
+            const image=result.value.images[0].image;
+            globalThis.source_image=image;
+            host.media.images.close(image);
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sources.wikipedia.article");
+    let digest = "0".repeat(64);
+    let descriptor = json!({"id":"source-image-1","kind":"image","width":1,"height":1,"format":"rgba8","sha256":digest});
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"title":"Fixture","url":"https://en.wikipedia.org/wiki/Fixture","revision":1,"blocks":[],"images":[{"url":"https://upload.wikimedia.org/fixture.png","image":descriptor}],"warnings":[],"attribution":"Fixture"}}),
+        &[], &BTreeMap::new(), &EngineLimits::default(), quota(),
+    ).unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let close = engine.take_requests().unwrap();
+    assert_eq!(close.len(), 1);
+    assert_eq!(close[0].method, "media.images.close");
+    assert_eq!(close[0].payload.metadata()["id"], json!("source-image-1"));
+    assert_eq!(
+        engine
+            .evaluate_json("[source_image.id,source_image.width,source_image.height]")
+            .unwrap(),
+        json!(["source-image-1", 1, 1])
+    );
+    let close_ack = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":null}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(close[0].id, native_authority(), close_ack)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
+fn image_sdk_preserves_branded_projection_and_float_sample_bytes() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.media.images.decode({bytes:new Uint8Array([1,2,3]),max_pixels:4});
+            if(!opened.ok)throw new Error(opened.error.code);
+            const sampled=await host.media.images.sample({image:opened.value,rectangle:{x:0,y:0,width:1,height:1},format:'gray32'});
+            if(!sampled.ok)throw new Error(sampled.error.code);
+            globalThis.image_sample=sampled.value;
+            return {render(){},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let decoded = engine.take_requests().unwrap();
+    assert_eq!(decoded.len(), 1);
+    assert_eq!(decoded[0].method, "media.images.decode");
+    assert_eq!(decoded[0].payload.arrays()[0].kind, TypedArrayKind::U8);
+    assert_eq!(decoded[0].payload.planes()["b0"], vec![1, 2, 3]);
+    let descriptor = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"id":"7","kind":"image","width":1,"height":1,"format":"rgba8","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}),
+        &[], &BTreeMap::new(), &EngineLimits::default(), quota()).unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(decoded[0].id, native_authority(), descriptor)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Pending);
+    let sampled = engine.take_requests().unwrap();
+    assert_eq!(sampled.len(), 1);
+    assert_eq!(sampled[0].method, "media.images.sample");
+    assert_eq!(
+        sampled[0].payload.metadata()["image"],
+        json!({"id":"7","kind":"image"})
+    );
+    assert_eq!(sampled[0].payload.metadata()["format"], json!("gray32"));
+    let bits = BTreeMap::from([("b0".to_owned(), 0.5_f32.to_ne_bytes().to_vec())]);
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"$ilium_binary":"b0"}}),
+        &[spec("b0", TypedArrayKind::F32, 1)],
+        &bits,
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(sampled[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine.evaluate_json("Array.from(image_sample)").unwrap(),
+        json!([0.5])
+    );
+}
+
+#[test]
+fn image_descriptor_copy_refusal_keeps_original_resolver_for_explicit_terminal_choice() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.media.images.decode({bytes:new Uint8Array([1]),max_pixels:1});
+            globalThis.image_copy_ok=opened.ok;
+            return {render(){},dispose(){}};
+        }
+    "#;
+    let package = package(script);
+    let digest = package.digest().to_owned();
+    let limits = EngineLimits {
+        backing_bytes: 1024 * 1024,
+        ..EngineLimits::default()
+    };
+    let mut engine = Engine::new(package, limits, quota()).unwrap();
+    engine.install_bootstrap(BOOTSTRAP).unwrap();
+    engine.load().unwrap();
+    engine
+        .bind_service_authority(&digest, native_authority())
+        .unwrap();
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    let oversized = BTreeMap::from([("b0".to_owned(), vec![0_u8; 2 * 1024 * 1024])]);
+    let refused = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"$ilium_binary":"b0"}}),
+        &[spec("b0", TypedArrayKind::U8, 2 * 1024 * 1024)],
+        &oversized,
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert!(engine
+        .complete_service_request(requests[0].id, native_authority(), refused)
+        .is_err());
+    let descriptor = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"id":"8","kind":"image","width":1,"height":1,"format":"rgba8","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}),
+        &[],&BTreeMap::new(),&EngineLimits::default(),quota()).unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), descriptor)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(engine.evaluate_json("image_copy_ok").unwrap(), json!(true));
+}
+
+#[test]
+fn source_image_slot_marker_cannot_become_a_guest_image_handle() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const result=await host.sources.osm.tile({x:0,y:0,zoom:0,format:'raster'});
+            globalThis.source_error=result.ok ? 'unexpected_success' : result.error.code;
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sources.osm.tile");
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"image":{"native_image_slot":0,"width":1,"height":1},"attribution":"Fixture"}}),
+        &[], &BTreeMap::new(), &EngineLimits::default(), quota(),
+    ).unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine.evaluate_json("source_error").unwrap(),
+        json!("invalid_request_or_result")
+    );
+}
+
+#[test]
+fn weather_feed_materializes_original_nested_image_shapes_and_controls() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.sources.weather.open({});
+            if(!opened.ok)throw new Error(opened.error.code);
+            const feed=opened.value, latest=feed.latest();
+            if(!latest.ok)throw new Error(latest.error.code);
+            const night=latest.value.layers[0].tiles[0].image;
+            const wms=latest.value.layers[1].frames[0].image;
+            const cloud=latest.value.layers[1].frames[1].tiles[0].image;
+            globalThis.weather_feed=feed;
+            globalThis.weather_feed_observation=[feed.id,feed.status().state,night.id,wms.id,cloud.id,
+                Object.isFrozen(latest.value),Object.isFrozen(latest.value.layers[1].frames[1].tiles[0])];
+            host.media.images.close(night);
+            feed.close();
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sources.weather.open");
+    let image = |id| json!({"id":id,"kind":"image","width":1,"height":1,"format":"rgba8","sha256":"0".repeat(64)});
+    let descriptor = json!({"id":"source-feed-1","kind":"sources.weather","revision":1,
+        "status":{"state":"ready"},"latest":{"revision":1,"available":true,"status":"ready",
+        "captured_at_ms":1000,"observed_at_ms":1000,"age_ms":0,"error":null,
+        "layers":[
+            {"requested_layer":"night_lights_daily","tiles":[{"image":image("source-image-1"),"epoch_ms":1000}]},
+            {"requested_layer":"cloud","frames":[
+                {"image":image("source-image-2"),"epoch_ms":1000},
+                {"tiles":[{"image":image("source-image-3"),"epoch_ms":1000}],"epoch_ms":1000}
+            ]}
+        ],"attribution":"Fixture"}});
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":descriptor}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine.evaluate_json("weather_feed_observation").unwrap(),
+        json!([
+            "source-feed-1",
+            "ready",
+            "source-image-1",
+            "source-image-2",
+            "source-image-3",
+            true,
+            true
+        ])
+    );
+    let controls = engine.take_requests().unwrap();
+    assert_eq!(controls.len(), 2);
+    assert_eq!(controls[0].method, "media.images.close");
+    assert_eq!(controls[0].payload.metadata()["id"], "source-image-1");
+    assert_eq!(controls[1].method, "sources.weather.close");
+    assert_eq!(controls[1].payload.metadata()["id"], "source-feed-1");
+    let image_ack = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":null}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(controls[0].id, native_authority(), image_ack)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    let closed = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"id":"source-feed-1","kind":"sources.weather",
+            "revision":2,"status":{"state":"closed"}}}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(controls[1].id, native_authority(), closed)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine
+            .evaluate_json("[weather_feed.status().state,weather_feed.latest().error.code]")
+            .unwrap(),
+        json!(["closed", "closed_handle"])
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
+fn weather_feed_rejects_a_native_slot_marker_without_original_image_registration() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.sources.weather.open({});
+            globalThis.weather_open_error=opened.ok?'unexpected_success':opened.error.code;
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    let descriptor = json!({"id":"source-feed-2","kind":"sources.weather","revision":1,
+        "status":{"state":"ready"},"latest":{"revision":1,"available":true,"status":"ready",
+        "layers":[{"tiles":[{"image":{"native_image_slot":0,"width":1,"height":1}}]}]}});
+    let result = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":descriptor}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), result)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine.evaluate_json("weather_open_error").unwrap(),
+        json!("invalid_result")
+    );
+}
+
+#[test]
+fn native_feed_seed_advances_latest_and_ignores_stale_revision_before_close() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.sources.earthquakes.open({});
+            if(!opened.ok)throw new Error(opened.error.code);
+            const feed=opened.value;
+            globalThis.feed_history=[];
+            return {render(c,f){
+                const latest=feed.latest();
+                feed_history.push([feed.status().state,latest.ok ? latest.value.revision : latest.error.code]);
+                f.present();
+            },dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "sources.earthquakes.open");
+    let descriptor = |revision, state, latest: Option<u64>| {
+        let mut value = json!({"id":"source-feed-9","kind":"sources.earthquakes",
+            "revision":revision,"status":{"state":state}});
+        if let Some(latest) = latest {
+            value["latest"] = json!({"revision":latest,"available":true,"status":"ready",
+                "entities":[],"attribution":"Fixture"});
+        }
+        value
+    };
+    let opened = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":descriptor(1,"ready",Some(1))}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), opened)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let mut owner = Owner::new(shape(Format::Gray8, Update::Retain, false));
+    for (sequence, seeded) in [
+        (1, descriptor(2, "ready", Some(2))),
+        (2, descriptor(1, "ready", Some(1))),
+        (3, descriptor(3, "closed", None)),
+    ] {
+        let (context, arrays) = begin(
+            &mut engine,
+            &mut owner,
+            sequence,
+            &[],
+            json!({"__test_native_services":[seeded]}),
+        );
+        let output = engine.render(&context, &arrays).unwrap();
+        assert!(
+            finish(&mut engine, &mut owner, &output, false)
+                .unwrap()
+                .accepted
+        );
+    }
+    assert_eq!(
+        engine.evaluate_json("feed_history").unwrap(),
+        json!([["ready", 2], ["ready", 2], ["closed", "closed_handle"]])
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
+fn cancelled_feed_open_cannot_brand_a_late_native_descriptor() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.sources.earthquakes.open({});
+            globalThis.cancelled_feed_open=opened.ok;
+            return {render(c,f){f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    requests[0].stop_token().stop();
+    let late = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"id":"source-feed-late","kind":"sources.earthquakes",
+            "revision":1,"status":{"state":"ready"},"latest":null}}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), late)
+            .unwrap(),
+        CompletionState::Cancelled
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    assert_eq!(
+        engine.evaluate_json("cancelled_feed_open").unwrap(),
+        json!(false)
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+fn task_engine(source: &str, mode: AnimationMode) -> Engine {
+    let package = package(source);
+    let digest = package.digest().to_owned();
+    let mut engine = Engine::new(package, EngineLimits::default(), quota()).unwrap();
+    engine.install_bootstrap(BOOTSTRAP).unwrap();
+    engine.configure_ambient(mode, 17).unwrap();
+    engine.load().unwrap();
+    engine
+        .bind_service_authority(&digest, native_authority())
+        .unwrap();
+    engine
+}
+
+fn task_result(value: Value) -> ServiceValue {
+    ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":value}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn two_sequential_pure_yields_stay_in_pending_create_and_need_two_native_acks() {
+    let _serial = serial();
+    let source = r#"export function plan(){return {}};
+        export async function create(host){
+          const first=await host.tasks.yield(); if(!first.ok) throw Error(first.error.code);
+          const second=await host.tasks.yield(); if(!second.ok) throw Error(second.error.code);
+          globalThis.yields_done=2;
+          return {render(c,f){f.present()},dispose(){}};
+        }"#;
+    let mut engine = task_engine(source, AnimationMode::PreRendered);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    for index in 0..2 {
+        let requests = engine.take_requests().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "tasks.yield");
+        assert_eq!(
+            requests[0].phase,
+            ilium_animation_js::engine::ServicePhase::Create
+        );
+        assert_eq!(requests[0].payload.metadata(), &json!({}));
+        assert_eq!(
+            engine
+                .complete_service_request(
+                    requests[0].id,
+                    native_authority(),
+                    task_result(Value::Null)
+                )
+                .unwrap(),
+            CompletionState::Delivered
+        );
+        assert_eq!(
+            engine.pump().unwrap(),
+            if index == 0 {
+                CreateState::Pending
+            } else {
+                CreateState::Ready
+            }
+        );
+    }
+    assert_eq!(engine.evaluate_json("yields_done").unwrap(), json!(2));
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
+fn native_task_callback_waits_for_its_yield_before_requesting_another_tick() {
+    let _serial = serial();
+    let source = r#"export function plan(){return {}};
+        export async function create(host){
+          globalThis.task_calls=0;
+          const opened=await host.tasks.poll({interval_ms:16,deadline_ms:100},async()=>{
+            task_calls++;
+            if(task_calls===1){const yielded=await host.tasks.yield();if(!yielded.ok)throw Error(yielded.error.code)}
+          });
+          if(!opened.ok)throw Error(opened.error.code);
+          globalThis.task_handle=opened.value;
+          return {render(c,f){f.present()},dispose(){}};
+        }"#;
+    let mut engine = task_engine(source, AnimationMode::Live);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let opened = engine.take_requests().unwrap();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0].method, "tasks.poll.open");
+    assert_eq!(
+        engine
+            .complete_service_request(
+                opened[0].id,
+                native_authority(),
+                task_result(json!({"id":"task-1-1","kind":"tasks.poll","revision":1,
+            "status":{"state":"ready"}}))
+            )
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let first = engine.take_requests().unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].method, "tasks.poll.next");
+    assert_eq!(
+        engine
+            .complete_service_request(
+                first[0].id,
+                native_authority(),
+                task_result(json!({"tick":true}))
+            )
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let yielded = engine.take_requests().unwrap();
+    assert_eq!(yielded.len(), 1);
+    assert_eq!(yielded[0].method, "tasks.yield");
+    assert_eq!(engine.evaluate_json("task_calls").unwrap(), json!(1));
+    assert_eq!(
+        engine
+            .complete_service_request(yielded[0].id, native_authority(), task_result(Value::Null))
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let next = engine.take_requests().unwrap();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].method, "tasks.poll.next");
+    next[0].stop_token().stop();
+    engine.expire_service_requests().unwrap();
+}
+
+#[test]
+fn periodic_task_in_prerender_is_a_live_only_result_without_native_request() {
+    let _serial = serial();
+    let source = r#"export function plan(){return {}};
+        export async function create(host){
+          const answer=await host.tasks.poll({interval_ms:16,deadline_ms:100},async()=>{});
+          globalThis.task_refusal=answer.ok?null:answer.error.code;
+          return {render(c,f){f.present()},dispose(){}};
+        }"#;
+    let mut engine = task_engine(source, AnimationMode::PreRendered);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Ready
+    );
+    assert_eq!(
+        engine.evaluate_json("task_refusal").unwrap(),
+        json!("live_only")
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_draw_batch_encodes_each_primitive_in_all_seven_formats() {
+    let _serial = serial();
+    for format in [
+        Format::Mask8,
+        Format::Mono1,
+        Format::Mono8,
+        Format::Gray8,
+        Format::Gray32,
+        Format::Rgb8,
+        Format::Rgba8,
+    ] {
+        let shape = shape(format, Update::Replace, false);
+        let script = source("const result=__ilium_host.draw.batch(f,[{kind:'line',from:{x:0,y:0},to:{x:3,y:7},width:1,intensity:1},{kind:'circle',centre:{x:2,y:3},radius:1,fill:true,intensity:1},{kind:'path',points:[{x:0,y:0},{x:3,y:0},{x:3,y:7}],closed:false,width:1,intensity:1},{kind:'triangle',vertices:[{x:0,y:0},{x:3,y:0},{x:2,y:7}],intensity:1}]);globalThis.batch_result=result;f.present();");
+        let mut engine = engine(package(&script), json!({}));
+        let mut owner = Owner::new(shape);
+        let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+        let output = engine.render(&context, &specs).unwrap();
+        let result = engine.evaluate_json("batch_result").unwrap();
+        assert_eq!(
+            result["ok"],
+            json!(true),
+            "public Draw.batch returned {result}"
+        );
+        let metadata = FrameMeta::parse(&serde_json::to_vec(&output.metadata).unwrap()).unwrap();
+        assert!(metadata.presented);
+        assert!(metadata.error.is_none());
+        assert_eq!(metadata.commands.len(), 4);
+        let operations = [
+            ilium_animation_js::surface::VectorOp::Line,
+            ilium_animation_js::surface::VectorOp::Ellipse,
+            ilium_animation_js::surface::VectorOp::Path,
+            ilium_animation_js::surface::VectorOp::Triangle,
+        ];
+        for (command, expected) in metadata.commands.iter().zip(operations) {
+            match command {
+                ilium_animation_js::surface::Command::Vector { op, .. } => {
+                    assert_eq!(*op, expected)
+                }
+                _ => panic!("batch must encode bounded native geometry"),
+            }
+        }
+        // This gate proves the genuine V8 encoder and closed native schema;
+        // actual geometry publication is independently covered by NativeDraw.
+        engine.accept_frame(false).unwrap();
+    }
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_draw_batch_invalid_later_command_refuses_the_whole_frame() {
+    let _serial = serial();
+    let script = source("globalThis.result=__ilium_host.draw.batch(f,[{kind:'line',from:{x:0,y:0},to:{x:3,y:7},width:1,intensity:1},{kind:'circle',centre:{x:1,y:1},radius:-1,fill:true,intensity:1}]);try{f.present();}catch{};");
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Gray8, Update::Retain, false));
+    let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &specs).unwrap();
+    assert_eq!(engine.evaluate_json("result.ok").unwrap(), json!(false));
+    assert_eq!(
+        finish(&mut engine, &mut owner, &output, false),
+        Err(SurfaceError::Callback)
+    );
+    assert_eq!(owner.surface.version(), 0);
+    assert_eq!(masks(&owner), vec![0; 4]);
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_draw_batch_rgb_intensity_uses_linear_light_before_srgb_encoding() {
+    let _serial = serial();
+    let script=source("globalThis.result=__ilium_host.draw.batch(f,[{kind:'line',from:{x:0,y:0},to:{x:3,y:7},width:1,intensity:0.5,rgb:{r:255,g:0,b:0}}]);f.present();");
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Rgb8, Update::Replace, false));
+    let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &specs).unwrap();
+    assert_eq!(engine.evaluate_json("result.ok").unwrap(), json!(true));
+    let metadata = FrameMeta::parse(&serde_json::to_vec(&output.metadata).unwrap()).unwrap();
+    match &metadata.commands[0] {
+        ilium_animation_js::surface::Command::Vector { value, .. } => {
+            assert_eq!(*value, vec![188., 0., 0.])
+        }
+        _ => panic!("native vector command required"),
+    }
+    engine.accept_frame(false).unwrap();
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_text_spans_accepts_bounded_styled_unicode_cells() {
+    let _serial = serial();
+    let script=source("globalThis.text_result=__ilium_host.text.spans({frame:f,x:0,y:0,max_cells:2,spans:[{text:'A',foreground:{r:255,g:0,b:0},background:{r:0,g:64,b:0},bold:true},{text:'e\\u0301',foreground:{r:0,g:255,b:0},italic:true,underline:true}]});f.present();");
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Gray8, Update::Replace, false));
+    let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &specs).unwrap();
+    let result = engine.evaluate_json("text_result").unwrap();
+    assert_eq!(
+        result["ok"],
+        json!(true),
+        "public Text.spans returned {result}"
+    );
+    let metadata = FrameMeta::parse(&serde_json::to_vec(&output.metadata).unwrap()).unwrap();
+    assert!(metadata.presented && metadata.error.is_none());
+    assert!(
+        !metadata.commands.is_empty(),
+        "styled spans require actual native text commands"
+    );
+    // Encoding acceptance only: native shaping/style preservation and actual
+    // live/replay terminal publication remain separate mandatory gates.
+    engine.accept_frame(false).unwrap();
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_text_raster_encodes_bundled_font_work_for_the_current_frame() {
+    let _serial = serial();
+    let script=source("globalThis.text_result=__ilium_host.text.raster({frame:f,text:'A',x:0,y:0,intensity:1});f.present();");
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Gray32, Update::Replace, false));
+    let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &specs).unwrap();
+    let result = engine.evaluate_json("text_result").unwrap();
+    assert_eq!(
+        result["ok"],
+        json!(true),
+        "public Text.raster returned {result}"
+    );
+    let metadata = FrameMeta::parse(&serde_json::to_vec(&output.metadata).unwrap()).unwrap();
+    assert!(metadata.presented && metadata.error.is_none());
+    assert!(
+        !metadata.commands.is_empty(),
+        "text raster must encode real native font work"
+    );
+    engine.accept_frame(false).unwrap();
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn public_text_measure_uses_bundled_font_and_rejects_invalid_family() {
+    let _serial = serial();
+    let script = r#"export function plan(){return {}} export async function create(host){let empty=host.text.measure({text:''});let a=host.text.measure({text:'A',size_px:16});let combining=host.text.measure({text:'e\u0301',size_px:16});let bad;try{host.text.measure({text:'A',font:'system'})}catch(error){bad=String(error.message)}globalThis.metrics={empty,a,combining,bad};return {render(c,f){f.present()},dispose(){}}}"#;
+    let mut engine = engine(package(script), json!({}));
+    let measured = engine.evaluate_json("metrics").unwrap();
+    assert_eq!(measured["empty"], json!({"width":0,"height":0}));
+    assert!(measured["a"]["width"]
+        .as_u64()
+        .is_some_and(|width| width > 0));
+    assert!(measured["a"]["height"]
+        .as_u64()
+        .is_some_and(|height| height > 0));
+    assert!(measured["combining"]["width"]
+        .as_u64()
+        .is_some_and(|width| width > 0));
+    assert!(measured["bad"]
+        .as_str()
+        .is_some_and(|error| error.contains("unsupported_font")));
+    engine.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native-host")]
+fn invalid_public_text_spans_poison_the_current_frame_even_when_caught() {
+    let _serial = serial();
+    let script = source(
+        r#"globalThis.result=__ilium_host.text.spans({frame:f,x:0,y:0,max_cells:2,spans:[{text:'A'},{text:'\u001b'}]});try{f.present()}catch{}"#,
+    );
+    let mut engine = engine(package(&script), json!({}));
+    let mut owner = Owner::new(shape(Format::Mask8, Update::Retain, false));
+    let (context, specs) = begin(&mut engine, &mut owner, 1, &[], json!({}));
+    let output = engine.render(&context, &specs).unwrap();
+    assert_eq!(engine.evaluate_json("result.ok").unwrap(), json!(false));
+    assert_eq!(
+        finish(&mut engine, &mut owner, &output, false),
+        Err(SurfaceError::Callback)
+    );
+    assert_eq!(owner.surface.version(), 0);
+}

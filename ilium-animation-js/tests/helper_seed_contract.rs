@@ -3,6 +3,7 @@
 use ilium_animation_js::{
     engine::{ArraySpec, ServiceAuthority, TypedArrayKind}, // Bind the real native activation explicitly before helper seed or creation.
     helper::validate_seed_planes,
+    manifest::AnimationMode, // Both real-helper fixture functions use the same actual live mode.
 };
 use std::collections::BTreeMap;
 #[test]
@@ -91,7 +92,6 @@ fn malformed_seed_names_shape_duplicate_overflow_and_hidden_planes_fail_closed()
 fn actual_helper_binary_seed_roundtrip_detaches_and_reseeds_without_json_pixels() {
     use ilium_animation_js::{
         helper::{HelperAuthority, HelperLimits, HelperSession},
-        manifest::AnimationMode,
         package::{Package, PackageLimits},
     };
     use ilium_execution::{QuotaGroup, QuotaLimits};
@@ -139,6 +139,10 @@ fn actual_helper_binary_seed_roundtrip_detaches_and_reseeds_without_json_pixels(
         },
         HelperLimits::default(),
         quota.clone(),
+        ilium_animation_js::helper::HelperPlayback {
+            mode: AnimationMode::Live,
+            ambient_seed: 0,
+        },
     )
     .unwrap();
     helper
@@ -227,7 +231,7 @@ fn actual_service_helper(
         std::env::var_os("ILIUM_ANIMATION_HELPER")
             .expect("qualification needs ILIUM_ANIMATION_HELPER"),
     ); // Require real native prerequisites.
-    let bootstrap = "globalThis.__ilium_host=Object.freeze({http:{request:payload=>__ilium_dispatch('http.request',payload)}});globalThis.__ilium_make_frame=()=>({gray:new Float32Array(4),present(){this.submitted=true;}});globalThis.__ilium_finish_frame=frame=>({metadata:{submitted:!!frame.submitted},planes:{gray:frame.gray}});globalThis.__ilium_accept_frame=()=>{};"; // Transport fixture only; no native HTTP.
+    let bootstrap = "globalThis.__ilium_configure_ambient=(mode,seed)=>{if(mode!=='live'||seed!==0)throw Error('fixture_live_only');};globalThis.__ilium_host=Object.freeze({http:{request:payload=>__ilium_dispatch('http.request',payload)}});globalThis.__ilium_make_frame=()=>({gray:new Float32Array(4),present(){this.submitted=true;}});globalThis.__ilium_finish_frame=frame=>({metadata:{submitted:!!frame.submitted},planes:{gray:frame.gray}});globalThis.__ilium_accept_frame=()=>{};"; // Transport fixture only; no native HTTP.
     let mut helper = HelperSession::launch(
         &executable,
         &bytes,
@@ -240,6 +244,10 @@ fn actual_service_helper(
         },
         HelperLimits::default(),
         quota,
+        ilium_animation_js::helper::HelperPlayback {
+            mode: AnimationMode::Live,
+            ambient_seed: 0,
+        },
     )
     .unwrap(); // Keep session and active stamps distinct.
     helper.bind_service_authority(stamp).unwrap(); // Bind before seed/create.
@@ -462,7 +470,11 @@ fn actual_helper_retirement_preserves_native_activation_until_explicit_broker_re
         authorization_epoch: activation.plan.authorization_epoch,
     }; // Derive stamp from private activation.
     let quota = helper_service_quota(); // Keep the original helper root.
-    let mut helper = actual_service_helper("export function plan(){return {}};export async function create(){return {render(context,frame){frame.present()},dispose(){}}}", stamp, quota.clone()); // Run an actual baseline-only helper.
+    let mut helper = actual_service_helper(
+        "export function plan(){return {}};export async function create(){return {render(context,frame){frame.present()},dispose(){}}}",
+        stamp,
+        quota.clone(),
+    ); // Run an actual baseline-only helper.
     assert_eq!(
         helper.start_create(&json!({}), &json!({})).unwrap(),
         CreateState::Ready

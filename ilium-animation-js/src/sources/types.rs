@@ -605,6 +605,8 @@ pub struct AdmittedSourceValue {
     _admission: ilium_execution::StorageAdmission,
     #[serde(skip)]
     _images: Vec<super::NativeSourceImage>,
+    #[serde(skip)]
+    binary_f32: Option<Vec<f32>>,
 }
 impl AdmittedSourceValue {
     pub fn view(&self) -> &Value {
@@ -613,15 +615,22 @@ impl AdmittedSourceValue {
     pub fn native_images(&self) -> &[super::NativeSourceImage] {
         &self._images
     }
+    /// Present only for native elevation delivery. Its original result debit
+    /// remains held by this value until the helper's complete copy ACK.
+    pub fn binary_f32(&self) -> Option<&[f32]> {
+        self.binary_f32.as_deref()
+    }
     pub(crate) fn new(
         value: Value,
         admission: ilium_execution::StorageAdmission,
         images: Vec<super::NativeSourceImage>,
+        binary_f32: Option<Vec<f32>>,
     ) -> Self {
         Self {
             value,
             _admission: admission,
             _images: images,
+            binary_f32,
         }
     }
 }

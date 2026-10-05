@@ -3,10 +3,12 @@
 //! evidence, retire preparation custody, and settle actual terminal emissions.
 //! This module does not implement disk compression or a saved-world adapter.
 use crate::{
+    clip_chunk_store::{ClipChunkReader, ClipChunkStore, ClipChunkWriter, ProceduralFrame},
     clock::{AnimationClock, ClockSample},
     error::{AnimationError, Result},
     manifest::AnimationMode,
     package::Package,
+    permissions::{Grant, PermissionBroker},
     plan::{AnimationPlan, PlanBudget},
     surface::{Format, NativeText, PackedSurface, Shape, Snapshot, SourceToken},
     trust::{PackageIdentity, TrustVerifier},
@@ -122,6 +124,28 @@ pub struct GrantLineage {
     pub capability: String,
     pub scope_digest: [u8; 32],
 }
+impl GrantLineage {
+    /// Only the accepted native Grant returned by the original broker can
+    /// produce this capture descriptor. It remains data; playback rechecks
+    /// the same channel and grant before using the recorded clip.
+    pub(crate) fn from_grant(grant: &Grant) -> Result<Self> {
+        let capability = serde_json::to_value(grant.right.id)?
+            .as_str()
+            .ok_or_else(|| failure("grant capability representation"))?
+            .to_owned();
+        let mut digest = Sha256::new();
+        digest.update(b"ilium-replay-grant-scope-v1\0");
+        digest.update(serde_json::to_vec(&grant.right.scope)?);
+        Ok(Self {
+            request_id: grant.request_id.clone(),
+            capability,
+            scope_digest: digest.finalize().into(),
+        })
+    }
+    pub(crate) fn matches_grant(&self, grant: &Grant) -> Result<bool> {
+        Ok(self == &Self::from_grant(grant)?)
+    }
+}
 fn validate_lineage(lineage: &[GrantLineage]) -> Result<()> {
     if lineage.len() > 32 {
         return Err(failure("grant lineage limit"));
@@ -170,6 +194,40 @@ pub trait ReplayAuthorization: Send + Sync {
         lineage: &[GrantLineage],
         access: ReplayAccess,
     ) -> Result<()>;
+    /// Verify original broker commitment after a real backend flush without
+    /// asking whether a now-revoked channel can authorize a NEW operation.
+    fn validate_flushed(
+        &self,
+        authority: &ReplayAuthority,
+        proof: &ReplayFlushedProof,
+    ) -> Result<()>;
+}
+/// The terminal owner can construct this only after its original broker
+/// settles a complete physical flush. It carries no guessed source dots.
+pub struct ReplayFlushedProof {
+    broker: Arc<Mutex<PermissionBroker>>,
+    authority: ReplayAuthority,
+    _storage: StorageAdmission,
+}
+impl ReplayFlushedProof {
+    pub(crate) fn from_native(
+        broker: Arc<Mutex<PermissionBroker>>,
+        authority: ReplayAuthority,
+        storage: StorageAdmission,
+    ) -> Self {
+        Self {
+            broker,
+            authority,
+            _storage: storage,
+        }
+    }
+    pub(crate) fn belongs_to(
+        &self,
+        broker: &Arc<Mutex<PermissionBroker>>,
+        authority: &ReplayAuthority,
+    ) -> bool {
+        Arc::ptr_eq(&self.broker, broker) && &self.authority == authority
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -237,16 +295,207 @@ impl FrozenInputs {
         &self.capture_label
     }
 }
-/// Native replay certification is distinct from script plan claims. The parent
-/// creates this only after actual deterministic clock/random/reset/barrier checks.
-#[derive(Debug, Clone)]
+/// Native execution-profile witness. It binds an actual sealed helper launch,
+/// immutable package/settings/environment and a no-external-dependency plan.
+/// It certifies the finite captured clip's replay conditions, not a theorem
+/// about arbitrary JavaScript or a source-owned recording.
+#[derive(Debug)]
 pub struct ReplayCertification {
-    pub reset_rules_digest: [u8; 32],
-    pub clock_random_binding_digest: [u8; 32],
-    pub prepared_assets_digest: [u8; 32],
-    pub async_order_digest: [u8; 32],
-    pub full_unoccluded: bool,
-    pub loop_state_continuity_verified: bool,
+    reset_rules_digest: [u8; 32],
+    clock_random_binding_digest: [u8; 32],
+    prepared_assets_digest: [u8; 32],
+    async_order_digest: [u8; 32],
+    full_unoccluded: bool,
+    loop_state_continuity_verified: bool,
+    binding: [u8; 32],
+    ambient_seed: u32,
+    bootstrap_digest: [u8; 32],
+    environment_digest: [u8; 32],
+    helper_build_digest: [u8; 32],
+    recorded_video_opens: u64,
+}
+/// Immutable execution inputs used by the certificate's ordered digest binding.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReplayExecutionIdentity {
+    pub ambient_seed: u32,
+    pub bootstrap_digest: [u8; 32],
+    pub environment_digest: [u8; 32],
+    pub helper_build_digest: [u8; 32],
+}
+
+impl ReplayCertification {
+    /// A source-free package may be certified without editing Rust for each
+    /// archive. The trusted helper configured time/random before guest load;
+    /// the native producer additionally rejects every external host request.
+    pub(crate) fn sealed_procedural(
+        package: &Package,
+        plan: &AnimationPlan,
+        settings: &Value,
+        execution_identity: ReplayExecutionIdentity,
+        preparation_yields: u64,
+    ) -> Result<Self> {
+        Self::sealed(
+            package,
+            plan,
+            settings,
+            execution_identity,
+            preparation_yields,
+            0,
+        )
+    }
+    pub(crate) fn sealed_recorded_video(
+        package: &Package,
+        plan: &AnimationPlan,
+        settings: &Value,
+        execution_identity: ReplayExecutionIdentity,
+        preparation_yields: u64,
+        recorded_video_opens: u64,
+    ) -> Result<Self> {
+        if !(1..=8).contains(&recorded_video_opens) {
+            return Err(failure("recorded Video count"));
+        }
+        Self::sealed(
+            package,
+            plan,
+            settings,
+            execution_identity,
+            preparation_yields,
+            recorded_video_opens,
+        )
+    }
+    fn sealed(
+        package: &Package,
+        plan: &AnimationPlan,
+        settings: &Value,
+        execution_identity: ReplayExecutionIdentity,
+        preparation_yields: u64,
+        recorded_video_opens: u64,
+    ) -> Result<Self> {
+        let ReplayExecutionIdentity {
+            ambient_seed,
+            bootstrap_digest,
+            environment_digest,
+            helper_build_digest,
+        } = execution_identity;
+        let replay = plan
+            .replay
+            .as_ref()
+            .ok_or_else(|| failure("replay declaration absent"))?;
+        if !plan.inputs.is_empty()
+            || (recorded_video_opens == 0 && !plan.permissions.is_empty())
+            || (recorded_video_opens != 0
+                && plan.permissions.iter().any(|permission| {
+                    !matches!(permission.id.as_str(), "disk.read" | "network.http")
+                }))
+            || plan.preparation.is_some()
+            || replay.seamless
+            || replay.input_recording.is_some()
+            || replay.civil_anchor_ms.is_some()
+            || plan.mode_unavailable_reason.is_some()
+        {
+            return Err(failure("finite recorded Video replay profile unavailable"));
+        }
+        if helper_build_digest == [0; 32] {
+            return Err(failure("running helper build identity absent"));
+        }
+        let binding = replay_binding(
+            package,
+            plan,
+            settings,
+            execution_identity,
+            recorded_video_opens != 0,
+        )?;
+        let mut assets = Sha256::new();
+        assets.update(b"ilium-audited-assets-v1");
+        for (path, bytes) in package.files() {
+            if path.starts_with("assets/") {
+                assets.update(path.as_bytes());
+                assets.update((bytes.len() as u64).to_le_bytes());
+                assets.update(Sha256::digest(bytes));
+            }
+        }
+        Ok(Self {
+            reset_rules_digest: Sha256::digest(
+                [b"finite-sequential-samples-v1".as_slice(), &binding].concat(),
+            )
+            .into(),
+            clock_random_binding_digest: Sha256::digest(
+                [b"sealed-ambient-v1".as_slice(), &binding].concat(),
+            )
+            .into(),
+            prepared_assets_digest: assets.finalize().into(),
+            async_order_digest: if recorded_video_opens != 0 {
+                Sha256::digest(
+                    [
+                        b"sequential-recorded-video-v1".as_slice(),
+                        &preparation_yields.to_le_bytes(),
+                        &recorded_video_opens.to_le_bytes(),
+                        &binding,
+                    ]
+                    .concat(),
+                )
+                .into()
+            } else if preparation_yields == 0 {
+                Sha256::digest([b"no-native-async-requests-v1".as_slice(), &binding].concat())
+                    .into()
+            } else {
+                Sha256::digest(
+                    [
+                        b"sequential-create-yields-v1".as_slice(),
+                        &preparation_yields.to_le_bytes(),
+                        &binding,
+                    ]
+                    .concat(),
+                )
+                .into()
+            },
+            full_unoccluded: true,
+            loop_state_continuity_verified: false,
+            binding,
+            ambient_seed,
+            bootstrap_digest,
+            environment_digest,
+            helper_build_digest,
+            recorded_video_opens,
+        })
+    }
+}
+fn replay_binding(
+    package: &Package,
+    plan: &AnimationPlan,
+    settings: &Value,
+    execution_identity: ReplayExecutionIdentity,
+    recorded_video: bool,
+) -> Result<[u8; 32]> {
+    let ReplayExecutionIdentity {
+        ambient_seed,
+        bootstrap_digest,
+        environment_digest,
+        helper_build_digest,
+    } = execution_identity;
+    let mut hash = Sha256::new();
+    hash.update(if recorded_video {
+        b"ilium-audited-recorded-video-binding-v1".as_slice()
+    } else {
+        b"ilium-audited-procedural-binding-v1".as_slice()
+    });
+    hash.update(package.digest().as_bytes());
+    hash.update(bounded_json(&serde_json::to_value(plan)?)?);
+    hash.update(bounded_json(settings)?);
+    hash.update(ambient_seed.to_le_bytes());
+    hash.update(bootstrap_digest);
+    hash.update(environment_digest);
+    hash.update(helper_build_digest);
+    // A cached text raster cannot survive a bundled font revision, even if a
+    // distributor accidentally reuses an otherwise matching helper digest.
+    hash.update(Sha256::digest(include_bytes!(
+        "../../ilium-ambient/assets/fonts/CascadiaCode-Regular.otf"
+    )));
+    hash.update(env!("CARGO_PKG_VERSION").as_bytes());
+    hash.update(v8::V8::get_version().as_bytes());
+    hash.update(std::env::consts::ARCH.as_bytes());
+    hash.update(std::env::consts::OS.as_bytes());
+    Ok(hash.finalize().into())
 }
 /// Actual history commit adapter. Its payload is native frozen ownership
 /// evidence, never arbitrary script owner IDs. Preparation never calls it.
@@ -347,10 +596,94 @@ impl FrozenEvidence {
             .map(|entry| entry.token)
             .ok_or_else(|| failure("source evidence missing"))
     }
+    /// Resolve the token issued for this exact native source. Token-key order
+    /// is unrelated to the input order supplied to `from_native`.
+    pub fn token_for_source(&self, source_digest: [u8; 32], payload: &[u8]) -> Result<SourceToken> {
+        let mut matches = self
+            .entries
+            .values()
+            .filter(|entry| entry.source == source_digest && entry.payload.as_slice() == payload);
+        let token = matches
+            .next()
+            .map(|entry| entry.token)
+            .ok_or_else(|| failure("recorded source evidence missing"))?;
+        if matches.next().is_some() {
+            return Err(failure("recorded source evidence ambiguous"));
+        }
+        Ok(token)
+    }
     fn resolve(&self, token: SourceToken) -> Result<&EvidenceEntry> {
         self.entries
             .get(&token.evidence_key())
             .ok_or_else(|| failure("unretained native source token"))
+    }
+}
+
+#[cfg(test)]
+mod recorded_video_evidence_tests {
+    use super::*;
+    use ilium_execution::QuotaLimits;
+
+    struct SyntheticHistory;
+    impl ReplayHistory for SyntheticHistory {
+        fn emitted(&self, _: [u8; 32], _: &[u8], _: &ReplayReceipt, _: &[usize]) -> Result<()> {
+            Err(failure("synthetic history is never an emission authority"))
+        }
+    }
+
+    #[test]
+    fn token_resolution_uses_original_source_identity_not_token_order() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: 0,
+            worker_bytes: 4096,
+        });
+        let storage = quota.reserve_external_storage(1024).unwrap();
+        let mut entries = BTreeMap::new();
+        let history: Arc<dyn ReplayHistory> = Arc::new(SyntheticHistory);
+        for (token_number, source, payload) in [
+            (20, [1u8; 32], b"first".to_vec()),
+            (10, [2u8; 32], b"second".to_vec()),
+        ] {
+            let token = SourceToken::from_native(token_number).unwrap();
+            entries.insert(
+                token.evidence_key(),
+                EvidenceEntry {
+                    token,
+                    source,
+                    payload,
+                    lineage: Vec::new(),
+                    history: Arc::clone(&history),
+                },
+            );
+        }
+        let evidence = FrozenEvidence {
+            entries,
+            digest: [0; 32],
+            package_digest: "synthetic-test".into(),
+            quota,
+            _storage: storage,
+        };
+        assert_eq!(
+            evidence
+                .token_for_source([1; 32], b"first")
+                .unwrap()
+                .evidence_key(),
+            20
+        );
+        assert_eq!(
+            evidence
+                .token_for_source([2; 32], b"second")
+                .unwrap()
+                .evidence_key(),
+            10
+        );
+        assert!(evidence.token_for_source([1; 32], b"second").is_err());
+        assert!(evidence.token_for_source([3; 32], b"first").is_err());
     }
 }
 pub struct ClipSpecification<'a> {
@@ -384,6 +717,7 @@ pub struct ClipSpec {
     frozen: Arc<FrozenInputs>,
     evidence: Arc<FrozenEvidence>,
     lineage: Vec<GrantLineage>,
+    recorded_video: bool,
     _metadata: StorageAdmission,
 }
 impl ClipSpec {
@@ -419,6 +753,15 @@ impl ClipSpec {
         if input.evidence.package_digest != package.digest() {
             return Err(AnimationError::PermissionDenied(
                 "frozen evidence producing package mismatch".into(),
+            ));
+        }
+        if (input.certification.recorded_video_opens == 0 && !input.evidence.entries.is_empty())
+            || (input.certification.recorded_video_opens != 0
+                && input.evidence.entries.len()
+                    != input.certification.recorded_video_opens as usize)
+        {
+            return Err(failure(
+                "recorded Video evidence count differs from certified opens",
             ));
         }
         let format = match input.shape.format {
@@ -464,6 +807,22 @@ impl ClipSpec {
             }
         }
         input.shape.layout().map_err(|e| failure(&e.to_string()))?;
+        if input.certification.binding
+            != replay_binding(
+                input.package,
+                &plan,
+                input.settings,
+                ReplayExecutionIdentity {
+                    ambient_seed: input.certification.ambient_seed,
+                    bootstrap_digest: input.certification.bootstrap_digest,
+                    environment_digest: input.certification.environment_digest,
+                    helper_build_digest: input.certification.helper_build_digest,
+                },
+                input.certification.recorded_video_opens != 0,
+            )?
+        {
+            return Err(failure("native replay certificate binding mismatch"));
+        }
         if !input.certification.full_unoccluded
             || [
                 input.certification.reset_rules_digest,
@@ -544,6 +903,7 @@ impl ClipSpec {
             frozen: input.frozen,
             evidence: input.evidence,
             lineage,
+            recorded_video: input.certification.recorded_video_opens != 0,
             _metadata: metadata,
         }))
     }
@@ -555,6 +915,9 @@ impl ClipSpec {
     }
     pub fn capture_label(&self) -> &str {
         self.frozen.capture_label()
+    }
+    pub fn is_recorded_video(&self) -> bool {
+        self.recorded_video
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -612,6 +975,7 @@ pub trait ReplayPreparationOwner: Send + Sync {
     fn retire(&self) -> Result<()>;
     fn is_retired(&self) -> bool;
 }
+#[derive(Clone)]
 struct ClipFrame {
     packed: PackedSurface,
     text: Vec<NativeText>,
@@ -619,6 +983,7 @@ struct ClipFrame {
 pub struct ReplayClip {
     spec: Arc<ClipSpec>,
     frames: Vec<ClipFrame>,
+    disk: Option<Arc<ClipChunkReader>>,
     charged_bytes: usize,
     _storage: Arc<StorageAdmission>,
 }
@@ -627,10 +992,49 @@ impl ReplayClip {
         self.spec.key
     }
     pub fn frame_count(&self) -> usize {
-        self.frames.len()
+        self.spec.frames
     }
     pub fn capture_label(&self) -> &str {
         self.spec.capture_label()
+    }
+    /// Archive only a complete source-free clip. The native cache directory
+    /// and quota are supplied by the host; no SourceToken is serialized.
+    /// This transition occurs after finish proved physical producer retirement.
+    pub fn archive_procedural(
+        &self,
+        store: &ClipChunkStore,
+        stop: &StopToken,
+    ) -> Result<Arc<ReplayClip>> {
+        check_stop(stop)?;
+        if !store.shares_root(&self.spec.frozen.quota)
+            || !self.spec.evidence.entries.is_empty()
+            || !self.spec.lineage.is_empty()
+            || self.frames.len() != self.spec.frames
+            || self.disk.is_some()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "protected or incomplete replay cannot use procedural archive".into(),
+            ));
+        }
+        let mut writer = store.begin_procedural(&self.key().hex(), self.spec.frames, false)?;
+        for frame in &self.frames {
+            check_stop(stop)?;
+            writer.push_packed(self.spec.shape, &frame.packed, &frame.text)?;
+        }
+        check_stop(stop)?;
+        writer.finish()?;
+        let disk = Arc::new(store.open_procedural(&self.key().hex())?);
+        if disk.frame_count() != self.spec.frames {
+            return Err(failure("procedural archive frame count"));
+        }
+        let storage = Arc::new(reserve(&self.spec.frozen.quota, 8192)?);
+        Ok(Arc::new(ReplayClip {
+            spec: self.spec.clone(),
+            frames: Vec::new(),
+            disk: Some(disk),
+            charged_bytes: 8192,
+            _storage: storage,
+        }))
     }
 }
 struct CacheEntry {
@@ -686,6 +1090,38 @@ impl ReplayCache {
         stop: StopToken,
         owner_factory: impl FnOnce() -> Result<Arc<dyn ReplayPreparationOwner>>,
     ) -> Result<Preparation> {
+        self.begin_with_store(spec, authority, authorization, stop, None, owner_factory)
+    }
+    /// Stream a source-free procedural preparation to the admitted native
+    /// cache directory. A source-owned producer needs retained cold evidence
+    /// and must use begin() until that adapter exists.
+    pub fn begin_streaming(
+        &self,
+        spec: Arc<ClipSpec>,
+        authority: ReplayAuthority,
+        authorization: Arc<dyn ReplayAuthorization>,
+        stop: StopToken,
+        store: Arc<ClipChunkStore>,
+        owner_factory: impl FnOnce() -> Result<Arc<dyn ReplayPreparationOwner>>,
+    ) -> Result<Preparation> {
+        self.begin_with_store(
+            spec,
+            authority,
+            authorization,
+            stop,
+            Some(store),
+            owner_factory,
+        )
+    }
+    fn begin_with_store(
+        &self,
+        spec: Arc<ClipSpec>,
+        authority: ReplayAuthority,
+        authorization: Arc<dyn ReplayAuthorization>,
+        stop: StopToken,
+        store: Option<Arc<ClipChunkStore>>,
+        owner_factory: impl FnOnce() -> Result<Arc<dyn ReplayPreparationOwner>>,
+    ) -> Result<Preparation> {
         check_stop(&stop)?;
         authority.validate(&spec.package)?;
         authorization.check(&authority, &spec.lineage, ReplayAccess::Prepare)?;
@@ -694,7 +1130,17 @@ impl ReplayCache {
         {
             return Err(failure("clip cache original root mismatch"));
         }
-        let (bytes, scratch) = estimate(&spec, self.limits)?;
+        if let Some(store) = &store {
+            if !store.shares_root(&self.quota)
+                || !spec.evidence.entries.is_empty()
+                || !spec.lineage.is_empty()
+            {
+                return Err(AnimationError::PermissionDenied(
+                    "streaming clip lacks original procedural ownership".into(),
+                ));
+            }
+        }
+        let (bytes, scratch) = estimate(&spec, self.limits, store.is_some())?;
         let mut state = self
             .state
             .lock()
@@ -780,16 +1226,23 @@ impl ReplayCache {
             }
         };
         let mut frames = Vec::new();
-        if frames.try_reserve_exact(spec.frames).is_err() {
-            child_stop.stop();
-            owner.cancel();
-            if owner.is_retired() {
-                if let Ok(mut state) = self.state.lock() {
-                    state.preparing.remove(&spec.key);
+        let writer = if let Some(store) = &store {
+            match store.begin_procedural(&spec.key.hex(), spec.frames, false) {
+                Ok(writer) => Some(writer),
+                Err(error) => {
+                    child_stop.stop();
+                    owner.cancel();
+                    return Err(error);
                 }
             }
-            return Err(failure("clip allocation"));
-        }
+        } else {
+            if frames.try_reserve_exact(spec.frames).is_err() {
+                child_stop.stop();
+                owner.cancel();
+                return Err(failure("clip allocation"));
+            }
+            None
+        };
         // The existing 8192-byte retained metadata envelope includes this boxed owner.
         Ok(Preparation::Started(Box::new(ClipPreparation {
             state: self.state.clone(),
@@ -802,6 +1255,10 @@ impl ReplayCache {
             job,
             owner,
             frames,
+            writer,
+            store,
+            first_frame: None,
+            written: 0,
             pending: None,
             boundary_verified: false,
             failed: false,
@@ -856,8 +1313,105 @@ impl ReplayCache {
             .clips
             .contains_key(&key))
     }
+    /// Swap a physically retired in-memory clip for its completed native disk
+    /// stream. Existing presentation leases retain their original frame bytes.
+    pub fn replace_with_disk(&self, old: &Arc<ReplayClip>, disk: Arc<ReplayClip>) -> Result<()> {
+        if old.key() != disk.key()
+            || disk.disk.is_none()
+            || !self.quota.shares_root(&disk.spec.frozen.quota)
+        {
+            return Err(failure("foreign procedural archive"));
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| failure("clip cache poisoned"))?;
+        let entry = state
+            .clips
+            .get_mut(&old.key())
+            .ok_or_else(|| failure("clip evicted"))?;
+        if !Arc::ptr_eq(&entry.clip, old) {
+            return Err(failure("clip changed during archive"));
+        }
+        entry.clip = disk;
+        Ok(())
+    }
+    /// A cold index is useful only after the current native activation has
+    /// physically retired its helper. Source-owned cold evidence is unavailable.
+    pub fn open_procedural_from_disk(
+        &self,
+        spec: Arc<ClipSpec>,
+        authority: ReplayAuthority,
+        authorization: Arc<dyn ReplayAuthorization>,
+        store: &ClipChunkStore,
+    ) -> Result<Arc<ReplayClip>> {
+        authority.validate(&spec.package)?;
+        if !self.quota.shares_root(&spec.frozen.quota)
+            || !store.shares_root(&self.quota)
+            || !spec.evidence.entries.is_empty()
+            || !spec.lineage.is_empty()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "cold replay lacks original procedural ownership".into(),
+            ));
+        }
+        authorization.check(&authority, &spec.lineage, ReplayAccess::CachedDelivery)?;
+        let disk = Arc::new(store.open_procedural(&spec.key.hex())?);
+        if disk.frame_count() != spec.frames {
+            return Err(failure("cold procedural frame count"));
+        }
+        let storage = Arc::new(reserve(&self.quota, 8192)?);
+        let clip = Arc::new(ReplayClip {
+            spec: spec.clone(),
+            frames: Vec::new(),
+            disk: Some(disk),
+            charged_bytes: 8192,
+            _storage: storage,
+        });
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| failure("clip cache poisoned"))?;
+        if state.preparing.contains_key(&spec.key) {
+            return Err(failure("cold clip conflicts with live preparation"));
+        }
+        state.clock = state
+            .clock
+            .checked_add(1)
+            .ok_or_else(|| failure("LRU clock exhausted"))?;
+        let used = state.clock;
+        if let Some(entry) = state.clips.get_mut(&spec.key) {
+            entry.used = used;
+            return Ok(entry.clip.clone());
+        }
+        while state.clips.len() >= self.limits.max_clips
+            || state
+                .clips
+                .values()
+                .try_fold(clip.charged_bytes, |n, entry| {
+                    add(n, entry.clip.charged_bytes)
+                })?
+                > self.limits.max_cache_bytes
+        {
+            let oldest = state
+                .clips
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| *key)
+                .ok_or_else(|| failure("cold cache admission"))?;
+            state.clips.remove(&oldest);
+        }
+        state.clips.insert(
+            spec.key,
+            CacheEntry {
+                clip: clip.clone(),
+                used,
+            },
+        );
+        Ok(clip)
+    }
 }
-fn estimate(spec: &ClipSpec, limits: ReplayLimits) -> Result<(usize, usize)> {
+fn estimate(spec: &ClipSpec, limits: ReplayLimits, streaming: bool) -> Result<(usize, usize)> {
     if spec.frames > limits.max_frames {
         return Err(AnimationError::Budget("replay frame count".into()));
     }
@@ -871,13 +1425,19 @@ fn estimate(spec: &ClipSpec, limits: ReplayLimits) -> Result<(usize, usize)> {
         multiply(limits.max_text_spans, size_of::<NativeText>())?,
     )?;
     let each = add(add(packed, text)?, size_of::<ClipFrame>() + 512)?;
+    let scratch = add(multiply(packed, 2)?, add(text, 8192)?)?;
+    if streaming {
+        // ChunkWriter accounts its own bounded raw/compressed scratch and
+        // retained frame bytes; only the first frame stays here for boundary.
+        return Ok((8192, scratch));
+    }
     let bytes = add(multiply(spec.frames, each)?, 8192)?;
     if bytes > limits.max_clip_bytes {
         return Err(AnimationError::Budget(
             "full finite replay clip estimate".into(),
         ));
     }
-    Ok((bytes, add(multiply(packed, 2)?, add(text, 8192)?)?))
+    Ok((bytes, scratch))
 }
 /// Native ticket issued from the exact finite schedule; no script can choose a
 /// completed sample ID or use the newest same-sized asynchronous result.
@@ -888,6 +1448,19 @@ pub struct ReplaySample {
     pub time: f64,
     pub wall: f64,
     pub delta: f64,
+}
+impl ReplaySample {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+}
+/// Packed under the original native drawing admission; only the finite
+/// preparation ticket can publish it after acceptance and request checks.
+pub struct CapturedSample {
+    identity: Arc<()>,
+    job: u64,
+    index: usize,
+    frame: ClipFrame,
 }
 pub struct ClipPreparation {
     state: Arc<Mutex<CacheState>>,
@@ -900,6 +1473,10 @@ pub struct ClipPreparation {
     job: u64,
     owner: Arc<dyn ReplayPreparationOwner>,
     frames: Vec<ClipFrame>,
+    writer: Option<ClipChunkWriter>,
+    store: Option<Arc<ClipChunkStore>>,
+    first_frame: Option<ClipFrame>,
+    written: usize,
     pending: Option<usize>,
     boundary_verified: bool,
     failed: bool,
@@ -931,10 +1508,10 @@ impl ClipPreparation {
     }
     pub fn next_sample(&mut self) -> Result<ReplaySample> {
         self.check()?;
-        if self.pending.is_some() || self.frames.len() >= self.spec.frames {
+        if self.pending.is_some() || self.written >= self.spec.frames {
             return Err(failure("sample already open or schedule complete"));
         }
-        let index = self.frames.len();
+        let index = self.written;
         self.pending = Some(index);
         Ok(ReplaySample {
             identity: self.ticket_identity.clone(),
@@ -945,32 +1522,61 @@ impl ClipPreparation {
             delta: if index == 0 { 0.0 } else { 1.0 / self.spec.fps },
         })
     }
-    pub fn push_snapshot(
-        &mut self,
-        sample: ReplaySample,
+    pub fn capture_snapshot(
+        &self,
+        sample: &ReplaySample,
         snapshot: &Snapshot,
         tone: impl FnMut(f32, usize, usize) -> f32,
         threshold: impl FnMut(f32, usize, usize) -> bool,
-    ) -> Result<()> {
+    ) -> Result<CapturedSample> {
+        self.check()?;
+        if !Arc::ptr_eq(&sample.identity, &self.ticket_identity)
+            || sample.job != self.job
+            || self.pending != Some(sample.index)
+            || sample.index != self.written
+        {
+            return Err(failure("wrong replay sample capture"));
+        }
+        let frame = pack(
+            snapshot,
+            &self.spec,
+            self.limits,
+            tone,
+            threshold,
+            &self.stop,
+        )?;
+        Ok(CapturedSample {
+            identity: Arc::clone(&sample.identity),
+            job: sample.job,
+            index: sample.index,
+            frame,
+        })
+    }
+    /// Called only after native accept_frame and the no-request invariant. The
+    /// file adapter writes outside the native drawing-finish callback.
+    pub fn push_captured(&mut self, sample: ReplaySample, captured: CapturedSample) -> Result<()> {
         let result = (|| {
             self.check()?;
             if !Arc::ptr_eq(&sample.identity, &self.ticket_identity)
+                || !Arc::ptr_eq(&captured.identity, &self.ticket_identity)
                 || sample.job != self.job
+                || captured.job != self.job
                 || self.pending != Some(sample.index)
-                || sample.index != self.frames.len()
+                || sample.index != self.written
+                || captured.index != self.written
             {
                 return Err(failure("wrong replay sample completion"));
             }
-            let frame = pack(
-                snapshot,
-                &self.spec,
-                self.limits,
-                tone,
-                threshold,
-                &self.stop,
-            )?;
-            self.check()?;
-            self.frames.push(frame);
+            let frame = captured.frame;
+            if let Some(writer) = &mut self.writer {
+                if self.written == 0 && self.spec.seamless {
+                    self.first_frame = Some(frame.clone());
+                }
+                writer.push_packed(self.spec.shape, &frame.packed, &frame.text)?;
+            } else {
+                self.frames.push(frame);
+            }
+            self.written += 1;
             self.pending = None;
             Ok(())
         })();
@@ -979,11 +1585,21 @@ impl ClipPreparation {
         }
         result
     }
+    pub fn push_snapshot(
+        &mut self,
+        sample: ReplaySample,
+        snapshot: &Snapshot,
+        tone: impl FnMut(f32, usize, usize) -> f32,
+        threshold: impl FnMut(f32, usize, usize) -> bool,
+    ) -> Result<()> {
+        let captured = self.capture_snapshot(&sample, snapshot, tone, threshold)?;
+        self.push_captured(sample, captured)
+    }
     /// Render the boundary at exactly duration after all ordinary samples. Native
     /// state-continuity certification AND exact packed/evidence equality required.
     pub fn boundary_sample(&mut self) -> Result<ReplaySample> {
         self.check()?;
-        if !self.spec.seamless || self.frames.len() != self.spec.frames || self.pending.is_some() {
+        if !self.spec.seamless || self.written != self.spec.frames || self.pending.is_some() {
             return Err(failure("loop boundary not ready"));
         }
         self.pending = Some(self.spec.frames);
@@ -1006,7 +1622,7 @@ impl ClipPreparation {
         let result = (|| {
             self.check()?;
             if !self.spec.seamless
-                || self.frames.len() != self.spec.frames
+                || self.written != self.spec.frames
                 || self.pending != Some(self.spec.frames)
                 || sample.index != self.spec.frames
                 || sample.job != self.job
@@ -1022,7 +1638,11 @@ impl ClipPreparation {
                 threshold,
                 &self.stop,
             )?;
-            let first = self.frames.first().ok_or_else(|| failure("clip empty"))?;
+            let first = self
+                .first_frame
+                .as_ref()
+                .or_else(|| self.frames.first())
+                .ok_or_else(|| failure("clip empty"))?;
             if frame.packed.masks != first.packed.masks
                 || frame.packed.rgb != first.packed.rgb
                 || frame.packed.owners != first.packed.owners
@@ -1041,7 +1661,7 @@ impl ClipPreparation {
     }
     pub fn finish(mut self) -> Result<Arc<ReplayClip>> {
         self.check()?;
-        if self.frames.len() != self.spec.frames
+        if self.written != self.spec.frames
             || self.pending.is_some()
             || (self.spec.seamless && !self.boundary_verified)
         {
@@ -1055,9 +1675,27 @@ impl ClipPreparation {
             return Err(failure("preparation did not actually retire"));
         }
         self.check()?;
+        let disk = if let Some(writer) = self.writer.take() {
+            check_stop(&self.stop)?;
+            writer.finish()?; // Only a complete atomic index becomes visible.
+            let store = self
+                .store
+                .as_ref()
+                .ok_or_else(|| failure("stream store missing"))?;
+            let reader = Arc::new(store.open_procedural(&self.spec.key.hex())?);
+            if reader.frame_count() != self.spec.frames {
+                self.fail();
+                return Err(failure("completed stream frame count changed"));
+            }
+            Some(reader)
+        } else {
+            None
+        };
+        self.check()?;
         let clip = Arc::new(ReplayClip {
             spec: self.spec.clone(),
             frames: std::mem::take(&mut self.frames),
+            disk,
             charged_bytes: self.charged_bytes,
             _storage: self.storage.clone(),
         });
@@ -1101,6 +1739,8 @@ impl ClipPreparation {
     fn fail(&mut self) {
         self.failed = true;
         self.frames.clear();
+        self.first_frame = None;
+        self.writer = None; // A partial index is never published.
         self.pending = None;
         self.stop.stop();
         self.owner.cancel();
@@ -1172,6 +1812,7 @@ pub struct ReplayReceipt {
 struct LeaseState {
     clip: Arc<ReplayClip>,
     index: usize,
+    disk_frame: Option<Arc<ProceduralFrame>>,
     receipt: ReplayReceipt,
     authorization: Arc<dyn ReplayAuthorization>,
     lifecycle: Arc<AtomicU64>,
@@ -1181,6 +1822,14 @@ struct LeaseState {
 }
 pub struct PlaybackLease {
     state: Arc<LeaseState>,
+}
+impl std::fmt::Debug for PlaybackLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PlaybackLease")
+            .field("receipt", &self.state.receipt)
+            .finish()
+    }
 }
 impl PlaybackLease {
     fn check(&self, access: ReplayAccess) -> Result<()> {
@@ -1196,24 +1845,51 @@ impl PlaybackLease {
     }
     pub fn packed(&self) -> Result<&PackedSurface> {
         self.check(ReplayAccess::Playback)?;
-        Ok(&self.state.clip.frames[self.state.index].packed)
+        match &self.state.disk_frame {
+            Some(frame) => Ok(&frame.packed),
+            None => Ok(&self.state.clip.frames[self.state.index].packed),
+        }
     }
     pub fn text(&self) -> Result<&[NativeText]> {
         self.check(ReplayAccess::Playback)?;
-        Ok(&self.state.clip.frames[self.state.index].text)
+        match &self.state.disk_frame {
+            Some(frame) => Ok(&frame.text),
+            None => Ok(&self.state.clip.frames[self.state.index].text),
+        }
     }
     pub fn receipt(&self) -> &ReplayReceipt {
         &self.state.receipt
+    }
+    /// A retained worker snapshot may be painted again. Mint a fresh original
+    /// receipt while sharing its admitted decoded frame; no disk I/O occurs on
+    /// the terminal owner and each physical flush has a unique history key.
+    pub fn fork_for_presentation(&self) -> Result<Self> {
+        self.check(ReplayAccess::Playback)?;
+        let storage = reserve(&self.state.clip.spec.frozen.quota, 4096)?;
+        let mut receipt = self.state.receipt.clone();
+        receipt.lease_sequence = native_id(&NEXT_PRESENTATION)?;
+        let state = Arc::new(LeaseState {
+            clip: Arc::clone(&self.state.clip),
+            index: self.state.index,
+            disk_frame: self.state.disk_frame.clone(),
+            receipt,
+            authorization: Arc::clone(&self.state.authorization),
+            lifecycle: Arc::clone(&self.state.lifecycle),
+            generation: self.state.generation,
+            stop: self.state.stop.clone(),
+            _storage: storage,
+        });
+        Ok(Self { state })
     }
     /// Pre-admit and project final compositor masks before any terminal effect.
     /// This produces no history credit. The host commits under its grant fence.
     pub fn prepare_emission(self, kept_masks: &[u8]) -> Result<PendingEmission> {
         self.check(ReplayAccess::Emission)?;
-        let frame = &self.state.clip.frames[self.state.index];
-        if kept_masks.len() != frame.packed.masks.len()
+        let packed = self.packed()?;
+        if kept_masks.len() != packed.masks.len()
             || kept_masks
                 .iter()
-                .zip(&frame.packed.masks)
+                .zip(&packed.masks)
                 .any(|(kept, mask)| kept & !mask != 0)
         {
             return Err(failure("emission claims absent clip dots"));
@@ -1230,7 +1906,7 @@ impl PlaybackLease {
                         continue;
                     }
                     let dot = (cell / width * 4 + dy) * (width * 2) + cell % width * 2 + dx;
-                    if let Some(token) = frame.packed.owners[dot] {
+                    if let Some(token) = packed.owners[dot] {
                         projected.entry(token.evidence_key()).or_default().push(dot);
                     }
                 }
@@ -1240,51 +1916,79 @@ impl PlaybackLease {
             lease: self.state,
             projected,
             _storage: storage,
+            proof: None,
+            settled_sources: 0,
+            state: EmissionSettlementState::AwaitingProof,
         })
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmissionSettlementState {
+    AwaitingProof,
+    Flushed,
+    ValidationFailed,
+    HistoryFailed,
+    Settled,
+}
 /// Only the trusted native compositor calls this AFTER actual terminal emission
-/// under the ordered authorization fence. Never expose it as script/RPC input.
+/// under the ordered authorization fence. The same admitted owner retains the
+/// flush proof and settlement cursor across every uncertain terminal outcome.
 pub struct PendingEmission {
     lease: Arc<LeaseState>,
     projected: BTreeMap<u64, Vec<usize>>,
     _storage: StorageAdmission,
+    proof: Option<ReplayFlushedProof>,
+    settled_sources: usize,
+    state: EmissionSettlementState,
 }
 impl PendingEmission {
-    pub fn after_host_emission(self) -> Result<EmittedReplay> {
-        let lease = PlaybackLease {
-            state: self.lease.clone(),
-        };
-        lease.check(ReplayAccess::Emission)?;
-        Ok(EmittedReplay {
-            lease: self.lease,
-            projected: self.projected,
-            _storage: self._storage,
-        })
-    }
-}
-/// Single-use committed proof. A later revocation cannot undo an already
-/// authorized emission, and does not fabricate history for invisible dots.
-pub struct EmittedReplay {
-    lease: Arc<LeaseState>,
-    projected: BTreeMap<u64, Vec<usize>>,
-    _storage: StorageAdmission,
-}
-impl EmittedReplay {
-    pub fn settle(self) -> Result<()> {
-        for (token, dots) in &self.projected {
-            let entry = self
-                .lease
-                .clip
-                .spec
-                .evidence
-                .entries
-                .get(token)
-                .ok_or_else(|| failure("emitted evidence missing"))?;
-            entry
-                .history
-                .emitted(entry.source, &entry.payload, &self.lease.receipt, dots)?;
+    pub fn after_host_emission(&mut self, proof: ReplayFlushedProof) -> Result<()> {
+        if self.state != EmissionSettlementState::AwaitingProof || self.proof.is_some() {
+            return Err(failure("replay flush proof already attached"));
         }
+        self.proof = Some(proof);
+        let proof = self
+            .proof
+            .as_ref()
+            .ok_or_else(|| failure("replay flush proof custody missing"))?;
+        if let Err(error) = self
+            .lease
+            .authorization
+            .validate_flushed(&self.lease.receipt.authority, proof)
+        {
+            self.state = EmissionSettlementState::ValidationFailed;
+            return Err(error);
+        }
+        self.state = EmissionSettlementState::Flushed;
+        Ok(())
+    }
+    /// On a failed history call this owner keeps the original flush proof and
+    /// exact remaining source cursor. Output stays blocked and another settle
+    /// call is rejected, because the failed adapter may have partially committed.
+    pub fn settle(&mut self) -> Result<()> {
+        if self.state != EmissionSettlementState::Flushed || self.proof.is_none() {
+            return Err(failure("replay emission is not a validated physical flush"));
+        }
+        while self.settled_sources < self.projected.len() {
+            let Some((&token, dots)) = self.projected.iter().nth(self.settled_sources) else {
+                self.state = EmissionSettlementState::HistoryFailed;
+                return Err(failure("emitted source cursor missing"));
+            };
+            let Some(entry) = self.lease.clip.spec.evidence.entries.get(&token) else {
+                self.state = EmissionSettlementState::HistoryFailed;
+                return Err(failure("emitted evidence missing"));
+            };
+            if let Err(error) =
+                entry
+                    .history
+                    .emitted(entry.source, &entry.payload, &self.lease.receipt, dots)
+            {
+                self.state = EmissionSettlementState::HistoryFailed;
+                return Err(error);
+            }
+            self.settled_sources += 1;
+        }
+        self.state = EmissionSettlementState::Settled;
         Ok(())
     }
 }
@@ -1379,7 +2083,7 @@ impl ReplayPlayer {
             position
         };
         let index =
-            ((position * self.clip.spec.fps).floor() as usize).min(self.clip.frames.len() - 1);
+            ((position * self.clip.spec.fps).floor() as usize).min(self.clip.spec.frames - 1);
         self.leases.retain(|lease| lease.strong_count() > 0);
         if self.leases.len() >= self.max_leases {
             return Err(AnimationError::Budget(
@@ -1387,10 +2091,23 @@ impl ReplayPlayer {
             ));
         }
         let storage = reserve(&self.clip.spec.frozen.quota, 4096)?;
+        let disk_frame = match &self.clip.disk {
+            Some(disk) => Some(Arc::new(
+                disk.procedural_frame(index, self.clip.spec.shape)?,
+            )),
+            None => None,
+        };
+        check_stop(&self.stop)?;
+        self.authorization.check(
+            &self.authority,
+            &self.clip.spec.lineage,
+            ReplayAccess::Playback,
+        )?;
         let sequence = native_id(&NEXT_PRESENTATION)?;
         let state = Arc::new(LeaseState {
             clip: self.clip.clone(),
             index,
+            disk_frame,
             receipt: ReplayReceipt {
                 clip: self.clip.key(),
                 frame: index,
@@ -1464,3 +2181,11 @@ impl Drop for ReplayPlayer {
         self.stop();
     }
 }
+
+// These synthetic cache/player checks need access to private, prevalidated
+// replay state. They do not mint a production replay certificate. Their
+// broker-issued proof follows a test host sink flush, not terminal acceptance;
+// protected-source integration remains a separate native adapter gate.
+#[cfg(test)]
+#[path = "replay_contract_tests.rs"]
+mod replay_contract_tests;

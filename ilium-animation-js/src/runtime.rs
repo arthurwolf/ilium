@@ -6,13 +6,20 @@ use crate::{
         ServiceValue,
     }, // Use the admitted binary service boundary.
     error::{AnimationError, Result},
-    helper::{HelperAuthority, HelperLimits, HelperSession, PreparedSeed, RetainedHelperFrame},
+    helper::{
+        HelperAuthority, HelperLimits, HelperPlayback, HelperSession, PreparedSeed,
+        RetainedHelperFrame,
+    },
     manifest::AnimationMode,
+    native_video::{VideoAuthority, VideoAuthorization, VideoOperation},
     package::{Package, PackageLimits},
     permissions::{
         Activation,
         CallPhase,
         Ceiling,
+        Channel,
+        FrameEmissionOutcome,
+        FrameEmissionTicket,
         HostBinding,
         Invalidation,
         OperationNeed,
@@ -23,15 +30,23 @@ use crate::{
     },
     plan::{AnimationPlan, PlanBudget},
     plan_authorization::AuthorizationProjection,
+    replay::{
+        GrantLineage, ReplayAccess, ReplayAuthority, ReplayAuthorization, ReplayFlushedProof,
+    },
     trust::{PackageIdentity as VerifiedIdentity, TrustVerifier},
 };
 use ilium_execution::{QuotaGroup, StorageAdmission};
+use ilium_platform::owned_worker::StopToken;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, MutexGuard,
+    },
+    time::Instant,
 };
 
 pub struct PackageInstance {
@@ -39,16 +54,339 @@ pub struct PackageInstance {
     quota: QuotaGroup,
     pending_resolution: Option<Arc<()>>,
     helper_retired: bool, // Logical retirement intent never proves that the child or its pipe workers exited.
+    replay_retired_proof: Arc<AtomicBool>, // Published only after actual child and pipe-worker exit.
     broker: Arc<Mutex<PermissionBroker>>,
     identity: VerifiedIdentity,
     package: Arc<Package>,
     mode: AnimationMode, // Retain the native-selected mode so every emission path enforces pre-rendered retirement.
+    ambient_seed: u32, // Derived from verified package and normalized settings before module evaluation.
+    ambient_bootstrap_digest: [u8; 32],
+    environment_digest: [u8; 32],
+    helper_build_digest: [u8; 32],
+    replay_request_count: u64,
+    replay_pure_yield_count: u64,
+    replay_completed_yield_count: u64,
+    replay_video_open_count: u64,
     plan: AnimationPlan,
     projection: AuthorizationProjection,
+    selected_storage: BTreeMap<String, Arc<crate::native_storage::SelectedStorage>>,
+    _selected_storage_metadata: StorageAdmission,
     activation: Option<Activation>,
     creation: Option<CreateState>,
     settings: Value,
     // Original storage is owned by the shared broker through its FINAL native owner.
+}
+
+/// Original broker channel retained with a published frame. The coordinates in
+/// a frame's identity are checked against this channel; they never construct it.
+/// Authorization linearizes when the presenter commits an output operation.
+/// A later revocation cannot undo an already committed write; the terminal
+/// result is settled independently of source-history credit.
+/// An original activation revocation owner that remains callable while an
+/// admitted preparation job temporarily owns the PackageInstance. Numeric
+/// coordinates do not create it; the broker's private channel is retained.
+pub struct RetainedReplayRevoker {
+    broker: Arc<Mutex<PermissionBroker>>,
+    channel: Channel,
+    instance_id: u64,
+    retired: bool,
+    _storage: StorageAdmission,
+}
+impl RetainedReplayRevoker {
+    pub fn revoke(&mut self) -> Result<Option<Invalidation>> {
+        if self.retired {
+            return Ok(None);
+        }
+        let mut broker = lock_broker(&self.broker)?;
+        broker
+            .grant(&self.channel, "_host_channel_check")
+            .map_err(permission_error)?;
+        let invalidation = broker.retire(self.instance_id);
+        self.retired = true;
+        Ok(Some(invalidation))
+    }
+}
+
+/// The only VideoAuthorization exposed to a decoder. It retains the native
+/// channel, original package identity and quota debit; the guest supplies none
+/// of these. Revocation invalidates the broker channel even after finite bytes
+/// have been acquired or the V8 helper has physically retired.
+struct InstanceVideoAuthorization {
+    broker: Arc<Mutex<PermissionBroker>>,
+    channel: Channel,
+    expected: VideoAuthority,
+    resource_id: u64,
+    _storage: StorageAdmission,
+}
+impl VideoAuthorization for InstanceVideoAuthorization {
+    fn check(
+        &self,
+        authority: &VideoAuthority,
+        resource_id: u64,
+        _operation: VideoOperation,
+    ) -> Result<()> {
+        if authority != &self.expected || resource_id != self.resource_id {
+            return Err(AnimationError::PermissionDenied(
+                "video authorization has no original resource owner".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let (instance_id, plan_revision, authorization_epoch) = broker
+            .channel_coordinates(&self.channel)
+            .map_err(permission_error)?;
+        if instance_id != authority.instance_id
+            || plan_revision != authority.plan_revision
+            || authorization_epoch != authority.authorization_epoch
+        {
+            return Err(AnimationError::PermissionDenied(
+                "video authorization is stale or foreign".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub struct RetainedFrameAuthority {
+    broker: Arc<Mutex<PermissionBroker>>,
+    channel: Channel,
+    expected: HelperAuthority,
+    quota: QuotaGroup,
+    _storage: StorageAdmission,
+}
+
+impl std::fmt::Debug for RetainedFrameAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RetainedFrameAuthority")
+            .field("instance_id", &self.expected.instance_id)
+            .field("plan_generation", &self.expected.plan_generation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A non-cloneable permit held by the actual terminal writer through backend
+/// flush. A successful flush only proves bytes were accepted by the backend;
+/// it does not certify which source dots survived composition.
+#[must_use = "settle the committed terminal operation"]
+pub struct CommittedFrameEmission {
+    broker: Arc<Mutex<PermissionBroker>>,
+    expected: HelperAuthority,
+    ticket: Option<FrameEmissionTicket>,
+    storage: Option<StorageAdmission>,
+}
+
+impl CommittedFrameEmission {
+    fn settle(mut self, outcome: FrameEmissionOutcome) -> Result<()> {
+        let ticket = self.ticket.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("terminal emission already settled".into())
+        })?;
+        lock_broker(&self.broker)?
+            .settle_frame_emission(ticket, outcome)
+            .map_err(permission_error)?;
+        self.ticket.take();
+        Ok(())
+    }
+
+    /// The backend accepted the whole frame. Source history is still the
+    /// responsibility of the exact composed-frame receipt after this event.
+    pub fn backend_flushed(mut self) -> Result<ReplayFlushedProof> {
+        let ticket = self.ticket.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("terminal emission already settled".into())
+        })?;
+        lock_broker(&self.broker)?
+            .settle_frame_emission(ticket, FrameEmissionOutcome::BackendFlushed)
+            .map_err(permission_error)?;
+        self.ticket.take();
+        let storage = self.storage.take().ok_or_else(|| {
+            AnimationError::PermissionDenied("terminal emission admission missing".into())
+        })?;
+        Ok(ReplayFlushedProof::from_native(
+            Arc::clone(&self.broker),
+            ReplayAuthority {
+                package_digest: self.expected.package_digest.clone(),
+                instance_id: self.expected.instance_id,
+                revision: self.expected.plan_generation,
+                authorization_epoch: self.expected.authorization_epoch,
+            },
+            storage,
+        ))
+    }
+
+    /// The backend may have accepted a prefix. Do not credit source history or
+    /// reuse the previous diff base; the presenter must stop/resynchronize.
+    pub fn backend_failed_uncertain(self) -> Result<()> {
+        self.settle(FrameEmissionOutcome::BackendFailureUncertain)
+    }
+}
+impl Drop for CommittedFrameEmission {
+    fn drop(&mut self) {
+        // Unwind or early exit after the native effect boundary is uncertain.
+        // A poisoned broker cannot prove settlement: quarantine the original
+        // admission rather than silently release an unsettled physical effect.
+        if let Some(ticket) = self.ticket.take() {
+            let settled = self.broker.lock().is_ok_and(|mut broker| {
+                broker
+                    .settle_frame_emission(&ticket, FrameEmissionOutcome::BackendFailureUncertain)
+                    .is_ok()
+            });
+            if !settled {
+                if let Some(storage) = self.storage.take() {
+                    std::mem::forget(storage);
+                }
+            }
+        }
+    }
+}
+
+impl RetainedFrameAuthority {
+    #[cfg(test)]
+    pub(crate) fn from_active_test_channel(
+        broker: Arc<Mutex<PermissionBroker>>,
+        channel: Channel,
+        expected: HelperAuthority,
+        quota: QuotaGroup,
+    ) -> Result<Self> {
+        let owner = lock_broker(&broker)?;
+        let coordinates = owner
+            .channel_coordinates(&channel)
+            .map_err(permission_error)?;
+        if coordinates
+            != (
+                expected.instance_id,
+                expected.plan_generation,
+                expected.authorization_epoch,
+            )
+            || owner
+                .identity()
+                .content_hash()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+                != expected.package_digest
+        {
+            return Err(AnimationError::PermissionDenied(
+                "test frame owner must retain the original active broker channel".into(),
+            ));
+        }
+        drop(owner);
+        let storage = quota.reserve_external_storage(4096).map_err(|error| {
+            AnimationError::Budget(format!("test frame owner admission: {error:?}"))
+        })?;
+        Ok(Self {
+            broker,
+            channel,
+            expected,
+            quota,
+            _storage: storage,
+        })
+    }
+
+    pub fn begin_output(&self, frame: &HelperAuthority) -> Result<CommittedFrameEmission> {
+        if frame != &self.expected {
+            return Err(AnimationError::PermissionDenied(
+                "published frame identity differs from original native owner".into(),
+            ));
+        }
+        // Admit the in-flight native effect before broker commitment. The
+        // token retains this same original quota root until physical settlement.
+        let storage = self.quota.reserve_external_storage(2048).map_err(|error| {
+            AnimationError::Budget(format!("terminal emission admission: {error:?}"))
+        })?;
+        let mut broker = lock_broker(&self.broker)?;
+        let (instance_id, plan_generation, authorization_epoch) = broker
+            .channel_coordinates(&self.channel)
+            .map_err(permission_error)?;
+        if frame.instance_id != instance_id
+            || frame.plan_generation != plan_generation
+            || frame.authorization_epoch != authorization_epoch
+            || frame.package_digest != self.expected.package_digest
+        {
+            return Err(AnimationError::PermissionDenied(
+                "published frame native activation is stale".into(),
+            ));
+        }
+        // The original broker records the effect under this same mutex. A
+        // revocation before this call denies without terminal I/O; a later
+        // revocation fences future calls but preserves this committed outcome.
+        let ticket = broker
+            .begin_frame_emission(&self.channel)
+            .map_err(permission_error)?;
+        Ok(CommittedFrameEmission {
+            broker: Arc::clone(&self.broker),
+            expected: frame.clone(),
+            ticket: Some(ticket),
+            storage: Some(storage),
+        })
+    }
+}
+
+/// Replay retains the original private channel. Captured grant lineage is
+/// rechecked against this broker at every protected access; serialized values
+/// never become an independent authority.
+struct BrokerReplayAuthorization {
+    broker: Arc<Mutex<PermissionBroker>>,
+    channel: Channel,
+    expected: ReplayAuthority,
+    retired: Arc<AtomicBool>,
+    _storage: StorageAdmission,
+}
+impl ReplayAuthorization for BrokerReplayAuthorization {
+    fn check(
+        &self,
+        authority: &ReplayAuthority,
+        lineage: &[GrantLineage],
+        access: ReplayAccess,
+    ) -> Result<()> {
+        if authority != &self.expected {
+            return Err(AnimationError::PermissionDenied(
+                "stale replay requires its original native owner".into(),
+            ));
+        }
+        if matches!(
+            access,
+            ReplayAccess::CachedDelivery | ReplayAccess::Playback | ReplayAccess::Emission
+        ) && !self.retired.load(Ordering::Acquire)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay producer has not physically retired".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let (instance_id, revision, epoch) = broker
+            .channel_coordinates(&self.channel)
+            .map_err(permission_error)?;
+        if authority.instance_id != instance_id
+            || authority.revision != revision
+            || authority.authorization_epoch != epoch
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay original activation changed".into(),
+            ));
+        }
+        for item in lineage {
+            let grant = broker
+                .current_grant(&self.channel, &item.request_id)
+                .map_err(permission_error)?;
+            if !item.matches_grant(&grant)? {
+                return Err(AnimationError::PermissionDenied(
+                    "recorded replay grant scope changed".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn validate_flushed(
+        &self,
+        authority: &ReplayAuthority,
+        proof: &ReplayFlushedProof,
+    ) -> Result<()> {
+        if authority != &self.expected || !proof.belongs_to(&self.broker, authority) {
+            return Err(AnimationError::PermissionDenied(
+                "flushed replay proof belongs to another original broker or plan".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub struct InstancePreparation<'a> {
@@ -180,6 +518,20 @@ impl VerifiedPreparation {
         broker
             .retain_authority_storage(storage)
             .map_err(permission_error)?;
+        let mut ambient_digest = Sha256::new();
+        ambient_digest.update(b"ilium-v8-replay-ambient-v1");
+        ambient_digest.update(package.digest().as_bytes());
+        ambient_digest.update(serde_json::to_vec(&settings)?);
+        let ambient_digest: [u8; 32] = ambient_digest.finalize().into();
+        let ambient_seed = u32::from_le_bytes([
+            ambient_digest[0],
+            ambient_digest[1],
+            ambient_digest[2],
+            ambient_digest[3],
+        ]);
+        let ambient_bootstrap_digest: [u8; 32] =
+            Sha256::digest(trusted_bootstrap.as_bytes()).into();
+        let environment_digest: [u8; 32] = Sha256::digest(serde_json::to_vec(&environment)?).into();
         let mut helper = HelperSession::launch(
             &helper_executable,
             &archive,
@@ -192,7 +544,12 @@ impl VerifiedPreparation {
             },
             limits,
             quota.clone(),
+            HelperPlayback {
+                mode: mode.clone(),
+                ambient_seed,
+            },
         )?;
+        let helper_build_digest = helper.build_digest();
         let raw = helper.plan(&settings, mode.clone(), &environment)?;
         let mut plan_budget = PlanBudget::default();
         plan_budget.max_clip_seconds = plan_budget
@@ -208,18 +565,33 @@ impl VerifiedPreparation {
                 BTreeMap::new(),
             )
             .map_err(permission_error)?;
+        let selected_storage_metadata =
+            quota.reserve_external_storage(64 * 512).map_err(|error| {
+                AnimationError::Budget(format!("selected storage registry: {error:?}"))
+            })?;
         Ok((
             PackageInstance {
                 helper,
                 quota,
                 pending_resolution: None,
                 helper_retired: false,
+                replay_retired_proof: Arc::new(AtomicBool::new(false)),
                 broker: Arc::new(Mutex::new(broker)),
                 identity,
                 package,
                 mode,
+                ambient_seed,
+                ambient_bootstrap_digest,
+                environment_digest,
+                helper_build_digest,
+                replay_request_count: 0,
+                replay_pure_yield_count: 0,
+                replay_completed_yield_count: 0,
+                replay_video_open_count: 0,
                 plan,
                 projection,
+                selected_storage: BTreeMap::new(),
+                _selected_storage_metadata: selected_storage_metadata,
                 activation: None,
                 creation: None,
                 settings,
@@ -314,9 +686,6 @@ impl ServiceOperation {
     pub(crate) fn request(&self) -> &HostRequest {
         &self.request
     } // Borrow immutable binary planes without separating their original-root admission.
-    pub(crate) fn operation_id(&self) -> u64 {
-        self.ticket.operation_id()
-    } // Native diagnostics may correlate this ID but cannot use it as authority.
 } // Cancellation may signal request().stop_token(), but actual job ownership still determines terminal settlement.
 
 // Observations describe the broker's current actual grant, never the requested
@@ -334,6 +703,22 @@ fn permission_observation(grant: &crate::permissions::Grant, epoch: u64) -> Resu
         "scope": grant.right.scope,
         "epoch": epoch,
     }))
+}
+#[cfg(all(feature = "native-host", feature = "native-network"))]
+#[derive(Clone)]
+pub(crate) struct SourceFeedOperation {
+    ticket: Arc<OperationTicket>,
+    broker: Arc<Mutex<PermissionBroker>>,
+    channel: Channel,
+    quota: QuotaGroup,
+    stop: StopToken,
+    deadline: Instant,
+}
+#[cfg(all(feature = "native-host", feature = "native-network"))]
+impl SourceFeedOperation {
+    fn is_stopped_or_expired(&self) -> bool {
+        self.stop.is_stopped() || Instant::now() >= self.deadline
+    }
 }
 
 fn permission_error(error: crate::permissions::PermissionError) -> AnimationError {
@@ -367,6 +752,26 @@ fn validate_baseline_request(request: &HostRequest) -> Result<()> {
     {
         return Err(AnimationError::PermissionDenied(
             "invalid baseline math operation".into(),
+        ));
+    }
+    Ok(())
+}
+fn validate_media_request(request: &HostRequest) -> Result<()> {
+    if request.is_cancelled()
+        || !matches!(
+            request.method.as_str(),
+            "media.images.decode"
+                | "media.images.resize"
+                | "media.images.sample"
+                | "media.images.close"
+                | "media.video.open"
+                | "media.video.pause"
+                | "media.video.seek"
+                | "media.video.close"
+        )
+    {
+        return Err(AnimationError::PermissionDenied(
+            "invalid baseline media operation".into(),
         ));
     }
     Ok(())
@@ -575,6 +980,75 @@ impl PackageInstance {
             )
             .map_err(permission_error)
     }
+    /// Re-review only actual picker-pinned resources. Every binding is derived
+    /// from an original native file/directory handle and its exact requested
+    /// right; guest-supplied IDs or paths never enter the broker binding table.
+    pub fn review_selected_resources(
+        &mut self,
+        instance_id: u64,
+        revision: u64,
+        resources: BTreeMap<String, Arc<crate::native_storage::SelectedStorage>>,
+        audio: BTreeMap<String, crate::native_audio_capture::QualifiedCaptureBinding>,
+    ) -> Result<PlanReview> {
+        if resources.len() + audio.len() > 64 {
+            return Err(AnimationError::Budget("selected resource count".into()));
+        }
+        let mut bindings = BTreeMap::new();
+        for (request_id, resource) in &resources {
+            let request = self
+                .projection
+                .permission_plan
+                .permissions
+                .iter()
+                .find(|request| request.request_id.as_deref() == Some(request_id))
+                .ok_or_else(|| {
+                    AnimationError::PermissionDenied("selected request identity missing".into())
+                })?;
+            if !resource.matches_right(&crate::permissions::Right {
+                id: request.id,
+                scope: request.scope.clone(),
+            }) {
+                return Err(AnimationError::PermissionDenied(
+                    "selected resource differs from reviewed right".into(),
+                ));
+            }
+            bindings.insert(request_id.clone(), resource.binding().clone());
+        }
+        for (request_id, selected) in &audio {
+            let request = self
+                .projection
+                .permission_plan
+                .permissions
+                .iter()
+                .find(|request| request.request_id.as_deref() == Some(request_id))
+                .ok_or_else(|| {
+                    AnimationError::PermissionDenied(
+                        "selected audio request identity missing".into(),
+                    )
+                })?;
+            if !selected.matches_right(&crate::permissions::Right {
+                id: request.id,
+                scope: request.scope.clone(),
+            }) || bindings.contains_key(request_id)
+            {
+                return Err(AnimationError::PermissionDenied(
+                    "selected audio differs from reviewed right".into(),
+                ));
+            }
+            bindings.insert(request_id.clone(), selected.binding().clone());
+        }
+        let review = self.review_selected(instance_id, revision, bindings)?;
+        self.selected_storage = resources;
+        Ok(review)
+    }
+    pub(crate) fn selected_storage(
+        &self,
+    ) -> &BTreeMap<String, Arc<crate::native_storage::SelectedStorage>> {
+        &self.selected_storage
+    }
+    pub(crate) fn selected_asset_id(request_id: &str) -> String {
+        format!("selected-{:x}", Sha256::digest(request_id.as_bytes()))
+    }
 
     /// Resolve genuine review into privately held authority, without create,
     /// host seeding, dispatch, or frame publication. Caller handles invalidation.
@@ -696,10 +1170,20 @@ impl PackageInstance {
                     .map_err(permission_error)?
                 {
                     accepted_requests.push(request);
-                    observed_grants.push(permission_observation(
-                        grant,
-                        active.plan.authorization_epoch,
-                    )?);
+                    let mut observation =
+                        permission_observation(grant, active.plan.authorization_epoch)?;
+                    if let Some(selected) = self.selected_storage.get(id) {
+                        if grant.binding.as_ref() != Some(selected.binding()) {
+                            return Err(AnimationError::PermissionDenied(
+                                "selected grant lost original pinned binding".into(),
+                            ));
+                        }
+                        observation["handle"] = serde_json::json!({
+                            "id": Self::selected_asset_id(id),
+                            "kind": "asset",
+                        });
+                    }
+                    observed_grants.push(observation);
                 }
             }
             accepted["permissions"] = serde_json::to_value(&accepted_requests)?;
@@ -714,10 +1198,11 @@ impl PackageInstance {
                 helper.bind_service_authority(authority)
             })?;
             self.live_helper_authority()?;
+            let bundle_id = self.bundle_asset_id();
             let seed = self.helper.with_native_publication(|helper| {
                 let broker = lock_broker(&owner)?;
                 authority_from(&broker, active)?;
-                helper.prepare_frame_seed(&serde_json::json!({"frame": null, "host": {"permissions": observed_grants, "cancelled": false, "package": {"id": self.identity.id(), "version": self.package.manifest().version, "digest": self.identity.digest(), "verified_ilium": self.identity.is_ilium()}, "bundle": "bundle", "selection": {"generation": active.plan.plan_revision, "authorization_epoch": active.plan.authorization_epoch}}}), &[], &BTreeMap::new())
+                helper.prepare_frame_seed(&serde_json::json!({"frame": null, "host": {"permissions": observed_grants, "cancelled": false, "package": {"id": self.identity.id(), "version": self.package.manifest().version, "digest": self.identity.digest(), "verified_ilium": self.identity.is_ilium()}, "bundle": {"id": bundle_id, "kind": "asset"}, "selection": {"generation": active.plan.plan_revision, "authorization_epoch": active.plan.authorization_epoch}}}), &[], &BTreeMap::new())
             })?;
             self.activate_frame_seed(seed)?;
             // JS execution is outside the serialized native authority. All resulting
@@ -788,6 +1273,156 @@ impl PackageInstance {
         validate_baseline_request(request)?;
         issue(authority)
     }
+    /// Baseline image and video controls use the already supervised animation worker. This
+    /// brief check cannot authorize selected disk, network, source imagery, or a new
+    /// worker; the native registry and final copy ACK are fenced separately.
+    pub(crate) fn check_baseline_media(&self, request: &HostRequest) -> Result<()> {
+        if self.helper_retired || !request.payload.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "image owner retired or foreign".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)?;
+        validate_media_request(request)
+    }
+    /// Bounded registry insertion only: no decode, image destruction, I/O,
+    /// JavaScript or worker wait is permitted inside the broker mutex.
+    pub(crate) fn with_baseline_media_registry<T>(
+        &self,
+        request: &HostRequest,
+        insert: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.check_baseline_media(request)?;
+        let owner = Arc::clone(&self.broker);
+        let broker = lock_broker(&owner)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)?;
+        insert()
+    }
+    /// The same retained request and exact immutable result pass the helper's
+    /// inert native copy/ACK before any later package continuation executes.
+    pub(crate) fn complete_baseline_media(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.check_baseline_media(request)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "image result belongs to a different quota root".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        let digest = self.package.digest();
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })
+    }
+    /// The immutable package bundle and instance-local cache are baseline
+    /// services. A selected disk or persistent-state operation must instead
+    /// carry its exact original broker ticket and pinned native resource.
+    pub(crate) fn check_baseline_storage(&self, request: &HostRequest) -> Result<()> {
+        if self.helper_retired || !request.payload.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "storage owner retired or foreign".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)?;
+        if request.is_cancelled()
+            || !matches!(
+                request.method.as_str(),
+                "assets.read"
+                    | "assets.list"
+                    | "assets.write"
+                    | "cache.get"
+                    | "cache.put"
+                    | "cache.remove"
+            )
+        {
+            return Err(AnimationError::PermissionDenied(
+                "invalid baseline storage operation".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn complete_baseline_storage(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.check_baseline_storage(request)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "storage result belongs to a different quota root".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        let digest = self.package.digest();
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })
+    }
+    /// The package and broker are both original-instance owners; this
+    /// identity may initialize a cache namespace but cannot authorize I/O.
+    pub(crate) fn storage_principal(&self) -> Result<crate::permissions::PackageIdentity> {
+        self.live_helper_authority()?;
+        Ok(lock_broker(&self.broker)?.identity().clone())
+    }
+    pub(crate) fn state_persist_request_id(&self) -> Result<Option<String>> {
+        self.live_helper_authority()?;
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("persistent state activation missing".into())
+        })?;
+        let request_id = self.projection.permission_plan.permissions.iter()
+            .find(|request| request.id == crate::permissions::Capability::StatePersist
+                && matches!(&request.scope, crate::permissions::Scope::Namespace { name } if name == "session"))
+            .and_then(|request| request.request_id.as_ref());
+        let Some(request_id) = request_id else {
+            return Ok(None);
+        };
+        if lock_broker(&self.broker)?
+            .grant(&active.channel, request_id)
+            .map_err(permission_error)?
+            .is_some()
+        {
+            Ok(Some(request_id.clone()))
+        } else {
+            Ok(None)
+        }
+    }
+    pub(crate) fn bundle_asset_id(&self) -> String {
+        format!("bundle-{}", self.package.digest())
+    }
+    /// Native service owners may install an already admitted prepared resource
+    /// while creation is active in either mode. This is not a frame emission
+    /// and may perform only a bounded registry insertion under the broker guard.
+    pub(crate) fn with_resource_registry_authority<T>(
+        &self,
+        insert: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.live_helper_authority()?;
+        let broker = lock_broker(&self.broker)?;
+        self.current_service_authority_locked(&broker)?;
+        Ok(insert())
+    }
     /// Original native receipt polling only, including after helper retirement.
     /// No request/effect/service acquisition is permitted in this callback.
     pub(crate) fn with_native_math_authority<T>(
@@ -821,32 +1456,197 @@ impl PackageInstance {
             helper.complete_service_request(request.id, authority, value)
         })
     }
-    /// Constructor is native-only, with a genuine channel cloned only AFTER
-    /// durable pending resolution was finished. The factory rechecks at issue.
+    /// Tasks are nonprivileged execution control. Authenticate the original
+    /// activation channel without manufacturing an empty-needs operation ticket.
+    /// In replay, only an empty yield issued while create is pending is pure.
+    pub(crate) fn check_native_task_request(
+        &self,
+        request: &HostRequest,
+    ) -> Result<ServiceAuthority> {
+        if !matches!(
+            request.method.as_str(),
+            "tasks.yield" | "tasks.poll.open" | "tasks.poll.next" | "tasks.poll.close"
+        ) || !request.payload.shares_root(&self.quota)
+            || request.is_cancelled()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "invalid native task request".into(),
+            ));
+        }
+        if self.mode == AnimationMode::PreRendered
+            && (request.method != "tasks.yield"
+                || self.creation != Some(CreateState::Pending)
+                || request.phase != ServicePhase::Create
+                || request.payload.metadata() != &serde_json::json!({})
+                || !request.payload.arrays().is_empty()
+                || !request.payload.planes().is_empty())
+        {
+            return Err(AnimationError::PermissionDenied(
+                "periodic or post-create tasks require live mode".into(),
+            ));
+        }
+        self.live_helper_authority()?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)
+    }
+    /// A bounded registry mutation is serialized with revoke/reconfigure.
+    /// The closure cannot run JS, IPC, an effect, or wait for another owner.
+    pub(crate) fn with_native_task_registry<T>(
+        &self,
+        request: &HostRequest,
+        mutate: impl FnOnce(ServiceAuthority) -> Result<T>,
+    ) -> Result<T> {
+        self.check_native_task_request(request)?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)?;
+        mutate(authority)
+    }
+    pub(crate) fn native_task_authority(&self) -> Result<ServiceAuthority> {
+        self.live_helper_authority()
+    }
+    /// Bounded inert child copy/ACK; the original channel is checked again at
+    /// publication. The existing helper guard defers physical teardown until
+    /// this copy transaction has finished; no package checkpoint runs here.
+    pub(crate) fn complete_native_task(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.check_native_task_request(request)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "foreign task result root".into(),
+            ));
+        }
+        let replay_yield =
+            self.mode == AnimationMode::PreRendered && request.method == "tasks.yield";
+        if replay_yield
+            && (value.metadata() != &serde_json::json!({"ok":true,"value":null})
+                || !value.arrays().is_empty()
+                || !value.planes().is_empty()
+                || self.replay_completed_yield_count >= self.replay_pure_yield_count)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "impure replay yield result".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("task activation missing".into()))?;
+        let digest = self.package.digest();
+        let outcome = self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })?;
+        if replay_yield && outcome == CompletionState::Delivered {
+            self.replay_completed_yield_count += 1;
+        }
+        Ok(outcome)
+    }
+    /// Select an exact original accepted audio request after durable resolution.
+    /// A script source string, copied accepted-plan JSON, or same-root quota
+    /// cannot choose the host device, demand ID, broker channel, or grant epoch.
     #[cfg(feature = "native-host")]
-    pub(crate) fn audio_capture_factory(
+    pub fn selected_audio_capture(
         &self,
         selected: crate::native_audio_capture::QualifiedCaptureBinding,
-        demand_id: String,
-    ) -> Result<crate::native_audio_capture::NativeAudioCaptureFactory> {
+    ) -> Result<
+        Option<(
+            crate::native_audio::AudioDemand,
+            crate::native_audio::AuthenticatedAudioGrant,
+            crate::native_audio_capture::NativeAudioCaptureFactory,
+        )>,
+    > {
         if self.helper_retired {
             return Err(AnimationError::PermissionDenied("helper retired".into()));
         }
+        let Some(plan) = self.plan.inputs.audio.as_ref() else {
+            return Ok(None); // Denied/absent demand never opens a device.
+        };
+        let demand = crate::native_audio::AudioDemand::from_accepted_plan(plan)?;
+        let source = crate::native_audio::AudioSourceSelection::from_accepted_plan(plan)?;
+        if selected.selector() != &source {
+            return Err(AnimationError::PermissionDenied(
+                "selected audio source differs from accepted plan".into(),
+            ));
+        }
+        let needed_products = demand
+            .products
+            .iter()
+            .map(|product| match product {
+                crate::native_audio::AudioProduct::Level => crate::permissions::AudioProduct::Level,
+                crate::native_audio::AudioProduct::Waveform => {
+                    crate::permissions::AudioProduct::Waveform
+                }
+                crate::native_audio::AudioProduct::Envelope => {
+                    crate::permissions::AudioProduct::Envelope
+                }
+                crate::native_audio::AudioProduct::Bands => crate::permissions::AudioProduct::Bands,
+                crate::native_audio::AudioProduct::History => {
+                    crate::permissions::AudioProduct::History
+                }
+            })
+            .collect::<std::collections::BTreeSet<_>>();
         let broker = lock_broker(&self.broker)?;
         self.current_service_authority_locked(&broker)?;
         let active = self
             .activation
             .as_ref()
             .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        let mut selected_request_id = None;
+        for request in &self.projection.permission_plan.permissions {
+            if request.id != selected.capability() {
+                continue;
+            }
+            let id = request.request_id.as_deref().ok_or_else(|| {
+                AnimationError::PermissionDenied("native audio request identity missing".into())
+            })?;
+            let Some(grant) = broker
+                .grant(&active.channel, id)
+                .map_err(permission_error)?
+            else {
+                continue;
+            };
+            let crate::permissions::Scope::Audio { device, products } = &grant.right.scope else {
+                continue;
+            };
+            if grant.binding.as_ref() == Some(selected.binding())
+                && device == selected.scope_device()
+                && needed_products.is_subset(products)
+                && active
+                    .plan
+                    .demands
+                    .contains_key(&crate::plan_authorization::operation_demand(id))
+            {
+                selected_request_id = Some(id.to_owned());
+                break;
+            }
+        }
+        let request_id = selected_request_id.ok_or_else(|| {
+            AnimationError::PermissionDenied("no accepted selected audio demand".into())
+        })?;
+        let epoch = active.plan.authorization_epoch;
         let channel = active.channel.clone();
         drop(broker);
-        crate::native_audio_capture::NativeAudioCaptureFactory::new(
+        let grant = crate::native_audio::AuthenticatedAudioGrant::from_host(
+            source,
+            demand.products.clone(),
+            epoch,
+        )?;
+        let factory = crate::native_audio_capture::NativeAudioCaptureFactory::new(
             selected,
             Arc::clone(&self.broker),
             channel,
-            demand_id,
+            crate::plan_authorization::operation_demand(&request_id),
             self.quota.clone(),
-        )
+        )?;
+        Ok(Some((demand, grant, factory)))
     }
     fn live_helper_authority(&self) -> Result<ServiceAuthority> {
         // Guard every runtime path that could execute package code or issue new work.
@@ -893,6 +1693,42 @@ impl PackageInstance {
                 "helper request activation mismatch; helper retirement: {retirement:?}"
             ))); // Native activation and unrelated native owners remain independently owned.
         } // No request reaches a native service before the whole batch's authority has been checked.
+        if self.mode == AnimationMode::PreRendered {
+            self.replay_video_open_count = self
+                .replay_video_open_count
+                .checked_add(
+                    requests
+                        .iter()
+                        .filter(|request| {
+                            request.method == "media.video.open"
+                                && matches!(
+                                    request.phase,
+                                    ServicePhase::Create | ServicePhase::Async
+                                )
+                        })
+                        .count() as u64,
+                )
+                .ok_or_else(|| AnimationError::Budget("replay Video open counter".into()))?;
+            self.replay_pure_yield_count = self
+                .replay_pure_yield_count
+                .checked_add(
+                    requests
+                        .iter()
+                        .filter(|request| {
+                            request.method == "tasks.yield"
+                                && request.phase == ServicePhase::Create
+                                && request.payload.metadata() == &serde_json::json!({})
+                                && request.payload.arrays().is_empty()
+                                && request.payload.planes().is_empty()
+                        })
+                        .count() as u64,
+                )
+                .ok_or_else(|| AnimationError::Budget("replay pure yield counter".into()))?;
+            self.replay_request_count = self
+                .replay_request_count
+                .checked_add(requests.len() as u64)
+                .ok_or_else(|| AnimationError::Budget("replay host request counter".into()))?;
+        }
         Ok(requests
             .into_iter()
             .filter(|request| !request.is_cancelled())
@@ -974,6 +1810,27 @@ impl PackageInstance {
             self.quota.clone(),
             credentials,
         )
+    }
+    /// Capture the exact grants which covered the original committed Video
+    /// selected/HTTP operation before its helper result settles that ticket.
+    /// The returned lineage has no effect authority without this broker.
+    pub(crate) fn video_replay_lineage(
+        &self,
+        operation: &ServiceOperation,
+    ) -> Result<Vec<GrantLineage>> {
+        if operation.request.method != "media.video.open" {
+            return Err(AnimationError::PermissionDenied(
+                "recorded Video source requires its original open operation".into(),
+            ));
+        }
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("recorded Video activation missing".into())
+        })?;
+        let broker = lock_broker(&self.broker)?;
+        let grants = broker
+            .committed_operation_grants(&operation.ticket, &active.channel)
+            .map_err(permission_error)?;
+        grants.iter().map(GrantLineage::from_grant).collect()
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub(crate) fn source_planning_authority(
@@ -1103,6 +1960,217 @@ impl PackageInstance {
         })
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn dispatch_source_feed_http_service(
+        &mut self,
+        source: &crate::native_source_host::SourcePlanningAuthority,
+        need: OperationNeed,
+    ) -> Result<SourceFeedOperation> {
+        self.live_helper_authority()?;
+        let (owner, channel, quota, stop, deadline) = source.feed_context()?;
+        if !Arc::ptr_eq(&owner, &self.broker) || !quota.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "source feed original broker/quota mismatch".into(),
+            ));
+        }
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("source feed activation missing".into())
+        })?;
+        let mut broker = lock_broker(&self.broker)?;
+        let coordinates = broker
+            .channel_coordinates(&channel)
+            .map_err(permission_error)?;
+        let current = self.current_service_authority_locked(&broker)?;
+        if coordinates
+            != (
+                current.instance_id,
+                current.plan_generation,
+                current.authorization_epoch,
+            )
+            || broker
+                .channel_coordinates(&active.channel)
+                .map_err(permission_error)?
+                != coordinates
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed activation changed".into(),
+            ));
+        }
+        let ticket =
+            self.projection
+                .dispatch_http(&mut broker, &channel, CallPhase::Async, need)?;
+        Ok(SourceFeedOperation {
+            ticket: Arc::new(ticket),
+            broker: owner,
+            channel,
+            quota,
+            stop,
+            deadline,
+        })
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_feed_planning<T>(
+        &self,
+        context: (
+            Arc<Mutex<PermissionBroker>>,
+            Channel,
+            QuotaGroup,
+            StopToken,
+            Instant,
+        ),
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.live_helper_authority()?;
+        let (owner, channel, quota, stop, deadline) = context;
+        if stop.is_stopped()
+            || Instant::now() >= deadline
+            || !Arc::ptr_eq(&owner, &self.broker)
+            || !quota.shares_root(&self.quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed planning owner/lifetime".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let current = self.current_service_authority_locked(&broker)?;
+        if broker
+            .channel_coordinates(&channel)
+            .map_err(permission_error)?
+            != (
+                current.instance_id,
+                current.plan_generation,
+                current.authorization_epoch,
+            )
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed planning channel changed".into(),
+            ));
+        }
+        Ok(issue())
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    fn check_source_feed_operation(&self, operation: &SourceFeedOperation) -> Result<()> {
+        self.live_helper_authority()?;
+        if operation.is_stopped_or_expired()
+            || !Arc::ptr_eq(&operation.broker, &self.broker)
+            || !operation.quota.shares_root(&self.quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed operation lifetime/root mismatch".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        let current = self.current_service_authority_locked(&broker)?;
+        if broker
+            .channel_coordinates(&operation.channel)
+            .map_err(permission_error)?
+            != (
+                current.instance_id,
+                current.plan_generation,
+                current.authorization_epoch,
+            )
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed operation channel changed".into(),
+            ));
+        }
+        broker
+            .check_operation_lineage(&operation.ticket, &operation.channel)
+            .map_err(permission_error)
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_feed_unissued<T>(
+        &self,
+        operation: &SourceFeedOperation,
+        issue: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.check_source_feed_operation(operation)?;
+        issue()
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn commit_source_feed<T>(
+        &mut self,
+        operation: &SourceFeedOperation,
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.check_source_feed_operation(operation)?;
+        lock_broker(&self.broker)?
+            .commit(&operation.ticket, issue)
+            .map_err(permission_error)
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_feed_cpu_authority<T>(
+        &self,
+        operation: &SourceFeedOperation,
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.check_source_feed_operation(operation)?;
+        let broker = lock_broker(&self.broker)?;
+        broker
+            .check_committed_operation(&operation.ticket, &operation.channel)
+            .map_err(permission_error)?;
+        Ok(issue())
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_feed_http_authority<T>(
+        &self,
+        operation: &SourceFeedOperation,
+        needs: &[OperationNeed],
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.check_source_feed_operation(operation)?;
+        let broker = lock_broker(&self.broker)?;
+        broker
+            .check_committed_needs(&operation.ticket, &operation.channel, needs)
+            .map_err(permission_error)?;
+        Ok(issue())
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn source_feed_http_authority_factory(
+        &self,
+        operation: &SourceFeedOperation,
+        credentials: Option<Box<dyn crate::native_http_authority::HostCredentialAdapter>>,
+    ) -> Result<crate::native_http_authority::NativeHttpAuthorityFactory> {
+        self.check_source_feed_operation(operation)?;
+        crate::native_http_authority::NativeHttpAuthorityFactory::from_feed(
+            Arc::clone(&operation.broker),
+            operation.channel.clone(),
+            Arc::clone(&operation.ticket),
+            operation.quota.clone(),
+            operation.stop.clone(),
+            operation.deadline,
+            credentials,
+        )
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn deliver_source_feed<T>(
+        &mut self,
+        operation: &SourceFeedOperation,
+        publish: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.check_source_feed_operation(operation)?;
+        lock_broker(&self.broker)?
+            .deliver(&operation.ticket, publish)
+            .map_err(permission_error)
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn settle_source_feed_terminal(
+        &mut self,
+        operation: &SourceFeedOperation,
+    ) -> Result<()> {
+        if !Arc::ptr_eq(&operation.broker, &self.broker)
+            || !operation.quota.shares_root(&self.quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed terminal foreign owner".into(),
+            ));
+        }
+        let mut broker = lock_broker(&self.broker)?;
+        match broker.settle_without_delivery(&operation.ticket) {
+            Ok(()) | Err(crate::permissions::PermissionError::UnknownOperation) => Ok(()),
+            Err(error) => Err(permission_error(error)),
+        }
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub(crate) fn complete_baseline_source(
         &mut self,
         request: &HostRequest,
@@ -1135,6 +2203,131 @@ impl PackageInstance {
             }
             helper.complete_service_request(request.id, authority, value)
         }) // Actual inert copy ACK; no helper JS/checkpoint under original native owner.
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn copy_native_source_feed_snapshots(
+        &mut self,
+        snapshots: &[Value],
+    ) -> Result<ServiceValue> {
+        self.live_helper_authority()?;
+        if snapshots.len() > 32 {
+            return Err(AnimationError::Budget(
+                "source feed snapshot inventory".into(),
+            ));
+        }
+        let broker = lock_broker(&self.broker)?;
+        self.current_service_authority_locked(&broker)?;
+        ServiceValue::copy_from_host(
+            &Value::Array(snapshots.to_vec()),
+            &[],
+            &BTreeMap::new(),
+            self.engine_limits(),
+            self.quota.clone(),
+        )
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn complete_native_source_feed_close(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.authorize_native_source_feed_close(request)?;
+        let method_kind = request.method.strip_suffix(".close");
+        let fields = request.payload.metadata().as_object();
+        let descriptor = &value.metadata()["value"];
+        if !matches!(
+            method_kind,
+            Some(
+                "sources.series"
+                    | "sources.earthquakes"
+                    | "sources.aircraft"
+                    | "sources.boats"
+                    | "sources.chess"
+                    | "sources.weather"
+            )
+        ) || fields.is_none_or(|fields| {
+            fields.len() != 2
+                || fields.get("kind").and_then(Value::as_str) != method_kind
+                || fields
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_none_or(|id| !id.starts_with("source-feed-") || id.len() > 128)
+        }) || !value.arrays().is_empty()
+            || value.metadata()["ok"] != true
+            || descriptor["id"] != request.payload.metadata()["id"]
+            || descriptor["kind"] != request.payload.metadata()["kind"]
+            || descriptor["revision"].as_u64().is_none()
+            || descriptor["status"]["state"] != "closed"
+            || descriptor.get("latest").is_some()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "native source feed close mismatch".into(),
+            ));
+        }
+        self.complete_baseline_source(request, value)
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn authorize_native_source_feed_close(&self, request: &HostRequest) -> Result<()> {
+        self.live_helper_authority()?;
+        if request.is_cancelled()
+            || !request.payload.shares_root(&self.quota)
+            || !matches!(
+                request.method.as_str(),
+                "sources.series.close"
+                    | "sources.earthquakes.close"
+                    | "sources.aircraft.close"
+                    | "sources.boats.close"
+                    | "sources.chess.close"
+                    | "sources.weather.close"
+            )
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source feed control lifetime/root".into(),
+            ));
+        }
+        self.validate_service_request(request).map(|_| ())
+    }
+
+    /// Release a registered source image only after the helper has accepted
+    /// its original control request. All non-Delivered results keep custody.
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn complete_native_source_image_close(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.live_helper_authority()?;
+        let fields = request.payload.metadata().as_object();
+        if request.method != "media.images.close"
+            || request.is_cancelled()
+            || !request.payload.shares_root(&self.quota)
+            || !value.shares_root(&self.quota)
+            || !value.arrays().is_empty()
+            || value.metadata() != &serde_json::json!({"ok":true,"value":null})
+            || fields.is_none_or(|fields| {
+                fields.len() != 2
+                    || fields.get("kind").and_then(Value::as_str) != Some("image")
+                    || fields
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_none_or(|id| !id.starts_with("source-image-") || id.len() > 64)
+            })
+        {
+            return Err(AnimationError::PermissionDenied(
+                "native source image close request or result mismatch".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let digest = self.package.digest();
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("source image activation missing".into())
+        })?;
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })
     }
 
     #[cfg(all(feature = "native-host", feature = "native-network"))]
@@ -1185,6 +2378,24 @@ impl PackageInstance {
         self.dispatch_service_selected(request, |projection, broker, channel, phase| {
             projection.dispatch_http(broker, channel, phase, need)
         }) // SAME dispatch_service owner path; only the native dependency selector differs.
+    }
+    /// A Video URL open uses the identical reviewed HTTP dependency selector,
+    /// but retains its original Video service request and decoder owner. The
+    /// browser-supplied URL never becomes an FFmpeg argument.
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn dispatch_video_http_service(
+        &mut self,
+        request: HostRequest,
+        need: OperationNeed,
+    ) -> Result<ServiceOperation> {
+        if request.method != "media.video.open" {
+            return Err(AnimationError::PermissionDenied(
+                "invalid native Video HTTP request".into(),
+            ));
+        }
+        self.dispatch_service_selected(request, |projection, broker, channel, phase| {
+            projection.dispatch_http(broker, channel, phase, need)
+        })
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub(crate) fn with_http_operation_authority<T>(
@@ -1370,6 +2581,45 @@ impl PackageInstance {
         self.activate_frame_seed(seed)
     }
 
+    /// Construct a decoder authorization from this original accepted broker
+    /// channel. The caller must assign a fresh nonzero native resource ID and
+    /// separately authenticate its bundle, selected ticket or HTTP receipt.
+    /// This callback stays usable across physical helper retirement for finite
+    /// clip preparation, but revocation still fences every codec effect.
+    pub(crate) fn native_video_authorization(
+        &self,
+        resource_id: u64,
+    ) -> Result<(VideoAuthority, Arc<dyn VideoAuthorization>)> {
+        if resource_id == 0 {
+            return Err(AnimationError::PermissionDenied(
+                "zero native video resource identity".into(),
+            ));
+        }
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("video activation missing".into()))?;
+        let broker = lock_broker(&self.broker)?;
+        let service = self.current_service_authority_locked(&broker)?;
+        let expected = VideoAuthority {
+            package_digest: self.package.digest().into(),
+            instance_id: service.instance_id,
+            plan_revision: service.plan_generation,
+            authorization_epoch: service.authorization_epoch,
+        };
+        let storage = self.quota.reserve_external_storage(512).map_err(|error| {
+            AnimationError::Budget(format!("video authorization admission: {error:?}"))
+        })?;
+        let owner: Arc<dyn VideoAuthorization> = Arc::new(InstanceVideoAuthorization {
+            broker: Arc::clone(&self.broker),
+            channel: active.channel.clone(),
+            expected: expected.clone(),
+            resource_id,
+            _storage: storage,
+        });
+        Ok((expected, owner))
+    }
+
     /// Current native coordinates are advisory until with_frame_authority or with_playback_authority protects actual emission.
     pub fn frame_authority(&self) -> Option<HelperAuthority> {
         // Keep publication coordinates independent from the immutable IPC session stamp.
@@ -1381,6 +2631,126 @@ impl PackageInstance {
             authorization_epoch: active.authorization_epoch,
         }) // These copied fields cannot authorize a later handoff by themselves.
     } // Retained frame ownership and source provenance remain the native presentation owner's responsibility.
+    /// Publish only the native-selected activation's PRIVATE channel with this
+    /// frame. No guest result, copied ID, or catalogue record can call this.
+    /// The returned owner survives retirement until queued terminal output is
+    /// either written or explicitly rejected.
+    pub fn retain_frame_authority(&self) -> Result<RetainedFrameAuthority> {
+        if self.mode == AnimationMode::PreRendered && !self.is_physically_retired() {
+            return Err(AnimationError::Runtime(
+                "pre-rendered output requires physical helper retirement".into(),
+            ));
+        }
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = authority_from(&broker, active)?;
+        let expected = HelperAuthority {
+            package_digest: self.package.digest().into(),
+            instance_id: authority.instance_id,
+            plan_generation: authority.plan_generation,
+            authorization_epoch: authority.authorization_epoch,
+        };
+        drop(broker);
+        let storage = self.quota.reserve_external_storage(4096).map_err(|error| {
+            AnimationError::Budget(format!("retained frame authority: {error:?}"))
+        })?;
+        Ok(RetainedFrameAuthority {
+            broker: Arc::clone(&self.broker),
+            channel: active.channel.clone(),
+            expected,
+            quota: self.quota.clone(),
+            _storage: storage,
+        })
+    }
+    /// Cancellation can revoke this original activation while its helper is
+    /// owned by a finite preparation job. The job still must prove physical
+    /// retirement before the controller releases original custody.
+    pub fn retain_replay_revoker(&self) -> Result<RetainedReplayRevoker> {
+        if self.mode != AnimationMode::PreRendered {
+            return Err(AnimationError::PermissionDenied(
+                "live instance cannot delegate replay".into(),
+            ));
+        }
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("native replay activation missing".into())
+        })?;
+        let broker = lock_broker(&self.broker)?;
+        let current = authority_from(&broker, active)?;
+        drop(broker);
+        let storage = self.quota.reserve_external_storage(4096).map_err(|error| {
+            AnimationError::Budget(format!("replay revoker storage: {error:?}"))
+        })?;
+        Ok(RetainedReplayRevoker {
+            broker: Arc::clone(&self.broker),
+            channel: active.channel.clone(),
+            instance_id: current.instance_id,
+            retired: false,
+            _storage: storage,
+        })
+    }
+    /// The producer obtains this while active; the same retained native broker
+    /// permits playback only after retire_helper confirms physical exit.
+    pub fn retain_procedural_replay_authorization(
+        &self,
+    ) -> Result<(ReplayAuthority, Arc<dyn ReplayAuthorization>)> {
+        if self.mode != AnimationMode::PreRendered {
+            return Err(AnimationError::PermissionDenied(
+                "live instance cannot issue replay".into(),
+            ));
+        }
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("native replay activation missing".into())
+        })?;
+        let broker = lock_broker(&self.broker)?;
+        let current = authority_from(&broker, active)?;
+        let authority = ReplayAuthority {
+            package_digest: self.package.digest().into(),
+            instance_id: current.instance_id,
+            revision: current.plan_generation,
+            authorization_epoch: current.authorization_epoch,
+        };
+        drop(broker);
+        let storage = self.quota.reserve_external_storage(4096).map_err(|error| {
+            AnimationError::Budget(format!("replay authorization storage: {error:?}"))
+        })?;
+        Ok((
+            authority.clone(),
+            Arc::new(BrokerReplayAuthorization {
+                broker: Arc::clone(&self.broker),
+                channel: active.channel.clone(),
+                expected: authority,
+                retired: Arc::clone(&self.replay_retired_proof),
+                _storage: storage,
+            }),
+        ))
+    }
+    /// Register a source result that has already passed its original source
+    /// completion guard. Registration is not frame emission: it may occur
+    /// during create, including before a pre-rendered helper is retired.
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_registration_authority<T>(
+        &mut self,
+        expected: &HelperAuthority,
+        register: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.live_helper_authority()?;
+        let owner = Arc::clone(&self.broker);
+        let broker = lock_broker(&owner)?;
+        let active = self.current_service_authority_locked(&broker)?;
+        if expected.package_digest != self.package.digest()
+            || expected.instance_id != active.instance_id
+            || expected.plan_generation != active.plan_generation
+            || expected.authorization_epoch != active.authorization_epoch
+        {
+            return Err(AnimationError::PermissionDenied(
+                "native source registration activation changed".into(),
+            ));
+        }
+        Ok(register())
+    }
     pub fn with_frame_authority<T>(
         &mut self,
         expected: &HelperAuthority,
@@ -1440,6 +2810,108 @@ impl PackageInstance {
     pub fn plan(&self) -> &AnimationPlan {
         &self.plan
     }
+    /// The exact reviewed package bytes and accepted no-input plan are bound
+    /// to the pre-evaluation ambient seed. Any other package/mode fails closed.
+    pub fn certify_procedural_replay(&self) -> Result<crate::replay::ReplayCertification> {
+        if self.mode != AnimationMode::PreRendered
+            || self.creation != Some(CreateState::Ready)
+            || self.helper_retired
+            || self.current_service_authority().is_err()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay preparation owner is not active".into(),
+            ));
+        }
+        if self.replay_request_count != self.replay_pure_yield_count
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "unqualified or unsettled native host requests occurred during replay creation"
+                    .into(),
+            ));
+        }
+        crate::replay::ReplayCertification::sealed_procedural(
+            &self.package,
+            &self.plan,
+            &self.settings,
+            crate::replay::ReplayExecutionIdentity {
+                ambient_seed: self.ambient_seed,
+                bootstrap_digest: self.ambient_bootstrap_digest,
+                environment_digest: self.environment_digest,
+                helper_build_digest: self.helper_build_digest,
+            },
+            self.replay_completed_yield_count,
+        )
+    }
+    /// Certified finite Video recordings are distinct from the procedural
+    /// source-free profile. The native Video owner supplies the exact count of
+    /// successful originally acquired sources, not guest IDs or a plan claim.
+    pub fn certify_recorded_video_replay(
+        &self,
+        acquired_video_count: usize,
+    ) -> Result<crate::replay::ReplayCertification> {
+        if self.mode != AnimationMode::PreRendered
+            || self.creation != Some(CreateState::Ready)
+            || self.helper_retired
+            || self.current_service_authority().is_err()
+            || acquired_video_count == 0
+            || acquired_video_count > 8
+            || self.replay_video_open_count != acquired_video_count as u64
+            || self
+                .replay_pure_yield_count
+                .checked_add(self.replay_video_open_count)
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "recorded replay lacks exact settled Video source inventory".into(),
+            ));
+        }
+        crate::replay::ReplayCertification::sealed_recorded_video(
+            &self.package,
+            &self.plan,
+            &self.settings,
+            crate::replay::ReplayExecutionIdentity {
+                ambient_seed: self.ambient_seed,
+                bootstrap_digest: self.ambient_bootstrap_digest,
+                environment_digest: self.environment_digest,
+                helper_build_digest: self.helper_build_digest,
+            },
+            self.replay_completed_yield_count,
+            self.replay_video_open_count,
+        )
+    }
+    pub fn check_recorded_video_replay_requests(&self, acquired_video_count: usize) -> Result<()> {
+        if self.mode != AnimationMode::PreRendered
+            || self.replay_video_open_count != acquired_video_count as u64
+            || self
+                .replay_pure_yield_count
+                .checked_add(self.replay_video_open_count)
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "recorded replay issued a new external request".into(),
+            ));
+        }
+        Ok(())
+    }
+    /// Sample-to-sample native work must remain empty for this source-free
+    /// profile. A newly issued request invalidates the incomplete clip.
+    pub fn check_procedural_replay_requests(&self) -> Result<()> {
+        if self.mode != AnimationMode::PreRendered
+            || self.replay_request_count != self.replay_pure_yield_count
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "procedural replay issued an external host request".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub fn ambient_seed(&self) -> u32 {
+        self.ambient_seed
+    }
     pub fn package(&self) -> &Package {
         &self.package
     }
@@ -1460,6 +2932,7 @@ impl PackageInstance {
                 "helper cancellation did not prove physical retirement".into(),
             ));
         } // Require explicit child and worker exit evidence even after a nominal cancellation return.
+        self.replay_retired_proof.store(true, Ordering::Release);
         Ok(()) // Native activation, broker decisions, retained clips, and actual native jobs remain separately owned.
     } // Pre-rendered playback must still use with_playback_authority at actual emission.
     pub fn revoke_activation(&mut self) -> Result<Option<Invalidation>> {
@@ -1539,9 +3012,165 @@ mod shared_authority_tests {
             Err(std::sync::TryLockError::WouldBlock)
         ));
         drop(guard);
-        let _invalidation = lock_broker(&other).unwrap().retire(1);
+        let invalidation = lock_broker(&other).unwrap().retire(1);
+        assert_eq!(invalidation.instance_ids, vec![1]);
+        assert!(invalidation.operations.is_empty()); // This broker-only fixture has no native work to cancel.
         assert!(authority_from(&lock_broker(&owner).unwrap(), &active).is_err());
         assert!(authority_from(&broker(), &active).is_err());
+    }
+    #[test]
+    fn retained_frame_owner_uses_original_channel_at_output_boundary() {
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 1024,
+            result_bytes: 1024,
+            worker_threads: 1,
+            worker_bytes: 8192,
+        });
+        let owner = Arc::new(Mutex::new(broker()));
+        let active = {
+            let mut broker = lock_broker(&owner).unwrap();
+            let review = broker
+                .prepare(
+                    1,
+                    1,
+                    crate::permissions::PermissionPlan {
+                        permissions: vec![],
+                        demands: vec![],
+                    },
+                    BTreeMap::new(),
+                )
+                .unwrap();
+            broker
+                .resolve(review, BTreeMap::new())
+                .unwrap()
+                .activation
+                .unwrap()
+        };
+        let expected = HelperAuthority {
+            package_digest: "genuine-test-package".into(),
+            instance_id: active.plan.instance_id,
+            plan_generation: active.plan.plan_revision,
+            authorization_epoch: active.plan.authorization_epoch,
+        };
+        let foreign = RetainedFrameAuthority {
+            broker: Arc::new(Mutex::new(broker())),
+            channel: active.channel.clone(),
+            expected: expected.clone(),
+            quota: quota.clone(),
+            _storage: quota.reserve_external_storage(4096).unwrap(),
+        };
+        assert!(matches!(
+            foreign.begin_output(&expected),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        drop(foreign);
+        let retained = RetainedFrameAuthority {
+            broker: Arc::clone(&owner),
+            channel: active.channel,
+            expected: expected.clone(),
+            quota: quota.clone(),
+            _storage: quota.reserve_external_storage(4096).unwrap(),
+        };
+        let mut copied = expected.clone();
+        copied.plan_generation += 1;
+        assert!(matches!(
+            retained.begin_output(&copied),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        copied.plan_generation = expected.plan_generation;
+        copied.authorization_epoch += 1;
+        assert!(matches!(
+            retained.begin_output(&copied),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        let committed_success = retained.begin_output(&expected).unwrap();
+        let committed_uncertain = retained.begin_output(&expected).unwrap();
+        assert_eq!(lock_broker(&owner).unwrap().pending_frame_emissions(), 2);
+        let invalidation = lock_broker(&owner).unwrap().retire(expected.instance_id);
+        assert_eq!(invalidation.instance_ids, vec![expected.instance_id]);
+        assert!(invalidation.operations.is_empty()); // Frame commits have separate retained custody below.
+        assert_eq!(lock_broker(&owner).unwrap().pending_frame_emissions(), 2);
+        committed_uncertain.backend_failed_uncertain().unwrap();
+        // The uncertain debit has retired, so a denial here cannot be
+        // mistaken for quota exhaustion while the valid token remains live.
+        assert!(matches!(
+            retained.begin_output(&expected),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        // Genuine effects committed before retirement settle afterward.
+        drop(retained);
+        assert_eq!(quota.snapshot().worker_bytes, 2048);
+        committed_success.backend_flushed().unwrap();
+        assert_eq!(lock_broker(&owner).unwrap().pending_frame_emissions(), 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+    #[test]
+    fn procedural_replay_adapter_rechecks_private_broker_and_retirement_gate() {
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 1024,
+            result_bytes: 1024,
+            worker_threads: 1,
+            worker_bytes: 8192,
+        });
+        let owner = Arc::new(Mutex::new(broker()));
+        let active = {
+            let mut broker = lock_broker(&owner).unwrap();
+            let review = broker
+                .prepare(
+                    1,
+                    1,
+                    crate::permissions::PermissionPlan {
+                        permissions: vec![],
+                        demands: vec![],
+                    },
+                    BTreeMap::new(),
+                )
+                .unwrap();
+            broker
+                .resolve(review, BTreeMap::new())
+                .unwrap()
+                .activation
+                .unwrap()
+        };
+        let authority = ReplayAuthority {
+            package_digest: "genuine-test-package".into(),
+            instance_id: active.plan.instance_id,
+            revision: active.plan.plan_revision,
+            authorization_epoch: active.plan.authorization_epoch,
+        };
+        let adapter = BrokerReplayAuthorization {
+            broker: Arc::clone(&owner),
+            channel: active.channel,
+            expected: authority.clone(),
+            retired: Arc::new(AtomicBool::new(false)),
+            _storage: quota.reserve_external_storage(4096).unwrap(),
+        };
+        assert!(adapter
+            .check(&authority, &[], ReplayAccess::Prepare)
+            .is_ok());
+        assert!(matches!(
+            adapter.check(&authority, &[], ReplayAccess::Playback),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        let mut stale = authority.clone();
+        stale.revision += 1;
+        assert!(matches!(
+            adapter.check(&stale, &[], ReplayAccess::Prepare),
+            Err(AnimationError::PermissionDenied(_))
+        ));
+        let invalidation = lock_broker(&owner).unwrap().retire(authority.instance_id);
+        assert_eq!(invalidation.instance_ids, vec![authority.instance_id]);
+        assert!(invalidation.operations.is_empty()); // No native operation was issued by this fixture.
+        assert!(matches!(
+            adapter.check(&authority, &[], ReplayAccess::Prepare),
+            Err(AnimationError::PermissionDenied(_))
+        ));
     }
     #[test]
     fn poisoned_shared_authority_is_never_recovered() {
@@ -1738,6 +3367,9 @@ mod retirement_boundary_tests {
         assert_eq!(resolution.accepted_creation(), Some(CreateState::Ready));
         let expected = instance.frame_authority().unwrap();
         assert!(!instance.helper.is_physically_retired());
+        assert!(!instance
+            .replay_retired_proof
+            .load(std::sync::atomic::Ordering::Acquire));
         // Force only the real native logical state assigned by retire_helper BEFORE
         // cancellation/join. Do not fabricate a child, activation, physical proof,
         // grant, successful join or configured producer limit.
@@ -1754,6 +3386,9 @@ mod retirement_boundary_tests {
         // Retire the actual test-owned helper through its ordinary physical path.
         instance.retire_helper().unwrap();
         assert!(instance.is_physically_retired());
+        assert!(instance
+            .replay_retired_proof
+            .load(std::sync::atomic::Ordering::Acquire));
         drop(instance);
         assert_eq!(quota.snapshot().worker_threads, 0);
         assert_eq!(quota.snapshot().worker_bytes, 0);

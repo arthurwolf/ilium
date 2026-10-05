@@ -70,6 +70,25 @@ impl<T> Default for Cache<T> {
 fn invalid(message: &str) -> AnimationError {
     AnimationError::Runtime(format!("native frame inputs: {message}"))
 }
+fn checked_audio_snapshot(
+    snapshot: Option<Arc<RetainedAudioSnapshot>>,
+    quota: &QuotaGroup,
+    authority: &HelperAuthority,
+) -> Result<Option<Arc<RetainedAudioSnapshot>>> {
+    if snapshot
+        .as_ref()
+        .is_some_and(|value| !value.shares_root(quota))
+    {
+        return Err(invalid("foreign retained audio root"));
+    }
+    if snapshot
+        .as_ref()
+        .is_some_and(|value| value.authority() != Some(authority))
+    {
+        return Err(invalid("foreign retained audio activation"));
+    }
+    Ok(snapshot)
+}
 impl<T> Cache<T> {
     fn refresh(
         &mut self,
@@ -342,15 +361,9 @@ impl NativeFrameInputs {
         }
         if let Some(d) = &self.wanted.audio {
             let quota = &self.quota;
+            let authority = &self.authority;
             self.audio.refresh(now, d.max_hz, || {
-                let snapshot = provider.audio(d)?;
-                if snapshot
-                    .as_ref()
-                    .is_some_and(|value| !value.shares_root(quota))
-                {
-                    return Err(invalid("foreign retained audio root"));
-                }
-                Ok(snapshot)
+                checked_audio_snapshot(provider.audio(d)?, quota, authority)
             })?;
         }
         let mut out = Builder::new(self.quota.clone(), self.limits.clone())?;
@@ -482,58 +495,65 @@ impl NativeFrameInputs {
             for product in &d.products {
                 match product.as_str() {
                     "level" => {
-                        if let Some(v) = source.level {
-                            if !v.is_finite() {
-                                return Err(invalid("audio level"));
-                            }
-                            value["level"] = json!(v);
+                        let v = source.level.ok_or_else(|| invalid("missing audio level"))?;
+                        if !v.is_finite() {
+                            return Err(invalid("audio level"));
                         }
-                        if let Some(v) = source.rms {
-                            if !v.is_finite() {
-                                return Err(invalid("audio rms"));
-                            }
-                            value["rms"] = json!(v);
+                        value["level"] = json!(v);
+                        let v = source.rms.ok_or_else(|| invalid("missing audio rms"))?;
+                        if !v.is_finite() {
+                            return Err(invalid("audio rms"));
                         }
+                        value["rms"] = json!(v);
                     }
                     "waveform" => {
-                        if let Some(data) = &source.waveform {
-                            out.floats("audio.waveform", data, d.waveform_samples.unwrap_or(256))?;
-                        }
+                        let data = source
+                            .waveform
+                            .as_ref()
+                            .ok_or_else(|| invalid("missing audio waveform"))?;
+                        out.floats("audio.waveform", data, d.waveform_samples.unwrap_or(256))?;
                     }
                     "envelope" => {
-                        if let Some(data) = &source.envelope {
-                            out.floats("audio.envelope", data, 1024)?;
-                        }
+                        let data = source
+                            .envelope
+                            .as_ref()
+                            .ok_or_else(|| invalid("missing audio envelope"))?;
+                        out.floats("audio.envelope", data, 1024)?;
                     }
                     "bands" => {
-                        if let Some(data) = &source.bands {
-                            out.floats("audio.bands", data, d.band_count.unwrap_or(32))?;
-                            if let Some(count) = source.band_count {
-                                value["band_count"] = json!(count);
-                            }
-                        }
+                        let data = source
+                            .bands
+                            .as_ref()
+                            .ok_or_else(|| invalid("missing audio bands"))?;
+                        out.floats("audio.bands", data, d.band_count.unwrap_or(32))?;
+                        value["band_count"] = json!(source
+                            .band_count
+                            .ok_or_else(|| invalid("missing audio band count"))?);
                     }
                     "history" => {
-                        if let Some(data) = &source.history {
-                            let maximum = d
-                                .band_count
-                                .unwrap_or(32)
-                                .checked_mul(d.history_frames.unwrap_or(32))
-                                .ok_or_else(|| invalid("audio history shape"))?;
-                            out.floats("audio.history", data, maximum)?;
-                            if let Some(count) = source.band_count {
-                                value["band_count"] = json!(count);
-                            }
-                            if let Some(count) = source.history_frames {
-                                value["history_frames"] = json!(count);
-                            }
-                        }
+                        let data = source
+                            .history
+                            .as_ref()
+                            .ok_or_else(|| invalid("missing audio history"))?;
+                        let maximum = d
+                            .band_count
+                            .unwrap_or(32)
+                            .checked_mul(d.history_frames.unwrap_or(32))
+                            .ok_or_else(|| invalid("audio history shape"))?;
+                        out.floats("audio.history", data, maximum)?;
+                        value["band_count"] = json!(source
+                            .band_count
+                            .ok_or_else(|| invalid("missing audio band count"))?);
+                        value["history_frames"] = json!(source
+                            .history_frames
+                            .ok_or_else(|| invalid("missing audio history count"))?);
                     }
                     _ => return Err(invalid("unknown accepted audio product")),
                 }
             }
             out.inputs.insert("audio".into(), value);
         }
+        instance.check_live_input_authority(&self.authority)?;
         out.finish()
     }
 }
@@ -574,6 +594,30 @@ mod tests {
             .unwrap();
         assert_eq!(calls, 2);
         assert!(cache.value.is_none());
+    }
+    #[test]
+    fn unbound_or_foreign_audio_snapshot_is_refused_before_frame_copy() {
+        let original = quota(4 * 1024 * 1024);
+        let foreign = quota(4 * 1024 * 1024);
+        let mut demand = crate::native_audio::AudioDemand::default();
+        demand
+            .products
+            .insert(crate::native_audio::AudioProduct::Waveform);
+        let mut processor =
+            crate::native_audio::AudioProcessor::new(demand, original.clone()).unwrap();
+        processor.push(&[0.25]).unwrap();
+        let snapshot = processor.snapshot(0, 1_780_000_000_000).unwrap();
+        let authority = HelperAuthority {
+            package_digest: "a".repeat(64),
+            instance_id: 1,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        };
+        assert!(checked_audio_snapshot(Some(snapshot.clone()), &foreign, &authority).is_err());
+        assert!(checked_audio_snapshot(Some(snapshot), &original, &authority).is_err());
+        assert!(checked_audio_snapshot(None, &original, &authority)
+            .unwrap()
+            .is_none());
     }
     #[test]
     fn pathological_rate_refuses_before_gather() {

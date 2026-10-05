@@ -366,3 +366,30 @@ fn real_font_coverage_and_unicode_continuations_preserve_native_contract() {
         .styled_cells(&[TextSpan { text: "界", style }], 1, &stop)
         .is_err());
 }
+
+#[test]
+fn bundled_font_measure_matches_raster_extent_and_releases_scratch() {
+    let (media, quota) = bank();
+    let stop = StopToken::default();
+    let before = quota.snapshot().worker_bytes;
+    assert_eq!(media.measure_text("", 16., &stop).unwrap(), (0, 0));
+    let (width, height) = media.measure_text("A", 16., &stop).unwrap();
+    assert!(width > 0 && height > 0);
+    assert_eq!(quota.snapshot().worker_bytes, before);
+    let raster = media.raster_text("A", 16., width, height, &stop).unwrap();
+    assert_eq!((raster.view().width, raster.view().height), (width, height));
+    assert!(raster.view().mask.iter().any(|coverage| *coverage > 0));
+    drop(raster);
+    assert_eq!(quota.snapshot().worker_bytes, before);
+    assert!(media.measure_text("A\nB", 16., &stop).is_err());
+    assert!(media.measure_text("A", 7., &stop).is_err());
+    assert!(media.measure_text("\u{10ffff}", 16., &stop).is_err());
+    let small = root_quota(1024 * 1024);
+    let constrained = NativeMedia::new(small.clone(), MediaLimits::default()).unwrap();
+    let baseline = small.snapshot().worker_bytes;
+    assert!(constrained.measure_text("A", 16., &stop).is_err());
+    assert_eq!(small.snapshot().worker_bytes, baseline);
+    let cancelled = StopToken::default();
+    cancelled.stop();
+    assert!(media.measure_text("A", 16., &cancelled).is_err());
+}

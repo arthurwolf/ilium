@@ -410,7 +410,7 @@ impl PreparationBudget {
     }
 }
 
-struct NativeDns(Arc<dyn DnsResolver + Send + Sync>);
+pub(crate) struct NativeDns(Arc<dyn DnsResolver + Send + Sync>);
 impl DnsResolver for NativeDns {
     fn resolve(&self, host: &str, port: u16) -> Result<Vec<std::net::SocketAddr>> {
         self.0.resolve(host, port)
@@ -697,6 +697,34 @@ impl NativeHttpHost {
             preparation: PreparationBudget::from_plan(instance.plan())?,
             _metadata: metadata,
         })
+    }
+    /// Video URL acquisition shares the actual HTTP owner's declared create
+    /// preparation budget and original finite client/DNS adapter. The Video
+    /// owner retains its own original request, operation and Receipt.
+    pub(crate) fn video_preparation(
+        &self,
+        instance: &PackageInstance,
+        request: &HostRequest,
+        maximum: usize,
+    ) -> Result<Option<(u64, u64)>> {
+        instance.check_http_owner(&self.owner, &self.quota)?;
+        if self.closed
+            || request.method != "media.video.open"
+            || request.is_cancelled()
+            || !request.payload.shares_root(&self.quota)
+            || !(1..=32_000_000).contains(&maximum)
+        {
+            return Err(permission("Video URL HTTP owner or body bound"));
+        }
+        self.preparation.next(request.phase, maximum)
+    }
+    /// Call only inside PackageInstance::commit_service's actual bounded IO
+    /// submission closure, after all other admission and factory preparation.
+    pub(crate) fn record_video_preparation(&mut self, next: Option<(u64, u64)>) {
+        self.preparation.record(next);
+    }
+    pub(crate) fn video_transport(&self) -> (Client, NativeDns) {
+        (self.client.clone(), NativeDns(Arc::clone(&self.dns)))
     }
     fn refusal(
         &self,

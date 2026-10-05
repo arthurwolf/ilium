@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize}; // Metadata is bounded JSON; sample planes 
 use std::collections::{BTreeMap, BTreeSet}; // Bound retained text and unique native evidence identities.
 use std::io::{self, Write}; // Count metadata bytes without allocating an oversized JSON copy.
 use std::num::NonZeroU64; // Option<SourceToken> remains one machine-sized provenance entry.
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 pub const MAX_CELLS: usize = 131_072; // Match the supplied worker's absolute cell ceiling.
 pub const MAX_META_BYTES: usize = 65_536; // Bound command and diagnostic metadata before parsing.
 pub const MAX_COMMANDS: usize = 256; // Native rendering is one bounded ordered batch.
@@ -302,10 +304,18 @@ pub enum VectorOp {
 #[serde(deny_unknown_fields)] // Escape sequences are never a styling API.
 pub struct TextStyle {
     pub rgb: Option<[u8; 3]>,
+    #[serde(default)]
+    pub background: Option<[u8; 3]>,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
 } // Width comes from the native text adapter.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeSpan {
+    pub text: String,
+    pub style: TextStyle,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)] // Script commands contain prepared handles, never owner IDs.
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)] // Closed command schema.
 pub enum Command {
@@ -318,6 +328,8 @@ pub enum Command {
         fill: bool,
         closed: bool,
         value: Vec<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rgb: Option<[u8; 3]>,
         blend: Blend,
     }, // Native bounded rasterization.
     Text {
@@ -326,7 +338,25 @@ pub enum Command {
         y: u32,
         text: String,
         style: TextStyle,
-    }, // Native Unicode/font layout.
+    }, // Native Unicode cell layout.
+    TextSpans {
+        order: u32,
+        x: u32,
+        y: u32,
+        spans: Vec<NativeSpan>,
+        max_cells: u32,
+    }, // One ordered native Unicode layout across all styled spans.
+    RasterText {
+        order: u32,
+        x: u32,
+        y: u32,
+        text: String,
+        font: String,
+        size_px: f32,
+        intensity: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rgb: Option<[u8; 3]>,
+    }, // Bundled font raster, in Braille-dot coordinates.
     Blit {
         order: u32,
         handle: String,
@@ -339,15 +369,19 @@ impl Command {
     // Validate metadata before invoking any native adapter.
     pub fn order(&self) -> u32 {
         match self {
-            Self::Vector { order, .. } | Self::Text { order, .. } | Self::Blit { order, .. } => {
-                *order
-            }
+            Self::Vector { order, .. }
+            | Self::Text { order, .. }
+            | Self::TextSpans { order, .. }
+            | Self::RasterText { order, .. }
+            | Self::Blit { order, .. } => *order,
         }
     } // One total transaction order.
     fn blend(&self) -> Blend {
         match self {
             Self::Vector { blend, .. } | Self::Blit { blend, .. } => *blend,
-            Self::Text { .. } => Blend::Overwrite,
+            Self::Text { .. } | Self::TextSpans { .. } | Self::RasterText { .. } => {
+                Blend::Overwrite
+            }
         }
     } // Text uses native overlay replacement.
     fn validate(&self, shape: Shape) -> Result<()> {
@@ -365,8 +399,14 @@ impl Command {
                 points,
                 width,
                 value,
+                rgb,
                 ..
             } => {
+                if rgb.is_some() && !shape.cell_rgb {
+                    return Err(SurfaceError::Invalid(
+                        "undeclared native vector cell colour",
+                    ));
+                }
                 // Geometry is in dot coordinates; the adapter clips before raster loops.
                 let count_ok = match op {
                     VectorOp::Line | VectorOp::Ellipse => points.len() == 2,
@@ -399,6 +439,61 @@ impl Command {
                     return Err(SurfaceError::Invalid("text command"));
                 }
             } // Single-line bounded plain Unicode text.
+            Self::TextSpans {
+                x,
+                y,
+                spans,
+                max_cells,
+                ..
+            } => {
+                if *x >= shape.cell_width
+                    || *y >= shape.cell_height
+                    || *max_cells == 0
+                    || *max_cells > shape.cell_width - *x
+                    || spans.is_empty()
+                    || spans.len() > 64
+                    || spans.iter().any(|span| !text_ok(&span.text))
+                    || spans
+                        .iter()
+                        .try_fold(0usize, |sum, span| sum.checked_add(span.text.len()))
+                        .is_none_or(|sum| sum > MAX_TEXT_BYTES)
+                {
+                    return Err(SurfaceError::Invalid("styled text command"));
+                }
+            }
+            Self::RasterText {
+                x,
+                y,
+                text,
+                font,
+                size_px,
+                intensity,
+                rgb,
+                ..
+            } => {
+                let dot_width = shape
+                    .cell_width
+                    .checked_mul(2)
+                    .ok_or(SurfaceError::Capacity)?;
+                let dot_height = shape
+                    .cell_height
+                    .checked_mul(4)
+                    .ok_or(SurfaceError::Capacity)?;
+                if *x >= dot_width
+                    || *y >= dot_height
+                    || !text_ok(text)
+                    || font != "CascadiaCode-Regular"
+                    || !size_px.is_finite()
+                    || !(8.0..=128.0).contains(size_px)
+                    || !intensity.is_finite()
+                    || !(0.0..=1.0).contains(intensity)
+                    || (rgb.is_some()
+                        && !shape.cell_rgb
+                        && !matches!(shape.format, Format::Rgb8 | Format::Rgba8))
+                {
+                    return Err(SurfaceError::Invalid("bundled raster text command"));
+                }
+            }
             Self::Blit {
                 handle,
                 source,
@@ -476,7 +571,8 @@ pub struct NativePatch {
     pub state: Vec<u8>,
     pub owners: Vec<Option<SourceToken>>,
 } // Owners are per dot, including eight entries per mask cell.
-#[derive(Clone, Debug, PartialEq, Eq)] // Native Unicode layout produces complete leading-cell glyphs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)] // Source-free clip chunks revalidate native text values.
+#[serde(deny_unknown_fields)]
 pub struct NativeText {
     pub x: u32,
     pub y: u32,
@@ -984,6 +1080,8 @@ impl Snapshot {
         if !matches!(text.width, 1 | 2)
             || !text_ok(&text.text)
             || text.text.len() > 256
+            || text.text.graphemes(true).count() != 1
+            || UnicodeWidthStr::width(text.text.as_str()) != usize::from(text.width)
             || text.x >= self.shape.cell_width
             || text.y >= self.shape.cell_height
             || u32::from(text.width) > self.shape.cell_width - text.x
@@ -1251,6 +1349,7 @@ impl Snapshot {
         Ok(PackedSurface { masks, rgb, owners }) // Host recomputes final source receipts from actual surviving emitted dots.
     } // Direct mask8 bypasses intensity controls and threshold callbacks.
 } // End snapshot mutation and encoding.
+#[derive(Clone)]
 pub struct PackedSurface {
     pub masks: Vec<u8>,
     pub rgb: Vec<Option<[u8; 3]>>,
@@ -1767,6 +1866,7 @@ mod tests {
             width: 2,
             style: TextStyle {
                 rgb: None,
+                background: None,
                 bold: false,
                 italic: false,
                 underline: false,
@@ -1827,6 +1927,7 @@ mod tests {
                     width: 2,
                     style: TextStyle {
                         rgb: None,
+                        background: None,
                         bold: false,
                         italic: false,
                         underline: false,

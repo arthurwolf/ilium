@@ -341,3 +341,6 @@ fn boundary_completion_is_inert_even_with_poisoned_then_and_runs_only_on_later_p
     assert_eq!(engine.evaluate_json("[then_hits,continuations,received instanceof Float32Array,Array.from(received),Object.hasOwn(received,'then')]").unwrap(),serde_json::json!([0,1,true,[0.25,0.5],false]));
     // The temporary shield is removed before the real result becomes visible to package code.
 } // The returned buffer can later be used as a normal strict binary input without a synthetic own then property.
+
+#[path = "world_region_bootstrap_tests.rs"]
+mod world_region_bootstrap;

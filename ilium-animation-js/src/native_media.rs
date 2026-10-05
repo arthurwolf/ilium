@@ -67,6 +67,35 @@ impl<T> Admitted<T> {
         (self.value, self.admission)
     }
 }
+impl Admitted<ImagePixels> {
+    /// The video decoder filled this exact allocation under the original root's
+    /// storage admission. Moving it into an image retains that debit; no pixel
+    /// buffer is copied or charged as if it were free.
+    pub(crate) fn from_video_rgba(
+        quota: QuotaGroup,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        admission: StorageAdmission,
+    ) -> Result<Self> {
+        let bytes = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| invalid("video RGBA dimension overflow"))?;
+        if width == 0 || height == 0 || rgba.len() != bytes || rgba.capacity() > bytes {
+            return Err(invalid("video RGBA plane shape"));
+        }
+        Ok(Self {
+            value: ImagePixels {
+                width,
+                height,
+                rgba,
+            },
+            quota,
+            admission,
+        })
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub struct MediaLimits {
     pub encoded_bytes: usize,
@@ -282,7 +311,22 @@ impl NativeMedia {
         Ok(())
     }
     pub fn decode(&mut self, encoded: &[u8], stop: &StopToken) -> Result<ImageHandle> {
+        self.decode_bounded(encoded, self.limits.pixels, stop)
+    }
+    /// The caller's max_pixels narrows the existing host limit before decoder
+    /// output allocation; it cannot raise the original NativeMedia ceiling.
+    pub fn decode_bounded(
+        &mut self,
+        encoded: &[u8],
+        max_pixels: usize,
+        stop: &StopToken,
+    ) -> Result<ImageHandle> {
         check(stop)?;
+        if max_pixels == 0 || max_pixels > self.limits.pixels {
+            return Err(AnimationError::Budget(
+                "native image caller pixel limit".into(),
+            ));
+        }
         if encoded.len() > self.limits.encoded_bytes || self.images.len() >= self.limits.handles {
             return Err(AnimationError::Budget(
                 "native image encoded bytes/handles".into(),
@@ -303,6 +347,9 @@ impl NativeMedia {
             .map_err(|error| invalid(&error.to_string()))?;
         let (width, height) = decoder.dimensions();
         let count = self.pixels(width, height)?;
+        if count > max_pixels {
+            return Err(AnimationError::Budget("native image caller pixels".into()));
+        }
         if decoder.total_bytes() > self.limits.decoder_scratch_bytes as u64 {
             return Err(AnimationError::Budget("native decoded source bytes".into()));
         }
@@ -330,6 +377,11 @@ impl NativeMedia {
         let image = image.into_rgba8();
         let (width, height) = image.dimensions();
         let count = self.pixels(width, height)?;
+        if count > max_pixels {
+            return Err(AnimationError::Budget(
+                "oriented image caller pixels".into(),
+            ));
+        }
         let rgba = image.into_raw();
         if rgba.len() != count * 4 || rgba.capacity() > count * 4 {
             return Err(invalid("decoded RGBA shape"));
@@ -911,6 +963,76 @@ impl NativeMedia {
             admission,
         })
     }
+    /// The only public font contract: CascadiaCode-Regular, CSS-style pixel
+    /// size, one line, and integer pixel bounding dimensions. An empty string
+    /// has zero extent. The renderer uses the identical bundled face and line
+    /// height, independent of the requested frame crop.
+    pub fn measure_text(&self, text: &str, size: f32, stop: &StopToken) -> Result<(u32, u32)> {
+        use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
+        check(stop)?;
+        if !size.is_finite()
+            || !(8.0..=128.0).contains(&size)
+            || text.len() > self.limits.text_bytes
+            || text.graphemes(true).count() > self.limits.text_graphemes
+            || text.chars().any(char::is_control)
+        {
+            return Err(invalid("native font text/size bounds"));
+        }
+        if text.is_empty() {
+            return Ok((0, 0));
+        }
+        let _font_setup = charge(&self.quota, 32 * 1024 * 1024)?;
+        let mut database = cosmic_text::fontdb::Database::new();
+        database.load_font_data(
+            include_bytes!("../../ilium-ambient/assets/fonts/CascadiaCode-Regular.otf").to_vec(),
+        );
+        check(stop)?;
+        let family = database
+            .faces()
+            .next()
+            .and_then(|face| face.families.first())
+            .map(|(name, _)| name.clone())
+            .ok_or_else(|| invalid("bundled font has no face"))?;
+        let mut fonts = FontSystem::new_with_locale_and_db("en-US".into(), database);
+        let line_height = (size * 1.4).ceil();
+        let mut buffer = Buffer::new(&mut fonts, Metrics::new(size, line_height));
+        buffer.set_size(&mut fonts, None, None);
+        buffer.set_wrap(&mut fonts, Wrap::None);
+        buffer.set_text(
+            &mut fonts,
+            text,
+            &Attrs::new().family(Family::Name(&family)),
+            Shaping::Advanced,
+        );
+        check(stop)?;
+        buffer.shape_until_scroll(&mut fonts, false);
+        check(stop)?;
+        let mut advance = 0.0_f32;
+        let mut glyphs = 0usize;
+        for run in buffer.layout_runs() {
+            advance = advance.max(run.line_w);
+            for glyph in run.glyphs {
+                glyphs += 1;
+                if glyph.glyph_id == 0 {
+                    return Err(invalid("unsupported_glyph"));
+                }
+            }
+        }
+        if advance <= 0.0 {
+            return Err(invalid("zero-width font text"));
+        }
+        if glyphs > self.limits.text_graphemes.saturating_mul(16)
+            || !advance.is_finite()
+            || advance > 16_384.0
+            || line_height > 16_384.0
+        {
+            return Err(AnimationError::Budget(
+                "native font metric/work bound".into(),
+            ));
+        }
+        check(stop)?;
+        Ok((advance.ceil() as u32, line_height as u32))
+    }
     /// Real bundled Cascadia coverage, using the same shaping/raster path as Pi.
     /// No system font discovery or mutable global font cache.
     pub fn raster_text(
@@ -948,9 +1070,15 @@ impl NativeMedia {
             .ok_or_else(|| invalid("bundled font has no face"))?;
         let mut fonts = FontSystem::new_with_locale_and_db("en-US".into(), database);
         let mut cache = SwashCache::new();
-        let line_height = height as f32;
+        let line_height = (size * 1.4).ceil();
         let mut buffer = Buffer::new(&mut fonts, Metrics::new(size, line_height));
-        buffer.set_size(&mut fonts, Some(width as f32), Some(height as f32));
+        // Shape a complete native line even when the viewport cuts through its
+        // bottom edge; the output mask callback still clips to `height`.
+        buffer.set_size(
+            &mut fonts,
+            Some(width as f32),
+            Some(line_height.max(height as f32)),
+        );
         buffer.set_wrap(&mut fonts, Wrap::None);
         buffer.set_text(
             &mut fonts,
@@ -1181,6 +1309,28 @@ mod admitted_image_import_tests {
             quota: quota.clone(),
             admission,
         })
+    }
+    #[test]
+    fn video_rgba_import_retains_the_decoder_allocation_and_original_debit() {
+        let quota = quota();
+        let admission = charge(&quota, 4 + 512).unwrap();
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(4).unwrap();
+        rgba.extend_from_slice(&[5, 10, 15, 255]);
+        let original =
+            Arc::new(Admitted::from_video_rgba(quota.clone(), 1, 1, rgba, admission).unwrap());
+        let mut media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+        let before_import = quota.snapshot().worker_bytes;
+        let handle = media.retain_admitted_image(Arc::clone(&original)).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, before_import);
+        let registered = media.snapshot(handle).unwrap();
+        assert!(Arc::ptr_eq(&original, &registered));
+        media.close(handle).unwrap();
+        drop(media);
+        drop(original);
+        assert_eq!(quota.snapshot().worker_bytes, 516);
+        drop(registered);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
     #[test]
     fn decoded_original_pixel_debit_survives_import_and_last_escaped_alias() {

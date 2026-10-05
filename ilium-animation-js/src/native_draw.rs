@@ -8,7 +8,7 @@ use crate::{
     native_worlds::NativeWorldFrame,
     surface::{
         Blend, ColourSpace, Command, Data, Format, Mode, NativeOutput, NativePatch, NativeRenderer,
-        NativeText, Rect, Shape, SourceToken, SurfaceError, VectorOp,
+        NativeSpan, NativeText, Rect, Shape, SourceToken, SurfaceError, VectorOp,
     },
 };
 use ilium_ambient::raster::Raster;
@@ -236,6 +236,7 @@ struct VectorSpec<'a> {
     fill: bool,
     closed: bool,
     value: &'a [f32],
+    rgb: Option<[u8; 3]>,
 }
 
 /// A frame-scoped owner. Construct under the original root quota outside the
@@ -357,7 +358,7 @@ impl<'a, A: DrawAuthority> NativeDraw<'a, A> {
                     text: &text[..end],
                     style: MediaStyle {
                         foreground: style.rgb,
-                        background: None,
+                        background: style.background,
                         bold: style.bold,
                         italic: style.italic,
                         underline: style.underline,
@@ -384,6 +385,205 @@ impl<'a, A: DrawAuthority> NativeDraw<'a, A> {
             ..Default::default()
         })
     }
+    fn text_spans(
+        &mut self,
+        x: u32,
+        y: u32,
+        spans: &[NativeSpan],
+        max_cells: u32,
+    ) -> Result<NativeOutput> {
+        if x >= self.shape.cell_width
+            || y >= self.shape.cell_height
+            || max_cells == 0
+            || max_cells > self.shape.cell_width - x
+            || spans.is_empty()
+            || spans.len() > 64
+        {
+            return Err(SurfaceError::Invalid("native styled text bounds"));
+        }
+        let bytes = spans
+            .iter()
+            .try_fold(0usize, |sum, span| sum.checked_add(span.text.len()))
+            .ok_or(SurfaceError::Capacity)?;
+        self.text_bytes = self
+            .text_bytes
+            .checked_sub(bytes)
+            .ok_or(SurfaceError::Capacity)?;
+        self.charge_work(max_cells as usize * 8)?;
+        let borrowed: Vec<TextSpan<'_>> = spans
+            .iter()
+            .map(|span| TextSpan {
+                text: &span.text,
+                style: MediaStyle {
+                    foreground: span.style.rgb,
+                    background: span.style.background,
+                    bold: span.style.bold,
+                    italic: span.style.italic,
+                    underline: span.style.underline,
+                },
+            })
+            .collect();
+        let layout = self
+            .media
+            .styled_cells(&borrowed, max_cells, self.stop)
+            .map_err(|error| media_surface_error(error, self.stop))?;
+        let text = layout
+            .view()
+            .iter()
+            .filter(|cell| !cell.continuation)
+            .map(|cell| NativeText {
+                x: x + cell.x,
+                y,
+                text: cell.glyph.clone(),
+                width: cell.width,
+                style: crate::surface::TextStyle {
+                    rgb: cell.style.foreground,
+                    background: cell.style.background,
+                    bold: cell.style.bold,
+                    italic: cell.style.italic,
+                    underline: cell.style.underline,
+                },
+            })
+            .collect();
+        Ok(NativeOutput {
+            text,
+            ..Default::default()
+        })
+    }
+    fn raster_text(
+        &mut self,
+        origin: [u32; 2],
+        text: &str,
+        size_px: f32,
+        intensity: f32,
+        rgb: Option<[u8; 3]>,
+        remaining: usize,
+    ) -> Result<NativeOutput> {
+        let [x, y] = origin;
+        let canvas_width = self.shape.cell_width as usize * 2;
+        let canvas_height = self.shape.cell_height as usize * 4;
+        if x as usize >= canvas_width
+            || y as usize >= canvas_height
+            || text.is_empty()
+            || !size_px.is_finite()
+            || !(8.0..=128.0).contains(&size_px)
+            || !intensity.is_finite()
+            || !(0.0..=1.0).contains(&intensity)
+        {
+            return Err(SurfaceError::Invalid("native font raster bounds"));
+        }
+        if rgb.is_some()
+            && !self.shape.cell_rgb
+            && !matches!(self.shape.format, Format::Rgb8 | Format::Rgba8)
+        {
+            return Err(SurfaceError::Invalid("undeclared raster text colour"));
+        }
+        self.text_bytes = self
+            .text_bytes
+            .checked_sub(text.len())
+            .ok_or(SurfaceError::Capacity)?;
+        let (metric_width, metric_height) = self
+            .media
+            .measure_text(text, size_px, self.stop)
+            .map_err(|error| media_surface_error(error, self.stop))?;
+        if metric_width == 0 || metric_height == 0 {
+            return Ok(NativeOutput::default());
+        }
+        let visible_width = (metric_width as usize).min(canvas_width - x as usize);
+        let visible_height = (metric_height as usize).min(canvas_height - y as usize);
+        let left = if self.shape.mode == Mode::Cells {
+            x as usize / 2 * 2
+        } else {
+            x as usize
+        };
+        let top = if self.shape.mode == Mode::Cells {
+            y as usize / 4 * 4
+        } else {
+            y as usize
+        };
+        let right = if self.shape.mode == Mode::Cells {
+            (x as usize + visible_width).div_ceil(2) * 2
+        } else {
+            x as usize + visible_width
+        };
+        let bottom = if self.shape.mode == Mode::Cells {
+            (y as usize + visible_height).div_ceil(4) * 4
+        } else {
+            y as usize + visible_height
+        };
+        let rect = dot_rect(self.shape, left, top, right - left, bottom - top);
+        require_samples(rect, remaining)?;
+        let dots = (right - left)
+            .checked_mul(bottom - top)
+            .ok_or(SurfaceError::Capacity)?;
+        self.charge_work(dots.checked_mul(4).ok_or(SurfaceError::Capacity)?)?;
+        let mask = self
+            .media
+            .raster_text(
+                text,
+                size_px,
+                visible_width as u32,
+                visible_height as u32,
+                self.stop,
+            )
+            .map_err(|error| media_surface_error(error, self.stop))?;
+        let mut raster = Raster::default();
+        raster.resize(right - left, bottom - top);
+        let font = mask.view();
+        for row in 0..font.height as usize {
+            for column in 0..font.width as usize {
+                raster.dots[(row + y as usize - top) * raster.width + column + x as usize - left] =
+                    f32::from(font.mask[row * font.width as usize + column]) / 255. * intensity;
+            }
+        }
+        let colour = rgb.unwrap_or([255, 255, 255]);
+        let values: Vec<f32> = match self.shape.format {
+            Format::Mask8 => vec![255.],
+            Format::Mono1 | Format::Mono8 => vec![1.],
+            Format::Gray8 => vec![255.],
+            Format::Gray32 => vec![1.],
+            Format::Rgb8 => colour.iter().map(|byte| f32::from(*byte)).collect(),
+            Format::Rgba8 => vec![
+                f32::from(colour[0]),
+                f32::from(colour[1]),
+                f32::from(colour[2]),
+                255.,
+            ],
+        };
+        let patch = vector_patch(self.shape, rect, &raster, &values)?;
+        let mut colours = Vec::new();
+        if let Some(rgb) = rgb.filter(|_| self.shape.cell_rgb) {
+            let mut touched = std::collections::BTreeSet::new();
+            for (index, state) in patch.state.iter().enumerate() {
+                if *state != 2 {
+                    continue;
+                }
+                if self.shape.format == Format::Mask8
+                    && matches!(&patch.data, Data::U8(data) if data[index] == 0)
+                {
+                    continue;
+                }
+                let sample_x = rect.x as usize + index % rect.width as usize;
+                let sample_y = rect.y as usize + index / rect.width as usize;
+                touched.insert(if self.shape.mode == Mode::Cells {
+                    (sample_x as u32, sample_y as u32)
+                } else {
+                    ((sample_x / 2) as u32, (sample_y / 4) as u32)
+                });
+            }
+            colours.extend(
+                touched
+                    .into_iter()
+                    .map(|(cell_x, cell_y)| (cell_x, cell_y, Some(rgb))),
+            );
+        }
+        self.check()?;
+        Ok(NativeOutput {
+            patches: vec![patch],
+            colours,
+            ..Default::default()
+        })
+    }
     fn vector(&mut self, vector: VectorSpec<'_>, remaining: usize) -> Result<NativeOutput> {
         let VectorSpec {
             op,
@@ -392,6 +592,7 @@ impl<'a, A: DrawAuthority> NativeDraw<'a, A> {
             fill,
             closed,
             value,
+            rgb,
         } = vector;
         let count = match op {
             VectorOp::Line | VectorOp::Ellipse => points.len() == 2,
@@ -481,7 +682,32 @@ impl<'a, A: DrawAuthority> NativeDraw<'a, A> {
         }
         self.check()?;
         let patch = vector_patch(self.shape, rect, &raster, value)?;
+        let mut colours = Vec::new();
+        if let Some(rgb) = rgb {
+            if !self.shape.cell_rgb {
+                return Err(SurfaceError::Invalid(
+                    "undeclared native vector cell colour",
+                ));
+            }
+            // The raster's actual touched samples determine colour damage;
+            // the clipped bounding rectangle must not tint empty neighbours.
+            let mut cells = std::collections::BTreeSet::new();
+            for (index, state) in patch.state.iter().enumerate() {
+                if *state != 2 {
+                    continue;
+                }
+                let x = rect.x + index as u32 % rect.width;
+                let y = rect.y + index as u32 / rect.width;
+                cells.insert(if self.shape.mode == Mode::Cells {
+                    (x, y)
+                } else {
+                    (x / 2, y / 4)
+                });
+            }
+            colours.extend(cells.into_iter().map(|(x, y)| (x, y, Some(rgb))));
+        }
         Ok(NativeOutput {
+            colours,
             patches: vec![patch],
             ..Default::default()
         })
@@ -645,6 +871,35 @@ impl<A: DrawAuthority> NativeRenderer for NativeDraw<'_, A> {
             Command::Text {
                 x, y, text, style, ..
             } => self.text(*x, *y, text, style)?,
+            Command::TextSpans {
+                x,
+                y,
+                spans,
+                max_cells,
+                ..
+            } => self.text_spans(*x, *y, spans, *max_cells)?,
+            Command::RasterText {
+                x,
+                y,
+                text,
+                font,
+                size_px,
+                intensity,
+                rgb,
+                ..
+            } => {
+                if font != "CascadiaCode-Regular" {
+                    return Err(SurfaceError::Invalid("unsupported bundled font"));
+                }
+                self.raster_text(
+                    [*x, *y],
+                    text,
+                    *size_px,
+                    *intensity,
+                    *rgb,
+                    remaining_samples,
+                )?
+            }
             Command::Vector {
                 op,
                 points,
@@ -652,6 +907,7 @@ impl<A: DrawAuthority> NativeRenderer for NativeDraw<'_, A> {
                 fill,
                 closed,
                 value,
+                rgb,
                 blend,
                 ..
             } => {
@@ -666,6 +922,7 @@ impl<A: DrawAuthority> NativeRenderer for NativeDraw<'_, A> {
                         fill: *fill,
                         closed: *closed,
                         value,
+                        rgb: *rgb,
                     },
                     remaining_samples,
                 )?
@@ -685,6 +942,19 @@ impl<A: DrawAuthority> NativeRenderer for NativeDraw<'_, A> {
         };
         self.check()?;
         Ok(output)
+    }
+}
+fn media_surface_error(error: crate::error::AnimationError, stop: &StopToken) -> SurfaceError {
+    if stop.is_stopped() {
+        SurfaceError::Stale
+    } else if matches!(error, crate::error::AnimationError::Budget(_)) {
+        SurfaceError::Capacity
+    } else if matches!(&error, crate::error::AnimationError::Runtime(message)
+        if message == "native media: bundled font lacks requested glyph" || message == "native media: unsupported_glyph")
+    {
+        SurfaceError::Invalid("unsupported bundled font glyph")
+    } else {
+        SurfaceError::Invalid("native media text rejected")
     }
 }
 fn channels(format: Format) -> usize {

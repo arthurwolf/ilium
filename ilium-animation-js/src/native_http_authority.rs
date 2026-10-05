@@ -18,6 +18,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Instant,
 };
 use url::Url;
 const AUTHORITY_BYTES: usize = 64 * 1024;
@@ -131,7 +132,8 @@ pub(crate) struct NativeHttpAuthorityFactory {
     broker: Arc<Mutex<PermissionBroker>>,
     channel: Channel,
     ticket: Arc<OperationTicket>,
-    request: HostRequest,
+    request: Option<HostRequest>,
+    feed: Option<(StopToken, Instant)>,
     principal: PackageIdentity,
     quota: QuotaGroup,
     credentials: Option<Box<dyn HostCredentialAdapter>>,
@@ -172,12 +174,59 @@ impl NativeHttpAuthorityFactory {
             broker,
             channel,
             ticket,
-            request,
+            request: Some(request),
+            feed: None,
             principal,
             quota,
             credentials,
             _storage: storage,
         })
+    }
+    /// A persistent source refresh owns a new native async ticket and its own
+    /// bounded transaction deadline. It never borrows the consumed opener.
+    pub(crate) fn from_feed(
+        broker: Arc<Mutex<PermissionBroker>>,
+        channel: Channel,
+        ticket: Arc<OperationTicket>,
+        quota: QuotaGroup,
+        stop: StopToken,
+        deadline: Instant,
+        credentials: Option<Box<dyn HostCredentialAdapter>>,
+    ) -> Result<Self> {
+        if stop.is_stopped() || Instant::now() >= deadline {
+            return Err(denied("native source feed refresh stopped or expired"));
+        }
+        let storage = quota
+            .reserve_external_storage(AUTHORITY_BYTES)
+            .map_err(|_| AnimationError::Budget("native HTTP feed authority admission".into()))?;
+        let principal = {
+            let owner = broker
+                .lock()
+                .map_err(|_| denied("native HTTP feed authority poisoned"))?;
+            owner
+                .check_operation_lineage(&ticket, &channel)
+                .map_err(auth)?;
+            owner.channel_coordinates(&channel).map_err(auth)?;
+            owner.identity().clone()
+        };
+        Ok(Self {
+            broker,
+            channel,
+            ticket,
+            request: None,
+            feed: Some((stop, deadline)),
+            principal,
+            quota,
+            credentials,
+            _storage: storage,
+        })
+    }
+    fn stopped_or_expired(&self) -> bool {
+        self.request.as_ref().is_some_and(HostRequest::is_cancelled)
+            || self
+                .feed
+                .as_ref()
+                .is_some_and(|(stop, deadline)| stop.is_stopped() || Instant::now() >= *deadline)
     }
     pub(crate) fn enter(
         self,
@@ -186,7 +235,7 @@ impl NativeHttpAuthorityFactory {
     ) -> Result<NativeHttpAuthority> {
         if !original_client.quota_group().shares_root(&self.quota)
             || context.stop_requested()
-            || self.request.is_cancelled()
+            || self.stopped_or_expired()
         {
             return Err(denied("native HTTP IO owner root or cancellation mismatch"));
         }
@@ -222,7 +271,7 @@ pub(crate) struct NativeHttpAuthority {
 }
 impl NativeHttpAuthority {
     fn check_lifetime(&self) -> Result<()> {
-        if self.io_stop.is_stopped() || self.factory.request.is_cancelled() {
+        if self.io_stop.is_stopped() || self.factory.stopped_or_expired() {
             return Err(denied("native HTTP operation cancelled or expired"));
         }
         Ok(())

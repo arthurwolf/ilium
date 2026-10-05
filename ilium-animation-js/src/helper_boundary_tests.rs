@@ -62,6 +62,7 @@ fn session_without_process(quota: &QuotaGroup) -> (HelperSession, mpsc::Receiver
     (
         HelperSession {
             authority: authority(),
+            helper_build_digest: [0; 32], // No physical helper exists in this negative fixture; it cannot certify a loaded build.
             child: None,
             writer,
             reader,
@@ -404,6 +405,10 @@ fn boundary_actual_helper_copy_ack_never_runs_the_next_acquiring_continuation() 
         identity,
         HelperLimits::default(),
         quota.clone(),
+        HelperPlayback {
+            mode: AnimationMode::Live,
+            ambient_seed: 0,
+        },
     )
     .unwrap();
     helper.bind_service_authority(stamp).unwrap(); // Bind before the actual helper executes an acquiring phase.

@@ -156,7 +156,18 @@ fn actual_owned_fixture_pcm_revocation_and_join_custody() {
     assert!(quota.snapshot().worker_threads >= baseline.worker_threads + 3);
     assert!(quota.snapshot().worker_bytes >= baseline.worker_bytes + 5 * 1024 * 1024);
     let mut samples = [0.; 32];
-    let count = capture.read_mono(&mut samples).unwrap();
+    let ready_by = Instant::now() + Duration::from_secs(2);
+    let count = loop {
+        let count = capture.read_mono(&mut samples).unwrap();
+        if count > 0 {
+            break count;
+        }
+        assert!(
+            Instant::now() < ready_by,
+            "synthetic helper did not publish PCM"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
     assert!(count > 0);
     assert!(samples[..count].iter().all(|sample| *sample == 0.5));
     assert!(capture.read_mono(&mut vec![0.; 8193]).is_err());

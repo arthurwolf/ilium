@@ -650,3 +650,71 @@ fn finite_resources_clip_reads_and_preserve_original_root_custody() {
     drop(input);
     assert_eq!(host.quota.snapshot().worker_bytes, baseline);
 }
+
+#[test]
+fn recorded_wait_reads_final_due_pixels_from_the_real_decoder_service() {
+    let host = Host::new();
+    let probe = Probe::new();
+    let (service, _) = setup(&host, probe, ordinary);
+    until(&service, |status| status.decoded_frames >= 4);
+    let outcome = (|| -> Result<()> {
+        for (target_ms, expected_ms, expected_byte) in [(250, 200, 2), (950, 900, 9)] {
+            let frame = service
+                .wait_recorded_at(
+                    Duration::from_millis(target_ms),
+                    Instant::now() + Duration::from_secs(3),
+                    &StopToken::default(),
+                )?
+                .ok_or_else(|| AnimationError::Runtime("fixture recorded frame absent".into()))?;
+            assert_eq!(frame.stamp.pts, Duration::from_millis(expected_ms));
+            assert_eq!(frame.bytes(), &[expected_byte; 16]);
+        }
+        assert!(
+            service
+                .wait_recorded_at(
+                    Duration::ZERO,
+                    Instant::now() + Duration::from_secs(1),
+                    &StopToken::default(),
+                )
+                .is_err(),
+            "recorded backwards motion requires an explicit seek"
+        );
+        Ok(())
+    })();
+    assert_eq!(
+        service.close_until(Instant::now() + Duration::from_secs(3)),
+        CloseState::Joined
+    );
+    outcome.expect("real admitted decoder must finalize the latest due pixels");
+    assert!(
+        service
+            .wait_recorded_at(
+                Duration::from_millis(950),
+                Instant::now() + Duration::from_secs(1),
+                &StopToken::default(),
+            )
+            .is_err(),
+        "a retired decoder must not supply recorded pixels"
+    );
+}
+
+#[test]
+fn recorded_wait_rejects_caller_stop_without_releasing_decoder_custody() {
+    let host = Host::new();
+    let probe = Probe::new();
+    let (service, _) = setup(&host, probe, ordinary);
+    let stop = StopToken::default();
+    stop.stop();
+    let denied = service
+        .wait_recorded_at(
+            Duration::ZERO,
+            Instant::now() + Duration::from_secs(1),
+            &stop,
+        )
+        .is_err();
+    assert_eq!(
+        service.close_until(Instant::now() + Duration::from_secs(3)),
+        CloseState::Joined
+    );
+    assert!(denied, "caller cancellation must deny recorded delivery");
+}

@@ -5,6 +5,8 @@
 //! URL/file acquisition. This service supplies admission, timing, cancellation,
 //! bounded backlog and immutable frame custody around an injected native codec.
 use crate::error::{AnimationError, Result};
+#[cfg(feature = "native-host")]
+use crate::native_media::{Admitted, ImagePixels};
 use ilium_execution::{Client, JobCost, QuotaGroup, Retained, StorageAdmission, WorkerAdmission};
 use ilium_platform::owned_worker::{self, OwnedWorker, StopToken, WorkerExit};
 use std::{
@@ -199,6 +201,9 @@ impl VerifiedVideoInput {
     pub fn resource_id(&self) -> u64 {
         self.resource_id
     }
+    pub fn maximum_bytes(&self) -> usize {
+        self.maximum_bytes
+    }
     pub fn encoded(&self) -> Result<&[u8]> {
         if self.resource.is_some() {
             return Err(failure(
@@ -322,13 +327,34 @@ pub struct TimedVideoFrame {
     pub geometry: VideoGeometry,
     pub authority: VideoAuthority,
     pub resource_id: u64,
-    pixels: Vec<u8>,
-    _storage: StorageAdmission,
+    pixels: FramePixels,
 }
 impl TimedVideoFrame {
     pub fn bytes(&self) -> &[u8] {
-        &self.pixels
+        match &self.pixels {
+            FramePixels::Raw { bytes, .. } => bytes,
+            #[cfg(feature = "native-host")]
+            FramePixels::Rgba(image) => &image.view().rgba,
+        }
     }
+    /// This Arc is the decoder's original admitted RGBA allocation. A native
+    /// image registry may retain it after the decoder frame queue advances.
+    #[cfg(feature = "native-host")]
+    pub fn admitted_rgba(&self) -> Option<Arc<Admitted<ImagePixels>>> {
+        match &self.pixels {
+            FramePixels::Rgba(image) => Some(Arc::clone(image)),
+            FramePixels::Raw { .. } => None,
+        }
+    }
+}
+#[derive(Debug)]
+enum FramePixels {
+    Raw {
+        bytes: Vec<u8>,
+        _storage: StorageAdmission,
+    },
+    #[cfg(feature = "native-host")]
+    Rgba(Arc<Admitted<ImagePixels>>),
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoPhase {
@@ -383,9 +409,44 @@ struct State {
     seek: Option<Seek>,
     stop: bool,
 }
+impl State {
+    /// The decoder writes `latest` and `queue` under this same mutex. Moving
+    /// due frames and cloning the result must be one observation of that state.
+    fn latest_due(&mut self) -> Option<Arc<TimedVideoFrame>> {
+        while self
+            .queue
+            .front()
+            .is_some_and(|frame| frame.stamp.pts <= self.target)
+        {
+            if let Some(frame) = self.queue.pop_front() {
+                if self.latest.replace(frame).is_some() {
+                    self.discarded = self.discarded.saturating_add(1);
+                }
+            }
+        }
+        self.latest.clone()
+    }
+
+    /// `Some(None)` is a finalized empty frame at EOF; `None` means the
+    /// decoder can still publish a newer due frame for this position.
+    fn recorded_final(&mut self) -> Option<Option<Arc<TimedVideoFrame>>> {
+        let frame = self.latest_due();
+        if self.phase == VideoPhase::Ended
+            || self
+                .queue
+                .front()
+                .is_some_and(|next| next.stamp.pts > self.target)
+        {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+}
 struct Shared {
     state: Mutex<State>,
     changed: Condvar,
+    actor_wake: Arc<dyn Fn() + Send + Sync>,
     _metadata: StorageAdmission,
 }
 #[derive(Clone)]
@@ -410,6 +471,27 @@ impl NativeVideo {
         factory: Arc<dyn VideoDecoderFactory>,
         limits: VideoLimits,
         stop: StopToken,
+    ) -> Result<Self> {
+        Self::start_with_wake(
+            client,
+            input,
+            authorization,
+            factory,
+            limits,
+            stop,
+            Arc::new(|| {}),
+        )
+    }
+    /// The callback is the existing bounded scene-actor wake, not a new
+    /// scheduler. The worker invokes it after state changes and actual exit.
+    pub fn start_with_wake(
+        client: Client,
+        input: Arc<VerifiedVideoInput>,
+        authorization: Arc<dyn VideoAuthorization>,
+        factory: Arc<dyn VideoDecoderFactory>,
+        limits: VideoLimits,
+        stop: StopToken,
+        actor_wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self> {
         stopped(&stop)?;
         let frame_bytes = limits.frame_bytes()?;
@@ -474,6 +556,7 @@ impl NativeVideo {
                 stop: false,
             }),
             changed: Condvar::new(),
+            actor_wake,
             _metadata: metadata,
         });
         let interrupt = factory.interrupt();
@@ -488,7 +571,7 @@ impl NativeVideo {
         let worker_shared = Arc::clone(&shared);
         let worker_input = Arc::clone(&input);
         let worker_auth = Arc::clone(&authorization);
-        let worker = owned_worker::spawn_owned(
+        let worker = owned_worker::spawn_owned_with_completion(
             "ilium-native-video",
             owned_worker::WorkerKind::SynchronousIo,
             stop,
@@ -516,6 +599,7 @@ impl NativeVideo {
                     stop,
                 );
             },
+            Arc::clone(&shared.actor_wake),
         )?;
         Ok(Self {
             shared,
@@ -550,19 +634,7 @@ impl NativeVideo {
             }
             state.target = position;
         }
-        let target = state.target;
-        while state
-            .queue
-            .front()
-            .is_some_and(|frame| frame.stamp.pts <= target)
-        {
-            if let Some(frame) = state.queue.pop_front() {
-                if state.latest.replace(frame).is_some() {
-                    state.discarded = state.discarded.saturating_add(1);
-                }
-            }
-        }
-        let frame = state.latest.clone();
+        let frame = state.latest_due();
         self.shared.changed.notify_all();
         Ok(frame)
     }
@@ -581,6 +653,8 @@ impl NativeVideo {
             state.phase = VideoPhase::Paused;
         }
         self.shared.changed.notify_all();
+        drop(state);
+        (self.shared.actor_wake)();
         Ok(())
     }
     pub fn resume(&self) -> Result<()> {
@@ -598,6 +672,8 @@ impl NativeVideo {
             state.phase = VideoPhase::Playing;
         }
         self.shared.changed.notify_all();
+        drop(state);
+        (self.shared.actor_wake)();
         Ok(())
     }
     pub fn seek(&self, position: Duration) -> Result<u64> {
@@ -642,6 +718,8 @@ impl NativeVideo {
             };
         }
         self.shared.changed.notify_all();
+        drop(state);
+        (self.shared.actor_wake)();
         Ok(generation)
     }
     pub fn status(&self) -> Result<VideoStatus> {
@@ -663,6 +741,72 @@ impl NativeVideo {
             actual_exit: self.worker.ticket().exit(),
         })
     }
+    /// Cleanup observation only. This conveys no media data or grant; a
+    /// retained owner uses it after revocation to prove physical retirement.
+    pub fn physical_exit(&self) -> Option<WorkerExit> {
+        self.worker.ticket().exit()
+    }
+    /// Trusted recording owner only. This retains the original admitted
+    /// finite byte source and its resource custody after decoder exit.
+    pub(crate) fn retained_input(&self) -> Arc<VerifiedVideoInput> {
+        Arc::clone(&self.input)
+    }
+    /// The pre-render producer waits on the decoder's finite condition
+    /// variable until the due frame is final (next PTS or EOF). The live UI
+    /// still uses nonblocking `latest_at` and never waits or decodes.
+    pub fn wait_recorded_at(
+        &self,
+        position: Duration,
+        deadline: Instant,
+        stop: &StopToken,
+    ) -> Result<Option<Arc<TimedVideoFrame>>> {
+        if position > self.limits.maximum_pts {
+            return Err(AnimationError::Budget("video playback target".into()));
+        }
+        loop {
+            stopped(stop)?;
+            self.authorize(VideoOperation::Deliver)?;
+            let mut state = self
+                .shared
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if state.stop || matches!(state.phase, VideoPhase::Stopping | VideoPhase::Exited) {
+                return Err(failure("recorded Video service retired"));
+            }
+            if state.failure.is_some() || state.phase == VideoPhase::Failed {
+                return Err(failure("recorded Video decoder failed"));
+            }
+            if !state.paused {
+                if position < state.target {
+                    return Err(failure("backwards playback requires explicit seek"));
+                }
+                state.target = position;
+            }
+            // The returned frame and finality test share the decoder's mutex.
+            // A newly published due frame cannot slip between two observations.
+            if let Some(frame) = state.recorded_final() {
+                self.shared.changed.notify_all();
+                stopped(stop)?;
+                return Ok(frame);
+            }
+            self.shared.changed.notify_all();
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(failure("recorded Video due-frame deadline"));
+            }
+            // NativeVideo::cancel changes state.stop and notifies this Condvar.
+            // The separate caller token has no registration callback, so it is
+            // checked again on every decoder wake and at the finite deadline.
+            stopped(stop)?;
+            let (state, _) = self
+                .shared
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|error| error.into_inner());
+            drop(state);
+        }
+    }
     /// Signal only; suitable for event/UI code. Actual join can remain pending.
     pub fn cancel(&self) {
         let mut state = self
@@ -670,6 +814,7 @@ impl NativeVideo {
             .state
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        let first_cancellation = !state.stop;
         state.stop = true;
         state.phase = if self.worker.ticket().exit().is_some() {
             if state.failure.is_some() {
@@ -685,6 +830,9 @@ impl NativeVideo {
         drop(state);
         self.worker.ticket().cancel();
         self.shared.changed.notify_all();
+        if first_cancellation {
+            (self.shared.actor_wake)();
+        }
     }
     /// Dedicated background owner only. Timeout keeps the supervisor, codec,
     /// resource, client reservation and physical admission alive until actual exit.
@@ -710,6 +858,8 @@ fn set_failure(shared: &Shared, kind: VideoFailure) {
     state.failure = Some(kind);
     state.phase = VideoPhase::Failed;
     shared.changed.notify_all();
+    drop(state);
+    (shared.actor_wake)();
 }
 /// The complete already-admitted source/codec graph moves onto its join owner.
 /// Custody guards remain in the surrounding worker closure through actual exit.
@@ -769,6 +919,7 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
         };
         shared.changed.notify_all();
     }
+    (shared.actor_wake)();
     let mut previous_pts = None;
     let mut read_count = 0u64;
     let mut ended = false;
@@ -866,6 +1017,8 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
                     .unwrap_or_else(|error| error.into_inner());
                 state.phase = VideoPhase::Ended;
                 shared.changed.notify_all();
+                drop(state);
+                (shared.actor_wake)();
                 continue;
             }
             Err(_) => {
@@ -913,6 +1066,33 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
             state.queue.pop_front();
             state.discarded = state.discarded.saturating_add(1);
         }
+        #[cfg(feature = "native-host")]
+        let pixels = if limits.geometry.format == VideoPixelFormat::Rgba8 {
+            match Admitted::from_video_rgba(
+                quota.clone(),
+                limits.geometry.width,
+                limits.geometry.height,
+                pixels,
+                admission,
+            ) {
+                Ok(image) => FramePixels::Rgba(Arc::new(image)),
+                Err(_) => {
+                    drop(state);
+                    set_failure(&shared, VideoFailure::Protocol);
+                    break;
+                }
+            }
+        } else {
+            FramePixels::Raw {
+                bytes: pixels,
+                _storage: admission,
+            }
+        };
+        #[cfg(not(feature = "native-host"))]
+        let pixels = FramePixels::Raw {
+            bytes: pixels,
+            _storage: admission,
+        };
         let frame = Arc::new(TimedVideoFrame {
             generation,
             sequence: read_count,
@@ -921,7 +1101,6 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
             authority: input.authority().clone(),
             resource_id: input.resource_id(),
             pixels,
-            _storage: admission,
         });
         if stamp.pts <= state.target {
             if state.latest.replace(frame).is_some() {
@@ -931,6 +1110,8 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
             state.queue.push_back(frame);
         }
         shared.changed.notify_all();
+        drop(state);
+        (shared.actor_wake)();
     }
     let closed = decoder.close_and_wait(&stop);
     let mut state = shared
@@ -948,4 +1129,100 @@ fn run_worker(context: VideoWorkerContext, stop: StopToken) {
         VideoPhase::Exited
     };
     shared.changed.notify_all();
+    drop(state);
+    (shared.actor_wake)();
+}
+
+#[cfg(test)]
+mod recorded_frame_tests {
+    use super::*;
+    use ilium_execution::QuotaLimits;
+    use std::sync::mpsc;
+    use std::thread;
+
+    fn frame(quota: &QuotaGroup, sequence: u64, seconds: u64) -> Arc<TimedVideoFrame> {
+        Arc::new(TimedVideoFrame {
+            generation: 1,
+            sequence,
+            stamp: FrameStamp {
+                pts: Duration::from_secs(seconds),
+                duration: Duration::from_secs(1),
+            },
+            geometry: VideoGeometry {
+                width: 1,
+                height: 1,
+                format: VideoPixelFormat::Gray8,
+            },
+            authority: VideoAuthority {
+                package_digest: "a".repeat(64),
+                instance_id: 1,
+                plan_revision: 1,
+                authorization_epoch: 1,
+            },
+            resource_id: 1,
+            pixels: FramePixels::Raw {
+                bytes: vec![sequence as u8],
+                _storage: storage(quota, 1).unwrap(),
+            },
+        })
+    }
+
+    #[test]
+    fn recorded_final_uses_newest_decoder_frame_under_the_original_state_lock() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: 1,
+            worker_bytes: 1024 * 1024,
+        });
+        let old = frame(&quota, 1, 0);
+        let newest = frame(&quota, 2, 1);
+        let future = frame(&quota, 3, 2);
+        let shared = Arc::new(Shared {
+            state: Mutex::new(State {
+                phase: VideoPhase::Playing,
+                queue: VecDeque::new(),
+                latest: Some(Arc::clone(&old)),
+                target: Duration::from_secs(1),
+                generation: 1,
+                decoded: 1,
+                discarded: 0,
+                info: None,
+                failure: None,
+                paused: false,
+                seek: None,
+                stop: false,
+            }),
+            changed: Condvar::new(),
+            actor_wake: Arc::new(|| {}),
+            _metadata: storage(&quota, 4096).unwrap(),
+        });
+        // This is the interleaving that made the old two-lock wait return the
+        // stale clone: the actual worker state changes after an earlier read.
+        let stale_clone = shared.state.lock().unwrap().latest.clone().unwrap();
+        let (release, received) = mpsc::sync_channel::<()>(0);
+        let worker_state = Arc::clone(&shared);
+        let worker_newest = Arc::clone(&newest);
+        let worker = thread::spawn(move || {
+            received.recv().unwrap();
+            let mut state = worker_state.state.lock().unwrap();
+            state.latest = Some(worker_newest);
+            state.queue.push_back(future);
+            worker_state.changed.notify_all();
+        });
+        release.send(()).unwrap();
+        let mut state = shared.state.lock().unwrap();
+        while state.queue.is_empty() {
+            state = shared.changed.wait(state).unwrap();
+        }
+        let selected = state.recorded_final().unwrap().unwrap();
+        drop(state);
+        worker.join().unwrap();
+        assert!(Arc::ptr_eq(&selected, &newest));
+        assert!(!Arc::ptr_eq(&selected, &stale_clone));
+        assert_eq!(selected.sequence, 2);
+    }
 }

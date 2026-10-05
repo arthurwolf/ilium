@@ -459,6 +459,46 @@ fn real_moon_grid_retains_native_provenance_and_fictional_identity_is_explicit()
     assert_eq!(fictional["provenance"]["fictional"], true);
 }
 
+#[cfg(all(
+    feature = "v8-runtime",
+    feature = "native-host",
+    feature = "native-network"
+))]
+#[test]
+fn native_elevation_keeps_actual_f32_samples_under_the_original_result_owner() {
+    let quota = root_quota();
+    let mut dispatcher =
+        SourceDispatcher::new(FakeClient(State::default()), quota.clone()).unwrap();
+    let stop = AtomicBool::new(false);
+    let value = dispatcher
+        .dispatch_native(
+            SourceRequest::GeographyElevation {
+                body: "moon".into(),
+                bounds: bounds(),
+                width: 2,
+                height: 2,
+                seed: None,
+            },
+            clock(0),
+            &stop,
+        )
+        .unwrap();
+    assert_eq!(value.binary_f32().map(<[f32]>::len), Some(4));
+    assert!(value
+        .binary_f32()
+        .unwrap()
+        .iter()
+        .all(|sample| sample.is_finite()));
+    assert!(value.view().get("elevations").is_none());
+    assert_eq!(value["width"], 2);
+    assert_eq!(value["height"], 2);
+    assert!(quota.snapshot().worker_bytes > 0);
+    drop(dispatcher);
+    assert!(quota.snapshot().worker_bytes > 0);
+    drop(value);
+    assert_eq!(quota.snapshot().worker_bytes, 0);
+}
+
 #[test]
 fn bounded_earth_contours_declare_zero_level_and_cancellation_prevents_loading() {
     let mut dispatcher = SourceDispatcher::new(FakeClient(State::default()), root_quota()).unwrap();

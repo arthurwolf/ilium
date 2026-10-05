@@ -18,12 +18,13 @@ use ilium_ambient::{
 };
 use ilium_execution::QuotaGroup;
 use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerExit, WorkerKind};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     io::Read,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 const RING_SAMPLES: usize = 8192;
@@ -41,6 +42,7 @@ pub enum CaptureBackend {
 }
 /// Qualification is supplied by the native host, never inferred from the helper
 /// name. Accounting bounds are reservations, not a physical RSS containment claim.
+#[derive(Clone)]
 pub struct QualifiedCaptureBinding {
     selector: AudioSourceSelection,
     endpoint: String,
@@ -50,6 +52,7 @@ pub struct QualifiedCaptureBinding {
     program: PathBuf,
     backend: CaptureBackend,
     helper_cost: WorkerCost,
+    platform_identity: Option<String>,
 }
 impl QualifiedCaptureBinding {
     #[allow(clippy::too_many_arguments)] // One host-selected resource's complete qualification.
@@ -86,6 +89,11 @@ impl QualifiedCaptureBinding {
                 && capability != Capability::AudioLoopback
             || matches!(selector, AudioSourceSelection::Microphone)
                 && capability != Capability::AudioMicrophone
+            || match &selector {
+                AudioSourceSelection::Loopback => scope_device != "loopback",
+                AudioSourceSelection::Microphone => scope_device != "microphone",
+                AudioSourceSelection::Device(name) => scope_device.as_str() != name.as_str(),
+            }
         {
             return Err(invalid("invalid qualified native audio binding"));
         }
@@ -98,10 +106,57 @@ impl QualifiedCaptureBinding {
             program,
             backend,
             helper_cost,
+            platform_identity: None,
         })
+    }
+    /// Only the platform's exact, user-selected source enumeration can create
+    /// a production Pulse binding. Fixture-only from_host remains explicit.
+    pub fn from_selected_pulse(
+        selector: AudioSourceSelection,
+        selected: ilium_platform::audio_backend::SelectedPulseSource,
+        scope_device: String,
+        capability: Capability,
+        helper_cost: WorkerCost,
+    ) -> Result<Self> {
+        let mut fingerprint = Sha256::new();
+        fingerprint.update(b"ilium-pulse-source-v1\0");
+        fingerprint.update(selected.identity().as_bytes());
+        let opaque_identity = format!(
+            "pulse_{}",
+            fingerprint
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        let mut binding = Self::from_host(
+            selector,
+            selected.endpoint().to_owned(),
+            scope_device,
+            capability,
+            opaque_identity,
+            selected.helper_program().to_path_buf(),
+            CaptureBackend::Pulse,
+            helper_cost,
+        )?;
+        binding.platform_identity = Some(selected.identity().to_owned());
+        Ok(binding)
     }
     pub fn binding(&self) -> &HostBinding {
         &self.binding
+    }
+    pub fn matches_right(&self, right: &Right) -> bool {
+        right.id == self.capability
+            && matches!(&right.scope, Scope::Audio { device, .. } if device == &self.scope_device)
+    }
+    pub fn selector(&self) -> &AudioSourceSelection {
+        &self.selector
+    }
+    pub fn scope_device(&self) -> &str {
+        &self.scope_device
+    }
+    pub fn capability(&self) -> Capability {
+        self.capability
     }
 }
 struct Ring {
@@ -145,7 +200,6 @@ struct Control {
 }
 struct Data {
     ring: Mutex<Ring>,
-    changed: Condvar,
 }
 /// Must run on a dedicated admitted host preparation thread, never an Execution
 /// bank callback or UI thread: open waits at most two seconds
@@ -216,6 +270,28 @@ impl AuthenticatedCaptureFactory for NativeAudioCaptureFactory {
         {
             return Err(invalid("capture demand/source/quota mismatch"));
         }
+        if let Some(identity) = &self.selected.platform_identity {
+            let _enumeration_charge = resources
+                .reserve_worker(WorkerCost {
+                    threads: 1,
+                    resident_bytes: 32 * 1024 * 1024,
+                })
+                .map_err(|error| {
+                    AnimationError::Budget(format!("audio endpoint requalification: {error:?}"))
+                })?;
+            let current = ilium_platform::audio_backend::qualify_selected_pulse_source(
+                &self.selected.endpoint,
+                self.selected.capability == Capability::AudioLoopback,
+            )
+            .map_err(|error| invalid(format!("selected audio endpoint changed: {error}")))?;
+            if current.identity() != identity
+                || current.helper_program() != self.selected.program.as_path()
+            {
+                return Err(AnimationError::PermissionDenied(
+                    "selected audio endpoint or helper changed before capture open".into(),
+                ));
+            }
+        }
         let need = self.need(&demand.products)?;
         let reservation = resources
             .reserve_worker(WorkerCost {
@@ -243,7 +319,6 @@ impl AuthenticatedCaptureFactory for NativeAudioCaptureFactory {
         let demand_id = self.demand_id.clone();
         let data = Arc::new(Data {
             ring: Mutex::new(Ring::new()),
-            changed: Condvar::new(),
         });
         let control = Arc::new(Mutex::new(Control {
             child: None,
@@ -280,69 +355,72 @@ impl AuthenticatedCaptureFactory for NativeAudioCaptureFactory {
                 };
                 if let Ok(ticket) = ticket {
                     if !stop.is_stopped() {
-                        let spawned = broker
+                        // Commit is the irreversible-issue boundary. Process
+                        // creation itself can block and must not hold the
+                        // broker mutex; a later revocation may cancel it but
+                        // cannot pretend the committed attempt never occurred.
+                        let committed = broker
                             .lock()
                             .map_err(|_| invalid("native audio authority poisoned"))
-                            .and_then(|mut broker| {
-                                broker
-                                    .commit(&ticket, || {
-                                        Command::new(program)
-                                            .args(std::mem::take(&mut command.args))
-                                            .stdin(Stdio::null())
-                                            .stdout(Stdio::piped())
-                                            .stderr(Stdio::null())
-                                            .spawn()
-                                    })
-                                    .map_err(auth)
-                            });
-                        if let Ok(Ok(mut child)) = spawned {
-                            let stdout = child.stdout.take();
-                            {
-                                let mut control = body_control
-                                    .lock()
-                                    .unwrap_or_else(|error| error.into_inner());
-                                if control.stopping || stop.is_stopped() {
-                                    let _ = child.kill();
+                            .and_then(|mut broker| broker.commit(&ticket, || ()).map_err(auth));
+                        if committed.is_ok() && !stop.is_stopped() {
+                            let spawned = Command::new(program)
+                                .args(std::mem::take(&mut command.args))
+                                .stdin(Stdio::null())
+                                .stdout(Stdio::piped())
+                                .stderr(Stdio::null())
+                                .spawn();
+                            if let Ok(mut child) = spawned {
+                                let stdout = child.stdout.take();
+                                {
+                                    let mut control = body_control
+                                        .lock()
+                                        .unwrap_or_else(|error| error.into_inner());
+                                    if control.stopping || stop.is_stopped() {
+                                        let _ = child.kill();
+                                    }
+                                    control.child = Some(child);
                                 }
-                                control.child = Some(child);
-                            }
-                            if let Some(mut stdout) = stdout {
-                                let mut decoder =
-                                    NativeAudioPcmDecoder::new(command.format, command.channels);
-                                let mut bytes = [0u8; 8192];
-                                let mut mono = Vec::with_capacity(1024);
-                                while !stop.is_stopped() {
-                                    match stdout.read(&mut bytes) {
-                                        Ok(0) => break,
-                                        Ok(count) => {
-                                            mono.clear();
-                                            decoder.push(&bytes[..count], &mut mono);
-                                            body_data
-                                                .ring
-                                                .lock()
-                                                .unwrap_or_else(|error| error.into_inner())
-                                                .push(&mono);
-                                            body_data.changed.notify_all();
+                                if let Some(mut stdout) = stdout {
+                                    let mut decoder = NativeAudioPcmDecoder::new(
+                                        command.format,
+                                        command.channels,
+                                    );
+                                    let mut bytes = [0u8; 8192];
+                                    let mut mono = Vec::with_capacity(1024);
+                                    while !stop.is_stopped() {
+                                        match stdout.read(&mut bytes) {
+                                            Ok(0) => break,
+                                            Ok(count) => {
+                                                mono.clear();
+                                                decoder.push(&bytes[..count], &mut mono);
+                                                body_data
+                                                    .ring
+                                                    .lock()
+                                                    .unwrap_or_else(|error| error.into_inner())
+                                                    .push(&mono);
+                                            }
+                                            Err(error)
+                                                if error.kind()
+                                                    == std::io::ErrorKind::Interrupted =>
+                                            {
+                                                continue;
+                                            }
+                                            Err(_) => break,
                                         }
-                                        Err(error)
-                                            if error.kind() == std::io::ErrorKind::Interrupted =>
-                                        {
-                                            continue;
-                                        }
-                                        Err(_) => break,
                                     }
                                 }
-                            }
-                            // The wake may kill but never waits. Actual exit remains in this worker's custody.
-                            let child = body_control
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .child
-                                .take();
-                            if let Some(mut child) = child {
-                                let _ = child.kill();
-                                while child.wait().is_err() {
-                                    std::thread::yield_now();
+                                // The wake may kill but never waits. Actual exit remains in this worker's custody.
+                                let child = body_control
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .child
+                                    .take();
+                                if let Some(mut child) = child {
+                                    let _ = child.kill();
+                                    while child.wait().is_err() {
+                                        std::thread::yield_now();
+                                    }
                                 }
                             }
                         }
@@ -356,34 +434,15 @@ impl AuthenticatedCaptureFactory for NativeAudioCaptureFactory {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .ended = true;
-                body_data.changed.notify_all();
             },
         )
         .map_err(|error| invalid(format!("owned audio worker: {error}")))?;
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let mut ring = data.ring.lock().unwrap_or_else(|error| error.into_inner());
-        while !ring.ready && !ring.ended {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            ring = data
-                .changed
-                .wait_timeout(ring, remaining)
-                .unwrap_or_else(|error| error.into_inner())
-                .0;
-        }
-        if !ring.ready {
-            drop(ring);
-            worker.ticket().cancel();
-            return Err(invalid(
-                "native audio helper produced no PCM before startup deadline",
-            ));
-        }
-        drop(ring);
+        // No startup wait here. The returned capture retains the original
+        // worker until readiness, timeout, cancellation, and physical join.
         Ok(Box::new(ProcessCapture {
             worker,
             data,
+            opened_at: Instant::now(),
             broker: Arc::clone(&self.broker),
             channel: self.channel.clone(),
             demand_id: self.demand_id.clone(),
@@ -393,6 +452,7 @@ impl AuthenticatedCaptureFactory for NativeAudioCaptureFactory {
 }
 struct ProcessCapture {
     data: Arc<Data>,
+    opened_at: Instant,
     broker: Arc<Mutex<PermissionBroker>>,
     channel: Channel,
     demand_id: String,
@@ -406,6 +466,24 @@ impl OwnedAudioCapture for ProcessCapture {
     fn read_mono(&mut self, out: &mut [f32]) -> Result<usize> {
         if out.len() > RING_SAMPLES {
             return Err(invalid("native PCM read exceeds bound"));
+        }
+        {
+            let ring = self
+                .data
+                .ring
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if !ring.ready {
+                if ring.ended {
+                    return Err(invalid("native audio helper ended before PCM"));
+                }
+                if self.opened_at.elapsed() >= Duration::from_secs(2) {
+                    return Err(invalid(
+                        "native audio helper produced no PCM before startup deadline",
+                    ));
+                }
+                return Ok(0);
+            }
         }
         let mut broker = self
             .broker

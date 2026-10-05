@@ -181,6 +181,7 @@ fn clipped_lines_fill_triangles_paths_and_ellipses_publish_in_every_format() {
                     fill,
                     closed,
                     value: value(format),
+                    rgb: None,
                     blend: Blend::Overwrite,
                 }],
             )
@@ -211,6 +212,7 @@ fn work_and_remaining_sample_bounds_reject_before_publication() {
         fill: true,
         closed: true,
         value: vec![255.],
+        rgb: None,
         blend: Blend::Overwrite,
     };
     let mut authority = Authority::default();
@@ -269,6 +271,7 @@ fn styled_unicode_clips_whole_wide_graphemes_without_losing_style() {
     .unwrap();
     let style = TextStyle {
         rgb: Some([12, 34, 56]),
+        background: None,
         bold: true,
         italic: true,
         underline: true,
@@ -486,6 +489,7 @@ fn mono1_patch_rows_keep_padding_clear_and_count_refusal_releases_scratch() {
         fill: false,
         closed: false,
         value: vec![1.],
+        rgb: None,
         blend: Blend::Overwrite,
     };
     let output = renderer.render(&command, shape, 64).unwrap();
@@ -723,4 +727,144 @@ fn scratch_refusal_cannot_allocate_an_unadmitted_renderer() {
         Err(SurfaceError::Capacity)
     ));
     assert_eq!(quota.snapshot().worker_bytes, before);
+}
+
+#[test]
+fn vector_tint_colours_actual_coverage_without_painting_empty_bound_corners() {
+    let quota = quota(64 * 1024 * 1024);
+    let media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+    let stop = StopToken::default();
+    for format in [Format::Mask8, Format::Gray32] {
+        let mut shape = shape(format);
+        shape.cell_rgb = true;
+        let mut authority = Authority::default();
+        let mut renderer = NativeDraw::new(
+            &quota,
+            shape,
+            DrawLimits::default(),
+            binding(),
+            &media,
+            &mut authority,
+            &stop,
+        )
+        .unwrap();
+        let command = Command::Vector {
+            order: 1,
+            op: VectorOp::Line,
+            points: vec![[0., 0.], [7., 7.]],
+            width: 1.,
+            fill: false,
+            closed: false,
+            value: value(format),
+            rgb: Some([255, 0, 0]),
+            blend: Blend::Overwrite,
+        };
+        let output = renderer.render(&command, shape, 64).unwrap();
+        assert!(!output.colours.is_empty());
+        assert!(output
+            .colours
+            .iter()
+            .all(|(_, _, rgb)| *rgb == Some([255, 0, 0])));
+        assert!(
+            !output
+                .colours
+                .iter()
+                .any(|(x, y, _)| (*x, *y) == (3, 0) || (*x, *y) == (0, 1)),
+            "empty diagonal bounding-box corners must remain untouched"
+        );
+        let mut undeclared = shape;
+        undeclared.cell_rgb = false;
+        let mut undeclared_authority = Authority::default();
+        let mut refused = NativeDraw::new(
+            &quota,
+            undeclared,
+            DrawLimits::default(),
+            binding(),
+            &media,
+            &mut undeclared_authority,
+            &stop,
+        )
+        .unwrap();
+        assert!(refused.render(&command, undeclared, 64).is_err());
+    }
+}
+
+#[test]
+fn native_text_raster_and_styled_spans_use_real_renderer_in_all_seven_formats() {
+    let quota = quota(256 * 1024 * 1024);
+    let media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+    let stop = StopToken::default();
+    for format in [
+        Format::Mask8,
+        Format::Mono1,
+        Format::Mono8,
+        Format::Gray8,
+        Format::Gray32,
+        Format::Rgb8,
+        Format::Rgba8,
+    ] {
+        let shape = shape(format);
+        let mut authority = Authority::default();
+        let mut renderer = NativeDraw::new(
+            &quota,
+            shape,
+            DrawLimits::default(),
+            binding(),
+            &media,
+            &mut authority,
+            &stop,
+        )
+        .unwrap();
+        let raster = renderer
+            .render(
+                &Command::RasterText {
+                    order: 1,
+                    x: 0,
+                    y: 0,
+                    text: "A".into(),
+                    font: "CascadiaCode-Regular".into(),
+                    size_px: 8.,
+                    intensity: 1.,
+                    rgb: None,
+                },
+                shape,
+                shape.layout().unwrap().samples,
+            )
+            .unwrap();
+        assert_eq!(raster.patches.len(), 1, "{format:?}");
+        assert!(raster.patches[0].state.contains(&2), "{format:?}");
+        let spans = renderer
+            .render(
+                &Command::TextSpans {
+                    order: 2,
+                    x: 0,
+                    y: 1,
+                    max_cells: 4,
+                    spans: vec![ilium_animation_js::surface::NativeSpan {
+                        text: "e\u{301}界".into(),
+                        style: TextStyle {
+                            rgb: Some([255, 0, 0]),
+                            background: Some([0, 64, 0]),
+                            bold: true,
+                            italic: true,
+                            underline: true,
+                        },
+                    }],
+                },
+                shape,
+                shape.layout().unwrap().samples,
+            )
+            .unwrap();
+        assert_eq!(spans.text.len(), 2, "{format:?}");
+        assert_eq!(
+            (spans.text[0].text.as_str(), spans.text[0].width),
+            ("e\u{301}", 1)
+        );
+        assert_eq!(
+            (spans.text[1].text.as_str(), spans.text[1].width),
+            ("界", 2)
+        );
+        assert_eq!(spans.text[1].style.background, Some([0, 64, 0]));
+        assert!(spans.text[1].style.underline);
+    }
 }

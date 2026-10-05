@@ -202,6 +202,11 @@ const SERVICE_PLANES: usize = 48; // Preserve the existing binary-plane ceiling.
 const SERVICE_REFERENCES: usize = 64; // Bound transient SDK wrapper projections without creating native handle authority.
 const SERVICE_NODES: usize = 4096; // Bound native metadata traversal and reconstruction.
 const SERVICE_DEPTH: usize = 32; // Bound recursion before allocating an escaping value.
+const PURE_SOURCE_SCRATCH_BYTES: usize = 1024 * 1024; // Match sources::operation_peak for both pure requests before native JSON computation.
+const PURE_SOURCE_INPUT_BYTES: usize = 512; // Exactly three primitive options; reject larger trees before math.
+const PURE_SOURCE_RESULT_BYTES: usize = 16 * 1024; // Existing fixed-body observer output has a finite result ceiling.
+const TEXT_MEASURE_INPUT_BYTES: usize = 17 * 1024; // Bounded primitive text plus font/size keys.
+const TEXT_MEASURE_RESULT_BYTES: usize = 512; // Two bounded integer pixel dimensions.
 const SERVICE_TAG: &str = "$ilium_binary"; // Reserve a structural marker that never denotes authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] // Compare only native-issued activation coordinates.
 pub struct ServiceAuthority {
@@ -376,6 +381,18 @@ impl ServiceValue {
         // Admit a distinct immutable native completion copy.
         Self::copy_parts(metadata, arrays, planes, limits, quota, None) // Do not borrow the producer's allocation lifetime.
     } // End public native-copy construction.
+    /// Copy borrowed native planes into an independently admitted immutable result.
+    /// The caller retains source custody for this call; clones share only the
+    /// resulting allocation and its original-root debit.
+    pub fn copy_from_borrowed_host(
+        metadata: &Value,
+        arrays: &[ArraySpec],
+        planes: &BTreeMap<String, &[u8]>,
+        limits: &EngineLimits,
+        quota: QuotaGroup,
+    ) -> Result<Self> {
+        Self::copy_parts(metadata, arrays, planes, limits, quota, None)
+    }
     pub(crate) fn copy_request_from_host(
         metadata: &Value,
         arrays: &[ArraySpec],
@@ -387,10 +404,10 @@ impl ServiceValue {
         // Revalidate helper ingress under the original parent root.
         Self::copy_parts(metadata, arrays, planes, limits, quota, Some(budget)) // Charge pending bounds before cloning data.
     } // End parent-side request construction.
-    fn copy_parts(
+    fn copy_parts<B: AsRef<[u8]>>(
         metadata: &Value,
         arrays: &[ArraySpec],
-        planes: &BTreeMap<String, Vec<u8>>,
+        planes: &BTreeMap<String, B>,
         limits: &EngineLimits,
         quota: QuotaGroup,
         budget: Option<&Arc<ServiceBudget>>,
@@ -411,6 +428,7 @@ impl ServiceValue {
             .map_err(admission_error)?; // Use the producer's original root before making a copy.
         let mut copied = BTreeMap::new(); // The new map is covered by the live storage admission.
         for (name, bytes) in planes {
+            let bytes = bytes.as_ref();
             // Copy each plane while the source remains borrowed.
             let mut output = Vec::new(); // Allocate only after complete shape and quota validation.
             output
@@ -569,6 +587,9 @@ struct Pending {
 }
 struct Bridge {
     phase: Phase,
+    native_deadline: Option<Instant>, // Mirror the current watchdog deadline for synchronous native work.
+    pure_source_running: bool,        // Deny nested pure entry while a bridge call owns scratch.
+    callback_stop: StopToken, // The engine watchdog and retirement signal synchronous native font work.
     next_id: u64,
     requests: VecDeque<HostRequest>,
     pending: BTreeMap<u64, Pending>,
@@ -643,6 +664,7 @@ struct WatchControl {
     changed: Condvar,
     terminated: AtomicBool,
     heap_failed: AtomicBool,
+    callback_stop: StopToken,
     handle: v8::IsolateHandle,
 }
 unsafe extern "C" fn near_heap(pointer: *mut c_void, current: usize, _initial: usize) -> usize {
@@ -650,6 +672,7 @@ unsafe extern "C" fn near_heap(pointer: *mut c_void, current: usize, _initial: u
     // isolate has been destroyed. The fixed emergency headroom was admitted.
     let control = unsafe { &*pointer.cast::<WatchControl>() };
     let already_failed = control.heap_failed.swap(true, Ordering::AcqRel);
+    control.callback_stop.stop();
     control.handle.terminate_execution();
     if already_failed {
         current
@@ -677,6 +700,7 @@ fn supervise_watchdog(control: Arc<WatchControl>, stop: StopToken) {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
                     control.terminated.store(true, Ordering::Release);
+                    control.callback_stop.stop();
                     control.handle.terminate_execution();
                     state.deadline = None;
                 } else {
@@ -796,6 +820,7 @@ impl Engine {
         };
         isolate.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
         isolate.set_allow_atomics_wait(false);
+        let callback_stop = StopToken::default();
         let control = Arc::new(WatchControl {
             state: Mutex::new(WatchState {
                 deadline: None,
@@ -804,10 +829,14 @@ impl Engine {
             changed: Condvar::new(),
             terminated: AtomicBool::new(false),
             heap_failed: AtomicBool::new(false),
+            callback_stop: callback_stop.clone(),
             handle: isolate.thread_safe_handle(),
         });
         let bridge = Rc::new(RefCell::new(Bridge {
             phase: Phase::Idle,
+            native_deadline: None,
+            pure_source_running: false,
+            callback_stop,
             next_id: 1,
             requests: VecDeque::new(),
             pending: BTreeMap::new(),
@@ -843,6 +872,43 @@ impl Engine {
             ) != Some(true)
             {
                 return Err(AnimationError::Runtime("dispatch registration".into()));
+            }
+            let project = v8::Function::new(scope, pure_geography_project)
+                .ok_or_else(|| runtime("geography project binding"))?;
+            let observe = v8::Function::new(scope, pure_astronomy_observe)
+                .ok_or_else(|| runtime("astronomy observe binding"))?;
+            for (name, callback) in [
+                ("__ilium_geography_project", project),
+                ("__ilium_astronomy_observe", observe),
+            ] {
+                let key = v8::String::new(scope, name)
+                    .ok_or_else(|| runtime("pure source binding name"))?;
+                if context.global(scope).define_own_property(
+                    scope,
+                    key.into(),
+                    callback.into(),
+                    v8::PropertyAttribute::READ_ONLY
+                        | v8::PropertyAttribute::DONT_DELETE
+                        | v8::PropertyAttribute::DONT_ENUM,
+                ) != Some(true)
+                {
+                    return Err(runtime("pure source registration"));
+                }
+            }
+            let text_measure = v8::Function::new(scope, native_text_measure)
+                .ok_or_else(|| runtime("native text measurement binding"))?;
+            let text_measure_name = v8::String::new(scope, "__ilium_text_measure")
+                .ok_or_else(|| runtime("native text measurement name"))?;
+            if context.global(scope).define_own_property(
+                scope,
+                text_measure_name.into(),
+                text_measure.into(),
+                v8::PropertyAttribute::READ_ONLY
+                    | v8::PropertyAttribute::DONT_DELETE
+                    | v8::PropertyAttribute::DONT_ENUM,
+            ) != Some(true)
+            {
+                return Err(runtime("native text measurement registration"));
             }
             let phase = v8::Function::new(scope, service_phase)
                 .ok_or_else(|| runtime("service phase binding"))?; // Let trusted synchronous SDK guards inspect native phase without acquiring anything.
@@ -964,7 +1030,6 @@ impl Engine {
         {
             return Err(runtime("native service authority is not bound"));
         } // Script-readable accepted-plan fields never activate execution.
-        self.bridge.borrow_mut().phase = phase;
         let deadline = Instant::now()
             .checked_add(Duration::from_millis(milliseconds))
             .ok_or_else(|| AnimationError::Budget("deadline overflow".into()))?;
@@ -976,6 +1041,11 @@ impl Engine {
             .lock()
             .map_err(|_| AnimationError::Runtime("watchdog state poisoned".into()))?
             .deadline = Some(deadline);
+        {
+            let mut bridge = self.bridge.borrow_mut();
+            bridge.phase = phase;
+            bridge.native_deadline = Some(deadline);
+        }
         self.control.changed.notify_all();
         Ok(())
     }
@@ -986,7 +1056,11 @@ impl Engine {
             .unwrap_or_else(|poison| poison.into_inner())
             .deadline = None;
         self.control.changed.notify_all();
-        self.bridge.borrow_mut().phase = Phase::Idle;
+        {
+            let mut bridge = self.bridge.borrow_mut();
+            bridge.phase = Phase::Idle;
+            bridge.native_deadline = None;
+        }
         let violation = self.bridge.borrow_mut().violation.take();
         let failure = if self.control.terminated.load(Ordering::Acquire) {
             Some("JavaScript deadline exceeded".to_owned())
@@ -1016,9 +1090,11 @@ impl Engine {
         self.staged_seed.take();
         let _ = self.detach_seed_buffers(); // No JS; failed cleanup keeps allocator custody until isolate teardown.
         self.invalid = true;
+        self.control.callback_stop.stop();
         self.control.handle.terminate_execution();
         let mut bridge = self.bridge.borrow_mut();
         bridge.authority = None; // Retire the native service stamp before dropping local queues.
+        bridge.native_deadline = None;
         bridge.service_reactions_pending = false; // A retired engine will never run its queued reactions.
         bridge.service_budget.close(); // Prevent replacement admissions while escaped payloads remain charged.
         for pending in bridge.pending.values() {
@@ -1093,6 +1169,7 @@ impl Engine {
                 "__ilium_seed_frame",
                 "__ilium_frame_buffers",
                 "__ilium_take_status",
+                "__ilium_configure_ambient",
             ] {
                 // Seal trusted private inventory before any package can add a replacement hook.
                 let key = v8::String::new(scope, name)
@@ -1111,6 +1188,46 @@ impl Engine {
                     return Err(runtime("optional bootstrap hook sealing"));
                 }
             }
+            scope.perform_microtask_checkpoint();
+            Ok(())
+        })();
+        self.finish(result)
+    }
+    /// This trusted hook runs after bootstrap installation and before module
+    /// instantiation/evaluation, so guest top-level code cannot capture the
+    /// physical Date or Math.random in pre-rendered mode.
+    pub fn configure_ambient(&mut self, mode: AnimationMode, seed: u32) -> Result<()> {
+        if self.module.is_some() {
+            return Err(runtime("ambient configuration after module load"));
+        }
+        self.begin(Phase::Bootstrap, self.limits.evaluation_ms)?;
+        let result = (|| {
+            let isolate = self
+                .isolate
+                .as_mut()
+                .ok_or_else(|| runtime("isolate missing"))?;
+            v8::scope!(let scope,isolate);
+            let context = v8::Local::new(
+                scope,
+                self.context
+                    .as_ref()
+                    .ok_or_else(|| runtime("context missing"))?,
+            );
+            let scope = &mut v8::ContextScope::new(scope, context);
+            v8::tc_scope!(let scope,scope);
+            let global = context.global(scope);
+            let hook = function_property(scope, global, "__ilium_configure_ambient")?;
+            let mode = v8::String::new(
+                scope,
+                match mode {
+                    AnimationMode::Live => "live",
+                    AnimationMode::PreRendered => "pre_rendered",
+                },
+            )
+            .ok_or_else(|| runtime("ambient mode allocation"))?;
+            let seed = v8::Number::new(scope, f64::from(seed));
+            hook.call(scope, global.into(), &[mode.into(), seed.into()])
+                .ok_or_else(|| runtime("ambient configuration rejected"))?;
             scope.perform_microtask_checkpoint();
             Ok(())
         })();
@@ -2413,10 +2530,10 @@ fn service_references(
     } // Finish this node's closed type case.
     Ok(()) // The caller separately verifies that all declared planes were referenced.
 } // End marker graph validation.
-fn validate_service_parts(
+fn validate_service_parts<B: AsRef<[u8]>>(
     metadata: &Value,
     arrays: &[ArraySpec],
-    planes: &BTreeMap<String, Vec<u8>>,
+    planes: &BTreeMap<String, B>,
     limits: &EngineLimits,
 ) -> Result<(usize, usize, usize)> {
     // Preflight a complete native service payload before copying it.
@@ -2433,7 +2550,7 @@ fn validate_service_parts(
             .elements
             .checked_mul(spec.kind.width())
             .ok_or_else(|| AnimationError::Budget("service plane shape overflow".into()))?; // Reject shape multiplication overflow first.
-        if planes.get(&spec.name).map(Vec::len) != Some(bytes) {
+        if planes.get(&spec.name).map(|plane| plane.as_ref().len()) != Some(bytes) {
             return Err(runtime("service binary shape mismatch"));
         } // Require exactly the declared bytes for each kind.
         binary_bytes = binary_bytes
@@ -2605,6 +2722,367 @@ fn service_phase(
         .unwrap_or(0); // Only native entrypoints open seed, inventory, or finish gates; none permits acquisition.
     returned.set(v8::Integer::new(scope, phase).into()); // A script may observe this state but cannot change it.
 } // Seed 3, private inventory 4, and sealed-plane finish 5 all remain nonacquiring.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PureSourceKind {
+    Project,
+    Observe,
+}
+#[derive(Clone, Copy)]
+enum PureSourceFailure {
+    Invalid,
+    Budget,
+    Deadline,
+    Phase,
+    Unavailable,
+    UnsupportedFont,
+    UnsupportedGlyph,
+}
+impl PureSourceFailure {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Invalid => "invalid_request",
+            Self::Budget => "budget_exceeded",
+            Self::Deadline => "timeout",
+            Self::Phase => "service_phase",
+            Self::Unavailable => "native_source_unavailable",
+            Self::UnsupportedFont => "unsupported_font",
+            Self::UnsupportedGlyph => "unsupported_glyph",
+        }
+    }
+    fn message(self) -> &'static str {
+        match self {
+            Self::Invalid => "Pure source options are invalid or outside the supported domain.",
+            Self::Budget => "Pure source computation exceeded the original engine quota.",
+            Self::Deadline => "The current engine deadline expired during pure source computation.",
+            Self::Phase => "Pure source computation is unavailable in this native lifecycle phase.",
+            Self::Unavailable => "Pure native sources are unavailable in this build.",
+            Self::UnsupportedFont => "Only the bundled CascadiaCode-Regular font is supported.",
+            Self::UnsupportedGlyph => "The bundled font lacks a requested glyph.",
+        }
+    }
+}
+struct PureSourceGuard(Rc<RefCell<Bridge>>);
+impl Drop for PureSourceGuard {
+    fn drop(&mut self) {
+        self.0.borrow_mut().pure_source_running = false;
+    }
+}
+fn native_text_measure(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut returned: v8::ReturnValue<v8::Value>,
+) {
+    let Some(bridge) = scope.get_slot::<Rc<RefCell<Bridge>>>().cloned() else {
+        return;
+    };
+    let answer = native_text_measure_value(scope, args, &bridge);
+    if matches!(answer, Err(PureSourceFailure::Deadline)) {
+        bridge.borrow_mut().violation = Some("JavaScript deadline exceeded".into());
+    }
+    let payload = match answer {
+        Ok((width, height)) => {
+            serde_json::json!({"ok":true,"value":{"width":width,"height":height}})
+        }
+        Err(failure) => serde_json::json!({"ok":false,"error":{
+            "code": failure.code(), "message": failure.message()
+        }}),
+    };
+    match service_into(scope, &payload, &BTreeMap::new()) {
+        Ok(value) => returned.set(value),
+        Err(_) => {
+            bridge.borrow_mut().violation = Some("native text result publication failed".into())
+        }
+    }
+}
+fn native_text_measure_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments,
+    bridge: &Rc<RefCell<Bridge>>,
+) -> std::result::Result<(u32, u32), PureSourceFailure> {
+    let (quota, prototypes, deadline, stop) = {
+        let mut state = bridge.borrow_mut();
+        if state.pure_source_running {
+            return Err(PureSourceFailure::Phase);
+        }
+        if !matches!(
+            state.phase,
+            Phase::Module
+                | Phase::Plan
+                | Phase::Preparation
+                | Phase::Async
+                | Phase::Diagnostics
+                | Phase::Render
+                | Phase::Acknowledge
+                | Phase::Dispose
+        ) {
+            return Err(PureSourceFailure::Phase);
+        }
+        let deadline = state.native_deadline.ok_or(PureSourceFailure::Phase)?;
+        if Instant::now() >= deadline {
+            return Err(PureSourceFailure::Deadline);
+        }
+        state.pure_source_running = true;
+        (
+            state.quota.clone(),
+            state.prototypes.clone(),
+            deadline,
+            state.callback_stop.clone(),
+        )
+    };
+    let _guard = PureSourceGuard(Rc::clone(bridge));
+    if args.length() != 1 {
+        return Err(PureSourceFailure::Invalid);
+    }
+    let prototypes = prototypes.ok_or(PureSourceFailure::Phase)?;
+    let value = v8::Local::new(scope, args.get(0));
+    let (input, views, _) =
+        service_out(scope, value, None, &prototypes, TEXT_MEASURE_INPUT_BYTES, 0)
+            .map_err(|_| PureSourceFailure::Invalid)?;
+    if !views.is_empty() {
+        return Err(PureSourceFailure::Invalid);
+    }
+    let Value::Object(options) = input else {
+        return Err(PureSourceFailure::Invalid);
+    };
+    if options.len() != 3 {
+        return Err(PureSourceFailure::Invalid);
+    }
+    if options.get("font").and_then(Value::as_str) != Some("CascadiaCode-Regular") {
+        return Err(PureSourceFailure::UnsupportedFont);
+    }
+    let text = options
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or(PureSourceFailure::Invalid)?;
+    let size = options
+        .get("size_px")
+        .and_then(Value::as_f64)
+        .ok_or(PureSourceFailure::Invalid)?;
+    if !size.is_finite() || !(8.0..=128.0).contains(&size) || text.len() > 16_384 {
+        return Err(PureSourceFailure::Invalid);
+    }
+    if stop.is_stopped() || Instant::now() >= deadline {
+        return Err(PureSourceFailure::Deadline);
+    }
+    #[cfg(feature = "native-host")]
+    let measured = {
+        let media = crate::native_media::NativeMedia::new(
+            quota,
+            crate::native_media::MediaLimits::default(),
+        )
+        .map_err(|_| PureSourceFailure::Budget)?;
+        let measured = media.measure_text(text, size as f32, &stop);
+        if stop.is_stopped() || Instant::now() >= deadline {
+            return Err(PureSourceFailure::Deadline);
+        }
+        measured.map_err(|error| match error {
+            AnimationError::Budget(_) => PureSourceFailure::Budget,
+            AnimationError::Runtime(ref message)
+                if message == "native media: unsupported_glyph" =>
+            {
+                PureSourceFailure::UnsupportedGlyph
+            }
+            _ => PureSourceFailure::Invalid,
+        })?
+    };
+    #[cfg(not(feature = "native-host"))]
+    let measured = {
+        let _ = quota;
+        return Err(PureSourceFailure::Unavailable);
+    };
+    if stop.is_stopped() || Instant::now() >= deadline {
+        return Err(PureSourceFailure::Deadline);
+    }
+    let payload = serde_json::json!({"ok":true,"value":{"width":measured.0,"height":measured.1}});
+    service_json_bytes(&payload, TEXT_MEASURE_RESULT_BYTES)
+        .map_err(|_| PureSourceFailure::Budget)?;
+    Ok(measured)
+}
+fn pure_geography_project(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    returned: v8::ReturnValue<v8::Value>,
+) {
+    pure_source_callback(scope, args, returned, PureSourceKind::Project);
+}
+fn pure_astronomy_observe(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    returned: v8::ReturnValue<v8::Value>,
+) {
+    pure_source_callback(scope, args, returned, PureSourceKind::Observe);
+}
+fn pure_source_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut returned: v8::ReturnValue<v8::Value>,
+    kind: PureSourceKind,
+) {
+    let Some(bridge) = scope.get_slot::<Rc<RefCell<Bridge>>>().cloned() else {
+        return;
+    };
+    let answer = pure_source_value(scope, args, &bridge, kind);
+    match answer {
+        Ok(value) => returned.set(value),
+        Err(failure) => {
+            if matches!(failure, PureSourceFailure::Deadline) {
+                // A guest catch must not turn an expired native call into a successful frame.
+                bridge.borrow_mut().violation = Some("JavaScript deadline exceeded".into());
+            }
+            if kind == PureSourceKind::Observe {
+                let payload = serde_json::json!({"ok":false,"error":{
+                    "code":failure.code(),"message":failure.message()
+                }});
+                if let Ok(value) = service_into(scope, &payload, &BTreeMap::new()) {
+                    returned.set(value);
+                    return;
+                }
+                bridge.borrow_mut().violation = Some("pure source error publication failed".into());
+            }
+            if let Some(message) = v8::String::new(scope, failure.message()) {
+                let exception = v8::Exception::type_error(scope, message);
+                scope.throw_exception(exception);
+            } else {
+                bridge.borrow_mut().violation =
+                    Some("pure source exception allocation failed".into());
+            }
+        }
+    }
+}
+fn pure_source_value<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments,
+    bridge: &Rc<RefCell<Bridge>>,
+    kind: PureSourceKind,
+) -> std::result::Result<v8::Local<'s, v8::Value>, PureSourceFailure> {
+    let (quota, prototypes, deadline) = {
+        let mut state = bridge.borrow_mut();
+        if state.pure_source_running {
+            return Err(PureSourceFailure::Phase);
+        }
+        if !matches!(
+            state.phase,
+            Phase::Module
+                | Phase::Plan
+                | Phase::Preparation
+                | Phase::Async
+                | Phase::Diagnostics
+                | Phase::Render
+                | Phase::Acknowledge
+                | Phase::Dispose
+        ) {
+            return Err(PureSourceFailure::Phase);
+        }
+        let deadline = state.native_deadline.ok_or(PureSourceFailure::Phase)?;
+        if Instant::now() >= deadline {
+            return Err(PureSourceFailure::Deadline);
+        }
+        state.pure_source_running = true;
+        (state.quota.clone(), state.prototypes.clone(), deadline)
+    }; // Release RefCell before any V8 reflection or native calculation.
+    let _guard = PureSourceGuard(Rc::clone(bridge));
+    if !cfg!(all(feature = "native-host", feature = "native-network")) {
+        return Err(PureSourceFailure::Unavailable);
+    }
+    let _scratch = quota
+        .reserve_external_storage(PURE_SOURCE_SCRATCH_BYTES)
+        .map_err(|_| PureSourceFailure::Budget)?;
+    if args.length() != 1 {
+        return Err(PureSourceFailure::Invalid);
+    }
+    let prototypes = prototypes.ok_or(PureSourceFailure::Phase)?;
+    let input = v8::Local::new(scope, args.get(0));
+    let (input, views, _) =
+        service_out(scope, input, None, &prototypes, PURE_SOURCE_INPUT_BYTES, 0)
+            .map_err(|_| PureSourceFailure::Invalid)?;
+    if !views.is_empty() {
+        return Err(PureSourceFailure::Invalid);
+    }
+    let Value::Object(options) = input else {
+        return Err(PureSourceFailure::Invalid);
+    };
+    if options.len() != 3 {
+        return Err(PureSourceFailure::Invalid);
+    }
+    let latitude = options
+        .get("latitude")
+        .and_then(Value::as_f64)
+        .ok_or(PureSourceFailure::Invalid)?;
+    let longitude = options
+        .get("longitude")
+        .and_then(Value::as_f64)
+        .ok_or(PureSourceFailure::Invalid)?;
+    let calculated = match kind {
+        PureSourceKind::Project => {
+            let projection = options
+                .get("projection")
+                .and_then(Value::as_str)
+                .ok_or(PureSourceFailure::Invalid)?;
+            if !matches!(projection, "equirectangular" | "mercator" | "orthographic") {
+                return Err(PureSourceFailure::Invalid);
+            }
+            pure_source_calculation(kind, 0, latitude, longitude, projection)
+        }
+        PureSourceKind::Observe => {
+            let epoch_ms = options
+                .get("epoch_ms")
+                .and_then(Value::as_i64)
+                .filter(|epoch| epoch.unsigned_abs() <= 9_007_199_254_740_991)
+                .ok_or(PureSourceFailure::Invalid)?;
+            pure_source_calculation(kind, epoch_ms, latitude, longitude, "")
+        }
+    };
+    if Instant::now() >= deadline {
+        return Err(PureSourceFailure::Deadline);
+    }
+    let calculated = calculated.map_err(|error| match error {
+        AnimationError::Budget(_) => PureSourceFailure::Budget,
+        _ => PureSourceFailure::Invalid,
+    })?;
+    if Instant::now() >= deadline {
+        return Err(PureSourceFailure::Deadline);
+    }
+    let payload = if kind == PureSourceKind::Observe {
+        serde_json::json!({"ok":true,"value":calculated})
+    } else {
+        calculated
+    };
+    service_json_bytes(&payload, PURE_SOURCE_RESULT_BYTES)
+        .map_err(|_| PureSourceFailure::Budget)?;
+    let value =
+        service_into(scope, &payload, &BTreeMap::new()).map_err(|_| PureSourceFailure::Budget)?;
+    if Instant::now() >= deadline {
+        return Err(PureSourceFailure::Deadline);
+    }
+    Ok(value) // V8 heap retains the output under Engine::_storage after scratch is released.
+}
+#[cfg(all(feature = "native-host", feature = "native-network"))]
+fn pure_source_calculation(
+    kind: PureSourceKind,
+    epoch_ms: i64,
+    latitude: f64,
+    longitude: f64,
+    projection: &str,
+) -> Result<Value> {
+    match kind {
+        PureSourceKind::Project => {
+            crate::sources::geography::project(latitude, longitude, projection)
+        }
+        PureSourceKind::Observe => {
+            crate::sources::astronomy::observe(epoch_ms, latitude, longitude)
+        }
+    }
+}
+#[cfg(not(all(feature = "native-host", feature = "native-network")))]
+fn pure_source_calculation(
+    _kind: PureSourceKind,
+    _epoch_ms: i64,
+    _latitude: f64,
+    _longitude: f64,
+    _projection: &str,
+) -> Result<Value> {
+    Err(runtime("pure native source build feature unavailable"))
+}
 struct WirePrototypes {
     // Retain identities before any package or bootstrap JavaScript runs.
     object: v8::Global<v8::Object>, // Permit ordinary records with the original object prototype.
@@ -3663,7 +4141,7 @@ pub(crate) mod inventory_contracts {
         initialize_engine_for_tests(quota.clone(), 1).unwrap(); // Initialize the shared native platform.
         quota // Return the existing root.
     } // End shared initialization.
-    fn package(source: &str) -> Arc<Package> {
+    pub(crate) fn package(source: &str) -> Arc<Package> {
         // Use real package validation.
         let manifest = json!({"api_version":1,"id":"inventory-contract","name":"Inventory","version":"1.0.0","entry":"entry.mjs","modes":["live"],"settings":{"type":"object","properties":{}},"files":[{"path":"entry.mjs","bytes":source.len(),"sha256":format!("{:x}",Sha256::digest(source.as_bytes()))}]}); // Preserve actual file inventory.
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new())); // Own temporary archive bytes.
@@ -4172,8 +4650,388 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
         }
         engine.discard_frame_seed(id).unwrap();
     }
+    #[test]
+    fn pre_render_ambient_is_bound_before_guest_module_evaluation() {
+        fn capture() -> Value {
+            let source = r#"
+                const savedDate = Date;
+                const savedRandom = Math.random;
+                const moduleNow = savedDate.now();
+                const calledWithArguments = savedDate(2001, 1, 1);
+                const expectedCall = new savedDate(0).toString();
+                const firstRandom = savedRandom();
+                const utcConstructed = new savedDate(2020, 0, 1, 12, 30);
+                let localeParseRejected = false;
+                try { savedDate.parse("Jan 1 2020"); } catch { localeParseRejected = true; }
+                export function plan() {
+                    return { moduleNow, calledWithArguments, expectedCall,
+                        firstRandom, nextRandom: savedRandom(), savedNow: savedDate.now(),
+                        retainedConstructor: new savedDate(0).constructor === savedDate,
+                        utcConstructed: utcConstructed.toISOString(),
+                        timezoneOffset: utcConstructed.getTimezoneOffset(),
+                        nativePrototypeHidden: Object.getPrototypeOf(utcConstructed) === savedDate.prototype
+                            && Object.getPrototypeOf(savedDate.prototype) === null,
+                        ambientFacilitiesHidden: [Intl, globalThis.Temporal, globalThis.performance,
+                            globalThis.crypto, WeakRef, FinalizationRegistry,
+                            SharedArrayBuffer, Atomics].every(x => x === undefined),
+                        localeParseRejected };
+                }
+            "#;
+            let package = package(source);
+            let mut engine = Engine::new(package, EngineLimits::default(), quota()).unwrap();
+            engine.install_bootstrap(crate::TRUSTED_BOOTSTRAP).unwrap();
+            engine
+                .configure_ambient(AnimationMode::PreRendered, 77)
+                .unwrap();
+            engine.load().unwrap();
+            engine
+                .plan(&json!({}), AnimationMode::PreRendered, &json!({}))
+                .unwrap()
+        }
+        let first = capture();
+        let second = capture();
+        assert_eq!(first, second, "a new native realm resets the same seed");
+        assert_eq!(first["moduleNow"], 0);
+        assert_eq!(first["savedNow"], 0);
+        assert_eq!(first["calledWithArguments"], first["expectedCall"]);
+        assert_eq!(first["retainedConstructor"], true);
+        assert_eq!(first["utcConstructed"], "2020-01-01T12:30:00.000Z");
+        assert_eq!(first["timezoneOffset"], 0);
+        assert_eq!(first["nativePrototypeHidden"], true);
+        assert_eq!(first["ambientFacilitiesHidden"], true);
+        assert_eq!(first["localeParseRejected"], true);
+        assert_ne!(first["firstRandom"], first["nextRandom"]);
+    }
 } // End native frame contracts.
 
 #[cfg(test)]
 #[path = "engine_boundary_tests.rs"]
 pub(crate) mod boundary_tests;
+
+#[cfg(all(test, feature = "native-host", feature = "native-network"))]
+mod pure_source_contracts {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn engine(quota: QuotaGroup) -> Engine {
+        let package = inventory_contracts::package(
+            "export function plan(){return {}} export async function create(){return {render(){},dispose(){}}}",
+        );
+        let mut engine = Engine::new(package, EngineLimits::default(), quota).unwrap();
+        engine.install_bootstrap(crate::TRUSTED_BOOTSTRAP).unwrap();
+        engine
+    }
+    fn number(value: &Value) -> f64 {
+        value.as_f64().expect("native numeric field")
+    }
+    fn close(actual: &Value, expected: &Value) {
+        let actual = number(actual);
+        let expected = number(expected);
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "{actual} != {expected}"
+        );
+    }
+
+    #[test]
+    fn projection_is_synchronous_matches_native_math_and_rejects_untrusted_fields() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let mut engine = engine(quota);
+        for (latitude, longitude, projection) in [
+            (48.0, 2.0, "equirectangular"),
+            (90.0, 180.0, "mercator"),
+            (-90.0, -180.0, "mercator"),
+            (0.0, 180.0, "orthographic"),
+            (45.0, 45.0, "orthographic"),
+        ] {
+            let script = format!(
+                "__ilium_host.sources.geography.project({{latitude:{latitude},longitude:{longitude},projection:'{projection}'}})"
+            );
+            let actual = engine.evaluate_json(&script).unwrap();
+            let expected =
+                crate::sources::geography::project(latitude, longitude, projection).unwrap();
+            assert_eq!(actual["visible"], expected["visible"]);
+            close(&actual["x"], &expected["x"]);
+            close(&actual["y"], &expected["y"]);
+        }
+        let invalid = engine
+            .evaluate_json(
+                r#"(() => {
+            const outcomes = [];
+            for (const options of [
+                {latitude:91,longitude:0,projection:'mercator'},
+                {latitude:0,longitude:181,projection:'mercator'},
+                {latitude:NaN,longitude:0,projection:'mercator'},
+                {latitude:0,longitude:0,projection:'unknown'},
+                {latitude:0,longitude:0,projection:'mercator',extra:1},
+                {latitude:'0',longitude:0,projection:'mercator'}
+            ]) { try { __ilium_host.sources.geography.project(options); outcomes.push(false); }
+                 catch (error) { outcomes.push(error instanceof TypeError); } }
+            return outcomes;
+        })()"#,
+            )
+            .unwrap();
+        assert_eq!(invalid, json!([true, true, true, true, true, true]));
+        let traps = engine
+            .evaluate_json(
+                r#"(() => {
+            let traps=0;
+            const accessor={longitude:0,projection:'mercator'};
+            Object.defineProperty(accessor,'latitude',{enumerable:true,get(){traps++;return 0;}});
+            try { __ilium_host.sources.geography.project(accessor); } catch (_) {}
+            const proxy=new Proxy({latitude:0,longitude:0,projection:'mercator'},
+                {ownKeys(){traps++;return ['latitude','longitude','projection'];}});
+            try { __ilium_host.sources.geography.project(proxy); } catch (_) {}
+            return traps;
+        })()"#,
+            )
+            .unwrap();
+        assert_eq!(traps, json!(0));
+        assert!(!engine.is_invalid()); // Caught validation failures do not poison ordinary guest work.
+    }
+
+    #[test]
+    fn observation_is_synchronous_matches_native_bodies_and_preserves_units() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let mut engine = engine(quota);
+        for epoch_ms in [-5_364_662_400_000_i64, 1_700_000_000_000, 2_524_521_600_000] {
+            let script = format!(
+                "__ilium_host.sources.astronomy.observe({{epoch_ms:{epoch_ms},latitude:48,longitude:2}})"
+            );
+            let result = engine.evaluate_json(&script).unwrap();
+            assert_eq!(result["ok"], true);
+            let actual = &result["value"];
+            let expected = crate::sources::astronomy::observe(epoch_ms, 48.0, 2.0).unwrap();
+            assert_eq!(actual["epoch_ms"], expected["epoch_ms"]);
+            assert_eq!(actual["units"], "unit_direction_not_physical_position");
+            assert_eq!(actual["heliocentric"]["frame"], "J2000_ecliptic");
+            assert_eq!(actual["heliocentric"]["units"], "astronomical_units");
+            assert_eq!(actual["bodies"].as_array().unwrap().len(), 7);
+            assert_eq!(
+                actual["heliocentric"]["bodies"].as_array().unwrap().len(),
+                8
+            );
+            close(&actual["julian_date"], &expected["julian_date"]);
+            close(
+                &actual["local_sidereal_degrees"],
+                &expected["local_sidereal_degrees"],
+            );
+            close(
+                &actual["bodies"][0]["altitude_degrees"],
+                &expected["bodies"][0]["altitude_degrees"],
+            );
+            close(
+                &actual["bodies"][1]["east_north_up"][2],
+                &expected["bodies"][1]["east_north_up"][2],
+            );
+            close(
+                &actual["heliocentric"]["bodies"][4]["position_au"][0],
+                &expected["heliocentric"]["bodies"][4]["position_au"][0],
+            );
+            assert_eq!(actual["bodies"][0]["magnitude"], Value::Null);
+        }
+        let invalid = engine.evaluate_json(r#"(() => [
+            __ilium_host.sources.astronomy.observe({epoch_ms:-5396198400000,latitude:0,longitude:0}),
+            __ilium_host.sources.astronomy.observe({epoch_ms:2524608000000,latitude:0,longitude:0}),
+            __ilium_host.sources.astronomy.observe({epoch_ms:1.5,latitude:0,longitude:0}),
+            __ilium_host.sources.astronomy.observe({epoch_ms:0,latitude:Infinity,longitude:0}),
+            __ilium_host.sources.astronomy.observe({epoch_ms:0,latitude:0,longitude:0,extra:1})
+        ].map(value => value.ok === false && value.error.code === 'invalid_request'))()"#).unwrap();
+        assert_eq!(invalid, json!([true, true, true, true, true]));
+        let traps = engine
+            .evaluate_json(
+                r#"(() => {
+            let traps=0;
+            const options={epoch_ms:0,longitude:0};
+            Object.defineProperty(options,'latitude',{enumerable:true,get(){traps++;return 0;}});
+            const result=__ilium_host.sources.astronomy.observe(options);
+            return [result.ok,traps];
+        })()"#,
+            )
+            .unwrap();
+        assert_eq!(traps, json!([false, 0]));
+        assert!(!engine.is_invalid());
+    }
+
+    #[test]
+    fn quota_refusal_is_catchable_and_result_heap_charge_lasts_through_engine_owner() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let mut engine = engine(quota.clone());
+        let before = quota.snapshot();
+        let available = before.limits.worker_bytes - before.worker_bytes;
+        assert!(available > PURE_SOURCE_SCRATCH_BYTES);
+        let fill = quota
+            .reserve_external_storage(available - PURE_SOURCE_SCRATCH_BYTES + 1)
+            .unwrap();
+        let refused = engine.evaluate_json(r#"(() => {
+            try { __ilium_host.sources.geography.project({latitude:0,longitude:0,projection:'mercator'}); }
+            catch (error) { return error instanceof TypeError && error.message.includes('quota'); }
+            return false;
+        })()"#).unwrap();
+        assert_eq!(refused, json!(true));
+        let observed = engine.evaluate_json(
+            "__ilium_host.sources.astronomy.observe({epoch_ms:1700000000000,latitude:0,longitude:0})"
+        ).unwrap();
+        assert_eq!(observed["ok"], false);
+        assert_eq!(observed["error"]["code"], "budget_exceeded");
+        drop(fill);
+        engine.evaluate_json("globalThis.kept=__ilium_host.sources.astronomy.observe({epoch_ms:1700000000000,latitude:0,longitude:0});kept.ok").unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, before.worker_bytes);
+        assert_eq!(
+            engine.evaluate_json("kept.value.bodies.length").unwrap(),
+            json!(7)
+        );
+        drop(engine);
+        assert!(quota.snapshot().worker_bytes < before.worker_bytes);
+    }
+
+    #[test]
+    fn module_plan_and_create_call_the_pure_bridge_without_acquisition() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let script = r#"
+            const at_load = __ilium_host.sources.geography.project({
+                latitude:0,longitude:0,projection:'equirectangular'
+            });
+            export function plan(_settings, mode) {
+                const observed=__ilium_host.sources.astronomy.observe({
+                    epoch_ms:1700000000000,latitude:48,longitude:2
+                });
+                return {mode,load_x:at_load.x,observed:observed.ok,
+                    body_count:observed.ok ? observed.value.bodies.length : 0};
+            }
+            export async function create(host) {
+                const point=host.sources.geography.project({
+                    latitude:45,longitude:45,projection:'orthographic'
+                });
+                globalThis.created_point=point;
+                return {render(){},dispose(){}};
+            }
+        "#;
+        let package = inventory_contracts::package(script);
+        let digest = package.digest().to_owned();
+        let mut engine = Engine::new(package, EngineLimits::default(), quota).unwrap();
+        engine.install_bootstrap(crate::TRUSTED_BOOTSTRAP).unwrap();
+        engine.load().unwrap();
+        for (mode, label) in [
+            (AnimationMode::Live, "live"),
+            (AnimationMode::PreRendered, "pre_rendered"),
+        ] {
+            let plan = engine.plan(&json!({}), mode, &json!({})).unwrap();
+            assert_eq!(plan["mode"], label);
+            assert_eq!(plan["load_x"], 0.5);
+            assert_eq!(plan["observed"], true);
+            assert_eq!(plan["body_count"], 7);
+        }
+        engine
+            .bind_service_authority(
+                &digest,
+                ServiceAuthority {
+                    instance_id: 1,
+                    plan_generation: 1,
+                    authorization_epoch: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine.start_create(&json!({}), &json!({})).unwrap(),
+            CreateState::Ready
+        );
+        assert_eq!(
+            engine.evaluate_json("created_point.visible").unwrap(),
+            json!(true)
+        );
+        assert!(engine.take_requests().unwrap().is_empty());
+    }
+
+    #[test]
+    fn caught_deadline_failure_still_retires_the_engine() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let mut engine = engine(quota);
+        engine.limits.evaluation_ms = 1;
+        let result = engine.evaluate_json(r#"(() => {
+            for (let index=0; index<1000000; index++) {
+                try { __ilium_host.sources.geography.project({latitude:0,longitude:0,projection:'mercator'}); }
+                catch (_) {}
+            }
+            return true;
+        })()"#);
+        assert!(result.is_err());
+        assert!(engine.is_invalid());
+    }
+
+    #[test]
+    fn text_measure_uses_the_existing_engine_quota_and_releases_font_scratch() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let before_engine = quota.snapshot().worker_bytes;
+        let mut engine = engine(quota.clone());
+        let baseline = quota.snapshot().worker_bytes;
+        let measured = engine
+            .evaluate_json("__ilium_host.text.measure({text:'A',size_px:16})")
+            .unwrap();
+        assert!(measured["width"].as_u64().is_some_and(|width| width > 0));
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+
+        // Leave room for V8's small result and diagnostic buffers while
+        // refusing the existing 32 MiB native font setup charge. An
+        // independent text quota would incorrectly make this call succeed.
+        let snapshot = quota.snapshot();
+        let available = snapshot.limits.worker_bytes - snapshot.worker_bytes;
+        assert!(available > 32 * 1024 * 1024);
+        let pressure = quota
+            .reserve_external_storage(available - 16 * 1024 * 1024)
+            .unwrap();
+        let denied = engine
+            .evaluate_json(
+                r#"(() => {
+                try { __ilium_host.text.measure({text:'A',size_px:16}); }
+                catch (error) { return String(error.message); }
+                return 'unexpected_success';
+            })()"#,
+            )
+            .unwrap();
+        assert!(denied
+            .as_str()
+            .is_some_and(|message| message.contains("budget_exceeded")));
+        drop(pressure);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        assert!(engine
+            .evaluate_json("__ilium_host.text.measure({text:'A'}).width")
+            .unwrap()
+            .as_u64()
+            .is_some_and(|width| width > 0));
+        drop(engine);
+        assert_eq!(quota.snapshot().worker_bytes, before_engine);
+    }
+
+    #[test]
+    fn native_text_deadline_and_cancellation_signal_the_original_callback_stop() {
+        let (_serial, quota) = inventory_contracts::fixture_lock();
+        let mut cancelled = engine(quota.clone());
+        cancelled.cancel();
+        assert!(cancelled.control.callback_stop.is_stopped());
+        assert!(cancelled.bridge.borrow().callback_stop.is_stopped());
+        assert!(cancelled
+            .evaluate_json("__ilium_host.text.measure({text:'A'})")
+            .is_err());
+        drop(cancelled);
+
+        let mut expired = engine(quota);
+        expired.limits.evaluation_ms = 1;
+        let result = expired.evaluate_json(
+            r#"(() => {
+            for (let index = 0; index < 1000000; index++) {
+                try { __ilium_host.text.measure({text:'A'}); } catch (_) {}
+            }
+            return true;
+        })()"#,
+        );
+        assert!(result.is_err());
+        assert!(expired.is_invalid());
+        assert!(expired.control.callback_stop.is_stopped());
+        assert!(expired.bridge.borrow().callback_stop.is_stopped());
+    }
+}
+
+#[cfg(test)]
+#[path = "borrowed_service_contract_tests.rs"]
+mod borrowed_service_contract_tests;
