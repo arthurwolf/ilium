@@ -69,12 +69,12 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Prefer `thiserror` for typed error enums per crate; `ilium-server`'s top-level error boundary logs and continues (a single pane's detection failure or PTY hiccup must never take the whole server down — other panes keep running).
 - Every `async` task spawned (PTY reader, detection-loop tick, IPC connection handler) must have a clear owner that can cancel it. Use `tokio::task::JoinHandle` tracking, not fire-and-forget `tokio::spawn` with no handle kept anywhere — a pane that's closed must have its reader/detection tasks actually stop, not leak.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
-- **Build output is cleaned immediately, never queued for 24 hours.** This project overrides the global 24-hour delayed-cleanup rule (`agent-artifact-cleanup`) for Cargo build output. As soon as a build's result has been used (binary installed and verified, test/clippy/check run finished and its result recorded, any needed log or evidence copied out), delete everything that build produced in the same turn, before reporting completion. Do not wait for the task to end and do not enqueue it.
-  - Never build inside `docs/` or inside the repo checkout for scratch/isolated work. Set `CARGO_TARGET_DIR` to a task-owned directory under `/tmp` or `~/.cache` (or a short `/ram` path when it fits), and keep frozen source copies there too, not under `docs/`. Only the repo's own `target/` (the shared dev target) may live in the checkout.
+- **Build output is cleaned immediately.** Follow the global Scratch Disks rule (`/media/arthur/build/<project>-<task>/`). As soon as a build's result has been used (binary installed and verified, test/clippy/check run finished and its result recorded, any needed log or evidence copied out), delete everything that build produced in the same turn, before reporting completion. Do not wait for the task to end.
+  - Never build inside `docs/` or inside the repo checkout for scratch/isolated work. Set `CARGO_TARGET_DIR` to a task-owned directory under `/media/arthur/build/` (a short `/ram` path only when it fits), and keep frozen source copies there too, not under `docs/`. Only the repo's own `target/` (the shared dev target) may live in the checkout.
   - Clean with `nice -n 19 ionice -c 3 cargo clean --target-dir <that exact dir>` (add `-p <crate>` only for partial cleanup), or `rm -rf` of that exact absolute task-owned directory when it also holds staging or source copies. Resolve and echo the absolute path first; never use a variable that could be empty, a glob, or a parent directory.
   - Cleanup covers: the target directory, staging/source copies, `.profraw`/coverage output, temporary logs and render/probe output that are not evidence. Keep only the final installed binary and the compact evidence the task needs (test summary, clippy result, hashes), outside the target.
   - Never clean a target another agent or a running build/test still uses, the shared repo `target/` while any consumer is active, or anything not created by this task. Check for running cargo/rustc processes using that directory first (`pgrep -af` against the path); if a consumer is active, wait for it to finish, then clean.
-  - If cleanup fails, report the path and the error; do not fall back to enqueueing.
+  - If cleanup fails, report the path and the error; do not defer or queue the cleanup.
 
 ## Testing
 
@@ -105,12 +105,12 @@ Use the `directories` crate, never hardcode `~`:
 
 - GUI automation must run only through tmux sessions we create and control. Do not use `xdotool` or screenshot-driven desktop automation.
 
-- `PROJECT=/absolute/project; STATE=$(mktemp -d /ram/is.XXXXXX); RUNTIME=$(mktemp -d /ram/ir.XXXXXX); TMUX_SERVER=ilium-ctl; TMUX_SESSION=ilium-ctl`
+- `PROJECT=/absolute/project; STATE=$(mktemp -d /media/arthur/tmp/is.XXXXXX); RUNTIME=$(mktemp -d /media/arthur/tmp/ir.XXXXXX); TMUX_SERVER=ilium-ctl; TMUX_SESSION=ilium-ctl`
 - Launch an isolated server/session: `tmux -L "$TMUX_SERVER" new-session -d -s "$TMUX_SESSION" "env XDG_DATA_HOME=$STATE/data XDG_CONFIG_HOME=$STATE/config XDG_RUNTIME_DIR=$RUNTIME $HOME/.local/bin/ilium --cwd $PROJECT"`.
 - Remotely control the live TUI: `tmux -L "$TMUX_SERVER" attach-session -t "$TMUX_SESSION"`; use normal ilium keys, then detach with tmux `Ctrl+B d`.
 - Inspect its rendered terminal without attaching: `tmux -L "$TMUX_SERVER" capture-pane -e -p -t "$TMUX_SESSION:0.0"`.
 - Stop cleanly: `env XDG_DATA_HOME="$STATE/data" XDG_CONFIG_HOME="$STATE/config" XDG_RUNTIME_DIR="$RUNTIME" "$HOME/.local/bin/ilium" --cwd "$PROJECT" kill-session default`.
-- Finish isolation: `tmux -L "$TMUX_SERVER" kill-server; rm -rf "$STATE" "$RUNTIME"`; keep `/ram` paths short so the derived Unix socket fits.
+- Finish isolation: `tmux -L "$TMUX_SERVER" kill-server; rm -rf "$STATE" "$RUNTIME"`; keep `/media/arthur/tmp` paths short so the derived Unix socket fits.
 
 ## Scope reminders specific to this project
 
@@ -150,4 +150,5 @@ The human reading the progress bar has NOT read your session and usually never w
 You MUST run `ilium progress check --command '<probe>'` and confirm its JSONL validation result before registration. Then run `ilium progress set --command '<probe>' --interval-seconds <n>` and wait for Ilium's positive JSONL registration acknowledgement containing the monitor ID and accepted first report. After registration, the agent MUST NOT poll in any form: do not make repeated tool calls, run checking loops, sleep then recheck, repeatedly inspect logs or files, issue recurring status commands, or spend conversational turns checking progress. Ilium's detached server is the sole recurring poller, and it will send you a message when the task reaches `done` or `error`. You MAY perform other useful work that does not poll the task.
 
 Do not manually clear a terminal result before handling its notification. Retain the task identity, final process exit evidence, progress evidence, and failure details for verification; use `ilium progress clear --monitor-id <id>` only after the lifecycle is complete or when explicitly cancelling it.
+
 <!-- /ilium-agent-feature: progress -->

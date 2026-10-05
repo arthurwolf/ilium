@@ -50,7 +50,7 @@ Polling is adaptive. Panes that are working or waiting for approval are checked 
 | What | Location |
 | --- | --- |
 | Global settings | `~/.config/ilium/config.toml` on Linux (the platform configuration directory elsewhere, resolved by the `directories` crate); `[keyboard]` for prefixes, `[keybindings]` for action remapping, `[notifications]`, `[inference]`, `[cost.prices]`, `[debug]` and others |
-| Per-project animation settings | `<project>/.ilium/config.yaml` |
+| Animation settings (global) | `~/.config/ilium/animation/.ilium/config.yaml` |
 | Session snapshots | `<project>/.ilium/sessions/<session_name>.json` |
 | Rolling snapshot backups | `<project>/.ilium/backups/` |
 | IPC socket | `$XDG_RUNTIME_DIR/ilium/<project-slug>-<digest>-<session>.sock` |
@@ -73,7 +73,7 @@ Full details: [Session recovery](session-recovery.md).
 
 ## Background animations
 
-Ambient animations are drawn by scene engines hosted in the client. Built-in scenes run natively; packaged native animations run in a confined helper process (Bubblewrap and cgroup-v2 limits on Linux). The helper is the `ilium-animation-helper` executable and the packages are `.iliumanim` files. See [Animations](animations.md).
+Ambient animations are drawn by scene engines hosted in the client. Built-in scenes run as Rust code; packaged TypeScript animations are bundled as JavaScript and executed by V8 in a confined helper process (Bubblewrap and cgroup-v2 limits on Linux). The helper is the `ilium-animation-helper` executable and the packages are `.iliumanim` files. See [Animations](animations.md).
 
 ## Diagnostics and logs
 
@@ -98,7 +98,7 @@ Ilium is a Cargo workspace with one crate per architectural layer. The layering 
 | `ilium-session-convert` | Converts a session between Claude Code and Codex. |
 | `ilium-agent-debug` | Schema and retention policy for per-pane agent debug history. |
 | `ilium-ambient` | Ambient animation scene engines (no terminal types). |
-| `ilium-animation-js` | The sandboxed helper that runs native `.iliumanim` packages. |
+| `ilium-animation-js` | V8 runtime and sandboxed helper for JavaScript `.iliumanim` packages. |
 | `ilium-gpu` | Optional GPU backend for ambient scenes (compiled only with the `gpu` feature). |
 | `ilium-wikipedia` | Wikipedia data adapter for the Wikipedia animation. |
 | `ilium-git` | Git adapter for worktrees and repository probes. |

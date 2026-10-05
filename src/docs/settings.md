@@ -22,6 +22,10 @@ Ilium keeps almost every preference in one full-screen Settings view and in a pl
 3. Move between options with the Up and Down arrows (or `k` and `j`). Where an option can be stepped, the Left and Right arrows (or `h` and `l`) change it; `Enter` or `Space` activates or edits it. Text and key fields open an editor: type, then press `Enter` to confirm or `Esc` to cancel.
 4. Press `Esc` or `q` (or click **Close**) to leave Settings. The header also shows a **Guided setup** button that reopens the first-run walkthrough (see [Guided setup and onboarding](#guided-setup-and-onboarding)).
 
+Choice controls show `← value + →`. Click the arrows to step backward or forward, or click `+` to open the full clickable list. A left click on the value moves forward; a right click moves backward. The list shows the current choice and any unavailable options with their reasons.
+
+Number controls show `− value + *`, with the value centered. Click `−` or `+` to change it by the field's normal step. Click `*` to type an exact value, then press `Enter` to confirm or `Esc` to cancel. The field's limits still apply. These controls are also used for choices and numbers in animation settings, dialogs, toolbars and guided setup.
+
 Use `Ctrl+B ?` (or the Keyboard tab) to see the active key map. Each tab ends or begins with the controls specific to it; some tabs (for example Animations, Keyboard and Setup) have richer interactions described below.
 
 ## Auto-save behaviour
@@ -42,6 +46,8 @@ The tabs appear in this order:
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
+| Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
+| Remote compaction | Summarize a Claude or Codex session through the Inference model and resume from it | `[remote_compaction]` |
 | Keyboard | Prefix keys and per-action key remapping, complete presets | `[keyboard]`, `[keybindings]` |
 | Terminal | Scrollback budget, new-pane directory, Smart Copy light | `[terminal]` |
 | Editor | Line display, line numbers, minimap, autosave, Markdown default | `[editor]` |
@@ -130,6 +136,16 @@ Poll intervals below a few hundred milliseconds are clamped up by the server. Cu
 ### Agent Cost
 
 Controls spend indicators and how "expensive" is decided (fixed cuts, burn cuts, quota budget percentage, or a USD budget). Custom thresholds are set under `[cost]`. See [Agent cost](agent-cost.md).
+
+### Optimization
+
+Scans your agent transcripts (`~/.codex/sessions`, `~/.claude/projects`) and recommends the cheapest auto-compaction threshold for your own sessions. The two sub-tabs, **Codex** and **Claude Code**, each open on a **Scan sessions** button: nothing is scanned until you press it. The scan lists the files, reads them with a progress bar (by bytes, with the phase, files done of total, elapsed time and current file; `Esc` or **Cancel** stops it) and then shows the report: the recommendation with an **Optimal: ... - Apply to <agent>** button on top, a comparison of the CLI default, your current setting and the recommendation, corpus and compaction statistics, the cost mix, the fixed prefix, a simulation table with a chart, per-model optima, rework sensitivity, compaction regimes and warnings. Per-model optima are shown for information only: the setting is one global value and cannot be applied per model. A failed or cancelled scan keeps the previous report.
+
+**Apply** opens a confirmation that names the resolved file, the key, the old and new value, the exact change and any environment, project or profile override that would shadow it. Only that one key changes (`autoCompactWindow` in `~/.claude/settings.json`, `model_auto_compact_token_limit` in `~/.codex/config.toml`), comments and everything else stay byte for byte, and only **new** agent sessions use it; running sessions keep the limit they loaded. A **Revert** button appears after an apply and restores the previous value unless the file was edited since. Ilium never restarts an agent. Keys: `←`/`→` agent, `s` scan, `a` apply, `e` apply the simulated optimum, `r` revert, `↑`/`↓`/`PgUp`/`PgDn` scroll. See [Agent cost](agent-cost.md) for the price table the dollar figures use.
+
+### Remote compaction
+
+Off by default. When on, the Compact button of a Claude or Codex pane summarizes the transcript with the provider and model chosen in the **Inference** tab instead of sending `/compact`, then resumes the agent from that summary. The tab holds the automatic trigger (a context threshold, a wait for a pause and a cooldown), the summarizing technique per agent (the real upstream prompts of Claude Code, Codex, opencode and Gemini CLI, an Ilium blend, or your own prompt), how much recent history stays verbatim, tool-output trimming, secret redaction, the summarizer input window and the number of backups kept. The transcript, which can contain prompts, code and secrets, is sent to that provider: a privacy box at the top of the tab says so and closes for good with `x`, `Delete` or its `[x]` button. See [Remote compaction](remote-compaction.md).
 
 ### Keyboard
 
@@ -322,7 +338,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | `[triggers]` | Event-to-actions lists |
 | `[text_triggers]` | Text trigger rules |
 | `[agent_setup]` | Global instruction file paths and "never ask" choices |
-| `[terminal]` | `scrollback_budget_mib`, `new_pane_directory`, `smart_copy_light`, `smart_copy_light_key` |
+| `[terminal]` | `scrollback_budget_mib`, `engine_memory_budget_mib`, `new_pane_directory`, `smart_copy_light`, `smart_copy_light_key` |
 | `[editor]` | `line_display`, `show_line_numbers`, `show_minimap`, `autosave_enabled`, `autosave_delay_ms`, `markdown_rendered_by_default` |
 | `[session]` | `recovery_policy`, `backups_enabled` |
 | `[git]` | `default_where`, `branch_prefix`, `worktree_location_template`, `default_base`, `branch_line`, `setup_command`, `default_close_policy` |

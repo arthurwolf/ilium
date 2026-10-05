@@ -83,6 +83,7 @@ A terminal pane runs a real process in a pseudo-terminal owned by the server, no
 - **Input:** everything you type goes to the process, except Ilium shortcuts, which start with the prefix. Press the prefix twice to send a literal prefix key.
 - **Agent detection:** Ilium identifies agent CLIs from the process tree and reads their activity from the screen. Claude Code, Codex and Antigravity are built in; you can add custom signatures in the configuration. An agent pane gains an optional toolbar, a last-prompt banner and a progress footer.
 - **Scrollback budget:** each pane keeps terminal output up to a memory budget. The default is 8 MiB per pane; **Settings → Terminal** (or `scrollback_budget_mib` in `[terminal]`) accepts 4 to 512 MiB in steps of 4. The budget applies to terminal views created afterwards; it does not make old, already discarded output reappear.
+- **Engine memory budget:** all panes share one memory budget (default 4096 MiB) for their parsed terminal state. Panes you leave keep it so coming back is instant; when a pane you are viewing needs room, the least recently focused hidden panes give theirs back and are rebuilt from the server when shown again. **Settings → Terminal** (or `engine_memory_budget_mib` in `[terminal]`) accepts 256 to 16384 MiB in steps of 256; lowering applies immediately, raising applies after restart.
 - **Text selection:** drag with the left mouse button to select and copy, by default. See the mouse section of [Getting started](getting-started.md#12-using-the-mouse).
 - **Right-click:** copy options, paste, send the screen to a neighbouring pane, open a URL or file under the pointer.
 - **When an agent ends:** a pane whose Claude or Codex process exits or loses terminal ownership keeps its agent identity and shows an unavailable indicator, and you can still copy its prompt and history. See [Agent monitoring](agent-monitoring.md).
@@ -239,7 +240,7 @@ A session is identified by the canonical project directory plus a name.
 - `ilium kill-session <name>` ends a running session and its panes.
 - Snapshots are written to `<project>/.ilium/sessions/<name>.json`, and rolling backups to `<project>/.ilium/backups/`. Add `.ilium/` to `.gitignore`. Backups exclude files you edit inside pane applications.
 - The session's local socket lives in a private runtime directory (`$XDG_RUNTIME_DIR/ilium/` on Linux, or a short per-user directory under `/tmp` when that is not set). Its name combines a readable slug with a digest of the project path, so different projects never collide.
-- Each project can also keep a few per-project settings (such as the chosen background animation) in `.ilium/config.yaml`.
+- Each project can also keep a few per-project settings (such as its name, icon and project separators) in `.ilium/config.yaml`. The background animation is not one of them: it is a single global setting.
 
 On startup the server decides what to do with an existing snapshot according to **Settings → Session → Recovery policy**: restore automatically (default), ask before restoring, or start fresh. Automatic backups are on by default.
 

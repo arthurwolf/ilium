@@ -36,7 +36,7 @@ Agent panes keep their existing names until Ilium can verify a real task from th
 - A genuine request must exist in the pane's project-verified conversation, or be text you authored followed by Enter for that exact invocation.
 - Startup screens, assistant output, goal bookkeeping, update requests, progress notifications and sibling panes' work never grant permission to title a pane.
 - If the history is missing or cannot be verified, the existing name stays untouched. Tree organization may still move the pane into a group.
-- Submitting exactly `/clear` to Claude or Codex discards that pane's detected session and its automatic title fields; the pane shows `<new>` until the replacement session can be verified and titled.
+- Submitting exactly `/clear` to Claude or Codex discards that pane's detected session. Automatic title fields reset to `<new>` until the replacement session can be verified and titled; manually fixed names, short titles and icons remain unchanged.
 - An eligibility check is made twice: the client when it captures the pane's state, and the server again when it applies the result. A stale or ineligible title is dropped; valid structural grouping can still apply.
 - A delayed AI result cannot replace a newer manual name or a newer accepted AI title. Results are fenced by the pane's presentation revision and conversation identity, and a result that arrives after you renamed the pane is discarded.
 
@@ -49,11 +49,9 @@ A name you enter through Rename (`Ctrl+B ,` by default, or the Rename hover cont
 - The literal name, its short title and its icon are fixed together as one bundle and are never overwritten by automatic naming.
 - The protection survives fresh conversations, session recovery and restart.
 - A name-fixed group is preserved exactly by tree organization (title, short title and icon), even when it is moved or its children are regrouped. It is listed once as an existing group.
-- Asking AI to retitle a pane produces an automatic name again (it is not a manual name) and follows the same task checks.
+- Asking AI to retitle an automatically named pane produces another automatic name and follows the same task checks. Retitle does not replace a name you entered through Rename.
 - Inferred titles stay automatic even after an explicit AI retitle; only a literal rename makes a title manual.
 - Undo restores accepted presentation revisions and preserves later title changes; manual names remain fixed.
-
-To hand a pane back to automatic naming, use **Retitle** on it (see below).
 
 ## Title style
 
@@ -169,11 +167,11 @@ Answer in short sentences. Always confirm which agent you are talking to.
 
 ## Troubleshooting
 
-- **A pane keeps its old name.** No verified task exists yet, history is unavailable, or the name is manual. Send a real request to the agent, or use Retitle.
+- **A pane keeps its old name.** No verified task exists yet, history is unavailable, or the name is manual. Submit a real request and use Retitle once the task can be verified. A manually named pane keeps its name even after Retitle; use Rename to change it yourself.
 - **My own name was kept but the group moved.** Expected: name-fixed items keep their text; structure can still change.
 - **Titles are in the wrong style.** Check Settings -> Titles. Existing titles change only when retitled.
 - **An instruction seems ignored.** Instructions refine but cannot change the required format; make them specific and short. Confirm the correct input is used (Entry naming for titles, Organization for grouping).
 - **No AI titles at all.** Check that guided setup is complete, a provider works (**Test provider**), and the Triggers tab has Retitle actions. See [Inference and privacy](inference-and-privacy.md#troubleshooting).
-- **After `/clear` the title shows `<new>`.** Normal until the new session has a verified request.
+- **After `/clear` an automatic title shows `<new>`.** Normal until the new session has a verified request. Manual names stay unchanged.
 
 Related: [Settings](settings.md), [Inference and privacy](inference-and-privacy.md), [Voice](voice.md), [Agent monitoring](agent-monitoring.md).

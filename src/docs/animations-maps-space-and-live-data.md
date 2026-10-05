@@ -33,7 +33,7 @@ Contents:
 
 Things that hold for every scene on this page:
 
-- Settings save immediately, per project, in `.ilium/config.yaml`. They sit under the top-level `animation:` mapping as flat keys named after the scene: `stars`, `solar_system`, `topographic_maps`, `openstreetmap`, `night_lights`, `clouds`, `voxel_landscape`, `graph`, `pi`, `earthquakes`, `aircraft`, `boats`, `chess`, plus a single shared `location`. Out-of-range values in the file are clamped when loaded; the ranges below are the clamped ranges.
+- Settings save immediately, for the whole client, in `~/.config/ilium/animation/.ilium/config.yaml`. They sit under the top-level `animation:` mapping as flat keys named after the scene: `stars`, `solar_system`, `topographic_maps`, `openstreetmap`, `night_lights`, `clouds`, `voxel_landscape`, `graph`, `pi`, `earthquakes`, `aircraft`, `boats`, `chess`, plus a single shared `location`. Out-of-range values in the file are clamped when loaded; the ranges below are the clamped ranges.
 - All of these scenes are **live-only**: they are evaluated as you watch, so the Playback (Loop or Live) row is hidden for them.
 - Colour, palette, brightness, contrast, dithering, frame-rate cap and panel placement are global, not per scene. Scenes here only expose what is specific to them. Earth at night paints its own cell colours, so the palette rows are hidden for it.
 - Animations are decoration only. They never change terminal history, text you copy, or agent detection. Outer terminal selection can include the decorative Braille.

@@ -33,6 +33,7 @@ This is the full documentation for Ilium. The [project README](../../README.md) 
 | Page | What it covers |
 | --- | --- |
 | [Settings](settings.md) | Every Settings tab, `config.toml`, project configuration, guided setup. |
+| [Remote compaction](remote-compaction.md) | Compact Claude and Codex sessions through your Inference model before they fill up. |
 | [Inference and privacy](inference-and-privacy.md) | AI providers, what is sent where, token budgets, logging. |
 | [Titles and instructions](titles-and-instructions.md) | Automatic titles, manual-name protection, custom instructions. |
 | [Voice](voice.md) | Voice control, `ilium voice say`, troubleshooting. |

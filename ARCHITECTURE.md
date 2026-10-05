@@ -100,7 +100,7 @@ Completed progress footers are a client presentation policy. `[ui].completed_pro
 
 ## Ambient animation rendering
 
-Semantic is an opt-in selection policy, not a scene engine. The selected real tree entry owns Entry scope; its project owns the default Project scope. Virtual tree rows use their nearest domain ancestor, with the displayed pane and a sole project as unambiguous fallbacks. `app_semantic_animation` binds authored animation settings at event-loop project transitions and caches strict recommendation admission against selection, tree version, generation, recommendation and authored settings. It returns one immutable concrete overlay without writing configuration or requesting inference. Composition, preview, cadence, color facts, loop-cache choice and attribution read that same effective value. Invalid or missing recommendations clear stale scene state and contribute no animation deadline; equivalent authoritative snapshots retain the scene. Explicit settings edits validate the bound project before the existing locked YAML write. Final-painted receipt hooks remain owned by the renderer; effective selection does not manufacture delivery receipts.
+Semantic is an opt-in selection policy, not a scene engine. The selected real tree entry owns Entry scope; its project owns the default Project scope. Virtual tree rows use their nearest domain ancestor, with the displayed pane and a sole project as unambiguous fallbacks. `app_semantic_animation` owns the one global authored animation setting (`App::animation_home`, stored through `project_config` under the client config directory; the launch project's block seeds it once) and caches strict recommendation admission against selection, tree version, generation, recommendation and authored settings. It returns one immutable concrete overlay without writing configuration or requesting inference. Composition, preview, cadence, color facts, loop-cache choice and attribution read that same effective value. Invalid or missing recommendations clear stale scene state and contribute no animation deadline; equivalent authoritative snapshots retain the scene. Explicit settings edits validate the global load state before the existing locked YAML write. Final-painted receipt hooks remain owned by the renderer; effective selection does not manufacture delivery receipts.
 
 Two scene families share one dot raster (`ilium_ambient::Raster`, 2×4 dots per terminal cell) and one packing step (fixed ordered or stippled thresholds, then Unicode Braille):
 
@@ -187,12 +187,17 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
   - **Identity** (which CLI, if any): walk the PTY's child process tree via `sysinfo` and match process names against the shared built-in provider registry (`claude`, `codex`, `agy`/`antigravity`), plus generic/custom signatures (`opencode`, `aider`, …). This is the primary signal — robust against UI redesigns, unlike text scraping.
   - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for markers. A literal `"esc to interrupt"` substring is one recognized "working" trigger, but real Claude Code builds also render a present-tense status line ending in an ellipsis alongside a live elapsed-time token (e.g. `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`) — `looks_like_live_status_line` catches that shape instead of matching exact wording, so it survives whichever whimsical verb is showing. A `y/n`-style confirmation line or a numbered selection menu with a `❯` cursor means blocked (`WaitingApproval`); anything else with no agent CLI detected, or an agent CLI with no such marker, is idle.
   - First-party providers implement one pure shared contract for command launch, process-name aliases, resume syntax, CLI argument parsing, labels, and deterministic ordering. Adding a supported provider extends that contract rather than duplicating special cases through the client and server.
-- **ilium-agent-session** — the shared transcript-provenance boundary used by both server-side session discovery and client-side LLM titling. It verifies Claude/Codex JSONL stores and Antigravity's UUID database plus `history.jsonl` project binding before accepting a session, preventing cross-project identities from leaking through lossy/global stores.
+- **ilium-agent-session** — the shared transcript-provenance boundary used by both server-side session discovery and client-side LLM titling. It verifies Claude/Codex JSONL stores and Antigravity's UUID database plus `history.jsonl` project binding before accepting a session, preventing cross-project identities from leaking through lossy/global stores. Its pure byte parser returns a raw identity, never verified provenance. Bounded locators can inject an explicitly owned metadata parser; cancellation, admission refusal or worker failure invalidates the entire discovery attempt so partial evidence cannot become a unique match. The crate creates no execution bank or worker.
 - **ilium-session-convert** — converts one agent session to the other built-in provider (Claude Code ⇄ Codex) so the conversation continues under the other CLI. Claude→Codex drives Codex's own `externalAgentConfig/import` session importer over a private `codex app-server` stdio child; Codex→Claude is a Rust transcript translator (user prompts, assistant text, shell/tool calls and results; reasoning and token events are dropped). It is a blocking function with step/log/progress events and a cancel flag, called from a client worker thread; the tree menu's **Convert to** action stops the pane's agent (`TerminatePaneProcess`), freezes the pane, shows the step/progress/log dialog, then `ReplacePaneWithCommand` swaps the pane for one resuming the converted session.
+- **ilium-remote-compaction** — pure compaction pipeline for Claude Code and Codex transcripts (no async, no HTTP, no PTY). It parses a session file into a neutral conversation (Claude `parentUuid` chain with `compact_boundary`/`preservedSegment`; Codex rollout with `compacted` and `replacement_history`), masks old tool output, redacts secrets, builds a deterministic file/command/error ledger, chunks the input to the summarizer window, renders the technique prompt (Claude Code, Codex, opencode, Gemini CLI, best-of-all-worlds, custom; templates live in `ilium-prompts/templates/compaction/`), and calls an injected `Summarizer` (chunk, merge, retry, re-chunk on `ContextTooLong`, deterministic fallback). It then backs the transcript up and rewrites it atomically as a compaction (a `compact_boundary` plus summary record for Claude, a `compacted` record with replacement history and a fresh `token_count` for Codex), refusing when the file grew meanwhile. `compact_session` reports step/progress/log/token events and honors a cancel flag; `transcript_is_at_pause_point` and `latest_context_usage` feed the client's monitor. The client owns the rest: `remote_compaction_worker` (blocking worker, the `Summarizer` over `ilium-inference` with a long per-request timeout), `remote_compaction_flow` (wait for a pause, freeze, `TerminatePaneProcess`, compact, `ReplacePaneWithCommand` resume, failure recovery, the automatic context monitor with cooldown and a three-failure circuit breaker), `remote_compaction_dialog` (steps, progress, token bars, log, privacy banner) and the **Remote compaction** settings tab. The toolbar Compact button routes here when the feature is enabled.
 - **ilium-ambient** — the ambient scene engines: the `Scene` contract, the shared dot `Raster`, data-driven `Control` rows and per-scene settings, the shared `GeoLocation`, address search, the world map and the pipes, stars, night-lights, clouds, video, spectrum and images scenes. No terminal, ratatui or client types; `ilium-client` hosts it (`background_animation::AmbientHost`) and owns the Settings UI, compositing and persistence.
 - **ilium-wikipedia** — a data adapter for English Wikipedia’s daily Main Page article pool, bounded cached HTTP/image decoding, semantic rich HTML documents, and an owned cancellable loader. The client’s `background_animation::wikipedia` owns native text and font/Braille page layout, presentation controls, scrolling and terminal-safe composition; the server and PTY source do not participate.
 - **ilium-git** — the Git adapter for repository discovery, registered worktrees, branch and dirty-state probes, and worktree mutation. It owns Git command arguments and porcelain parsing; the server owns pane lifecycle and removal policy.
 - **ilium-server** — owns all PTYs and the tree (`ServerState`), runs the detection loop, the single scheduled-input executor, and generation-fenced progress coordinators, writes a JSON crash-recovery snapshot to `<project>/.ilium/sessions/<name>.json` after structural or monitored-lifecycle changes, and restores panes, pending deadlines, and conservatively recoverable monitors on startup. The CLI gives it one exact project-session socket, so one process serves exactly one session with no multi-session registry.
+
+**Start-up progress.** A server restoring a large session is busy long before it accepts connections, so it publishes its current work to `<socket>.startup` (`ilium-ipc::startup`: category, item, completed, total; atomic replace, removed when ready). The client takes the terminal before its slow discovery (sounds, audio devices) and shows a three-line centred dialog -- category, item, progress bar -- first written straight to the terminal (`startup_dialog::StartupDialog`), then painted by `ui::draw_startup_dialog` over the interface until `InitialStateSyncComplete`. An unknown total draws a moving bar.
+
+**Terminal parser engines.** The client's `terminal_parsing` has no engine-count cap; only bytes are bounded by `terminal.engine_memory_budget_mib` (default 4096 MiB, 256 to 16384). The same budget limits retained engine state and published snapshots, and the parser reserves twice that amount from the process quota at start (later increases apply after a restart, decreases immediately). Panes leave their engine in place when hidden, so revisiting is instant. Only when a displayed pane is refused for memory does `collect_terminal_parsing` evict the least recently focused hidden engine (`TerminalView::evict_parser`), and the client sends `DiscardTerminalDelivery` so the server forgets what it delivered and replays its journal when that pane is next displayed. Engine retirement on the parser thread wakes the client loop, and the loop retries every 50 ms while a displayed pane has no engine, so a selected pane never waits for unrelated input. A displayed pane without an engine renders an explanatory message instead of black.
 - **ilium-client** — the `ratatui` TUI: left tree panel + right presentation target, keybinding dispatch (`keys.rs`/`keymap.rs`), one-step tree reordering, and shared `split_layout` viewport geometry used by rendering, PTY sizing, focus, and mouse routing. It sends `ClientRequest`s to the server and renders the `ScreenUpdate`/`PaneStateSnapshot`/`PaneStatusChanged` events it streams back. Its `TerminalView` also compares allocation-free visible-character fingerprints while applying live output, feeding the client-local ordinary-terminal activity animation without adding a server poll or wire state. It owns built-in editor and board panes plus background LLM-assisted session/project naming and the client-local immutable Smart Copy snapshot/worker lifecycle through `ilium-inference`'s selected-provider boundary. When Kilo paid-proxy egress is enabled, its boot path reads the configured MongoDB collection before entering the terminal and keeps the loaded rows in memory only.
   - Reset planning is client-local: one owned background monitor checks the public Claude and Codex announcement feeds while a client is attached, reports observations over a bounded channel, and stops on detach. Settings persist globally under `[reset_planning]`. The Codex status contract distinguishes an `active_watch` forecast window from a scheduled announcement; the status bar labels the forecast window's expiry as the end of the watch, never as a guaranteed reset time. Scheduled announcements may have a null target time, which is shown as time TBD rather than an invented countdown. Claude's current public catalog contains historical announcements but no future schedule field. Reattach triggers an immediate fresh check, so this presentation state does not enter session snapshots or IPC.
 - **ilium-inference** — provider-neutral title/organization/Smart Copy inference. Its base provider contract has concrete Kilo Gateway, local Ollama, OpenAI-compatible, Anthropic, and OpenRouter implementations, with both whole-response and incremental streaming entry points; the client owns its persisted credentials, endpoints, selected models, and the MongoDB source/field mapping for Kilo paid proxies. Proxy records themselves are runtime-only and are never serialized into `config.toml`. Requests use the model's maximum output allowance when known; prompts, not convenience caps, control normal response length. Official OpenAI uses `max_completion_tokens` with documented exact-model maxima, omits forced sampling parameters, and omits the explicit limit for unknown IDs rather than transmitting the 1,000,000-token fallback used by other adapters. OpenAI-compatible catalog discovery authenticates `GET <base>/models`, returns sorted exact IDs without inventing capabilities, and exposes credential-redacted endpoint metadata. The client keeps a last-good catalog and fences asynchronous results with a settings revision so credential/URL/provider edits, including edits away and back, cannot publish stale results. Kilo exposes a live, unauthenticated free-text-model catalog in Settings, with stable Kilo/OpenRouter free-router fallbacks when discovery is unavailable.
@@ -214,6 +219,16 @@ resident storage. A reservation precedes expensive capture or stateful
 preparation. Reserved publication remains valid during a concurrent drain;
 explicit cancellation returns work that never started. Callback panics produce
 failed receipts and leave subsequent finite jobs runnable.
+
+Transcript metadata parsing can use the existing CPU bank through the bounded
+locator's supplied parser. Synchronous filesystem traversal and receipt waits
+belong to an admitted persistent I/O coordinator, outside the finite I/O bank;
+a finite I/O callback must not synchronously wait for nested CPU admission.
+Canonical project/store checks remain with the locator after raw parsing.
+The parser boundary has passed its 19 native library tests, strict lint and
+release library build. Those checks do not prove conversion caller offloading,
+physical child cleanup or coherent client/server release behavior, which remain
+separate integration requirements.
 
 `Client.child` gives related producers independent feature limits beneath one
 aggregate parent. Admission charges every ancestor; sibling identities cannot
@@ -281,6 +296,13 @@ frames and acknowledgements. These primitives are implemented and have focused
 forcing coverage; editor, clipboard and context-menu ownership migration remains
 unfinished. Queue admission and declared bytes do not establish a native RSS
 bound or guarantee destruction after every permitted execution owner is lost.
+An isolated native forcing test drops the combined error and execution bank
+while the CPU callback is blocked. After release, both original 64 KiB payloads
+retain their addresses and contents; the outer and two nested destructors run
+on that same CPU worker. The test verifies all three retirement envelopes are
+released and physical thread admission returns only after native exit. It keeps
+client and observation capabilities through the check. This qualifies that
+disposal sequence, not arbitrary owner loss or complete client shutdown.
 
 The remaining editor migration must cover each independently retained leaf,
 including syntax tokens, rendered documents, context text and TextArea undo/yank
@@ -303,6 +325,21 @@ matching presentation acknowledgement. Shutdown cancels preparation, joins the
 presenter and releases its last editor frame owners before execution retirement
 joins. This source-window integration is applied to the current tree; frozen
 candidate checks do not qualify the newly combined tree or its release binary.
+The complete editor engine also has an all-target type-check pass against a
+frozen private union of the current callers. A corrected native run passed
+13 original-ownership editor cases, one hidden undo/yank growth case and one
+ordered durable-save readback case; all 1868 captured source hashes remained
+unchanged. The original runner rejected a zero-test save filter, and the
+corrected module filter executed the real readback test. During a CPU loan, the UI renders immutable acknowledged source rows or
+already emitted Markdown cells and one captured set of chrome facts; it does
+not read the loaned mutable document. The ordered save collector retains an
+original durable completion while the same editor instance is loaned, then
+settles that head before younger acknowledgements. The shared ordered writer
+readiness and selected native loan/save tests pass. Combined editor/scene
+shutdown forcing, the later complete caller union and whole-workspace strict
+checks remain separate acceptance gates. These private qualification states
+do not imply that the complete engine is applied, released or live.
+
 Chapter line-offset discovery now counts disjoint source ranges rather than
 repeated prefixes. Isolated original-versus-candidate chapter fixtures pass;
 full-buffer context capture/parsing, TextArea storage and live acceptance remain
@@ -327,9 +364,142 @@ the shared codec bank instead of starting a duplicate bank per connection.
 Shutdown errors retain undelivered events and live retirement tickets alongside
 earlier client errors. The declared process limit includes these owners; it is
 not an allocator or measured RSS guarantee. Frozen candidate checks cover the
-selected contracts, including four isolated Linux PTY cases for input/query
-ordering, large paste, cancellation and retirement. Current combined
-compilation, release and whole-UI real-terminal acceptance remain unverified.
+selected contracts. Four real Linux PTY runs against the qualified debug native
+input child now pass cancellation, release/retry, shared input/query ownership,
+and an exact 40 MiB paste followed by a key. They verify physical join and zero
+remaining admission; the large paste also verifies compacted capacity. The query
+controller provides a synthetic primary device-attributes response only. The
+original timeout and controller defects are retained alongside corrected proofs.
+These runs do not qualify the Rust parent harness, whole TUI, release behavior,
+RSS or matched performance. Ordinary pane-key forwarding still needs retained
+retry custody when outbound request admission refuses; native reader preservation
+does not prove that downstream contract. Current combined acceptance remains open.
+The parent input dispatcher now uses a fixed two-slot backlog, consuming retained
+originals before fresh input and draining both slots during shutdown. Overflow
+returns both incoming originals without changing existing custody. Seven native
+checks cover actual input allocations, the production 64-event motion boundary
+and the current dispatcher compiled against retained private App APIs. Both
+captured current-client compiler modes now pass all-target type checks with and
+without GPU support, plus input-module formatting; all 1850 captured source hashes
+and three log hashes were independently verified. V8 download was skipped for
+these compiler gates, so they provide no native or release execution proof.
+These focused proofs do not qualify downstream semantic admission, the complete
+current App or real TUI input latency. A separate private fixed instruction head distinguishes actual
+editor installation from model acknowledgement, fences original allocation and
+editor instance, and retains partial UTF8/CRLF offsets and terminal failures.
+Five native-allocation boundary cases pass; their model facts are synthetic.
+Two additional cases use actual shared CPU model callbacks: a partial Unicode
+paste cannot release its original until the remaining bytes complete, and a
+panicked model retains the same original for shutdown diagnostics. The first
+also verifies a following key and actual committed text; both physically join
+their test-owned worker banks. The 1882 captured source hashes and native logs
+were independently verified. This head remains private pending complete App
+caller, global/protected input precedence, completion and shutdown integration.
+A private Save As adapter retains a CPU-prepared destination through admission
+refusals and reuses the original editor source capture and ordered writer.
+Two native cases verify the original CPU snapshot, exact destination allocation,
+Unicode disk readback, model-return-before-write ordering and physical bank drain;
+all 1882 frozen source hashes and the test log were independently verified.
+These cases do not qualify the current App, dialog acknowledgement or full shutdown.
+A later current-source capture with the private prompt callers failed its default
+all-target compiler gate on missing producer APIs and caller contracts; its 1895
+source hashes and diagnostic log were stable. The GPU gate did not run. Shared
+editor input, final configuration-source release and whole-App shutdown integration
+remain private and incomplete; the earlier compiler passes do not prove this union.
+Private shutdown tests now exercise the actual CPU bank in debug and release:
+original disposal, nested retirement, deadline ownership retention and retry,
+and recovery with a target behind 63 originals of other types. They verify the
+original allocation, CPU disposal, physical worker exit and released quotas.
+The 48 frozen source hashes, locked dependency versions and four logs were
+independently audited. The bounded recovery regression is also included in
+`ilium-execution` tests. Its payloads are synthetic; these focused passes do not
+qualify complete App shutdown, the current integrated client, or release latency.
+
+GPU ownership remains an explicit gap in the worker inventory. The optional
+startup probe discards its native join handle, and all three existing GPU scene
+backends share a frame owner that starts a raw thread, joins synchronously on
+Drop and clones the entire pixel vector when reading its latest result. Pixel
+allocation also bypasses the shared byte admission. The GPU parity test is a
+second startup-probe consumer. The existing SceneEnv resources, admitted ambient
+worker and platform supervisor provide reusable boundaries. An existing animation
+owner has prepared private changes for admitted probe/frame ownership,
+nonblocking retirement and immutable charged frames. The pinned Rust 1.96.1
+private qualification passed 13 ambient, 21 default GPU, 24 feature GPU and one
+parity test, plus strict all-target Clippy in both modes and scoped formatting.
+The parity run used an NVIDIA GeForce RTX 3090: 34 cases had zero differences,
+and the ten-second temporal control changed 12.08% of pixels. These changes
+are not yet integrated into the client lifecycle. Default NotCompiled behavior,
+software fallback and matching-
+size frame presentation must survive. Driver/device library roles, native buffer
+lifetime and hardware acceptance require separate evidence; shared admission is
+not proof of driver, GPU-memory or RSS bounds. Probe admission must be retryable
+through a bounded pending owner and completion notifications. Scenes receive one
+stable eventual runner source before construction, render software immediately,
+and acquire the later admitted device without rebuilding simulation state. The
+private source qualification does not prove the current workspace, affected
+release or live client lifecycle. The client must admit the probe on its existing
+execution bank before constructing App/SceneEnv and physically retire GPU owners
+after animation drain, before shutting that bank down. Driver threads, native
+buffer memory, GPU memory and process RSS remain outside the cooperative ledger.
+
+Subsequent final-reader forcing tests preserved original pixel bytes and frame
+credits through CPU disposal. That private hardware run passed parity assertions
+but crashed during process teardown, so assertion success was insufficient.
+The next private candidate tracks every original frame-worker ticket in a fixed
+32-slot controller custody before spawn, fences close against reserved starts,
+and drains actual scene and frame joins before releasing the probe/device. Three
+RTX 3090 parity processes exited zero with explicit teardown, and 17 managed
+GPU tests passed; default strict Clippy then rejected one indexed loop. The
+corrected frozen source now passes 17 ambient ownership tests, 21 GPU tests,
+real hardware parity, default and GPU-feature strict all-target Clippy, and
+formatting. All six commands exited zero and its 490-file source audit found
+no drift. This qualifies the private GPU engine; the combined client lifecycle,
+release, terminal and matched performance checks remain outstanding.
+The crash did not reproduce under the original-binary debugger run, leaving the
+exact crash cause unresolved. Client startup, physical scene join and finite-I/O
+frame-drain compositions remain private and require combined qualification.
+
+Server notification audio uses one ordered actor with a bounded queue of 64
+requests. Playback is a typed finite I/O job on the existing server bank; the
+actor retains the original request while waiting for admission. A running native
+callback retains its job charge after the actor is cancelled, until playback
+physically returns. The original cancellation regression failed before this
+change. A frozen callback-source capture passed 458 server tests, all-target
+checks, strict Clippy, formatting and a server release build. Its release is
+retained separately from the subsequent settings/config integration.
+
+Queued request bytes and immutable sound-settings publication now retain their
+own storage admission. Producers reserve before constructing new labels;
+startup, IPC updates and config reload publish one immutable admitted settings
+allocation, shared by queued and native readers until the last reader releases
+it. The config watcher uses the existing finite I/O bank and one bounded
+256 KiB read for both fingerprint and parsing. It preserves first-tick refresh,
+last-good settings, refusal retry and independent text-trigger refresh. The
+13 integrated files match the exact private capture that passed 467 server
+tests, including nine required ownership/refusal/watcher regressions, all-target
+checks, strict Clippy and formatting. The combined settings server release has built successfully from that frozen
+capture, with actual supervised Cargo and runner exit zero. It is retained as
+a separate artifact; current-source union and live installation remain unqualified.
+Full notification queues retain explicit logged overflow;
+DSP preparation preserves existing bounded synthesis and playback order. Library
+and child-process memory remains separate from the cooperative allocation ledger.
+
+The captured CLI/server release pair has passed an isolated real-PTY attach,
+project/tree render, physical Help input, resize and Help-dismissal check, with
+loaded executable identity and scoped shutdown verified. This does not qualify
+the complete current-source union, the full TUI suite, GPU hardware, RSS or
+matched performance, and the pair has not been installed.
+
+Exceptional scene shutdown must retain the complete original animation owner,
+including accepted configuration and receipt queues and unsettled replay proofs.
+A native join ticket or an open execution bank alone does not retain those
+originals after App destruction. The private client proposal reserves one
+exceptional retirement envelope before scene startup, moves the whole surface
+without copying its payloads, and bounds receipt-drain observation. A failed
+editor and scene shutdown must preserve both original errors under the same
+outer execution owner; GPU retirement and bank closure follow proven physical
+scene exit. The new exceptional-path fixtures and combined proposal have not
+yet passed compiler or native execution qualification.
 
 External file, directory and URL launches now use the existing shared I/O bank.
 One client owner retains at most eight ordered requests, with explicit target
@@ -345,7 +515,7 @@ non-UTF-8 paths, dash-prefixed filenames, null stdio and Windows shell error
 mapping remain at that boundary. Closing never waits for or kills a user
 application; surviving Unix children retain the admitted service through actual
 join, and surviving handles retain its bookkeeping charge. The process
-declaration now counts 30 worker roles under the unchanged 4096 MiB declaration;
+declaration now caps explicit owners at 38 roles under the unchanged 4096 MiB allowance;
 this does not bound native allocator RSS or impose a host-wide limit. The five
 caller/adapter files are applied and formatted. Their new ordering, overload,
 shutdown and real-child fixtures are authored; captured qualification is
@@ -391,6 +561,23 @@ so younger text, push-to-talk and tool commands cannot overtake it. Replacement
 settings fence prepared results, while Stop cancels preparation and waits for
 actual actor and native retirement before another owner can start.
 
+The retained-source configuration transition is not integrated yet. Canonical
+onboarding Test capture still clones the selected voice settings. The private
+source-based callers retain the chosen original before admission, with runtime
+identity inherited only after the CPU compares the runtime-relevant settings;
+policy-only changes preserve a waiting Test. The original caller's policy test
+passes natively, while the new source caller and acknowledged configuration
+union have only parsing and source-hash evidence. Modal construction has three
+passing native library admission/refusal tests. The private CPU editor and save
+controller also have fourteen passing native tests covering original text and
+hidden history, input ordering, refusal, panic, partial-paste cancellation,
+surface and resize fences, and physical worker shutdown. The save-controller
+fixtures inject acknowledgement facts; they do not establish actual writer
+durability or persistence readback. Dialog caller integration, complete frame
+composition, ordered disk acknowledgements and application shutdown remain
+unqualified. None of these focused checks establishes a complete client release
+or live transition.
+
 Audio callbacks use bounded preallocated sample rings. The existing persistent
 DSP owner performs sample conversion in both directions; playback pressure retains
 original pending samples there while capture remains serviced. Capture overflow
@@ -402,16 +589,22 @@ allocates before its accepted-size cap; arbitrary external JSON maps have opaque
 spare capacity and require a producer backing declaration. Native backend lifetime
 and library thread costs need separate platform qualification.
 
-The current client composition declares 26 admitted worker roles and 4096 MiB
-of aggregate worker/storage allowance. Its selected single-video-owner scenario
-reserves 3449 MiB plus 128 KiB for the finite bank, immutable parser, clipboard,
-media, presentation, animation frames, icon engine, voice and one video owner.
-Retiring owners still compete for their original admission; the selected scenario
-does not guarantee concurrent replacements will fit. Startup logging, the join
-supervisor and the separate codec bank remain outside this scenario and require
-the reconciliation described below. These figures are source declarations, not
-a whole-process OS-thread bound, allocated RSS or an allocator limit. Native
-helper/library completeness and measured memory acceptance remain separate.
+The client bank constructor and selected-composition fixture now share one
+configuration: two CPU, four I/O and one service thread. The selected feature
+owners contribute another 21 roles; supervisor/logger/input add three, the
+external opener one, and the existing Tokio runtime six. The root ceiling is
+derived from those bank constants and the named set: 38 roles under the unchanged
+4096 MiB allowance. Earlier fixtures counted only five bank threads, undercounting
+the selected feature scenario by two. The selected feature storage declaration is
+now 3451 MiB plus 128 KiB before additive bootstrap/runtime storage. A standalone
+forcing test starts the real seven-thread bank: the original 36-role ceiling
+refuses the remaining 31 declarations, while the corrected ceiling admits them,
+refuses a further role, and releases bank admission after all seven native owners
+join. Those other roles are synthetic declarations in this test; their engines
+and children are not started. Full-client compilation and the updated selected
+storage fixture remain unqualified. Retiring owners compete for their original
+admission. These declarations do not prove whole-process OS threads, allocator
+RSS, native library completeness or measured memory acceptance.
 
 Ambient scene construction receives the composition root's existing execution
 client through `AmbientResources` and `SceneEnv`. Finite carpet-chess searches
@@ -480,6 +673,13 @@ cache changes and last-reader retirement. Full engine destruction, current-clien
 runtime and measured memory qualification remain open. Tree-row acknowledgements
 retain the prepared card, its
 displayed title and visibility policy; rendering borrows those immutable lines.
+Cost CPU admission additionally records the actual rejecting ledger's quota
+boundary, requested bytes and used/limit values from the existing admission lock.
+The UI diagnostic and retry policy stay unchanged; repeated ticks with the same
+diagnostic do not repeat the warning. Refusal leaves the engine in its coordinator,
+and a later submission refusal returns the exact engine as before. This diagnostic
+change uses the same client, bank and quotas. Scoped formatting passes; its fresh
+cost/history/client checks and reproduction of the runtime refusal remain pending.
 A changed acknowledged card requests one redraw, while an unchanged source
 does not create an acknowledgement/redraw loop. These source contracts still
 need integrated compiled and runtime qualification.
@@ -585,14 +785,16 @@ reports unsupported platforms explicitly. Detection workers gather owned process
 and transcript evidence; the server reconciles current revisions and exclusive
 session claims centrally.
 
-Server foreground-process evidence still has a synchronous boundary. Six
-server paths probe shell ownership during detection reconciliation, automated
-input checks and title decisions. On Windows this invokes a ToolHelp process
-scan while shared tree or pane guards remain held; Unix uses the narrower
-terminal foreground-process-group query. Moving that evidence outside the
-locks requires revalidating the original pane, agent and presentation revisions
-before applying input or title decisions. Current Linux checks do not qualify
-the Windows scan or complete this remaining I/O migration.
+Server foreground-process evidence now uses the existing finite I/O workers.
+Five observation paths capture shell/process evidence, release shared tree and
+pane guards, then await a bounded native probe; title and input decisions
+revalidate the captured PTY, session, agent and presentation fences before
+applying results. The sixth path probes shell ownership within the detection
+evidence worker after releasing its cached process-table guard. Refused,
+unavailable or late evidence does not grant shell ownership. The native adapter
+still uses ToolHelp on Windows and the narrower terminal foreground-process-group
+query on Unix. This describes the current source; it does not establish Windows
+runtime behavior or replace current-source integration and runtime checks.
 
 Local PNG preparation uses the shared finite CPU bank. Its concrete decoder
 preflights bounded chunk metadata, inflater buffers, pixel storage and resize
@@ -641,11 +843,25 @@ runtime, the process root reserves its two async and four blocking roles with
 for process lifetime: a timed runtime shutdown can leave blocked callbacks alive,
 so dropping a local guard would release capacity prematurely. Same-root repeated
 initialization is idempotent; a foreign root or changed declaration is refused.
-The selected client census includes one external-opener reaper and totals36
-roles within the unchanged4096 MiB storage ceiling. Foundation qualification
+The selected-client census includes one external-opener reaper and derives a
+38-role ceiling from the current seven-thread bank plus its named owners, within
+the unchanged 4096 MiB storage allowance. Current full-client qualification is
+still required; standalone bank admission is not whole-process acceptance. Foundation qualification
 covers runtime admission/refusal, idempotence and retained process custody;
 captured-source server and CLI all-target compilation also passes. The later
 client changes require their own qualification; no installed-runtime claim follows.
+
+The shared local ordered writer can retain an accepted FIFO head while its
+original source is prepared on the existing CPU bank. Its typed readiness
+predicate runs before I/O submission; a younger ready write cannot overtake the
+head, and waiting for preparation occupies no I/O worker. Existing editor, board,
+configuration, integration and permission writers retain their default ready
+behavior and original completion wakes. Eight isolated native writer/snapshot
+regressions pass, including independent I/O during blocked CPU preparation,
+ordered durable readback, shutdown and admission provenance. The full editor
+model-loan, deferred save acknowledgement and source-capture caller integration
+remains under current-source client verification; this boundary proof does not
+establish workspace, release or installed-runtime acceptance.
 
 The snapshot service reserves its persistent OS worker and declared bounded
 mailbox/write storage on the server's existing root before spawn. Its physical
@@ -679,8 +895,78 @@ acknowledgements hand the original result and its same storage lease to that
 bank; no new worker is created. Shutdown releases an unchosen pending recovery
 result before closing the bank. Two additional fixtures park both CPU owners
 and force retirement-slot refusal to check retained custody and unchanged disk
-bytes. These later source changes and fixtures are not yet compiled or executed;
-partial-restore cancellation and exceptional shutdown custody remain unqualified.
+bytes. Their frozen-source qualification passes all 16 snapshot-service tests,
+30 persistence tests (two ignored), server all-target compilation, strict Clippy
+and scoped formatting. Source/log hashes match the capture; these receipts predate
+the newer JSON admission and overload changes. Partial-restore cancellation and
+exceptional shutdown custody remain unqualified.
+
+The read owner additionally admits the actual restoration future frame before
+decoding, using its compiler-derived size and the existing retirement metadata
+allowance. Restore polls that owned frame on the coordination runtime; cancellation
+hands its remaining input, state reference and storage lease to the existing CPU
+destruction owner. No async task is claimed as CPU offloading. An unexpected
+missing owner retains the original recovery result and refuses successful
+resolution. Two fixtures cover cancellation before tree publication
+with both CPU workers parked, and frame-admission refusal with exact disk readback.
+Frozen-source qualification passes all 21 snapshot-service tests, including these
+fixtures. An independent audit verifies 1,792 source files and eight logs. This
+does not establish semantic recovery after a partially published restore, old-tree
+destruction bounds or exceptional shutdown safety.
+
+A single recovery owner now retains the pending original and one accepted
+restore/discard coordination task independently of the requesting socket.
+Admission reserves the compiler-derived task frame before transferring that
+original. A refused restore or failed ordered discard returns the same original
+to the retry slot; direct reply backpressure does not own semantic completion.
+Attach waits for resolution, workspace pruning protects an unresolved operation,
+and session kill or shutdown closes admission and joins it before clearing the
+tree or draining final persistence. Native snapshot I/O and CPU destruction keep
+their existing owners. Four real-bank regressions, server all-target strict
+Clippy and formatting passed against 1820 unchanged captured files; the five
+recovery files are applied. The server release build also passed against the
+same 1820-file capture, with independently verified source, log and retained
+binary hashes. The artifact is retained separately and is not installed; current
+paired runtime acceptance remains outstanding. This release predates the
+failure-handling proposal below.
+
+Recovery failure and snapshot shutdown changes are now applied through exact
+current-source deltas across seven server files. Accepted recovery failures latch
+an error and keep the original-file write fence; KillSession returns an error
+without clearing the tree or acknowledging success. A lexical dirty-claim guard
+restores pending work on cancellation, unwind or failed write acknowledgement.
+Shutdown cooperatively stops and physically joins the original coordinator
+before its final conditional flush. Join failure remains latched across cancelled
+and repeated shutdown attempts; clean discard and clean startup do not force a
+save. Original native regressions reproduced both lost cancellation claims and
+missed failed-write shutdown retries before the remedy. The frozen candidate
+passes 11 recovery, 25 snapshot and one task-handle cancellation test, strict
+server Clippy, scoped formatting and a private release build; all 1820 source
+hashes and six log hashes were independently verified. Its new cancellation
+case checks actual persisted readback and sticky failure after repeated drain.
+The seven applied files match those qualified candidate bytes and pass formatting.
+A fresh current-source gate additionally passes all 38 native cases, including
+the actual KillSession failure handler, strict server Clippy and scoped formatting;
+all 1850 captured source hashes and six log hashes were independently verified.
+That gate built no release. The earlier private release is not installed, and
+current paired runtime, whole-workspace and performance acceptance remain
+outstanding.
+
+The session shutdown sequence now drains accepted workspace semantic tasks while
+keeping their existing execution bank open, then flushes and shuts down the ordered
+snapshot service, and only then requests bank cancellation. The same production
+drain helper is used by an authored regression that parks both actual CPU workers,
+queues an accepted semantic mutation, and checks authoritative snapshot readback
+after shutdown. Its first qualification failed before execution because the
+fixture called a nonexistent receipt method. The test now uses the foundation's
+existing `try_take` API and passes scoped formatting; fresh compilation and
+execution remain outstanding. Recovery still runs inside the request
+handler: ordinary socket closure does not immediately cancel that awaited handler,
+but the server aborts connection tasks during normal shutdown. The ordering change
+does not preserve a partially published restore across that abort or establish
+old-tree destruction bounds. The production startup branches load at most one
+snapshot per server lifetime; repeated replacement of the read-storage lease is
+a future contract concern, not an observed production reload path.
 
 Native JSON loading now uses the shared allocation-checked Serde visitors before
 owned strings and collection growth, while preserving trailing-input rejection.
@@ -692,15 +978,204 @@ Resource-admission errors have a typed snapshot error. Recovery startup returns
 that error instead of starting a fresh writer that could overwrite the original.
 Operation-capacity and queue-overflow refusals use the same typed error. Snapshot
 worker construction failures also use it because construction admits/spawns a
-worker before any disk operation. Three later authored fixtures force operation,
-parser and worker-creation pressure, verify original-file readback and retry;
-they are not yet compiled or executed.
+worker before any disk operation. Three later fixtures force operation,
+parser and worker-creation pressure, verify original-file readback and retry.
+Their frozen-source qualification passes 19 snapshot-service tests, 32 persistence
+tests (two ignored), 47 IPC tests (two ignored), the startup-refusal test, server
+all-target compilation, server/IPC strict Clippy and scoped formatting. Independent
+hash audit verifies 1,792 source files and eight logs. These receipts predate the
+restoration-frame changes and legacy encoded-size refusal parity.
 Four new fixtures cover the shared decoder, native refusal and readback, trailing
-JSON, and actual refused server startup. These source changes are awaiting their
-own IPC/server qualification. Custom deserializer conversions remain an audit
-obligation; the shared visitors are not a generic allocator or RSS guarantee.
+JSON, and actual refused server startup. Their frozen-source qualification passes
+47 IPC tests (two ignored), 16 snapshot tests, 32 persistence tests (two ignored),
+and the startup-refusal test, plus server all-target compilation, server/IPC strict
+Clippy and scoped formatting. All 1,792 captured source hashes and eight log hashes
+match. These receipts predate the newer overload and cancellation-frame changes.
+Custom deserializer conversions remain an audit obligation; the shared visitors
+are not a generic allocator or RSS guarantee.
 Norway's eager YAML event/alias graph, migration coexistence, normalization
 scratch and partial-restore/shutdown custody still need separate bounds.
+Legacy YAML decoded values now use the native snapshot's allocation-checked
+Serde policy, so compact repeated aliases cannot bypass collection/string/depth
+admission. Refusal returns a typed recovery resource error before conversion or
+native publication; malformed YAML keeps its original codec error. Two standalone
+exact-LegacyWorkspace tests reproduce the original unchecked expansion, then
+verify allocation refusal and ordinary decoding with the real IPC/Norway crates.
+The production disk readback, no-publication and valid-alias retry fixture is
+authored but unrun. This change does not bound Norway's eager event graph, custom
+Serde conversions or migration/normalization coexistence. Integrated qualification
+still needs current persistence source.
+
+Legacy YAML encoded-size refusals now use the same typed resource error as native
+snapshots, including an early file-metadata check and the bounded reader's
+post-read growth check. Startup therefore refuses recovery rather than treating
+an oversized legacy source as an empty session. A new fixture
+checks exact original-file bytes, absence of native publication, and later valid
+migration with native readback. Frozen-source qualification passes that fixture,
+all 33 persistence tests (two ignored), 47 IPC tests (two ignored), the startup
+refusal test, server all-target compilation, IPC strict Clippy and scoped formatting.
+The owned refusal transfer now uses `ControlFlow` to retain the original snapshot
+without another allocation. The subsequent captured-source qualification passes
+22 snapshot tests, 33 persistence tests (two ignored), 47 IPC tests (two ignored),
+the startup refusal test and the full server library (435 passed, nine ignored),
+plus server all-target compilation, server/IPC strict Clippy and scoped formatting.
+The independent audit verifies all 1,792 captured source hashes and nine log hashes;
+actual controller exit is zero. This includes the semantic shutdown regression:
+accepted work drains before the final durable snapshot and execution-bank stop.
+Concurrent startup-dialog and hidden-terminal delivery changes arrived after that
+capture, so these receipts do not qualify the current workspace union. YAML parser
+peak memory and semantic restoration after partial publication remain unresolved.
+
+Location search now uses one shared one-job tenant per `ClientExecution` on the
+existing finite I/O bank, replacing its separate four-thread gate. Picker replacement
+cancels delivery while a blocked callback retains its physical job debit. Typed
+outcomes and input revisions fence late results; result and selected-candidate
+allocations keep a separate process-root storage admission after job retirement.
+Provider error strings follow that same storage contract through display.
+Query capture is bounded at 64 KiB without truncating the authored input; configured
+address-provider validation and cooldowns stay in their existing adapters.
+The new real-bank forcing tests and private prompt reconciliation are unqualified.
+The shared `ilium-http` adapter now keeps DNS on the already admitted caller at
+all nine existing construction sites (seven formerly using the default resolver,
+two map callers using the previous local owned resolver). Locked ureq 3.3.0 spawns
+an untracked DNS helper for finite resolver timeouts; the shared resolver selects
+its synchronous lookup path and reports an expired deadline after lookup returns.
+Native lookup cannot be forcibly cancelled, so a blocked worker retains custody
+and admission. Caller proxy, redirects, cooldowns and request settings remain owned
+by their existing adapters. Captured qualification passes both resolver forcing
+tests, checks and strict Clippy for the HTTP, ambient, Wikipedia, inference and
+gateway crates. Its import-format gate failed and was corrected afterward; newer
+client integration remains unqualified. These checks establish no measured
+process-thread or latency bound.
+Location confirmation now carries an allocation-free marker into App. Destination
+storage is admitted before normalization and copying into authored settings, save
+intents and picker receipts. Version leases follow acknowledged, failed and rollback
+settings after picker disposal. Semantic cache misses reserve separate storage
+before cloning authored and derived settings; each independently retained view
+keeps that resolution's charge, avoiding unlimited escaped views under one fixed
+version declaration. Admission refusal leaves the original picker and prior cache
+available for retry. Declared copy/scratch allowances are cooperative accounting,
+not measured RSS bounds. Five quota, writer-refusal, persistence and retained-view forcing tests pass in
+the captured client Cargo run, together with test compilation and package formatting.
+The tested Root-owned seams match current source at audit; two concurrently changed
+statistics files keep whole-current client integration and release qualification open.
+Picker-list admission alone does not qualify downstream consumers.
+
+Startup-dialog observations now use the existing filesystem I/O client rather
+than reading a file on each UI-loop pass. One active receipt and one immutable
+charged observation retain their original admission; reads are paced at 100 ms
+and fenced by the startup-file path. A missing, malformed or oversized record
+uses the existing indeterminate display. The reader accepts at most 64 KiB,
+without modifying the server's file, and closes on initial sync or terminal
+shutdown. A blocked native read keeps its bank debit until it returns. No
+additional thread, bank or provider quota is introduced. The oversized-file
+regression fails against the original reader and passes with the bounded reader;
+three exact-source record tests pass. The subsequent captured client run passes both production startup-reader tests,
+including real-bank readback and close, plus three execution composition fixtures,
+all five location-save fixtures, compilation and package formatting. The runner exit
+and all nine log hashes are verified. Two concurrent statistics-file changes mean
+this is captured-source qualification; strict lint, current-union release, runtime
+and matched performance acceptance remain open.
+The server's best-effort startup publisher now has one State-owned native file
+owner on the existing I/O bank. Captured text is bounded and admitted before
+copying; the original path remains charged through its last native callback.
+Only native callbacks acquire the file mutex. Pane-name capture releases the tree
+lock before awaiting publication. Each restore carries a generation token, and
+ordered sequence fences prevent delayed writes after finish or an old finish
+from deleting a newer phase. Shutdown submits final removal before cancelling
+the bank. Refusing a courtesy update leaves the semantic restore input intact.
+Four standalone tests using the real bank and native files verify off-caller
+execution/readback, stale-write fencing, cancellation while blocked and finish
+ordering when a younger update returns first. Finish always closes its own phase;
+sequence coalescing applies only to publications. The ordering regression fails
+against the earlier publisher and passes after this correction. These
+use a minimal State fixture. The subsequent captured full server run passes
+443 library tests with nine ignored, including all four production publisher tests,
+three ready-log tests, bootstrap tests and legacy allocation-refusal/readback.
+All-target compilation, strict Clippy, package formatting and the server release
+build pass with actual runner exit zero. An independent audit matches all five
+log hashes and 588 files in the server's transitive local dependency closure,
+with no captured or current-source drift at audit time. The release binary is
+built but not installed or live. Complete client integration, shutdown runtime
+acceptance and matched performance measurements remain outstanding.
+
+Rolling session backups now reserve typed job and scratch admission on the existing
+server I/O bank before copying paths or session names. Started native work and its
+original errors retain admission through actual return or final error disposal.
+Copy-before-restore, synced temporary publication, half-hour retry buckets and the
+existing newest-first retention tiers are preserved. Retention scans stop at 16,384
+entries or 4,096 candidates and check filename/path capacity; sorting and deletion
+plans borrow the retained candidate paths. A complete plan precedes any deletion,
+so an incomplete scan preserves history. A published backup remains successful
+when pruning refuses. Checked borrowed path lengths determine the cooperative
+memory declaration; this is not an allocator or RSS guarantee. Six forcing tests
+are authored for readback, admission refusal, blocked cancellation, original error
+retention and incomplete pruning. The first capture passed its tests but stopped
+at strict Clippy on a manual scan counter and unnecessary borrowed-result lifetimes.
+After correcting both, the fresh capture passes 12 backup tests, all 451 server
+library tests, all-target compilation, strict Clippy, package formatting and the
+server release build. Actual runner exit and all six log hashes are verified;
+backup and IPC source hashes still match that capture. The binary is built but
+not installed or live. Later HTTP changes are outside this qualification.
+
+IPC acceptance now waits before accepting a new stream when the existing tracked
+connection registry contains 64 owners. Completion-aware handle polling reaps
+actual completed owners and observes their original failure result; one saturation
+and one resumed-capacity diagnostic are emitted per wait episode. Shutdown can
+cancel the capacity wait through the existing outer select. Transport backpressure
+preserves queued stream bytes without creating another worker or quota pool.
+Two authored real-endpoint tests exercise four release/reaccept cycles, queued
+request ordering, shutdown and terminal-subscription cleanup after abort. Scoped
+formatting passes. Both real-endpoint tests and all-target compilation pass.
+The separate original capture stopped on the older backup style findings; the
+corrected combined server capture subsequently passes strict Clippy, package
+formatting and release with this same IPC source. Idle/stalled clients can still
+delay new management connections, and
+this owner count does not establish a complete byte or RSS bound. Existing registry
+insertion may prune a below-saturation completion before its error is observed.
+
+Loopback HTTP project resolution now reserves a job on the existing server I/O
+bank before copying the requested project and directory inputs. Admission refusal
+returns a retriable service-unavailable response before agent/workspace creation.
+Path inputs and constructed paths are limited to 8,192 bytes, scans to 16,384
+entries and 512 pending directories at depth two. At most two distinct canonical
+candidates are retained; two establish ambiguity, while an incomplete capacity-
+limited scan refuses rather than returning a unique prefix. Mid-enumeration
+errors also refuse instead of silently yielding a partial candidate set. Existing hidden-path,
+unavailable-directory, stale-session-directory and canonical deduplication behavior
+is retained. Checked copied-path/FIFO/native-scratch declarations are cooperative
+limits, not allocator or RSS guarantees. Success/error JSON buffers inherit the
+original job retention through `Bytes::from_owner`, including byte-slice clones;
+server-owned workspace creation also retains lookup admission if its HTTP caller
+is cancelled. Native callbacks retain physical admission through actual return.
+Six authored forcing tests cover bank-thread identity, path readback, last-byte
+ownership, original error responses, pre-callback refusal/retry, cancellation and
+incomplete/ambiguous scans. The initial test compile stopped because its
+cancellation assertion required Debug on the successful retained value. A direct
+error match fixes that fixture without expanding production contracts. Scoped
+formatting passes; fresh frozen tests, all-target compilation, strict Clippy,
+package format and release are running. Independent
+advisor delivery was unavailable because required browser Pro was locked and both
+prescribed native launch adapters hit the runtime agent-thread limit; exact frozen
+sources and failures are retained. Original HTTP request parsing and unrelated
+semantic/transport concurrency are separate admission boundaries, not proved
+bounded by this lookup job. No HTTP runtime activation or performance benefit is
+claimed.
+
+Ready-log metadata publication now moves the original PID/path marker into the
+existing server I/O bank, started after successful listener binding. The secure
+temporary-file write and atomic rename retain their original fatal error contract.
+Cancellation discards delivery but cannot undo a native callback that has started;
+its physical job admission remains held until return. Error-path storage remains
+charged through the caller's error value. An isolated thread-identity regression
+fails against the original direct helper. The subsequent full server qualification
+passes the real-bank and bootstrap tests, all-target compilation, strict Clippy,
+package formatting and release build with Cargo, rustc, rustdoc and Clippy pinned
+together. Earlier mixed-compiler, missing-error-Display, platform cast and orphaned
+doc-comment failures remain retained as failed evidence. The release build is not
+installed or activated; client, live terminal and performance acceptance remain open.
+
+
 
 The platform registry caps running and retiring owners at1024, excluding its
 supervisor. Neither that cap nor cooperative declarations establish a whole-process
@@ -713,6 +1188,19 @@ overload recovery contract; all message queues need byte ownership through their
 consumers; and existing provider/library workers need the shared admission wired
 through actual retirement. Focused foundation tests do not establish whole
 workspace, release, live PTY or performance acceptance.
+
+Matched frame-age measurements require equal clock boundaries. The retained
+baseline draws synchronously; a measurement-only overlay now records field
+request, field preparation completion and successful terminal flush without
+modifying the original baseline. Its source hashes and scoped formatting are
+verified; compilation, instrumentation overhead and runtime samples remain
+outstanding. The candidate's terminal `prepared_at` is captured after buffer
+validation, whereas the baseline overlay's terminal age starts before UI work.
+Those terminal `frame_age_us` values must therefore be reported separately.
+Animation field-ready age includes cached retrieval, and must not be described
+as the age of the original cache generation. Matched workloads, logging settings,
+warm-up and whole-process CPU/memory still require real release runs after builds
+stop; source timestamps alone prove no performance improvement.
 
 ## Ordered terminal ownership
 
@@ -888,6 +1376,16 @@ Each milestone is meant to be independently runnable/demoable, not a big-bang in
    - *Sound.* Discovers only folders/files that exist on the current system (XDG/Linux distributions, macOS, and Windows), offers an attributed embedded chirping sound, a selected system file, deterministic synthesized PCM, system beep or mute with preview, and independently enables Agent finished, approval-needed, started-working, and waiting-background events. Changes persist under `[sound]`, reach the current detached server immediately over IPC, and are picked up by other running project servers through a low-frequency global-config watcher. Playback is serialized through a bounded server-owned actor, so it works with no client attached, never duplicates per attached client, and cannot block detection or IPC.
    - *Persistence and notifications.* Each project session persists independently in `.ilium/sessions/<name>.json`; detected Claude, Codex, and Antigravity IDs are converted into their provider-specific resume commands when saved, so restored panes resume their own agent conversations. Desktop notifications are sent without blocking IPC. Two distinct kinds exist: *agent* events (finished turn, approval needed; raised by the detection loop from the same projected signals as the sidebar) and *task* events (a progress monitor's `done`/`error`/lost outcome, raised by `handlers::alert_task_outcome`). `ilium_sound::NotificationSettings` is the one shared `[notifications]` type: master `enabled`, per-event flags (`agent_finished`, `approval_required`, `task_succeeded`, `task_failed`), `suppress_redundant_task_outcomes` and `task_coalesce_seconds`. Defaults notify on everything but task success, because a task finishing while its agent keeps working is routine progress already visible as the sidebar ✅. Task sounds and notifications share one policy: the per-event flag, suppression while the agent is idle or parked (its own finished alert follows; panes with no agent are never suppressed), and per-pane, per-kind coalescing (`TaskOutcomeCoalescer`). Notification text names the kind ("background task finished (agent still working)") and leads with the pane title. The client edits the table in Settings → Sound and writes it to `config.toml`; running servers reload it through the existing config watcher, so there is no IPC request.
 7. **Split views. Done.** `ContainerNode` generalizes tree ownership without duplicating membership in client state. Leader `"`, the tree footer split button, or a context action opens an orientation dialog and an optional eligible-pane picker; the server applies one atomic `CreateSplitView` mutation. `RightPanelTarget` and the pure `split_layout` allocator render zero to four panes, resize each visible PTY to its own viewport, and route keyboard/mouse/editor/board interactions only to the active slot.
+
+## Compaction optimizer
+
+Settings → Optimization recommends the auto-compaction threshold that minimizes weighted token cost on the user's own transcripts, and can write it to the agent's configuration. Three layers keep the pieces testable:
+
+- **`ilium-compaction-analysis`** (pure: no I/O, no async, no ratatui) — per-agent log-format parsers (Claude Code and Codex entries in one registry) producing compact `SessionTrace`s, cross-file dedupe of resumed/forked sessions, corpus statistics, the trace-driven replay simulator, the optimizer (argmin, flat bands, bootstrap, per-model split, rework sensitivity) and the per-agent trigger-to-setting semantics (Claude `autoCompactWindow` = trigger + measured offset; Codex `model_auto_compact_token_limit` clamped to 90% of the window).
+- **`ilium-client` scan driver** — `compaction_scan` lists and streams the transcripts as one finite `Lane::Io` job per agent (progress by bytes in shared atomics, cancellation between chunks, a `(path, size, mtime)` trace cache, the previous report surviving a failed or cancelled scan) and `compaction_report` turns the analysis into plain view-model rows. A scan starts only from an explicit button press; there is no timer.
+- **Writers** — `agent_config_writer` patches exactly one key of `~/.claude/settings.json` or `~/.codex/config.toml` (span-based, every other byte preserved), as a compare-and-swap under a sidecar lock with an atomic rename, and keeps a revert record in Ilium's data directory. It never creates the file and never touches a process: a running agent keeps the limit it loaded.
+
+The tab itself is `compaction_ui` (layout, hit testing, the Apply confirmation) over `compaction_app` (selected agent, current values, pending apply, outcome notes, key and mouse actions; per-tick `drain_events` next to `tick_cost`). `docs/compaction-optimizer-design.md` (git-ignored scratch) records the design history and the user's decisions; this section is the maintained description.
 
 ## Guided setup
 

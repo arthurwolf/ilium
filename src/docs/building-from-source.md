@@ -23,7 +23,7 @@ Three executables make up a working installation:
 | --- | --- | --- |
 | `ilium` | `ilium` | The command-line entry point and the terminal UI. |
 | `ilium-server` | `ilium-server` | The per-project session server that owns panes. |
-| `ilium-animation-helper` | `ilium-animation-js` | The confined helper that runs native animation packages. |
+| `ilium-animation-helper` | `ilium-animation-js` | The confined V8 helper that executes packaged JavaScript animations. |
 
 Two animation packages, `beach-1.0.0.iliumanim` and `carpet-1.0.0.iliumanim`, live in `ilium-animation-js/assets/packages/` and must sit beside the executables for the bundled animations to be found. See [How it works](how-it-works.md) for how these pieces cooperate.
 

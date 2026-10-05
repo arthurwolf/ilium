@@ -112,6 +112,8 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 Also included:
 
 - Agent [cost tracking](src/docs/agent-cost.md) and [notifications](src/docs/notifications.md).
+- Optional remote compaction of Claude and Codex sessions through your Inference model, configured in [Settings](src/docs/settings.md#remote-compaction).
+- A compaction optimizer (**Settings → Optimization**) that scans your Codex and Claude Code transcripts and recommends the cheapest auto-compaction threshold, applied to the agent's own config only after you confirm, with one-click revert. See [Settings](src/docs/settings.md#optimization).
 - AI [titles, tree organization and custom instructions](src/docs/titles-and-instructions.md), with [provider and privacy controls](src/docs/inference-and-privacy.md).
 - [Voice control](src/docs/voice.md).
 - [Scheduled input, text triggers, prompt queues, progress monitors and Chatroom](src/docs/automation.md).
