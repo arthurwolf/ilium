@@ -277,8 +277,8 @@ function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [strin
     $expected = [Text.Encoding]::ASCII.GetBytes("$Version`n")
     $actual = [IO.File]::ReadAllBytes($versionPath)
     if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($expected)) { throw 'Archive VERSION differs from the requested release.' }
-    if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne '4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30' -or
-        (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne 'c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870') { throw 'Official animation archive differs from compiled release identity.' }
+    if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne '21a195c4641ab73914ba0d7ad535ffbdff1ab116323f933f0df9cce973e33777' -or
+        (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne '08eaa2889f12698a541b8914b7940b883f9328966a25289a3b5cddac772a40ae') { throw 'Official animation archive differs from compiled release identity.' }
 }
 
 function Confirm-IliumBinaryVersion([string]$Directory, [string]$Version) {
@@ -346,8 +346,8 @@ function Test-IliumOwnedVersion([string]$Root, [string]$Version, [switch]$AllowM
     foreach ($file in Get-ChildItem -LiteralPath $directory -Force) { if ($file.PSIsContainer -or $file.Name -cnotin $names) { return $false } }
     foreach ($property in $receipt.PSObject.Properties) {
         if ($property.Name -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or $property.Value -cnotmatch '\A[0-9a-f]{64}\z') { return $false }
-        if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne '4b47934f4285ae426f680929b59af7151f4ac2e73ad41292872cfccd516cda30') { return $false }
-        if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne 'c4cfdbc6d088361e488e8a7544162cc19a55dd0fea1c8bb237ad467b029db870') { return $false }
+        if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne '21a195c4641ab73914ba0d7ad535ffbdff1ab116323f933f0df9cce973e33777') { return $false }
+        if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne '08eaa2889f12698a541b8914b7940b883f9328966a25289a3b5cddac772a40ae') { return $false }
         $path = Join-Path $directory $property.Name
         Assert-IliumPlainPath $path
         if (-not [IO.File]::Exists($path)) { if ($AllowMissing) { continue }; return $false }

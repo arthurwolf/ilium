@@ -220,6 +220,57 @@ class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.workflow = yaml.load((ROOT / '.github/workflows/release.yml').read_text(), Loader=yaml.BaseLoader)
 
+    def test_cross_platform_ci_configures_isolated_pty_test_environment(self):
+        ci = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
+        expected_binaries = {
+            'test-linux': '${{ github.workspace }}/target/debug/ilium',
+            'test-macos': '${{ github.workspace }}/target/debug/ilium',
+            'test-windows': '${{ github.workspace }}\\target\\debug\\ilium.exe',
+        }
+        for job_name, binary in expected_binaries.items():
+            with self.subTest(job=job_name):
+                steps = ci['jobs'][job_name]['steps']
+                test_step = next(step for step in steps if step.get('name') == 'cargo test')
+                environment = test_step['env']
+                self.assertEqual(environment.get('RUST_TEST_THREADS'), '1')
+                self.assertEqual(environment.get('ILIUM_PTY_SMOKE_BINARY'), binary)
+                if job_name != 'test-windows':
+                    self.assertEqual(
+                        environment.get('ILIUM_NAMING_EVIDENCE_DIR'),
+                        '${{ runner.temp }}/ilium-naming-evidence',
+                    )
+
+    def test_native_workspace_tests_use_run_owned_candidate_binaries(self):
+        targets = {
+            'linux': {'os': 'linux', 'rust_target': 'x86_64-unknown-linux-gnu'},
+            'macos': {'os': 'macos', 'rust_target': 'aarch64-apple-darwin'},
+            'windows': {'os': 'windows', 'rust_target': 'x86_64-pc-windows-msvc'},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = root / 'native-work'
+            work.mkdir()
+            cargo_target = work / 'cargo-target'
+            for operating_system, target in targets.items():
+                with self.subTest(operating_system=operating_system):
+                    job_work = work / operating_system
+                    job_work.mkdir()
+                    environment = pipeline.configure_workspace_test_environment(
+                        {}, target, job_work, cargo_target,
+                    )
+                    self.assertEqual(environment['RUST_TEST_THREADS'], '1')
+                    executable = 'ilium.exe' if operating_system == 'windows' else 'ilium'
+                    self.assertEqual(
+                        environment['ILIUM_PTY_SMOKE_BINARY'],
+                        str(cargo_target / target['rust_target'] / 'release' / executable),
+                    )
+                    if operating_system == 'windows':
+                        self.assertNotIn('ILIUM_NAMING_EVIDENCE_DIR', environment)
+                    else:
+                        evidence_directory = Path(environment['ILIUM_NAMING_EVIDENCE_DIR'])
+                        self.assertEqual(evidence_directory, job_work / 'naming-title-evidence')
+                        self.assertTrue(evidence_directory.is_dir())
+
     def ancestors(self, name, workflow=None):
         jobs = (workflow or self.workflow)['jobs']
         seen = set()

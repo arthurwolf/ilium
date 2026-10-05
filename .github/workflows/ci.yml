@@ -90,6 +90,12 @@ jobs:
             # run should report every crate, not stop at the first failure.
             - name: cargo test
               run: cargo test --workspace --no-fail-fast
+              env:
+                # Process-heavy PTY tests contend with one another when Cargo
+                # test binaries use the runner's full parallelism.
+                RUST_TEST_THREADS: '1'
+                ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}/target/debug/ilium
+                ILIUM_NAMING_EVIDENCE_DIR: ${{ runner.temp }}/ilium-naming-evidence
 
     test-windows:
         name: Test (Windows)
@@ -110,6 +116,12 @@ jobs:
             # checklist rather than a one-bug-per-run drip.
             - name: cargo test
               run: cargo test --workspace --no-fail-fast
+              env:
+                # The Windows release lane also serializes process-heavy PTY
+                # tests; otherwise child Ilium processes can exhaust their
+                # runner stack while sibling tests spawn more processes.
+                RUST_TEST_THREADS: '1'
+                ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}\target\debug\ilium.exe
 
     test-macos:
         name: Test (macOS)
@@ -131,6 +143,8 @@ jobs:
             - name: cargo test
               run: cargo test --workspace --no-fail-fast
               env:
-                # Real-PTY and live-detection tests spawn many processes; on the small
-                # macOS runner parallel execution starves agent detection (first-exec scans).
+                # The process-heavy PTY tests need a private binary/evidence path
+                # and serialized execution so first-exec detection can settle.
                 RUST_TEST_THREADS: '1'
+                ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}/target/debug/ilium
+                ILIUM_NAMING_EVIDENCE_DIR: ${{ runner.temp }}/ilium-naming-evidence

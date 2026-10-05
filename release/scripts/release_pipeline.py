@@ -202,6 +202,20 @@ def logged(command, root, log, environment=None, timeout=10_800):
     emit('result', operation=Path(str(command[0])).name, state='passed', log=str(log), log_sha256=sha(log))
 
 
+def configure_workspace_test_environment(environment, target, work, cargo_target):
+    environment['RUST_TEST_THREADS'] = '1'
+    executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'
+    candidate = cargo_target / target['rust_target'] / 'release' / executable
+    environment['ILIUM_PTY_SMOKE_BINARY'] = str(candidate)
+    if target['os'] in ('linux', 'macos'):
+        evidence_directory = work / 'naming-title-evidence'
+        evidence_directory.mkdir(mode=0o700)
+        environment['ILIUM_NAMING_EVIDENCE_DIR'] = str(evidence_directory)
+    else:
+        environment.pop('ILIUM_NAMING_EVIDENCE_DIR', None)
+    return environment
+
+
 def native(arguments):
     target = release_tool.selected_target(arguments.manifest, arguments.target)
     root = arguments.workspace.resolve().parent
@@ -235,15 +249,8 @@ def native(arguments):
         require(probe_link.is_symlink(), 'Windows symlink prerequisite did not create a real link')
         probe_link.unlink(); probe_target.unlink()
     if target['os'] == 'macos':
-        # Parallel PTY/live-detection tests starve agent detection on the small
-        # macOS runners (first execution of each fresh fixture is OS-scanned).
-        environment['RUST_TEST_THREADS'] = '1'
         # /var is a symlink to /private/var; tests compare resolved paths.
         environment['TMPDIR'] = os.path.realpath(os.environ.get('TMPDIR', '/tmp'))
-    if target['os'] == 'windows':
-        # Plain CI passes these PTY tests; the slower static-CRT release lane
-        # misses detection/render deadlines when they run concurrently.
-        environment['RUST_TEST_THREADS'] = '1'
     if target['os'] == 'linux':
         environment['OPENSSL_STATIC'] = '1'
         # The bundled libonnxruntime sits beside the executables; the installed
@@ -252,6 +259,7 @@ def native(arguments):
         environment['CARGO_ENCODED_RUSTFLAGS'] = '-Clink-arg=-Wl,-rpath,$ORIGIN'
     cargo_home = work / 'cargo-home'
     cargo_target = work / 'cargo-target'
+    configure_workspace_test_environment(environment, target, work, cargo_target)
     ort_register = release_tool.read_json(root / 'release/ort-source.json')
     require(ort_register.get('state') == 'reviewed', 'ORT source register is not reviewed')
     ort_archive = work / 'onnxruntime-source.tar.gz'
