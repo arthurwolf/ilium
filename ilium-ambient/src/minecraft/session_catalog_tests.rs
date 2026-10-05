@@ -658,10 +658,33 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
     assert!(request.support_chunks().len() > 1);
     // The fixture intentionally has only one chunk. A matching bound root
     // must reach the ordinary missing-chunk refusal, not fail path identity.
-    assert!(matches!(
-        projected_source::qualify(base, bound, &root, &request, &account, cancel, &|| false),
-        Err(projected_source::Error::Unqualified { missing, .. }) if missing > 0
-    ));
+    let expected_missing = request
+        .support_chunks()
+        .iter()
+        .filter(|&&position| position != [0, 0])
+        .copied()
+        .collect::<Vec<_>>();
+    let error = projected_source::qualify(
+        base,
+        bound,
+        &root,
+        &request,
+        &account,
+        cancel,
+        &|| false,
+    );
+    let (missing, first, missing_positions) = match error {
+        Err(projected_source::Error::Unqualified {
+            missing,
+            first,
+            missing_positions,
+        }) => (missing, first, missing_positions),
+        Err(error) => panic!("expected incomplete decoded source, got {error}"),
+        Ok(_) => panic!("expected incomplete decoded source"),
+    };
+    assert_eq!(missing_positions, expected_missing);
+    assert_eq!(missing, missing_positions.len());
+    assert_eq!(first, missing_positions.first().copied());
     assert_eq!(std::fs::read(path.join("level.dat")).unwrap(), metadata);
     assert_eq!(
         std::fs::read(path.join("region/r.0.0.mca")).unwrap(),

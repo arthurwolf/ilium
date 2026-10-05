@@ -65,6 +65,9 @@
       "minecraft:block/glass": [
         "textures/block/glass.png"
       ],
+      "minecraft:block/glass_pane": [
+        "textures/block/glass_pane_top.png"
+      ],
       "minecraft:block/granite": [
         "textures/block/granite.png"
       ],
@@ -137,6 +140,9 @@
       "minecraft:block/poppy": [
         "textures/block/poppy.png"
       ],
+      "minecraft:block/potatoes": [
+        "textures/block/potatoes_stage3.png"
+      ],
       "minecraft:block/potatoes_stage3": [
         "textures/block/potatoes_stage3.png"
       ],
@@ -208,6 +214,12 @@
       ],
       "minecraft:block/white_wool": [
         "textures/block/white_wool.png"
+      ],
+      "minecraft:block/yellow_carpet": [
+        "textures/block/carpet_yellow.png"
+      ],
+      "minecraft:block/tall_grass": [
+        "textures/block/tall_grass_top.png"
       ]
     },
     "plasticator": {
@@ -505,6 +517,12 @@
       "minecraft:block/white_wool": [
         "assets/minecraft/textures/block/white_wool.png",
         "Plasticator Texture Pack/textures/blocks/wool_colored_white.png"
+      ],
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
       ]
     },
     "programmerart": {
@@ -810,6 +828,9 @@
       ],
       "minecraft:block/yellow_terracotta": [
         "assets/minecraft/textures/blocks/hardened_clay_stained_yellow.png"
+      ],
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/blocks/tallgrass.png"
       ]
     },
     "textureless": {
@@ -836,6 +857,12 @@
       ],
       "minecraft:block/wheat_stage7": [
         "assets/minecraft/textures/block/wheat/stage7.png"
+      ],
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
       ]
     },
     "whimscape": {
@@ -862,6 +889,47 @@
       ],
       "minecraft:block/wheat_stage7": [
         "assets/minecraft/textures/block/wheat_stage_7.png"
+      ]
+    },
+    "pixelperfectionce": {
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
+      ]
+    },
+    "faithful32": {
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
+      ]
+    },
+    "faithful64": {
+      "minecraft:block/glass_pane": [
+        "assets/minecraft/textures/block/glass_pane_top.png"
+      ],
+      "minecraft:block/potatoes": [
+        "assets/minecraft/textures/block/potatoes_stage3.png"
+      ],
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
+      ],
+      "minecraft:block/yellow_carpet": [
+        "assets/minecraft/textures/block/yellow_wool.png"
+      ]
+    },
+    "antumbra": {
+      "minecraft:block/tall_grass": [
+        "assets/minecraft/textures/block/tall_grass_top.png"
+      ],
+      "minecraft:block/beehive_top": [
+        "assets/minecraft/textures/block/beehive_end.png"
       ]
     }
   },

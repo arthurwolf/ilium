@@ -9,10 +9,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use ureq::unversioned::{
-    resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
-    transport::{time::Duration as ResolverDuration, DefaultConnector, NextTimeout},
-};
 const SPACING: Duration = Duration::from_secs(60);
 #[derive(Default)]
 struct GateState {
@@ -63,43 +59,6 @@ impl Drop for Permit<'_> {
         }
     }
 }
-#[derive(Debug)]
-pub(super) struct OwnedResolver;
-fn resolve_owned(
-    resolver: &impl Resolver,
-    uri: &ureq::http::Uri,
-    config: &ureq::config::Config,
-    timeout: NextTimeout,
-) -> Result<ResolvedSocketAddrs, ureq::Error> {
-    let began = Instant::now();
-    if matches!(timeout.after,ResolverDuration::Exact(duration) if duration.is_zero()) {
-        return Err(ureq::Error::Timeout(timeout.reason));
-    }
-    // The OS lookup remains on this admitted worker. It cannot be forcibly
-    // cancelled; a stuck lookup keeps its slot rather than leaking helpers.
-    let result = resolver.resolve(
-        uri,
-        config,
-        NextTimeout {
-            after: ResolverDuration::NotHappening,
-            reason: timeout.reason,
-        },
-    );
-    if matches!(timeout.after,ResolverDuration::Exact(duration) if began.elapsed()>=duration) {
-        return Err(ureq::Error::Timeout(timeout.reason));
-    }
-    result
-}
-impl Resolver for OwnedResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        config: &ureq::config::Config,
-        timeout: NextTimeout,
-    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
-        resolve_owned(&DefaultResolver::default(), uri, config, timeout)
-    }
-}
 pub fn fetch(url: &str, stop: &AtomicBool) -> Result<Vec<u8>, String> {
     if stop.load(Ordering::Relaxed) {
         return Err("OSM load cancelled".into());
@@ -128,7 +87,7 @@ pub fn fetch(url: &str, stop: &AtomicBool) -> Result<Vec<u8>, String> {
         .max_response_header_size(16 * 1024)
         .user_agent(crate::source::USER_AGENT)
         .build();
-    let agent = ureq::Agent::with_parts(config, DefaultConnector::default(), OwnedResolver);
+    let agent = ilium_http::agent(config);
     let mut response = agent
         .get(url)
         .header("Accept", "application/json")

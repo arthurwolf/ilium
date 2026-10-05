@@ -3,6 +3,7 @@ use super::budget::{ByteBudget, Cancel, Reservation};
 use super::error::{AssetError, Result};
 use super::identity::Digest256;
 use super::pixels::PixelImage;
+use super::texture_minification::Mipmaps;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
@@ -342,6 +343,7 @@ pub struct Texture {
     animation: AnimationPlan,
     encoding: Encoding,
     fingerprint: Digest256,
+    mipmaps: Option<Mipmaps>,
     _reservation: Reservation,
 }
 impl Texture {
@@ -364,8 +366,13 @@ impl Texture {
             ));
         }
         let reservation = budget.reserve(512, cancel)?;
+        let mipmaps = if encoding == Encoding::SrgbColor {
+            Some(Mipmaps::build(&image, &animation, budget, cancel)?)
+        } else {
+            None
+        };
         let mut hash = Sha256::new();
-        hash.update(b"ilium-overworld-texture-v1\0");
+        hash.update(b"ilium-overworld-texture-v2\0");
         hash.update(image.source_sha256().bytes());
         hash.update(image.rgba_sha256().bytes());
         hash.update(animation.fingerprint().bytes());
@@ -379,6 +386,7 @@ impl Texture {
             animation,
             encoding,
             fingerprint,
+            mipmaps,
             _reservation: reservation,
         })
     }
@@ -409,6 +417,54 @@ impl Texture {
             rgb: [sample[0], sample[1], sample[2]],
             alpha: sample[3],
         })
+    }
+    /// Generated diffuse minification filters RGB in linear light while keeping
+    /// the existing point/bilinear alpha decision. Native materials bypass it.
+    pub(crate) fn sample_color_minified(
+        &self,
+        uv: [f32; 2],
+        time: Duration,
+        derivatives: [[f32; 2]; 2],
+    ) -> Option<LinearRgba> {
+        if derivatives.iter().flatten().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let point = self.sample_color(uv, time)?;
+        if point.alpha() == 0.0 || derivatives == [[0.0; 2]; 2] {
+            return Some(point);
+        }
+        let mipmaps = self.mipmaps.as_ref()?;
+        let phase = self.animation.at(time);
+        let sample_frame = |rect| {
+            mipmaps.sample(
+                rect,
+                uv,
+                derivatives,
+                self.animation.sampler().clamp,
+                self.frame(rect, uv, true)?,
+            )
+        };
+        let current = sample_frame(phase.current)?;
+        let filtered = if phase.blend == 0.0 || phase.current == phase.next {
+            current
+        } else {
+            let next = sample_frame(phase.next)?;
+            std::array::from_fn(|channel| {
+                current[channel] + (next[channel] - current[channel]) * phase.blend
+            })
+        };
+        let filtered_color = LinearRgba {
+            rgb: [filtered[0], filtered[1], filtered[2]],
+            alpha: filtered[3],
+        };
+        LinearRgba::from_straight(
+            if filtered_color.alpha() > 0.0 {
+                filtered_color.straight()
+            } else {
+                point.straight()
+            },
+            point.alpha(),
+        )
     }
     /// Native shader input keeps RGB independent of alpha until the exact
     /// render-layer discard/blend decision. The generated sampler continues to
@@ -769,5 +825,83 @@ mod tests {
         assert_eq!(tinted.alpha(), a.alpha());
         assert_eq!(tinted.straight(), [0.4, 0.5, 0.0]);
         assert!(a.tint([f32::INFINITY, 0.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn generated_minification_averages_color_and_preserves_magnification() {
+        let texture = texture(
+            [2, 2],
+            &[
+                0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255,
+            ],
+            None,
+        );
+        let uv = [0.25, 0.25];
+        assert_eq!(
+            texture.sample_color_minified(uv, Duration::ZERO, [[0.25, 0.0], [0.0, 0.25]]),
+            texture.sample_color(uv, Duration::ZERO)
+        );
+        let filtered = texture
+            .sample_color_minified(uv, Duration::ZERO, [[1.0, 0.0], [0.0, 1.0]])
+            .unwrap();
+        for channel in filtered.straight() {
+            assert!((channel - 0.5).abs() < 1e-6);
+        }
+        assert_eq!(filtered.alpha(), 1.0);
+    }
+
+    #[test]
+    fn generated_minification_preserves_point_alpha_and_ignores_invisible_rgb() {
+        let texture = texture([2, 1], &[255, 0, 0, 255, 0, 0, 255, 0], None);
+        let derivatives = [[1.0, 0.0], [0.0, 1.0]];
+        let visible = texture
+            .sample_color_minified([0.25, 0.5], Duration::ZERO, derivatives)
+            .unwrap();
+        assert_eq!(visible.straight(), [1.0, 0.0, 0.0]);
+        assert_eq!(visible.alpha(), 1.0);
+        let invisible = texture
+            .sample_color_minified([0.75, 0.5], Duration::ZERO, derivatives)
+            .unwrap();
+        assert_eq!(invisible, LinearRgba::CLEAR);
+    }
+
+    #[test]
+    fn generated_minification_preserves_odd_extent_average() {
+        let texture = texture(
+            [3, 1],
+            &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255],
+            None,
+        );
+        let filtered = texture
+            .sample_color_minified([0.13, 0.5], Duration::ZERO, [[2.0, 0.0], [0.0, 2.0]])
+            .unwrap();
+        for channel in filtered.straight() {
+            assert!((channel - 1.0 / 3.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn generated_minification_keeps_animation_frames_isolated() {
+        let data: Vec<_> = [[255, 0, 0, 255]; 4]
+            .into_iter()
+            .chain([[0, 0, 255, 255]; 4])
+            .flatten()
+            .collect();
+        let texture = texture([2, 4], &data, Some(r#"{"animation":{}}"#));
+        let derivatives = [[1.0, 0.0], [0.0, 1.0]];
+        assert_eq!(
+            texture
+                .sample_color_minified([0.5, 0.99], Duration::ZERO, derivatives)
+                .unwrap()
+                .straight(),
+            [1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            texture
+                .sample_color_minified([0.5, 0.01], Duration::from_millis(50), derivatives,)
+                .unwrap()
+                .straight(),
+            [0.0, 0.0, 1.0]
+        );
     }
 }

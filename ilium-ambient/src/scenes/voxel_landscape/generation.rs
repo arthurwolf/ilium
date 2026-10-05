@@ -22,6 +22,23 @@ pub struct PreparedWorld {
     pub instances: Vec<features::Instance>,
     pub biomes: Vec<ecology::Biome>,
     pub cached_chunks: usize,
+    // Retain the exact source used to derive the mesh: visible blocks omit
+    // interiors and cannot answer block-volume queries faithfully.
+    pub(crate) occupancy: WorldWindow,
+}
+impl PreparedWorld {
+    /// Query original occupancy in generator coordinates (ground x/y, height z).
+    /// The render halo is excluded. Native callers separately validate request
+    /// extents so out-of-window coordinates are not serialized as guessed air.
+    pub fn block(&self, position: [i32; 3]) -> Option<Material> {
+        if (0..2).any(|axis| {
+            position[axis] < self.region.minimum[axis]
+                || position[axis] >= self.region.maximum[axis]
+        }) {
+            return None;
+        }
+        self.occupancy.block(position)
+    }
 }
 /// Classify from the frozen kernel column, then derive presentation occupancy.
 /// Both terrain attachment and feature habitat use this one pure result.
@@ -152,6 +169,7 @@ pub fn prepare(
         instances,
         biomes,
         cached_chunks: cache.len(),
+        occupancy: window,
     })
 }
 
@@ -460,3 +478,42 @@ mod tests {
                     > i32::from(kernel.sample(block.position[0], block.position[1]).height) + 3));
     }
 }
+
+#[cfg(test)]
+mod retained_occupancy_contract {
+    use super::*;
+
+    #[test]
+    fn prepared_generated_world_retains_buried_blocks_missing_from_visible_mesh() {
+        let settings = VoxelLandscapeSettings {
+            seed: 42,
+            detail: 0,
+            vegetation_percent: 0,
+            structures_percent: 0,
+            rivers: false,
+            ravines: false,
+            caves: false,
+            ..Default::default()
+        };
+        let mut cache = ColumnCache::new(16);
+        let prepared = prepare(
+            Region {
+                minimum: [0, 0],
+                maximum: [4, 4],
+            },
+            &settings,
+            &mut cache,
+            || false,
+        )
+        .expect("bounded actual native preparation");
+        let buried = [1, 1, 0];
+        assert!(!prepared.blocks.iter().any(|block| block.position == buried));
+        // Basalt is the original generator's material for its bedrock layer.
+        assert_eq!(prepared.block(buried), Some(Material::Basalt));
+        assert_eq!(prepared.block([1, 1, 1024]), None);
+    }
+}
+
+#[cfg(test)]
+#[path = "retained_occupancy_tests.rs"]
+mod retained_occupancy_tests;

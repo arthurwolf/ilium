@@ -1122,6 +1122,70 @@ fn attempted_map_diversity_only_breaks_ties_within_the_requested_phase() {
 }
 
 #[test]
+fn route_selection_skips_a_recent_map_when_its_complete_projected_source_is_missing() {
+    use super::super::source_footprint;
+    use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
+    use std::sync::atomic::AtomicBool;
+
+    let positions = rectangle([-3, -3], [3, 3]);
+    let incomplete = prepared(1, 1, 100, &positions, &[]);
+    let complete = prepared(2, 1, 10, &positions, &[]);
+    let mut controller = Controller::new(1, History::default()).unwrap();
+    let ticket = controller.request(&budget()).unwrap();
+    let account = ByteBudget::new(256 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let complete_allocations = rectangle([-32, -32], [32, 32]);
+    let incomplete_allocations = BTreeSet::new();
+    let mut eligibility =
+        |source: Source, line: Line, focus_y: f64, work: &mut Budget<'_>| -> Result<bool, Error> {
+            let estimate = source_footprint::work_estimate(line, focus_y, [1, 1], 1024.0).unwrap();
+            work.charge(estimate)?;
+            let request =
+                match source_footprint::request(line, focus_y, [1, 1], 1024.0, &account, cancel) {
+                    Ok(request) => request,
+                    Err(source_footprint::Error::Invalid | source_footprint::Error::Limit) => {
+                        return Ok(false);
+                    }
+                    Err(error @ source_footprint::Error::Asset(_)) => {
+                        return Err(Error::CandidateCoverage(error.to_string()));
+                    }
+                };
+            let allocations = if source.map == MapId([1; 16]) {
+                &incomplete_allocations
+            } else {
+                &complete_allocations
+            };
+            Ok(request
+                .support_chunks()
+                .iter()
+                .all(|position| allocations.contains(position)))
+        };
+    let selection = select_diverse_excluding_with_eligibility(
+        ticket,
+        &[incomplete, Arc::clone(&complete)],
+        &controller.history(),
+        policy(8.0),
+        CandidateSurvey {
+            excluded: &BTreeSet::new(),
+            attempted_maps: &BTreeMap::new(),
+            required_choice: Some(Choice::SavedSurface),
+        },
+        &mut eligibility,
+        &mut budget(),
+    )
+    .unwrap();
+    let selected = selection.plan.unwrap();
+
+    assert_eq!(
+        selected.source().map,
+        complete.source().map,
+        "relative recency must not outrank complete saved source coverage"
+    );
+    assert!(selection.audit.source_coverage_rejections > 0);
+}
+
+#[test]
 fn relative_recency_and_displayed_map_route_diversity_are_deterministic() {
     let positions = rectangle([-3, -3], [3, 3]);
     let old = prepared(1, 1, 0, &positions, &[]);

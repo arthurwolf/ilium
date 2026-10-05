@@ -43,6 +43,8 @@ pub enum Error {
     Cancelled,
     #[error("tour limit: {0}")]
     Limit(&'static str),
+    #[error("candidate coverage check failed: {0}")]
+    CandidateCoverage(String),
     #[error("invalid tour input: {0}")]
     Invalid(&'static str),
     #[error("stale tour request or presentation")]
@@ -84,7 +86,7 @@ impl<'a> Budget<'a> {
             Ok(())
         }
     }
-    fn charge(&mut self, amount: u64) -> Result<(), Error> {
+    pub(crate) fn charge(&mut self, amount: u64) -> Result<(), Error> {
         self.check()?;
         if amount > self.limit.saturating_sub(self.used) {
             return Err(Error::Limit("work"));
@@ -676,6 +678,7 @@ pub struct SearchAudit {
     pub unrecent_desired: usize,
     pub line_queries: usize,
     pub usable_lines: usize,
+    pub source_coverage_rejections: usize,
     pub immediate_repeats: usize,
     pub surface_seeds: usize,
     pub query_limited: bool,
@@ -764,7 +767,10 @@ struct Candidate {
     focus_y: f64,
     score: Score,
 }
-struct Search<'a, 'b> {
+pub type CandidateEligibility<'a> =
+    dyn for<'budget> FnMut(Source, Line, f64, &mut Budget<'budget>) -> Result<bool, Error> + 'a;
+
+struct Search<'a, 'b, 'c> {
     ticket: Ticket,
     history: &'a History,
     policy: Policy,
@@ -772,10 +778,11 @@ struct Search<'a, 'b> {
     excluded: &'a BTreeSet<RouteKey>,
     attempted_maps: &'a BTreeMap<MapId, usize>,
     budget: &'a mut Budget<'b>,
+    eligibility: &'c mut CandidateEligibility<'c>,
     audit: SearchAudit,
     best: Option<Candidate>,
 }
-impl Search<'_, '_> {
+impl Search<'_, '_, '_> {
     fn consider(
         &mut self,
         map: usize,
@@ -818,10 +825,14 @@ impl Search<'_, '_> {
                 self.audit.immediate_repeats += 1;
                 continue;
             }
-            self.audit.usable_lines += 1;
             if (self.ticket.run & 1) == (direction_index as u64 & 1) {
                 std::mem::swap(&mut line.start, &mut line.end);
             }
+            if !(self.eligibility)(prepared.source, line, focus_y, self.budget)? {
+                self.audit.source_coverage_rejections += 1;
+                continue;
+            }
+            self.audit.usable_lines += 1;
             let map_penalty = self
                 .history
                 .routes
@@ -927,6 +938,30 @@ pub fn select_diverse_excluding(
     survey: CandidateSurvey<'_>,
     budget: &mut Budget<'_>,
 ) -> Result<Selection, Error> {
+    let mut eligible = |_: Source, _: Line, _: f64, _: &mut Budget<'_>| Ok(true);
+    select_diverse_excluding_with_eligibility(
+        ticket,
+        maps,
+        history,
+        policy,
+        survey,
+        &mut eligible,
+        budget,
+    )
+}
+
+/// Enumerate a finite candidate while rejecting lines whose exact projected
+/// source cannot be supplied by that candidate's save. Eligibility work must
+/// be charged to the same search budget before doing its bounded work.
+pub fn select_diverse_excluding_with_eligibility(
+    ticket: Ticket,
+    maps: &[Arc<PreparedMap>],
+    history: &History,
+    policy: Policy,
+    survey: CandidateSurvey<'_>,
+    eligibility: &mut CandidateEligibility<'_>,
+    budget: &mut Budget<'_>,
+) -> Result<Selection, Error> {
     if survey.excluded.len() > 32 {
         return Err(Error::Limit("route qualification attempts"));
     }
@@ -993,6 +1028,7 @@ pub fn select_diverse_excluding(
         excluded: survey.excluded,
         attempted_maps: survey.attempted_maps,
         budget,
+        eligibility,
         audit,
         best: None,
     };

@@ -1,13 +1,162 @@
 //! Synthetic source-routing controls, not proof that the pinned game JAR was read.
 use super::*;
 use crate::voxel_landscape::assets::{
+    animation::{AnimationPlan, PixelRect},
     archive::synthetic_zip,
     block_state::BlockState,
     layers::ResourceKind,
     models::{DefinitionProvider, ModelCompiler},
     review::fixture_review,
 };
-use std::sync::atomic::AtomicBool;
+use std::{sync::atomic::AtomicBool, time::Duration};
+
+fn goodvibes_fixture(
+    selected: &[(&str, &[u8])],
+    native: &[(&str, &[u8])],
+    budget: &ByteBudget,
+    cancel: Cancel<'_>,
+) -> NativeSources {
+    let mut sources = fixture(
+        &[("assets/minecraft/textures/block/stone.png", b"placeholder")],
+        native,
+        budget,
+        cancel,
+    );
+    let zip = synthetic_zip(selected, false, false);
+    let bytes = SourceBytes::from_slice(&zip, 1 << 20, budget, cancel).unwrap();
+    let source =
+        Arc::new(ZipSource::open(bytes, None, SourceLimits::default(), budget, cancel).unwrap());
+    let mut review = fixture_review();
+    review.pack = ResourceId::parse("ilium-pack:goodvibes").unwrap();
+    review.edition = SourceEdition::ExtractedWorldArt;
+    sources.packs[0] = LayeredPack::mount(
+        review,
+        source,
+        None,
+        MountLayout::ExtractedJava,
+        OriginKind::SelectedPack,
+        Limits::default(),
+        budget.clone(),
+        cancel,
+    )
+    .unwrap();
+    sources
+}
+
+#[test]
+fn selected_goodvibes_water_requests_use_exact_aliases_and_animation_pins() {
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let budget = ByteBudget::new(64 << 20).unwrap();
+    let sources = goodvibes_fixture(
+        &[
+            ("textures/block/water_still.png", b"still"),
+            ("textures/block/water_flow.png", b"flow"),
+        ],
+        &[("assets/minecraft/textures/block/water_still.png", b"native")],
+        &budget,
+        cancel,
+    );
+
+    for (name, digest, image, frame, count, ticks) in [
+        (
+            "water_still",
+            "f35e3a02b81bb359bf3eced106c12324f5523d9fb85e13599887205c0e513247",
+            [512, 16384],
+            [512, 512],
+            32_usize,
+            2_u32,
+        ),
+        (
+            "water_flow",
+            "75994f61cfd8a4e56480010e91b1df098ab71c70ba373d858effe9d3a2613f66",
+            [1021, 16384],
+            [1021, 1024],
+            16_usize,
+            1_u32,
+        ),
+    ] {
+        let id = ResourceId::parse(&format!("minecraft:block/{name}")).unwrap();
+        let requests = sources
+            .texture_requests(std::slice::from_ref(&id), cancel)
+            .unwrap();
+        let candidates = &requests.as_slice()[0].candidates;
+        assert_eq!(candidates.len(), 3);
+        assert!(matches!(
+            &candidates[0].location,
+            TextureLocation::Resource { id: found, .. } if found == &id
+        ));
+        assert!(matches!(
+            &candidates[1].location,
+            TextureLocation::Literal { path, .. }
+                if path.as_str() == format!("textures/block/{name}.png")
+        ));
+        for candidate in &candidates[..2] {
+            assert_eq!(
+                candidate.expected_source_sha256,
+                Some(Digest256::try_from(digest.to_owned()).unwrap())
+            );
+            assert_eq!(candidate.expected_image.dimensions, Some(image));
+            let ScheduleSource::AutomaticJavaWithMissing(missing) = &candidate.schedule else {
+                panic!("GoodVibes water candidate must have pinned missing-metadata playback");
+            };
+            let plan =
+                AnimationPlan::build(image, None, missing, &Limits::default(), &budget, cancel)
+                    .unwrap();
+            assert_eq!(plan.frame_count(), count);
+            assert!(!plan.authored_schedule());
+            for index in 0..count {
+                let sample = plan.at(Duration::from_millis(u64::from(index as u32 * ticks) * 50));
+                assert_eq!(
+                    sample.current,
+                    PixelRect {
+                        x: 0,
+                        y: index as u32 * frame[1],
+                        width: frame[0],
+                        height: frame[1],
+                    }
+                );
+                assert_eq!(sample.blend, 0.0);
+            }
+            let cycle_ms = count as u64 * u64::from(ticks) * 50;
+            assert_eq!(plan.at(Duration::from_millis(cycle_ms)).current.y, 0);
+        }
+        assert!(matches!(
+            candidates[2].schedule,
+            ScheduleSource::AutomaticJava
+        ));
+        assert!(candidates[2].expected_source_sha256.is_none());
+    }
+
+    let stone = ResourceId::parse("minecraft:block/stone").unwrap();
+    let requests = sources
+        .texture_requests(std::slice::from_ref(&stone), cancel)
+        .unwrap();
+    let stone_candidates = &requests.as_slice()[0].candidates;
+    assert_eq!(stone_candidates.len(), 3);
+    assert!(matches!(
+        &stone_candidates[1].location,
+        TextureLocation::Literal { path, .. }
+            if path.as_str() == "textures/block/stone.png"
+    ));
+
+    let farmland = ResourceId::parse("minecraft:block/farmland").unwrap();
+    let requests = sources
+        .texture_requests(std::slice::from_ref(&farmland), cancel)
+        .unwrap();
+    let farmland_candidates = &requests.as_slice()[0].candidates;
+    assert_eq!(farmland_candidates.len(), 4);
+    assert!(matches!(
+        &farmland_candidates[1].location,
+        TextureLocation::Literal { path, .. }
+            if path.as_str() == "textures/block/farmland.png"
+    ));
+    assert!(matches!(
+        &farmland_candidates[2].location,
+        TextureLocation::Literal { path, .. }
+            if path.as_str() == "textures/block/farmland_moist.png"
+    ));
+}
 
 fn mount(
     entries: &[(&str, &[u8])],

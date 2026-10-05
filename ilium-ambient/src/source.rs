@@ -221,11 +221,11 @@ fn http_get_inner(
     }
     let deadline = Instant::now() + timeout; // Admission and body collection share one deadline.
     let timeout = wait_for_host_slot(url, deadline, stop)?; // Only the remaining budget reaches ureq.
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
-        .build()
-        .into();
+        .build();
+    let agent = ilium_http::agent(config);
     let mut response = agent.get(url).call().map_err(request_error)?; // Keep structured HTTP status.
     read_bounded_body(response.body_mut().as_reader(), max_bytes, deadline, stop)
     // Count decoded bytes and check cancellation between chunks.
@@ -420,11 +420,11 @@ pub fn http_stream_lines(
         return Err(FetchError::NotHttps(url.to_owned()));
     }
     let timeout = wait_for_host_slot(url, Instant::now() + timeout, Some(stop))?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
-        .build()
-        .into();
+        .build();
+    let agent = ilium_http::agent(config);
     let mut response = agent.get(url).call().map_err(request_error)?; // Preserve 429 for the stream owner's cooldown policy.
     let mut reader = std::io::BufReader::new(response.body_mut().as_reader());
     let limit = max_line_bytes.clamp(1, 1_048_576);

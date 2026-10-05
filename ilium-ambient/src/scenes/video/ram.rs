@@ -187,7 +187,7 @@ impl RamMedia {
             return Err("Expected a remote source".into());
         };
         // Disable automatic redirects: the catalogue pins exact HTTPS representations.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .max_redirects(0)
             .timeout_global(Some(Duration::from_secs(60)))
@@ -195,8 +195,8 @@ impl RamMedia {
             .timeout_recv_response(Some(Duration::from_secs(10)))
             .timeout_recv_body(Some(Duration::from_secs(60)))
             .user_agent(USER_AGENT)
-            .build()
-            .into();
+            .build();
+        let agent = ilium_http::agent(config);
         let mut response = agent
             .get(url)
             .header("Accept-Encoding", "identity")

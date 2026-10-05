@@ -8,10 +8,12 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::mem::size_of;
 
-pub const RULE_REVISION: u16 = 2;
+pub const RULE_REVISION: u16 = 3;
 const BAND: i32 = 24;
 const TILE_CELLS: usize = 256;
-const HARD_TARGETS: usize = 2304;
+const MAX_CORE_TILES: usize = 256;
+// One target per category/tile plus the construction windows' independent cap.
+const HARD_TARGETS: usize = CATEGORIES.len() * MAX_CORE_TILES + 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Kind {
@@ -24,6 +26,8 @@ pub enum Category {
     RootedWoodland,
     SnowySurface,
     DrySandySurface,
+    MushroomFieldsLike,
+    BadlandsLikeSurface,
     VegetatedShore,
     RockyRelief,
     WeatheredMasonry,
@@ -32,11 +36,13 @@ pub enum Category {
     /// Paired door or bed within connected observed construction; no provenance claim.
     DwellingLikeConstruction,
 }
-const CATEGORIES: [Category; 9] = [
+const CATEGORIES: [Category; 11] = [
     Category::OpenGrassland,
     Category::RootedWoodland,
     Category::SnowySurface,
     Category::DrySandySurface,
+    Category::MushroomFieldsLike,
+    Category::BadlandsLikeSurface,
     Category::VegetatedShore,
     Category::RockyRelief,
     Category::WeatheredMasonry,
@@ -59,6 +65,8 @@ impl Category {
             Self::RootedWoodland => (32, 3),
             Self::SnowySurface => (64, 64),
             Self::DrySandySurface => (128, 4),
+            Self::MushroomFieldsLike => (64, 4),
+            Self::BadlandsLikeSurface => (64, 4),
             Self::VegetatedShore => (32, 4),
             Self::RockyRelief => (64, 16),
             Self::WeatheredMasonry => (16, 8),
@@ -222,8 +230,11 @@ enum Role {
     Unknown,
     Air,
     Soil,
+    Mycelium,
     Grass,
     Sand,
+    RedSand,
+    Terracotta,
     Rock,
     Gravel,
     Ice,
@@ -231,6 +242,7 @@ enum Role {
     Herb,
     Dry,
     Lily,
+    Mushroom,
     Water,
     Log(u8),
     Leaves(u8),
@@ -281,7 +293,24 @@ fn role(state: &BlockState) -> Role {
     }
     match name {
         "grass_block" if schema(state, &[("snowy", BOOL)]) => return Grass,
-        "podzol" | "mycelium" if schema(state, &[("snowy", BOOL)]) => return Soil,
+        "podzol" if schema(state, &[("snowy", BOOL)]) => return Soil,
+        "mycelium" if schema(state, &[("snowy", BOOL)]) => return Mycelium,
+        "brown_mushroom" | "red_mushroom" if state.properties.is_empty() => return Mushroom,
+        "brown_mushroom_block" | "red_mushroom_block" | "mushroom_stem"
+            if schema(
+                state,
+                &[
+                    ("down", BOOL),
+                    ("east", BOOL),
+                    ("north", BOOL),
+                    ("south", BOOL),
+                    ("up", BOOL),
+                    ("west", BOOL),
+                ],
+            ) =>
+        {
+            return Mushroom
+        }
         "snow"
             if schema(
                 state,
@@ -300,7 +329,25 @@ fn role(state: &BlockState) -> Role {
     }
     match name {
         "dirt" | "coarse_dirt" | "rooted_dirt" | "clay" | "mud" => Soil,
-        "sand" | "red_sand" => Sand,
+        "sand" => Sand,
+        "red_sand" => RedSand,
+        "terracotta"
+        | "white_terracotta"
+        | "orange_terracotta"
+        | "magenta_terracotta"
+        | "light_blue_terracotta"
+        | "yellow_terracotta"
+        | "lime_terracotta"
+        | "pink_terracotta"
+        | "gray_terracotta"
+        | "light_gray_terracotta"
+        | "cyan_terracotta"
+        | "purple_terracotta"
+        | "blue_terracotta"
+        | "brown_terracotta"
+        | "green_terracotta"
+        | "red_terracotta"
+        | "black_terracotta" => Terracotta,
         "stone" | "andesite" | "diorite" | "granite" => Rock,
         "gravel" => Gravel,
         "ice" | "packed_ice" | "blue_ice" => Ice,
@@ -328,7 +375,7 @@ fn family(role: Role) -> u8 {
     }
 }
 fn soil(role: Role) -> bool {
-    matches!(role, Role::Soil | Role::Grass)
+    matches!(role, Role::Soil | Role::Mycelium | Role::Grass)
 }
 #[derive(Clone, Copy, Debug, Default)]
 struct Column<'a> {
@@ -432,7 +479,7 @@ fn column<'a>(
                 }
                 continue;
             }
-            Role::Herb | Role::Dry | Role::Lily => {
+            Role::Herb | Role::Dry | Role::Lily | Role::Mushroom => {
                 value.plant = Some(block);
                 value.plant_role = found;
                 continue;
@@ -450,7 +497,8 @@ fn column<'a>(
         value.rooted = soil(found) && log_count >= 3 && last_log == Some(y + 1);
         let planted = value.plant.is_some_and(|plant| match value.plant_role {
             Role::Herb => soil(found) && plant.position[1] == y + 1,
-            Role::Dry => found == Role::Sand && plant.position[1] == y + 1,
+            Role::Dry => matches!(found, Role::Sand | Role::RedSand) && plant.position[1] == y + 1,
+            Role::Mushroom => soil(found) && (1..=8).contains(&(plant.position[1] - y)),
             Role::Lily => value
                 .water
                 .is_some_and(|water| plant.position[1] == water.position[1] + 1),
@@ -462,7 +510,7 @@ fn column<'a>(
         if last_snow != Some(y + 1)
             || !matches!(
                 found,
-                Role::Soil | Role::Grass | Role::Rock | Role::Gravel | Role::Ice
+                Role::Soil | Role::Mycelium | Role::Grass | Role::Rock | Role::Gravel | Role::Ice
             )
         {
             value.snow = None;
@@ -524,7 +572,11 @@ fn member(category: Category, cell: Column<'_>) -> bool {
         Category::OpenGrassland => dry && cell.role == Role::Grass && cell.canopy.is_none(),
         Category::RootedWoodland => dry && soil(cell.role),
         Category::SnowySurface => cell.snow.is_some() || cell.role == Role::Ice,
-        Category::DrySandySurface => dry && cell.role == Role::Sand,
+        Category::DrySandySurface => dry && matches!(cell.role, Role::Sand | Role::RedSand),
+        Category::MushroomFieldsLike => dry && cell.role == Role::Mycelium,
+        Category::BadlandsLikeSurface => {
+            dry && matches!(cell.role, Role::RedSand | Role::Terracotta)
+        }
         Category::VegetatedShore => !cell.snow_cover && (cell.water.is_some() || soil(cell.role)),
         Category::RockyRelief => dry && matches!(cell.role, Role::Rock | Role::Gravel),
         Category::WeatheredMasonry => family(cell.role) == 1,
@@ -547,6 +599,15 @@ fn signals<'a>(
         Category::SnowySurface => (cell.snow, cell.ground.filter(|_| cell.snow.is_some())),
         Category::DrySandySurface => (
             cell.ground,
+            cell.plant.filter(|_| cell.plant_role == Role::Dry),
+        ),
+        Category::MushroomFieldsLike => (
+            cell.ground.filter(|_| cell.role == Role::Mycelium),
+            cell.plant.filter(|_| cell.plant_role == Role::Mushroom),
+        ),
+        Category::BadlandsLikeSurface => (
+            cell.ground
+                .filter(|_| matches!(cell.role, Role::RedSand | Role::Terracotta)),
             cell.plant.filter(|_| cell.plant_role == Role::Dry),
         ),
         Category::VegetatedShore => (
@@ -788,7 +849,7 @@ pub fn analyze<'a>(
         .map(|value| (i64::from(value) - 15).div_euclid(16));
     let count =
         (upper[0] - lower[0] + 1).max(0) as usize * (upper[1] - lower[1] + 1).max(0) as usize;
-    if count > limits.max_tiles.min(256) {
+    if count > limits.max_tiles.min(MAX_CORE_TILES) {
         return Err(Error::Limit("tiles"));
     }
     if limits.max_targets > HARD_TARGETS {

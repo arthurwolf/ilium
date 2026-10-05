@@ -141,7 +141,7 @@ pub(crate) fn decode(
         _ => {
             return Err(AssetError::Unsupported(
                 "TGA decoder output color type".into(),
-            ))
+            ));
         }
     };
     let raw_count = count / 4 * channels;

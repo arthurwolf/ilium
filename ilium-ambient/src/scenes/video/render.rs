@@ -100,7 +100,7 @@ impl VideoScene {
         Self::with_runner_resources(settings, runner, crate::resources::test_resources())
     }
 
-    fn with_runner_resources(
+    pub(super) fn with_runner_resources(
         settings: &VideoSettings,
         runner: Arc<dyn CommandRunner>,
         resources: AmbientResources,

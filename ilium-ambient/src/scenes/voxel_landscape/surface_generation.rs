@@ -18,7 +18,7 @@ use super::{
     surface_flora::{
         AdmissionError, FloraCell, FloraPlacement, FloraState, HabitatCell, PlantCandidate, Support,
     },
-    surface_flora_vocabulary::ENTRIES,
+    surface_flora_vocabulary::{FloraEntry, ENTRIES},
     surface_fluid::FluidCell,
     surface_geology, surface_landmark_assembly, surface_ruin_assembly, surface_village_assembly,
     terrain_fields::{TerrainFields, TerrainSample},
@@ -473,6 +473,125 @@ fn tree_configuration(biome: SurfaceBiome, entropy: u64) -> Option<&'static str>
         let weight = tree_configuration_weight(biome, source);
         if choice < weight {
             return Some(source);
+        }
+        choice -= weight;
+    }
+    None
+}
+
+fn flora_selection_weight(biome: SurfaceBiome, id: &str) -> u64 {
+    use SurfaceBiome::*;
+
+    let arid = matches!(
+        biome,
+        Badlands
+            | Desert
+            | ErodedBadlands
+            | Savanna
+            | SavannaPlateau
+            | WindsweptSavanna
+            | WoodedBadlands
+    );
+    let flower_rich = matches!(biome, FlowerForest | Meadow | SunflowerPlains);
+    match id {
+        "minecraft:short_grass" => 12,
+        "minecraft:tall_grass" | "minecraft:large_fern" => 4,
+        "minecraft:fern" => {
+            if matches!(
+                biome,
+                BambooJungle
+                    | Jungle
+                    | OldGrowthPineTaiga
+                    | OldGrowthSpruceTaiga
+                    | SnowyTaiga
+                    | Taiga
+            ) {
+                8
+            } else {
+                2
+            }
+        }
+        "minecraft:short_dry_grass" => u64::from(arid) * 10 + 1,
+        "minecraft:tall_dry_grass" => u64::from(arid) * 4 + 1,
+        "minecraft:dead_bush" => u64::from(arid) * 6 + 1,
+        "minecraft:cactus" => u64::from(arid) * 4 + 1,
+        "minecraft:cactus_flower" => u64::from(arid) * 2 + 1,
+        "minecraft:bamboo" => 6,
+        "minecraft:sugar_cane" | "minecraft:lily_pad" => 4,
+        "minecraft:pumpkin" | "minecraft:melon" => 2,
+        "minecraft:sweet_berry_bush" => 3,
+        "minecraft:brown_mushroom" | "minecraft:red_mushroom" => {
+            if biome == MushroomFields {
+                5
+            } else {
+                1
+            }
+        }
+        "minecraft:brown_mushroom_block"
+        | "minecraft:red_mushroom_block"
+        | "minecraft:mushroom_stem"
+        | "minecraft:shelf_mushroom" => u64::from(biome == MushroomFields) * 4 + 1,
+        "minecraft:leaf_litter" => {
+            u64::from(matches!(biome, Forest | Taiga | OldGrowthBirchForest)) * 4 + 1
+        }
+        "minecraft:moss_carpet" => {
+            u64::from(matches!(
+                biome,
+                Jungle | BambooJungle | Swamp | MangroveSwamp
+            )) * 4
+                + 1
+        }
+        "minecraft:pale_moss_block"
+        | "minecraft:pale_moss_carpet"
+        | "minecraft:pale_hanging_moss" => u64::from(biome == PaleGarden) * 5 + 1,
+        "minecraft:allium"
+        | "minecraft:azure_bluet"
+        | "minecraft:blue_orchid"
+        | "minecraft:cornflower"
+        | "minecraft:dandelion"
+        | "minecraft:closed_eyeblossom"
+        | "minecraft:firefly_bush"
+        | "minecraft:lilac"
+        | "minecraft:lily_of_the_valley"
+        | "minecraft:orange_tulip"
+        | "minecraft:oxeye_daisy"
+        | "minecraft:peony"
+        | "minecraft:pink_petals"
+        | "minecraft:pink_tulip"
+        | "minecraft:poppy"
+        | "minecraft:red_shrub"
+        | "minecraft:red_tulip"
+        | "minecraft:rose_bush"
+        | "minecraft:sunflower"
+        | "minecraft:white_tulip"
+        | "minecraft:wildflowers" => {
+            if flower_rich {
+                7
+            } else {
+                2
+            }
+        }
+        _ => 1,
+    }
+}
+
+fn choose_flora_entry<'a>(
+    candidates: &'a [&FloraEntry],
+    biome: SurfaceBiome,
+    entropy: u64,
+) -> Option<&'a FloraEntry> {
+    let total_weight: u64 = candidates
+        .iter()
+        .map(|entry| flora_selection_weight(biome, entry.id))
+        .sum();
+    if total_weight == 0 {
+        return None;
+    }
+    let mut choice = entropy % total_weight;
+    for entry in candidates {
+        let weight = flora_selection_weight(biome, entry.id);
+        if choice < weight {
+            return Some(*entry);
         }
         choice -= weight;
     }
@@ -2195,7 +2314,9 @@ fn prepare_with_tree_configuration(
             if candidates.is_empty() {
                 continue;
             }
-            let entry = candidates[(hash.rotate_left(17) as usize) % candidates.len()];
+            let Some(entry) = choose_flora_entry(&candidates, biome, hash.rotate_left(17)) else {
+                continue;
+            };
             let height = if entry.id == "minecraft:lily_pad" {
                 let Some(water_level) = sample.water_level else {
                     continue;
@@ -3249,6 +3370,50 @@ mod tests {
             .contains(&("half", "upper")));
     }
     #[test]
+    fn flora_selection_weights_favor_each_biomes_characteristic_cover() {
+        assert!(
+            flora_selection_weight(SurfaceBiome::Plains, "minecraft:short_grass")
+                > flora_selection_weight(SurfaceBiome::Plains, "minecraft:poppy")
+        );
+        assert!(
+            flora_selection_weight(SurfaceBiome::FlowerForest, "minecraft:poppy")
+                > flora_selection_weight(SurfaceBiome::Plains, "minecraft:poppy")
+        );
+        assert!(
+            flora_selection_weight(SurfaceBiome::Desert, "minecraft:short_dry_grass")
+                > flora_selection_weight(SurfaceBiome::Plains, "minecraft:short_dry_grass")
+        );
+        assert!(
+            flora_selection_weight(SurfaceBiome::Desert, "minecraft:cactus")
+                > flora_selection_weight(SurfaceBiome::Plains, "minecraft:cactus")
+        );
+
+        let plains_candidates: Vec<_> = ENTRIES
+            .iter()
+            .filter(|entry| {
+                !entry.attachment && entry.generation_biomes.contains(&SurfaceBiome::Plains.id())
+            })
+            .collect();
+        let total_weight: u64 = plains_candidates
+            .iter()
+            .map(|entry| flora_selection_weight(SurfaceBiome::Plains, entry.id))
+            .sum();
+        let chosen: Vec<_> = (0..total_weight)
+            .filter_map(|entropy| {
+                choose_flora_entry(&plains_candidates, SurfaceBiome::Plains, entropy)
+            })
+            .collect();
+        let grass_selections = chosen
+            .iter()
+            .filter(|entry| entry.id == "minecraft:short_grass")
+            .count();
+        let flower_selections = chosen
+            .iter()
+            .filter(|entry| entry.id == "minecraft:poppy")
+            .count();
+        assert!(grass_selections > flower_selections);
+    }
+    #[test]
     fn surface_azalea_indicators_are_reachable_without_replacing_forest_prescriptions() {
         let mut selected = BTreeSet::new();
         let mut azaleas = 0;
@@ -3771,6 +3936,33 @@ mod tests {
             .collect()
     }
 
+    fn tree_anchors_crossing_tile_cores(
+        projection: &BTreeMap<[i32; 3], (BlockState, SourceOwner)>,
+        tiles: &[(Region, Region)],
+    ) -> Vec<([i32; 3], BTreeSet<usize>)> {
+        let mut owners_by_anchor = BTreeMap::<[i32; 3], BTreeSet<usize>>::new();
+        for (&position, (_, owner)) in projection {
+            let anchor = match owner {
+                SourceOwner::Tree { anchor, .. } | SourceOwner::TreeDecoration { anchor, .. } => {
+                    *anchor
+                }
+                _ => continue,
+            };
+            for (tile_index, (core, _)) in tiles.iter().enumerate() {
+                if core.contains(position) {
+                    owners_by_anchor
+                        .entry(anchor)
+                        .or_default()
+                        .insert(tile_index);
+                }
+            }
+        }
+        owners_by_anchor
+            .into_iter()
+            .filter(|(_, tile_indices)| tile_indices.len() > 1)
+            .collect()
+    }
+
     #[derive(Debug, Default)]
     struct WoodedFloraCoverage {
         prescriptions: [usize; 4],
@@ -4093,6 +4285,46 @@ mod tests {
             !expected_trees.is_empty(),
             "wooded seam needs projected trees"
         );
+        let viewport_tiles =
+            super::super::surface_viewport::visible_tiles(region, 2.8, [4096, 4096]).unwrap();
+        let crossing_trees = tree_anchors_crossing_tile_cores(&expected_trees, &viewport_tiles);
+        assert!(
+            !crossing_trees.is_empty(),
+            "a naturally generated tree must cross selected viewport tile cores"
+        );
+        let (crossing_anchor, selected_tile_indices) = &crossing_trees[0];
+        let expected_selected_tiles: BTreeMap<_, _> = expected_trees
+            .iter()
+            .filter(|(position, _)| {
+                selected_tile_indices
+                    .iter()
+                    .any(|&index| viewport_tiles[index].0.contains(**position))
+            })
+            .map(|(&position, owned_block)| (position, owned_block.clone()))
+            .collect();
+        for reverse in [false, true] {
+            let mut tile_indices: Vec<_> = selected_tile_indices.iter().copied().collect();
+            if reverse {
+                tile_indices.reverse();
+            }
+            let mut joined = BTreeMap::new();
+            for tile_index in tile_indices {
+                let (core, expanded) = viewport_tiles[tile_index];
+                let tile = prepare(expanded, &settings, || false).unwrap();
+                for (position, owned_block) in relevant_tree_projection(&tile) {
+                    if core.contains(position) {
+                        assert!(
+                            joined.insert(position, owned_block).is_none(),
+                            "tree cell {position:?} has duplicate viewport-core ownership"
+                        );
+                    }
+                }
+            }
+            assert_eq!(
+                joined, expected_selected_tiles,
+                "selected tile order changed natural tree {crossing_anchor:?}; reverse={reverse}"
+            );
+        }
         let cactus = whole
             .blocks
             .get(&cactus_anchor)

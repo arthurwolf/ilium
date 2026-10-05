@@ -1083,12 +1083,13 @@ mod uvlock_regressions {
             let original_ignored = model.ignored_non_world_fields.clone(); // Preserve metadata review records during orientation.
             let cached = compiler.compile_model(&model_id, cancel).unwrap(); // Exercise retained model cache identity.
             assert!(std::sync::Arc::ptr_eq(&model, &cached)); // Orientation must not replace the cached compiled model.
-            assert!(model.quads.iter().any(|quad| quad
-                .normal
-                .iter()
-                .filter(|component| component.abs() > 0.1)
-                .count()
-                > 1)); // Confirm the fixture actually contains non-cardinal physical normals.
+            assert!(model.quads.iter().any(|quad| {
+                quad.normal
+                    .iter()
+                    .filter(|component| component.abs() > 0.1)
+                    .count()
+                    > 1
+            })); // Confirm the fixture actually contains non-cardinal physical normals.
             for quad in &model.quads {
                 // Validate independent source expectations before any blockstate transformation.
                 let element = usize::from(quad.element); // Decode the fixture's declared element layout.

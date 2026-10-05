@@ -383,7 +383,7 @@ pub static SURFACE_BIOME_DESCRIPTORS: [SurfaceBiomeDescriptor; 43] = [
         surface_block_ids: &["minecraft:brown_mushroom", "minecraft:cactus", "minecraft:cactus_flower", "minecraft:dandelion", "minecraft:dead_bush", "minecraft:glow_lichen", "minecraft:lava", "minecraft:poppy", "minecraft:pumpkin", "minecraft:red_mushroom", "minecraft:short_dry_grass", "minecraft:short_grass", "minecraft:stone", "minecraft:sugar_cane", "minecraft:suspicious_sand", "minecraft:tall_dry_grass", "minecraft:water"],
         biome_table_fauna_ids: &["minecraft:camel", "minecraft:creeper", "minecraft:enderman", "minecraft:husk", "minecraft:parched", "minecraft:rabbit", "minecraft:skeleton", "minecraft:slime", "minecraft:spider", "minecraft:witch", "minecraft:zombie", "minecraft:zombie_villager"],
         water_biome_table_fauna_ids: &[],
-        surface_structure_variant_ids: &["minecraft:desert_pyramid", "minecraft:pillager_outpost", "minecraft:ruined_portal_desert", "minecraft:village_desert"],
+        surface_structure_variant_ids: &["minecraft:desert_pyramid", "minecraft:desert_well", "minecraft:pillager_outpost", "minecraft:ruined_portal_desert", "minecraft:village_desert"],
         supplemental_organisms: &[
             SupplementalOrganismReference { organism_id: "minecraft:allay", source: OrganismSource::FixedStructureEntity, condition: "Fixed entity in eligible pillager_outpost template; actual template selection required." },
             SupplementalOrganismReference { organism_id: "minecraft:camel", source: OrganismSource::FixedStructureEntity, condition: "Fixed entity in eligible village_desert template; actual template selection required." },
@@ -1259,6 +1259,10 @@ mod tests {
             .descriptor()
             .surface_structure_variant_ids
             .contains(&"minecraft:village_desert"));
+        assert!(SurfaceBiome::Desert
+            .descriptor()
+            .surface_structure_variant_ids
+            .contains(&"minecraft:desert_well"));
         assert!(SurfaceBiome::DappledForest
             .descriptor()
             .surface_structure_variant_ids

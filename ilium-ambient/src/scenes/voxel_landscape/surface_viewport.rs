@@ -13,9 +13,9 @@ const ISOMETRIC_X: f64 = 0.866_025_403_784_438_6;
 /// the terrain cap, all tree profiles, exterior kits and fauna geometry.
 pub const SOURCE_Z_MIN: f64 = 0.0;
 pub const SOURCE_Z_MAX: f64 = 320.0;
-/// Core side used when finer viewport tiles would exceed the per-frame tile
-/// budget. Finer cores tighten projected culling at the cost of repeated halo
-/// generation; the planner falls back to this size when larger frames need fewer tiles.
+/// Core side used when finer viewport tiles exceed the preferred tile count or
+/// cannot fit the hard per-frame cap. Finer cores tighten projected culling at
+/// the cost of repeated halo generation.
 pub const CORE_SIDE: i32 = 96;
 const FINE_CORE_SIDES: [i32; 2] = [48, 64];
 pub const GENERATION_HALO: i32 = 16;
@@ -24,6 +24,8 @@ pub const GENERATION_HALO: i32 = 16;
 pub const MAX_VIEWPORT_TILES: usize = 256;
 const MAX_RAW_TILES: usize = 1024;
 const PROJECTION_MARGIN: f64 = 24.0;
+/// Zoom scale at which the preferred viewport budget reaches the hard cap.
+const REFERENCE_SCALE: f64 = 2.8;
 
 /// Invert both isometric axes at both source-height extremes. Including both
 /// heights is necessary because a high, distant crown can enter the same pixel
@@ -89,22 +91,35 @@ pub fn visible_tiles(
         (f64::from(region.minimum[0]) + f64::from(region.maximum[0])) * 0.5 - middle_z,
         (f64::from(region.minimum[1]) + f64::from(region.maximum[1])) * 0.5 - middle_z,
     ];
+    let preferred_tile_count = preferred_tile_count(scale);
     let mut last_budget_error = None;
+    let mut coarsest_within_hard_budget = None;
     for core_side in FINE_CORE_SIDES.into_iter().chain([CORE_SIDE]) {
         match visible_tiles_with_core_side(region, scale, size, relative_camera, core_side) {
-            Ok(selected) => return Ok(selected),
+            Ok(selected) if selected.len() <= preferred_tile_count => return Ok(selected),
+            Ok(selected) => coarsest_within_hard_budget = Some(selected),
             Err(error @ AssetError::Limit { .. }) => {
                 if core_side == CORE_SIDE {
-                    return Err(error);
+                    return coarsest_within_hard_budget.ok_or(error);
                 }
                 last_budget_error = Some(error);
             }
             Err(error) => return Err(error),
         }
     }
+    if let Some(selected) = coarsest_within_hard_budget {
+        return Ok(selected);
+    }
     Err(last_budget_error.unwrap_or_else(|| {
         AssetError::InvalidMetadata("no generated viewport core sizes configured".into())
     }))
+}
+
+fn preferred_tile_count(scale: f64) -> usize {
+    let scale_ratio = scale / REFERENCE_SCALE;
+    (MAX_VIEWPORT_TILES as f64 / scale_ratio.powi(2))
+        .round()
+        .clamp(1.0, MAX_VIEWPORT_TILES as f64) as usize
 }
 
 fn visible_tiles_with_core_side(
@@ -226,6 +241,59 @@ mod tests {
         assert!(selected.iter().all(|(core, _)| {
             core.maximum[0] - core.minimum[0] <= 48 && core.maximum[1] - core.minimum[1] <= 48
         }));
+    }
+
+    #[test]
+    fn extreme_zoom_uses_the_coarsest_candidate_when_no_tile_target_is_met() {
+        let viewport = Region {
+            minimum: [0, 0],
+            maximum: [128, 128],
+        };
+
+        let selected = visible_tiles(viewport, 1024.0, [4096, 4096]).unwrap();
+
+        assert!(!selected.is_empty() && selected.len() <= MAX_VIEWPORT_TILES);
+    }
+
+    #[test]
+    fn four_hundred_percent_zoom_uses_the_zoom_scaled_tile_budget() {
+        let camera = [64.0, 64.0, 80.0];
+        let scale = 2.8 * 4.0;
+        let size = [160, 96];
+        let viewport = region(camera, scale, size).unwrap();
+        let selected = visible_tiles(viewport, scale, size).unwrap();
+
+        assert!(!selected.is_empty() && selected.len() <= 16);
+
+        for y in viewport.minimum[1]..viewport.maximum[1] {
+            for x in viewport.minimum[0]..viewport.maximum[0] {
+                let screen_x = ISOMETRIC_X
+                    * f64::from(scale)
+                    * (f64::from(x) - camera[0] - f64::from(y) + camera[1]);
+                let screen_y_at_minimum = f64::from(scale)
+                    * ((f64::from(x) - camera[0] + f64::from(y) - camera[1]) * 0.5
+                        - (SOURCE_Z_MIN - camera[2]));
+                let screen_y_at_maximum = f64::from(scale)
+                    * ((f64::from(x) - camera[0] + f64::from(y) - camera[1]) * 0.5
+                        - (SOURCE_Z_MAX - camera[2]));
+                let screen_top = screen_y_at_minimum.min(screen_y_at_maximum);
+                let screen_bottom = screen_y_at_minimum.max(screen_y_at_maximum);
+                if screen_x.abs() <= size[0] as f64 * 0.5
+                    && screen_bottom >= -(size[1] as f64) * 0.5
+                    && screen_top <= size[1] as f64 * 0.5
+                {
+                    assert!(selected.iter().any(|(core, _)| core.contains([x, y, 0])));
+                    for [dx, dy] in [[-1, 0], [1, 0], [0, -1], [0, 1]] {
+                        assert!(
+                            selected
+                                .iter()
+                                .any(|(core, _)| core.contains([x + dx, y + dy, 0])),
+                            "visible source column [{x}, {y}] lacks neighbor [{dx}, {dy}]"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -1,9 +1,6 @@
 //! Explicit, blocking OSM-picker search. Call only from the picker's admitted worker.
 //! Search results are coordinates, never OSM geometry or shared observer state.
-use super::{
-    address_settings::{AddressProvider, AddressSearchSettings},
-    transport::OwnedResolver,
-};
+use super::address_settings::{AddressProvider, AddressSearchSettings};
 use crate::{
     location::GeoLocation,
     source::{default_cache_dir, USER_AGENT},
@@ -20,7 +17,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use ureq::unversioned::transport::DefaultConnector;
 
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const CACHE_KEY_BYTES: usize = 32;
@@ -242,7 +238,7 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .max_response_header_size(16 * 1024)
         .user_agent(USER_AGENT)
         .build();
-    let agent = ureq::Agent::with_parts(config, DefaultConnector::default(), OwnedResolver);
+    let agent = ilium_http::agent(config);
     let mut response = agent
         .get(url)
         .header("Accept", "application/json")

@@ -77,7 +77,9 @@ impl DefinitionSet {
     }
     /// Install only explicitly named ordinary templates. These do not invent all vanilla block definitions.
     pub fn install_geometry_templates(&mut self, cancel: Cancel<'_>) -> Result<()> {
-        let reason = Label::new("Original Ilium cube/cuboid/cross compatibility geometry; not source-pack-authored model JSON")?;
+        let reason = Label::new(
+            "Original Ilium cube/cuboid/cross compatibility geometry; not source-pack-authored model JSON",
+        )?;
         let mut faces = Map::new();
         for face in Direction::ALL {
             faces.insert(

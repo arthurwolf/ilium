@@ -602,6 +602,9 @@ impl AnimationPlan {
     pub fn frame_count(&self) -> usize {
         self.frames.len()
     }
+    pub(crate) fn frame_rects(&self) -> impl Iterator<Item = PixelRect> + '_ {
+        self.frames.iter().map(|frame| frame.rect)
+    }
     pub fn changing_rects(&self) -> bool {
         self.changing_rects
     }

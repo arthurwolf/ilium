@@ -23,6 +23,7 @@ pub mod pixels;
 pub mod review;
 pub mod source;
 pub mod texture;
+mod texture_minification;
 pub mod tga;
 
 pub use animation::{AnimationPlan, MissingAnimation, PixelRect};

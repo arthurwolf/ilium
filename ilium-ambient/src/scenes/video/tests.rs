@@ -537,14 +537,15 @@ fn successful_short_resize_tails_preserve_repeat_one() {
 #[test]
 fn unplayable_files_back_off_instead_of_spinning() {
     let mut fx = fixture(&["a.mp4"], |_| {}, Plan::Empty);
-    let started = Instant::now();
     assert!(wait_until(|| {
         render_frame(&mut fx.scene, 20, 5, secs(0.0));
         fx.scene
             .status()
             .is_some_and(|s| s.starts_with("cannot play a.mp4"))
     }));
-    std::thread::sleep(Duration::from_millis(300).saturating_sub(started.elapsed()));
+    // Measure retry cadence after the first failed open. Worker admission may
+    // be delayed by unrelated tests sharing the ambient fixture quota.
+    std::thread::sleep(Duration::from_millis(300));
     let attempts = fx.requests().len();
     assert!(attempts >= 3, "keeps retrying: {attempts}");
     // 5, 10, 20, 40, 40 ms ... would be ~40 attempts without the cap; with
@@ -845,8 +846,12 @@ fn dropping_the_scene_kills_and_reaps_a_blocked_child_promptly() {
     let (settings, _directory) = base_settings(&["a.mp4"]);
     let runner = FakeRunner::new(FakeMode::Blocked);
     let mut scene = VideoScene::with_runner(&settings, runner.clone());
-    render_frame(&mut scene, 20, 5, secs(0.0));
-    assert!(wait_for_ffmpeg(&runner));
+    assert!(
+        draw_until(&mut scene, (20, 5), secs(0.0), |_, _| {
+            !runner.specs("ffmpeg").is_empty()
+        }),
+        "FFmpeg child did not start within {PATIENCE:?}"
+    );
     let started = Instant::now();
     drop(scene);
     assert!(
@@ -875,6 +880,8 @@ fn dropping_the_scene_kills_and_reaps_a_blocked_child_promptly() {
 #[test]
 fn each_mode_reaches_ffmpeg_with_the_expected_arguments() {
     let (mut settings, directory) = base_settings(&[]);
+    // RandomScenes must choose a non-zero seek offset for this argument check.
+    settings.seed = 1;
     let odd = directory.path().join("-odd \u{e9}\u{4e2d} name.mp4");
     std::fs::write(&odd, b"fake").unwrap();
     settings.source = odd.display().to_string();
@@ -957,6 +964,7 @@ fn missing_ffmpeg_is_reported_with_an_install_hint() {
 #[cfg(target_os = "linux")]
 struct SleepRunner {
     controls: Mutex<Vec<Arc<dyn ChildControl>>>,
+    resources: crate::resources::AmbientResources,
 }
 
 #[cfg(target_os = "linux")]
@@ -965,7 +973,7 @@ impl CommandRunner for SleepRunner {
         if spec.program == "ffprobe" {
             return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
         }
-        let child = SystemRunner::new(crate::resources::test_resources()).spawn(&CommandSpec {
+        let child = SystemRunner::new(self.resources.clone()).spawn(&CommandSpec {
             program: "sleep".into(),
             args: vec!["31.415".into()],
         })?;
@@ -981,10 +989,12 @@ impl CommandRunner for SleepRunner {
 #[test]
 fn a_real_child_process_is_killed_and_reaped_on_drop() {
     let (settings, _directory) = base_settings(&["a.mp4"]);
+    let (mut execution, resources) = crate::resources::isolated_test_resources();
     let runner = Arc::new(SleepRunner {
         controls: Mutex::new(Vec::new()),
+        resources: resources.clone(),
     });
-    let mut scene = VideoScene::with_runner(&settings, runner.clone());
+    let mut scene = VideoScene::with_runner_resources(&settings, runner.clone(), resources);
     render_frame(&mut scene, 20, 5, secs(0.0));
     assert!(wait_until(|| !runner.controls.lock().unwrap().is_empty()));
     let controls = runner.controls.lock().unwrap().clone();
@@ -998,16 +1008,22 @@ fn a_real_child_process_is_killed_and_reaped_on_drop() {
             "child was reaped, not a zombie"
         );
     }
+    execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+    execution
+        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .unwrap();
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn a_real_stalled_decoder_is_timed_out_and_reaped() {
     let (settings, _directory) = base_settings(&["a.mp4"]);
+    let (mut execution, resources) = crate::resources::isolated_test_resources();
     let runner = Arc::new(SleepRunner {
         controls: Mutex::new(Vec::new()),
+        resources: resources.clone(),
     });
-    let mut scene = VideoScene::with_runner(&settings, runner.clone());
+    let mut scene = VideoScene::with_runner_resources(&settings, runner.clone(), resources);
     let mut notices = std::collections::VecDeque::new();
     let observed_stall = draw_until(&mut scene, (20, 5), Duration::ZERO, |scene, _| {
         let notice = scene.status();
@@ -1036,6 +1052,10 @@ fn a_real_stalled_decoder_is_timed_out_and_reaped() {
     let started = Instant::now();
     drop(scene);
     assert!(started.elapsed() < Duration::from_millis(100));
+    execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+    execution
+        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .unwrap();
 }
 
 // --------------------------------------------------------------- appearance

@@ -64,6 +64,10 @@ const TOUR_WORK: u64 = 16_000_000;
 // This finite worker budget covers that declared search; UI/history operations
 // retain their separate16million cap.
 const PLANNER_WORK: u64 = 32_000_000;
+// Per allocated chunk plus the bounded region-issue summaries returned while
+// reading each region header. Reservations are shrunk to the retained sets.
+const ALLOCATION_POSITION_CHARGE: u64 = 64;
+const ALLOCATION_ISSUE_CHARGE: u64 = 4096;
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 static RASTER_STOP: AtomicBool = AtomicBool::new(false);
@@ -1030,6 +1034,57 @@ fn prepare_selection(
     if maps.is_empty() {
         return Err("No saved map has canonical signed world seed and bound source".into());
     }
+    let canonical_root = ilium_platform::paths::canonicalize(&bundle.root)
+        .map_err(|error| format!("Saved maps root could not be canonicalized: {error}"))?;
+    let mut allocations = BTreeMap::new();
+    let mut allocation_reservations = Vec::with_capacity(maps.len());
+    for map in &maps {
+        cancel.check().map_err(|error| error.to_string())?;
+        let bound = bundle
+            .bindings
+            .iter()
+            .find(|bound| bound.map == map.source().map)
+            .ok_or_else(|| "Saved route lost its bound allocation directory".to_owned())?;
+        bound
+            .verify(&canonical_root)
+            .map_err(|error| format!("Saved allocation binding changed: {error}"))?;
+        let maximum_charge = (super::index::MAX_ALLOCATED_CHUNKS as u64)
+            .checked_mul(ALLOCATION_POSITION_CHARGE)
+            .and_then(|charge| charge.checked_add(64 * ALLOCATION_ISSUE_CHARGE + 4096))
+            .ok_or_else(|| "Saved allocation inventory charge overflow".to_owned())?;
+        let mut reservation = bundle
+            .budget
+            .reserve(maximum_charge, cancel)
+            .map_err(|error| format!("Saved allocation inventory admission failed: {error}"))?;
+        let region_directory = bound.directory.join("region");
+        let inventory = super::index::allocated_chunks(&region_directory, &cancelled)
+            .map_err(|error| format!("Saved allocation inventory failed: {error}"))?;
+        bound
+            .verify(&canonical_root)
+            .map_err(|error| format!("Saved allocation binding changed during read: {error}"))?;
+        let super::index::AllocationIndex {
+            chunks,
+            issues,
+            rejected_regions: _,
+        } = inventory;
+        let retained_charge = (chunks.len() as u64)
+            .checked_mul(ALLOCATION_POSITION_CHARGE)
+            .and_then(|charge| {
+                let issue_bytes = issues.iter().try_fold(0_u64, |total, issue| {
+                    total.checked_add(issue.message.capacity() as u64 + 64)
+                })?;
+                charge.checked_add(issue_bytes + 4096)
+            })
+            .ok_or_else(|| "Saved allocation inventory retained charge overflow".to_owned())?;
+        drop(issues);
+        reservation
+            .shrink_to(retained_charge)
+            .map_err(|error| format!("Saved allocation inventory accounting failed: {error}"))?;
+        if allocations.insert(map.source().map, chunks).is_some() {
+            return Err("Duplicate saved allocation map identity".into());
+        }
+        allocation_reservations.push(reservation);
+    }
     let mut attempts_by_map = BTreeMap::<MapId, usize>::new();
     for map in &maps {
         attempts_by_map.insert(map.source().map, 0);
@@ -1042,6 +1097,55 @@ fn prepare_selection(
     let mut query_limited_tiers = 0;
     let mut failures = Vec::<String>::new();
     let mut attempted = 0;
+    let mut candidate_eligibility = |source: super::evidence::Source,
+                                     line: super::coverage::Line,
+                                     focus_y: f64,
+                                     work: &mut tours::Budget<'_>|
+     -> Result<bool, tours::Error> {
+        let allocated = allocations.get(&source.map).ok_or_else(|| {
+            tours::Error::CandidateCoverage("map allocation index missing".into())
+        })?;
+        let estimate = match super::source_footprint::work_estimate(
+            line,
+            focus_y,
+            request.size,
+            request.scale,
+        ) {
+            Ok(estimate) => estimate,
+            Err(
+                super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
+            ) => {
+                work.charge(128)?;
+                return Ok(false);
+            }
+            Err(error @ super::source_footprint::Error::Asset(_)) => {
+                return Err(tours::Error::CandidateCoverage(error.to_string()));
+            }
+        };
+        work.charge(estimate)?;
+        let footprint = match super::source_footprint::request(
+            line,
+            focus_y,
+            request.size,
+            request.scale,
+            &bundle.budget,
+            cancel,
+        ) {
+            Ok(footprint) => footprint,
+            Err(
+                super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
+            ) => {
+                return Ok(false);
+            }
+            Err(error @ super::source_footprint::Error::Asset(_)) => {
+                return Err(tours::Error::CandidateCoverage(error.to_string()));
+            }
+        };
+        Ok(footprint
+            .support_chunks()
+            .iter()
+            .all(|position| allocated.contains(position)))
+    };
     let qualified: Option<(Plan, Arc<projected_route::PreparedRoute>, f64)> =
         qualify_in_tier_order(
             request.policy.minimum_length,
@@ -1065,7 +1169,7 @@ fn prepare_selection(
                 let mut work = tours::Budget::new(PLANNER_WORK.min(remaining), &cancelled);
                 // Every selector pass receives ALL maps; attempt count ranks
                 // maps only within the required appearance phase.
-                let selection = tours::select_diverse_excluding(
+                let selection = tours::select_diverse_excluding_with_eligibility(
                     request.ticket,
                     &maps,
                     &request.history,
@@ -1075,6 +1179,7 @@ fn prepare_selection(
                         attempted_maps: &attempts_by_map,
                         required_choice: Some(choice),
                     },
+                    &mut candidate_eligibility,
                     &mut work,
                 );
                 selection_passes += 1;

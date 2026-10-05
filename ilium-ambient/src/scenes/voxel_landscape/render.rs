@@ -146,6 +146,13 @@ mod tests {
                 instances: Vec::new(),
                 biomes: Vec::new(),
                 cached_chunks: 0,
+                // This fixture supplies a render-only mesh; it does not model
+                // a generated volume or participate in occupancy assertions.
+                occupancy: super::super::world::WorldWindow::from_columns(
+                    [offset + base, offset + base],
+                    [offset + 350, offset + 350],
+                    std::collections::BTreeMap::new(),
+                ),
             };
             let first = mesh(-176);
             let second = mesh(-160);

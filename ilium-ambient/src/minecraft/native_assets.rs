@@ -1,8 +1,8 @@
 //! Worker-only, digest-pinned installed Java assets beneath exact selected overrides.
-//! No download, extraction, class execution, generated model, or resource alias.
+//! No download, extraction, class execution, or generated model is admitted.
 use crate::voxel_landscape::{
     assets::{
-        animation::MissingAnimation,
+        animation::{ExplicitFrame, MissingAnimation, PixelRect},
         archive::{DuplicateMember, ZipSource},
         bank::{RequiredOrigin, TextureRequirement},
         budget::{ByteBudget, Cancel, Limits, Reservation},
@@ -20,7 +20,7 @@ use crate::voxel_landscape::{
 };
 use ilium_platform::secure_fs::NoFollowDirectory;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -30,6 +30,87 @@ pub const NATIVE_JAR_SHA256: &str =
     "b7228c23dbc8988129561af3918dd469577de842d2eb3c7dabe00316bf9a44d6";
 pub const NATIVE_PACK: &str = "ilium:installed-java-1.19.3";
 const PATH_BYTES: usize = 4096;
+const GOODVIBES_PACK: &str = "ilium-pack:goodvibes";
+
+#[derive(Clone)]
+struct GoodVibesWaterPin {
+    digest: Digest256,
+    dimensions: [u32; 2],
+    missing_animation: MissingAnimation,
+}
+
+fn goodvibes_aliases() -> Result<BTreeMap<ResourceId, Vec<AssetPath>>, AssetError> {
+    let catalog: serde_json::Value =
+        serde_json::from_str(include_str!("../scenes/voxel_landscape/pack_aliases.json"))
+            .map_err(|error| AssetError::InvalidMetadata(format!("pack alias catalog: {error}")))?;
+    let entries = catalog
+        .get("aliases")
+        .and_then(|aliases| aliases.get("goodvibes"))
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| AssetError::InvalidMetadata("missing GoodVibes pack aliases".into()))?;
+    let mut output = BTreeMap::new();
+    for (key, paths) in entries {
+        let id = ResourceId::parse(key)?;
+        let paths = paths
+            .as_array()
+            .ok_or_else(|| AssetError::InvalidMetadata("invalid GoodVibes alias paths".into()))?;
+        let mut converted = Vec::new();
+        converted
+            .try_reserve_exact(paths.len())
+            .map_err(|_| AssetError::Allocation)?;
+        for path in paths.iter().filter_map(serde_json::Value::as_str) {
+            converted.push(AssetPath::parse(path)?);
+        }
+        output.insert(id, converted);
+    }
+    Ok(output)
+}
+
+fn goodvibes_water_pin(id: &ResourceId) -> Result<Option<GoodVibesWaterPin>, AssetError> {
+    let (digest, dimensions, frame_dimensions, frame_count, ticks) = match id.as_str() {
+        "minecraft:block/water_still" => (
+            "f35e3a02b81bb359bf3eced106c12324f5523d9fb85e13599887205c0e513247",
+            [512, 16384],
+            [512, 512],
+            32_u32,
+            2_u32,
+        ),
+        "minecraft:block/water_flow" => (
+            "75994f61cfd8a4e56480010e91b1df098ab71c70ba373d858effe9d3a2613f66",
+            [1021, 16384],
+            [1021, 1024],
+            16_u32,
+            1_u32,
+        ),
+        _ => return Ok(None),
+    };
+    let mut frames = Vec::new();
+    frames
+        .try_reserve_exact(frame_count as usize)
+        .map_err(|_| AssetError::Allocation)?;
+    for index in 0..frame_count {
+        frames.push(ExplicitFrame {
+            rect: PixelRect {
+                x: 0,
+                y: index * frame_dimensions[1],
+                width: frame_dimensions[0],
+                height: frame_dimensions[1],
+            },
+            ticks,
+        });
+    }
+    Ok(Some(GoodVibesWaterPin {
+        digest: Digest256::try_from(digest.to_owned())?,
+        dimensions,
+        missing_animation: MissingAnimation::ExplicitFrames {
+            frames,
+            interpolate: false,
+            reason: Label::new(
+                "Ilium compatibility timing for digest-pinned GoodVibes water sheet; not pack-authored; no interpolation",
+            )?,
+        },
+    }))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -325,6 +406,20 @@ impl NativeSources {
         let reservation = self
             .budget
             .reserve(4096 + ids.len() as u64 * 16 * 1024, cancel)?;
+        let goodvibes_selected = self.packs.first().is_some_and(|pack| {
+            pack.review().pack.as_str() == GOODVIBES_PACK
+                && pack.layout() == MountLayout::ExtractedJava
+        });
+        let goodvibes_aliases = if goodvibes_selected {
+            goodvibes_aliases()?
+        } else {
+            BTreeMap::new()
+        };
+        let maximum_aliases = goodvibes_aliases
+            .values()
+            .map(Vec::len)
+            .max()
+            .unwrap_or_default();
         let mut seen = BTreeSet::new();
         let mut requests = Vec::new();
         requests
@@ -341,19 +436,91 @@ impl NativeSources {
             }
             let mut candidates = Vec::new();
             candidates
-                .try_reserve_exact(self.packs.len())
+                .try_reserve_exact(self.packs.len() + 1 + maximum_aliases)
                 .map_err(|_| AssetError::Allocation)?;
-            for pack in &self.packs {
+            let water_pin = if goodvibes_selected {
+                goodvibes_water_pin(id)?
+            } else {
+                None
+            };
+            let water_schedule = || {
+                water_pin
+                    .as_ref()
+                    .map_or(ScheduleSource::AutomaticJava, |pin| {
+                        ScheduleSource::AutomaticJavaWithMissing(pin.missing_animation.clone())
+                    })
+            };
+            let water_digest = water_pin.as_ref().map(|pin| pin.digest);
+            let water_dimensions = water_pin.as_ref().map(|pin| pin.dimensions);
+            let mut emitted_aliases = BTreeSet::new();
+            for (pack_index, pack) in self.packs.iter().enumerate() {
                 candidates.push(TextureCandidate {
                     pack: pack.review().pack.clone(),
                     location: TextureLocation::Resource {
                         id: id.clone(),
                         alias_reason: None,
                     },
-                    schedule: ScheduleSource::AutomaticJava,
-                    expected_source_sha256: None,
-                    expected_image: ImageExpectations::default(),
+                    schedule: if pack_index == 0 && goodvibes_selected {
+                        water_schedule()
+                    } else {
+                        ScheduleSource::AutomaticJava
+                    },
+                    expected_source_sha256: if pack_index == 0 && goodvibes_selected {
+                        water_digest
+                    } else {
+                        None
+                    },
+                    expected_image: ImageExpectations {
+                        dimensions: if pack_index == 0 && goodvibes_selected {
+                            water_dimensions
+                        } else {
+                            None
+                        },
+                        ..ImageExpectations::default()
+                    },
                 });
+                if pack_index != 0 || !goodvibes_selected || id.parts().0 != "minecraft" {
+                    continue;
+                }
+                let root_path = AssetPath::parse(&format!("textures/{}.png", id.parts().1))?;
+                emitted_aliases.insert(root_path.clone());
+                candidates.push(TextureCandidate {
+                    pack: pack.review().pack.clone(),
+                    location: TextureLocation::Literal {
+                        path: root_path,
+                        evidence: Label::new(
+                            "GoodVibes extracted Minecraft root: exact textures path for this Java resource",
+                        )?,
+                    },
+                    schedule: water_schedule(),
+                    expected_source_sha256: water_digest,
+                    expected_image: ImageExpectations {
+                        dimensions: water_dimensions,
+                        ..ImageExpectations::default()
+                    },
+                });
+                if let Some(paths) = goodvibes_aliases.get(id) {
+                    for path in paths {
+                        if !emitted_aliases.insert(path.clone()) {
+                            continue;
+                        }
+                        candidates.push(TextureCandidate {
+                            pack: pack.review().pack.clone(),
+                            location: TextureLocation::Literal {
+                                path: path.clone(),
+                                evidence: Label::new(
+                                    "GoodVibes pack_aliases.json exact retained resource path",
+                                )?,
+                            },
+                            schedule: water_schedule(),
+                            expected_source_sha256: water_digest,
+                            expected_image: ImageExpectations {
+                                dimensions: water_dimensions,
+                                ..ImageExpectations::default()
+                            },
+                        });
+                    }
+                }
             }
             requests.push(TextureRequest {
                 requirement,

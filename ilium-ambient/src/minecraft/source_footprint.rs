@@ -28,6 +28,10 @@ pub const MAX_REQUESTED_CHUNKS: usize = 512;
 // Both BTreeSets can retain 512 positions. This includes conservative node,
 // pointer and allocator slack for each position in each set.
 const CHUNK_SET_CHARGE: u64 = 2 * 512 * 160 + 8192;
+// Fixed projection/inverse work plus every possible support-ring insertion.
+// The rectangle enumeration count is added per candidate before request().
+const PROJECTION_WORK_BASE: u64 = 128;
+const SUPPORT_INSERTION_WORK: u64 = (MAX_REQUESTED_CHUNKS as u64) * 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -185,6 +189,94 @@ fn inverse(
     [(sum + difference) * 0.5, (sum - difference) * 0.5]
 }
 
+/// Conservative work reservation for one projected-source candidate. The
+/// estimate includes the complete rectangle visited by request(), its fixed
+/// inverse-projection operations, and the maximum render/support-set insertions.
+/// Callers charge this before invoking request so repeated candidate rejection
+/// remains inside the same finite planner budget as route enumeration.
+pub fn work_estimate(
+    line: Line,
+    camera_height: f64,
+    size: [usize; 2],
+    scale: f64,
+) -> Result<u64, Error> {
+    validate_request(line, camera_height, size, scale)?;
+    let (lower, upper) = bounds(line, camera_height, size, scale)?;
+    let widths = [0, 1].map(|axis| i64::from(upper[axis]) - i64::from(lower[axis]) + 1);
+    let enumerated = widths[0]
+        .checked_mul(widths[1])
+        .filter(|count| *count > 0 && *count as u64 <= MAX_ENUMERATED_CHUNKS)
+        .ok_or(Error::Limit)? as u64;
+    PROJECTION_WORK_BASE
+        .checked_add(enumerated)
+        .and_then(|work| work.checked_add(SUPPORT_INSERTION_WORK))
+        .ok_or(Error::Limit)
+}
+
+fn validate_request(
+    line: Line,
+    camera_height: f64,
+    size: [usize; 2],
+    scale: f64,
+) -> Result<(), Error> {
+    let length = line.length();
+    if line
+        .start
+        .iter()
+        .chain(line.end.iter())
+        .any(|v| !v.is_finite())
+        || !length.is_finite()
+        || length > 1024.0
+        || !camera_height.is_finite()
+        || !(-4096.0..=4096.0).contains(&camera_height)
+        || !scale.is_finite()
+        || !(0.01..=1024.0).contains(&scale)
+        || size.iter().any(|side| !(1..=65_536).contains(side))
+        || size[0]
+            .checked_mul(size[1])
+            .is_none_or(|dots| dots > 1_048_576)
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+fn bounds(
+    line: Line,
+    camera_height: f64,
+    size: [usize; 2],
+    scale: f64,
+) -> Result<([i32; 2], [i32; 2]), Error> {
+    let mut minimum = [f64::INFINITY; 2];
+    let mut maximum = [f64::NEG_INFINITY; 2];
+    for camera in [line.start, line.end] {
+        for screen_x in [-1.0, size[0] as f64 + 1.0] {
+            for screen_y in [-1.0, size[1] as f64 + 1.0] {
+                for y in [MIN_BLOCK_Y + LOCAL_MIN, MAX_BLOCK_Y + LOCAL_MAX] {
+                    let ground =
+                        inverse([screen_x, screen_y], y, camera, camera_height, size, scale);
+                    for axis in 0..2 {
+                        minimum[axis] = minimum[axis].min(ground[axis]);
+                        maximum[axis] = maximum[axis].max(ground[axis]);
+                    }
+                }
+            }
+        }
+    }
+    let lower = [0, 1].map(|axis| ((minimum[axis] - LOCAL_MAX - 1.0) / 16.0).floor());
+    let upper = [0, 1].map(|axis| ((maximum[axis] - LOCAL_MIN + 1.0) / 16.0).ceil());
+    if lower
+        .into_iter()
+        .chain(upper)
+        .any(|v| !v.is_finite() || v < f64::from(i32::MIN + 1) || v > f64::from(i32::MAX - 1))
+    {
+        return Err(Error::Invalid);
+    }
+    let lower = lower.map(|v| v as i32);
+    let upper = upper.map(|v| v as i32);
+    Ok((lower, upper))
+}
+
 fn possible_chunk(
     chunk: [i32; 2],
     line: Line,
@@ -231,55 +323,9 @@ pub fn request(
     cancel: Cancel<'_>,
 ) -> Result<Request, Error> {
     cancel.check()?;
-    let length = line.length();
-    if line
-        .start
-        .iter()
-        .chain(line.end.iter())
-        .any(|v| !v.is_finite())
-        || !length.is_finite()
-        || length > 1024.0
-        || !camera_height.is_finite()
-        || !(-4096.0..=4096.0).contains(&camera_height)
-        || !scale.is_finite()
-        || !(0.01..=1024.0).contains(&scale)
-        || size.iter().any(|side| !(1..=65_536).contains(side))
-        || size[0]
-            .checked_mul(size[1])
-            .is_none_or(|dots| dots > 1_048_576)
-    {
-        return Err(Error::Invalid);
-    }
+    validate_request(line, camera_height, size, scale)?;
     let reservation = budget.reserve(CHUNK_SET_CHARGE, cancel)?;
-    let mut minimum = [f64::INFINITY; 2];
-    let mut maximum = [f64::NEG_INFINITY; 2];
-    for camera in [line.start, line.end] {
-        for screen_x in [-1.0, size[0] as f64 + 1.0] {
-            for screen_y in [-1.0, size[1] as f64 + 1.0] {
-                for y in [MIN_BLOCK_Y + LOCAL_MIN, MAX_BLOCK_Y + LOCAL_MAX] {
-                    let ground =
-                        inverse([screen_x, screen_y], y, camera, camera_height, size, scale);
-                    for axis in 0..2 {
-                        minimum[axis] = minimum[axis].min(ground[axis]);
-                        maximum[axis] = maximum[axis].max(ground[axis]);
-                    }
-                }
-            }
-        }
-    }
-    // Invert the owner-local offset and add one full block for rounding and
-    // inclusive raster-edge overlap. Reject float-to-int saturation explicitly.
-    let lower = [0, 1].map(|axis| ((minimum[axis] - LOCAL_MAX - 1.0) / 16.0).floor());
-    let upper = [0, 1].map(|axis| ((maximum[axis] - LOCAL_MIN + 1.0) / 16.0).ceil());
-    if lower
-        .into_iter()
-        .chain(upper)
-        .any(|v| !v.is_finite() || v < f64::from(i32::MIN + 1) || v > f64::from(i32::MAX - 1))
-    {
-        return Err(Error::Invalid);
-    }
-    let lower = lower.map(|v| v as i32);
-    let upper = upper.map(|v| v as i32);
+    let (lower, upper) = bounds(line, camera_height, size, scale)?;
     let widths = [0, 1].map(|axis| i64::from(upper[axis]) - i64::from(lower[axis]) + 1);
     if widths.iter().any(|width| *width <= 0)
         || widths[0]
@@ -343,18 +389,15 @@ mod tests {
     fn distant_high_face_enters_source_request_before_binding() {
         let budget = ByteBudget::new(1 << 20).unwrap();
         let stop = AtomicBool::new(false);
-        let request = request(
-            Line {
-                start: [0.0, 0.0],
-                end: [64.0, 0.0],
-            },
-            70.0,
-            [160, 96],
-            4.2,
-            &budget,
-            Cancel::new(&stop),
-        )
-        .unwrap();
+        let line = Line {
+            start: [0.0, 0.0],
+            end: [64.0, 0.0],
+        };
+        let estimate = work_estimate(line, 70.0, [160, 96], 4.2).unwrap();
+        let request = request(line, 70.0, [160, 96], 4.2, &budget, Cancel::new(&stop)).unwrap();
+        assert!(
+            estimate >= request.enumerated_chunks + PROJECTION_WORK_BASE + SUPPORT_INSERTION_WORK
+        );
         assert!(request.render.contains(&[8, 8]));
         assert!(request.support.contains(&[0, 0]));
         assert!(request.render.len() <= MAX_REQUESTED_CHUNKS);

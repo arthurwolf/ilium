@@ -74,6 +74,7 @@ fn sources_from_members(
         plasticator: false,
         exact_plasticator_campfire_source: false,
         aliases: BTreeMap::new(),
+        fallback_aliases: BTreeMap::new(),
         fallback_goodvibes: false,
         fallback_unavailable: false,
     }

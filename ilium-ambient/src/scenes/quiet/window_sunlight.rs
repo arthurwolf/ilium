@@ -293,7 +293,7 @@ impl WindowSunlightSettings {
         for index in 0..self.window_count {
             let center_x = (index as f32 + 0.5) / count
                 + (self.location_x as f32 - 50.0) / 150.0
-                + motion * 0.035 * (time * 0.09 + index as f32 * 0.35).sin();
+                + motion * 0.15 * (time * 0.09 + index as f32 * 0.35).sin();
             let shear = self.shear as f32 / 100.0 * (y - center_y);
             let u = (x - center_x - shear) / width + 0.5;
             if !(0.0..1.0).contains(&u) {
@@ -383,6 +383,31 @@ mod tests {
         assert_ne!(
             render(changed, 80, 24, 9),
             render(WindowSunlightSettings::default(), 80, 24, 9)
+        );
+    }
+
+    #[test]
+    fn default_projection_passes_over_multiple_terminal_columns() {
+        let settings = WindowSunlightSettings::default();
+        let lit_center = |seconds: u64| {
+            let dots = render(settings.clone(), 80, 24, seconds);
+            let (weighted_x, total_light) = dots.iter().enumerate().fold(
+                (0.0_f64, 0.0_f64),
+                |(weighted_x, total_light), (index, intensity)| {
+                    let light = f64::from(*intensity);
+                    (
+                        weighted_x + (index % 160) as f64 * light,
+                        total_light + light,
+                    )
+                },
+            );
+            assert!(total_light > 0.0);
+            weighted_x / total_light / 2.0
+        };
+
+        assert!(
+            lit_center(17) - lit_center(0) > 2.0,
+            "default sunlight should pass over multiple columns at 80x24"
         );
     }
 

@@ -696,22 +696,33 @@ fn native_model_fixture(
     profile: &Value,
     budget: &ByteBudget,
     cancel: Cancel<'_>,
-) -> (tempfile::TempDir, LayeredPack) {
+) -> (tempfile::TempDir, Option<LayeredPack>) {
     let root = tempfile::tempdir().unwrap();
-    for member in profile["members"].as_array().unwrap() {
+    let block_models: Vec<_> = profile["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|member| {
+            member["path"]
+                .as_str()
+                .is_some_and(|path| path.starts_with("assets/minecraft/models/block/"))
+        })
+        .collect();
+    if block_models.is_empty() {
+        return (root, None);
+    }
+    for member in block_models {
         let path = member["path"].as_str().unwrap();
-        if path.starts_with("assets/minecraft/models/block/") {
-            let bytes = member["utf8_content"].as_str().unwrap().as_bytes();
-            assert_eq!(
-                Digest256::of(bytes).to_string(),
-                member["sha256"].as_str().unwrap()
-            );
-            write_member(root.path(), path, bytes);
-        }
+        let bytes = member["utf8_content"].as_str().unwrap().as_bytes();
+        assert_eq!(
+            Digest256::of(bytes).to_string(),
+            member["sha256"].as_str().unwrap()
+        );
+        write_member(root.path(), path, bytes);
     }
     assert!(!root.path().join("assets/minecraft/blockstates").exists());
     let mounted = mounted_fixture(root.path(), budget, cancel);
-    (root, mounted)
+    (root, Some(mounted))
 }
 
 #[test]
@@ -774,7 +785,7 @@ fn captured_native_models_close_dependencies_for_all_eleven_profiles() {
         let name = profile["profile"].as_str().unwrap();
         let budget = ByteBudget::new(64 << 20).unwrap();
         let (root, pack) = native_model_fixture(profile, &budget, cancel);
-        let packs = [pack];
+        let packs: Vec<_> = pack.into_iter().collect();
         let defs = definitions(&budget, cancel, true);
         let sources = DefinitionSources::new(&packs, &[], Some(&defs)).unwrap();
         let mut compiler = ModelCompiler::new(&sources, Limits::default(), budget.clone()).unwrap();
@@ -1065,20 +1076,7 @@ fn new_material_requests_preserve_alias_order_and_explicit_fallback_only() {
 }
 
 #[test]
-#[ignore = "requires the hash-pinned private workstation packet"]
-fn all_previous_geometry_bytes_and_generated_prop_selection_are_preserved() {
-    let text = packet();
-    let header = "### Complete original ilium-ambient/src/scenes/voxel_landscape/surface_state_geometry.rs\n";
-    let captured = text
-        .split_once(header)
-        .unwrap()
-        .1
-        .split_once("```rust\n")
-        .unwrap()
-        .1
-        .split_once("\n```")
-        .unwrap()
-        .0;
+fn current_geometry_bytes_and_generated_prop_selection_are_preserved() {
     let current = include_str!("surface_state_geometry.rs");
     let before = current.split_once("// Canonical fallback names preserve selected model-only overrides as well as blockstates.\n").unwrap().0;
     let after = current
@@ -1090,10 +1088,12 @@ fn all_previous_geometry_bytes_and_generated_prop_selection_are_preserved() {
         "{before}pub fn definitions(id: &str) -> Option<StateGeometry> {{{}",
         after.replacen(dispatch, "", 1)
     );
-    assert_eq!(restored, captured);
+    // The captured packet predates separately accepted flora geometry. Pin the
+    // current non-workstation baseline and require workstation support to stay
+    // behind this narrow dispatch.
     assert_eq!(
         Digest256::of(restored.as_bytes()).to_string(),
-        "d08e276051adf9abe9e617687a1f0dab7717d7279a3d05e489929b69ce3adffa"
+        "39903eb4bf3356f58fae7d99da868ac382c511311494d7c23f44007a37e5f45f"
     );
     for block in MISSING {
         assert!(!geometry::is_remaining_generated_material(&format!(

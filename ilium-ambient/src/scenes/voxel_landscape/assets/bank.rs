@@ -358,7 +358,7 @@ impl TextureBankBuilder {
                 OriginKind::OriginalCompatibilityGeometry => {
                     return Err(AssetError::InvalidReview(
                         "original compatibility geometry cannot be a texture origin".into(),
-                    ))
+                    ));
                 }
                 OriginKind::ExplicitFullPackFallback => report.explicit_fallback_texture_count += 1,
                 OriginKind::SelectedPack | OriginKind::OfficialInternalLayer => {

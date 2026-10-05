@@ -93,55 +93,60 @@ impl<T> Stored<T> {
 /// One explicit isolated composition for ambient unit fixtures. Pure scene
 /// environments share it rather than starting an execution per constructor.
 #[cfg(test)]
+fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
+    use ilium_execution::{ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaLimits};
+    let quota = QuotaGroup::new(QuotaLimits {
+        clients: 8,
+        jobs: 16,
+        service_jobs: 0,
+        input_bytes: 512 * 1024 * 1024,
+        result_bytes: 512 * 1024 * 1024,
+        worker_threads: 16,
+        worker_bytes: 2304 * 1024 * 1024,
+    });
+    let lane = LaneConfig {
+        threads: 2,
+        queue_slots: 8,
+        priority: None,
+        resident_bytes_per_thread: 1024 * 1024,
+    };
+    let execution = Execution::start(
+        quota,
+        ExecutionConfig {
+            cpu: lane,
+            io: lane,
+            service: LaneConfig {
+                threads: 0,
+                queue_slots: 0,
+                priority: None,
+                resident_bytes_per_thread: 0,
+            },
+        },
+    )
+    .unwrap();
+    let client = execution
+        .client(ClientLimits {
+            jobs: 16,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 512 * 1024 * 1024,
+        })
+        .unwrap();
+    (execution, AmbientResources::new(client))
+}
+
+/// A process-lifecycle test gets its own quota so unrelated parallel fixtures
+/// cannot prevent the decoder worker from reaching the timeout under test.
+#[cfg(test)]
+pub(crate) fn isolated_test_resources() -> (ilium_execution::Execution, AmbientResources) {
+    create_test_resources()
+}
+
+#[cfg(test)]
 pub(crate) fn test_resources() -> AmbientResources {
     static FIXTURE: std::sync::OnceLock<(ilium_execution::Execution, AmbientResources)> =
         std::sync::OnceLock::new();
-    FIXTURE
-        .get_or_init(|| {
-            use ilium_execution::{
-                ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaLimits,
-            };
-            let quota = QuotaGroup::new(QuotaLimits {
-                clients: 8,
-                jobs: 16,
-                service_jobs: 0,
-                input_bytes: 512 * 1024 * 1024,
-                result_bytes: 512 * 1024 * 1024,
-                worker_threads: 16,
-                worker_bytes: 2304 * 1024 * 1024,
-            });
-            let lane = LaneConfig {
-                threads: 2,
-                queue_slots: 8,
-                priority: None,
-                resident_bytes_per_thread: 1024 * 1024,
-            };
-            let execution = Execution::start(
-                quota,
-                ExecutionConfig {
-                    cpu: lane,
-                    io: lane,
-                    service: LaneConfig {
-                        threads: 0,
-                        queue_slots: 0,
-                        priority: None,
-                        resident_bytes_per_thread: 0,
-                    },
-                },
-            )
-            .unwrap();
-            let client = execution
-                .client(ClientLimits {
-                    jobs: 16,
-                    service_jobs: 0,
-                    input_bytes: 512 * 1024 * 1024,
-                    result_bytes: 512 * 1024 * 1024,
-                })
-                .unwrap();
-            (execution, AmbientResources::new(client))
-        })
-        .1
-        .clone()
+    FIXTURE.get_or_init(create_test_resources).1.clone()
 }
 
 #[cfg(test)]

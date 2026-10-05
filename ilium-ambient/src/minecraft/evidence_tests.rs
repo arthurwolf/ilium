@@ -104,6 +104,24 @@ fn palette() -> Vec<BlockState> {
             "red_bed",
             vec![("facing", "east"), ("occupied", "false"), ("part", "head")],
         ),
+        ("mycelium", vec![("snowy", "false")]),
+        ("brown_mushroom", vec![]),
+        ("red_mushroom", vec![]),
+        (
+            "brown_mushroom_block",
+            vec![
+                ("down", "false"),
+                ("east", "false"),
+                ("north", "false"),
+                ("south", "false"),
+                ("up", "true"),
+                ("west", "false"),
+            ],
+        ),
+        ("red_sand", vec![]),
+        ("terracotta", vec![]),
+        ("orange_terracotta", vec![]),
+        ("yellow_terracotta", vec![]),
     ]
     .into_iter()
     .map(|(name, properties)| state(&format!("minecraft:{name}"), &properties))
@@ -256,6 +274,225 @@ fn has(report: &Report<'_>, category: Category) -> bool {
         .iter()
         .any(|target| target.key.category == category)
 }
+
+#[test]
+fn biome_evidence_roles_require_supported_minecraft_state_schemas() {
+    let mushroom_block = state(
+        "minecraft:brown_mushroom_block",
+        &[
+            ("down", "false"),
+            ("east", "false"),
+            ("north", "false"),
+            ("south", "false"),
+            ("up", "true"),
+            ("west", "false"),
+        ],
+    );
+    assert_eq!(role(&mushroom_block), Role::Mushroom);
+    assert_eq!(
+        role(&state("minecraft:brown_mushroom_block", &[("up", "true")])),
+        Role::Unknown
+    );
+    assert_eq!(
+        role(&state("minecraft:mycelium", &[("snowy", "false")])),
+        Role::Mycelium
+    );
+    assert_eq!(
+        role(&state("minecraft:mycelium", &[("invented", "true")])),
+        Role::Unknown
+    );
+    assert_eq!(
+        role(&state("minecraft:orange_terracotta", &[])),
+        Role::Terracotta
+    );
+    assert_eq!(
+        role(&state(
+            "minecraft:orange_terracotta",
+            &[("invented", "true")]
+        )),
+        Role::Unknown
+    );
+}
+
+#[test]
+fn mycelium_with_distributed_mushrooms_forms_a_distinct_biome_target() {
+    let palette = palette();
+    let mycelium = palette
+        .iter()
+        .position(|state| state.name == "minecraft:mycelium")
+        .unwrap();
+    let mushroom = palette
+        .iter()
+        .position(|state| state.name == "minecraft:brown_mushroom")
+        .unwrap();
+    let mushroom_block = palette
+        .iter()
+        .position(|state| state.name == "minecraft:brown_mushroom_block")
+        .unwrap();
+    let mushroom_columns = [
+        (2, 2),
+        (3, 2),
+        (10, 2),
+        (11, 2),
+        (2, 10),
+        (3, 10),
+        (10, 10),
+        (11, 10),
+    ];
+    let mushroom_block_columns = &mushroom_columns[4..];
+    let clustered_mushroom_columns = [
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+    ];
+    for version in [2834, 2835, 2836, 3218] {
+        let chunk = decoded(version, [0, 0], &palette, |x, y, z| {
+            if y == 68 && mushroom_block_columns.contains(&(x, z)) {
+                mushroom_block
+            } else if y == 65 && mushroom_columns[..4].contains(&(x, z)) {
+                mushroom
+            } else if y == 64 {
+                mycelium
+            } else if y < 64 {
+                2
+            } else {
+                0
+            }
+        });
+        let chunks = [chunk];
+        let report = survey(&chunks, bounds([0, 0]));
+        let target = report.targets.iter().find(|target| {
+            target.key.category == Category::MushroomFieldsLike
+                && target.key.category.kind() == Kind::Biome
+                && target.anchor.block.state.name == "minecraft:mycelium"
+                && target.corroboration.block.state.name == "minecraft:brown_mushroom"
+        });
+        assert!(
+            target.is_some(),
+            "distributed mycelium and mushroom evidence should create a target at DataVersion {version}"
+        );
+        let target = target.unwrap();
+        assert_eq!(target.key.category, Category::MushroomFieldsLike);
+        assert_eq!(target.support.primary_columns, 256);
+        assert!(target.support.secondary_columns >= 8);
+
+        let clustered = [decoded(version, [0, 0], &palette, |x, y, z| {
+            if y == 65 && clustered_mushroom_columns.contains(&(x, z)) {
+                mushroom
+            } else if y == 64 {
+                mycelium
+            } else if y < 64 {
+                2
+            } else {
+                0
+            }
+        })];
+        assert!(
+            !has(
+                &survey(&clustered, bounds([0, 0])),
+                Category::MushroomFieldsLike
+            ),
+            "mushrooms confined to one sector must not qualify at DataVersion {version}"
+        );
+    }
+}
+
+#[test]
+fn red_sand_and_terracotta_with_dry_plants_form_a_distinct_biome_target() {
+    let palette = palette();
+    let red_sand = palette
+        .iter()
+        .position(|state| state.name == "minecraft:red_sand")
+        .unwrap();
+    let terracotta = palette
+        .iter()
+        .position(|state| state.name == "minecraft:orange_terracotta")
+        .unwrap();
+    let dead_bush = palette
+        .iter()
+        .position(|state| state.name == "minecraft:dead_bush")
+        .unwrap();
+    let plant_columns = [
+        (2, 2),
+        (3, 2),
+        (10, 2),
+        (11, 2),
+        (2, 10),
+        (3, 10),
+        (10, 10),
+        (11, 10),
+    ];
+    let clustered_plant_columns = [
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+    ];
+    for version in [2834, 2835, 2836, 3218] {
+        let chunk = decoded(version, [0, 0], &palette, |x, y, z| {
+            if y == 65 && plant_columns.contains(&(x, z)) {
+                dead_bush
+            } else if y == 64 && (x + z) % 3 == 0 && !plant_columns.contains(&(x, z)) {
+                terracotta
+            } else if y == 64 {
+                red_sand
+            } else if y < 64 {
+                2
+            } else {
+                0
+            }
+        });
+        let chunks = [chunk];
+        let report = survey(&chunks, bounds([0, 0]));
+        let target = report.targets.iter().find(|target| {
+            target.key.category == Category::BadlandsLikeSurface
+                && target.key.category.kind() == Kind::Biome
+                && matches!(
+                    target.anchor.block.state.name.as_str(),
+                    "minecraft:red_sand" | "minecraft:orange_terracotta"
+                )
+                && target.corroboration.block.state.name == "minecraft:dead_bush"
+        });
+        assert!(
+            target.is_some(),
+            "red sand, terracotta and dry plant evidence should create a target at DataVersion {version}"
+        );
+        let target = target.unwrap();
+        assert_eq!(target.key.category, Category::BadlandsLikeSurface);
+        assert!(target.support.secondary_columns >= 8);
+
+        let clustered = [decoded(version, [0, 0], &palette, |x, y, z| {
+            if y == 65 && clustered_plant_columns.contains(&(x, z)) {
+                dead_bush
+            } else if y == 64 && (x + z) % 3 == 0 && !clustered_plant_columns.contains(&(x, z)) {
+                terracotta
+            } else if y == 64 {
+                red_sand
+            } else if y < 64 {
+                2
+            } else {
+                0
+            }
+        })];
+        assert!(
+            !has(
+                &survey(&clustered, bounds([0, 0])),
+                Category::BadlandsLikeSurface
+            ),
+            "dry plants confined to one sector must not qualify at DataVersion {version}"
+        );
+    }
+}
+
 fn scene(category: Category, x: i32, y: i32, z: i32) -> usize {
     use Category::*;
     match category {
@@ -297,6 +534,23 @@ fn scene(category: Category, x: i32, y: i32, z: i32) -> usize {
             }
             if y == 64 {
                 return 6;
+            }
+        }
+        MushroomFieldsLike => {
+            if y == 65 && x % 4 == 0 && z % 4 == 0 {
+                return 40;
+            }
+            if y == 64 {
+                return 39;
+            }
+        }
+        BadlandsLikeSurface => {
+            let planted = x % 4 == 0 && z % 4 == 0;
+            if y == 65 && planted {
+                return 7;
+            }
+            if y == 64 {
+                return if !planted && (x + z) % 3 == 0 { 45 } else { 43 };
             }
         }
         VegetatedShore => {

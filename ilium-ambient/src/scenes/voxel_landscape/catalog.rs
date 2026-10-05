@@ -8515,3 +8515,105 @@ mod tests {
         assert!(!round_blocks.contains(&[2, 2, 2]));
     }
 }
+
+impl Material {
+    /// Stable identities for original procedural materials. These names denote
+    /// the generator's vocabulary, not vanilla Minecraft block-state aliases.
+    pub const fn generated_state_name(self) -> &'static str {
+        match self {
+            Self::Grass => "ilium:generated/grass",
+            Self::Dirt => "ilium:generated/dirt",
+            Self::Stone => "ilium:generated/stone",
+            Self::Cobblestone => "ilium:generated/cobblestone",
+            Self::MossStone => "ilium:generated/moss_stone",
+            Self::Sand => "ilium:generated/sand",
+            Self::RedSand => "ilium:generated/red_sand",
+            Self::Sandstone => "ilium:generated/sandstone",
+            Self::RedSandstone => "ilium:generated/red_sandstone",
+            Self::Gravel => "ilium:generated/gravel",
+            Self::Clay => "ilium:generated/clay",
+            Self::Terracotta => "ilium:generated/terracotta",
+            Self::Granite => "ilium:generated/granite",
+            Self::Basalt => "ilium:generated/basalt",
+            Self::Limestone => "ilium:generated/limestone",
+            Self::Slate => "ilium:generated/slate",
+            Self::CoalOre => "ilium:generated/coal_ore",
+            Self::IronOre => "ilium:generated/iron_ore",
+            Self::CopperOre => "ilium:generated/copper_ore",
+            Self::OakLog => "ilium:generated/oak_log",
+            Self::BirchLog => "ilium:generated/birch_log",
+            Self::SpruceLog => "ilium:generated/spruce_log",
+            Self::JungleLog => "ilium:generated/jungle_log",
+            Self::AcaciaLog => "ilium:generated/acacia_log",
+            Self::MangroveLog => "ilium:generated/mangrove_log",
+            Self::OakLeaves => "ilium:generated/oak_leaves",
+            Self::BirchLeaves => "ilium:generated/birch_leaves",
+            Self::SpruceLeaves => "ilium:generated/spruce_leaves",
+            Self::JungleLeaves => "ilium:generated/jungle_leaves",
+            Self::CherryLeaves => "ilium:generated/cherry_leaves",
+            Self::DryLeaves => "ilium:generated/dry_leaves",
+            Self::Planks => "ilium:generated/planks",
+            Self::DarkPlanks => "ilium:generated/dark_planks",
+            Self::Bricks => "ilium:generated/bricks",
+            Self::Glass => "ilium:generated/glass",
+            Self::Water => "ilium:generated/water",
+            Self::Snow => "ilium:generated/snow",
+            Self::Ice => "ilium:generated/ice",
+            Self::Cactus => "ilium:generated/cactus",
+            Self::Wheat => "ilium:generated/wheat",
+            Self::Carrot => "ilium:generated/carrot",
+            Self::Potato => "ilium:generated/potato",
+            Self::Beetroot => "ilium:generated/beetroot",
+            Self::Pumpkin => "ilium:generated/pumpkin",
+            Self::Melon => "ilium:generated/melon",
+            Self::Flower => "ilium:generated/flower",
+            Self::Reed => "ilium:generated/reed",
+            Self::Mushroom => "ilium:generated/mushroom",
+            Self::WhiteMushroom => "ilium:generated/white_mushroom",
+            Self::Moss => "ilium:generated/moss",
+            Self::Podzol => "ilium:generated/podzol",
+            Self::Farmland => "ilium:generated/farmland",
+            Self::Path => "ilium:generated/path",
+            Self::Obsidian => "ilium:generated/obsidian",
+            Self::Lava => "ilium:generated/lava",
+            Self::Copper => "ilium:generated/copper",
+            Self::Iron => "ilium:generated/iron",
+            Self::Lantern => "ilium:generated/lantern",
+            Self::Wool => "ilium:generated/wool",
+            Self::Hay => "ilium:generated/hay",
+            Self::Bookshelf => "ilium:generated/bookshelf",
+            Self::Coral => "ilium:generated/coral",
+            Self::Seagrass => "ilium:generated/seagrass",
+            Self::Mud => "ilium:generated/mud",
+        }
+    }
+}
+
+#[cfg(test)]
+mod generated_material_identity_contract {
+    use super::{Material, ALL_MATERIALS};
+    use std::collections::{BTreeMap, BTreeSet};
+    #[test]
+    fn all_64_original_generated_materials_have_distinct_host_names() {
+        let mut names = BTreeSet::new();
+        let mut identities = BTreeMap::new();
+        assert_eq!(ALL_MATERIALS.len(), 64);
+        for &original in ALL_MATERIALS {
+            let name = original.generated_state_name();
+            assert!(name.starts_with("ilium:generated/"));
+            assert!(name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_:/".contains(&b)));
+            assert!(names.insert(name), "duplicate original identity {name}");
+            assert!(identities.insert(format!("{original:?}"), name).is_none());
+        }
+        assert_eq!(identities["Grass"], "ilium:generated/grass");
+        assert_eq!(identities["MossStone"], "ilium:generated/moss_stone");
+        assert_eq!(
+            identities["WhiteMushroom"],
+            "ilium:generated/white_mushroom"
+        );
+        assert_eq!(identities["Basalt"], "ilium:generated/basalt");
+        assert!(ALL_MATERIALS.contains(&Material::Basalt));
+    }
+}

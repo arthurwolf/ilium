@@ -340,6 +340,7 @@ fn explicit_aliases(profile: &str) -> Result<BTreeMap<ResourceId, Vec<AssetPath>
     }
     Ok(output)
 }
+#[cfg(test)]
 fn request(
     id: ResourceId,
     pack: &ResourceId,
@@ -347,6 +348,26 @@ fn request(
     goodvibes: bool,
     fallback_pack: Option<&ResourceId>,
     fallback_goodvibes: bool,
+) -> Result<TextureRequest> {
+    request_with_fallback_aliases(
+        id,
+        pack,
+        aliases,
+        goodvibes,
+        fallback_pack,
+        fallback_goodvibes,
+        &BTreeMap::new(),
+    )
+}
+
+fn request_with_fallback_aliases(
+    id: ResourceId,
+    pack: &ResourceId,
+    aliases: &BTreeMap<ResourceId, Vec<AssetPath>>,
+    goodvibes: bool,
+    fallback_pack: Option<&ResourceId>,
+    fallback_goodvibes: bool,
+    fallback_aliases: &BTreeMap<ResourceId, Vec<AssetPath>>,
 ) -> Result<TextureRequest> {
     let mut candidates = vec![TextureCandidate {
         pack: pack.clone(),
@@ -450,6 +471,26 @@ fn request(
                 expected_source_sha256: None,
                 expected_image: ImageExpectations::default(),
             });
+        }
+        if let Some(paths) = fallback_aliases.get(&id) {
+            for path in paths {
+                candidates.push(TextureCandidate {
+                    pack: fallback.clone(),
+                    location: TextureLocation::Literal {
+                        path: path.clone(),
+                        evidence: Label::new(
+                            "Exact member in retained private full-pack catalog; reviewed fallback, not selected-pack art",
+                        )?,
+                    },
+                    schedule: if fallback_goodvibes {
+                        ScheduleSource::NoMetadata
+                    } else {
+                        ScheduleSource::AutomaticJava
+                    },
+                    expected_source_sha256: None,
+                    expected_image: ImageExpectations::default(),
+                });
+            }
         }
     }
     if id.parts().1 == "block/composter_bottom" {
@@ -734,6 +775,7 @@ struct BindingSources {
     plasticator: bool,
     exact_plasticator_campfire_source: bool,
     aliases: BTreeMap<ResourceId, Vec<AssetPath>>,
+    fallback_aliases: BTreeMap<ResourceId, Vec<AssetPath>>,
     fallback_goodvibes: bool,
     fallback_unavailable: bool,
 }
@@ -784,6 +826,13 @@ impl BindingSources {
             })
             .transpose()?
             .unwrap_or(false);
+        let fallback_aliases = reviewed_fallback
+            .map(|settings| {
+                pack_profiles::profile(settings.pack_profile)
+                    .and_then(|profile| explicit_aliases(profile.id))
+            })
+            .transpose()?
+            .unwrap_or_default();
         if fallback
             .as_ref()
             .is_some_and(|fallback| fallback.pack.review().pack == review.pack)
@@ -806,6 +855,7 @@ impl BindingSources {
             plasticator,
             exact_plasticator_campfire_source,
             aliases,
+            fallback_aliases,
             fallback_goodvibes,
             fallback_unavailable,
         })
@@ -1108,6 +1158,7 @@ fn prepare_world_from_sources(
     let profile_id = sources.profile_id;
     let exact_plasticator_campfire_source = sources.exact_plasticator_campfire_source;
     let aliases = &sources.aliases;
+    let fallback_aliases = &sources.fallback_aliases;
     let fallback_goodvibes = sources.fallback_goodvibes;
     let fallback_unavailable = sources.fallback_unavailable;
     let packs = &sources.packs;
@@ -1262,13 +1313,14 @@ fn prepare_world_from_sources(
     let mut requests: Vec<_> = textures
         .into_iter()
         .map(|id| {
-            request(
+            request_with_fallback_aliases(
                 id,
                 &review.pack,
                 aliases,
                 goodvibes,
                 fallback_pack.as_ref(),
                 fallback_goodvibes,
+                fallback_aliases,
             )
         })
         .collect::<Result<_>>()?;
@@ -2348,6 +2400,38 @@ mod supplied_tests {
             source_limitations: Vec::new(),
         }
     }
+    #[test]
+    fn reviewed_fallback_aliases_keep_fallback_pack_provenance() {
+        let id = ResourceId::parse("minecraft:block/beehive_top").unwrap();
+        let selected = ResourceId::parse("ilium:goodvibes").unwrap();
+        let fallback = ResourceId::parse("ilium:faithful64").unwrap();
+        let selected_aliases = explicit_aliases("goodvibes").unwrap();
+        let fallback_aliases = explicit_aliases("faithful64").unwrap();
+        let request = request_with_fallback_aliases(
+            id.clone(),
+            &selected,
+            &selected_aliases,
+            true,
+            Some(&fallback),
+            false,
+            &fallback_aliases,
+        )
+        .unwrap();
+
+        assert_eq!(
+            request.requirement.origin,
+            RequiredOrigin::SelectedOrExplicitFullPackFallback
+        );
+        assert!(request.candidates.iter().any(|candidate| {
+            candidate.pack == fallback
+                && matches!(
+                    &candidate.location,
+                    TextureLocation::Literal { path, .. }
+                        if path.as_str() == "assets/minecraft/textures/block/beehive_end.png"
+                )
+        }));
+    }
+
     #[test]
     fn image_fallback_is_exact_semantic_last_candidate_and_explicitly_admitted() {
         let id = ResourceId::parse("minecraft:block/mangrove_log").unwrap();

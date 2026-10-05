@@ -1,6 +1,8 @@
 //! B1-specific policy and candidate tests. Flat worlds below are explicitly synthetic.
 use super::super::assets::budget::Cancel;
-use super::super::surface_viewport::{visible_tiles, SOURCE_Z_MAX, SOURCE_Z_MIN};
+use super::super::surface_viewport::{
+    visible_tiles, MAX_VIEWPORT_TILES, SOURCE_Z_MAX, SOURCE_Z_MIN,
+};
 use super::geology_public_tests::{
     bare_settings, centers, natural_fossil_witness, owned, square, TARGETS,
 };
@@ -673,20 +675,29 @@ fn synthetic_fossils_cross_signed_split_shifted_and_tile_seams() {
         )
         .unwrap();
         let tiles = visible_tiles(tiled_region, 2.8, [4096, 4096]).unwrap();
-        assert_eq!(tiles.len(), 4);
-        let mut stitched = BTreeMap::new();
-        for (core, expanded) in tiles {
-            let mut tile = flat_world(expanded);
-            project_fossil(
-                &mut tile,
-                &mut BTreeSet::new(),
-                copy_fossil(&fossil),
-                &|| false,
-            )
-            .unwrap();
-            stitched.extend(owned(&tile, core));
+        assert!(!tiles.is_empty() && tiles.len() <= MAX_VIEWPORT_TILES);
+        assert!(tiles.len() > 1);
+        for reverse in [false, true] {
+            let mut stitched = BTreeMap::new();
+            for offset in 0..tiles.len() {
+                let tile_index = if reverse {
+                    tiles.len() - offset - 1
+                } else {
+                    offset
+                };
+                let (core, expanded) = tiles[tile_index];
+                let mut tile = flat_world(expanded);
+                project_fossil(
+                    &mut tile,
+                    &mut BTreeSet::new(),
+                    copy_fossil(&fossil),
+                    &|| false,
+                )
+                .unwrap();
+                stitched.extend(owned(&tile, core));
+            }
+            assert_eq!(stitched, owned(&tiled_whole, tiled_region));
         }
-        assert_eq!(stitched, owned(&tiled_whole, tiled_region));
         let mut left = flat_world(pieces[0]);
         let before = owned(&left, pieces[0]);
         let blocked = *positions(&fossil)
@@ -794,13 +805,30 @@ fn natural_fossil_equals_whole_candidate_and_survives_projection_and_vegetation(
         maximum: xy.map(|v| v + 33),
     };
     let tiles = visible_tiles(tiled_region, 2.8, [4096, 4096]).unwrap();
-    assert_eq!(tiles.len(), 4);
+    assert!(!tiles.is_empty() && tiles.len() <= MAX_VIEWPORT_TILES);
+    assert!(tiles.len() > 1);
     assert!(fossil.minimum[0] < xy[0] + 1 && fossil.maximum[0] > xy[0] + 1);
     assert!(fossil.minimum[1] < xy[1] + 1 && fossil.maximum[1] > xy[1] + 1);
     let whole = prepare(tiled_region, &settings, || false).unwrap();
-    let stitched = prepare_viewport(tiled_region, 2.8, [4096, 4096], &settings, || false).unwrap();
-    assert_eq!(owned(&stitched, tiled_region), owned(&whole, tiled_region));
-    assert_eq!(stitched.fluids, whole.fluids);
+    let whole_owned = owned(&whole, tiled_region);
+    for reverse in [false, true] {
+        let mut stitched = BTreeMap::new();
+        for offset in 0..tiles.len() {
+            let tile_index = if reverse {
+                tiles.len() - offset - 1
+            } else {
+                offset
+            };
+            let (core, expanded) = tiles[tile_index];
+            let tile = prepare(expanded, &settings, || false).unwrap();
+            stitched.extend(owned(&tile, core));
+        }
+        assert_eq!(stitched, whole_owned);
+    }
+    let viewport_world =
+        prepare_viewport(tiled_region, 2.8, [4096, 4096], &settings, || false).unwrap();
+    assert_eq!(owned(&viewport_world, tiled_region), whole_owned);
+    assert_eq!(viewport_world.fluids, whole.fluids);
 }
 
 #[test]

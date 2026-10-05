@@ -381,12 +381,14 @@ impl<'a> TextureImporter<'a> {
                         ScheduleSource::AutomaticJava
                         | ScheduleSource::AutomaticJavaWithMissing(_) => {
                             if pack.layout() == MountLayout::Bedrock {
-                                return Err(metadata::invalid("Bedrock animation requires explicit flipbook or no-metadata policy"));
+                                return Err(metadata::invalid(
+                                    "Bedrock animation requires explicit flipbook or no-metadata policy",
+                                ));
                             }
                             Some(AssetPath::parse(&format!("{}.mcmeta", requested.as_str()))?)
                         }
                         ScheduleSource::BedrockFlipbook { .. } => {
-                            return Err(metadata::invalid("unreachable flipbook policy"))
+                            return Err(metadata::invalid("unreachable flipbook policy"));
                         }
                     };
                     let metadata_blob = match metadata_path {

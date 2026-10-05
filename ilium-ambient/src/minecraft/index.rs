@@ -3,6 +3,9 @@ use super::region;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+/// Hard ceiling for one save's allocated chunk coordinates.
+pub const MAX_ALLOCATED_CHUNKS: usize = 262_144;
+
 #[derive(Debug, Default)]
 pub struct AllocationIndex {
     pub chunks: BTreeSet<[i32; 2]>,
@@ -94,7 +97,7 @@ pub fn allocated_chunks(
                 origin[0] + (slot % 32) as i32,
                 origin[1] + (slot / 32) as i32,
             ]);
-            if result.chunks.len() > 262144 {
+            if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
                 return Err(region::Error::Limit("allocated chunk count"));
             }
         }

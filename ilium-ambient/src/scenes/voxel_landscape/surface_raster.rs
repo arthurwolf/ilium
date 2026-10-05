@@ -71,6 +71,10 @@ pub struct PixelResult {
 }
 pub trait FragmentShader {
     fn sample(&self, uv: [f32; 2]) -> Result<LinearRgba>;
+
+    fn sample_footprint(&self, uv: [f32; 2], _derivatives: [[f32; 2]; 2]) -> Result<LinearRgba> {
+        self.sample(uv)
+    }
 }
 pub struct FlatShader(pub LinearRgba);
 impl FragmentShader for FlatShader {
@@ -316,6 +320,7 @@ impl RasterFrame {
             vertices.swap(1, 2);
             area = -area;
         }
+        let derivatives = texture_derivatives(points, vertices.map(|vertex| vertex.uv), area);
         let left = points
             .iter()
             .map(|p| p[0])
@@ -376,7 +381,7 @@ impl RasterFrame {
                         .map(|i| weights[i] * f64::from(vertices[i].uv[channel]))
                         .sum::<f64>() as f32
                 });
-                let mut color = shader.sample(uv)?;
+                let mut color = shader.sample_footprint(uv, derivatives)?;
                 if color.alpha() == 0.0 {
                     continue;
                 }
@@ -541,6 +546,35 @@ fn edge(a: [i64; 2], b: [i64; 2], p: [i64; 2]) -> i128 {
     i128::from(b[0] - a[0]) * i128::from(p[1] - a[1])
         - i128::from(b[1] - a[1]) * i128::from(p[0] - a[0])
 }
+fn texture_derivatives(
+    points: [[i64; 2]; 3],
+    coordinates: [[f32; 2]; 3],
+    area: i128,
+) -> [[f32; 2]; 2] {
+    let coefficients = [
+        [
+            points[1][1] - points[2][1],
+            points[2][1] - points[0][1],
+            points[0][1] - points[1][1],
+        ],
+        [
+            points[2][0] - points[1][0],
+            points[0][0] - points[2][0],
+            points[1][0] - points[0][0],
+        ],
+    ];
+    std::array::from_fn(|axis| {
+        std::array::from_fn(|channel| {
+            ((0..3)
+                .map(|vertex| {
+                    coefficients[axis][vertex] as f64 * f64::from(coordinates[vertex][channel])
+                })
+                .sum::<f64>()
+                * 256.0
+                / area as f64) as f32
+        })
+    })
+}
 fn top_left(a: [i64; 2], b: [i64; 2]) -> bool {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
@@ -602,6 +636,9 @@ struct TextureShader<'a> {
 }
 impl FragmentShader for TextureShader<'_> {
     fn sample(&self, uv: [f32; 2]) -> Result<LinearRgba> {
+        self.sample_footprint(uv, [[0.0; 2]; 2])
+    }
+    fn sample_footprint(&self, uv: [f32; 2], derivatives: [[f32; 2]; 2]) -> Result<LinearRgba> {
         // All motion is keyed by frame time and absolute world coordinates.
         // Camera motion has no effect on material phase.
         let surface_uv = uv;
@@ -632,7 +669,7 @@ impl FragmentShader for TextureShader<'_> {
         } else {
             let color = self
                 .texture
-                .sample_color(uv, self.time)
+                .sample_color_minified(uv, self.time, derivatives)
                 .ok_or_else(|| metadata::invalid("invalid diffuse sample"))?;
             (color.straight(), color.alpha())
         };
@@ -1004,5 +1041,21 @@ mod generated_water_tests {
             generated_water_slopes([-3, -17, 2], [0.375, 0.625], 0.0),
             generated_water_slopes([-3, -17, 2], [0.375, 0.625], 0.4)
         );
+    }
+}
+
+#[cfg(test)]
+mod texture_footprint_tests {
+    use super::{edge, texture_derivatives};
+
+    #[test]
+    fn texture_minification_derivatives_ignore_screen_translation() {
+        let points = [[0, 0], [512, 0], [0, 1024]];
+        let uv = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let area = edge(points[0], points[1], points[2]);
+        let expected = [[0.5, 0.0], [0.0, 0.25]];
+        assert_eq!(texture_derivatives(points, uv, area), expected);
+        let translated = points.map(|point| [point[0] + 12_345, point[1] - 6_789]);
+        assert_eq!(texture_derivatives(translated, uv, area), expected);
     }
 }

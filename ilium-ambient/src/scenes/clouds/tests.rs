@@ -893,15 +893,30 @@ fn progress_text_counts_frames() {
             seen.push(progress.clone());
         }
     }
+    let observed_counts: Vec<(usize, usize)> = seen
+        .iter()
+        .filter_map(|text| text.strip_prefix("Downloading frame "))
+        .filter_map(|count| count.split_once('/'))
+        .filter_map(|(completed, total)| Some((completed.parse().ok()?, total.parse().ok()?)))
+        .collect();
+    assert!(!observed_counts.is_empty(), "{seen:?}");
     assert!(
-        seen.iter()
-            .any(|text| text.starts_with("Downloading frame 1/")),
-        "{seen:?}"
+        observed_counts
+            .iter()
+            .all(|(completed, total)| *completed > 0 && completed <= total),
+        "{observed_counts:?}"
     );
     assert!(
-        seen.iter()
-            .any(|text| text.starts_with("Downloading frame 2/")),
-        "{seen:?}"
+        observed_counts
+            .windows(2)
+            .all(|pair| { pair[0].0 <= pair[1].0 && pair[0].1 == pair[1].1 }),
+        "{observed_counts:?}"
+    );
+    assert!(
+        observed_counts
+            .iter()
+            .any(|(completed, total)| completed < total),
+        "progress should be visible before all frames finish: {observed_counts:?}"
     );
 }
 

@@ -220,10 +220,17 @@ impl OpenStreetMapSettings {
                 names.push("Unknown saved list (choose another)");
                 names.len() - 1
             });
-        let mut rows = vec![Control::choice(
+        let mut list_control = Control::choice(
             "place_list", "Tour list", index, &names,
             "The offline themes use bundled OSM extracts. Other themes require an authorized Overpass service; lists never geocode or prefetch.",
-        )];
+        );
+        if index == available.len() {
+            list_control = list_control.with_disabled_option(
+                index,
+                "Saved list is unavailable for this map source; choose a listed theme to replace it.",
+            );
+        }
+        let mut rows = vec![list_control];
         if let Some(list) = self
             .active_list()
             .ok()
@@ -234,12 +241,20 @@ impl OpenStreetMapSettings {
                 .iter()
                 .filter_map(|id| places::destination(id).map(|place| place.label))
                 .collect();
+            let available_destinations = labels.len();
             let index = self.selected_list_index().unwrap_or_else(|_| {
                 labels.push("Unknown saved destination (choose another)");
                 labels.len() - 1
             });
-            rows.push(Control::choice("destination", "Starting place", index, &labels,
-                "Choose the first stop or the held place. Stable destination IDs are saved, not the visible row index."));
+            let mut destination_control = Control::choice("destination", "Starting place", index, &labels,
+                "Choose the first stop or the held place. Stable destination IDs are saved, not the visible row index.");
+            if index == available_destinations {
+                destination_control = destination_control.with_disabled_option(
+                    index,
+                    "Saved destination is unavailable in this list; choose a listed place to replace it.",
+                );
+            }
+            rows.push(destination_control);
         }
         rows.extend([
             Control::choice("tour", "Place selection", self.tour, &["Selected place", "Ordered tour", "Shuffled tour"],
@@ -841,5 +856,51 @@ mod selection_tests {
             .unwrap();
         assert_eq!(settings.place_list, places::OFFLINE_LIST_ID);
         assert_eq!(settings.selection, SelectionMode::List);
+    }
+
+    #[test]
+    fn unknown_saved_choices_are_visible_but_cannot_be_selected() {
+        for (id, settings) in [
+            (
+                "place_list",
+                OpenStreetMapSettings {
+                    place_list: "removed-theme".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "destination",
+                OpenStreetMapSettings {
+                    selection: SelectionMode::List,
+                    destination_id: "removed-destination".into(),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let row = settings
+                .controls()
+                .into_iter()
+                .find(|row| row.id == id)
+                .unwrap();
+            let ControlValue::Index(placeholder) = row.value else {
+                panic!("expected choice");
+            };
+            assert!(row.display_value().starts_with("Unknown saved"));
+            assert!(
+                row.disabled_reason(placeholder).is_some(),
+                "{id}: stale saved value was advertised as selectable"
+            );
+            for direction in [-1, 1] {
+                let value = row.stepped(direction).unwrap();
+                assert_ne!(value, ControlValue::Index(placeholder));
+                let mut next = settings.clone();
+                next.set_control(id, value).unwrap();
+            }
+            let mut next = settings.clone();
+            assert!(next
+                .set_control(id, ControlValue::Index(placeholder))
+                .is_err());
+            assert_eq!(next, settings);
+        }
     }
 }

@@ -1201,3 +1201,191 @@ mod bound_tests {
         assert_eq!(bodies.len(), 18);
     }
 }
+
+#[cfg(test)]
+mod plugin_pixel_fixtures {
+    use super::super::{render, CarpetScene, CarpetSettings};
+    use super::*;
+    use crate::{control::SceneSettings, Raster, SceneEnv};
+    use serde_json::{json, Value};
+    use sha2::{Digest, Sha256};
+    use std::{io::Write, path::PathBuf, sync::Arc};
+
+    struct Export {
+        root: PathBuf,
+        renderer: render::Renderer,
+        raster: Raster,
+        render_options: render::RenderOptions,
+        samples: Vec<Value>,
+    }
+
+    impl Export {
+        fn capture(
+            &mut self,
+            chess: &mut CarpetChess,
+            options: &ChessOptions,
+            case: &str,
+            time: f64,
+            input: Value,
+        ) {
+            assert!(chess.live.is_none(), "fixture must never acquire a TV feed");
+            let mut bodies = Vec::new();
+            chess.append_bodies(options, time, &mut bodies);
+            // Match CarpetScene::render's geometry-to-height-field boundary.
+            // Keep the raw bodies below for the separate simulation comparison.
+            let mut render_bodies = bodies.clone();
+            for body in &mut render_bodies {
+                body.height /= super::super::MAX_BODY_HEIGHT;
+            }
+            self.renderer
+                .render(&mut self.raster, &render_bodies, &self.render_options);
+            assert!(self.raster.dots.iter().all(|dot| dot.is_finite()));
+            let name = format!("sample-{:03}.f32", self.samples.len());
+            let bytes: Vec<u8> = self
+                .raster
+                .dots
+                .iter()
+                .flat_map(|dot| dot.to_le_bytes())
+                .collect();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(self.root.join(&name))
+                .unwrap()
+                .write_all(&bytes)
+                .unwrap();
+            self.samples.push(json!({
+                "case": case, "time": time, "input": input, "file": name,
+                "sha256": format!("{:x}", Sha256::digest(&bytes)),
+                "bodies": bodies.iter().map(|body| json!({
+                    "from": body.from, "to": body.to,
+                    "radius": body.radius, "height": body.height,
+                })).collect::<Vec<_>>(),
+            }));
+        }
+    }
+
+    #[test]
+    #[ignore = "exports native Chess/TV component pixels to a new explicit fixture directory"]
+    fn export_actual_chess_and_tv_pixels_for_plugin_comparison() {
+        let root = PathBuf::from(
+            std::env::var_os("ILIUM_CARPET_NATIVE_FIXTURES")
+                .expect("provide an absolute, nonexistent fixture directory"),
+        );
+        assert!(root.is_absolute());
+        // Never overwrite an earlier capture or write inside a user save.
+        std::fs::create_dir(&root).unwrap();
+        let settings = CarpetSettings::default().normalized();
+        let resources = crate::resources::test_resources();
+        let environment = SceneEnv::for_test(root.join("unused-cache"), resources.clone());
+        let scene = CarpetScene::new(&settings, &environment);
+        let options = scene.chess_options();
+        let mut raster = Raster::default();
+        raster.resize(96, 64);
+        let mut export = Export {
+            root: root.clone(),
+            renderer: render::Renderer::default(),
+            raster,
+            render_options: scene.render_options(),
+            samples: Vec::new(),
+        };
+        let mut automatic = CarpetChess::new(settings.seed as u64, resources.clone());
+        let mut unused = Vec::new();
+        automatic.update(false, &options, 0.0, 0.0, &mut unused);
+        export.capture(
+            &mut automatic,
+            &options,
+            "automatic",
+            0.0,
+            json!({"mode":3,"operation":"update"}),
+        );
+        for ply in 0..4 {
+            let start = f64::from(ply + 1) * 2.5;
+            unused.clear();
+            automatic.update(false, &options, start, 0.0, &mut unused);
+            assert!(automatic.pending.is_some());
+            // This waits for the actual admitted native AI job, rather than
+            // duplicating its search or guessing completion from frame count.
+            automatic.wait_for_move(&options, start);
+            assert_eq!(automatic.plies, ply + 1);
+            export.capture(
+                &mut automatic,
+                &options,
+                "automatic",
+                start,
+                json!({"mode":3,"operation":"complete_search"}),
+            );
+            for fraction in [0.5, 1.0] {
+                let time = start + options.easing_duration * fraction;
+                export.capture(
+                    &mut automatic,
+                    &options,
+                    "automatic",
+                    time,
+                    json!({"mode":3,"operation":"sample"}),
+                );
+            }
+        }
+        for (case, before, after) in [
+            (
+                "castling",
+                "4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1",
+                "4k3/8/8/8/8/8/8/R4RK1 b - - 1 1",
+            ),
+            (
+                "capture",
+                "4k3/8/8/4p3/3P4/8/8/4K3 w - - 0 1",
+                "4k3/8/8/4P3/8/8/8/4K3 b - - 0 1",
+            ),
+            (
+                "promotion",
+                "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+                "Q3k3/8/8/8/8/8/8/4K3 b - - 0 1",
+            ),
+        ] {
+            let mut television = CarpetChess::new(settings.seed as u64, resources.clone());
+            for (time, fen) in [
+                (0.0, before),
+                (1.0, after),
+                (1.0 + options.easing_duration * 0.5, after),
+                (1.0 + options.easing_duration, after),
+            ] {
+                let snapshot = TvSnapshot {
+                    game: Some(Arc::new(crate::live_chess::feed::Game {
+                        id: case.into(),
+                        position: ChessPosition::from_fen(fen).unwrap(),
+                        white_seconds: None,
+                        black_seconds: None,
+                        last_move: None,
+                    })),
+                    ..TvSnapshot::default()
+                };
+                television.accept_snapshot(&snapshot, &options, time, 0.0);
+                export.capture(
+                    &mut television,
+                    &options,
+                    case,
+                    time,
+                    json!({"mode":4,"operation":"snapshot","fen":fen,"game_id":case}),
+                );
+            }
+        }
+        let manifest = json!({
+            "schema":1,"width":96,"height":64,"settings":settings,
+            "scope":"actual native AI/snapshot transitions and Carpet renderer; synthetic TV positions; no network, V8 or terminal acceptance",
+            "samples":export.samples,
+        });
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(root.join("manifest.json"))
+            .unwrap()
+            .write_all(&serde_json::to_vec_pretty(&manifest).unwrap())
+            .unwrap();
+        println!(
+            "{}",
+            json!({"type":"artifact","path":root,"samples":25,
+            "native_component_pixels":true,"actual_terminal_emission_proven":false})
+        );
+    }
+}

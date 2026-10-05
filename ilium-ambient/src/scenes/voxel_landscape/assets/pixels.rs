@@ -153,8 +153,11 @@ impl PixelImage {
         let mut rgba = zeroed_bytes(rgba_len)?;
         let mut info = DecodeInfo {
             source_bits_per_channel: (bytes_per_channel * 8) as u8,
-            alpha_min: 255, alpha_max: 0,
-            zero_alpha_pixels: 0, partially_transparent_pixels: 0, opaque_pixels: 0,
+            alpha_min: 255,
+            alpha_max: 0,
+            zero_alpha_pixels: 0,
+            partially_transparent_pixels: 0,
+            opaque_pixels: 0,
             omitted_ancillary_chunks: sanitized.omitted,
             omitted_ancillary_kinds: sanitized.kinds.iter().cloned().collect(),
             color_policy: "retain raw color channels; color sampler assumes sRGB; data sampler stays linear; 16-bit channels round to nearest 8-bit UNORM; ancillary color/text metadata is not interpreted",

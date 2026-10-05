@@ -867,4 +867,23 @@ mod quiet_catalog_tests {
             }
         }
     }
+
+    #[test]
+    fn saved_map_source_reaches_saved_scene_without_opening_a_world() {
+        let mut settings = AmbientSettings::default();
+        settings.voxel_landscape.saved_maps.source =
+            crate::minecraft::settings::WorldSource::SavedMaps;
+        settings.voxel_landscape.saved_maps.saves_folder = "relative/saves".into();
+        let environment = crate::scene::SceneEnv::for_test(
+            std::env::temp_dir(),
+            crate::resources::test_resources(),
+        );
+
+        let scene = settings.create_scene(AmbientKind::VoxelLandscape, &environment);
+
+        assert_eq!(
+            scene.status().as_deref(),
+            Some("Saved maps folder must be an absolute path, or blank for automatic discovery")
+        );
+    }
 }
