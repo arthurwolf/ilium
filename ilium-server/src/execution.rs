@@ -11,6 +11,7 @@ const MIB: usize = 1024 * 1024;
 // Distinct tenants reserve output headroom even while request handlers wait
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
+const ADMISSION_WAIT_REPORT: std::time::Duration = std::time::Duration::from_secs(2);
 const GENERAL_INPUT_BYTES: usize = 512 * MIB;
 const GENERAL_RESULT_BYTES: usize = 128 * MIB;
 const PROCESS_INPUT_BYTES: usize = GENERAL_INPUT_BYTES + 4 * 128 * MIB + 2 * 128 * MIB;
@@ -265,11 +266,23 @@ impl ExecutionClient {
                     tokio::time::sleep(std::time::Duration::from_millis(1)).await
                 }
                 Err(
-                    ilium_execution::RejectReason::QueueFull
+                    reason @ (ilium_execution::RejectReason::QueueFull
                     | ilium_execution::RejectReason::JobLimit
                     | ilium_execution::RejectReason::InputBytes
-                    | ilium_execution::RejectReason::ResultBytes,
-                ) => notified.await,
+                    | ilium_execution::RejectReason::ResultBytes),
+                ) => {
+                    // A stalled admission is otherwise invisible: report it
+                    // with the process-wide ledger, then keep waiting.
+                    if tokio::time::timeout(ADMISSION_WAIT_REPORT, notified)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(
+                            ?lane, ?cost, ?reason, ledger = ?self.quota.snapshot(),
+                            "execution admission has been waiting for capacity"
+                        );
+                    }
+                }
                 Err(error) => return Err(error),
             }
         }

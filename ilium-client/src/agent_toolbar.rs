@@ -423,7 +423,10 @@ pub fn tooltip_for(
         AgentToolbarAction::CopyLastMessage => {
             "Copy the agent's last message (sends /copy)".to_string()
         }
-        AgentToolbarAction::Compact => "Compact the conversation (sends /compact)".to_string(),
+        AgentToolbarAction::Compact => {
+            "Compact the conversation (remote model when enabled in settings, else /compact)"
+                .to_string()
+        }
         AgentToolbarAction::Clear => "Clear the conversation (sends /clear)".to_string(),
         AgentToolbarAction::Config => "Open configuration (sends /config)".to_string(),
         AgentToolbarAction::Exit => "Exit the agent".to_string(),

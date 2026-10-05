@@ -304,7 +304,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 setup = t.elapsed();
             })?;
             if let Some(presentation) = presentation {
-                app.animation_frame.acknowledge(presentation);
+                // This synthetic native-scene benchmark does not issue replay flush proofs.
+                app.animation_frame.acknowledge(presentation, None);
             }
             let total = start.elapsed();
             let pipeline_elapsed = pipeline_start.elapsed();

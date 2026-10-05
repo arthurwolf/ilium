@@ -8,7 +8,8 @@
 //! crate never touches rendering or input dispatch.
 
 use std::borrow::Cow;
-use std::io::Write;
+use std::io::{Read, Write};
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -18,6 +19,9 @@ use ilium_sound::SoundSettings;
 use serde::Deserialize;
 
 use crate::error::{ConfigLoadError, ServerError};
+
+/// Shared with the client config reader: refuse oversized input before parsing.
+pub(crate) const MAX_CONFIG_BYTES: usize = 256 * 1024;
 
 /// How often the detection loop re-checks a pane, per its last-observed
 /// activity. Values below a few hundred milliseconds are clamped up at
@@ -365,7 +369,7 @@ pub fn save_agent_detection_settings(
             message: format!("could not lock config file: {error}"),
         }
     })?;
-    let mut document = match std::fs::read_to_string(&path) {
+    let mut document = match read_contents(&path) {
         Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|error| {
             ilium_ipc::AgentDetectionSettingsError {
                 message: format!("could not parse config.toml: {error}"),
@@ -442,6 +446,11 @@ pub fn save_agent_detection_settings(
             message: format!("could not serialize config.toml: {error}"),
         }
     })?;
+    if serialized.len() > MAX_CONFIG_BYTES {
+        return Err(ilium_ipc::AgentDetectionSettingsError {
+            message: "updated config.toml exceeds the 256 KiB allocation limit".to_owned(),
+        });
+    }
     secure_fs::create_private_directory(config_dir).map_err(|error| {
         ilium_ipc::AgentDetectionSettingsError {
             message: format!("could not prepare config directory: {error}"),
@@ -530,7 +539,7 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
     // `exists()` folding every stat error -- including a permission problem
     // on the file or a parent directory -- into "missing," which would boot
     // silently on defaults instead of surfacing a real `ConfigLoadError::Read`.
-    let contents = match std::fs::read_to_string(&path) {
+    let contents = match read_contents(&path) {
         Ok(contents) => contents,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ServerConfig::default());
@@ -542,7 +551,28 @@ pub fn load(config_dir: &Path) -> Result<ServerConfig, ServerError> {
             });
         }
     };
-    let raw: RawConfig = toml::from_str(&contents).map_err(|source| ServerError::ConfigLoad {
+    parse_contents(&path, &contents)
+}
+
+/// Match the client reader bound. Open once and reject overflow/invalid UTF-8
+/// before parsing; an oversized file never becomes a truncated valid config.
+pub(crate) fn read_contents(path: &Path) -> std::io::Result<String> {
+    let file = std::fs::File::open(path)?;
+    let mut contents = String::new();
+    file.take((MAX_CONFIG_BYTES + 1) as u64)
+        .read_to_string(&mut contents)?;
+    if contents.len() > MAX_CONFIG_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "config.toml exceeds the 256 KiB allocation limit",
+        ));
+    }
+    Ok(contents)
+}
+
+pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig, ServerError> {
+    let path = path.to_path_buf();
+    let raw: RawConfig = toml::from_str(contents).map_err(|source| ServerError::ConfigLoad {
         path: path.clone(),
         source: Box::new(ConfigLoadError::Parse(source)),
     })?;
@@ -884,7 +914,7 @@ mod tests {
 
         save_agent_detection_settings(&dir, &settings).expect("save detection settings");
 
-        let contents = std::fs::read_to_string(&path).expect("read saved config");
+        let contents = read_contents(&path).expect("read saved config");
         let document: toml::Value = toml::from_str(&contents).expect("parse saved config");
         assert_eq!(document["voice"]["locale"].as_str(), Some("en"));
         assert_eq!(
@@ -1061,5 +1091,26 @@ mod tests {
             config.session_recovery,
             SessionRecoveryConfig::AskBeforeRestore
         );
+    }
+
+    #[test]
+    fn reader_rejects_overflow_without_parsing_a_truncated_valid_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, format!("#{}", "x".repeat(MAX_CONFIG_BYTES))).unwrap();
+        assert_eq!(
+            read_contents(&path).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(load(dir.path()).is_err());
+    }
+    #[test]
+    fn reader_accepts_the_exact_bound_and_retains_missing_default_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load(dir.path()).is_ok());
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, format!("#{}", "x".repeat(MAX_CONFIG_BYTES - 1))).unwrap();
+        assert_eq!(read_contents(&path).unwrap().len(), MAX_CONFIG_BYTES);
+        assert!(load(dir.path()).is_ok());
     }
 }

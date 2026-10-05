@@ -77,6 +77,7 @@ struct WorkerCompletion {
     // Completion must survive destruction of record-owned wake captures.
     exit: Mutex<Option<WorkerExit>>, // Publish only after native join and custody retirement.
     changed: Condvar, // Wake existing blocking observers without another helper thread.
+    on_exit: Option<Arc<dyn Fn() + Send + Sync>>, // One finite hint only after physical join.
 } // End the completion cell.
   //
 struct WorkerState {
@@ -370,13 +371,27 @@ pub fn reserve_owned_worker<C: Send + 'static>(
 impl<C: Send + 'static> WorkerReservation<C> {
     // One reservation starts at most one native worker.
     pub fn spawn(
-        // Call only after all required admissions and capture preparation have succeeded.
-        mut self,   // Consume the original slot so it cannot be reused for a second thread.
-        name: &str, // Preserve the existing thread naming interface.
-        kind: WorkerKind, // Preserve cooperative versus synchronous-I/O cancellation.
-        stop: StopToken, // Keep the caller's original cancellation lineage.
-        wake: impl Fn() + Send + Sync + 'static, // The original bounded nonblocking wake contract still applies.
-        body: impl FnOnce(StopToken) + Send + 'static, // The native body executes exactly once if spawned.
+        // Keep the original public spawn contract for existing owners.
+        self,
+        name: &str,
+        kind: WorkerKind,
+        stop: StopToken,
+        wake: impl Fn() + Send + Sync + 'static,
+        body: impl FnOnce(StopToken) + Send + 'static,
+    ) -> io::Result<OwnedWorker> {
+        self.spawn_with_completion(name, kind, stop, wake, body, None)
+    }
+
+    /// The supervisor invokes this optional hint only after the native join and
+    /// custody retirement have been published.
+    pub fn spawn_with_completion(
+        mut self,
+        name: &str,
+        kind: WorkerKind,
+        stop: StopToken,
+        wake: impl Fn() + Send + Sync + 'static,
+        body: impl FnOnce(StopToken) + Send + 'static,
+        on_exit: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> io::Result<OwnedWorker> {
         // Native failure leaves no registered handle and releases the unused slot.
         if name.as_bytes().contains(&0) {
@@ -398,6 +413,7 @@ impl<C: Send + 'static> WorkerReservation<C> {
                 // Separate final observation from wake ownership.
                 exit: Mutex::new(None), // Callback return cannot publish a joined outcome.
                 changed: Condvar::new(), // Reuse the existing background join-wait interface.
+                on_exit, // Keep an optional hint outside the native worker's physical custody.
             }), // Finish independent completion state.
             metadata: WorkerMetadata {
                 // Describe the request actually used for this native body.
@@ -464,7 +480,6 @@ impl<C: Send + 'static> Drop for WorkerReservation<C> {
         self.supervisor.changed.notify_all(); // Prompt observers after unused capacity becomes available.
     } // Custody is destroyed after this method returns with no registry lock held.
 } // End unused-reservation rollback.
-
 /// Start only after reserving a registry slot. Both live and retiring workers
 /// count against the cap; a hung kernel cannot cause unbounded thread growth.
 /// `wake` must be nonblocking and must not acquire any parser/registry lock.
@@ -476,6 +491,24 @@ pub fn spawn_owned(
     body: impl FnOnce(StopToken) + Send + 'static,
 ) -> io::Result<OwnedWorker> {
     reserve_owned_worker(None, ())?.spawn(name, kind, stop, wake, body) // Preserve every legacy caller signature.
+}
+
+pub fn spawn_owned_with_completion(
+    name: &str,
+    kind: WorkerKind,
+    stop: StopToken,
+    wake: impl Fn() + Send + Sync + 'static,
+    body: impl FnOnce(StopToken) + Send + 'static,
+    on_exit: Arc<dyn Fn() + Send + Sync>,
+) -> io::Result<OwnedWorker> {
+    reserve_owned_worker(None, ())?.spawn_with_completion(
+        name,
+        kind,
+        stop,
+        wake,
+        body,
+        Some(on_exit),
+    )
 }
 
 pub fn registered_worker_count() -> usize {
@@ -585,6 +618,11 @@ fn supervise(state: Arc<SupervisorState>, mut wakes: Vec<Arc<dyn Fn() + Send + S
             .unwrap_or_else(|error| error.into_inner()) = Some(exit); // Publish only the proved outcome.
         completion.changed.notify_all(); // Wake existing join observers after all record custody has retired.
         state.changed.notify_all(); // Expose newly available registry capacity to later callers.
+        let on_exit = completion.on_exit.as_ref().map(Arc::clone);
+        drop(registry);
+        if let Some(on_exit) = on_exit {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| on_exit()));
+        }
     } // Release the short registry guard before beginning the next scan.
 } // End the single native retirement supervisor.
 
@@ -685,6 +723,42 @@ mod supervisor_panic_retirement_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_hint_follows_physical_join_and_custody_retirement() {
+        use std::sync::atomic::AtomicUsize;
+        struct Admission(Arc<AtomicUsize>);
+        impl Drop for Admission {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+        let remaining = Arc::new(AtomicUsize::new(1));
+        let observed = Arc::clone(&remaining);
+        let (release, wait) = std::sync::mpsc::sync_channel(1);
+        let (notified, notification) = std::sync::mpsc::sync_channel(1);
+        let worker = reserve_owned_worker(None, Admission(remaining))
+            .unwrap()
+            .spawn_with_completion(
+                "post-join-video-hint",
+                WorkerKind::Cooperative,
+                StopToken::default(),
+                || {},
+                move |_| {
+                    let _ = wait.recv();
+                },
+                Some(Arc::new(move || {
+                    let _ = notified.try_send(observed.load(Ordering::Acquire));
+                })),
+            )
+            .unwrap();
+        let ticket = worker.ticket();
+        drop(worker);
+        assert_eq!(ticket.exit(), None);
+        release.send(()).unwrap();
+        assert_eq!(notification.recv_timeout(Duration::from_secs(5)), Ok(0));
+        assert_eq!(ticket.exit(), Some(WorkerExit::Joined));
+    }
 
     #[test]
     fn actual_join_releases_supervisor_custody_before_last_ticket_is_dropped() {

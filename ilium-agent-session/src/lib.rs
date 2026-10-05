@@ -26,6 +26,61 @@ pub struct VerifiedTranscript {
     pub path: PathBuf,
 }
 
+/// Raw first-record evidence, not a verified transcript or exclusive claim.
+/// Canonical project/store checks belong to the filesystem adapter. For an
+/// Antigravity history record, a missing workspace is authoritative refusal
+/// for that conversation; a later record must not repair that first binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptIdentity {
+    pub session_id: String,
+    pub project_cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataParseFailure {
+    Cancelled,
+    AdmissionRefused,
+    WorkerFailed,
+}
+
+/// Caller-owned CPU service. Ownership of the actual bounded line transfers
+/// to this service; it returns only typed identity evidence. No library pool,
+/// parser thread, or implicit unbounded channel is created by the locator.
+pub trait TranscriptMetadataParser: std::fmt::Debug + Send + Sync {
+    fn parse(
+        &self,
+        class: &AgentClass,
+        line: Vec<u8>,
+    ) -> Result<Option<TranscriptIdentity>, MetadataParseFailure>;
+}
+
+/// Parses one already-admitted metadata line without accessing the filesystem.
+/// Worker callers run this on CPU, reserving parser peak and result storage
+/// before submission. None means no authoritative record in this line, never
+/// proof of unique ownership or completion of a bounded discovery attempt.
+pub fn parse_transcript_identity(class: &AgentClass, line: &[u8]) -> Option<TranscriptIdentity> {
+    let entry = serde_json::from_slice::<Value>(line).ok()?;
+    let (session_id, project_cwd) = match class {
+        AgentClass::Claude => {
+            let (session_id, cwd) = claude_identity(&entry)?;
+            (session_id, Some(cwd))
+        }
+        AgentClass::Codex => {
+            let (session_id, cwd) = codex_identity(&entry)?;
+            (session_id, Some(cwd))
+        }
+        AgentClass::Antigravity => (
+            entry.get("conversationId")?.as_str()?,
+            entry.get("workspace").and_then(Value::as_str),
+        ),
+        AgentClass::Other(_) => return None,
+    };
+    Some(TranscriptIdentity {
+        session_id: session_id.to_string(),
+        project_cwd: project_cwd.map(str::to_string),
+    })
+}
+
 /// Cooperative upper bounds for one complete transcript-discovery attempt.
 #[derive(Debug, Clone, Copy)]
 pub struct TranscriptReadLimits {
@@ -41,6 +96,7 @@ struct TranscriptReadBudget {
     entries: std::sync::atomic::AtomicUsize,
     path_bytes: std::sync::atomic::AtomicUsize,
     exhausted: std::sync::atomic::AtomicBool,
+    parser_failure: std::sync::atomic::AtomicU8,
 }
 impl TranscriptReadBudget {
     fn new(limits: TranscriptReadLimits) -> Self {
@@ -50,6 +106,7 @@ impl TranscriptReadBudget {
             entries: 0.into(),
             path_bytes: 0.into(),
             exhausted: false.into(),
+            parser_failure: 0.into(),
         }
     }
     fn charge(&self, counter: &std::sync::atomic::AtomicUsize, bytes: usize, limit: usize) -> bool {
@@ -73,6 +130,33 @@ impl TranscriptReadBudget {
             .store(true, std::sync::atomic::Ordering::Release);
         std::io::Error::other("transcript discovery resource limit reached")
     }
+    fn note_parser_failure(&self, reason: MetadataParseFailure) {
+        use std::sync::atomic::Ordering;
+        let value = match reason {
+            MetadataParseFailure::Cancelled => 1,
+            MetadataParseFailure::AdmissionRefused => 2,
+            MetadataParseFailure::WorkerFailed => 3,
+        };
+        let _ = self
+            .parser_failure
+            .compare_exchange(0, value, Ordering::AcqRel, Ordering::Acquire);
+        self.exhausted.store(true, Ordering::Release);
+    }
+}
+fn parse_bounded_identity(
+    class: &AgentClass,
+    line: Vec<u8>,
+    budget: &TranscriptReadBudget,
+    parser: Option<&dyn TranscriptMetadataParser>,
+) -> Result<Option<TranscriptIdentity>, MetadataParseFailure> {
+    let result = match parser {
+        Some(parser) => parser.parse(class, line),
+        None => Ok(parse_transcript_identity(class, &line)),
+    };
+    if let Err(reason) = &result {
+        budget.note_parser_failure(*reason);
+    }
+    result
 }
 fn bounded_line(
     reader: &mut impl BufRead,
@@ -107,23 +191,21 @@ fn transcript_metadata_matches_bounded(
     expected_session_id: &str,
     expected_project_cwd: &Path,
     budget: &TranscriptReadBudget,
+    parser: Option<&dyn TranscriptMetadataParser>,
 ) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
     let mut reader = BufReader::new(file);
     while let Ok(Some(line)) = bounded_line(&mut reader, budget) {
-        let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
-            continue;
+        let Ok(identity) = parse_bounded_identity(class, line, budget, parser) else {
+            return false;
         };
-        let identity = match class {
-            AgentClass::Claude => claude_identity(&entry),
-            AgentClass::Codex => codex_identity(&entry),
-            _ => None,
-        };
-        if let Some((session_id, cwd)) = identity {
-            return session_id == expected_session_id
-                && same_canonical_project(Path::new(cwd), expected_project_cwd);
+        if let Some(identity) = identity {
+            return identity.session_id == expected_session_id
+                && identity.project_cwd.as_deref().is_some_and(|cwd| {
+                    same_canonical_project(Path::new(cwd), expected_project_cwd)
+                });
         }
     }
     false
@@ -180,6 +262,7 @@ pub struct TranscriptLocator {
     home: PathBuf,
     project_cwd: PathBuf,
     read_budget: Option<std::sync::Arc<TranscriptReadBudget>>,
+    metadata_parser: Option<std::sync::Arc<dyn TranscriptMetadataParser>>,
 }
 
 impl TranscriptLocator {
@@ -189,6 +272,7 @@ impl TranscriptLocator {
             home: home.to_path_buf(),
             project_cwd: canonical_or_original(project_cwd),
             read_budget: None,
+            metadata_parser: None,
         }
     }
 
@@ -204,10 +288,37 @@ impl TranscriptLocator {
             home: self.home.clone(),
             project_cwd: self.project_cwd.clone(),
             read_budget: Some(std::sync::Arc::new(TranscriptReadBudget::new(limits))),
+            metadata_parser: self.metadata_parser.clone(),
         }
     }
     pub fn read_limits(&self) -> Option<TranscriptReadLimits> {
         self.read_budget.as_ref().map(|budget| budget.limits)
+    }
+    /// Installs an explicitly owned CPU parser only on a bounded attempt.
+    /// The caller must run discovery on its admitted I/O owner and provide a
+    /// parser service with independent cancellation and completion custody.
+    pub fn with_metadata_parser(
+        mut self,
+        parser: std::sync::Arc<dyn TranscriptMetadataParser>,
+    ) -> Result<Self, MetadataParseFailure> {
+        if self.read_budget.is_none() {
+            return Err(MetadataParseFailure::AdmissionRefused);
+        }
+        self.metadata_parser = Some(parser);
+        Ok(self)
+    }
+    pub fn metadata_parse_failure(&self) -> Option<MetadataParseFailure> {
+        let value = self
+            .read_budget
+            .as_ref()?
+            .parser_failure
+            .load(std::sync::atomic::Ordering::Acquire);
+        match value {
+            1 => Some(MetadataParseFailure::Cancelled),
+            2 => Some(MetadataParseFailure::AdmissionRefused),
+            3 => Some(MetadataParseFailure::WorkerFailed),
+            _ => None,
+        }
     }
     /// Adapter overflow invalidates every partial ownership conclusion in the
     /// same bounded attempt, including stronger ranks evaluated earlier.
@@ -282,6 +393,7 @@ impl TranscriptLocator {
                 &session_id,
                 &self.project_cwd,
                 budget,
+                self.metadata_parser.as_deref(),
             ),
             None => transcript_metadata_matches(class, path, &session_id, &self.project_cwd),
         };
@@ -400,19 +512,23 @@ impl TranscriptLocator {
         if let Some(budget) = &self.read_budget {
             let mut reader = BufReader::new(file);
             while let Ok(Some(line)) = bounded_line(&mut reader, budget) {
-                let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
+                let Ok(identity) = parse_bounded_identity(
+                    &AgentClass::Antigravity,
+                    line,
+                    budget,
+                    self.metadata_parser.as_deref(),
+                ) else {
+                    return false;
+                };
+                let Some(identity) = identity else {
                     continue;
                 };
-                if entry.get("conversationId").and_then(Value::as_str) != Some(expected_session_id)
-                {
+                if identity.session_id != expected_session_id {
                     continue;
                 }
-                return entry
-                    .get("workspace")
-                    .and_then(Value::as_str)
-                    .is_some_and(|workspace| {
-                        same_canonical_project(Path::new(workspace), &self.project_cwd)
-                    });
+                return identity.project_cwd.as_deref().is_some_and(|workspace| {
+                    same_canonical_project(Path::new(workspace), &self.project_cwd)
+                });
             }
             return false;
         }
@@ -420,14 +536,16 @@ impl TranscriptLocator {
             .lines()
             .map_while(Result::ok)
             .find_map(|line| {
-                let entry = serde_json::from_str::<Value>(&line).ok()?;
-                let session_id = entry.get("conversationId").and_then(Value::as_str)?;
-                if session_id != expected_session_id {
+                let identity =
+                    parse_transcript_identity(&AgentClass::Antigravity, line.as_bytes())?;
+                if identity.session_id != expected_session_id {
                     return None;
                 }
-                let workspace = entry.get("workspace").and_then(Value::as_str)?;
+                // Preserve the unbounded legacy reader's missing-workspace
+                // behavior; bounded worker discovery rejects the first binding.
+                let workspace = identity.project_cwd?;
                 Some(same_canonical_project(
-                    Path::new(workspace),
+                    Path::new(&workspace),
                     &self.project_cwd,
                 ))
             })
@@ -448,20 +566,14 @@ fn transcript_metadata_matches(
         return false;
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+        let Some(identity) = parse_transcript_identity(class, line.as_bytes()) else {
             continue;
         };
-        let identity = match class {
-            AgentClass::Claude => claude_identity(&entry),
-            AgentClass::Codex => codex_identity(&entry),
-            AgentClass::Antigravity => None,
-            AgentClass::Other(_) => None,
-        };
-        let Some((session_id, cwd)) = identity else {
-            continue;
-        };
-        return session_id == expected_session_id
-            && same_canonical_project(Path::new(cwd), expected_project_cwd);
+        return identity.session_id == expected_session_id
+            && identity
+                .project_cwd
+                .as_deref()
+                .is_some_and(|cwd| same_canonical_project(Path::new(cwd), expected_project_cwd));
     }
     false
 }
@@ -605,6 +717,143 @@ fn looks_like_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_metadata_parser_preserves_unresolved_project_spelling() {
+        let line = br#"{"sessionId":"opaque-id","cwd":"/missing/../project"}"#;
+        assert_eq!(
+            parse_transcript_identity(&AgentClass::Claude, line),
+            Some(TranscriptIdentity {
+                session_id: "opaque-id".into(),
+                project_cwd: Some("/missing/../project".into()),
+            })
+        );
+        assert!(parse_transcript_identity(&AgentClass::Claude, b"\xff").is_none());
+        assert!(
+            parse_transcript_identity(&AgentClass::Claude, br#"{"sessionId":"opaque-id"}"#)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn raw_codex_parser_requires_authoritative_record_shape() {
+        let other = br#"{"type":"event_msg","payload":{"id":"id","cwd":"/project"}}"#;
+        assert!(parse_transcript_identity(&AgentClass::Codex, other).is_none());
+        let metadata = br#"{"type":"session_meta","payload":{"id":"id","cwd":"/project"}}"#;
+        assert_eq!(
+            parse_transcript_identity(&AgentClass::Codex, metadata),
+            Some(TranscriptIdentity {
+                session_id: "id".into(),
+                project_cwd: Some("/project".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn raw_history_parser_retains_missing_workspace_refusal() {
+        let line = br#"{"conversationId":"id","workspace":null}"#;
+        assert_eq!(
+            parse_transcript_identity(&AgentClass::Antigravity, line),
+            Some(TranscriptIdentity {
+                session_id: "id".into(),
+                project_cwd: None,
+            })
+        );
+    }
+
+    #[derive(Debug)]
+    struct RecordingParser {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        failure: Option<MetadataParseFailure>,
+    }
+    impl TranscriptMetadataParser for RecordingParser {
+        fn parse(
+            &self,
+            class: &AgentClass,
+            line: Vec<u8>,
+        ) -> Result<Option<TranscriptIdentity>, MetadataParseFailure> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            match self.failure {
+                Some(reason) => Err(reason),
+                None => Ok(parse_transcript_identity(class, &line)),
+            }
+        }
+    }
+    fn parser_limits() -> TranscriptReadLimits {
+        TranscriptReadLimits {
+            line_bytes: 16 * 1024,
+            total_read_bytes: 64 * 1024,
+            scanned_entries: 64,
+            retained_path_bytes: 64 * 1024,
+        }
+    }
+
+    #[test]
+    fn bounded_real_transcript_uses_caller_owned_metadata_parser() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        let path = write_claude_transcript(home.path(), project.path(), project.path(), session_id);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let parser = std::sync::Arc::new(RecordingParser {
+            calls: calls.clone(),
+            failure: None,
+        });
+        let locator = TranscriptLocator::new_bounded(home.path(), project.path(), parser_limits())
+            .with_metadata_parser(parser)
+            .unwrap();
+        let verified = locator
+            .transcript_for_session(&AgentClass::Claude, session_id)
+            .unwrap();
+        assert_eq!(verified.path, path);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Acquire), 1);
+        assert_eq!(locator.metadata_parse_failure(), None);
+        assert!(!locator.read_limit_reached());
+    }
+
+    #[test]
+    fn metadata_worker_failure_invalidates_partial_identity_attempt() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session_id = "123e4567-e89b-12d3-a456-426614174000";
+        write_claude_transcript(home.path(), project.path(), project.path(), session_id);
+        for reason in [
+            MetadataParseFailure::Cancelled,
+            MetadataParseFailure::AdmissionRefused,
+            MetadataParseFailure::WorkerFailed,
+        ] {
+            let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let parser = std::sync::Arc::new(RecordingParser {
+                calls: calls.clone(),
+                failure: Some(reason),
+            });
+            let locator =
+                TranscriptLocator::new_bounded(home.path(), project.path(), parser_limits())
+                    .with_metadata_parser(parser)
+                    .unwrap();
+            assert!(locator
+                .transcript_for_session(&AgentClass::Claude, session_id)
+                .is_none());
+            assert!(locator.read_limit_reached());
+            assert_eq!(locator.metadata_parse_failure(), Some(reason));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::Acquire), 1);
+        }
+    }
+
+    #[test]
+    fn unbounded_locator_cannot_install_worker_parser() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let parser = std::sync::Arc::new(RecordingParser {
+            calls: calls.clone(),
+            failure: None,
+        });
+        let locator = TranscriptLocator::new(Path::new("/home"), Path::new("/project"));
+        assert!(matches!(
+            locator.with_metadata_parser(parser),
+            Err(MetadataParseFailure::AdmissionRefused)
+        ));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Acquire), 0);
+    }
 
     #[test]
     fn bounded_discovery_rejects_long_lines_and_partial_directory_scans() {

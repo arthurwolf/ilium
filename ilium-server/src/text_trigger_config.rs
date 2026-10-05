@@ -161,7 +161,10 @@ mod durability_tests {
     }
 
     fn state_at(directory: &Path) -> (Arc<ServerState>, Task<()>) {
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "durability-test".to_owned(),
             session_cwd: directory.to_path_buf(),
@@ -170,7 +173,7 @@ mod durability_tests {
             socket_path: directory.join("unused.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

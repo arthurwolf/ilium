@@ -211,6 +211,8 @@ pub struct KiloGatewayClient {
     /// Full CONNECT URL of a paid proxy this client should route every
     /// request through, when the caller opted into paid-proxy egress.
     proxy_url: Option<String>,
+    /// Overrides `REQUEST_TIMEOUT` for long calls such as transcript summaries.
+    request_timeout: Duration,
 }
 
 impl Default for KiloGatewayClient {
@@ -225,7 +227,14 @@ impl KiloGatewayClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             retry_policy,
             proxy_url: None,
+            request_timeout: REQUEST_TIMEOUT,
         }
+    }
+
+    /// Replaces the whole-request timeout (connect through last body byte).
+    pub fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.request_timeout = request_timeout;
+        self
     }
 
     /// Routes every request this client sends through the given proxy's
@@ -237,7 +246,7 @@ impl KiloGatewayClient {
 
     fn build_agent(&self) -> Result<ureq::Agent, GatewayError> {
         let mut config = ureq::Agent::config_builder()
-            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_global(Some(self.request_timeout))
             .http_status_as_error(false);
         if let Some(proxy_url) = &self.proxy_url {
             let proxy = ureq::Proxy::new(proxy_url).map_err(|error| {
@@ -248,7 +257,7 @@ impl KiloGatewayClient {
             })?;
             config = config.proxy(Some(proxy));
         }
-        Ok(ureq::Agent::new_with_config(config.build()))
+        Ok(ilium_http::agent(config.build()))
     }
 
     /// Sends a non-streaming completion and returns only its assistant text.

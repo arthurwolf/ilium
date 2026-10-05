@@ -2,7 +2,7 @@
 //!
 //! Three ways to choose a place, all ending in the same candidate that
 //! Enter (or the "Use location" button) confirms:
-//! * an address, geocoded on a worker thread this state owns;
+//! * an address, geocoded on the client's owned finite I/O bank;
 //! * a direct "lat, lon" entry, parsed locally (no network);
 //! * a Braille world map with a crosshair (arrows, Shift for big steps, or a
 //!   mouse click).
@@ -10,16 +10,16 @@
 //! Render and input share [`layout`], so hit-testing can never drift from
 //! what is drawn.
 
-use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    mpsc::{self, Receiver, TryRecvError},
-    Arc,
-};
-use std::thread::JoinHandle;
+#[cfg(test)]
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::{path::PathBuf, sync::Arc};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ilium_ambient::{worldmap, AddressProvider, AddressSearchSettings, GeoLocation};
+use ilium_execution::{
+    Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt, RejectReason, Retained,
+    SkipReason, StorageAdmission,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
@@ -38,31 +38,86 @@ use crate::theme;
 const RESULT_ROWS: u16 = 4;
 /// Cells the Shift modifier moves the crosshair per key press.
 const BIG_STEP_CELLS: i32 = 5;
+const MAX_SEARCH_QUERY_BYTES: usize = 64 * 1024;
+const MIB: usize = 1024 * 1024;
+/// Covers the 256 KiB HTTP body, provider parsing and bounded query capture.
+/// This is a cooperative peak declaration, not an allocator or RSS limit.
+const SEARCH_COST: JobCost = JobCost {
+    input_bytes: 16 * MIB,
+    result_bytes: 4 * MIB,
+};
+const SEARCH_RESULT_STORAGE_BYTES: usize = SEARCH_COST.result_bytes;
 
-/// A blocking address lookup, run on a worker thread.
+/// A blocking address lookup, run only on an already-admitted finite I/O worker.
 pub type Searcher = Arc<dyn Fn(&str) -> Result<Vec<GeoLocation>, String> + Send + Sync>;
-
 type SearchResult = Result<Vec<GeoLocation>, String>;
 
-const MAX_SEARCH_WORKERS: usize = 4;
-#[derive(Default)]
-struct SearchGate(AtomicUsize);
-static SEARCH_GATE: std::sync::OnceLock<Arc<SearchGate>> = std::sync::OnceLock::new();
-struct SearchAdmission(Arc<SearchGate>);
-impl SearchGate {
-    fn acquire(self: &Arc<Self>) -> Option<SearchAdmission> {
-        self.0
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < MAX_SEARCH_WORKERS).then_some(count + 1)
-            })
-            .ok()
-            .map(|_| SearchAdmission(Arc::clone(self)))
+struct SearchOutput {
+    results: SearchResult,
+    // Last: the actual allocation is destroyed before its process-root debit.
+    storage: Arc<StorageAdmission>,
+}
+struct SearchTask {
+    query: Arc<str>,
+    searcher: Searcher,
+    // Reserved before copying the query or publishing the job.
+    storage: Arc<StorageAdmission>,
+}
+impl Job for SearchTask {
+    type Output = SearchOutput;
+    type Error = String;
+
+    fn run(self, context: JobContext) -> Result<Self::Output, Self::Error> {
+        if context.stop_requested() {
+            return Err("Address search cancelled".into());
+        }
+        let results = (self.searcher)(&self.query);
+        if context.stop_requested() {
+            return Err("Address search cancelled".into());
+        }
+        let bytes = match &results {
+            Ok(results) => retained_result_bytes(results, results.capacity()),
+            Err(message) => std::mem::size_of::<SearchOutput>().checked_add(message.capacity()),
+        }
+        .ok_or("Address search result size overflow")?;
+        if bytes > context.cost().result_bytes {
+            return Err("Address search result exceeds admitted storage".into());
+        }
+        Ok(SearchOutput {
+            results,
+            storage: self.storage,
+        })
     }
 }
-impl Drop for SearchAdmission {
-    fn drop(&mut self) {
-        let gate = &self.0;
-        gate.0.fetch_sub(1, Ordering::AcqRel);
+
+/// Include the installed vector and one selected-label copy, which may outlive
+/// the result list as the map candidate. No extra heap copy inherits this debit.
+fn retained_result_bytes(results: &[GeoLocation], capacity: usize) -> Option<usize> {
+    let vector = capacity.checked_mul(std::mem::size_of::<GeoLocation>())?;
+    let labels = results.iter().try_fold(0usize, |total, location| {
+        total.checked_add(location.label.capacity())
+    })?;
+    let candidate = results
+        .iter()
+        .map(|location| location.label.capacity())
+        .max()
+        .unwrap_or(0);
+    std::mem::size_of::<SearchOutput>()
+        .checked_add(vector)?
+        .checked_add(labels)?
+        .checked_add(candidate)
+}
+
+fn search_refusal(reason: RejectReason) -> String {
+    match reason {
+        RejectReason::Closed => "Address search stopped during shutdown".into(),
+        RejectReason::Busy
+        | RejectReason::QueueFull
+        | RejectReason::JobLimit
+        | RejectReason::InputBytes
+        | RejectReason::ResultBytes
+        | RejectReason::WorkerBytes => "Address workers are busy; try again shortly".into(),
+        _ => format!("Address search resources unavailable: {reason:?}"),
     }
 }
 
@@ -87,17 +142,39 @@ pub enum PickerFocus {
 pub enum PickerOutcome {
     Continue,
     Cancel,
-    Confirm(GeoLocation),
+    // The App admits destination storage before copying the candidate.
+    Confirm,
 }
 
-/// One in-flight address search. The worker thread is detached when the job
-/// (or the whole picker) is dropped: the actual worker retains its admission
-/// slot through completion, and a late answer is discarded without blocking UI.
+enum SearchCompletion {
+    Bank(Receipt<SearchTask>),
+    #[cfg(test)]
+    TestChannel(Receiver<SearchResult>),
+}
+
+enum CompletedSearch {
+    Bank(Retained<JobOutcome<SearchTask>>),
+    #[cfg(test)]
+    TestChannel(SearchResult),
+    Lost,
+}
+
+/// One pending search. The existing bank and supervisor retain a blocked
+/// callback after the picker closes; dropping this UI receipt requests stop.
 struct SearchJob {
-    receiver: Receiver<SearchResult>,
-    _worker: Option<JoinHandle<()>>,
-    query: String,
+    query: Arc<str>,
     input_revision: u64,
+    // Last: query allocation dies before a receipt can release its job debit.
+    completion: SearchCompletion,
+}
+impl Drop for SearchJob {
+    fn drop(&mut self) {
+        match &self.completion {
+            SearchCompletion::Bank(receipt) => receipt.cancel(),
+            #[cfg(test)]
+            SearchCompletion::TestChannel(_) => {}
+        }
+    }
 }
 
 pub struct LocationPickerState {
@@ -110,21 +187,38 @@ pub struct LocationPickerState {
     pub status: Option<String>,
     search: Option<SearchJob>,
     searcher: Searcher,
-    search_gate: Arc<SearchGate>,
+    search_client: Option<Client>,
     target: PickerTarget,
     input_revision: u64,
     pending_save: Option<Arc<()>>,
+    // Last: results and selected candidate are destroyed before this debit.
+    results_storage: Option<Arc<StorageAdmission>>,
+    candidate_storage: Option<Arc<StorageAdmission>>,
+    // Provider errors can contain the complete query; keep their source debit
+    // after the finite job retires, just like successful result labels.
+    status_storage: Option<Arc<StorageAdmission>>,
 }
 
 impl LocationPickerState {
-    pub fn new(current: GeoLocation) -> Self {
-        Self::with_searcher(
+    pub fn new(current: GeoLocation, search_client: Option<Client>) -> Self {
+        Self::with_searcher_and_client(
             current,
             Arc::new(|query: &str| ilium_ambient::geocode::search(query)),
+            search_client,
         )
     }
 
+    /// Test searchers still execute on a real, shared client bank.
+    #[cfg(test)]
     pub fn with_searcher(current: GeoLocation, searcher: Searcher) -> Self {
+        Self::with_searcher_and_client(current, searcher, Some(crate::execution::test_client()))
+    }
+
+    fn with_searcher_and_client(
+        current: GeoLocation,
+        searcher: Searcher,
+        search_client: Option<Client>,
+    ) -> Self {
         Self {
             input: TextPromptState::new(""),
             results: Vec::new(),
@@ -134,23 +228,36 @@ impl LocationPickerState {
             status: None,
             search: None,
             searcher,
-            search_gate: Arc::clone(SEARCH_GATE.get_or_init(|| Arc::new(SearchGate::default()))),
+            search_client,
             target: PickerTarget::SharedObserver,
             input_revision: 0,
             pending_save: None,
+            results_storage: None,
+            candidate_storage: None,
+            status_storage: None,
         }
     }
 
     pub fn for_openstreetmap(
         current: GeoLocation,
         project_path: PathBuf,
-        settings: AddressSearchSettings,
+        settings: &AddressSearchSettings,
+        search_client: Option<Client>,
     ) -> Self {
         let search_provider = settings.provider;
-        let searcher: Searcher = Arc::new(move |query| {
-            ilium_ambient::openstreetmap_address_search::search(&settings, query)
-        });
-        let mut picker = Self::with_searcher(current, searcher);
+        // Settings can be loaded from disk. Bound this picker snapshot before
+        // allocating its owned copy; invalid endpoints remain editable and
+        // direct-coordinate selection still works.
+        let searcher: Searcher =
+            if settings.photon_endpoint.len() > 2048 || settings.nominatim_endpoint.len() > 2048 {
+                Arc::new(|_| Err("Search endpoint exceeds 2048 bytes".into()))
+            } else {
+                let settings = settings.clone();
+                Arc::new(move |query| {
+                    ilium_ambient::openstreetmap_address_search::search(&settings, query)
+                })
+            };
+        let mut picker = Self::with_searcher_and_client(current, searcher, search_client);
         picker.target = PickerTarget::OpenStreetMap {
             project_path,
             search_provider,
@@ -186,50 +293,70 @@ impl LocationPickerState {
         self.search.is_some()
     }
 
-    /// Test seam: adopts a channel the test feeds directly (no thread, no
-    /// network) as the in-flight search.
+    /// Test-only transport seam; forcing ownership tests use a real bank.
     #[cfg(test)]
     pub fn adopt_search_channel(&mut self, receiver: Receiver<SearchResult>) {
         self.search = Some(SearchJob {
-            receiver,
-            _worker: None,
-            query: self.input.buf.trim().to_owned(),
+            query: Arc::from(self.input.buf.trim()),
             input_revision: self.input_revision,
+            completion: SearchCompletion::TestChannel(receiver),
         });
         self.status = Some("Searching\u{2026}".to_owned());
     }
 
-    fn start_search(&mut self, query: String) {
+    fn start_search(&mut self) {
         if self.search.is_some() {
             self.status = Some("A search is still running; wait before submitting again".into());
             return;
         }
-        let Some(admission) = self.search_gate.acquire() else {
-            self.status = Some("Address workers are busy; try again shortly".into());
+        let Some(client) = &self.search_client else {
+            self.status = Some("Address search is unavailable".into());
             return;
         };
-        let (sender, receiver) = mpsc::channel();
-        let searcher = Arc::clone(&self.searcher);
-        let worker_query = query.clone();
-        let worker = std::thread::Builder::new()
-            .name("ilium-geocode".to_owned())
-            .spawn(move || {
-                let _admission = admission;
-                // A closed receiver only means the picker was dismissed.
-                let _ = sender.send(searcher(&worker_query));
-            });
-        match worker {
-            Ok(handle) => {
+        // Both debits precede the first new query allocation or job capture.
+        let reservation = match client.try_reserve(Lane::Io, SEARCH_COST) {
+            Ok(reservation) => reservation,
+            Err(reason) => {
+                self.status = Some(search_refusal(reason));
+                return;
+            }
+        };
+        let storage = match client
+            .quota_group()
+            .reserve_external_storage(SEARCH_RESULT_STORAGE_BYTES)
+        {
+            Ok(storage) => Arc::new(storage),
+            Err(reason) => {
+                self.status = Some(search_refusal(reason));
+                return;
+            }
+        };
+        let query: Arc<str> = Arc::from(self.input.buf.trim());
+        let task = SearchTask {
+            query: Arc::clone(&query),
+            searcher: Arc::clone(&self.searcher),
+            storage,
+        };
+        match reservation.submit(task) {
+            Ok(receipt) => {
                 self.search = Some(SearchJob {
-                    receiver,
-                    _worker: Some(handle),
                     query,
                     input_revision: self.input_revision,
+                    completion: SearchCompletion::Bank(receipt),
                 });
                 self.status = Some("Searching\u{2026}".to_owned());
             }
-            Err(error) => self.status = Some(format!("Could not start the search: {error}")),
+            Err(rejected) => {
+                self.status = Some(search_refusal(rejected.reason));
+            }
         }
+    }
+
+    fn clear_results(&mut self) {
+        // Vec::clear keeps capacity, which would outlive a released debit.
+        self.results = Vec::new();
+        self.results_storage = None;
+        self.selected_result = 0;
     }
 
     /// Applies a finished search, if any. Returns whether anything changed.
@@ -237,44 +364,91 @@ impl LocationPickerState {
         if self.is_saving() {
             return false;
         }
-        let Some(job) = &self.search else {
+        let Some(job) = &mut self.search else {
             return false;
         };
-        let outcome = match job.receiver.try_recv() {
-            Ok(result) => result,
-            Err(TryRecvError::Empty) => return false,
-            Err(TryRecvError::Disconnected) => {
-                Err("The address search stopped unexpectedly".to_owned())
-            }
+        let completed = match &mut job.completion {
+            SearchCompletion::Bank(receipt) => match receipt.try_take() {
+                JobPoll::Pending => return false,
+                JobPoll::Ready(outcome) => CompletedSearch::Bank(outcome),
+                JobPoll::Lost | JobPoll::Taken => CompletedSearch::Lost,
+            },
+            #[cfg(test)]
+            SearchCompletion::TestChannel(receiver) => match receiver.try_recv() {
+                Ok(outcome) => CompletedSearch::TestChannel(outcome),
+                Err(TryRecvError::Empty) => return false,
+                Err(TryRecvError::Disconnected) => CompletedSearch::Lost,
+            },
         };
-        let is_current =
-            job.input_revision == self.input_revision && job.query == self.input.buf.trim();
+        let is_current = job.input_revision == self.input_revision
+            && job.query.as_ref() == self.input.buf.trim();
         self.search = None;
         if !is_current {
-            self.results.clear();
-            self.selected_result = 0;
+            self.clear_results();
             self.status =
                 Some("Earlier search finished; press Enter to search the current text".into());
             return true;
         }
+        let (outcome, storage) = match completed {
+            CompletedSearch::Bank(retained) => {
+                let (outcome, job_hold) = retained.into_parts();
+                match outcome {
+                    JobOutcome::Finished(Ok(output)) => {
+                        let SearchOutput { results, storage } = output;
+                        drop(job_hold); // separate storage debit already owns results
+                        (results, Some(storage))
+                    }
+                    JobOutcome::Finished(Err(message)) => {
+                        drop(job_hold);
+                        (Err(message), None)
+                    }
+                    JobOutcome::NotStarted { job, reason } => {
+                        drop(job);
+                        drop(job_hold);
+                        let message = match reason {
+                            SkipReason::Shutdown => "Address search stopped during shutdown",
+                            SkipReason::Cancelled => "Address search cancelled",
+                        };
+                        (Err(message.to_owned()), None)
+                    }
+                    JobOutcome::Panicked => {
+                        drop(job_hold);
+                        (
+                            Err("The address search stopped unexpectedly".to_owned()),
+                            None,
+                        )
+                    }
+                }
+            }
+            #[cfg(test)]
+            CompletedSearch::TestChannel(outcome) => (outcome, None),
+            CompletedSearch::Lost => (
+                Err("The address search stopped unexpectedly".to_owned()),
+                None,
+            ),
+        };
         match outcome {
             Ok(results) if results.is_empty() => {
-                self.results.clear();
+                self.clear_results();
                 self.status = Some("No matching place found".to_owned());
+                self.status_storage = None;
             }
             Ok(results) => {
+                self.clear_results();
                 self.status = Some(format!(
                     "{} result{} \u{2014} Up/Down, Enter chooses",
                     results.len(),
                     if results.len() == 1 { "" } else { "s" }
                 ));
                 self.results = results;
-                self.selected_result = 0;
+                self.results_storage = storage;
+                self.status_storage = None;
                 self.focus = PickerFocus::Results;
             }
             Err(message) => {
-                self.results.clear();
+                self.clear_results();
                 self.status = Some(message);
+                self.status_storage = storage;
             }
         }
         true
@@ -298,9 +472,9 @@ impl LocationPickerState {
 
     fn input_changed(&mut self) {
         self.input_revision = self.input_revision.wrapping_add(1);
-        self.results.clear();
-        self.selected_result = 0;
+        self.clear_results();
         self.status = None;
+        self.status_storage = None;
     }
 
     fn cycle_focus(&mut self, direction: i32) {
@@ -320,19 +494,27 @@ impl LocationPickerState {
     /// Enter in the input field: coordinates apply locally, anything else is
     /// geocoded.
     fn submit_input(&mut self) {
-        let text = self.input.buf.trim().to_owned();
+        let text = self.input.buf.trim();
         if text.is_empty() {
             self.status = Some("Type an address or \"lat, lon\" first".to_owned());
             return;
         }
-        if let Some(location) = GeoLocation::parse_coordinates(&text) {
+        if text.len() > MAX_SEARCH_QUERY_BYTES {
+            self.status = Some(
+                "Address search exceeds the 64 KiB capture limit; shorten the address and retry"
+                    .into(),
+            );
+            return;
+        }
+        if let Some(location) = GeoLocation::parse_coordinates(text) {
             self.candidate = location;
+            self.candidate_storage = None;
             self.input_changed();
             self.focus = PickerFocus::Map;
             self.status = Some("Coordinates set \u{2014} Enter uses them".to_owned());
             return;
         }
-        self.start_search(text);
+        self.start_search();
     }
 
     /// Moves the crosshair `columns` / `rows` cells on a map of the given size.
@@ -351,6 +533,7 @@ impl LocationPickerState {
         let (longitude, latitude) = lon_lat_of(column, row, map.width, map.height);
         self.candidate = GeoLocation::new(String::new(), latitude, longitude);
         self.candidate.label = self.candidate.coordinate_text();
+        self.candidate_storage = None;
     }
 
     pub fn handle_key(
@@ -413,7 +596,7 @@ impl LocationPickerState {
                     KeyCode::Right => self.move_crosshair(step, 0, picker_layout.map),
                     KeyCode::Up => self.move_crosshair(0, -step, picker_layout.map),
                     KeyCode::Down => self.move_crosshair(0, step, picker_layout.map),
-                    KeyCode::Enter => return PickerOutcome::Confirm(self.candidate.clone()),
+                    KeyCode::Enter => return PickerOutcome::Confirm,
                     _ => {}
                 }
             }
@@ -429,6 +612,7 @@ impl LocationPickerState {
         };
         self.selected_result = index;
         self.candidate = result.normalized();
+        self.candidate_storage = self.results_storage.clone();
         self.focus = PickerFocus::Map;
         self.status = Some("Enter uses this place; arrows fine-tune it".to_owned());
     }
@@ -446,7 +630,7 @@ impl LocationPickerState {
         if let Some(action) = picker_layout.actions.action_at(position) {
             return match action {
                 DialogAction::Cancel => PickerOutcome::Cancel,
-                DialogAction::Confirm => PickerOutcome::Confirm(self.candidate.clone()),
+                DialogAction::Confirm => PickerOutcome::Confirm,
             };
         }
         if picker_layout.input_box.contains(position) {
@@ -821,52 +1005,325 @@ mod tests {
         assert_eq!(picker.results[0].label, "Paris, France");
     }
 
+    fn isolated_search_bank(
+        job_limit: usize,
+    ) -> (
+        ilium_execution::Execution,
+        Client,
+        ilium_execution::QuotaGroup,
+    ) {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+        };
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 2 * SEARCH_COST.input_bytes,
+            result_bytes: 2 * SEARCH_COST.result_bytes,
+            worker_threads: 2,
+            worker_bytes: 16 * MIB,
+        });
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 2,
+                    priority: None,
+                    resident_bytes_per_thread: MIB,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: job_limit,
+                service_jobs: 0,
+                input_bytes: job_limit * SEARCH_COST.input_bytes,
+                result_bytes: job_limit * SEARCH_COST.result_bytes,
+            })
+            .unwrap();
+        (execution, client, quota)
+    }
+
     #[test]
-    fn worker_slot_survives_picker_drop_and_capacity_recovers_after_completion() {
-        let gate = Arc::new(SearchGate::default());
-        let held: Vec<_> = (0..MAX_SEARCH_WORKERS - 1)
-            .map(|_| gate.acquire().unwrap())
-            .collect();
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
-        let mut picker = picker_with(Arc::new(move |_query| {
-            ready_tx.send(()).unwrap();
+    fn blocked_lookup_keeps_real_job_debit_after_picker_drop_and_refuses_reentry() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(1);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = std::sync::Mutex::new(release_rx);
+        let searcher: Searcher = Arc::new(move |_| {
+            started_tx.send(()).unwrap();
             release_rx
                 .lock()
                 .unwrap()
-                .recv_timeout(Duration::from_secs(3))
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            Ok(vec![place("Paris", 48.85, 2.35)])
+        });
+        let mut picker = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            searcher,
+            Some(client.clone()),
+        );
+        type_text(&mut picker, "Paris");
+        press(&mut picker, KeyCode::Enter);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(quota.snapshot().jobs, 1);
+        drop(picker);
+        assert_eq!(
+            quota.snapshot().jobs,
+            1,
+            "blocked actual callback keeps its debit"
+        );
+
+        let mut refused = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            offline(),
+            Some(client.clone()),
+        );
+        let candidate = refused.candidate.clone();
+        type_text(&mut refused, "Another place");
+        press(&mut refused, KeyCode::Enter);
+        assert!(!refused.is_searching());
+        assert_eq!(refused.input.buf, "Another place");
+        assert_eq!(refused.candidate, candidate);
+        assert!(refused.status.as_deref().unwrap().contains("busy"));
+        assert_eq!(quota.snapshot().jobs, 1);
+
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_millis(20))
+            .unwrap();
+        assert_eq!(report.remaining_workers, 1);
+        assert_eq!(quota.snapshot().jobs, 1, "deadline is not owner exit");
+        release_tx.send(()).unwrap();
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(report.remaining_workers, 0);
+        assert_eq!(quota.snapshot().jobs, 0);
+    }
+
+    #[test]
+    fn completed_result_storage_follows_results_and_selected_candidate() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(1);
+        let baseline = quota.snapshot().worker_bytes;
+        let searcher: Searcher = Arc::new(|_| Ok(vec![place("Paris", 48.85, 2.35)]));
+        let mut picker = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            searcher,
+            Some(client),
+        );
+        type_text(&mut picker, "Paris");
+        press(&mut picker, KeyCode::Enter);
+        wait_for_search(&mut picker);
+        assert_eq!(quota.snapshot().jobs, 0, "finite job debit may retire");
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline + SEARCH_RESULT_STORAGE_BYTES
+        );
+        press(&mut picker, KeyCode::Enter); // select result; candidate clones its label
+        picker.paste(" changed"); // releases list while keeping selected candidate
+        assert!(picker.results.is_empty());
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline + SEARCH_RESULT_STORAGE_BYTES
+        );
+        picker.focus = PickerFocus::Map;
+        press(&mut picker, KeyCode::Right); // map candidate replaces charged label
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        drop(picker);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert_eq!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0
+        );
+    }
+
+    #[test]
+    fn provider_error_storage_survives_job_retirement_and_long_query_is_unchanged() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(1);
+        let baseline = quota.snapshot().worker_bytes;
+        let query = "City ".repeat(512).trim().to_owned();
+        let expected_query = query.clone();
+        let searcher: Searcher = Arc::new(move |received| {
+            assert_eq!(received, expected_query);
+            Err("provider evidence ".repeat(4096))
+        });
+        let mut picker = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            searcher,
+            Some(client),
+        );
+        picker.paste(&query);
+        press(&mut picker, KeyCode::Enter);
+        wait_for_search(&mut picker);
+        assert_eq!(picker.input.buf, query);
+        assert_eq!(quota.snapshot().jobs, 0);
+        assert!(picker.status.as_ref().unwrap().len() > 64 * 1024);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline + SEARCH_RESULT_STORAGE_BYTES
+        );
+        picker.paste(" changed");
+        assert!(picker.status.is_none());
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        drop(picker);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert_eq!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0
+        );
+    }
+
+    #[test]
+    fn oversized_provider_error_is_refused_without_losing_query() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(1);
+        let baseline = quota.snapshot().worker_bytes;
+        let searcher: Searcher = Arc::new(|_| Err("x".repeat(SEARCH_RESULT_STORAGE_BYTES + 1)));
+        let mut picker = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            searcher,
+            Some(client),
+        );
+        picker.paste("Retained address");
+        press(&mut picker, KeyCode::Enter);
+        wait_for_search(&mut picker);
+        assert_eq!(picker.input.buf, "Retained address");
+        assert_eq!(
+            picker.status.as_deref(),
+            Some("Address search result exceeds admitted storage")
+        );
+        assert_eq!(quota.snapshot().jobs, 0);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        drop(picker);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert_eq!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0
+        );
+    }
+
+    #[test]
+    fn stale_real_bank_answer_cannot_replace_current_query_or_candidate() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(1);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = std::sync::Mutex::new(release_rx);
+        let searcher: Searcher = Arc::new(move |_| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            Ok(vec![place("Paris, France", 48.85, 2.35)])
+        });
+        let mut picker = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            searcher,
+            Some(client),
+        );
+        let candidate = picker.candidate.clone();
+        let baseline = quota.snapshot().worker_bytes;
+        type_text(&mut picker, "Paris");
+        press(&mut picker, KeyCode::Enter);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        picker.paste(", Texas");
+        release_tx.send(()).unwrap();
+        wait_for_search(&mut picker);
+        assert_eq!(picker.input.buf, "Paris, Texas");
+        assert!(picker.results.is_empty());
+        assert_eq!(picker.candidate, candidate);
+        assert!(picker.status.as_deref().unwrap().contains("Earlier search"));
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert_eq!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0
+        );
+    }
+
+    #[test]
+    fn shutdown_skips_queued_geocode_without_invoking_provider() {
+        use ilium_execution::ShutdownMode;
+        let (mut execution, client, quota) = isolated_search_bank(2);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = std::sync::Mutex::new(release_rx);
+        let first: Searcher = Arc::new(move |_| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
                 .unwrap();
             Ok(Vec::new())
-        }));
-        picker.search_gate = Arc::clone(&gate);
-        type_text(&mut picker, "held address");
-        press(&mut picker, KeyCode::Enter);
-        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(gate.0.load(Ordering::Acquire), MAX_SEARCH_WORKERS);
-        drop(picker);
-        assert_eq!(gate.0.load(Ordering::Acquire), MAX_SEARCH_WORKERS);
-
-        let mut blocked = picker_with(offline());
-        blocked.search_gate = Arc::clone(&gate);
-        type_text(&mut blocked, "another address");
-        press(&mut blocked, KeyCode::Enter);
-        assert!(!blocked.is_searching());
-        assert!(blocked.status.as_deref().unwrap().contains("busy"));
-
+        });
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let queued: Searcher = Arc::new(move |_| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        });
+        let mut running = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            first,
+            Some(client.clone()),
+        );
+        type_text(&mut running, "First");
+        press(&mut running, KeyCode::Enter);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut waiting = LocationPickerState::with_searcher_and_client(
+            GeoLocation::default(),
+            queued,
+            Some(client),
+        );
+        type_text(&mut waiting, "Second");
+        press(&mut waiting, KeyCode::Enter);
+        assert!(waiting.is_searching());
+        assert_eq!(quota.snapshot().jobs, 2);
+        execution.request_shutdown(ShutdownMode::Cancel);
         release_tx.send(()).unwrap();
-        drop(held);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while gate.0.load(Ordering::Acquire) != 0 {
-            assert!(
-                Instant::now() < deadline,
-                "completed worker retained admission"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let final_slot = gate.acquire().unwrap();
-        drop(final_slot);
-        assert_eq!(gate.0.load(Ordering::Acquire), 0);
+        wait_for_search(&mut waiting);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            waiting.status.as_deref(),
+            Some("Address search stopped during shutdown")
+        );
+        drop((running, waiting));
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(report.remaining_workers, 0);
+        assert_eq!(quota.snapshot().jobs, 0);
     }
 
     fn press(picker: &mut LocationPickerState, code: KeyCode) -> PickerOutcome {
@@ -903,11 +1360,9 @@ mod tests {
         assert_eq!(picker.focus, PickerFocus::Map);
         assert!((picker.candidate.latitude - 48.857).abs() < 1e-9);
         assert_eq!(picker.candidate.label, "48.857N 2.352E");
-        let PickerOutcome::Confirm(location) = press(&mut picker, KeyCode::Enter) else {
-            panic!("Enter on the map confirms");
-        };
-        assert_eq!(location.label, "48.857N 2.352E");
-        assert!((location.longitude - 2.352).abs() < 1e-9);
+        assert_eq!(press(&mut picker, KeyCode::Enter), PickerOutcome::Confirm);
+        assert_eq!(picker.candidate.label, "48.857N 2.352E");
+        assert!((picker.candidate.longitude - 2.352).abs() < 1e-9);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
@@ -930,10 +1385,9 @@ mod tests {
         assert!(picker.is_searching());
         wait_for_search(&mut picker);
         let calls = names.lock().unwrap().clone();
-        assert_eq!(
-            calls,
-            vec![("Paris".to_owned(), Some("ilium-geocode".to_owned()))]
-        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "Paris");
+        assert!(calls[0].1.as_deref().unwrap().starts_with("ilium-exec-io-"));
         assert_eq!(picker.results.len(), 2);
         assert_eq!(picker.focus, PickerFocus::Results);
         press(&mut picker, KeyCode::Down);
@@ -945,11 +1399,9 @@ mod tests {
         assert_eq!(press(&mut picker, KeyCode::Enter), PickerOutcome::Continue);
         assert_eq!(picker.candidate.label, "Paris, Texas");
         assert_eq!(picker.focus, PickerFocus::Map);
-        let PickerOutcome::Confirm(location) = press(&mut picker, KeyCode::Enter) else {
-            panic!("confirming uses the geocoded name");
-        };
-        assert_eq!(location.label, "Paris, Texas");
-        assert!((location.latitude - 33.6609).abs() < 1e-9);
+        assert_eq!(press(&mut picker, KeyCode::Enter), PickerOutcome::Confirm);
+        assert_eq!(picker.candidate.label, "Paris, Texas");
+        assert!((picker.candidate.latitude - 33.6609).abs() < 1e-9);
     }
 
     #[test]
@@ -1008,7 +1460,7 @@ mod tests {
             started.elapsed() < Duration::from_millis(100),
             "no join on close"
         );
-        // The detached worker sends into a closed channel and just ends.
+        // The bank retains the callback until it actually returns.
         std::thread::sleep(Duration::from_millis(250));
     }
 
@@ -1131,12 +1583,10 @@ mod tests {
         );
 
         let confirm = picker_layout.actions.confirm_button;
-        let PickerOutcome::Confirm(location) =
-            picker.click(Position::new(confirm.x, confirm.y), SCREEN)
-        else {
-            panic!("Use location confirms");
-        };
-        assert_eq!(location.label, picker.candidate.label);
+        assert_eq!(
+            picker.click(Position::new(confirm.x, confirm.y), SCREEN),
+            PickerOutcome::Confirm
+        );
         let cancel = picker_layout.actions.cancel_button;
         assert_eq!(
             picker.click(Position::new(cancel.x, cancel.y), SCREEN),
@@ -1209,10 +1659,11 @@ mod tests {
             let mut picker = LocationPickerState::for_openstreetmap(
                 GeoLocation::default(),
                 PathBuf::from("/project"),
-                AddressSearchSettings {
+                &AddressSearchSettings {
                     provider,
                     ..Default::default()
                 },
+                Some(crate::execution::test_client()),
             );
             picker.status = Some("Address service HTTP 503".into());
             let credit = layout(screen).credit_row;
@@ -1282,6 +1733,207 @@ mod tests {
         (app, project)
     }
 
+    fn destination_quota(worker_bytes: usize) -> ilium_execution::QuotaGroup {
+        use ilium_execution::{QuotaGroup, QuotaLimits};
+        QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 32 * MIB,
+            result_bytes: 8 * MIB,
+            worker_threads: 0,
+            worker_bytes,
+        })
+    }
+
+    #[test]
+    fn escaped_resolutions_each_keep_separate_admission_and_refusal_is_retryable() {
+        let (mut app, project) = stars_app();
+        let quota = destination_quota(16 * MIB);
+        app.location_destination_quota = quota.clone();
+        // Synthetic already-admitted source version; this test isolates the
+        // real quota/cache boundary without a second persistence operation.
+        app.animation_location_storage =
+            Some(Arc::new(quota.reserve_external_storage(4096).unwrap()));
+        let first = app.effective_animation_settings().unwrap();
+        let repeated = app.effective_animation_settings().unwrap();
+        assert!(std::rc::Rc::ptr_eq(&first, &repeated));
+        let mut held = vec![first];
+        drop(repeated);
+        let mut refused = false;
+        for _ in 0..1024 {
+            let previous_bytes = quota.snapshot().worker_bytes;
+            app.bump_tree_version();
+            match app.effective_animation_settings() {
+                Some(view) => {
+                    assert!(quota.snapshot().worker_bytes > previous_bytes);
+                    held.push(view);
+                }
+                None => {
+                    assert_eq!(quota.snapshot().worker_bytes, previous_bytes);
+                    assert!(app
+                        .semantic_animation_error()
+                        .unwrap()
+                        .contains("storage unavailable"));
+                    refused = true;
+                    break;
+                }
+            }
+        }
+        assert!(refused, "retained deep copies must exhaust finite storage");
+        held.clear();
+        assert!(
+            app.effective_animation_settings().is_some(),
+            "refusal remains retryable"
+        );
+        app.install_animation_project_settings(
+            project.path().to_path_buf(),
+            Ok(crate::background_animation::AnimationSettings::default()),
+        );
+        app.reconcile_animation_presentation();
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn confirmation_storage_refusal_preserves_picker_and_authored_location() {
+        let (mut app, _project) = stars_app();
+        let quota = destination_quota(1);
+        app.location_destination_quota = quota.clone();
+        app.open_location_picker();
+        let Mode::LocationPicker(mut picker) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("picker")
+        };
+        picker.candidate = place("Refused destination", 48.85, 2.35);
+        picker.focus = PickerFocus::Map;
+        let previous = app.animation_settings.ambient.location.clone();
+        assert_eq!(
+            picker.handle_key(KeyCode::Enter, KeyModifiers::NONE, SCREEN),
+            PickerOutcome::Confirm
+        );
+        let candidate = picker.candidate.clone();
+        let error = app.confirm_location_picker(&mut picker).unwrap_err();
+        assert!(error.contains("storage unavailable"), "{error}");
+        assert_eq!(picker.candidate, candidate);
+        assert_eq!(app.animation_settings.ambient.location, previous);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn writer_refusal_releases_prepared_copy_without_losing_confirmation() {
+        let (mut app, _project) = osm_app();
+        let quota = destination_quota(128 * MIB);
+        app.location_destination_quota = quota.clone();
+        app.configuration_files.as_mut().unwrap().close_admission();
+        app.open_location_picker();
+        let Mode::LocationPicker(mut picker) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("picker")
+        };
+        picker.candidate = place("Prepared but refused", 48.85, 2.35);
+        picker.focus = PickerFocus::Map;
+        let original = app.animation_settings.clone();
+        let candidate = picker.candidate.clone();
+        assert_eq!(
+            picker.handle_key(KeyCode::Enter, KeyModifiers::NONE, SCREEN),
+            PickerOutcome::Confirm
+        );
+        assert!(app.confirm_location_picker(&mut picker).is_err());
+        assert_eq!(picker.candidate, candidate);
+        assert!(!picker.is_saving());
+        assert_eq!(app.animation_settings, original);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn accepted_save_keeps_destination_charge_after_picker_cancel_until_ack_and_replacement() {
+        let (mut app, project) = osm_app();
+        let quota = destination_quota(128 * MIB);
+        app.location_destination_quota = quota.clone();
+        crate::project_config::set_animation(project.path(), app.animation_settings.clone())
+            .unwrap();
+        let lock = ilium_platform::file_lock::ExclusiveFileLock::acquire(
+            &project.path().join(".ilium/.config.yaml.lock"),
+        )
+        .unwrap();
+        app.open_location_picker();
+        let Mode::LocationPicker(picker) = &mut app.mode else {
+            panic!("picker")
+        };
+        picker.candidate = place("Sydney pending", -33.87, 151.21);
+        picker.focus = PickerFocus::Map;
+        key(&mut app, KeyCode::Enter);
+        let charged = quota.snapshot().worker_bytes;
+        assert!(charged > 0);
+        assert_eq!(app.configuration_files.as_ref().unwrap().pending(), 1);
+        key(&mut app, KeyCode::Esc); // Dismiss the modal, not the accepted write.
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(quota.snapshot().worker_bytes, charged);
+        drop(lock);
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::project_config::load(project.path())
+                .unwrap()
+                .animation
+                .ambient
+                .openstreetmap
+                .selected_location()
+                .unwrap()
+                .label
+                .as_str(),
+            "Sydney pending"
+        );
+        assert!(app.committed_animation_location_storage.is_some());
+        // Keep one effective Rc outside the cache. Its own lease must
+        // survive project replacement, then release when that Rc is dropped.
+        let escaped = app.effective_animation_settings().unwrap();
+        assert!(quota.snapshot().worker_bytes > 0);
+        app.install_animation_project_settings(
+            project.path().to_path_buf(),
+            Ok(crate::background_animation::AnimationSettings::default()),
+        );
+        app.reconcile_animation_presentation();
+        assert!(quota.snapshot().worker_bytes > 0);
+        drop(escaped);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn failed_save_retains_failed_candidate_until_its_owner_releases_it() {
+        let (mut app, project) = osm_app();
+        let quota = destination_quota(128 * MIB);
+        app.location_destination_quota = quota.clone();
+        app.open_location_picker();
+        let Mode::LocationPicker(picker) = &mut app.mode else {
+            panic!("picker")
+        };
+        picker.candidate = place("Sydney unsaved", -33.87, 151.21);
+        picker.focus = PickerFocus::Map;
+        std::fs::create_dir_all(project.path().join(".ilium/config.yaml")).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert!(quota.snapshot().worker_bytes > 0);
+        app.settle_filesystem_for_test();
+        assert!(matches!(&app.mode, Mode::LocationPicker(picker) if !picker.is_saving()));
+        assert_eq!(
+            app.failed_animation_settings
+                .as_ref()
+                .unwrap()
+                .ambient
+                .openstreetmap
+                .selected_location()
+                .unwrap()
+                .label
+                .as_str(),
+            "Sydney unsaved"
+        );
+        assert!(app.failed_animation_location_storage.is_some());
+        key(&mut app, KeyCode::Esc);
+        assert!(quota.snapshot().worker_bytes > 0);
+        app.failed_animation_settings = None;
+        app.failed_animation_location_storage = None;
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
     #[test]
     fn pending_osm_save_freezes_candidate_and_rejects_duplicate_confirmation() {
         let mut picker = picker_with(offline());
@@ -1307,7 +1959,7 @@ mod tests {
         assert!(!picker.is_saving());
         assert!(matches!(
             press(&mut picker, KeyCode::Enter),
-            PickerOutcome::Confirm(_)
+            PickerOutcome::Confirm
         ));
     }
 
@@ -1360,6 +2012,7 @@ mod tests {
             token,
             project_path: project.path().to_path_buf(),
             candidate: picker.candidate.clone(),
+            location_storage: None, // synthetic receipt: no accepted write
         };
         app.finish_animation_picker_save(&save, Err("disk refused".into()));
         let Mode::LocationPicker(picker) = &mut app.mode else {
@@ -1449,6 +2102,8 @@ mod tests {
     #[test]
     fn osm_cancel_and_save_failure_keep_the_previous_location() {
         let (mut app, project) = osm_app();
+        let quota = destination_quota(128 * MIB);
+        app.location_destination_quota = quota.clone();
         let before = app.animation_settings.ambient.openstreetmap.clone();
         open_from_location_row(&mut app);
         key(&mut app, KeyCode::Esc);
@@ -1462,6 +2117,7 @@ mod tests {
         key(&mut app, KeyCode::Enter);
         assert!(matches!(app.mode, Mode::LocationPicker(_)));
         assert_eq!(app.animation_settings.ambient.openstreetmap, before);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
         assert!(app
             .status_message
             .as_deref()
@@ -1495,34 +2151,32 @@ mod tests {
     }
 
     #[test]
-    fn osm_picker_confirmation_cannot_write_into_a_different_selected_project() {
+    fn osm_picker_confirmation_writes_the_global_settings_whatever_project_is_selected() {
         for use_mouse in [false, true] {
-            let first = tempfile::tempdir().unwrap();
-            let second = tempfile::tempdir().unwrap();
-            let first_settings = crate::background_animation::AnimationSettings {
+            let home = tempfile::tempdir().unwrap();
+            let other = tempfile::tempdir().unwrap();
+            let settings = crate::background_animation::AnimationSettings {
                 kind: AnimationKind::OpenStreetMap,
                 hue_degrees: 17,
                 ..Default::default()
             };
-            let second_settings = crate::background_animation::AnimationSettings {
+            let other_settings = crate::background_animation::AnimationSettings {
                 kind: AnimationKind::OpenStreetMap,
                 hue_degrees: 219,
                 ..Default::default()
             };
-            crate::project_config::set_animation(first.path(), first_settings).unwrap();
-            crate::project_config::set_animation(second.path(), second_settings).unwrap();
-            let first_before = crate::project_config::load(first.path()).unwrap().animation;
-            let second_before = crate::project_config::load(second.path())
-                .unwrap()
-                .animation;
-            let mut app = App::new("osm-picker-binding".into(), first.path().to_path_buf());
+            crate::project_config::set_animation(home.path(), settings).unwrap();
+            crate::project_config::set_animation(other.path(), other_settings).unwrap();
+            let home_before = crate::project_config::load(home.path()).unwrap().animation;
+            let other_before = crate::project_config::load(other.path()).unwrap().animation;
+            let mut app = App::new("osm-picker-binding".into(), home.path().to_path_buf());
             app.set_screen_area(SCREEN);
-            let first_id = app.tree.add_project(first.path().to_path_buf()).unwrap();
-            let second_id = app.tree.add_project(second.path().to_path_buf()).unwrap();
-            app.select_node(first_id);
+            let home_project = app.tree.add_project(home.path().to_path_buf()).unwrap();
+            let other_project = app.tree.add_project(other.path().to_path_buf()).unwrap();
+            app.select_node(home_project);
             app.install_animation_project_settings(
-                first.path().to_path_buf(),
-                Ok(first_before.clone()),
+                home.path().to_path_buf(),
+                Ok(home_before.clone()),
             );
             app.mode = Mode::Settings(SettingsState {
                 tab: SettingsTab::Animations,
@@ -1534,11 +2188,12 @@ mod tests {
             };
             assert!(
                 matches!(picker.target(), PickerTarget::OpenStreetMap { project_path, .. }
-                if project_path == first.path())
+                if project_path == home.path())
             );
             picker.candidate = place("New York", 40.7128, -74.006);
             picker.focus = PickerFocus::Map;
-            app.select_node(second_id);
+            // Selecting another project must neither redirect nor drop the save.
+            app.select_node(other_project);
             if use_mouse {
                 let actions = layout(SCREEN).actions;
                 let confirm = actions.confirm_button;
@@ -1546,17 +2201,13 @@ mod tests {
             } else {
                 key(&mut app, KeyCode::Enter);
             }
+            app.settle_filesystem_for_test();
+            let saved = crate::project_config::load(home.path()).unwrap().animation;
+            assert_ne!(saved, home_before, "the global settings take the new place");
             assert_eq!(
-                crate::project_config::load(first.path()).unwrap().animation,
-                first_before,
-                "the opening project must remain unchanged"
-            );
-            assert_eq!(
-                crate::project_config::load(second.path())
-                    .unwrap()
-                    .animation,
-                second_before,
-                "an old picker cannot change the newly selected project"
+                crate::project_config::load(other.path()).unwrap().animation,
+                other_before,
+                "a project's old animation block is never rewritten"
             );
         }
     }

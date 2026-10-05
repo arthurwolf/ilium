@@ -12,11 +12,33 @@ struct Selection {
     entry_id: NodeId,
     path: PathBuf,
 }
+/// Effective settings may escape a cache refresh as an Rc; carry the source
+/// lease on that Rc itself, not only on the surrounding cache entry.
+#[derive(Debug)]
+pub(crate) struct AnimationSettingsView {
+    settings: AnimationSettings,
+    _location_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+impl std::ops::Deref for AnimationSettingsView {
+    type Target = AnimationSettings;
+    fn deref(&self) -> &Self::Target {
+        &self.settings
+    }
+}
+impl PartialEq for AnimationSettingsView {
+    fn eq(&self, other: &Self) -> bool {
+        self.settings == other.settings
+    }
+}
+
 struct Resolution {
-    settings: Option<Rc<AnimationSettings>>,
+    settings: Option<Rc<AnimationSettingsView>>,
     error: Option<String>,
     label: String,
     semantic: bool,
+    // Last: cached authored/effective settings may outlive the App field
+    // from which they were cloned.
+    _location_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 struct CachedResolution {
     selection: Option<Selection>,
@@ -33,7 +55,7 @@ pub(super) struct SemanticPresentation {
     load_error: Option<String>,
     cache: RefCell<Option<CachedResolution>>,
     presented: Option<Rc<Resolution>>,
-    field_settings: Option<Rc<AnimationSettings>>,
+    field_settings: Option<Rc<AnimationSettingsView>>,
 }
 impl SemanticPresentation {
     pub(super) fn new(bound_path: PathBuf) -> Self {
@@ -76,9 +98,10 @@ impl App {
         }
         resolve(projects[0])
     }
+    /// The one location that stores the animation settings, whatever project
+    /// is selected: switching entries never reloads or rebinds them.
     fn animation_project_path(&self) -> PathBuf {
-        self.animation_selection()
-            .map_or_else(|| self.session_cwd.clone(), |selection| selection.path)
+        self.animation_home.clone()
     }
     pub(crate) fn install_animation_project_settings(
         &mut self,
@@ -86,15 +109,21 @@ impl App {
         result: Result<AnimationSettings, String>,
     ) {
         self.semantic_presentation.bound_path = path;
+        // Retire every old cached copy before dropping its source lease.
+        self.semantic_presentation.cache.get_mut().take();
+        self.semantic_presentation.field_settings = None;
+        // Keep the prior presented resolution through the next reconciliation
+        // so native transition detection sees the real old/new settings.
         self.semantic_presentation.load_error = match result {
             Ok(settings) => {
                 self.animation_settings = settings;
+                self.animation_location_storage = None;
                 self.committed_animation_settings = None;
+                self.committed_animation_location_storage = None;
                 None
             }
             Err(error) => Some(error),
         };
-        self.semantic_presentation.cache.get_mut().take();
     }
     pub(crate) fn synchronize_animation_project_settings(&mut self) -> bool {
         let path = self.animation_project_path();
@@ -150,6 +179,11 @@ impl App {
             .committed_animation_settings
             .as_ref()
             .unwrap_or(&self.animation_settings);
+        let location_storage = if self.committed_animation_settings.is_some() {
+            self.committed_animation_location_storage.clone()
+        } else {
+            self.animation_location_storage.clone()
+        };
         let selection = self.animation_selection();
         let owner = selection
             .as_ref()
@@ -177,16 +211,52 @@ impl App {
                 return Rc::clone(&cached.resolution);
             }
         }
+        // Each cache miss can yield a separately retained Rc. Sharing the
+        // source version's lease would permit arbitrarily many escaped deep
+        // copies under one fixed declaration. Admit this resolution before
+        // cloning either its authored snapshot or its derived settings.
+        let resolution_storage = if location_storage.is_some() {
+            let required =
+                crate::filesystem::configuration::serialized_bound(authored).and_then(|settings| {
+                    let recommendation = recommendation
+                        .map(crate::filesystem::configuration::serialized_bound)
+                        .transpose()?
+                        .unwrap_or(0);
+                    settings
+                        .checked_mul(4)
+                        .and_then(|bytes| bytes.checked_add(recommendation.checked_mul(4)?))
+                        .and_then(|bytes| bytes.checked_add(4096))
+                        .ok_or_else(|| "Animation resolution storage size overflow".to_owned())
+                });
+            match required.and_then(|bytes| {
+                self.location_destination_quota
+                    .reserve_external_storage(bytes)
+                    .map(std::sync::Arc::new)
+                    .map_err(|reason| {
+                        format!("Animation resolution storage unavailable: {reason:?}")
+                    })
+            }) {
+                Ok(storage) => Some(storage),
+                Err(error) => {
+                    // Keep the previous cache intact for retry. No derived
+                    // settings or authored snapshot is allocated on refusal.
+                    return Rc::new(Resolution {
+                        settings: None,
+                        error: Some(error),
+                        label: String::new(),
+                        semantic: authored.kind == AnimationKind::Semantic,
+                        _location_storage: None,
+                    });
+                }
+            }
+        } else {
+            None
+        };
         let semantic = authored.kind == AnimationKind::Semantic;
         let result = if let Some(error) = &self.semantic_presentation.load_error {
             Err(error.clone())
         } else if !semantic {
             Ok(authored.clone())
-        } else if selection
-            .as_ref()
-            .is_some_and(|selection| selection.path != self.semantic_presentation.bound_path)
-        {
-            Err("Semantic: selected project animation settings are not loaded".into())
         } else if selection.is_none() {
             Err("Semantic: select a project or entry".into())
         } else if let Some(recommendation) = recommendation {
@@ -203,7 +273,13 @@ impl App {
             ))
         };
         let (settings, error) = match result {
-            Ok(settings) => (Some(Rc::new(settings)), None),
+            Ok(settings) => (
+                Some(Rc::new(AnimationSettingsView {
+                    settings,
+                    _location_storage: resolution_storage.clone(),
+                })),
+                None,
+            ),
             Err(error) => (None, Some(error)),
         };
         let mut label = String::new();
@@ -236,6 +312,7 @@ impl App {
             error,
             label,
             semantic,
+            _location_storage: resolution_storage,
         });
         *cache = Some(CachedResolution {
             selection,
@@ -249,7 +326,7 @@ impl App {
         });
         resolution
     }
-    pub(crate) fn effective_animation_settings(&self) -> Option<Rc<AnimationSettings>> {
+    pub(crate) fn effective_animation_settings(&self) -> Option<Rc<AnimationSettingsView>> {
         self.animation_resolution().settings.clone()
     }
     pub(crate) fn effective_animation_kind(&self) -> Option<AnimationKind> {
@@ -277,11 +354,15 @@ impl App {
     }
     fn animation_field_matches(&self, settings: &AnimationSettings) -> bool {
         self.animation_settings.kind != AnimationKind::Semantic
-            || self.semantic_presentation.field_settings.as_deref() == Some(settings)
+            || self
+                .semantic_presentation
+                .field_settings
+                .as_ref()
+                .map(|view| &view.settings)
+                == Some(settings)
     }
     pub(crate) fn note_animation_field_settings(&mut self) {
-        let settings = self.effective_animation_settings();
-        self.semantic_presentation.field_settings = settings;
+        self.semantic_presentation.field_settings = self.effective_animation_settings();
     }
     pub(super) fn animation_wants_attribution(&self) -> bool {
         self.effective_animation_settings().is_some_and(|settings| {
@@ -402,7 +483,7 @@ impl App {
         } else {
             runtime_status
         };
-        let uses_loop = settings.is_some_and(AnimationSettings::uses_loop_cache);
+        let uses_loop = settings.is_some_and(|settings| settings.uses_loop_cache());
         crate::animation_rows::RowContext {
             effective_kind: kind,
             scene_uses_cell_colors: kind == Some(AnimationKind::Wikipedia)

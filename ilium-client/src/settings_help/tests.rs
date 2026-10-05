@@ -124,6 +124,8 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "RESET", 1, 3);
     add_range(&mut ids, "COST", 1, 23);
+    add_range(&mut ids, "RCOMP", 1, 17);
+    add_range(&mut ids, "OPT", 1, 14);
     add_range(&mut ids, "SETUP", 1, 2);
     ids.insert("DEBUG-01".to_owned());
     ids.insert("API-01".to_owned());

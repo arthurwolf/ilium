@@ -59,6 +59,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::PaneProcessTerminated { pane_id, result } => {
+            app.apply_remote_pane_process_terminated(pane_id, result.clone());
             app.apply_pane_process_terminated(pane_id, result);
             None
         }

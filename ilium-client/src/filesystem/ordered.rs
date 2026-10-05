@@ -100,11 +100,23 @@ pub struct OrderedWriter<J: Job> {
     next_id: u64,
     bytes: usize,
     closing: bool,
+    job_ready: fn(&J) -> bool,
 }
 
 impl<J: Job> OrderedWriter<J> {
     pub fn new(client: Client, ready: Arc<tokio::sync::Notify>) -> Self {
         Self::with_completion_targets(client, ready, None)
+    }
+    /// A typed adapter may keep an accepted FIFO head awaiting CPU preparation.
+    /// This bounded predicate runs before submitting any I/O job, never in one.
+    pub fn new_with_readiness(
+        client: Client,
+        ready: Arc<tokio::sync::Notify>,
+        job_ready: fn(&J) -> bool,
+    ) -> Self {
+        let mut writer = Self::new(client, ready);
+        writer.job_ready = job_ready;
+        writer
     }
     /// Install before any admission. The actor callback must capture its original
     /// admitted ownership and perform only a bounded, nonblocking wake hint.
@@ -136,6 +148,7 @@ impl<J: Job> OrderedWriter<J> {
             next_id: 0,
             bytes: 0,
             closing: false,
+            job_ready: |_| true,
         }
     }
     pub fn notification(&self) -> Arc<tokio::sync::Notify> {
@@ -275,6 +288,12 @@ impl<J: Job> OrderedWriter<J> {
                     return Some(WriteCompletion::Lost { id });
                 }
             }
+        }
+        // An accepted source capture cannot be overtaken by younger saves.
+        // No I/O lane is occupied waiting for its CPU loan. The source owner
+        // signals this same notification on readiness or explicit cancellation.
+        if !(self.job_ready)(&self.queued.front()?.job) {
+            return None;
         }
         let mut queued = self.queued.pop_front()?;
         let reservation = match queued.reservation.take() {
@@ -884,5 +903,146 @@ mod tests {
     #[test]
     fn writer_refusal_identifies_process_root_execution_ledger() {
         execution_refusal_case(ilium_execution::AdmissionBoundary::Root);
+    }
+    struct PreparedWriteFixture {
+        original: Write,
+        source_ready: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Job for PreparedWriteFixture {
+        type Output = &'static str;
+        type Error = String;
+        fn run(self, context: JobContext) -> Result<Self::Output, String> {
+            assert!(self.source_ready.load(std::sync::atomic::Ordering::Acquire));
+            self.original.run(context)
+        }
+    }
+    #[test]
+    fn accepted_not_ready_head_preserves_fifo_without_occupying_io_workers() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let notification = Arc::new(tokio::sync::Notify::new());
+        let mut writer = OrderedWriter::new_with_readiness(
+            client.clone(),
+            notification.clone(),
+            |job: &PreparedWriteFixture| job.source_ready.load(Ordering::Acquire),
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ordered.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let prepared = Arc::new(AtomicBool::new(false));
+        let first = writer
+            .enqueue(
+                small_cost(),
+                PreparedWriteFixture {
+                    original: Write {
+                        path: path.clone(),
+                        text: "FIRST",
+                        entered: entered.clone(),
+                        gate: None,
+                    },
+                    source_ready: prepared.clone(),
+                },
+            )
+            .unwrap();
+        let second = writer
+            .enqueue(
+                small_cost(),
+                PreparedWriteFixture {
+                    original: Write {
+                        path: path.clone(),
+                        text: "SECOND",
+                        entered,
+                        gate: None,
+                    },
+                    source_ready: Arc::new(AtomicBool::new(true)),
+                },
+            )
+            .unwrap();
+        let bytes = writer.retained_bytes();
+        let (cpu_entered, cpu_observed) = mpsc::sync_channel(1);
+        let (release, gate) = mpsc::sync_channel(1);
+        let mut blocked = client
+            .try_submit(Lane::Cpu, small_cost(), move |_| {
+                cpu_entered.send(()).unwrap();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok::<_, String>(())
+            })
+            .unwrap();
+        cpu_observed.recv_timeout(Duration::from_secs(3)).unwrap();
+        let wake = notification.clone();
+        let mut preparation = client
+            .try_submit(Lane::Cpu, small_cost(), move |_| {
+                prepared.store(true, Ordering::Release);
+                wake.notify_one();
+                Ok::<_, String>(())
+            })
+            .unwrap();
+        writer.close_admission();
+        assert!(writer.poll().is_none());
+        assert_eq!(writer.pending(), 2);
+        assert_eq!(writer.retained_bytes(), bytes);
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(!path.exists());
+        // This real I/O job completes while CPU preparation is still blocked.
+        // A callback waiting on CPU would occupy an I/O worker unnecessarily.
+        let (io_entered, io_observed) = mpsc::sync_channel(1);
+        let mut independent = client
+            .try_submit(Lane::Io, small_cost(), move |_| {
+                io_entered.send(()).unwrap();
+                Ok::<_, String>(())
+            })
+            .unwrap();
+        io_observed.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(writer.poll().is_none());
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut completed = Vec::new();
+        while completed.len() != 2 {
+            if let Some(completion) = writer.poll() {
+                match completion {
+                    WriteCompletion::Outcome { id, outcome } => {
+                        assert!(matches!(outcome.view(), JobOutcome::Finished(Ok(_))));
+                        completed.push(id);
+                    }
+                    _ => panic!("accepted original prepared write did not finish"),
+                }
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(completed, [first, second]);
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "FIRST"
+        );
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "SECOND"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "SECOND");
+        assert_eq!(writer.retained_bytes(), 0);
+        assert!(matches!(blocked.try_take(), JobPoll::Ready(_)));
+        assert!(matches!(preparation.try_take(), JobPoll::Ready(_)));
+        assert!(matches!(independent.try_take(), JobPoll::Ready(_)));
+        drop((blocked, preparation, independent, writer, client));
+        owner.request_shutdown(ShutdownMode::Drain);
+        assert_eq!(
+            owner
+                .join_until_background(deadline)
+                .unwrap()
+                .remaining_workers,
+            0
+        );
     }
 }

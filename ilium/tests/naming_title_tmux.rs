@@ -78,6 +78,32 @@ impl Fixture {
         ilium_client::config::save_onboarding_progress(&config, &settings.onboarding).unwrap();
         ilium_client::config::save_trigger_settings(&config, &settings.triggers).unwrap();
         ilium_client::config::save_ui_settings(&config, &settings.ui).unwrap();
+        // Keep the task-created server away from the user's default listener.
+        // A selected port is configuration evidence, not listener ownership.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let http_port = listener.local_addr().unwrap().port();
+        assert_ne!(http_port, 8872);
+        drop(listener);
+        let config_path = config.join("config.toml");
+        let existing = std::fs::read_to_string(&config_path).unwrap();
+        assert!(!existing.contains("[api]"));
+        std::fs::write(
+            &config_path,
+            format!("{existing}\n[api]\nport = {http_port}\n"),
+        )
+        .unwrap();
+        let port_receipt = root.join("requested-http-port.json");
+        std::fs::write(
+            &port_receipt,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "type": "artifact", "config_path": config_path,
+                "table": "api", "port": http_port,
+                "listener_ownership": "not established by port selection"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        artifact(&port_receipt, "task-local HTTP port configuration");
         let binary = ilium_platform::paths::canonicalize(&PathBuf::from(
             std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
                 .expect("set matching candidate ILIUM_PTY_SMOKE_BINARY"),
@@ -165,10 +191,15 @@ impl Fixture {
             .map(|(name, value)| shell_quote(&format!("{name}={}", value.display())))
             .collect::<Vec<_>>()
             .join(" ");
+        // Keep exec so tmux's pane PID remains the client PID. Retain stderr
+        // separately because tmux discards the pane when startup exits early.
+        let client_stderr = self.root.join("client-stderr.txt");
+        artifact(&client_stderr, "owned client startup and runtime stderr");
         let command = format!(
-            "exec env {env} {} --cwd {}",
+            "exec env {env} {} --cwd {} 2> {}",
             shell_quote(self.binary.to_str().unwrap()),
-            shell_quote(self.project.to_str().unwrap())
+            shell_quote(self.project.to_str().unwrap()),
+            shell_quote(client_stderr.to_str().unwrap())
         );
         let output = self.tmux(&[
             "new-session",
@@ -206,10 +237,11 @@ impl Fixture {
 
     fn terminal_text(&self) -> String {
         let output = self.tmux(&["capture-pane", "-e", "-p", "-t", "acceptance:0.0"]);
-        assert!(
-            output.status.success(),
-            "capture owned terminal: {output:?}"
-        );
+        if !output.status.success() {
+            let path = self.root.join("client-stderr.txt");
+            let stderr = std::fs::read_to_string(&path);
+            panic!("capture owned terminal: {output:?}; retained client stderr at {path:?}: {stderr:?}");
+        }
         String::from_utf8(output.stdout).unwrap()
     }
 

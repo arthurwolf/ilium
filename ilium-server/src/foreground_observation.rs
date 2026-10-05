@@ -327,7 +327,7 @@ mod tests {
         assert_ne!(worker_thread, std::thread::current().id());
 
         let directory = tempfile::tempdir().expect("isolated state directory");
-        let (sound_requests, _sound_rx) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _sound_rx) = crate::sounds::test_channel(1);
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "foreground-lock-fixture".to_owned(),
             session_cwd: directory.path().to_path_buf(),
@@ -336,7 +336,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

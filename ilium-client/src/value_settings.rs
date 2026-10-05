@@ -11,6 +11,7 @@ pub enum SettingsNumber {
     Panel(PanelNumber),
     Ui(UiNumber),
     TerminalScrollback,
+    TerminalEngineMemory,
     EditorAutosaveDelay,
     Board(BoardNumber),
     ApiPort,
@@ -109,6 +110,11 @@ impl SettingsNumber {
             {
                 Some(Self::TerminalScrollback)
             }
+            SettingsTab::Terminal
+                if TerminalRow::ALL.get(row) == Some(&TerminalRow::EngineMemoryBudget) =>
+            {
+                Some(Self::TerminalEngineMemory)
+            }
             SettingsTab::Editor if EditorRow::ALL.get(row) == Some(&EditorRow::AutosaveDelay) => {
                 Some(Self::EditorAutosaveDelay)
             }
@@ -143,6 +149,7 @@ impl SettingsNumber {
                 "Hide completed progress after (s; 0 = never)"
             }
             Self::TerminalScrollback => "Scrollback budget (MiB)",
+            Self::TerminalEngineMemory => "Terminal engine memory budget (MiB)",
             Self::EditorAutosaveDelay => "Autosave delay (ms)",
             Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
             Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
@@ -199,6 +206,10 @@ impl SettingsNumber {
                 value_config::terminal_scrollback_spec(),
                 app.terminal_settings.scrollback_budget_mib.to_string(),
             ),
+            Self::TerminalEngineMemory => (
+                value_config::terminal_engine_memory_spec(),
+                app.terminal_settings.engine_memory_budget_mib.to_string(),
+            ),
             Self::EditorAutosaveDelay => (
                 value_config::editor_autosave_spec(),
                 app.editor_settings.autosave_delay_ms.to_string(),
@@ -229,6 +240,7 @@ impl SettingsNumber {
                 i128::from(ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS)
             }
             Self::TerminalScrollback => 4,
+            Self::TerminalEngineMemory => 256,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
             _ => 1,
         };
@@ -537,6 +549,11 @@ impl App {
             SettingsNumber::TerminalScrollback => {
                 let mut settings = self.terminal_settings;
                 value_config::set_terminal_scrollback(&mut settings, text)?;
+                ConfigurationChange::Terminal(settings)
+            }
+            SettingsNumber::TerminalEngineMemory => {
+                let mut settings = self.terminal_settings;
+                value_config::set_terminal_engine_memory(&mut settings, text)?;
                 ConfigurationChange::Terminal(settings)
             }
             SettingsNumber::EditorAutosaveDelay => {

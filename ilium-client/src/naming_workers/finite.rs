@@ -287,7 +287,7 @@ fn run_request(
         }
         Kind::Restructure(request, home) => {
             let crate::app::PendingRestructureRequest {
-                project_cwd,
+                animation_home,
                 recommendation_snapshot,
                 project_id,
                 mut contexts,
@@ -311,7 +311,7 @@ fn run_request(
                             &current_structure,
                             &protected_split_views,
                             &recommendation_snapshot,
-                            &project_cwd,
+                            &animation_home,
                         )
                     }),
                 )
@@ -455,7 +455,7 @@ impl Kind {
                     std::mem::size_of::<crate::app::PendingRestructureRequest>()
                         .saturating_add(home.capacity())
                         .saturating_add(request.project_name.capacity())
-                        .saturating_add(request.project_cwd.capacity())
+                        .saturating_add(request.animation_home.capacity())
                         .saturating_add(request.current_structure.capacity())
                         .saturating_add(
                             request

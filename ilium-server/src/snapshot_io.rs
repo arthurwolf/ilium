@@ -8,6 +8,7 @@ use crate::{
 use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind};
 use std::{
     io,
+    ops::ControlFlow,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -73,6 +74,8 @@ pub(crate) struct LoadedSnapshot {
     snapshot: Option<SessionSnapshot>,
     storage: Arc<ilium_execution::StorageAdmission>,
     retirement: Option<ilium_execution::RetirementReservation<SessionSnapshot>>,
+    restore_retirement:
+        Option<ilium_execution::RetirementReservation<crate::SnapshotRestoreFuture>>,
 }
 impl std::ops::Deref for LoadedSnapshot {
     type Target = SessionSnapshot;
@@ -82,6 +85,24 @@ impl std::ops::Deref for LoadedSnapshot {
     }
 }
 impl LoadedSnapshot {
+    pub(crate) fn into_restore_future(
+        mut self,
+        state: Arc<crate::state::ServerState>,
+    ) -> ControlFlow<Self, ilium_execution::Retiring<crate::SnapshotRestoreFuture>> {
+        let Some(retirement) = self.restore_retirement.take() else {
+            return ControlFlow::Break(self);
+        };
+        // Every allocation of the actual future frame was admitted before
+        // decoding. Transfer the exact original; neither tree nor pane history
+        // is cloned. The same lease covers partial state and remaining input.
+        state.retain_snapshot_read_storage(Arc::clone(&self.storage));
+        let snapshot = self.snapshot.take().expect("live loaded snapshot");
+        let frame = crate::boxed_snapshot_restore_future(state, snapshot);
+        let mut frame = retirement.attach(frame);
+        frame.set_storage_guard(Arc::clone(&self.storage));
+        ControlFlow::Continue(frame)
+    }
+    #[cfg(test)]
     pub(crate) fn into_parts(
         mut self,
     ) -> (SessionSnapshot, Arc<ilium_execution::StorageAdmission>) {
@@ -135,6 +156,8 @@ enum Command {
         result_storage: Arc<ilium_execution::StorageAdmission>,
         parser_storage: ilium_execution::StorageAdmission,
         retirement: Option<ilium_execution::RetirementReservation<SessionSnapshot>>,
+        restore_retirement:
+            Option<ilium_execution::RetirementReservation<crate::SnapshotRestoreFuture>>,
         ack: oneshot::Sender<Completion<Option<LoadedSnapshot>>>,
         reservation: Reservation,
     },
@@ -287,6 +310,7 @@ impl SnapshotIo {
                             result_storage,
                             parser_storage,
                             retirement,
+                            restore_retirement,
                             ack,
                             reservation,
                         } => {
@@ -314,6 +338,7 @@ impl SnapshotIo {
                                     snapshot: Some(snapshot),
                                     storage: result_storage,
                                     retirement,
+                                    restore_retirement,
                                 }))
                             });
                             // The decoder and its scratch have actually returned;
@@ -574,6 +599,30 @@ impl SnapshotIo {
                     })
             })
             .transpose()?;
+        let restore_retirement = self
+            .retirement
+            .as_ref()
+            .map(|owner| {
+                let frame_bytes = crate::snapshot_restore_frame_bytes()
+                    .checked_add(4096)
+                    .ok_or_else(|| {
+                        admission_error(
+                            &self.path,
+                            "restore frame admission",
+                            "future frame declaration overflow",
+                        )
+                    })?;
+                owner
+                    .try_reserve::<crate::SnapshotRestoreFuture>(frame_bytes)
+                    .map_err(|reason| {
+                        admission_error(
+                            &self.path,
+                            "restore frame admission",
+                            format!("{reason:?}"),
+                        )
+                    })
+            })
+            .transpose()?;
         let (ack, receiver) = oneshot::channel();
         self.admit(
             Command::Read {
@@ -581,6 +630,7 @@ impl SnapshotIo {
                 result_storage,
                 parser_storage,
                 retirement,
+                restore_retirement,
                 ack,
                 reservation,
             },
@@ -948,9 +998,11 @@ mod tests {
         let retained = quota.snapshot().worker_bytes;
         assert!(retained >= baseline + MAX_SNAPSHOT_RETAINED_BYTES);
         drop(loaded);
-        assert_eq!(
-            quota.snapshot().worker_bytes,
-            retained,
+        // The unused restore-frame reservation contains no original and may
+        // release its small empty envelope. The decoded original still owns
+        // its independent body lease and CPU destruction envelope.
+        assert!(
+            quota.snapshot().worker_bytes > baseline + MAX_SNAPSHOT_RETAINED_BYTES,
             "discard must not destroy or uncharge the original on the caller"
         );
         for release in releases {
@@ -971,6 +1023,147 @@ mod tests {
         .await
         .expect("retirement completion");
         drop(receipts);
+        service.shutdown().await.expect("disk shutdown");
+    }
+
+    #[tokio::test]
+    async fn cancelled_pending_restore_keeps_original_frame_state_and_storage_until_cpu_drop() {
+        let directory = tempfile::tempdir().expect("directory");
+        let owner = crate::execution::ServerExecution::start().expect("bank");
+        let quota = owner.quota_group();
+        let service =
+            SnapshotIo::new_with_execution(directory.path().join("restore-frame.json"), &owner)
+                .expect("disk owner");
+        service
+            .write_boot(snapshot(35))
+            .await
+            .expect("fixture write");
+        let (entered, started) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut receipts = Vec::new();
+        for _ in 0..2 {
+            let (release, gate) = mpsc::channel();
+            let entered = entered.clone();
+            let receipt = owner
+                .client
+                .foundation
+                .try_reserve(
+                    ilium_execution::Lane::Cpu,
+                    ilium_execution::JobCost {
+                        input_bytes: 4096,
+                        result_bytes: 4096,
+                    },
+                )
+                .expect("CPU admission")
+                .submit(move |_: ilium_execution::JobContext| {
+                    entered.send(()).expect("entered");
+                    gate.recv().expect("release");
+                    Ok::<(), ()>(())
+                })
+                .unwrap_or_else(|_| panic!("CPU submit refused"));
+            releases.push(release);
+            receipts.push(receipt);
+        }
+        for _ in 0..2 {
+            started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("CPU owners parked");
+        }
+        let baseline = quota.snapshot().worker_bytes;
+        let loaded = service.read(None).await.expect("read").expect("original");
+        let state = Arc::new(capture_state(directory.path()));
+        let weak = Arc::downgrade(&state);
+        let publish_fence = state.workspace_spawn_lock.lock().await;
+        let mut frame = match loaded.into_restore_future(Arc::clone(&state)) {
+            ControlFlow::Continue(frame) => frame,
+            ControlFlow::Break(_) => panic!("admitted restore frame"),
+        };
+        std::future::poll_fn(|context| {
+            assert!(
+                frame.as_mut().poll(context).is_pending(),
+                "actual restore must wait for its publish fence"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(publish_fence);
+        drop(state);
+        let retained = quota.snapshot().worker_bytes;
+        assert!(retained > baseline + MAX_SNAPSHOT_RETAINED_BYTES);
+        drop(frame);
+        assert!(
+            weak.upgrade().is_some(),
+            "cancelled future retains its actual state on CPU retirement queue"
+        );
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            retained,
+            "neither original nor frame credit released by caller"
+        );
+        for release in releases {
+            release.send(()).expect("release CPU");
+        }
+        let wake = owner.client.completion_notification();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let notified = wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if weak.upgrade().is_none() && quota.snapshot().worker_bytes == baseline {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("actual frame/state retirement");
+        drop(receipts);
+        service.shutdown().await.expect("disk shutdown");
+    }
+
+    #[tokio::test]
+    async fn restore_frame_refusal_precedes_decode_and_releases_the_snapshot_envelope() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("frame-refused.json");
+        let owner = crate::execution::ServerExecution::start().expect("bank");
+        let quota = owner.quota_group();
+        let service = SnapshotIo::new_with_execution(path.clone(), &owner).expect("disk owner");
+        service
+            .write_boot(snapshot(36))
+            .await
+            .expect("fixture write");
+        let original = std::fs::read(&path).expect("original bytes");
+        let retirement = owner.client.foundation.retirement();
+        let permits: Vec<_> = (0..63)
+            .map(|_| {
+                retirement
+                    .try_reserve::<SessionSnapshot>(4096)
+                    .expect("slot pressure")
+            })
+            .collect();
+        let baseline = quota.snapshot().worker_bytes;
+        assert!(matches!(
+            service.read(None).await,
+            Err(ServerError::Snapshot {
+                operation: "restore frame admission",
+                source: SnapshotError::ResourceAdmission(_),
+                ..
+            })
+        ));
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline,
+            "failed frame admission releases prior result, scratch and envelope credits"
+        );
+        assert_eq!(service.budget.bytes.load(Ordering::Acquire), 0);
+        assert_eq!(
+            std::fs::read(&path).expect("authoritative readback"),
+            original
+        );
+        drop(permits);
+        let loaded = service.read(None).await.expect("retry").expect("snapshot");
+        assert_eq!(loaded.version, 36);
+        drop(loaded);
         service.shutdown().await.expect("disk shutdown");
     }
 
@@ -1282,7 +1475,7 @@ mod tests {
             config::{DetectionConfig, NotificationsConfig},
             state::{ServerState, ServerStateOptions},
         };
-        let (sound_requests, _) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _) = crate::sounds::test_channel(1);
         ServerState::new(ServerStateOptions {
             session_name: "capture-test".into(),
             session_cwd: directory.into(),
@@ -1291,12 +1484,324 @@ mod tests {
             socket_path: directory.join("isolated.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: true,
             progress_monitor_enabled: true,
         })
+    }
+
+    #[tokio::test]
+    async fn shutdown_drains_queued_semantic_cpu_work_and_durable_snapshot_before_bank_stop() {
+        let directory = tempfile::tempdir().expect("directory");
+        let state = Arc::new(capture_state(directory.path()));
+        let owner = crate::execution::ServerExecution::start().expect("bank");
+        assert!(state.execution.set(owner).is_ok());
+        let execution = state.execution.get().expect("owner");
+        let foundation = execution.client.foundation.clone();
+        let wake = execution.client.completion_notification();
+        let (entered, started) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut parked = Vec::new();
+        for _ in 0..2 {
+            let (release, gate) = mpsc::channel();
+            let entered = entered.clone();
+            parked.push(
+                foundation
+                    .try_reserve(
+                        ilium_execution::Lane::Cpu,
+                        ilium_execution::JobCost {
+                            input_bytes: 4096,
+                            result_bytes: 4096,
+                        },
+                    )
+                    .expect("park admission")
+                    .submit(move |_: ilium_execution::JobContext| {
+                        entered.send(()).expect("entered");
+                        gate.recv().expect("release");
+                        Ok::<(), ()>(())
+                    })
+                    .unwrap_or_else(|_| panic!("park submit")),
+            );
+            releases.push(release);
+        }
+        for _ in 0..2 {
+            started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("CPU owners parked");
+        }
+        let mut receipt = foundation
+            .try_reserve(
+                ilium_execution::Lane::Cpu,
+                ilium_execution::JobCost {
+                    input_bytes: 4096,
+                    result_bytes: 4096,
+                },
+            )
+            .expect("semantic admission")
+            .submit(|context: ilium_execution::JobContext| {
+                Ok::<bool, ()>(!context.stop_requested())
+            })
+            .unwrap_or_else(|_| panic!("semantic submit"));
+        let semantic_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            loop {
+                let notified = wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                match receipt.try_take() {
+                    ilium_execution::JobPoll::Pending => notified.await,
+                    ilium_execution::JobPoll::Ready(outcome) => {
+                        assert!(
+                            matches!(
+                                outcome.view(),
+                                ilium_execution::JobOutcome::Finished(Ok(true))
+                            ),
+                            "accepted semantic CPU work must run before cancellation"
+                        );
+                        break;
+                    }
+                    _ => panic!("semantic work lost"),
+                }
+            }
+            semantic_state
+                .tree
+                .write()
+                .await
+                .rename_node(ROOT_ID, "accepted work drained", None, None)
+                .expect("mutation");
+            semantic_state.request_snapshot_save();
+        });
+        assert!(state.track_workspace_mutation_task(task));
+        let mut writer = crate::task_guard::AbortOnDropHandle::new(
+            persistence::spawn_snapshot_writer(Arc::clone(&state)),
+        );
+        let mut shutdown = Box::pin(crate::drain_session_work(&state, &mut writer));
+        std::future::poll_fn(|context| {
+            assert!(std::future::Future::poll(shutdown.as_mut(), context).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(
+            foundation.is_open(),
+            "semantic drain must retain bank admission"
+        );
+        for release in releases {
+            release.send(()).expect("release CPU");
+        }
+        tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .expect("shutdown drain")
+            .expect("successful semantic and durable shutdown");
+        assert!(
+            !foundation.is_open(),
+            "bank stops after semantic and durable work"
+        );
+        let persisted = persistence::load_snapshot_blocking(&state.snapshot_path)
+            .expect("authoritative readback")
+            .expect("snapshot");
+        assert_eq!(
+            persisted.tree.get(ROOT_ID).expect("root").name,
+            "accepted work drained"
+        );
+        drop(parked);
+        let _ = writer.settle().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_snapshot_attempt_preserves_original_dirty_claim() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = Arc::new(capture_state(directory.path()));
+        let execution = crate::execution::ServerExecution::start().expect("actual bank");
+        assert!(state.execution.set(execution).is_ok());
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        state.request_snapshot_save();
+        let mut attempt = Box::pin(persistence::flush_pending_snapshot(&state));
+        std::future::poll_fn(|context| {
+            assert!(
+                std::future::Future::poll(attempt.as_mut(), context).is_pending(),
+                "actual write must remain blocked behind the held write owner"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        // Cancel only this test-owned future after the production flush took
+        // the dirty claim but before native write admission can occur.
+        drop(attempt);
+        let still_owed = state.take_pending_snapshot();
+        drop(write_guard);
+        persistence::shutdown_snapshot_service(&state)
+            .await
+            .expect("ordered native service cleanup");
+        state
+            .execution
+            .get()
+            .expect("actual owner")
+            .request_shutdown();
+        assert!(
+            still_owed,
+            "cancelling an actual pending snapshot attempt must preserve its dirty claim"
+        );
+        assert!(
+            !state.snapshot_path.exists(),
+            "a cancelled pre-admission write must not create a snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_retries_dirty_claim_returned_by_inflight_failed_write() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = Arc::new(capture_state(directory.path()));
+        let execution = crate::execution::ServerExecution::start().expect("actual bank");
+        assert!(state.execution.set(execution).is_ok());
+        state
+            .tree
+            .write()
+            .await
+            .rename_node(ROOT_ID, "latest state after failed write", None, None)
+            .expect("actual semantic mutation");
+        std::fs::create_dir(&state.snapshot_path).expect("isolated native write obstruction");
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        let mut writer = crate::task_guard::AbortOnDropHandle::new(
+            persistence::spawn_snapshot_writer(Arc::clone(&state)),
+        );
+        state.request_snapshot_save();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.is_snapshot_dirty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("actual background writer consumed the dirty claim");
+        let mut shutdown = Box::pin(crate::drain_session_work(&state, &mut writer));
+        std::future::poll_fn(|context| {
+            assert!(
+                std::future::Future::poll(shutdown.as_mut(), context).is_pending(),
+                "shutdown waits behind the actual in-flight writer"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(write_guard);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !state.is_snapshot_dirty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("actual native failure returned the dirty claim");
+        // Freeze only this fixture's now-idle debounced coordinator, after the
+        // real write acknowledgement and failure bookkeeping. This prevents a
+        // later ordinary retry from hiding a missing final shutdown retry.
+        state.stop_snapshot_writer();
+        assert_eq!(state.snapshot_path.parent(), Some(directory.path()));
+        std::fs::remove_dir(&state.snapshot_path).expect("remove only isolated empty obstruction");
+        let _shutdown_outcome = tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .expect("shutdown completes cleanup after actual write failure");
+        let _ = writer.settle().await;
+        assert!(!state
+            .execution
+            .get()
+            .expect("actual bank")
+            .client
+            .foundation
+            .is_open());
+        let persisted = persistence::load_snapshot_blocking(&state.snapshot_path)
+            .expect("authoritative final readback")
+            .expect("shutdown must retry the dirty claim returned by its in-flight failed write");
+        assert_eq!(
+            persisted.tree.get(ROOT_ID).expect("saved root").name,
+            "latest state after failed write"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_shutdown_preserves_original_writer_failure_across_retries() {
+        let directory = tempfile::tempdir().expect("isolated snapshot directory");
+        let state = Arc::new(capture_state(directory.path()));
+        let execution = crate::execution::ServerExecution::start().expect("actual bank");
+        assert!(state.execution.set(execution).is_ok());
+        state
+            .tree
+            .write()
+            .await
+            .rename_node(
+                ROOT_ID,
+                "dirty state survives cancelled shutdown",
+                None,
+                None,
+            )
+            .expect("actual semantic mutation");
+        state.request_snapshot_save();
+        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
+        let mut writer: crate::task_guard::AbortOnDropHandle<()> =
+            crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async {
+                panic!("isolated snapshot coordinator failure");
+            }));
+        let mut first = Box::pin(crate::drain_session_work(&state, &mut writer));
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|context| {
+                let outcome = std::future::Future::poll(first.as_mut(), context);
+                assert!(
+                    outcome.is_pending(),
+                    "final persistence must wait for the held write owner"
+                );
+                if state.snapshot_writer_failed() {
+                    std::task::Poll::Ready(())
+                } else {
+                    std::task::Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("actual writer failure was reaped and latched");
+        drop(first);
+        assert!(
+            state.is_snapshot_dirty(),
+            "cancelled final persistence returns the original dirty claim"
+        );
+        assert!(
+            state.snapshot_writer_failed(),
+            "cancellation must not erase the physical join failure"
+        );
+        drop(write_guard);
+        let second = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::drain_session_work(&state, &mut writer),
+        )
+        .await
+        .expect("retry settles actual persistence and shutdown");
+        assert!(
+            second.is_err(),
+            "retry must report the original coordinator failure"
+        );
+        let persisted = persistence::load_snapshot_blocking(&state.snapshot_path)
+            .expect("authoritative final readback")
+            .expect("dirty state was durably retried");
+        assert_eq!(
+            persisted.tree.get(ROOT_ID).expect("saved root").name,
+            "dirty state survives cancelled shutdown"
+        );
+        let third = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::drain_session_work(&state, &mut writer),
+        )
+        .await
+        .expect("already reaped shutdown retry finishes");
+        assert!(
+            third.is_err(),
+            "an already reaped failed coordinator never becomes successful"
+        );
+        assert!(!state
+            .execution
+            .get()
+            .expect("actual bank")
+            .client
+            .foundation
+            .is_open());
     }
 
     #[tokio::test]
@@ -1458,7 +1963,7 @@ mod tests {
             state::{ServerState, ServerStateOptions},
         };
         let directory = tempfile::tempdir().expect("directory");
-        let (sound_requests, _sound_receiver) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
         let state = ServerState::new(ServerStateOptions {
             session_name: "snapshot-kill-test".into(),
             session_cwd: directory.path().to_owned(),
@@ -1467,7 +1972,7 @@ mod tests {
             socket_path: directory.path().join("isolated.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

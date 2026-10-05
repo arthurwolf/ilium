@@ -443,6 +443,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.selected_row,
             state.scroll,
         ),
+        SettingsTab::Optimization => {
+            crate::compaction_ui::render(frame, layout.content_area, app, state.scroll);
+        }
+        SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::render(
+            frame,
+            layout.content_area,
+            app,
+            state.selected_row,
+            state.scroll,
+        ),
         SettingsTab::Debug => render_scrollable(
             frame,
             layout.content_area,
@@ -484,6 +494,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
     }
     render_settings_help_anchors(frame, &layout, app, state);
+    if state.tab == SettingsTab::Optimization {
+        // The Apply confirmation covers the whole screen, help rail included.
+        crate::compaction_ui::render_modal(frame, area, app);
+    }
     if state.tab == SettingsTab::Animations {
         crate::animation_hover::render(
             frame,
@@ -571,6 +585,27 @@ pub fn settings_help_anchors(
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
                 crate::cost_settings_ui::help_anchors(app, layout.content_area.width)
+            {
+                let selected = all_rows.get(state.selected_row) == Some(&row);
+                push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
+            }
+        }
+        SettingsTab::Optimization => {
+            // A pending Apply confirmation hides the page and its anchors.
+            if app.optimization.pending_apply.is_none() {
+                for (topic_id, row) in
+                    crate::compaction_ui::help_anchors(app, layout.content_area, state.scroll)
+                {
+                    // The sub-tab row is the tab's focus point.
+                    let selected = topic_id == "OPT-01";
+                    push_help_anchor(&mut anchors, layout, topic_id, row, 0, selected);
+                }
+            }
+        }
+        SettingsTab::RemoteCompaction => {
+            let all_rows = crate::remote_compaction_settings_ui::rows(app);
+            for (topic_id, line, row) in
+                crate::remote_compaction_settings_ui::help_anchors(app, layout.content_area.width)
             {
                 let selected = all_rows.get(state.selected_row) == Some(&row);
                 push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
@@ -1314,6 +1349,16 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::Cost => {
             return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
+        }
+        SettingsTab::Optimization => {
+            return crate::compaction_ui::max_scroll(app, content_area);
+        }
+        SettingsTab::RemoteCompaction => {
+            return crate::remote_compaction_settings_ui::max_scroll(
+                app,
+                selected_row,
+                content_area,
+            );
         }
         SettingsTab::Debug => debug_lines(&app.debug_settings, selected_row).len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
@@ -4081,6 +4126,9 @@ fn settings_control_row(
                 Some(crate::value_settings::SettingsNumber::TerminalScrollback) => {
                     "Scrollback budget"
                 }
+                Some(crate::value_settings::SettingsNumber::TerminalEngineMemory) => {
+                    "Engine memory budget"
+                }
                 Some(crate::value_settings::SettingsNumber::EditorAutosaveDelay) => {
                     "Autosave delay"
                 }
@@ -4132,6 +4180,7 @@ pub(crate) fn settings_number_control(
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
         crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
+        crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
         crate::value_settings::SettingsNumber::Ui(
             crate::value_settings::UiNumber::CompletedProgressHideAfter,
@@ -4354,6 +4403,11 @@ fn terminal_lines(settings: &TerminalSettings, selected: usize) -> Vec<Line<'sta
                 "Smart Copy light key",
                 settings.smart_copy_light_key.label().to_string(),
                 "The modifier key that starts Smart Copy light while held.",
+            ),
+            (
+                "Engine memory budget",
+                format!("{} MiB", settings.engine_memory_budget_mib),
+                "Memory all terminal parsers may use together. Panes you leave keep their parsed state for instant revisit until a shown pane needs the room; the oldest-focused go first. Raising it applies after restart; lowering applies immediately.",
             ),
         ],
         selected,
@@ -4993,7 +5047,7 @@ fn monitoring_card_lines(
             "Show the long-term objective and current activity in separate positions. Healthy work, goals, and monitored tasks stay visible."
         }
         crate::agent_monitoring::AgentMonitoringMode::Attention => {
-            "Show at most one status icon, and only when you need to act or inspect: approval, stopped goals, errors, failed monitoring, or unread results."
+            "Use one shared status position, blank when there is no signal. Show the highest-priority status: approval, stopped goals, errors, failed monitoring, or unread results."
         }
     };
     let demo = crate::tree_ui::agent_monitoring_demo_rows(mode, ui);
@@ -5190,7 +5244,7 @@ fn agent_monitoring_view(
     }
     view.lines.extend([
         Line::from(""),
-        Line::from(Span::styled("What the two status positions mean", Style::new().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Normal mode: two status positions", Style::new().add_modifier(Modifier::BOLD))),
         Line::from(" Agent identity │ objective / long-term │ current activity / right now │ pane title"),
         Line::from("                  committed goal or task     what the agent is doing"),
         Line::from(""),
@@ -5203,6 +5257,7 @@ fn agent_monitoring_view(
         Line::from(Span::styled("Attention mode priority", Style::new().add_modifier(Modifier::BOLD))),
         Line::from("Approval → monitor failed → task error → blocked → usage limited → paused → reached"),
         Line::from("→ unread task success → unread agent turn. Only the highest-priority status glyph is shown."),
+        Line::from("Attention uses one shared status position, left blank when there is no icon."),
         Line::from("A goal remains until its provider changes or clears it; opening the pane acknowledges results, not goals."),
         Line::from(""),
         Line::from(Span::styled("Monitoring settings", Style::new().add_modifier(Modifier::BOLD))),
@@ -5905,6 +5960,10 @@ mod tests {
                                 .map(|anchor| anchor.topic_id),
                         );
                     }
+                }
+                SettingsTab::Optimization => {
+                    // Idle, scanning and report pages carry different topics.
+                    reachable.extend(crate::compaction_ui::tests::reachable_topics());
                 }
                 _ => {
                     let state = SettingsState {
@@ -6627,7 +6686,7 @@ mod tests {
         for expected in [
             "Normal mode",
             "Attention mode",
-            "What the two status positions mean",
+            "Normal mode: two status positions",
             "objective / long-term",
             "current activity / right now",
             "Objective position:",

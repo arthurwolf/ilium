@@ -8,14 +8,20 @@ use super::{
     },
 };
 use ilium_animation_js::{
-    permissions::{HostBinding, Invalidation, PlanReview, UserChoice},
+    native_audio_capture::QualifiedCaptureBinding,
+    native_storage::SelectedStorage,
+    permissions::{Invalidation, PlanReview, UserChoice},
     runtime::{
-        InstanceResolution, PackageInstance, PendingResolution, StoppedInstance,
-        VerifiedPreparation,
+        InstanceResolution, PackageInstance, PendingResolution, RetainedReplayRevoker,
+        StoppedInstance, VerifiedPreparation,
     },
 };
 use ilium_execution::{Client, QuotaGroup, Retained, StorageAdmission};
-use std::{collections::BTreeMap, sync::Arc};
+use ilium_platform::owned_worker::StopToken;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::Notify;
 
 type Result<T> = std::result::Result<T, String>;
@@ -60,7 +66,14 @@ pub(crate) enum ActivationUpdate {
 /// PRIVATE; callers receive genuine review/effect inventories, never grant IDs.
 pub(crate) struct PermissionCancellation {
     pub(crate) stop: Option<StoppedInstance>,
+    pub(crate) delegated_invalidation: Option<Invalidation>,
+    pub(crate) delegated_authority_error: Option<String>,
     pub(crate) persistence_error: Option<String>,
+}
+struct DelegatedInstance {
+    instance: Arc<Mutex<PackageInstance>>,
+    revoker: RetainedReplayRevoker,
+    stop: StopToken,
 }
 
 pub(crate) struct PluginPermissionController {
@@ -68,6 +81,7 @@ pub(crate) struct PluginPermissionController {
     files: PluginPermissionFiles,
     verified: Option<VerifiedPreparation>,
     instance: Option<PackageInstance>,
+    delegated: Option<DelegatedInstance>,
     fence: Option<Arc<PermissionFence>>,
     loaded: Option<LoadedOutcome>,
     written: Option<WrittenOutcome>,
@@ -76,6 +90,8 @@ pub(crate) struct PluginPermissionController {
     pending: Option<PendingResolution>,
     expected_write: Option<WriteExpectation>,
     selection_revision: Option<u64>,
+    selected_storage: BTreeMap<String, Arc<SelectedStorage>>,
+    selected_audio: BTreeMap<String, QualifiedCaptureBinding>,
     blocked: Option<String>,
     finished: bool,
     failure_reported: bool,
@@ -95,6 +111,7 @@ impl PluginPermissionController {
             files,
             verified: None,
             instance: None,
+            delegated: None,
             fence: None,
             loaded: None,
             written: None,
@@ -103,6 +120,8 @@ impl PluginPermissionController {
             pending: None,
             expected_write: None,
             selection_revision: None,
+            selected_storage: BTreeMap::new(),
+            selected_audio: BTreeMap::new(),
             blocked: None,
             finished: false,
             failure_reported: false,
@@ -187,6 +206,22 @@ impl PluginPermissionController {
         host.on_completion_wake(instance)
             .map_err(|error| error.to_string())
     }
+    /// The source actor retains its original CPU/IO receipts after logical
+    /// cancellation. Allow only its bounded collector to see this retired
+    /// instance on a genuine finite-client completion wake.
+    pub(crate) fn collect_source_retirement_on_wake<T>(
+        &mut self,
+        collect: impl FnOnce(&mut PackageInstance) -> Result<T>,
+    ) -> Result<T> {
+        if self.blocked.is_none() {
+            return Err("Source retirement before cancellation/failure".into());
+        }
+        let instance = self
+            .instance
+            .as_mut()
+            .ok_or("Original source retirement instance missing")?;
+        collect(instance)
+    }
     pub(crate) fn is_physically_settled(&self) -> bool {
         self.blocked.is_some()
             && self.files.is_physically_settled()
@@ -194,6 +229,12 @@ impl PluginPermissionController {
                 .instance
                 .as_ref()
                 .is_none_or(PackageInstance::is_physically_retired)
+            && self.delegated.as_ref().is_none_or(|owner| {
+                owner
+                    .instance
+                    .try_lock()
+                    .is_ok_and(|instance| instance.is_physically_retired())
+            })
     }
     /// Read-only preactivation inspection; no mutable instance escapes the durable gate.
     pub(crate) fn with_review_state<T>(
@@ -238,11 +279,42 @@ impl PluginPermissionController {
             None
         }
     }
+    /// Transfer only an accepted pre-rendered instance to an admitted finite
+    /// preparation owner. The controller retains original revocation, quota,
+    /// persistence and physical-exit custody throughout the delegation.
+    pub(crate) fn delegate_accepted_replay(
+        &mut self,
+        stop: StopToken,
+    ) -> Result<Arc<Mutex<PackageInstance>>> {
+        if !self.finished || self.blocked.is_some() || self.delegated.is_some() {
+            return Err("Replay delegation requires one accepted current instance".into());
+        }
+        let instance = self
+            .instance
+            .as_ref()
+            .ok_or("Accepted replay instance missing")?;
+        let revoker = instance
+            .retain_replay_revoker()
+            .map_err(|error| error.to_string())?;
+        let owned = Arc::new(Mutex::new(
+            self.instance.take().ok_or("Replay instance moved")?,
+        ));
+        self.delegated = Some(DelegatedInstance {
+            instance: Arc::clone(&owned),
+            revoker,
+            stop,
+        });
+        Ok(owned)
+    }
+    pub(crate) fn delegated_instance(&self) -> Option<&Arc<Mutex<PackageInstance>>> {
+        self.delegated.as_ref().map(|owner| &owner.instance)
+    }
     pub(crate) fn review_selected(
         &mut self,
         current_selection: u64,
         revision: u64,
-        bindings: BTreeMap<String, HostBinding>,
+        picked: Option<(String, Arc<SelectedStorage>)>,
+        picked_audio: Option<(String, Option<QualifiedCaptureBinding>)>,
     ) -> Result<PlanReview> {
         self.check_selection(current_selection)?;
         if self.pending.is_some() || self.finished {
@@ -258,9 +330,33 @@ impl PluginPermissionController {
             .ok_or("Native storage fence missing")?
             .stamp()
             .instance_id;
-        instance
-            .review_selected(instance_id, revision, bindings)
-            .map_err(|error| error.to_string())
+        let mut proposed = self.selected_storage.clone();
+        if let Some((request_id, resource)) = picked {
+            if proposed.len() >= 64 && !proposed.contains_key(&request_id) {
+                return Err("Selected native resource inventory is full".into());
+            }
+            proposed.insert(request_id, resource);
+        }
+        let mut audio = self.selected_audio.clone();
+        if let Some((request_id, selected)) = picked_audio {
+            match selected {
+                Some(selected) => {
+                    if audio.len() + proposed.len() >= 64 && !audio.contains_key(&request_id) {
+                        return Err("Selected native resource inventory is full".into());
+                    }
+                    audio.insert(request_id, selected);
+                }
+                None => {
+                    audio.remove(&request_id);
+                }
+            }
+        }
+        let review = instance
+            .review_selected_resources(instance_id, revision, proposed.clone(), audio.clone())
+            .map_err(|error| error.to_string())?;
+        self.selected_storage = proposed;
+        self.selected_audio = audio;
+        Ok(review)
     }
     /// Returns the ORIGINAL native invalidation inventory. Owning worker must
     /// apply it to real acquisition/publication owners BEFORE the next poll.
@@ -485,6 +581,19 @@ impl PluginPermissionController {
         self.finished = false;
         self.failure_reported = true;
         let stop = self.instance.as_mut().map(PackageInstance::stop);
+        // The retained native broker is revoked before signalling a running
+        // preparation. The helper's physical exit remains a separate predicate.
+        let (delegated_invalidation, delegated_authority_error) = match self.delegated.as_mut() {
+            Some(owner) => {
+                let result = owner.revoker.revoke();
+                owner.stop.stop();
+                match result {
+                    Ok(invalidation) => (invalidation, None),
+                    Err(error) => (None, Some(error.to_string())),
+                }
+            }
+            None => (None, None),
+        };
         let persistence_error = self
             .fence
             .as_ref()
@@ -493,6 +602,8 @@ impl PluginPermissionController {
         self.files.close_admission();
         PermissionCancellation {
             stop,
+            delegated_invalidation,
+            delegated_authority_error,
             persistence_error,
         }
     }

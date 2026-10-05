@@ -1294,6 +1294,209 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
+    /// Walk only source-audited visibility controllers, without starting scenes.
+    /// The key keeps controller values and complete catalog schemas, so a new
+    /// visible control or changed option list must be checked as a new state.
+    fn conditional_scene_variants(kind: AnimationKind) -> Vec<AnimationSettings> {
+        use ilium_ambient::ControlKind;
+        use std::collections::HashSet;
+
+        const CONTROLLERS: &[&str] = &[
+            "address_provider",
+            "coastline",
+            "coverage",
+            "digit_colors",
+            "gravity_enabled",
+            "history_hours",
+            "input",
+            "land_underlay",
+            "map",
+            "merge_dots",
+            "mode",
+            "motion",
+            "order",
+            "palette",
+            "place_list",
+            "projection",
+            "reset_mode",
+            "seed_mode",
+            "selection",
+            "series",
+            "shoreline_style",
+            "shuffle",
+            "source",
+            "source_kind",
+            "star_style",
+            "start_from",
+            "style",
+            "terminator",
+            "tide_range_m",
+            "wiki_render_mode",
+            "wind_mode",
+            "semantic_scope",
+        ];
+        let identity = |settings: &AnimationSettings| {
+            settings
+                .scene_controls()
+                .iter()
+                .map(|control| {
+                    let value = CONTROLLERS.contains(&control.id).then_some(&control.value);
+                    format!(
+                        "{}:{:?}:{:?}:{value:?}",
+                        control.id, control.kind, control.disabled_options
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let initial = AnimationSettings {
+            kind,
+            ..Default::default()
+        };
+        let mut seen = HashSet::from([identity(&initial)]);
+        let mut variants = vec![initial];
+        let mut cursor = 0;
+        while cursor < variants.len() {
+            let current = variants[cursor].clone();
+            cursor += 1;
+            for control in current
+                .scene_controls()
+                .into_iter()
+                .filter(|control| CONTROLLERS.contains(&control.id))
+            {
+                let values: Vec<_> = match &control.kind {
+                    ControlKind::Choice { options } => (0..options.len())
+                        .filter(|index| {
+                            !control
+                                .disabled_options
+                                .iter()
+                                .any(|(disabled, _)| disabled == index)
+                        })
+                        .map(ControlValue::Index)
+                        .collect(),
+                    ControlKind::Toggle => {
+                        vec![ControlValue::Bool(false), ControlValue::Bool(true)]
+                    }
+                    ControlKind::Slider { min, max, .. } => {
+                        vec![ControlValue::Number(*min), ControlValue::Number(*max)]
+                    }
+                    ControlKind::Text { .. } => continue,
+                };
+                for value in values {
+                    let mut candidate = current.clone();
+                    candidate
+                        .set_scene_control(control.id, value)
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "{kind:?}: advertised controller {} refused its value: {error}",
+                                control.id
+                            )
+                        });
+                    if seen.insert(identity(&candidate)) {
+                        variants.push(candidate);
+                        assert!(
+                            variants.len() <= 1024,
+                            "{kind:?}: visibility state walk exceeded its explicit safety bound"
+                        );
+                    }
+                }
+            }
+        }
+        let expected: &[&str] = match kind {
+            AnimationKind::Clouds => &[
+                "land_underlay_percent",
+                "playback_fps",
+                "projection",
+                "rotation_deg_per_min",
+                "smoothing_percent",
+            ],
+            AnimationKind::Graph => &["falling_hue", "rising_hue"],
+            AnimationKind::HexExpedition => &["map_seconds"],
+            AnimationKind::Images => &[
+                "builtin_image",
+                "display_seconds",
+                "easing",
+                "motion_strength",
+                "order",
+                "shuffle_seed",
+                "source_kind",
+                "transition_seconds",
+            ],
+            AnimationKind::NightLights => &[
+                "coastline_strength_percent",
+                "rotation_deg_per_min",
+                "terminator_strength_percent",
+            ],
+            AnimationKind::OpenStreetMap => {
+                &["destination", "dwell_seconds", "place", "selection", "tour"]
+            }
+            AnimationKind::Pi => &[
+                "digit_0_hue",
+                "digit_1_hue",
+                "digit_2_hue",
+                "digit_3_hue",
+                "digit_4_hue",
+                "digit_5_hue",
+                "digit_6_hue",
+                "digit_7_hue",
+                "digit_8_hue",
+                "digit_9_hue",
+                "font_size",
+            ],
+            AnimationKind::Pipes => &["reset_seconds", "seed"],
+            AnimationKind::Shoreline => &[
+                "shoreline_backwash",
+                "shoreline_big_wave_every",
+                "shoreline_chop",
+                "shoreline_foam_breakup",
+                "shoreline_foam_unevenness",
+                "shoreline_lace",
+                "shoreline_meander",
+                "shoreline_set_irregularity",
+                "shoreline_sparkle",
+                "shoreline_stick_amount",
+                "shoreline_stick_linger",
+                "shoreline_swell_angle",
+                "shoreline_wave_sets",
+                "shoreline_wet_darkness",
+                "shoreline_wet_memory",
+            ],
+            AnimationKind::Spectrum => &[
+                "band_scale",
+                "bands",
+                "bar_gap",
+                "bar_width",
+                "ceiling_db",
+                "fft_size",
+                "floor_db",
+                "max_frequency",
+                "min_frequency",
+                "orientation",
+                "spectrogram_speed",
+                "tilt",
+            ],
+            AnimationKind::Stars => &["lens", "look_altitude", "star_size"],
+            AnimationKind::TopographicMaps => &["tide_seconds"],
+            AnimationKind::VectorTd => &["hue", "saturation", "scheme"],
+            AnimationKind::Video => &["scene_seconds", "seed", "slowed_percent"],
+            AnimationKind::Wikipedia => &["wiki_zoom"],
+            AnimationKind::Wind => &["gravity_strength", "merge_threshold", "rotation_speed"],
+            _ => &[],
+        };
+        let visible_ids: HashSet<_> = variants
+            .iter()
+            .flat_map(AnimationSettings::scene_controls)
+            .map(|control| control.id)
+            .collect();
+        for id in expected {
+            assert!(
+                visible_ids.contains(id),
+                "{kind:?}: conditional metadata walk never exposed {id}"
+            );
+        }
+        variants
+    }
+
     #[test]
     fn every_native_choice_and_number_paints_and_hits_at_supported_sizes() {
         use crate::value_control::{ControlAction, ControlStyles, PointerButton};
@@ -1301,130 +1504,153 @@ mod tests {
         let mut checked_choices = 0;
         let mut checked_numbers = 0;
         for kind in AnimationKind::ALL {
-            for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
-                for scene_uses_cell_colors in [false, true] {
-                    let settings = AnimationSettings {
-                        kind,
-                        playback_mode,
-                        ..Default::default()
-                    };
-                    let context = RowContext {
-                        scene_uses_cell_colors,
-                        ..Default::default()
-                    };
-                    let model = RowModel::new(&settings, &context);
-                    for (width, height) in [(80, 24), (120, 40), (160, 50)] {
-                        let area = Rect::new(0, 0, width, height);
-                        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                        for row in 0..model.len() {
-                            let view = model.view(row).unwrap();
-                            let (previous, next, open, action) = match view.kind {
-                                RowKind::Choice => {
-                                    checked_choices += 1;
-                                    ("←", "→", "+", ControlAction::OpenChoices)
-                                }
-                                RowKind::Slider(_) => {
-                                    checked_numbers += 1;
-                                    ("−", "+", "*", ControlAction::EditNumber)
-                                }
-                                _ => continue,
+            for variant in conditional_scene_variants(kind) {
+                for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
+                    for scene_uses_cell_colors in [false, true] {
+                        for color_mode in [
+                            ilium_ambient::style::ColorMode::Color,
+                            ilium_ambient::style::ColorMode::Greyscale,
+                            ilium_ambient::style::ColorMode::Monotone,
+                        ] {
+                            let mut settings = variant.clone();
+                            settings.playback_mode = playback_mode;
+                            settings.appearance.mode = color_mode;
+                            let effective_kinds = if kind == AnimationKind::Semantic {
+                                std::iter::once(None)
+                                    .chain(AnimationKind::ALL.into_iter().map(Some))
+                                    .collect::<Vec<_>>()
+                            } else {
+                                vec![None]
                             };
-                            let scrolls = follow_selection(area, &model, row, Scrolls::default());
-                            let control =
-                                value_control(area, &model, row, scrolls).unwrap_or_else(|| {
-                                    panic!(
-                                        "{kind:?} {width}x{height}: {} has no control",
-                                        view.label
-                                    )
-                                });
-                            let geometry = control.geometry();
-                            terminal
-                                .draw(|frame| control.render(frame, ControlStyles::default()))
-                                .unwrap();
-                            for (rect, glyph) in [
-                                (geometry.previous, previous),
-                                (geometry.next, next),
-                                (geometry.open, open),
-                            ] {
-                                assert_eq!(
-                                    rect.width, 1,
-                                    "{kind:?} {width}x{height}: {} missing {glyph}",
-                                    view.label
-                                );
-                                assert_eq!(
-                                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
-                                    glyph
-                                );
-                            }
-                            assert_eq!(
+                            for effective_kind in effective_kinds {
+                                let context = RowContext {
+                                    effective_kind,
+                                    scene_uses_cell_colors,
+                                    ..Default::default()
+                                };
+                                let model = RowModel::new(&settings, &context);
+                                for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+                                    let area = Rect::new(0, 0, width, height);
+                                    let mut terminal =
+                                        Terminal::new(TestBackend::new(width, height)).unwrap();
+                                    for row in 0..model.len() {
+                                        let view = model.view(row).unwrap();
+                                        let (previous, next, open, action) = match view.kind {
+                                            RowKind::Choice => {
+                                                checked_choices += 1;
+                                                ("←", "→", "+", ControlAction::OpenChoices)
+                                            }
+                                            RowKind::Slider(_) => {
+                                                checked_numbers += 1;
+                                                ("−", "+", "*", ControlAction::EditNumber)
+                                            }
+                                            _ => continue,
+                                        };
+                                        let scrolls =
+                                            follow_selection(area, &model, row, Scrolls::default());
+                                        let control = value_control(area, &model, row, scrolls)
+                                            .unwrap_or_else(|| {
+                                                panic!(
+                                                    "{kind:?} {width}x{height}: {} has no control",
+                                                    view.label
+                                                )
+                                            });
+                                        let geometry = control.geometry();
+                                        terminal
+                                            .draw(|frame| {
+                                                control.render(frame, ControlStyles::default())
+                                            })
+                                            .unwrap();
+                                        for (rect, glyph) in [
+                                            (geometry.previous, previous),
+                                            (geometry.next, next),
+                                            (geometry.open, open),
+                                        ] {
+                                            assert_eq!(
+                                                rect.width, 1,
+                                                "{kind:?} {width}x{height}: {} missing {glyph}",
+                                                view.label
+                                            );
+                                            assert_eq!(
+                                                terminal.backend().buffer()[(rect.x, rect.y)]
+                                                    .symbol(),
+                                                glyph
+                                            );
+                                        }
+                                        assert_eq!(
                                 value_hit(area, &model, scrolls, Position::new(geometry.open.x, geometry.open.y), PointerButton::Left),
                                 Some((row, action)),
                                 "{kind:?} {width}x{height}: {} open button belongs to a different row", view.label
                             );
-                            assert_eq!(
-                                value_hit(
-                                    area,
-                                    &model,
-                                    scrolls,
-                                    Position::new(geometry.open.x, geometry.open.y),
-                                    PointerButton::Right
-                                ),
-                                None
-                            );
-                            let metadata = model.control(row).unwrap();
-                            let value_left = if matches!(view.kind, RowKind::Choice) {
-                                metadata
-                                    .stepped(1)
-                                    .filter(|value| *value != metadata.value)
-                                    .map(|_| ControlAction::NextChoice)
-                            } else {
-                                Some(ControlAction::EditNumber)
-                            };
-                            let value_right = if matches!(view.kind, RowKind::Choice) {
-                                metadata
-                                    .stepped(-1)
-                                    .filter(|value| *value != metadata.value)
-                                    .map(|_| ControlAction::PreviousChoice)
-                            } else {
-                                None
-                            };
-                            if let Some((first, last)) =
-                                control.value_ink().first().zip(control.value_ink().last())
-                            {
-                                for x in first.x..last.right() {
-                                    let position = Position::new(x, first.y);
-                                    assert_eq!(
-                                        value_hit(
-                                            area,
-                                            &model,
-                                            scrolls,
-                                            position,
-                                            PointerButton::Left
-                                        ),
-                                        value_left.map(|action| (row, action))
-                                    );
-                                    assert_eq!(
-                                        value_hit(
-                                            area,
-                                            &model,
-                                            scrolls,
-                                            position,
-                                            PointerButton::Right
-                                        ),
-                                        value_right.map(|action| (row, action))
-                                    );
+                                        assert_eq!(
+                                            value_hit(
+                                                area,
+                                                &model,
+                                                scrolls,
+                                                Position::new(geometry.open.x, geometry.open.y),
+                                                PointerButton::Right
+                                            ),
+                                            None
+                                        );
+                                        let metadata = model.control(row).unwrap();
+                                        let value_left = if matches!(view.kind, RowKind::Choice) {
+                                            metadata
+                                                .stepped(1)
+                                                .filter(|value| *value != metadata.value)
+                                                .map(|_| ControlAction::NextChoice)
+                                        } else {
+                                            Some(ControlAction::EditNumber)
+                                        };
+                                        let value_right = if matches!(view.kind, RowKind::Choice) {
+                                            metadata
+                                                .stepped(-1)
+                                                .filter(|value| *value != metadata.value)
+                                                .map(|_| ControlAction::PreviousChoice)
+                                        } else {
+                                            None
+                                        };
+                                        if let Some((first, last)) = control
+                                            .value_ink()
+                                            .first()
+                                            .zip(control.value_ink().last())
+                                        {
+                                            for x in first.x..last.right() {
+                                                let position = Position::new(x, first.y);
+                                                assert_eq!(
+                                                    value_hit(
+                                                        area,
+                                                        &model,
+                                                        scrolls,
+                                                        position,
+                                                        PointerButton::Left
+                                                    ),
+                                                    value_left.map(|action| (row, action))
+                                                );
+                                                assert_eq!(
+                                                    value_hit(
+                                                        area,
+                                                        &model,
+                                                        scrolls,
+                                                        position,
+                                                        PointerButton::Right
+                                                    ),
+                                                    value_right.map(|action| (row, action))
+                                                );
+                                            }
+                                        }
+                                        if matches!(view.kind, RowKind::Slider(_)) {
+                                            let slot_center = 2 * u32::from(geometry.value_slot.x)
+                                                + u32::from(geometry.value_slot.width);
+                                            let value_center = 2 * u32::from(geometry.value.x)
+                                                + u32::from(geometry.value.width);
+                                            assert!(
+                                                slot_center.abs_diff(value_center) <= 1,
+                                                "{kind:?}: {} number is not centered",
+                                                view.label
+                                            );
+                                        }
+                                    }
                                 }
-                            }
-                            if matches!(view.kind, RowKind::Slider(_)) {
-                                let slot_center = 2 * u32::from(geometry.value_slot.x)
-                                    + u32::from(geometry.value_slot.width);
-                                let value_center = 2 * u32::from(geometry.value.x)
-                                    + u32::from(geometry.value.width);
-                                assert!(
-                                    slot_center.abs_diff(value_center) <= 1,
-                                    "{kind:?}: {} number is not centered",
-                                    view.label
-                                );
                             }
                         }
                     }

@@ -4,6 +4,8 @@ use super::worker::{
     RenderRequest,
 };
 use super::{AnimationCacheStatus, AnimationSettings};
+use ilium_animation_js::replay::{PendingEmission, ReplayFlushedProof};
+use ilium_animation_js::runtime::CommittedFrameEmission;
 use ratatui::layout::Rect;
 use std::collections::VecDeque;
 use std::io;
@@ -20,6 +22,7 @@ enum Configuration {
 pub struct ComposedPresentation {
     lease: PresentationLease,
     surviving: Option<Vec<u8>>,
+    pending_replay: Option<PendingEmission>,
     composed_at: Instant,
 }
 impl ComposedPresentation {
@@ -29,6 +32,39 @@ impl ComposedPresentation {
     pub fn composed_at(&self) -> Instant {
         self.composed_at
     }
+    /// The Presenter computes this from the very same previous/current buffer
+    /// diff it submits to the backend. A surviving but unchanged glyph has no
+    /// new terminal write and cannot credit a newly attributed source dot.
+    pub(crate) fn restrict_to_emitted_cells(&mut self, emitted: &[u8]) -> Result<(), String> {
+        let Some(surviving) = self.surviving.as_mut() else {
+            return Ok(());
+        };
+        if surviving.len() != emitted.len() || emitted.iter().any(|flag| *flag > 1) {
+            return Err("Terminal diff provenance does not match composed frame".into());
+        }
+        for (bits, &flag) in surviving.iter_mut().zip(emitted) {
+            if flag == 0 {
+                *bits = 0;
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn begin_output(&mut self) -> Result<Option<CommittedFrameEmission>, String> {
+        if self.lease.has_replay() {
+            let surviving = self
+                .surviving
+                .as_deref()
+                .ok_or("Final compositor provenance unavailable for replay output")?;
+            self.pending_replay = self.lease.prepare_replay(surviving)?;
+        }
+        self.lease.begin_output()
+    }
+}
+
+enum UnsettledReplay {
+    Uncertain { _pending: PendingEmission },
+    Validation { _pending: PendingEmission },
+    History { _emitted: PendingEmission },
 }
 
 pub struct AnimationSurface {
@@ -39,6 +75,7 @@ pub struct AnimationSurface {
     desired: Option<(AnimationSettings, u16, u16)>,
     configurations: VecDeque<Configuration>,
     receipts: VecDeque<EmissionReceipt>,
+    blocked_replay: Option<UnsettledReplay>,
     display: Option<Arc<FrameSnapshot>>,
     last_request: Option<(u64, Duration, Option<[f32; 2]>, u64)>,
     occupancy: Option<Arc<ilium_ambient::OccupancyMask>>,
@@ -72,6 +109,7 @@ impl Default for AnimationSurface {
             desired: None,
             configurations: VecDeque::new(),
             receipts: VecDeque::new(),
+            blocked_replay: None,
             display: None,
             last_request: None,
             occupancy: None,
@@ -373,7 +411,10 @@ impl AnimationSurface {
         // A discarded, never-emitted composition is safely retired without credit.
         self.composition = None;
         self.composed_bits.clear();
-        if !self.configurations.is_empty() || !self.receipts.is_empty() {
+        if self.blocked_replay.is_some()
+            || !self.configurations.is_empty()
+            || !self.receipts.is_empty()
+        {
             return false;
         }
         let Some(frame) = &self.display else {
@@ -400,10 +441,40 @@ impl AnimationSurface {
         self.composition.take().map(|lease| ComposedPresentation {
             lease,
             surviving,
+            pending_replay: None,
             composed_at: Instant::now(),
         })
     }
-    pub fn acknowledge(&mut self, presentation: ComposedPresentation) {
+    pub fn acknowledge(
+        &mut self,
+        mut presentation: ComposedPresentation,
+        proof: Option<ReplayFlushedProof>,
+    ) {
+        if let Some(mut pending) = presentation.pending_replay.take() {
+            let Some(proof) = proof else {
+                self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
+                self.reject_output("replay flush proof missing after output");
+                return;
+            };
+            if let Err(error) = pending.after_host_emission(proof) {
+                self.blocked_replay = Some(UnsettledReplay::Validation { _pending: pending });
+                self.reject_output(&format!("original replay flush validation failed: {error}"));
+                return;
+            }
+            if let Err(error) = pending.settle() {
+                self.blocked_replay = Some(UnsettledReplay::History { _emitted: pending });
+                self.reject_output(&format!("original replay history uncertain: {error}"));
+                return;
+            }
+        } else {
+            if presentation.lease.snapshot().plugin_identity().is_some() != proof.is_some() {
+                self.reject_output("terminal proof did not match its original frame");
+                return;
+            }
+            // Live plugin frames have no replay source projection. Their broker
+            // proof remains charged until this exact terminal acknowledgement.
+            drop(proof);
+        }
         if let Some(bits) = presentation.surviving {
             match presentation.lease.receipt(bits) {
                 Ok(receipt) => self.receipts.push_back(receipt),
@@ -411,6 +482,22 @@ impl AnimationSurface {
             }
         }
         self.flush();
+    }
+    pub fn uncertain_output(&mut self, mut presentation: ComposedPresentation, reason: &str) {
+        if let Some(pending) = presentation.pending_replay.take() {
+            self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
+        }
+        self.reject_output(reason);
+    }
+
+    pub(crate) fn reject_output(&mut self, reason: &str) {
+        self.composition = None;
+        self.display = None;
+        self.composed_bits.clear();
+        self.error = Some(format!(
+            "Animation frame rejected before terminal output: {reason}"
+        ));
+        self.ready.notify_one();
     }
 
     pub async fn shutdown(&mut self) -> io::Result<()> {
@@ -423,7 +510,13 @@ impl AnimationSurface {
         loop {
             self.flush();
             let Some(service) = &self.service else {
-                return Ok(());
+                return if self.blocked_replay.is_some() {
+                    Err(io::Error::other(
+                        "Original replay emission remains unsettled",
+                    ))
+                } else {
+                    Ok(())
+                };
             };
             if !service.is_accepting()
                 && (!self.receipts.is_empty()
@@ -445,6 +538,11 @@ impl AnimationSurface {
             self.ready.notified().await;
         }
         self.service = None;
+        if self.blocked_replay.is_some() {
+            return Err(io::Error::other(
+                "Original replay emission remains unsettled",
+            ));
+        }
         Ok(())
     }
 
@@ -492,6 +590,15 @@ impl AnimationSurface {
             .as_ref()
             .and_then(|frame| frame.cell(x, y))
             .map_or((false, false), |cell| cell.article_style)
+    }
+    pub fn article_background(&self, x: u16, y: u16) -> Option<(u8, u8, u8)> {
+        self.display.as_ref()?.cell(x, y)?.article_background
+    }
+    pub fn article_underline(&self, x: u16, y: u16) -> bool {
+        self.display
+            .as_ref()
+            .and_then(|frame| frame.cell(x, y))
+            .is_some_and(|cell| cell.article_underline)
     }
     pub fn cell_color(&self, x: u16, y: u16) -> Option<(u8, u8, u8)> {
         self.display.as_ref()?.cell(x, y)?.color
@@ -816,7 +923,7 @@ mod tests {
                 .unwrap();
         let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
         buffer[(0, 0)].set_symbol(&glyph.to_string());
-        let frame = crate::presentation::PreparedFrame::new(
+        let mut frame = crate::presentation::PreparedFrame::new(
             presenter.try_reserve().unwrap(),
             buffer,
             None,
@@ -824,6 +931,7 @@ mod tests {
             1,
         )
         .unwrap();
+        frame.attach_animation(Some(presentation));
         presenter.submit(frame).unwrap();
         assert_ne!(
             output_observed
@@ -841,7 +949,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert_eq!(emitted.frame.frame_id, 42);
-        surface.acknowledge(presentation);
+        let mut completed_frame = emitted.frame;
+        let animation = completed_frame.take_animation().unwrap();
+        surface.acknowledge(animation, emitted.flush_proof);
         surface.settle_for_test();
         assert_eq!(
             receipts.recv_timeout(Duration::from_secs(3)).unwrap(),
@@ -850,6 +960,41 @@ mod tests {
                 dots: surviving.count_ones()
             }]
         );
+        // The exact same scene glyph remains in the terminal diff base. This
+        // second successful flush must not credit it again as a fresh view.
+        assert!(surface.begin_composition());
+        let second = surface.capture(Some(vec![surviving, 0])).unwrap();
+        let mut same = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
+        same[(0, 0)].set_symbol(&glyph.to_string());
+        let mut frame = crate::presentation::PreparedFrame::new(
+            presenter.try_reserve().unwrap(),
+            same,
+            None,
+            43,
+            1,
+        )
+        .unwrap();
+        frame.attach_animation(Some(second));
+        presenter.submit(frame).unwrap();
+        let emitted =
+            tokio::time::timeout(Duration::from_secs(3), presenter.acknowledgements.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        assert!(emitted.rejection.is_none() && emitted.uncertainty.is_none());
+        let mut completed_frame = emitted.frame;
+        surface.acknowledge(
+            completed_frame.take_animation().unwrap(),
+            emitted.flush_proof,
+        );
+        surface.settle_for_test();
+        if let Ok(owners) = receipts.try_recv() {
+            assert!(
+                owners.is_empty(),
+                "identical retained glyph has no new terminal dots"
+            );
+        }
         presenter.shutdown().await.unwrap();
         surface.shutdown().await.unwrap();
     }

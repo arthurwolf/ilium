@@ -21,10 +21,10 @@ const MAX_COMMAND_BYTES: usize = 64 * MIB;
 const MAX_COMMANDS: usize = 256;
 const MAX_RESULT_METADATA_BYTES: usize = 2 * MIB;
 const MAX_STATE_BYTES: usize = 128 * MIB;
+#[cfg(test)]
 const MAX_SNAPSHOT_BYTES: usize = 256 * MIB;
 const MAX_PIN_BYTES: usize = 128 * MIB;
 const MAX_CAPTURE_BYTES: usize = 128 * MIB;
-const IMMUTABLE_STORAGE_BYTES: usize = 512 * MIB;
 fn geometry_peak(rows: u16, cols: u16) -> usize {
     usize::from(rows)
         .saturating_mul(usize::from(cols))
@@ -135,8 +135,12 @@ struct Shared {
     capture_bytes: Arc<AtomicUsize>,
     storage: Arc<StorageAdmission>,
     engine_claims: Arc<AtomicUsize>,
-    #[cfg(test)]
+    /// Aggregate bytes all engines may retain; follows `terminal.engine_memory_budget_mib`.
     state_limit: AtomicUsize,
+    /// Aggregate bytes published snapshots may retain; same source as `state_limit`.
+    snapshot_limit: AtomicUsize,
+    /// Largest budget the process quota reservation can back until restart.
+    reserved_budget_bytes: usize,
 }
 pub(crate) enum ParseResult {
     InputBarrier {
@@ -316,7 +320,10 @@ impl SnapshotCharge {
         let (used, limit) = if capture {
             (&shared.capture_bytes, MAX_CAPTURE_BYTES)
         } else {
-            (&shared.snapshot_bytes, MAX_SNAPSHOT_BYTES)
+            (
+                &shared.snapshot_bytes,
+                shared.snapshot_limit.load(Ordering::Acquire),
+            )
         };
         reserve_counter(used, bytes, limit)?;
         Some(Self {
@@ -505,13 +512,30 @@ pub struct TerminalParsing {
     receipt: Receipt<ParserJob>,
 }
 impl TerminalParsing {
-    pub fn start(client: Client) -> Result<Self, String> {
+    /// Engines and published snapshots may each retain up to the configured
+    /// budget, so the process quota backs twice that amount. The reservation is
+    /// fixed at start; later increases take effect after a restart.
+    pub fn start(client: Client, budget_mib: u32) -> Result<Self, String> {
+        let budget_bytes = (budget_mib as usize).saturating_mul(MIB);
         let storage = crate::execution::process_quota()
-            .reserve_external_storage(IMMUTABLE_STORAGE_BYTES)
+            .reserve_external_storage(budget_bytes.saturating_mul(2))
             .map_err(|error| format!("terminal immutable storage admission: {error:?}"))?;
-        Self::start_with_storage(client, Arc::new(storage))
+        Self::start_with_storage(client, Arc::new(storage), budget_bytes)
     }
-    fn start_with_storage(client: Client, storage: Arc<StorageAdmission>) -> Result<Self, String> {
+    /// Applies a changed budget at runtime, capped by what `start` reserved.
+    pub fn set_budget_mib(&self, budget_mib: u32) {
+        let bytes = (budget_mib as usize)
+            .saturating_mul(MIB)
+            .min(self.shared.reserved_budget_bytes);
+        self.shared.state_limit.store(bytes, Ordering::Release);
+        self.shared.snapshot_limit.store(bytes, Ordering::Release);
+        self.shared.changed.notify_all();
+    }
+    fn start_with_storage(
+        client: Client,
+        storage: Arc<StorageAdmission>,
+        budget_bytes: usize,
+    ) -> Result<Self, String> {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue {
                 commands: VecDeque::with_capacity(MAX_COMMANDS),
@@ -528,8 +552,9 @@ impl TerminalParsing {
             capture_bytes: Arc::new(AtomicUsize::new(0)),
             storage,
             engine_claims: Arc::new(AtomicUsize::new(0)),
-            #[cfg(test)]
-            state_limit: AtomicUsize::new(MAX_STATE_BYTES),
+            state_limit: AtomicUsize::new(budget_bytes),
+            snapshot_limit: AtomicUsize::new(budget_bytes),
+            reserved_budget_bytes: budget_bytes,
         });
         let receipt = client
             .try_submit(
@@ -546,20 +571,17 @@ impl TerminalParsing {
     pub fn notification(&self) -> Arc<Notify> {
         self.shared.notification.clone()
     }
+    /// Engines currently claimed, including those still retiring.
+    pub(crate) fn engine_claims(&self) -> usize {
+        self.shared.engine_claims.load(Ordering::Acquire)
+    }
     pub(crate) fn attach(&self, pane_id: NodeId, view: &mut TerminalView) -> Result<(), String> {
         if view.frontend.is_some() {
             return Ok(());
         }
         let (rows, cols) = view.desired_size;
         validate_geometry(rows, cols)?;
-        self.shared
-            .engine_claims
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |claims| {
-                (claims < 16).then_some(claims + 1)
-            })
-            .map_err(|_| {
-                "Terminal parser engine admission limit (16 live or retiring panes)".to_string()
-            })?;
+        self.shared.engine_claims.fetch_add(1, Ordering::AcqRel);
         let claim = Arc::new(EngineClaim(self.shared.engine_claims.clone()));
         let target = PaneTarget {
             pane_id,
@@ -639,6 +661,17 @@ struct Engine {
     target: PaneTarget,
     state: TerminalState,
 }
+/// Drops the engines of panes whose frontend is gone. Releasing an engine
+/// returns its claim and memory, so the client is woken: a displayed pane
+/// that was refused admission while this one retired retries only when the
+/// event loop runs again.
+fn retire_dropped_engines(engines: &mut HashMap<NodeId, Engine>, shared: &Shared) {
+    let before = engines.len();
+    engines.retain(|_, engine| engine.target.alive.load(Ordering::Acquire));
+    if engines.len() != before {
+        shared.notification.notify_one();
+    }
+}
 struct ParserJob(Arc<Shared>);
 impl Job for ParserJob {
     type Output = ();
@@ -654,7 +687,7 @@ impl Job for ParserJob {
             if context.stop_requested() {
                 return cancellation_report(&shared);
             }
-            engines.retain(|_, engine| engine.target.alive.load(Ordering::Acquire));
+            retire_dropped_engines(&mut engines, &shared);
             let mut queue = shared
                 .queue
                 .lock()
@@ -676,6 +709,10 @@ impl Job for ParserJob {
                     .wait_timeout(queue, Duration::from_millis(100))
                     .unwrap_or_else(|error| error.into_inner())
                     .0;
+                // An idle parser must still retire engines of dropped panes,
+                // or an evicted pane would hold its claim until some other
+                // pane happened to send a command.
+                retire_dropped_engines(&mut engines, &shared);
                 if !deferred.is_empty() {
                     break;
                 }
@@ -724,9 +761,6 @@ impl Job for ParserJob {
             let result: Result<(), String> = (|| {
                 if let PaneCommand::Register { rows, cols, budget } = &command.body {
                     validate_geometry(*rows, *cols)?;
-                    if engines.len() >= 16 {
-                        return Err("terminal parser engine limit reached (16 panes)".into());
-                    }
                     let initial = geometry_peak(*rows, *cols);
                     try_state_budget(
                         &mut engines,
@@ -1096,13 +1130,7 @@ fn try_state_budget(
         .values()
         .map(|engine| engine.state.retained_allocation_bytes())
         .sum::<usize>();
-    #[cfg(test)]
     let limit = shared.state_limit.load(Ordering::Acquire);
-    #[cfg(not(test))]
-    let limit = {
-        let _ = shared;
-        MAX_STATE_BYTES
-    };
     if used.saturating_add(peak) <= limit {
         return Ok(());
     }
@@ -1176,7 +1204,7 @@ mod tests {
             };
             let storage = Arc::new(
                 quota
-                    .reserve_external_storage(IMMUTABLE_STORAGE_BYTES)
+                    .reserve_external_storage(2 * MAX_SNAPSHOT_BYTES)
                     .unwrap(),
             );
             let execution = Execution::start(
@@ -1201,7 +1229,8 @@ mod tests {
                     result_bytes: 2 * MIB,
                 })
                 .unwrap();
-            let parsing = TerminalParsing::start_with_storage(client, storage).unwrap();
+            let parsing =
+                TerminalParsing::start_with_storage(client, storage, MAX_SNAPSHOT_BYTES).unwrap();
             (Self(execution), parsing)
         }
     }
@@ -1788,6 +1817,94 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         drop(hold);
+    }
+    #[test]
+    fn retiring_an_engine_wakes_the_client_loop() {
+        let (_bank, parsing) = Bank::start();
+        let mut view = TerminalView::new(24, 80);
+        parsing.attach(NodeId(1), &mut view).unwrap();
+        // Drain wakeups caused by registration so only retirement is measured.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let notification = parsing.notification();
+        runtime.block_on(async {
+            while tokio::time::timeout(Duration::from_millis(300), notification.notified())
+                .await
+                .is_ok()
+            {}
+        });
+        assert!(view.evict_parser());
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), notification.notified())
+                .await
+                .expect("an idle parser must wake the client when it releases an engine");
+        });
+    }
+    #[test]
+    fn engine_count_is_not_capped_only_bytes_are() {
+        let (_bank, parsing) = Bank::start();
+        let mut views: Vec<TerminalView> = (0..20).map(|_| TerminalView::new(24, 80)).collect();
+        for (index, view) in views.iter_mut().enumerate() {
+            parsing.attach(NodeId(index as u64 + 1), view).unwrap();
+        }
+        assert_eq!(parsing.engine_claims(), 20);
+        // The parser thread must register every engine too, not just the client.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut errors = Vec::new();
+        loop {
+            for result in parsing.collect() {
+                if let ParseResult::Error { message, .. } = result {
+                    errors.push(message);
+                }
+            }
+            if parsing.pending_work() == Some((0, 0)) || Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for result in parsing.collect() {
+            if let ParseResult::Error { message, .. } = result {
+                errors.push(message);
+            }
+        }
+        assert!(errors.is_empty(), "engine registration refused: {errors:?}");
+    }
+    #[test]
+    fn an_evicted_hidden_pane_releases_its_engine_and_wakes_the_loop() {
+        let (_bank, parsing) = Bank::start();
+        let mut view = TerminalView::new(24, 80);
+        parsing.attach(NodeId(1), &mut view).unwrap();
+        assert!(view.evict_parser());
+        assert!(view.frontend.is_none());
+        assert!(
+            !view.evict_parser(),
+            "a pane without an engine has nothing to release"
+        );
+        // Retirement is asynchronous: the claim returns once the parser
+        // thread has dropped the engine.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while parsing.engine_claims() != 0 {
+            let _ = parsing.collect();
+            assert!(Instant::now() < deadline, "evicted engine never retired");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    #[test]
+    fn budget_changes_apply_live_but_never_exceed_the_reservation() {
+        let (_bank, parsing) = Bank::start();
+        parsing.set_budget_mib(64);
+        assert_eq!(parsing.shared.state_limit.load(Ordering::Acquire), 64 * MIB);
+        assert_eq!(
+            parsing.shared.snapshot_limit.load(Ordering::Acquire),
+            64 * MIB
+        );
+        parsing.set_budget_mib(u32::MAX);
+        assert_eq!(
+            parsing.shared.state_limit.load(Ordering::Acquire),
+            MAX_SNAPSHOT_BYTES
+        );
     }
     #[test]
     fn unsupported_geometry_is_rejected_before_desired_size_changes() {

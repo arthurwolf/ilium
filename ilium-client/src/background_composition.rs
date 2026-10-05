@@ -430,17 +430,20 @@ enum FieldCell {
         symbol: String,
         color: Option<Color>,
     },
+    Text {
+        symbol: String,
+        color: Option<Color>,
+        background: Option<Color>,
+        modifier: Modifier,
+    },
 }
 
 fn field_cell(app: &App, column: u16, row: u16, black_backdrop: bool) -> FieldCell {
     let frame = &app.animation_frame;
-    if frame.is_wikipedia() {
-        if frame.article_is_continuation(column, row) {
-            return FieldCell::Continuation;
-        }
-        let Some(symbol) = frame.article_symbol(column, row) else {
-            return FieldCell::Empty;
-        };
+    if frame.article_is_continuation(column, row) {
+        return FieldCell::Continuation;
+    }
+    if let Some(symbol) = frame.article_symbol(column, row) {
         let (bold, italic) = frame.article_style(column, row);
         let mut modifier = Modifier::empty();
         if bold {
@@ -449,13 +452,22 @@ fn field_cell(app: &App, column: u16, row: u16, black_backdrop: bool) -> FieldCe
         if italic {
             modifier |= Modifier::ITALIC;
         }
-        return FieldCell::Ink {
+        if frame.article_underline(column, row) {
+            modifier |= Modifier::UNDERLINED;
+        }
+        return FieldCell::Text {
             symbol: symbol.to_owned(),
             color: frame
                 .cell_color(column, row)
                 .map(|(red, green, blue)| Color::Rgb(red, green, blue)),
+            background: frame
+                .article_background(column, row)
+                .map(|(red, green, blue)| Color::Rgb(red, green, blue)),
             modifier,
         };
+    }
+    if frame.is_wikipedia() {
+        return FieldCell::Empty;
     }
     if let Some(symbol) = frame.native_glyph(column, row) {
         return FieldCell::Native {
@@ -685,27 +697,29 @@ fn paint_region_with_field_receipt(
             {
                 continue;
             }
-            let (symbol, color, modifier, is_native, background) =
+            let (symbol, color, background, modifier, native_kind) =
                 match field(column - buffer.area.x, row - buffer.area.y) {
                     FieldCell::Ink {
                         symbol,
                         color,
                         modifier,
-                    } => (symbol, color, modifier, false, Color::Reset),
+                    } => (symbol, color, None, modifier, 0),
                     FieldCell::BlackInk { symbol, color } => {
-                        (symbol, color, Modifier::empty(), false, Color::Black)
+                        (symbol, color, Some(Color::Black), Modifier::empty(), 0)
                     }
-                    FieldCell::Native { symbol, color } => (
-                        symbol.to_string(),
-                        color,
-                        Modifier::empty(),
-                        true,
-                        Color::Reset,
-                    ),
                     FieldCell::Black => {
                         buffer[(column, row)].set_bg(Color::Black);
                         continue;
                     }
+                    FieldCell::Native { symbol, color } => {
+                        (symbol.to_string(), color, None, Modifier::empty(), 1)
+                    }
+                    FieldCell::Text {
+                        symbol,
+                        color,
+                        background,
+                        modifier,
+                    } => (symbol, color, background, modifier, 2),
                     FieldCell::Empty | FieldCell::Continuation => continue,
                 };
             let symbol_width = crate::background_animation::wikipedia_symbol_width(&symbol);
@@ -715,15 +729,13 @@ fn paint_region_with_field_receipt(
                     .chars()
                     .next()
                     .is_some_and(|character| ('\u{2801}'..='\u{28ff}').contains(&character));
-            let is_native_text = is_native
-                && symbol_width == Some(1)
-                && symbol.chars().count() == 1
-                && symbol
-                    .chars()
-                    .next()
-                    .is_some_and(|character| !character.is_control());
+            let is_native_text = match native_kind {
+                1 => symbol_width == Some(1) && symbol.chars().count() == 1,
+                2 => matches!(symbol_width, Some(1 | 2)) && !symbol.chars().any(char::is_control),
+                _ => false,
+            };
             let Some(symbol_width) = symbol_width.filter(|_| {
-                if is_native {
+                if native_kind != 0 {
                     is_native_text
                 } else {
                     allow_text || is_braille
@@ -753,17 +765,29 @@ fn paint_region_with_field_receipt(
             }
             let color = color.unwrap_or(foreground);
             let cell = &mut buffer[(column, row)];
-            // Aurora deliberately keeps a black backdrop on otherwise safe
-            // cells; other scenes reset an explicit black fill as before.
-            cell.set_symbol(&symbol).set_fg(color).set_bg(background);
-            cell.modifier = modifier & (Modifier::BOLD | Modifier::ITALIC);
+            // Drop the blank's bold/dim/italic so the field keeps one look, and
+            // reset an explicit black fill to the default background.
+            cell.set_symbol(&symbol)
+                .set_fg(color)
+                .set_bg(background.unwrap_or(Color::Reset));
+            cell.modifier = if native_kind == 2 {
+                modifier & (Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED)
+            } else {
+                modifier & (Modifier::BOLD | Modifier::ITALIC)
+            };
             if symbol_width == 2 {
                 let next = &mut buffer[(column + 1, row)];
-                next.set_symbol(" ").set_fg(color).set_bg(background);
-                next.modifier = Modifier::empty();
+                next.set_symbol(" ")
+                    .set_fg(color)
+                    .set_bg(background.unwrap_or(Color::Reset));
+                next.modifier = if native_kind == 2 {
+                    modifier & Modifier::UNDERLINED
+                } else {
+                    Modifier::empty()
+                };
                 remaining_continuations = 1;
             }
-            if !is_native && is_braille {
+            if native_kind == 0 && is_braille {
                 if let Some(character) = symbol.chars().next() {
                     painted(
                         column - buffer.area.x,
@@ -2144,6 +2168,31 @@ mod tests {
         assert_eq!(surviving_braille_bits(&buffer, &bits), Some(vec![0, 0]));
     }
     #[test]
+    fn identical_late_glyph_does_not_recredit_explicitly_touched_scene_cell() {
+        let (mut app, _probe, _project) = ambient_app();
+        let area = Rect::new(0, 0, 40, 12);
+        let mut buffer = Buffer::empty(area);
+        compose_ready_for_test(&mut buffer, &mut app, Duration::ZERO);
+        let original = app.animation_frame.composed_bits().to_vec();
+        let index = original
+            .iter()
+            .position(|bits| *bits != 0)
+            .expect("fixture paints at least one authored Braille cell");
+        let column = (index % usize::from(area.width)) as u16;
+        let row = (index / usize::from(area.width)) as u16;
+        let same_glyph = buffer[(column, row)].symbol().to_owned();
+        app.animation_frame
+            .occlude_composed(area, Rect::new(column, row, 1, 1));
+        buffer[(column, row)].set_symbol(&same_glyph);
+        assert_eq!(buffer[(column, row)].symbol(), same_glyph);
+        assert_eq!(
+            surviving_braille_bits(&buffer, app.animation_frame.composed_bits()).unwrap()[index],
+            0,
+            "touch provenance beats identical final glyph"
+        );
+    }
+
+    #[test]
     fn completed_frame_excludes_skip_cells_even_if_they_contain_braille() {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(2, 1)).unwrap();
@@ -2160,5 +2209,75 @@ mod tests {
             surviving_braille_bits(completed.buffer, &[1, 1]),
             Some(vec![1, 0])
         );
+    }
+}
+
+#[cfg(test)]
+mod native_text_publication_tests {
+    use super::*;
+
+    #[test]
+    fn styled_wide_native_text_respects_terminal_occupancy_and_continuation() {
+        let area = Rect::new(0, 0, 5, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(2, 0)].set_char('P').set_fg(Color::Yellow);
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |column, _| match column {
+                0 => FieldCell::Text {
+                    symbol: "界".into(),
+                    color: Some(Color::Red),
+                    background: Some(Color::Blue),
+                    modifier: Modifier::BOLD | Modifier::UNDERLINED,
+                },
+                1 => FieldCell::Continuation,
+                3 => FieldCell::Text {
+                    symbol: "e\u{301}".into(),
+                    color: Some(Color::Green),
+                    background: Some(Color::Black),
+                    modifier: Modifier::ITALIC,
+                },
+                _ => FieldCell::Empty,
+            },
+            false,
+        );
+        assert_eq!(buffer[(0, 0)].symbol(), "界");
+        assert_eq!(buffer[(0, 0)].bg, Color::Blue);
+        assert!(buffer[(0, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert_eq!(buffer[(1, 0)].symbol(), " ");
+        assert_eq!(buffer[(1, 0)].bg, Color::Blue);
+        assert_eq!(buffer[(2, 0)].symbol(), "P");
+        assert_eq!(buffer[(3, 0)].symbol(), "e\u{301}");
+        assert_eq!(buffer[(3, 0)].bg, Color::Black);
+        assert_eq!(buffer[(3, 0)].modifier, Modifier::ITALIC);
+    }
+
+    #[test]
+    fn clipped_wide_native_text_never_writes_a_half_glyph() {
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buffer = Buffer::empty(area);
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |column, _| {
+                if column == 1 {
+                    FieldCell::Text {
+                        symbol: "界".into(),
+                        color: None,
+                        background: None,
+                        modifier: Modifier::empty(),
+                    }
+                } else {
+                    FieldCell::Empty
+                }
+            },
+            false,
+        );
+        assert_eq!(buffer[(1, 0)].symbol(), " ");
     }
 }

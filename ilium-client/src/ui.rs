@@ -110,17 +110,70 @@ pub(crate) fn draw_at_with_cursor(
         cursor = draw_mode_overlay(frame, area, app, mode).or(cursor);
     }
     cursor = draw_mode_overlay(frame, area, app, &app.mode).or(cursor);
+    // The listed modes paint no late layer. Every other mode (or a suspended
+    // parent) can touch a scene cell with the SAME Braille glyph, which a final
+    // Buffer comparison cannot detect. Withhold its source history entirely.
+    if !late_layers_are_source_transparent(app) {
+        app.animation_frame.discard_composed_receipt();
+    }
     // Copied text can repaint an identical Braille glyph after composition.
     // Withhold this draw rather than crediting preview text as scene pixels.
     if app.smart_copy_preview.is_some() {
         app.animation_frame.discard_composed_receipt();
     }
     draw_smart_copy_preview(frame, area, app);
+    draw_startup_dialog(frame, area, app);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
+        app.animation_frame.discard_composed_receipt();
         return None;
     }
     cursor
+}
+
+/// Centred progress dialog shown while the server's session is still
+/// arriving; see `startup_dialog`.
+fn draw_startup_dialog(frame: &mut Frame, area: Rect, app: &mut App) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::widgets::{Clear, Paragraph};
+
+    if !app.is_startup_dialog_visible() {
+        return;
+    }
+    let Some(dialog) = crate::startup_dialog::dialog_area(area) else {
+        return;
+    };
+    app.animation_frame.discard_composed_receipt();
+    let tick = (app.started_at.elapsed().as_millis() / 80) as u64;
+    let lines = crate::startup_dialog::dialog_lines(dialog.width, &app.startup_dialog_text(), tick);
+    frame.render_widget(Clear, dialog);
+    for (offset, line) in lines.into_iter().enumerate() {
+        let style = match offset {
+            2 => Style::default().add_modifier(Modifier::BOLD),
+            3 => Style::default().fg(ratatui::style::Color::Gray),
+            4 => Style::default().fg(ratatui::style::Color::Cyan),
+            _ => Style::default(),
+        };
+        frame.render_widget(
+            Paragraph::new(line).style(style),
+            Rect::new(dialog.x, dialog.y + offset as u16, dialog.width, 1),
+        );
+    }
+}
+
+/// This is an exact allowlist of no-op `draw_mode_overlay` branches. New late
+/// render branches must either report their touched cells or stay excluded.
+fn late_layers_are_source_transparent(app: &App) -> bool {
+    app.modal_stack.is_empty()
+        && matches!(
+            app.mode,
+            Mode::Normal
+                | Mode::LeaderPending
+                | Mode::NavigationLeaderPending
+                | Mode::Move
+                | Mode::Settings(_)
+                | Mode::Search(_)
+        )
 }
 
 /// The "Preview" dialog: what Smart Copy light just put on the clipboard, with
@@ -948,6 +1001,28 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                     frame,
                     crate::session_conversion::dialog_area(pane_area, area),
                     state,
+                );
+            }
+        }
+        Mode::RemoteCompaction => {
+            if let Some(state) = &app.remote_compaction {
+                let pane_area = app
+                    .pane_viewport(state.pane_id)
+                    .map(|viewport| viewport.outer_area);
+                let banner_text = app
+                    .remote_compaction_settings
+                    .should_show_privacy_banner()
+                    .then(|| {
+                        crate::remote_compaction_settings_ui::privacy_banner_text(
+                            &app.inference_settings,
+                        )
+                    });
+                let banner_rows = crate::remote_compaction_dialog::banner_rows(banner_text.as_deref());
+                crate::remote_compaction_dialog::render(
+                    frame,
+                    crate::remote_compaction_dialog::dialog_area(pane_area, area, banner_rows),
+                    state,
+                    banner_text.as_deref(),
                 );
             }
         }
@@ -2137,6 +2212,28 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
+                // A pane that has no parser engine must say why instead of
+                // staying black: it retries on its own, or cannot fit at all.
+                if let Some(error) = term
+                    .admission_error
+                    .as_deref()
+                    .filter(|_| term.frontend.is_none())
+                {
+                    let message = if error.contains("backpressure") {
+                        "Loading terminal... (terminal engine memory budget in use; raise it in Settings > Terminal)".to_owned()
+                    } else {
+                        format!("Terminal cannot be shown: {error}")
+                    };
+                    frame.render_widget(
+                        ratatui::widgets::Paragraph::new(message)
+                            .wrap(ratatui::widgets::Wrap { trim: true })
+                            .style(
+                                ratatui::style::Style::default()
+                                    .add_modifier(ratatui::style::Modifier::DIM),
+                            ),
+                        terminal_area,
+                    );
+                }
                 crate::goal_resume_link::draw_goal_resume_link(
                     app,
                     viewport.pane_id,
@@ -2754,6 +2851,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConvertSession => "CONVERTING SESSION",
+        Mode::RemoteCompaction => "REMOTE COMPACTION",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         Mode::Search(_) => "SEARCH",
@@ -3353,6 +3451,33 @@ mod tests {
         assert_eq!(pane_title(&app, pane_id), "Review authentication — Codex");
     }
 
+    #[test]
+    fn a_displayed_terminal_without_an_engine_explains_itself_instead_of_staying_black() {
+        let mut app = App::new("test".to_owned(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Waiting", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(24, 80);
+        view.admission_error = Some("terminal parser registration backpressure".into());
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Loading terminal"));
+    }
     #[test]
     fn completed_agent_renders_a_full_width_red_close_action_at_the_panel_bottom() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
@@ -3983,5 +4108,22 @@ mod text_trigger_numeric_control_tests {
                 "{width}x{height}: delay value is not centered between its step buttons"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod source_touch_provenance_tests {
+    use super::*;
+
+    #[test]
+    fn late_modal_and_suspended_parent_withhold_scene_history() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("touch provenance".into(), project.path().to_path_buf());
+        assert!(late_layers_are_source_transparent(&app));
+        app.mode = Mode::Help;
+        assert!(!late_layers_are_source_transparent(&app));
+        app.mode = Mode::Normal;
+        app.modal_stack.push(Mode::Help);
+        assert!(!late_layers_are_source_transparent(&app));
     }
 }

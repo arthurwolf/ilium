@@ -40,7 +40,7 @@ const REBUILD_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the tracker asks for fresh statistics of one pane.
 const PANE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 /// Transcript readers the tracker may keep busy at once.
-pub const MAX_CONCURRENT_STATS_WORKERS: usize = 2;
+pub const MAX_CONCURRENT_STATS_WORKERS: usize = 1;
 
 /// Dollars for one model inside one session.
 #[derive(Debug, Clone, PartialEq)]

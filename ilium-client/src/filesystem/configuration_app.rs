@@ -402,6 +402,7 @@ impl App {
                                 path,
                                 picker,
                                 value_dialog,
+                                location_storage,
                                 ..
                             }) = &intent
                             {
@@ -410,7 +411,11 @@ impl App {
                                 let value_result = value_dialog
                                     .as_ref()
                                     .map(|_| self.validate_plugin_value_receipt());
-                                self.acknowledge_animation_settings(path, *settings);
+                                self.acknowledge_animation_settings(
+                                    path,
+                                    *settings,
+                                    location_storage.clone(),
+                                );
                                 if let Some(save) = picker {
                                     self.finish_animation_picker_save(save, Ok(()));
                                 }
@@ -454,13 +459,22 @@ impl App {
                     };
                     let animation_failure =
                         matches!(&intent, Some(ConfigurationIntent::Animation { .. }));
-                    if let Some(ConfigurationIntent::Animation { path, desired, .. }) = &intent {
+                    if let Some(ConfigurationIntent::Animation {
+                        path,
+                        desired,
+                        location_storage,
+                        ..
+                    }) = &intent
+                    {
                         if self.animation_project_binding() == *path
                             && self.animation_settings == **desired
                         {
                             self.failed_animation_settings = Some((**desired).clone());
+                            self.failed_animation_location_storage = location_storage.clone();
                             if let Some(committed) = &self.committed_animation_settings {
                                 self.animation_settings = committed.clone();
+                                self.animation_location_storage =
+                                    self.committed_animation_location_storage.clone();
                             }
                         }
                     }

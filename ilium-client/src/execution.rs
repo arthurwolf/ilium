@@ -4,20 +4,25 @@ use ilium_execution::{
     RejectReason, ShutdownMode, StartError, WorkerPriority,
 };
 use std::{
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 const MIB: usize = 1024 * 1024;
-// Preserve the selected 26-role / 3449 MiB + 128 KiB feature composition,
-// then count its three previously omitted startup owners: supervisor, logger,
-// and terminal input. Interactive codecs reuse this five-thread bank rather
-// than adding the standalone codec's sixth thread. Additional/retiring owners
-// and one bounded external-opener reaper compete within 30 roles. Six existing
-// Tokio async/blocking runtime roles bring the total to36, with the
-// unchanged 4096 MiB storage declaration.
-// These declarations do not bound native stacks, allocator RSS, or all OS threads.
-const PROCESS_WORKER_THREADS: usize = 36;
-const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
+const CPU_THREADS: usize = 2;
+const IO_THREADS: usize = 4;
+const SERVICE_THREADS: usize = 1;
+// The selected feature owners outside this bank contribute 21 roles:
+// clipboard3, media1, presenter1, animation1, icons1, voice4, video10.
+// Supervisor/logger/input add3, the opener reaper1, and the existing Tokio
+// runtime6. Derive the ceiling from the actual bank configuration; retiring
+// owners compete with these same roles and the unchanged4096 MiB allowance.
+// This declared scenario does not bound unadmitted libraries or allocator RSS.
+const PROCESS_WORKER_THREADS: usize = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 21 + 3 + 1 + 6;
+// The terminal parser reserves twice `terminal.engine_memory_budget_mib` (engines
+// plus published snapshots) on top of the fixed allowance; the setting's maximum
+// bounds that extra declaration.
+const PROCESS_WORKER_BYTES: usize =
+    (4096 + 2 * crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB as usize) * MIB;
 
 pub(crate) fn admission_notification() -> Arc<tokio::sync::Notify> {
     static WAKE: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
@@ -50,6 +55,28 @@ pub(crate) fn process_quota() -> QuotaGroup {
             )
         })
         .clone()
+}
+
+/// One cadence ledger for every native source consumer in this client process,
+/// including preview. It owns no bank, thread or independent quota.
+pub(crate) fn native_source_cadence(
+) -> Result<Arc<ilium_animation_js::native_source_host::SourceCadence>, String> {
+    static CADENCE: OnceLock<
+        Mutex<Option<Arc<ilium_animation_js::native_source_host::SourceCadence>>>,
+    > = OnceLock::new();
+    let mut slot = CADENCE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "Native source cadence lock poisoned".to_owned())?;
+    if let Some(cadence) = slot.as_ref() {
+        return Ok(Arc::clone(cadence));
+    }
+    let cadence = Arc::new(
+        ilium_animation_js::native_source_host::SourceCadence::new(process_quota())
+            .map_err(|error| error.to_string())?,
+    );
+    *slot = Some(Arc::clone(&cadence));
+    Ok(cadence)
 }
 
 /// Real process bootstrap, before logging or other platform-owned workers.
@@ -129,9 +156,31 @@ pub(crate) fn codec_admission_group(
 pub struct ClientExecution {
     execution: Execution,
     general: Client,
+    location_search: Client,
 }
+
+// One source of truth for constructor and selected-composition admission.
+fn bank_config() -> ExecutionConfig {
+    let bank = |threads, resident_bytes_per_thread| LaneConfig {
+        threads,
+        queue_slots: if threads == 0 { 0 } else { 16 },
+        priority: Some(WorkerPriority::BelowNormal),
+        resident_bytes_per_thread,
+    };
+    ExecutionConfig {
+        cpu: bank(CPU_THREADS, 64 * MIB),
+        io: bank(IO_THREADS, MIB),
+        service: LaneConfig {
+            threads: SERVICE_THREADS,
+            queue_slots: 1,
+            priority: Some(WorkerPriority::BelowNormal),
+            resident_bytes_per_thread: 128 * MIB,
+        },
+    }
+}
+
 impl ClientExecution {
-    /// Bootstrap only: creates five bank threads before interaction.
+    /// Bootstrap only: creates seven bank threads before interaction.
     /// Production calls bootstrap_process_quota before logging; independent
     /// fixture banks do not designate the process supervisor. Interactive
     /// codecs use this bank with the original directional admission groups.
@@ -140,25 +189,7 @@ impl ClientExecution {
         // an implicit process-global Rayon pool outside physical admission.
         tokenizers::utils::parallelism::set_parallelism(false);
         let quota = process_quota();
-        let bank = |threads, resident_bytes_per_thread| LaneConfig {
-            threads,
-            queue_slots: if threads == 0 { 0 } else { 16 },
-            priority: Some(WorkerPriority::BelowNormal),
-            resident_bytes_per_thread,
-        };
-        let execution = Execution::start(
-            quota,
-            ExecutionConfig {
-                cpu: bank(2, 64 * MIB),
-                io: bank(2, MIB),
-                service: LaneConfig {
-                    threads: 1,
-                    queue_slots: 1,
-                    priority: Some(WorkerPriority::BelowNormal),
-                    resident_bytes_per_thread: 128 * MIB,
-                },
-            },
-        )?;
+        let execution = Execution::start(quota, bank_config())?;
         let aggregate = general_admission_group().map_err(StartError::Admission)?;
         let general = execution
             .client_in_group(
@@ -171,7 +202,21 @@ impl ClientExecution {
                 },
             )
             .map_err(StartError::Admission)?;
-        Ok(Self { execution, general })
+        // One tenant identity for every picker hosted by this execution. Its
+        // one-job limit remains charged across picker replacement or closure.
+        let location_search = general
+            .child(ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 16 * MIB,
+                result_bytes: 4 * MIB,
+            })
+            .map_err(StartError::Admission)?;
+        Ok(Self {
+            execution,
+            general,
+            location_search,
+        })
     }
     pub fn client(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
         self.general.child(limits)
@@ -216,6 +261,11 @@ impl ClientExecution {
             result_bytes: 128 * MIB,
         })?;
         Ok(ilium_ambient::resources::AmbientResources::new(finite))
+    }
+    /// Clones the one geocoding tenant on this execution's existing I/O bank.
+    /// A blocked lookup keeps its job charged across picker replacement.
+    pub fn location_search(&self) -> Client {
+        self.location_search.clone()
     }
     /// Clone this one client identity for Markdown, source windows and syntax.
     /// All adapters share its existing aggregate credits and physical bank.
@@ -376,6 +426,41 @@ mod composition_tests {
     }
 
     #[test]
+    fn actual_bank_admission_fits_selected_roles_and_releases_after_native_join() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 32,
+            jobs: 64,
+            service_jobs: 1,
+            input_bytes: 768 * MIB,
+            result_bytes: 768 * MIB,
+            worker_threads: PROCESS_WORKER_THREADS,
+            worker_bytes: PROCESS_WORKER_BYTES,
+        });
+        let config = bank_config();
+        let bank_threads = config.cpu.threads + config.io.threads + config.service.threads;
+        let mut execution = Execution::start(quota.clone(), config).unwrap();
+        assert_eq!(quota.snapshot().worker_threads, bank_threads);
+        // Other roles are declared here; their actual engines/children are
+        // covered by separate lifecycle qualification. This bank is native.
+        let others = quota
+            .reserve_external_worker(PROCESS_WORKER_THREADS - bank_threads, 3191 * MIB)
+            .unwrap();
+        assert_eq!(quota.snapshot().worker_threads, PROCESS_WORKER_THREADS);
+        assert!(matches!(
+            quota.reserve_external_worker(1, 1),
+            Err(RejectReason::WorkerLimit)
+        ));
+        drop(others);
+        execution.request_shutdown(ShutdownMode::Drain);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(joined.remaining_workers, 0);
+        drop(execution);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+    }
+
+    #[test]
     fn selected_single_video_owner_declarations_fit_and_release() {
         let quota = QuotaGroup::new(QuotaLimits {
             worker_threads: PROCESS_WORKER_THREADS,
@@ -388,7 +473,14 @@ mod composition_tests {
         });
         // Source-grounded declarations, not a claim that every owner is active
         // simultaneously or that unadmitted library threads are accounted here.
-        let bank = quota.reserve_external_worker(5, 258 * MIB).unwrap();
+        let config = bank_config();
+        let bank_threads = config.cpu.threads + config.io.threads + config.service.threads;
+        let bank_bytes = config.cpu.threads * config.cpu.resident_bytes_per_thread
+            + config.io.threads * config.io.resident_bytes_per_thread
+            + config.service.threads * config.service.resident_bytes_per_thread;
+        let bank = quota
+            .reserve_external_worker(bank_threads, bank_bytes)
+            .unwrap();
         let parser = quota.reserve_external_storage(512 * MIB).unwrap();
         let clipboard = quota.reserve_external_worker(3, 264 * MIB).unwrap();
         let media = quota.reserve_external_worker(1, 400 * MIB).unwrap();
@@ -401,11 +493,14 @@ mod composition_tests {
         let voice_custody = quota.reserve_external_storage(128 * 1024).unwrap();
         let video = quota.reserve_external_worker(10, 1064 * MIB).unwrap();
         let video_storage = quota.reserve_external_storage(104 * MIB).unwrap();
-        assert_eq!(quota.snapshot().worker_threads, 26);
-        assert_eq!(quota.snapshot().worker_bytes, 3449 * MIB + 128 * 1024);
+        assert_eq!(quota.snapshot().worker_threads, bank_threads + 21);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            3191 * MIB + bank_bytes + 128 * 1024
+        );
         // These real bootstrap declarations are additive to the
-        // previously selected 26-role feature census, without widening the
-        // unchanged 4096 MiB storage ceiling or adding a codec bank thread.
+        // selected census from the constructor configuration. The4096 MiB
+        // storage ceiling stays fixed; codecs add no separate bank thread.
         let supervisor_bytes = ilium_platform::owned_worker::supervisor_declared_bytes();
         let log_path = std::path::Path::new("selected-session.log");
         let supervisor = quota.reserve_external_worker(1, supervisor_bytes).unwrap();
@@ -431,7 +526,8 @@ mod composition_tests {
         assert_eq!(quota.snapshot().worker_threads, PROCESS_WORKER_THREADS);
         assert_eq!(
             quota.snapshot().worker_bytes,
-            3449 * MIB
+            3191 * MIB
+                + bank_bytes
                 + 128 * 1024
                 + supervisor_bytes
                 + ilium_logging::LOGGER_STACK_BYTES

@@ -1709,6 +1709,67 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         "the old rollout must stay quarantined while Codex waits for its next prompt"
     );
 
+    // A wall-clock quarantine alone does not prove the asynchronous detector
+    // applied an unresolved sample. A sample crossing either input fence is
+    // correctly discarded. Observe the actual journal edge before advancing
+    // the fake process to the replacement transcript.
+    write_frame(
+        &mut client,
+        &ClientRequest::GetPaneDebugLog {
+            pane_id,
+            after_sequence: None,
+        },
+    )
+    .await
+    .expect("read the post-clear discovery boundary");
+    let window = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+        matches!(event, ServerEvent::PaneDebugLogSnapshot { pane_id: id, .. } if *id == pane_id)
+    }).await;
+    let ServerEvent::PaneDebugLogSnapshot { entries, .. } = window else {
+        unreachable!("predicate only matches the requested journal");
+    };
+    let clear_correlation = entries
+        .iter()
+        .find(|entry| {
+            entry.kind == AgentDebugEventKind::SessionCleared
+                && entry.summary.contains("submitted command")
+        })
+        .expect("command-driven clear is recorded before its published transition")
+        .correlation_id
+        .clone();
+    let negative_applied = entries.iter().any(|entry| {
+        entry.kind == AgentDebugEventKind::SessionDiscovery
+            && entry.summary.contains("no admissible identity")
+            && entry.correlation_id == clear_correlation
+    });
+    if !negative_applied {
+        tokio::time::timeout(WAIT_TIMEOUT, async {
+            loop {
+                let event: ServerEvent = read_frame(&mut client)
+                    .await
+                    .expect("observe the applied post-clear discovery");
+                assert!(
+                    !matches!(&event,
+                        ServerEvent::PaneSessionIdResolved { pane_id: id, session_id, .. }
+                        if *id == pane_id && session_id == old_session_id
+                    ),
+                    "the invalidated transcript cannot rebound while awaiting discovery"
+                );
+                if matches!(&event,
+                    ServerEvent::PaneDebugEntryAppended { pane_id: id, entry }
+                    if *id == pane_id
+                        && entry.kind == AgentDebugEventKind::SessionDiscovery
+                        && entry.summary.contains("no admissible identity")
+                        && entry.correlation_id == clear_correlation
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("an unresolved correlated discovery must be applied before the next prompt");
+    }
+
     write_frame(
         &mut client,
         &ClientRequest::KeyInput {

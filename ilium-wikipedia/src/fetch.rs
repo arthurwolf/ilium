@@ -102,15 +102,15 @@ fn guarded_http_get(initial: &str, max_bytes: usize) -> Result<Vec<u8>, String> 
             .checked_sub(started.elapsed())
             .filter(|duration| !duration.is_zero())
             .ok_or("Wikipedia request deadline exceeded")?;
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .timeout_global(Some(remaining))
             .user_agent(USER_AGENT)
             .https_only(true)
             .max_redirects(0)
             .max_redirects_will_error(false)
             .http_status_as_error(false)
-            .build()
-            .into();
+            .build();
+        let agent = ilium_http::agent(config);
         let mut response = agent.get(&url).call().map_err(|error| error.to_string())?;
         if response.status().is_redirection() {
             if hop == 5 {

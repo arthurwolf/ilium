@@ -354,6 +354,9 @@ pub enum Mode {
     /// Step/progress/log dialog over a frozen agent pane while its session is
     /// converted to the other provider. State lives in `App::conversion`.
     ConvertSession,
+    /// Progress dialog over a frozen agent pane while its conversation is
+    /// compacted by a remote model. State lives in `App::remote_compaction`.
+    RemoteCompaction,
 }
 
 /// Which animation control a `Mode::AnimationTextPrompt` edits, and what to
@@ -445,6 +448,12 @@ pub enum SettingsTab {
     AgentMonitoring,
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
+    /// Scans agent transcripts and recommends the auto-compaction threshold
+    /// (see `crate::compaction_ui`).
+    Optimization,
+    /// Summarizing a session through the Inference model (the Remote
+    /// compaction tab).
+    RemoteCompaction,
     Debug,
     Api,
     About,
@@ -606,11 +615,13 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 23] = [
+    pub const ALL: [SettingsTab; 25] = [
         Self::Appearance,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Cost,
+        Self::Optimization,
+        Self::RemoteCompaction,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -654,6 +665,8 @@ impl SettingsTab {
             Self::ResetPlanning => "Reset planning",
             Self::AgentMonitoring => "Agent Monitoring",
             Self::Cost => "Agent Cost",
+            Self::Optimization => "Optimization",
+            Self::RemoteCompaction => "Remote compaction",
             Self::Debug => "Debug",
             Self::Api => "API",
             Self::About => "About",
@@ -811,13 +824,15 @@ pub enum TerminalRow {
     NewPaneDirectory,
     SmartCopyLight,
     SmartCopyLightKey,
+    EngineMemoryBudget,
 }
 impl TerminalRow {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::ScrollbackBudget,
         Self::NewPaneDirectory,
         Self::SmartCopyLight,
         Self::SmartCopyLightKey,
+        Self::EngineMemoryBudget,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1753,7 +1768,9 @@ pub struct PendingRestructureRequest {
     pub recommendation_snapshot: crate::restructure::RecommendationSnapshot,
     pub project_id: NodeId,
     pub project_name: String,
-    pub project_cwd: PathBuf,
+    /// Directory holding the global animation settings the recommendation
+    /// is resolved against (see `App::animation_home`).
+    pub animation_home: PathBuf,
     pub contexts: Vec<LeafContext>,
     pub title_observations: Vec<ilium_ipc::PaneTitleObservation>,
     /// Complete typed split-view constraints captured from the same tree
@@ -1880,6 +1897,7 @@ pub struct App {
     /// synchronous and unit-testable without a real connection.
     outbox: Vec<crate::ipc_preparation::AdmittedRequest>,
     pub(crate) outbound_admission: Option<ilium_execution::Client>,
+    pub(crate) location_search_client: Option<ilium_execution::Client>,
     pending_input_retention: Option<ilium_execution::Retention>,
     pub tree_state: TreeState<NodeId>,
     pub right_panel_target: RightPanelTarget,
@@ -1919,6 +1937,15 @@ pub struct App {
     pub(crate) plugin_catalogue:
         Option<ilium_execution::Retained<crate::animation_plugins::PluginCatalogue>>,
     semantic_presentation: semantic_presentation::SemanticPresentation,
+    // These leases outlive all App-owned animation snapshots and presentation
+    // caches. Each version is separately charged before its first deep copy.
+    pub(crate) animation_location_storage:
+        Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) committed_animation_location_storage:
+        Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) failed_animation_location_storage:
+        Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    pub(crate) location_destination_quota: ilium_execution::QuotaGroup,
     /// Immutable view shared by background and Settings preview. The service
     /// owns all scenes, rendering and loop-cache generation off the UI thread.
     pub animation_frame: crate::background_animation::AnimationSurface,
@@ -1939,6 +1966,10 @@ pub struct App {
     /// Geometry from the last terminal-size calculation.
     pub layout: UiLayout,
     pub(crate) emitted_geometry: Option<EmittedGeometry>,
+    /// A left-button press that arrived before the frame showing the latest
+    /// state was acknowledged. It is replayed once that frame is acknowledged,
+    /// but only if the layout it was aimed at is unchanged.
+    pub(crate) deferred_pointer_press: Option<(crossterm::event::MouseEvent, UiLayout)>,
     pub(crate) composed_tree_rows: Option<std::sync::Arc<crate::tree_ui::PaintedTreeRows>>,
     pub(crate) composed_terminal_sources: Vec<(NodeId, crate::terminal_view::PaintedTerminal)>,
     pub(crate) composed_editor_sources: Vec<(NodeId, crate::source_window_surface::PaintedWindow)>,
@@ -2006,6 +2037,11 @@ pub struct App {
     /// Text being typed into the sparkline-window field of the Agent Cost
     /// tab (`Enter` on that row), or `None` while it is not being edited.
     pub cost_window_input: Option<String>,
+    /// Remote compaction settings (the Remote compaction tab).
+    pub remote_compaction_settings: crate::remote_compaction_settings::RemoteCompactionSettings,
+    /// When numeric Remote compaction rows were last changed plus the
+    /// debounce; `None` while nothing is waiting to be saved.
+    pub remote_compaction_save_deadline: Option<Instant>,
     /// Derived per-agent spend and the overlay the tree draws.
     pub(crate) cost_tracker: crate::cost_tracker::CostTracker,
     pub reset_monitor_state: ResetMonitorState,
@@ -2159,6 +2195,11 @@ pub struct App {
     /// here (server-side), and the file-picker overlay always opens
     /// rooted here.
     pub session_cwd: PathBuf,
+    /// Directory whose `.ilium/config.yaml` stores the animation settings.
+    /// One location for the whole client: animation is a global preference,
+    /// never a per-project one. Only the semantic scene differs per project,
+    /// and that comes from each project's restructuring recommendation.
+    pub animation_home: PathBuf,
     pub project_name: Option<String>,
     pub project_icon: Option<String>,
     pub is_project_name_loading: bool,
@@ -2230,6 +2271,13 @@ pub struct App {
     pub(crate) projection_busy_retry_at: Option<tokio::time::Instant>,
     pub(crate) projection_admission_failure: Option<ilium_execution::RejectReason>,
     terminal_input: crate::terminal_input::TerminalInput,
+    /// Hidden panes whose parser state was released; the server must forget
+    /// what it delivered for them before they are displayed again.
+    pub(crate) pending_terminal_discards: Vec<NodeId>,
+    /// Where the starting server publishes what it is doing. Set only by a
+    /// real client run; its presence turns the start-up dialog on.
+    pub(crate) startup_progress_path: Option<PathBuf>,
+    pub(crate) startup_progress: crate::filesystem::startup::StartupReader,
     pub(crate) pending_native_paste: Option<crate::terminal_input::NativePaste>,
     native_paste_failure: Option<crate::terminal_input_owner::InputFailure>,
     pub(crate) terminal_context_preparation:
@@ -2286,6 +2334,22 @@ pub struct App {
     pub pending_conversion_start: Option<crate::session_conversion::ConversionJob>,
     /// Set when the user cancels a running conversion.
     pub pending_conversion_cancel: bool,
+    /// The active remote-compaction dialog, if any (see `Mode::RemoteCompaction`).
+    pub remote_compaction:
+        Option<Box<crate::remote_compaction_dialog::RemoteCompactionDialogState>>,
+    /// Remote-compaction worker job the event loop must start.
+    pub pending_remote_compaction_job: Option<crate::remote_compaction_worker::RemoteCompactionJob>,
+    /// Set when the user cancels a running remote compaction.
+    pub pending_remote_compaction_cancel: bool,
+    /// Cooldown and failure bookkeeping of the automatic trigger.
+    pub remote_compaction_monitor: crate::remote_compaction_flow::RemoteCompactionMonitor,
+    /// Settings > Optimization: the transcript scans of the compaction
+    /// optimizer (see `crate::compaction_scan`).
+    pub compaction_optimizer: crate::compaction_scan::CompactionOptimizer,
+    /// Settings > Optimization: selected sub-tab, current agent settings, the
+    /// pending Apply confirmation and the last outcome (see
+    /// `crate::compaction_app`).
+    pub optimization: crate::compaction_app::OptimizationState,
     /// Position of a pane being swapped for its converted replacement, and
     /// whether the user was looking at it, so the replacement can take over.
     pub pending_replacement_focus: Option<crate::session_conversion::ReplacementFocus>,
@@ -2487,6 +2551,16 @@ impl App {
                     None
                 }
             },
+            location_search_client: {
+                #[cfg(test)]
+                {
+                    Some(crate::execution::test_client())
+                }
+                #[cfg(not(test))]
+                {
+                    None
+                }
+            },
             pending_input_retention: None,
             tree_state: TreeState::default(),
             right_panel_target: RightPanelTarget::Empty,
@@ -2517,11 +2591,16 @@ impl App {
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
                 session_cwd.clone(),
             ),
+            animation_location_storage: None,
+            committed_animation_location_storage: None,
+            failed_animation_location_storage: None,
+            location_destination_quota: crate::execution::process_quota(),
             tree_transitions: TreeTransitions::default(),
             last_known_pane_size: (terminal_view::DEFAULT_ROWS, terminal_view::DEFAULT_COLS),
             requested_pane_sizes: HashMap::new(),
             layout: UiLayout::default(),
             emitted_geometry: None,
+            deferred_pointer_press: None,
             composed_tree_rows: None,
             composed_terminal_sources: Vec::new(),
             composed_editor_sources: Vec::with_capacity(4),
@@ -2561,6 +2640,9 @@ impl App {
             reset_planning_settings: ResetPlanningSettings::default(),
             cost_settings: CostSettings::default(),
             cost_window_input: None,
+            remote_compaction_settings:
+                crate::remote_compaction_settings::RemoteCompactionSettings::default(),
+            remote_compaction_save_deadline: None,
             cost_tracker: crate::cost_tracker::CostTracker::default(),
             reset_monitor_state: ResetMonitorState::default(),
             agent_detection_settings: None,
@@ -2647,6 +2729,7 @@ impl App {
             terminal_selection: None,
             terminal_selection_source: None,
             help_leader_pending: false,
+            animation_home: session_cwd.clone(),
             session_cwd,
             project_name: None,
             project_icon: None,
@@ -2700,6 +2783,9 @@ impl App {
             pending_normal_voice_outputs: None,
             pending_voice_interaction_allocation: None,
             terminal_input: crate::terminal_input::TerminalInput::default(),
+            pending_terminal_discards: Vec::new(),
+            startup_progress_path: None,
+            startup_progress: crate::filesystem::startup::StartupReader::default(),
             pending_native_paste: None,
             native_paste_failure: None,
             terminal_context_preparation: None,
@@ -2813,6 +2899,13 @@ impl App {
             conversion: None,
             pending_conversion_start: None,
             pending_conversion_cancel: false,
+            remote_compaction: None,
+            pending_remote_compaction_job: None,
+            pending_remote_compaction_cancel: false,
+            remote_compaction_monitor:
+                crate::remote_compaction_flow::RemoteCompactionMonitor::default(),
+            compaction_optimizer: crate::compaction_scan::CompactionOptimizer::new(),
+            optimization: crate::compaction_app::OptimizationState::default(),
             pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
             restored_editor_paths: HashMap::new(),
@@ -4349,6 +4442,13 @@ impl App {
         }
     }
 
+    /// Returns the press held by `handle_mouse_event` when its frame has now
+    /// been acknowledged and the layout it targeted is still the live one.
+    pub(crate) fn take_deferred_pointer_press(&mut self) -> Option<crossterm::event::MouseEvent> {
+        let (event, layout) = self.deferred_pointer_press.take()?;
+        (self.pointer_geometry_is_current() && layout == self.layout).then_some(event)
+    }
+
     pub(crate) fn commit_emitted_geometry(&mut self, geometry: EmittedGeometry) -> bool {
         // The card reads acknowledged sources. Request one replacement paint
         // when its source changes, including the first acknowledged tree.
@@ -5023,6 +5123,9 @@ impl App {
             if let PaneRuntime::Terminal(view) = pane {
                 view.set_scrollback_budget_mib(settings.scrollback_budget_mib);
             }
+        }
+        if let Some(parsing) = &self.terminal_parsing {
+            parsing.set_budget_mib(settings.engine_memory_budget_mib);
         }
     }
     pub fn apply_editor_settings(&mut self, settings: EditorSettings) {
@@ -8455,18 +8558,6 @@ impl App {
         }
     }
 
-    /// Stores the shared observer location used by every location scene.
-    pub fn settings_set_location(&mut self, location: ilium_ambient::GeoLocation) {
-        self.settings_edit_animation(|settings| {
-            let location = location.normalized();
-            if settings.ambient.location == location {
-                return Ok(false);
-            }
-            settings.ambient.location = location;
-            Ok(true)
-        });
-    }
-
     /// Opens the location picker over Settings; the caller has restored the
     /// Settings mode first. OSM captures the validated project binding now.
     pub fn open_location_picker(&mut self) {
@@ -8491,54 +8582,115 @@ impl App {
             crate::location_picker::LocationPickerState::for_openstreetmap(
                 current,
                 project_path,
-                osm.search.clone(),
+                &osm.search,
+                self.location_search_client.clone(),
             )
         } else {
             crate::location_picker::LocationPickerState::new(
                 self.animation_settings.ambient.location.clone(),
+                self.location_search_client.clone(),
             )
         };
         self.push_modal(Mode::LocationPicker(Box::new(picker)));
     }
 
-    /// An OSM picker may save only to the project captured at opening. The
-    /// guard precedes synchronization because keyboard dispatch temporarily
-    /// replaces the modal mode while processing Enter.
+    /// Charge every App/intent/presentation copy before confirmation clones
+    /// the candidate. The existing 64 KiB serialization check bounds the
+    /// setting snapshot, and 16 is a conservative peak-copy declaration, not
+    /// a new provider or worker limit.
+    fn reserve_animation_location_storage(
+        &self,
+        settings: &crate::background_animation::AnimationSettings,
+        additional_label_capacity: usize,
+    ) -> Result<std::sync::Arc<ilium_execution::StorageAdmission>, String> {
+        const PEAK_COPIES: usize = 16;
+        let snapshot = crate::filesystem::configuration::serialized_bound(settings)?;
+        let added_label = additional_label_capacity
+            .checked_mul(16)
+            .ok_or("Location storage size overflow")?;
+        let bytes = snapshot
+            .checked_add(added_label)
+            .and_then(|bytes| {
+                bytes.checked_add(std::mem::size_of::<
+                    crate::background_animation::AnimationSettings,
+                >())
+            })
+            .and_then(|bytes| bytes.checked_mul(PEAK_COPIES))
+            .ok_or("Location storage size overflow")?;
+        self.location_destination_quota
+            .reserve_external_storage(bytes)
+            .map(std::sync::Arc::new)
+            .map_err(|reason| format!("Location confirmation storage unavailable: {reason:?}"))
+    }
+
+    /// An OSM picker may save only to the project captured at opening. Enter
+    /// and mouse clicks carry no cloned location until this admission succeeds.
     pub fn confirm_location_picker(
         &mut self,
         picker: &mut crate::location_picker::LocationPickerState,
-        location: ilium_ambient::GeoLocation,
     ) -> Result<(), String> {
         use crate::location_picker::PickerTarget;
-        let PickerTarget::OpenStreetMap { project_path, .. } = picker.target() else {
-            self.settings_set_location(location);
-            return Ok(());
-        };
         if picker.is_saving() {
             return Ok(());
         }
-        let current = self.animation_write_path()?;
-        if &current != project_path {
-            return Err("The selected project changed; reopen its map location picker".into());
-        }
-        if self.animation_settings.kind != crate::background_animation::AnimationKind::OpenStreetMap
-        {
-            return Err("The animation changed; reopen the map location picker".into());
-        }
-        let mut settings = self.animation_settings.clone();
-        settings
-            .ambient
-            .openstreetmap
-            .set_selected_location(&location)?;
-        // Even an unchanged optimistic value needs a durable retry receipt.
-        let token = std::sync::Arc::new(());
-        let save = crate::filesystem::configurations::AnimationPickerSave {
-            token: std::sync::Arc::clone(&token),
-            project_path: current,
-            candidate: location,
+        let current = match picker.target() {
+            PickerTarget::OpenStreetMap { project_path, .. } => {
+                let current = self.animation_write_path()?;
+                if &current != project_path {
+                    return Err(
+                        "The selected project changed; reopen its map location picker".into(),
+                    );
+                }
+                if self.animation_settings.kind
+                    != crate::background_animation::AnimationKind::OpenStreetMap
+                {
+                    return Err("The animation changed; reopen its map location picker".into());
+                }
+                if picker.candidate.label.capacity() > 8192 {
+                    return Err("Animation picker receipt exceeds retained limit".into());
+                }
+                Some(current)
+            }
+            PickerTarget::SharedObserver => {
+                if self.animation_settings.ambient.location == picker.candidate {
+                    return Ok(());
+                }
+                None
+            }
         };
-        self.enqueue_animation_settings(settings, Some(save))?;
-        picker.begin_save(token);
+        let storage = self.reserve_animation_location_storage(
+            &self.animation_settings,
+            picker.candidate.label.capacity(),
+        )?;
+        let mut settings = self.animation_settings.clone();
+        if let Some(current) = current {
+            settings
+                .ambient
+                .openstreetmap
+                .set_selected_location(&picker.candidate)?;
+            // Even an unchanged optimistic value needs a durable retry receipt.
+            let token = std::sync::Arc::new(());
+            let save = crate::filesystem::configurations::AnimationPickerSave {
+                token: std::sync::Arc::clone(&token),
+                project_path: current,
+                candidate: picker.candidate.clone(),
+                location_storage: Some(std::sync::Arc::clone(&storage)),
+            };
+            self.enqueue_animation_settings_with_storage(
+                settings,
+                Some(save),
+                None,
+                Some(storage),
+            )?;
+            picker.begin_save(token);
+        } else {
+            let candidate = picker.candidate.normalized();
+            if settings.ambient.location == candidate {
+                return Ok(());
+            }
+            settings.ambient.location = candidate;
+            self.enqueue_animation_settings_with_storage(settings, None, None, Some(storage))?;
+        }
         Ok(())
     }
 
@@ -8605,29 +8757,52 @@ impl App {
         picker: Option<crate::filesystem::configurations::AnimationPickerSave>,
         value_dialog: Option<std::sync::Arc<()>>,
     ) -> Result<(), String> {
+        self.enqueue_animation_settings_with_storage(settings, picker, value_dialog, None)
+    }
+
+    fn enqueue_animation_settings_with_storage(
+        &mut self,
+        settings: crate::background_animation::AnimationSettings,
+        picker: Option<crate::filesystem::configurations::AnimationPickerSave>,
+        value_dialog: Option<std::sync::Arc<()>>,
+        location_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    ) -> Result<(), String> {
         if !self.animation_frame.can_queue_configuration() {
             return Err("Animation busy; retry this settings change".into());
         }
-
+        // Descendants of a confirmed location receive a fresh lease before
+        // this routine clones queue/intent/optimistic snapshots. Earlier
+        // accepted versions remain charged by their own owners.
+        let location_storage = match location_storage {
+            Some(storage) => Some(storage),
+            None if self.animation_location_storage.is_some() => {
+                Some(self.reserve_animation_location_storage(&settings, 0)?)
+            }
+            None => None,
+        };
         let path = self.animation_write_path()?;
+        let normalized = settings.normalized();
         self.enqueue_configuration(
             path.clone(),
             crate::filesystem::configuration::ConfigurationChange::Animation(Box::new(
-                settings.clone(),
+                normalized.clone(),
             )),
             crate::filesystem::configurations::ConfigurationIntent::Animation {
                 path,
                 picker,
                 value_dialog,
-                desired: Box::new(settings.clone()),
+                desired: Box::new(normalized.clone()),
+                location_storage: location_storage.clone(),
             },
         )?;
         // Authored choices accumulate while durability is pending. Rendering
         // remains fenced to the last acknowledged configuration.
         if self.committed_animation_settings.is_none() {
             self.committed_animation_settings = Some(self.animation_settings.clone());
+            self.committed_animation_location_storage = self.animation_location_storage.clone();
         }
-        self.animation_settings = settings.normalized();
+        self.animation_settings = normalized;
+        self.animation_location_storage = location_storage;
         Ok(())
     }
 
@@ -8635,11 +8810,13 @@ impl App {
         &mut self,
         path: &Path,
         settings: crate::background_animation::AnimationSettings,
+        location_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
     ) {
         if self.animation_write_path().as_deref() != Ok(path) {
             return;
         }
         self.committed_animation_settings = Some(settings.normalized());
+        self.committed_animation_location_storage = location_storage;
         self.status_message = None;
         if let Some(effective) = self.effective_animation_settings() {
             let elapsed = crate::background_composition::quantized_elapsed_at(
@@ -8875,6 +9052,26 @@ impl App {
     /// documented no-op, not a silent fallthrough, for any path that
     /// reaches it anyway.
     pub fn execute_agent_toolbar_action(&mut self, pane_id: NodeId, action: AgentToolbarAction) {
+        let needs_running_agent = !matches!(
+            action,
+            AgentToolbarAction::Close
+                | AgentToolbarAction::ToggleTextSelection
+                | AgentToolbarAction::CopyScreen
+                | AgentToolbarAction::SmartCopy
+        );
+        let agent_is_gone = self.tree.get(pane_id).is_some_and(|node| match &node.kind {
+            NodeKind::Pane { status, .. } => status.agent_recovery().is_some(),
+            _ => false,
+        });
+        if needs_running_agent && agent_is_gone {
+            // The agent process has exited; its keystrokes would go nowhere.
+            let label = crate::agent_toolbar::action_label(action);
+            self.status_message = Some(format!(
+                "{} unavailable: the agent in this pane is no longer running",
+                if label.is_empty() { "Action" } else { label }
+            ));
+            return;
+        }
         match action {
             AgentToolbarAction::Close => self.settings_toggle_agent_toolbar(),
             AgentToolbarAction::ToggleTextSelection => {
@@ -8901,6 +9098,7 @@ impl App {
             }
             AgentToolbarAction::SmartCopy => self.start_smart_copy(pane_id),
             AgentToolbarAction::CycleEffort => self.step_agent_effort(pane_id, false),
+            AgentToolbarAction::Compact if self.action_remote_compact(pane_id, false) => {}
             AgentToolbarAction::CodexModelTier(_) => {}
             _ => {
                 let Some(provider) = self.agent_toolbar_provider(pane_id) else {
@@ -8930,8 +9128,20 @@ impl App {
             self.status_message = Some("Smart Copy generation exhausted".into());
             return;
         };
-        if let Some(preparation) = &mut self.terminal_context_preparation {
-            match preparation.request_capture(pane_id, generation, &source) {
+        let mut capture_result = self
+            .terminal_context_preparation
+            .as_mut()
+            .map(|preparation| preparation.request_capture(pane_id, generation, &source));
+        if capture_result.as_ref().is_some_and(Result::is_err)
+            && self.release_foreign_selection_pin(pane_id)
+        {
+            capture_result = self
+                .terminal_context_preparation
+                .as_mut()
+                .map(|preparation| preparation.request_capture(pane_id, generation, &source));
+        }
+        if let Some(result) = capture_result {
+            match result {
                 Ok(()) => {
                     self.light_copy_preview_generation = None;
                     self.smart_copy_preview = None;
@@ -9091,6 +9301,7 @@ impl App {
                 ),
                 user_prompt,
                 max_tokens: ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+                timeout: None,
             },
         });
         self.smart_copy_cancel_requested = false;
@@ -9784,6 +9995,10 @@ impl App {
         match row {
             TerminalRow::ScrollbackBudget => {
                 settings.scrollback_budget_mib = settings.stepped_scrollback_budget_mib(direction)
+            }
+            TerminalRow::EngineMemoryBudget => {
+                settings.engine_memory_budget_mib =
+                    settings.stepped_engine_memory_budget_mib(direction)
             }
             TerminalRow::NewPaneDirectory => {
                 settings.new_pane_directory = settings.new_pane_directory.stepped(direction)
@@ -10520,9 +10735,15 @@ impl App {
             ),
             other => return Err(Box::new(other)),
         };
+        let is_displayed = self.is_pane_displayed(pane_id);
         let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) else {
             return Ok(());
         };
+        if view.frontend.is_none() && !is_displayed {
+            // A hidden pane without a parser is rebuilt from the server journal
+            // when displayed; a late tail would only claim a scarce engine.
+            return Ok(());
+        }
         if view.is_confirmed_removed() {
             let (first_sequence, through_sequence, byte_count) = match &body {
                 PaneCommand::Output {
@@ -10585,6 +10806,53 @@ impl App {
             })),
             _ => Ok(()),
         }
+    }
+    /// The start-up dialog shows until the server's initial state has arrived.
+    pub(crate) fn is_startup_dialog_visible(&self) -> bool {
+        self.startup_progress_path.is_some() && !self.is_initial_state_sync_complete
+    }
+
+    /// Refreshes what the dialog says from the server's progress file.
+    /// Returns whether the dialog needs repainting (it always animates).
+    pub(crate) fn refresh_startup_progress(&mut self) -> bool {
+        let Some(path) = self.startup_progress_path.as_ref() else {
+            return false;
+        };
+        if self.is_initial_state_sync_complete {
+            self.startup_progress.close();
+            return false;
+        }
+        self.startup_progress.refresh(path, Instant::now());
+        true
+    }
+
+    /// The text of the start-up dialog for the current moment.
+    pub(crate) fn startup_dialog_text(&self) -> crate::startup_dialog::DialogText {
+        match self.startup_progress.progress() {
+            Some(progress) => crate::startup_dialog::DialogText {
+                category: progress.category.clone(),
+                item: progress.item.clone(),
+                fraction: progress.fraction(),
+            },
+            None => crate::startup_dialog::DialogText {
+                category: "Loading the session".into(),
+                item: "Receiving panes from the session server".into(),
+                fraction: None,
+            },
+        }
+    }
+
+    /// Whether a pane in the right panel still waits for a parser engine.
+    /// An engine can be unavailable only transiently (all claims held by
+    /// retiring panes, or the shared memory budget occupied), so the event
+    /// loop must keep retrying instead of sleeping until unrelated input
+    /// happens to arrive. Without this a pane selected in the tree stayed
+    /// black until the user focused it.
+    pub(crate) fn is_displayed_terminal_awaiting_engine(&self) -> bool {
+        self.terminal_parsing.is_some()
+            && self.displayed_pane_slots().into_iter().flatten().any(|id| {
+                matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(view)) if view.frontend.is_none())
+            })
     }
     pub(crate) fn collect_terminal_parsing(&mut self) -> bool {
         if let Some(error) = self
@@ -10698,15 +10966,63 @@ impl App {
         let Some(parsing) = &self.terminal_parsing else {
             return changed;
         };
+        let displayed: Vec<NodeId> = self.displayed_pane_slots().into_iter().flatten().collect();
+        let mut engines_held = 0_usize;
         for (id, pane) in &mut self.panes {
             if let PaneRuntime::Terminal(view) = pane {
-                if let Err(error) = parsing.attach(*id, view) {
-                    view.admission_error = Some(error);
+                let is_wanted = displayed.contains(id);
+                if view.frontend.is_some() || is_wanted {
+                    if let Err(error) = parsing.attach(*id, view) {
+                        view.admission_error = Some(error);
+                    }
                 }
                 if let Some(frontend) = &mut view.frontend {
+                    engines_held += 1;
                     frontend.retry();
                 }
             }
+        }
+        // Hidden panes keep their engine so revisiting them is instant. Only
+        // when a displayed pane is refused for memory do the least recently
+        // focused hidden engines give theirs back, one per retirement, because
+        // the displayed pane retries as soon as each retirement wakes the loop.
+        let is_displayed_refused = self.panes.iter().any(|(id, pane)| {
+            displayed.contains(id)
+                && matches!(pane, PaneRuntime::Terminal(view)
+                    if view.admission_error.as_deref().is_some_and(|error| error.contains("backpressure")))
+        });
+        if is_displayed_refused && parsing.engine_claims() <= engines_held {
+            let tree = &self.tree;
+            let victim = self
+                .panes
+                .iter()
+                .filter(|(id, pane)| {
+                    !displayed.contains(id)
+                        && matches!(pane, PaneRuntime::Terminal(view) if view.frontend.is_some())
+                })
+                .min_by_key(|(id, _)| {
+                    (
+                        tree.get(**id)
+                            .and_then(|node| node.last_focus_activity_revision),
+                        **id,
+                    )
+                })
+                .map(|(id, _)| *id);
+            if let Some(victim) = victim {
+                if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&victim) {
+                    if view.evict_parser() {
+                        self.pending_terminal_discards.push(victim);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if !self.pending_terminal_discards.is_empty()
+            && self.queue_request(ClientRequest::DiscardTerminalDelivery {
+                pane_ids: self.pending_terminal_discards.clone(),
+            })
+        {
+            self.pending_terminal_discards.clear();
         }
         let cancelled = self.terminal_input.retain(|id,identity| matches!(self.panes.get(&id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,identity)));
         if cancelled != 0 {
@@ -12951,22 +13267,28 @@ impl App {
             row,
             snapshot_ordinal,
         };
+        let session_cwd = self.session_cwd.clone();
+        let make_request = || crate::terminal_context_preparation::ContextRequest {
+            key: key.clone(),
+            source_row,
+            column: click_column,
+            selection,
+            cwd: session_cwd.clone(),
+            home: home_dir.clone(),
+            history_context: history_context.clone(),
+        };
         let Some(preparation) = &mut self.terminal_context_preparation else {
             self.status_message = Some("Terminal context preparation is unavailable".into());
             return;
         };
-        if let Err(error) = preparation.request(
-            &source,
-            crate::terminal_context_preparation::ContextRequest {
-                key: key.clone(),
-                source_row,
-                column: click_column,
-                selection,
-                cwd: self.session_cwd.clone(),
-                home: home_dir,
-                history_context,
-            },
-        ) {
+        let mut outcome = preparation.request(&source, make_request());
+        if outcome.is_err() && self.release_foreign_selection_pin(pane_id) {
+            outcome = match &mut self.terminal_context_preparation {
+                Some(preparation) => preparation.request(&source, make_request()),
+                None => outcome,
+            };
+        }
+        if let Err(error) = outcome {
             self.status_message = Some(error);
             return;
         }
@@ -14889,7 +15211,9 @@ impl App {
                 _ => None,
             })
             .chain(self.restructure_budget_autosave_deadline)
+            .chain(self.remote_compaction_save_deadline)
             .chain(self.next_chatroom_reconcile_at)
+            .chain(self.compaction_next_poll(now))
             .min();
 
         let ordinary_delay = next_deadline
@@ -15998,7 +16322,7 @@ impl App {
             }
             return;
         };
-        let Some(project_cwd) = project.project_path().map(Path::to_path_buf) else {
+        let Some(_project_path) = project.project_path() else {
             if !request_origin.is_automatic() {
                 self.status_message = Some("That entry is not a project".to_string());
             }
@@ -16122,7 +16446,7 @@ impl App {
             .push(PendingRestructureRequest {
                 project_id,
                 project_name,
-                project_cwd,
+                animation_home: self.animation_home.clone(),
                 contexts,
                 title_observations,
                 protected_split_views,
@@ -16803,6 +17127,12 @@ impl App {
         let Some(source) = self.emitted_terminal_source(pane_id) else {
             return;
         };
+        // A plain click replaces the previous selection, so release its pin
+        // first: pins are admitted against a 128 MiB aggregate, and holding
+        // the old generation while pinning the new one needs both at once,
+        // which refuses every pane whose snapshot exceeds half the budget.
+        self.terminal_selection = None;
+        self.terminal_selection_source = None;
         let source = match source.pinned() {
             Ok(source) => source,
             Err(error) => {
@@ -16853,6 +17183,23 @@ impl App {
             self.terminal_selection = None;
             self.terminal_selection_source = None;
         }
+    }
+
+    /// Drops a selection pinned on a pane other than `pane_id`. Its frozen
+    /// source holds part of the shared pin budget, so an action on `pane_id`
+    /// that is refused for budget can retry after this. Returns whether a pin
+    /// was actually released.
+    fn release_foreign_selection_pin(&mut self, pane_id: NodeId) -> bool {
+        if !self
+            .terminal_selection_source
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner != pane_id)
+        {
+            return false;
+        }
+        self.terminal_selection = None;
+        self.terminal_selection_source = None;
+        true
     }
 
     /// Drops `pane_id`'s selection, if it has one -- used whenever that
@@ -18054,6 +18401,27 @@ mod tests {
     }
 
     #[test]
+    fn foreign_selection_pin_is_released_only_for_other_panes() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "pins").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "a", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "b", PaneContentKind::Terminal)
+            .unwrap();
+        let view = TerminalView::new(8, 80);
+        app.terminal_selection_source = Some((first, view.painted_source()));
+        assert!(!app.release_foreign_selection_pin(first));
+        assert!(app.terminal_selection_source.is_some());
+        assert!(app.release_foreign_selection_pin(second));
+        assert!(app.terminal_selection_source.is_none());
+        assert!(!app.release_foreign_selection_pin(second));
+    }
+
+    #[test]
     fn impossible_composition_shape_is_refused_before_replacing_last_metadata() {
         let mut app = app();
         app.layout.tree_area.height = u16::MAX;
@@ -18140,6 +18508,36 @@ mod tests {
         app.commit_emitted_geometry(next);
         assert_eq!(app.emitted_layout_revision(), Some(8));
         assert!(app.pointer_geometry_is_current());
+    }
+
+    #[test]
+    fn press_before_frame_acknowledgement_is_replayed_once_current() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let mut app = app();
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 80, 24));
+        let first = app.capture_emitted_geometry(1);
+        app.commit_emitted_geometry(first);
+        app.mode = Mode::LeaderPending;
+        let press = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 3,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+        crate::mouse::handle_mouse_event(&mut app, press);
+        assert!(app.deferred_pointer_press.is_some());
+        assert!(app.take_deferred_pointer_press().is_none());
+        crate::mouse::handle_mouse_event(&mut app, press);
+        let next = app.capture_emitted_geometry(2);
+        app.commit_emitted_geometry(next);
+        assert_eq!(app.take_deferred_pointer_press(), Some(press));
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 120, 40));
+        crate::mouse::handle_mouse_event(&mut app, press);
+        assert!(app.deferred_pointer_press.is_some());
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 100, 30));
+        let after = app.capture_emitted_geometry(3);
+        app.commit_emitted_geometry(after);
+        assert!(app.take_deferred_pointer_press().is_none());
     }
 
     #[test]
@@ -22255,6 +22653,56 @@ mod tests {
     }
 
     #[test]
+    fn toolbar_agent_actions_explain_themselves_on_a_dead_agent_pane() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "dead codex", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+                    last_known_state: ilium_core::AgentState::from_activity(
+                        AgentClass::Codex,
+                        AgentActivity::Working,
+                        None,
+                    ),
+                    process: ilium_core::AgentProcessKey {
+                        class: AgentClass::Codex,
+                        process_id: 42,
+                        started_at_unix_seconds: 1,
+                    },
+                    availability: ilium_core::AgentAvailability::ShellForeground,
+                    signal_name: None,
+                    session_id: None,
+                    last_prompt: None,
+                    previous_exact_prompt: None,
+                    latest_prompt_unavailable: false,
+                })),
+            )
+            .unwrap();
+        app.take_outbound_requests();
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::Stop);
+        assert!(app.take_outbound_requests().is_empty());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Stop unavailable: the agent in this pane is no longer running")
+        );
+        app.status_message = None;
+        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::CopyScreen);
+        assert_ne!(
+            app.status_message.as_deref(),
+            Some("Screen unavailable: the agent in this pane is no longer running")
+        );
+    }
+
+    #[test]
     fn stopped_agent_menu_prefers_its_exact_prompt_over_later_shell_input() {
         let mut app = app();
         app.terminal_context_preparation = Some(
@@ -24514,7 +24962,21 @@ mod tests {
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
-        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Optimization);
+        assert_eq!(
+            SettingsTab::Optimization.next(),
+            SettingsTab::RemoteCompaction
+        );
+        assert_eq!(SettingsTab::RemoteCompaction.next(), SettingsTab::Keyboard);
+        assert_eq!(
+            SettingsTab::Keyboard.previous(),
+            SettingsTab::RemoteCompaction
+        );
+        assert_eq!(
+            SettingsTab::RemoteCompaction.previous(),
+            SettingsTab::Optimization
+        );
+        assert_eq!(SettingsTab::Optimization.previous(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);

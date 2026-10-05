@@ -84,7 +84,145 @@ fn denied_unresolved_default_and_all_four_exact_native_choices() {
                 assert_eq!(answers["pointer"], choice.native_intent());
             }
             ReviewAction::Cancel { .. } => panic!("unexpected cancel"),
+            ReviewAction::Pick { .. } => panic!("unexpected picker"),
+            ReviewAction::PickAudio { .. } => panic!("unexpected audio picker"),
         }
+    }
+}
+#[test]
+fn path_input_queues_only_current_needs_selection_disk_right() {
+    let (package, principal, _) = fixture();
+    let right = Right {
+        id: NativeCapability::DiskRead,
+        scope: Scope::Disk {
+            slot: "pictures".into(),
+            selection: Selection::Folder,
+        },
+    };
+    let ceiling = Ceiling {
+        permissions: vec![right],
+    };
+    let mut broker = PermissionBroker::new(principal.clone(), ceiling.clone(), ceiling).unwrap();
+    let native = broker
+        .prepare(
+            7,
+            1,
+            PermissionPlan {
+                permissions: vec![NativeRequest {
+                    request_id: Some("pictures".into()),
+                    id: NativeCapability::DiskRead,
+                    scope: Scope::Disk {
+                        slot: "pictures".into(),
+                        selection: Selection::Folder,
+                    },
+                    required: true,
+                    reason: "Fixture selected directory".into(),
+                }],
+                demands: vec![],
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    assert_eq!(native.items()[0].verdict, Verdict::NeedsSelection);
+    let epoch = native.authorization_epoch();
+    let bridge = bridge(quota(2 * REVIEW_BYTES));
+    bridge.select(1, true).unwrap();
+    bridge.publish(1, &package, &principal, native).unwrap();
+    let mut session = bridge.session().unwrap().unwrap();
+    session.handle_key(&bridge, KeyCode::Char('p')).unwrap();
+    for character in "/tmp/fixture".chars() {
+        session
+            .handle_key(&bridge, KeyCode::Char(character))
+            .unwrap();
+    }
+    session.handle_key(&bridge, KeyCode::Enter).unwrap();
+    match bridge.take_action(1, 7, 1, epoch).unwrap().unwrap() {
+        ReviewAction::Pick {
+            request_id,
+            path,
+            slot,
+            disk_selection,
+            writable,
+            review_revision,
+            authorization_epoch,
+            ..
+        } => {
+            assert_eq!(request_id, "pictures");
+            assert_eq!(path, "/tmp/fixture");
+            assert_eq!(slot, "pictures");
+            assert_eq!(disk_selection, Selection::Folder);
+            assert!(!writable);
+            assert_eq!(review_revision, 1);
+            assert_eq!(authorization_epoch, epoch);
+        }
+        _ => panic!("expected native picker intent"),
+    }
+}
+#[test]
+fn selected_audio_source_uses_current_native_right_and_review_fence() {
+    let (package, principal, _) = fixture();
+    let scope = Scope::Audio {
+        device: "microphone".into(),
+        products: std::collections::BTreeSet::from([
+            ilium_animation_js::permissions::AudioProduct::Level,
+        ]),
+    };
+    let right = Right {
+        id: NativeCapability::AudioMicrophone,
+        scope: scope.clone(),
+    };
+    let ceiling = Ceiling {
+        permissions: vec![right],
+    };
+    let mut broker = PermissionBroker::new(principal.clone(), ceiling.clone(), ceiling).unwrap();
+    let native = broker
+        .prepare(
+            7,
+            1,
+            PermissionPlan {
+                permissions: vec![NativeRequest {
+                    request_id: Some("mic".into()),
+                    id: NativeCapability::AudioMicrophone,
+                    scope,
+                    required: true,
+                    reason: "Select exact fixture endpoint".into(),
+                }],
+                demands: vec![],
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    assert_eq!(native.items()[0].verdict, Verdict::NeedsSelection);
+    let epoch = native.authorization_epoch();
+    let bridge = bridge(quota(2 * REVIEW_BYTES));
+    bridge.select(1, true).unwrap();
+    bridge.publish(1, &package, &principal, native).unwrap();
+    let mut session = bridge.session().unwrap().unwrap();
+    session.handle_key(&bridge, KeyCode::Char('p')).unwrap();
+    for character in "alsa_input.fixture".chars() {
+        session
+            .handle_key(&bridge, KeyCode::Char(character))
+            .unwrap();
+    }
+    session.handle_key(&bridge, KeyCode::Enter).unwrap();
+    match bridge.take_action(1, 7, 1, epoch).unwrap().unwrap() {
+        ReviewAction::PickAudio {
+            request_id,
+            endpoint,
+            scope_device,
+            capability,
+            review_revision,
+            authorization_epoch,
+            ..
+        } => {
+            assert_eq!(request_id, "mic");
+            assert_eq!(endpoint, "alsa_input.fixture");
+            assert_eq!(scope_device, "microphone");
+            assert_eq!(capability, NativeCapability::AudioMicrophone);
+            assert_eq!(review_revision, 1);
+            assert_eq!(authorization_epoch, epoch);
+        }
+        _ => panic!("expected exact native audio selection"),
     }
 }
 #[test]

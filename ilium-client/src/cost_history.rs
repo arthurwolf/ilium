@@ -800,7 +800,7 @@ impl CostHistory {
         match client.try_submit(
             Lane::Io,
             JobCost {
-                input_bytes: 256 * 1024 * 1024,
+                input_bytes: 64 * 1024 * 1024,
                 result_bytes: 1024 * 1024,
             },
             job,

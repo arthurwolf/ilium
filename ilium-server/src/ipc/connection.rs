@@ -50,6 +50,9 @@ enum StreamControl {
     /// right-panel panes, no raw terminal bytes may cross this connection.
     StreamNoTerminals,
     SetVisiblePanes(Vec<ilium_core::NodeId>),
+    /// The client released its parser state for these panes; forget what was
+    /// delivered so the next subscription replays their journal in full.
+    DiscardDelivery(Vec<ilium_core::NodeId>),
 }
 
 /// Returns whether request intake must wait until the connection writer has
@@ -57,7 +60,10 @@ enum StreamControl {
 /// whereas a subsequent visible-pane selection only changes output demand and
 /// must never delay PTY input behind that output.
 fn stream_control_requires_request_barrier(control: &StreamControl) -> bool {
-    !matches!(control, StreamControl::SetVisiblePanes(_))
+    !matches!(
+        control,
+        StreamControl::SetVisiblePanes(_) | StreamControl::DiscardDelivery(_)
+    )
 }
 
 struct StreamControlCommand {
@@ -294,6 +300,9 @@ async fn read_requests<R>(
                 has_terminal_stream_selection = true;
                 Some(StreamControl::SetVisiblePanes(pane_ids.clone()))
             }
+            ClientRequest::DiscardTerminalDelivery { pane_ids } => {
+                Some(StreamControl::DiscardDelivery(pane_ids.clone()))
+            }
             ClientRequest::Attach { .. } => {
                 terminal_subscription_guard.set_all();
                 has_terminal_stream_selection = true;
@@ -512,6 +521,12 @@ async fn write_replies<W>(
                                 terminal_stream_selection = TerminalStreamSelection::None;
                                 true
                             }
+                            StreamControl::DiscardDelivery(pane_ids) => {
+                                for pane_id in pane_ids {
+                                    delivered_terminal_sequences.remove(&pane_id);
+                                }
+                                true
+                            }
                             StreamControl::SetVisiblePanes(pane_ids) => {
                                 if let Some(state) = &resynchronization_state {
                                     apply_visible_pane_selection(
@@ -710,6 +725,7 @@ where
         .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
         .collect();
     *terminal_stream_selection = TerminalStreamSelection::Visible(visible_pane_ids.clone());
+    tracing::info!(panes = ?visible_pane_ids, "applying visible pane selection");
     let activity_revisions: HashMap<_, _> = {
         let tree = state.tree.read().await;
         visible_pane_ids
@@ -758,6 +774,7 @@ where
             return false;
         }
     }
+    tracing::info!(panes = ?visible_pane_ids, "applied visible pane selection");
     true
 }
 
@@ -1200,7 +1217,10 @@ mod tests {
     #[tokio::test]
     async fn broadcast_lag_rebuilds_state_without_retriggering_startup() {
         let directory = tempfile::tempdir().expect("tempdir");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "lag-repair".to_string(),
             session_cwd: directory.path().to_path_buf(),
@@ -1209,7 +1229,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1306,7 +1326,10 @@ mod tests {
     #[tokio::test]
     async fn broadcast_replay_for_closed_pane_is_not_sent_to_a_new_parser() {
         let directory = tempfile::tempdir().expect("tempdir");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = ServerState::new(crate::state::ServerStateOptions {
             session_name: "closed-replay".to_string(),
             session_cwd: directory.path().to_path_buf(),
@@ -1315,7 +1338,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1343,7 +1366,10 @@ mod tests {
     #[tokio::test]
     async fn live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full() {
         let directory = tempfile::tempdir().expect("private directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "live-replay-normalization".to_string(),
             session_cwd: directory.path().to_path_buf(),
@@ -1352,7 +1378,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1677,7 +1703,10 @@ mod text_trigger_writer_tests {
         }
     }
     fn state_at(directory: &std::path::Path) -> (Arc<ServerState>, Task<()>) {
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "trigger-writer".to_owned(),
             session_cwd: directory.to_path_buf(),
@@ -1686,7 +1715,7 @@ mod text_trigger_writer_tests {
             socket_path: directory.join("unused.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1859,7 +1888,10 @@ mod text_trigger_ordering_regressions {
 
     async fn assert_newer_rules_survive_queued_old_event(lag: bool, drain: bool) {
         let directory = tempfile::tempdir().expect("private directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "trigger-ordering".to_owned(),
             session_cwd: directory.path().to_path_buf(),
@@ -1868,7 +1900,7 @@ mod text_trigger_ordering_regressions {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

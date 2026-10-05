@@ -11,6 +11,7 @@ pub enum ConfigurationChange {
     Git(crate::config::GitSettings),
     ResetPlanning(crate::reset_planning::ResetPlanningSettings),
     Cost(crate::cost_settings::CostSettings),
+    RemoteCompaction(crate::remote_compaction_settings::RemoteCompactionSettings),
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
@@ -87,6 +88,10 @@ impl Job for ConfigurationWrite {
                 .map(|()| ConfigurationSaved::Plain),
             Cost(value) => crate::config::save_cost_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
+            RemoteCompaction(value) => {
+                crate::config::save_remote_compaction_settings(directory, &value)
+                    .map(|()| ConfigurationSaved::Plain)
+            }
             Editor(value) => crate::config::save_editor_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Onboarding(value) => crate::config::save_onboarding_progress(directory, &value)
@@ -254,6 +259,7 @@ impl ConfigurationChange {
             Git(value) => serialized_bound(value)?,
             ResetPlanning(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
+            RemoteCompaction(value) => serialized_bound(value)?,
             Onboarding(value) => serialized_bound(value)?,
             Sound(value) => serialized_bound(value)?,
             Notifications(value) => serialized_bound(value)?,
@@ -282,7 +288,7 @@ impl ConfigurationChange {
 /// unbounded transport. Deep-cloned String/Vec snapshots have normalized
 /// capacities; the factor covers element/tree overhead, and runtime-only
 /// inference proxies are explicitly removed before construction.
-fn serialized_bound(value: &impl serde::Serialize) -> Result<usize, String> {
+pub(crate) fn serialized_bound(value: &impl serde::Serialize) -> Result<usize, String> {
     struct Counter(usize);
     impl std::io::Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -317,6 +323,7 @@ impl ConfigurationChange {
                     .collect();
                 Cost(value)
             }
+            RemoteCompaction(value) => RemoteCompaction(normalize(&value)?),
             Onboarding(value) => Onboarding(normalize(&value)?),
             Sound(value) => Sound(normalize(&value)?),
             Notifications(value) => Notifications(normalize(&value)?),

@@ -235,6 +235,14 @@ pub fn handle_event(app: &mut App, event: Event) {
             handle_board_delete_confirm(app, pane_id, target, &event)
         }
         Mode::ConfirmClose(target) => handle_confirm_close_event(app, target, &event),
+        Mode::RemoteCompaction => {
+            app.mode = Mode::RemoteCompaction;
+            if let Event::Key(key) = &event {
+                if is_press(key) {
+                    app.handle_remote_compaction_key(key.code);
+                }
+            }
+        }
         Mode::ConvertSession => {
             app.mode = Mode::ConvertSession;
             if let Event::Key(key) = &event {
@@ -1379,17 +1387,15 @@ fn handle_location_picker_event(
     match outcome {
         PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
         PickerOutcome::Cancel => app.pop_modal(),
-        PickerOutcome::Confirm(location) => {
-            match app.confirm_location_picker(&mut picker, location) {
-                Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
-                Ok(()) => app.pop_modal(),
-                Err(error) => {
-                    picker.status = Some(error.clone());
-                    app.status_message = Some(error);
-                    app.mode = Mode::LocationPicker(picker);
-                }
+        PickerOutcome::Confirm => match app.confirm_location_picker(&mut picker) {
+            Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
+            Ok(()) => app.pop_modal(),
+            Err(error) => {
+                picker.status = Some(error.clone());
+                app.status_message = Some(error);
+                app.mode = Mode::LocationPicker(picker);
             }
-        }
+        },
     }
 }
 
@@ -2347,6 +2353,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     state.animation_slider_drag = None;
     app.clear_animation_hover();
+
+    // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
+    // and, while its Apply confirmation is open, every key.
+    if state.tab == SettingsTab::Optimization && app.optimization_key(&mut state, *key) {
+        app.mode = Mode::Settings(state);
+        return;
+    }
 
     // The full-screen animation preview hides every control: any key returns.
     if state.tab == SettingsTab::Animations && state.animation_fullscreen {
@@ -3362,6 +3375,73 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     .unwrap_or_else(|| state.selected_row.min(rows.len().saturating_sub(1)));
             }
         }
+        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::RemoteCompaction => {
+            state.selected_row = state.selected_row.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::RemoteCompaction => {
+            let last = crate::remote_compaction_settings_ui::rows(app)
+                .len()
+                .saturating_sub(1);
+            state.selected_row = (state.selected_row + 1).min(last);
+        }
+        KeyCode::Char('x') | KeyCode::Delete | KeyCode::Backspace
+            if state.tab == SettingsTab::RemoteCompaction =>
+        {
+            // x / Delete close the privacy box or clear the custom prompt,
+            // whichever row has focus; every other row ignores them.
+            match crate::remote_compaction_settings_ui::rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                Some(crate::remote_compaction_settings::RemoteCompactionRow::PrivacyBanner)
+                    if key.code != KeyCode::Backspace =>
+                {
+                    app.dismiss_remote_compaction_privacy_banner();
+                }
+                Some(crate::remote_compaction_settings::RemoteCompactionRow::CustomPrompt)
+                    if key.code != KeyCode::Char('x') =>
+                {
+                    app.settings_clear_remote_compaction_prompt();
+                }
+                _ => {}
+            }
+        }
+        KeyCode::Left
+        | KeyCode::Char('h')
+        | KeyCode::Right
+        | KeyCode::Char('l')
+        | KeyCode::Char('-')
+        | KeyCode::Char('+')
+        | KeyCode::Enter
+        | KeyCode::Char(' ')
+            if state.tab == SettingsTab::RemoteCompaction =>
+        {
+            use crate::remote_compaction_settings::RemoteCompactionRow;
+            let direction = match key.code {
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('-') => -1,
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('+') => 1,
+                _ => 0,
+            };
+            if let Some(row) = crate::remote_compaction_settings_ui::rows(app)
+                .get(state.selected_row)
+                .copied()
+            {
+                // A stray arrow never closes the privacy box for good; only
+                // Enter, Space, x and Delete do.
+                let is_stray_banner_arrow =
+                    row == RemoteCompactionRow::PrivacyBanner && direction != 0;
+                if row == RemoteCompactionRow::CustomPrompt && direction == 0 {
+                    // The editor is a modal stacked over Settings, so the
+                    // settings state must be back in `app.mode` first.
+                    app.mode = Mode::Settings(state);
+                    app.settings_adjust_remote_compaction_row(row, direction);
+                    return;
+                }
+                if !is_stray_banner_arrow {
+                    app.settings_adjust_remote_compaction_row(row, direction);
+                }
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::ResetPlanning => {
             state.selected_row = state.selected_row.saturating_sub(1);
         }
@@ -3667,6 +3747,16 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.scroll,
         );
     }
+    if state.tab == SettingsTab::RemoteCompaction {
+        let row_count = crate::remote_compaction_settings_ui::rows(app).len();
+        state.selected_row = state.selected_row.min(row_count.saturating_sub(1));
+        state.scroll = crate::remote_compaction_settings_ui::scroll_for_selection(
+            app,
+            content_area,
+            state.selected_row,
+            state.scroll,
+        );
+    }
     if state.tab == SettingsTab::Triggers {
         state.scroll = crate::trigger_settings_ui::scroll_for_selection(
             app,
@@ -3679,6 +3769,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, content_area);
     state.scroll = state.scroll.min(max_scroll);
+    app.optimization_sync_visibility(state.tab == SettingsTab::Optimization);
     app.mode = Mode::Settings(state);
 }
 

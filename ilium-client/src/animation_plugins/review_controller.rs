@@ -3,7 +3,8 @@ use super::review_bridge::{ReviewAction, ReviewBridge, ReviewPhase};
 use crate::filesystem::plugin_permission_controller::{
     ActivationUpdate, PermissionCancellation, PluginPermissionController,
 };
-use ilium_animation_js::permissions::{Invalidation, PlanReview};
+use ilium_animation_js::permissions::Selection;
+use ilium_animation_js::permissions::{Capability, Invalidation, PlanReview};
 type Result<T> = std::result::Result<T, String>;
 /// Coordinates supplied by the actual current controller/broker, never UI.
 struct CurrentReviewAuthority {
@@ -15,9 +16,30 @@ struct CurrentReviewAuthority {
 pub(crate) enum IntentOutcome {
     None,
     Resolved,
+    Picking(PickSelection),
+    PickingAudio(PickAudioSelection),
     /// Preserve ORIGINAL stop/invalidation and durable refusal through actual
     /// teardown. Parent must consume this before another controller poll.
     Cancelled(PermissionCancellation),
+}
+pub(crate) struct PickSelection {
+    pub(crate) selection_revision: u64,
+    pub(crate) request_id: String,
+    pub(crate) path: String,
+    pub(crate) slot: String,
+    pub(crate) disk_selection: Selection,
+    pub(crate) writable: bool,
+    pub(crate) review_revision: u64,
+    pub(crate) authorization_epoch: u64,
+}
+pub(crate) struct PickAudioSelection {
+    pub(crate) selection_revision: u64,
+    pub(crate) request_id: String,
+    pub(crate) endpoint: String,
+    pub(crate) scope_device: String,
+    pub(crate) capability: Capability,
+    pub(crate) review_revision: u64,
+    pub(crate) authorization_epoch: u64,
 }
 /// Call on the owning worker after observing a real intent wake. The closure
 /// must apply invalidation to ORIGINAL services/acquisition/publication owners;
@@ -62,6 +84,46 @@ pub(crate) fn consume_intent(
         }
         ReviewAction::Cancel { .. } => {
             return Ok(IntentOutcome::Cancelled(controller.cancel()));
+        }
+        ReviewAction::Pick {
+            selection_revision,
+            request_id,
+            path,
+            slot,
+            disk_selection,
+            writable,
+            review_revision,
+            authorization_epoch,
+        } => {
+            return Ok(IntentOutcome::Picking(PickSelection {
+                selection_revision,
+                request_id,
+                path,
+                slot,
+                disk_selection,
+                writable,
+                review_revision,
+                authorization_epoch,
+            }));
+        }
+        ReviewAction::PickAudio {
+            selection_revision,
+            request_id,
+            endpoint,
+            scope_device,
+            capability,
+            review_revision,
+            authorization_epoch,
+        } => {
+            return Ok(IntentOutcome::PickingAudio(PickAudioSelection {
+                selection_revision,
+                request_id,
+                endpoint,
+                scope_device,
+                capability,
+                review_revision,
+                authorization_epoch,
+            }));
         }
     }
     Ok(IntentOutcome::Resolved)
@@ -164,6 +226,13 @@ pub(crate) fn publish_cancellation(
             bridge.set_phase(selection_revision, ReviewPhase::Failed, Some(&message))?;
             return Err(message);
         }
+    }
+    if let Some(invalidation) = &cancellation.delegated_invalidation {
+        apply_invalidation(invalidation)?;
+    }
+    if let Some(error) = &cancellation.delegated_authority_error {
+        bridge.set_phase(selection_revision, ReviewPhase::Failed, Some(error))?;
+        return Err(error.clone());
     }
     if let Some(error) = &cancellation.persistence_error {
         bridge.set_phase(selection_revision, ReviewPhase::Failed, Some(error))?;

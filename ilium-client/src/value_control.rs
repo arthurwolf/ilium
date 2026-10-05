@@ -98,7 +98,30 @@ impl ValueControl {
         } else {
             spec.label_width
         };
-        let label_width = requested_label.min(row.width.saturating_sub(8));
+        let mut label_width = requested_label.min(row.width.saturating_sub(8));
+        let label_gap = u16::from(label_width > 0);
+        let initial_control_width = row.width - label_width - label_gap;
+        if initial_control_width >= 7 {
+            let value_cells = cell_width(spec.value).min(usize::from(row.width)) as u16;
+            let current_value_slot = initial_control_width - 6;
+            if value_cells > current_value_slot {
+                // Release unused label budget before clipping a readable value.
+                // Very long labels may use half the row; the rest remains
+                // available to the value and the three distinct buttons.
+                let label_floor = cell_width(spec.label)
+                    .min(usize::from(label_width))
+                    .min(usize::from(row.width / 2)) as u16;
+                let largest_value_slot = row
+                    .width
+                    .saturating_sub(label_floor)
+                    .saturating_sub(label_gap)
+                    .saturating_sub(6);
+                let target_value_slot = value_cells.saturating_add(2).min(largest_value_slot);
+                label_width -= target_value_slot
+                    .saturating_sub(current_value_slot)
+                    .min(label_width - label_floor);
+            }
+        }
         let label_gap = u16::from(label_width > 0);
         let control_x = row.x + label_width + label_gap;
         let control_width = row.width - label_width - label_gap;
@@ -320,6 +343,30 @@ mod tests {
         }
     }
     #[test]
+    fn short_numeric_values_keep_their_units_in_narrow_settings_rows() {
+        for value in ["8 MiB", "1000 ms", "0.75"] {
+            let control = ValueControl::new(
+                Rect::new(31, 3, 48, 1),
+                ControlSpec {
+                    label: "A descriptive settings label",
+                    label_width: 42,
+                    ..spec(ControlKind::Number, value)
+                },
+            );
+            assert_eq!(control.value_text, value);
+            let geometry = control.geometry();
+            assert_eq!(
+                geometry.value.x - geometry.value_slot.x,
+                (geometry.value_slot.width - geometry.value.width) / 2
+            );
+            assert!(geometry.previous.right() <= geometry.value_slot.x);
+            assert!(geometry.value_slot.right() <= geometry.next.x);
+            assert!(geometry.next.right() <= geometry.open.x);
+            assert!(geometry.open.right() <= geometry.row.right());
+        }
+    }
+
+    #[test]
     fn narrow_layouts_paint_only_their_actual_targets() {
         let expected_rows = [
             "",
@@ -484,6 +531,165 @@ mod tests {
             );
             assert_eq!(control.hit(Position::new(x, 1), PointerButton::Right), None);
         }
+    }
+    #[test]
+    fn eighty_column_settings_keep_short_numbers_and_units_readable() {
+        // 80 columns - 26 tab cells - 3 gap - 3 help cells - 2 row inset.
+        let row = Rect::new(31, 0, 46, 1);
+        for (label, value, expected_slot) in [
+            ("Scrollback budget", "8 MiB", 7),
+            ("Autosave delay", "1000 ms", 9),
+        ] {
+            let control = ValueControl::new(
+                row,
+                ControlSpec {
+                    kind: ControlKind::Number,
+                    label,
+                    value,
+                    label_width: 39,
+                    previous_enabled: true,
+                    next_enabled: true,
+                    open_enabled: true,
+                },
+            );
+            let geometry = control.geometry();
+            assert_eq!(geometry.value_slot.width, expected_slot);
+            assert!(geometry.label.width >= cell_width(label) as u16);
+            assert_eq!(geometry.value.width, cell_width(value) as u16);
+            assert_eq!(geometry.value.x, geometry.value_slot.x + 1);
+            assert_eq!(geometry.value.right() + 1, geometry.value_slot.right());
+            assert!(geometry.previous.right() < geometry.value_slot.x);
+            assert!(geometry.value_slot.right() < geometry.next.x);
+            assert!(geometry.next.right() < geometry.open.x);
+
+            let mut terminal = Terminal::new(TestBackend::new(80, 2)).unwrap();
+            terminal
+                .draw(|frame| control.render(frame, ControlStyles::default()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let painted_label: String = (geometry.label.x
+                ..geometry.label.x + cell_width(label) as u16)
+                .map(|x| buffer.cell((x, 0)).unwrap().symbol())
+                .collect();
+            let painted_value: String = (geometry.value.x..geometry.value.right())
+                .map(|x| buffer.cell((x, 0)).unwrap().symbol())
+                .collect();
+            assert_eq!(painted_label, label);
+            assert_eq!(painted_value, value);
+            for (rectangle, glyph, action) in [
+                (geometry.previous, "−", ControlAction::Decrement),
+                (geometry.next, "+", ControlAction::Increment),
+                (geometry.open, "*", ControlAction::EditNumber),
+            ] {
+                assert_eq!(buffer.cell((rectangle.x, 0)).unwrap().symbol(), glyph);
+                assert_eq!(
+                    control.hit(Position::new(rectangle.x, 0), PointerButton::Left),
+                    Some(action)
+                );
+                assert_eq!(
+                    control.hit(Position::new(rectangle.x, 0), PointerButton::Right),
+                    None
+                );
+            }
+            for x in geometry.value.x..geometry.value.right() {
+                assert_eq!(
+                    control.hit(Position::new(x, 0), PointerButton::Left),
+                    Some(ControlAction::EditNumber)
+                );
+                assert_eq!(control.hit(Position::new(x, 0), PointerButton::Right), None);
+            }
+            for x in [geometry.value_slot.x, geometry.value_slot.right() - 1] {
+                assert_eq!(control.hit(Position::new(x, 0), PointerButton::Left), None);
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_choice_borrows_blank_label_cells_without_changing_actions() {
+        let control = ValueControl::new(
+            Rect::new(31, 0, 46, 1),
+            ControlSpec {
+                kind: ControlKind::Choice,
+                label: "New pane directory",
+                value: "Project root",
+                label_width: 39,
+                previous_enabled: true,
+                next_enabled: true,
+                open_enabled: true,
+            },
+        );
+        let geometry = control.geometry();
+        assert_eq!(geometry.value.width, cell_width("Project root") as u16);
+        assert!(geometry.label.width >= cell_width("New pane directory") as u16);
+        let mut terminal = Terminal::new(TestBackend::new(80, 2)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let painted: String = (geometry.value.x..geometry.value.right())
+            .map(|x| buffer.cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert_eq!(painted, "Project root");
+        for (rectangle, glyph, action) in [
+            (geometry.previous, "←", ControlAction::PreviousChoice),
+            (geometry.open, "+", ControlAction::OpenChoices),
+            (geometry.next, "→", ControlAction::NextChoice),
+        ] {
+            assert_eq!(buffer.cell((rectangle.x, 0)).unwrap().symbol(), glyph);
+            assert_eq!(
+                control.hit(Position::new(rectangle.x, 0), PointerButton::Left),
+                Some(action)
+            );
+        }
+        let word_gap = Position::new(geometry.value.x + 7, 0);
+        assert_eq!(
+            control.hit(word_gap, PointerButton::Left),
+            Some(ControlAction::NextChoice)
+        );
+        assert_eq!(
+            control.hit(word_gap, PointerButton::Right),
+            Some(ControlAction::PreviousChoice)
+        );
+        assert_eq!(
+            control.hit(Position::new(geometry.open.x, 0), PointerButton::Right),
+            None
+        );
+    }
+
+    #[test]
+    fn long_label_and_wide_grapheme_share_the_bounded_row() {
+        let mut options = spec(ControlKind::Choice, "界e\u{301} item");
+        options.label = "An extremely long label";
+        options.label_width = 22;
+        let control = ValueControl::new(Rect::new(0, 0, 30, 1), options);
+        let geometry = control.geometry();
+        assert_eq!(geometry.label.width, 15);
+        assert_eq!(geometry.value_slot.width, 8);
+        assert_eq!(geometry.value.width, cell_width(options.value) as u16);
+        assert!(geometry.next.right() <= geometry.row.right());
+        let mut terminal = Terminal::new(TestBackend::new(30, 1)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.cell((geometry.value.x, 0)).unwrap().symbol(), "界");
+        assert_eq!(
+            buffer.cell((geometry.value.x + 2, 0)).unwrap().symbol(),
+            "e\u{301}"
+        );
+        for x in geometry.value.x..geometry.value.x + 4 {
+            assert_eq!(
+                control.hit(Position::new(x, 0), PointerButton::Left),
+                Some(ControlAction::NextChoice)
+            );
+        }
+        options.value = "界e\u{301} item with more text";
+        let clipped = ValueControl::new(Rect::new(0, 0, 30, 1), options);
+        assert_eq!(clipped.geometry().label.width, 15);
+        assert_eq!(clipped.geometry().value_slot.width, 8);
+        assert_eq!(cell_width(&clipped.value_text), 8);
+        assert!(clipped.value_text.ends_with('…'));
+        assert!(clipped.geometry().next.right() <= clipped.geometry().row.right());
     }
     #[test]
     fn clipping_keeps_unicode_whole_and_single_line() {

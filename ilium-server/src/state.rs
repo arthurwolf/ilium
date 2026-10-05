@@ -22,8 +22,9 @@ use tokio::task::JoinHandle;
 use crate::agent_debug::AgentDebugRecorder;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::pane::PaneResource;
+use crate::recovery::RecoveryOwner;
 use crate::snapshot_state::SnapshotState;
-use crate::sounds::PlaybackRequest;
+use crate::sounds::PlaybackSender;
 
 /// Capacity of the per-session broadcast channel. Sized generously for
 /// terminal output bursts (a `cat` of a large file can emit many
@@ -117,8 +118,8 @@ pub struct ServerStateOptions {
     pub socket_path: PathBuf,
     pub detection_config: DetectionConfig,
     pub notifications_config: NotificationsConfig,
-    pub sound_settings: ilium_sound::SoundSettings,
-    pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
+    pub sound_settings: Arc<crate::sounds::SharedSoundSettings>,
+    pub sound_requests: PlaybackSender,
     pub custom_signatures: Vec<AgentSignature>,
     pub agent_debug_menu_enabled: bool,
     pub progress_monitor_enabled: bool,
@@ -153,7 +154,7 @@ pub struct ServerState {
     /// Bounds repeated task-outcome alerts per pane. Held only briefly and
     /// never across an await.
     pub task_outcome_coalescer: std::sync::Mutex<crate::notifications::TaskOutcomeCoalescer>,
-    pub sound_settings: RwLock<ilium_sound::SoundSettings>,
+    pub sound_settings: RwLock<Arc<crate::sounds::SharedSoundSettings>>,
     /// Last server-accepted Text Trigger configuration. Execution state is
     /// added separately so a rejected candidate never replaces this value.
     pub text_trigger_settings: RwLock<VersionedTextTriggerSettings>,
@@ -162,7 +163,7 @@ pub struct ServerState {
     /// Serializes source read, validation, mutation, and publication.
     /// Acquire before text_trigger_settings; never while holding tree/panes.
     pub(crate) text_trigger_settings_transaction: Mutex<()>,
-    pub sound_requests: tokio::sync::mpsc::Sender<PlaybackRequest>,
+    pub sound_requests: PlaybackSender,
     pub tree: std::sync::Arc<RwLock<Tree>>,
     pub panes: std::sync::Arc<RwLock<PaneRegistry>>,
     /// Server-owned, pane-keyed semantic debug history. It is separate from
@@ -170,7 +171,8 @@ pub struct ServerState {
     pub agent_debug: std::sync::Arc<AgentDebugRecorder>,
     /// Most recently selected terminal launch directory in this session.
     pub last_terminal_working_directory: Mutex<Option<PathBuf>>,
-    pub(crate) pending_session_recovery: Mutex<Option<crate::snapshot_io::LoadedSnapshot>>,
+    /// Single accepted snapshot-resolution task and its original retry slot.
+    pub(crate) recovery: RecoveryOwner,
     /// One pre-restructure snapshot per project. A project-scoped revert
     /// restores only that project's subtree, leaving concurrent work in
     /// every other project intact.
@@ -183,6 +185,8 @@ pub struct ServerState {
     pub(crate) snapshot_io: tokio::sync::OnceCell<crate::snapshot_io::SnapshotIo>,
     /// Finite CPU/I/O bank, started once before interactive coordination.
     pub(crate) execution: std::sync::OnceLock<crate::execution::ServerExecution>,
+    /// Native publication owns its path and generations; no process-global path.
+    pub(crate) startup_progress: std::sync::OnceLock<Arc<crate::startup_progress::Publisher>>,
     /// Keep applied logging transitions and their IPC broadcasts in one order.
     pub(crate) debug_logging_transaction: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
@@ -233,6 +237,9 @@ pub struct ServerState {
     /// `request_snapshot_save` calls that land faster than the writer's
     /// debounce window collapse into one wakeup.
     pub snapshot_requested: Notify,
+    snapshot_writer_stopping: std::sync::atomic::AtomicBool,
+    snapshot_writer_failed: std::sync::atomic::AtomicBool,
+    snapshot_writer_stop_requested: Notify,
     /// Wakes the single scheduled-input executor whenever the nearest
     /// deadline may have changed (new schedule, replacement, or pane close).
     /// One coalesced permit is sufficient because the executor always scans
@@ -393,13 +400,14 @@ impl ServerState {
                 options.agent_debug_menu_enabled,
             )),
             last_terminal_working_directory: Mutex::new(None),
-            pending_session_recovery: Mutex::new(None),
+            recovery: RecoveryOwner::default(),
             restructure_transaction: Mutex::new(()),
             restructure_undo: Mutex::new(HashMap::new()),
             restructure_title_revisions: Mutex::new(HashMap::new()),
             snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
             snapshot_io: tokio::sync::OnceCell::new(),
             execution: std::sync::OnceLock::new(),
+            startup_progress: std::sync::OnceLock::new(),
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
@@ -412,6 +420,9 @@ impl ServerState {
             workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),
             snapshot_state: SnapshotState::new(),
             snapshot_requested: Notify::new(),
+            snapshot_writer_stopping: std::sync::atomic::AtomicBool::new(false),
+            snapshot_writer_failed: std::sync::atomic::AtomicBool::new(false),
+            snapshot_writer_stop_requested: Notify::new(),
             scheduled_input_changed: Notify::new(),
             detection_schedule_changed: Notify::new(),
             events,
@@ -665,6 +676,31 @@ impl ServerState {
 
     /// Claims a pending snapshot write for the caller, returning whether
     /// there was one to claim. Used only by `crate::persistence`'s writer.
+    /// Close only the background debounce coordinator. Its admitted native
+    /// write still finishes before the retained task handle is joined.
+    pub(crate) fn stop_snapshot_writer(&self) {
+        self.snapshot_writer_stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.snapshot_writer_stop_requested.notify_one();
+    }
+    pub(crate) fn record_snapshot_writer_failure(&self) {
+        self.snapshot_writer_failed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub(crate) fn snapshot_writer_failed(&self) -> bool {
+        self.snapshot_writer_failed
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) async fn snapshot_writer_stop_requested(&self) {
+        if !self
+            .snapshot_writer_stopping
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            self.snapshot_writer_stop_requested.notified().await;
+        }
+    }
+
     pub fn take_pending_snapshot(&self) -> bool {
         self.snapshot_state.take_dirty()
     }
@@ -752,7 +788,10 @@ mod tests {
     use super::*;
 
     fn test_state(directory: &tempfile::TempDir) -> ServerState {
-        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         ServerState::new(ServerStateOptions {
             session_name: "state-test".to_string(),
             session_cwd: directory.path().to_path_buf(),
@@ -761,7 +800,7 @@ mod tests {
             socket_path: directory.path().join("state-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

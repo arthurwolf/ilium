@@ -71,9 +71,9 @@ pub fn infer_project_restructure<G: RestructureCompletionClient>(
     structure: &str,
     splits: &[ProtectedSplitViewContext],
     snapshot: &RecommendationSnapshot,
-    project_cwd: &Path,
+    animation_home: &Path,
 ) -> anyhow::Result<RecommendedRestructurePlan> {
-    let authored = crate::project_config::load(project_cwd)?.animation;
+    let authored = crate::project_config::load(animation_home)?.animation;
     let recommendation_context = RecommendationContext {
         snapshot: snapshot.clone(),
         authored,

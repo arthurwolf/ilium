@@ -268,6 +268,22 @@ pub(crate) fn load_snapshot_or_migrate_blocking(
             path: legacy_path.clone(),
             message: error.to_string(),
         })?;
+    // Refuse known oversized files before allocating their contents. A file
+    // can still grow after metadata, so the bounded reader checks again below.
+    let encoded_bytes = legacy_file
+        .metadata()
+        .map_err(|error| ServerError::LegacyWorkspace {
+            path: legacy_path.clone(),
+            message: error.to_string(),
+        })?
+        .len();
+    if encoded_bytes > MAX_ENCODED_SNAPSHOT_BYTES {
+        return Err(crate::snapshot_io::admission_error(
+            &legacy_path,
+            "legacy read admission",
+            "legacy workspace exceeds encoded byte limit",
+        ));
+    }
     let mut legacy_contents = String::new();
     legacy_file
         .take(MAX_ENCODED_SNAPSHOT_BYTES + 1)
@@ -277,16 +293,29 @@ pub(crate) fn load_snapshot_or_migrate_blocking(
             message: error.to_string(),
         })?;
     if legacy_contents.len() as u64 > MAX_ENCODED_SNAPSHOT_BYTES {
-        return Err(ServerError::LegacyWorkspace {
-            path: legacy_path,
-            message: "legacy workspace exceeds encoded byte limit".into(),
-        });
+        return Err(crate::snapshot_io::admission_error(
+            &legacy_path,
+            "legacy read admission",
+            "legacy workspace exceeds encoded byte limit",
+        ));
     }
-    let legacy_workspace: LegacyWorkspace =
-        serde_norway::from_str(&legacy_contents).map_err(|error| ServerError::LegacyWorkspace {
+    // Alias expansion and derived collection buffers share the native
+    // snapshot's decoded allocation policy. Norway's eager event graph is
+    // parser scratch and still needs its own producer declaration.
+    let legacy_workspace: LegacyWorkspace = ilium_ipc::deserialize_allocation_checked(
+        serde_norway::Deserializer::from_str(&legacy_contents),
+    )
+    .map_err(|failure| match failure {
+        ilium_ipc::AllocationDecodeError::Codec(error) => ServerError::LegacyWorkspace {
             path: legacy_path.clone(),
             message: error.to_string(),
-        })?;
+        },
+        refusal => crate::snapshot_io::admission_error(
+            &legacy_path,
+            "legacy decode admission",
+            refusal.to_string(),
+        ),
+    })?;
     let mut snapshot = legacy_workspace.into_snapshot(session_cwd)?;
     // Legacy `sessions.yml` files could already carry the same agent
     // session id on several titled panes; collapse those duplicates before
@@ -709,10 +738,25 @@ pub async fn save_snapshot(state: &ServerState) -> Result<(), ServerError> {
             "session was killed",
         ));
     }
+    ensure_recovery_snapshot_writable(state)?;
     let _write_guard = snapshot_service(state)
         .await?
         .capture_write(SnapshotSources::new(state), None, write_guard)
         .await?;
+    Ok(())
+}
+
+/// Snapshot dispatch callers check this with the write guard held; the
+/// debounced flush also checks before claiming dirty work. Never await the
+/// recovery slot here: a drainer may hold it while discard needs the guard.
+fn ensure_recovery_snapshot_writable(state: &ServerState) -> Result<(), ServerError> {
+    if state.recovery.preserves_original() {
+        return Err(crate::snapshot_io::error(
+            &state.snapshot_path,
+            "recovery write fence",
+            "session recovery is unresolved; stored snapshot replacement is blocked",
+        ));
+    }
     Ok(())
 }
 
@@ -813,6 +857,7 @@ pub(crate) async fn await_progress_monitor_durability_barrier(
             "session was killed",
         ));
     }
+    ensure_recovery_snapshot_writable(state)?;
     snapshot_service(state)
         .await?
         .capture_write(
@@ -833,22 +878,22 @@ pub(crate) async fn await_progress_monitor_durability_barrier(
 /// woken before actually writing, so a burst of rapid mutations coalesces
 /// into one write.
 ///
-/// Deliberately never aborted while a write might be in flight: cancelling
-/// a task mid-`tokio::fs::write`/`rename` does not stop the underlying
-/// blocking file operation (`tokio::fs` runs it on a blocking-thread-pool
-/// task via `spawn_blocking`, which keeps running to completion even if
-/// the `.await` waiting on it is dropped) -- it would only detach the
-/// *result* from anything, silently losing track of whether the write
-/// finished. `crate::run`'s shutdown path instead performs its own final,
-/// directly-awaited [`flush_pending_snapshot`] call, then waits for
-/// `state.snapshot_write_lock` to confirm any write this task already had
-/// in flight has fully completed, before finally stopping this task (see
-/// its comments).
+/// Clean shutdown cooperatively stops and joins this coordinator before
+/// taking the final dirty claim. The native disk owner retains its write guard
+/// until completion; a dropped waiter restores its original dirty claim.
 pub fn spawn_snapshot_writer(state: Arc<ServerState>) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            state.snapshot_requested.notified().await;
-            tokio::time::sleep(SNAPSHOT_DEBOUNCE_INTERVAL).await;
+            tokio::select! {
+                biased;
+                _ = state.snapshot_writer_stop_requested() => break,
+                _ = state.snapshot_requested.notified() => {},
+            }
+            tokio::select! {
+                biased;
+                _ = state.snapshot_writer_stop_requested() => break,
+                _ = tokio::time::sleep(SNAPSHOT_DEBOUNCE_INTERVAL) => {},
+            }
             flush_pending_snapshot(&state).await;
         }
     })
@@ -868,15 +913,44 @@ pub fn spawn_snapshot_writer(state: Arc<ServerState>) -> JoinHandle<()> {
 /// this retry after deletion, and shutdown performs only its existing final
 /// attempt rather than starting another retry task.
 pub async fn flush_pending_snapshot(state: &ServerState) {
-    if !state.take_pending_snapshot() {
+    // Keep the existing dirty claim without a wake/retry loop while awaiting
+    // recovery. Successful resolution wakes this same writer again.
+    if state.recovery.preserves_original() {
         return;
     }
-    if let Err(error) = save_snapshot(state).await {
-        // Admission pressure or a transient filesystem error must not consume
-        // the only evidence that live state still owes a recovery snapshot.
-        state.request_snapshot_save();
+    if let Err(error) = try_flush_pending_snapshot(state).await {
         tracing::error!("failed to write crash-recovery snapshot: {error}");
     }
+}
+
+/// Final shutdown needs the actual write result after all semantic owners
+/// have drained. Ordinary background callers retain their best-effort API.
+struct PendingSnapshotClaim<'a> {
+    state: &'a ServerState,
+    completed: bool,
+}
+impl Drop for PendingSnapshotClaim<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            // Cancellation, unwind, admission refusal and failed native ACK
+            // all return the same claim. The killed-session fence wins.
+            self.state.request_snapshot_save();
+        }
+    }
+}
+
+pub(crate) async fn try_flush_pending_snapshot(state: &ServerState) -> Result<(), ServerError> {
+    ensure_recovery_snapshot_writable(state)?;
+    if !state.take_pending_snapshot() {
+        return Ok(());
+    }
+    let mut claim = PendingSnapshotClaim {
+        state,
+        completed: false,
+    };
+    save_snapshot(state).await?;
+    claim.completed = true;
+    Ok(())
 }
 
 /// Writes `snapshot` to `path`, via a temp-file-then-rename in the same
@@ -1859,6 +1933,96 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn legacy_alias_allocation_refusal_preserves_source_and_allows_later_migration() {
+        let directory = tempfile::tempdir().expect("directory");
+        let legacy_directory = directory.path().join(".ilium");
+        std::fs::create_dir(&legacy_directory).expect("legacy directory");
+        let legacy_path = legacy_directory.join("sessions.yml");
+        let native_path = directory.path().join("snapshot.json");
+        // Synthetic compact YAML whose repeated aliases expand past the
+        // shared decoded-allocation policy, despite fitting encoded limits.
+        let mut original = format!(
+            "root:\n  - &pane\n    kind: terminal\n    name: '{}'\n    agent: null\n",
+            "x".repeat(64 * 1024)
+        );
+        for _ in 0..511 {
+            original.push_str("  - *pane\n");
+        }
+        std::fs::write(&legacy_path, &original).expect("alias fixture");
+        let result =
+            load_snapshot_or_migrate_blocking(&native_path, directory.path(), directory.path());
+        assert!(matches!(
+            result,
+            Err(ServerError::Snapshot {
+                operation: "legacy decode admission",
+                source: SnapshotError::ResourceAdmission(_),
+                ref path,
+            }) if path == &legacy_path
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&legacy_path).expect("readback"),
+            original
+        );
+        assert!(
+            !native_path.exists(),
+            "refusal must precede native publication"
+        );
+        let valid = b"root:\n  - &pane {kind: terminal, name: preserved, agent: null}\n  - *pane\n";
+        std::fs::write(&legacy_path, valid).expect("small alias retry");
+        let migrated =
+            load_snapshot_or_migrate_blocking(&native_path, directory.path(), directory.path())
+                .expect("retry migration")
+                .expect("migrated snapshot");
+        assert_eq!(migrated.panes.len(), 2);
+        assert_eq!(std::fs::read(&legacy_path).expect("retained YAML"), valid);
+        assert_eq!(
+            load_snapshot_blocking(&native_path).expect("native readback"),
+            Some(migrated)
+        );
+    }
+
+    #[test]
+    fn legacy_encoded_refusal_preserves_source_and_allows_later_migration() {
+        let directory = tempfile::tempdir().expect("directory");
+        let legacy_directory = directory.path().join(".ilium");
+        std::fs::create_dir(&legacy_directory).expect("legacy directory");
+        let legacy_path = legacy_directory.join("sessions.yml");
+        let native_path = directory.path().join("snapshot.json");
+        // Synthetic sparse oversized recovery input, isolated from user state.
+        let file = std::fs::File::create(&legacy_path).expect("fixture");
+        file.set_len(MAX_ENCODED_SNAPSHOT_BYTES + 1)
+            .expect("oversized fixture");
+        drop(file);
+        let original = std::fs::read(&legacy_path).expect("original bytes");
+        let result =
+            load_snapshot_or_migrate_blocking(&native_path, directory.path(), directory.path());
+        assert!(matches!(
+            result,
+            Err(ServerError::Snapshot {
+                operation: "legacy read admission",
+                source: SnapshotError::ResourceAdmission(_),
+                ref path,
+            }) if path == &legacy_path
+        ));
+        assert_eq!(std::fs::read(&legacy_path).expect("readback"), original);
+        assert!(
+            !native_path.exists(),
+            "refusal cannot publish fresh recovery"
+        );
+        let valid = b"root: []\n";
+        std::fs::write(&legacy_path, valid).expect("valid retry fixture");
+        let migrated =
+            load_snapshot_or_migrate_blocking(&native_path, directory.path(), directory.path())
+                .expect("retry migration")
+                .expect("migrated snapshot");
+        assert_eq!(std::fs::read(&legacy_path).expect("retained YAML"), valid);
+        assert_eq!(
+            load_snapshot_blocking(&native_path).expect("native readback"),
+            Some(migrated)
+        );
     }
 
     #[tokio::test]

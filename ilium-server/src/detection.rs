@@ -35,7 +35,7 @@ use crate::notifications::{self, PendingNotification};
 use crate::pane::{
     agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
 };
-use crate::sounds::{self, PlaybackRequest};
+use crate::sounds;
 use crate::state::ServerState;
 use ilium_pty::PtyExitCause;
 use ilium_sound::NotificationEvent;
@@ -2175,11 +2175,17 @@ async fn run_due_panes_with_hook(
                 ilium_sound::event_for_signals(previous_signals.as_ref(), &new_signals)
             {
                 if sound_settings.events.is_enabled(event) {
-                    pending_sounds.push(PlaybackRequest {
-                        settings: sound_settings.clone(),
-                        event: Some(event),
-                        pane_name: pane_name_before_update.clone(),
-                    });
+                    match state.sound_requests.prepare(
+                        &sound_settings,
+                        Some(event),
+                        pane_name_before_update.as_deref(),
+                    ) {
+                        Ok(request) => pending_sounds.push(request),
+                        Err(reason) => tracing::warn!(
+                            ?reason,
+                            "agent sound preparation refused before allocation"
+                        ),
+                    }
                 }
             }
 
@@ -2239,7 +2245,7 @@ async fn run_due_panes_with_hook(
         notifications::send(pending).await;
     }
     for pending in pending_sounds {
-        sounds::enqueue(state, pending);
+        sounds::enqueue_prepared(state, pending);
     }
 
     Ok(())
@@ -3034,7 +3040,7 @@ mod tests {
     async fn blocked_evidence_cannot_reclassify_a_replaced_pty() {
         use crate::state::ServerStateOptions;
         let directory = tempfile::tempdir().expect("directory");
-        let (sound_requests, _) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _) = crate::sounds::test_channel(1);
         let state = Arc::new(ServerState::new(ServerStateOptions {
             session_name: "evidence-replacement".into(),
             session_cwd: directory.path().into(),
@@ -3043,7 +3049,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -3146,7 +3152,7 @@ mod tests {
     #[tokio::test]
     async fn stale_cached_agent_identity_revokes_queued_input_epoch() {
         let directory = tempfile::tempdir().expect("isolated directory");
-        let (sound_requests, _) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _) = crate::sounds::test_channel(1);
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "stale-identity-fixture".into(),
             session_cwd: directory.path().into(),
@@ -3155,7 +3161,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

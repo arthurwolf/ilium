@@ -36,6 +36,7 @@ use crate::layout::{
     DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
     MIN_TREE_WIDTH,
 };
+use crate::remote_compaction_settings::RemoteCompactionSettings;
 use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
@@ -93,6 +94,8 @@ pub struct ClientConfig {
     pub reset_planning: ResetPlanningSettings,
     /// Agent-spend indicators and how "expensive" is decided.
     pub cost: CostSettings,
+    /// Summarizing a session through the Inference model and resuming from it.
+    pub remote_compaction: RemoteCompactionSettings,
     pub onboarding: crate::onboarding::progress::OnboardingProgress,
 }
 
@@ -119,6 +122,7 @@ impl Default for ClientConfig {
             api: ApiSettings::default(),
             reset_planning: ResetPlanningSettings::default(),
             cost: CostSettings::default(),
+            remote_compaction: RemoteCompactionSettings::default(),
             onboarding: crate::onboarding::progress::OnboardingProgress::default(),
         }
     }
@@ -422,6 +426,9 @@ impl SidebarDensity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalSettings {
     pub scrollback_budget_mib: u16,
+    /// Memory all live terminal parser engines may retain together. Hidden
+    /// panes keep their engine until a displayed pane needs the room.
+    pub engine_memory_budget_mib: u32,
     pub new_pane_directory: NewPaneDirectory,
     /// Holding `smart_copy_light_key` over a terminal pane starts Smart Copy
     /// light: click regions to select them, release the key to copy them.
@@ -432,6 +439,7 @@ impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             scrollback_budget_mib: 8,
+            engine_memory_budget_mib: 4096,
             new_pane_directory: NewPaneDirectory::ProjectRoot,
             smart_copy_light: true,
             smart_copy_light_key: SmartCopyLightKey::Control,
@@ -500,6 +508,15 @@ impl SmartCopyLightKey {
 impl TerminalSettings {
     pub const MIN_SCROLLBACK_BUDGET_MIB: u16 = 4;
     pub const MAX_SCROLLBACK_BUDGET_MIB: u16 = 512;
+    pub const MIN_ENGINE_MEMORY_BUDGET_MIB: u32 = 256;
+    pub const MAX_ENGINE_MEMORY_BUDGET_MIB: u32 = 16384;
+    pub fn stepped_engine_memory_budget_mib(self, direction: i32) -> u32 {
+        let value = i64::from(self.engine_memory_budget_mib) + i64::from(direction) * 256;
+        value.clamp(
+            i64::from(Self::MIN_ENGINE_MEMORY_BUDGET_MIB),
+            i64::from(Self::MAX_ENGINE_MEMORY_BUDGET_MIB),
+        ) as u32
+    }
     pub fn stepped_scrollback_budget_mib(self, direction: i32) -> u16 {
         let value = self.scrollback_budget_mib as i32 + direction * 4;
         value.clamp(
@@ -1168,6 +1185,8 @@ struct RawClientConfig {
     #[serde(default)]
     cost: CostSettings,
     #[serde(default)]
+    remote_compaction: RemoteCompactionSettings,
+    #[serde(default)]
     onboarding: crate::onboarding::progress::OnboardingProgress,
 }
 
@@ -1229,6 +1248,7 @@ struct RawUiConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawTerminalConfig {
     scrollback_budget_mib: Option<u16>,
+    engine_memory_budget_mib: Option<u32>,
     new_pane_directory: Option<String>,
     smart_copy_light: Option<bool>,
     smart_copy_light_key: Option<String>,
@@ -1349,6 +1369,8 @@ pub enum ConfigLoadError {
     InvalidTaskProgressFrames,
     #[error("terminal.scrollback_budget_mib = {0} must be between 4 and 512")]
     InvalidScrollbackBudget(u16),
+    #[error("terminal.engine_memory_budget_mib = {0} must be between 256 and 16384")]
+    InvalidEngineMemoryBudget(u32),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
     InvalidNewPaneDirectory(String),
     #[error("terminal.smart_copy_light_key = {0:?} must be \"ctrl\", \"alt\" or \"shift\"")]
@@ -1496,6 +1518,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         api: raw.api,
         reset_planning: raw.reset_planning,
         cost: raw.cost.sanitized(),
+        remote_compaction: raw.remote_compaction.sanitized(),
         onboarding: raw.onboarding,
     })
 }
@@ -1743,6 +1766,17 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
             scrollback_budget_mib,
         ));
     }
+    let engine_memory_budget_mib = raw
+        .engine_memory_budget_mib
+        .unwrap_or(defaults.engine_memory_budget_mib);
+    if !(TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB
+        ..=TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB)
+        .contains(&engine_memory_budget_mib)
+    {
+        return Err(ConfigLoadError::InvalidEngineMemoryBudget(
+            engine_memory_budget_mib,
+        ));
+    }
     let new_pane_directory = raw
         .new_pane_directory
         .as_deref()
@@ -1757,6 +1791,7 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
         .unwrap_or(defaults.smart_copy_light_key);
     Ok(TerminalSettings {
         scrollback_budget_mib,
+        engine_memory_budget_mib,
         new_pane_directory,
         smart_copy_light: raw.smart_copy_light.unwrap_or(defaults.smart_copy_light),
         smart_copy_light_key,
@@ -2182,6 +2217,17 @@ pub fn save_cost_settings(config_dir: &Path, settings: &CostSettings) -> Result<
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "cost", value)
+}
+
+pub fn save_remote_compaction_settings(
+    config_dir: &Path,
+    settings: &RemoteCompactionSettings,
+) -> Result<(), ClientError> {
+    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
+        path: config_dir.join("config.toml"),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "remote_compaction", value)
 }
 
 pub fn save_editor_settings(
@@ -2933,6 +2979,10 @@ fn terminal_settings_to_toml(settings: &TerminalSettings) -> toml::Value {
     table.insert(
         "scrollback_budget_mib".into(),
         toml::Value::Integer(i64::from(settings.scrollback_budget_mib)),
+    );
+    table.insert(
+        "engine_memory_budget_mib".into(),
+        toml::Value::Integer(i64::from(settings.engine_memory_budget_mib)),
     );
     table.insert(
         "new_pane_directory".into(),
@@ -4040,6 +4090,68 @@ mod tests {
         assert_eq!(loaded.budget_usd, defaults.budget_usd);
         assert_eq!(loaded.sparkline_window_minutes, 1);
         assert_eq!(loaded.fixed_cuts, defaults.fixed_cuts);
+    }
+
+    #[test]
+    fn remote_compaction_settings_default_off_and_round_trip_beside_other_tables() {
+        use crate::remote_compaction_settings::{RemoteCompactionRow, TechniqueTarget};
+        use ilium_remote_compaction::Technique;
+
+        let dir = scratch_dir();
+        let defaults = load(&dir).unwrap().remote_compaction;
+        assert_eq!(defaults, RemoteCompactionSettings::default());
+        assert!(!defaults.enabled);
+        assert!(!defaults.privacy_banner_dismissed);
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nshow_context_menu_icons = false\n",
+        )
+        .unwrap();
+        let mut settings = RemoteCompactionSettings::default();
+        settings.adjust(RemoteCompactionRow::Enabled, 0);
+        settings.adjust(RemoteCompactionRow::Automatic, 0);
+        settings.adjust(RemoteCompactionRow::Threshold, -1);
+        settings.adjust(RemoteCompactionRow::Technique(TechniqueTarget::Other), 1);
+        settings.adjust(RemoteCompactionRow::RedactSecrets, 0);
+        settings.set_custom_prompt("Keep the schema.\nSecond line \"quoted\" 🦀".into());
+        settings.dismiss_privacy_banner();
+        settings.codex_technique = Technique::GeminiCli;
+        save_remote_compaction_settings(&dir, &settings).unwrap();
+
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.remote_compaction, settings);
+        assert!(
+            !loaded.ui.show_context_menu_icons,
+            "other tables survive the save"
+        );
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(text.contains("[remote_compaction]"), "{text}");
+    }
+
+    #[test]
+    fn hand_edited_remote_compaction_settings_are_repaired_on_load() {
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[remote_compaction]\nenabled = true\nthreshold_percent = 99\ntail_tokens = 5\n\
+             tool_result_chars = 1\nsummarizer_context_tokens = 1\npause_timeout_seconds = 0\n\
+             cooldown_minutes = 100000\nkeep_backups = 0\nprotected_recent_tool_tokens = 999999999\n",
+        )
+        .unwrap();
+        let loaded = load(&dir).unwrap().remote_compaction;
+        let defaults = RemoteCompactionSettings::default();
+        assert!(loaded.enabled, "valid values are kept");
+        assert_eq!(loaded.threshold_percent, 88);
+        assert_eq!(loaded.tail_tokens, 2_000);
+        assert_eq!(loaded.tool_result_chars, 200);
+        assert_eq!(loaded.summarizer_context_tokens, 8_000);
+        assert_eq!(loaded.pause_timeout_seconds, 10);
+        assert_eq!(loaded.cooldown_minutes, 240);
+        assert_eq!(loaded.keep_backups, 1);
+        assert_eq!(loaded.protected_recent_tool_tokens, 200_000);
+        assert_eq!(loaded.claude_technique, defaults.claude_technique);
+        assert_eq!(loaded.redact_secrets, defaults.redact_secrets);
     }
 
     #[test]

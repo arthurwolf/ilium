@@ -16,6 +16,7 @@ mod bounded_decode;
 mod error;
 mod framing;
 mod protocol;
+mod startup;
 mod terminal_bytes;
 mod text_trigger;
 mod voice_text;
@@ -41,6 +42,10 @@ pub use protocol::{
     WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
     WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
+};
+pub use startup::{
+    clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
+    StartupProgress,
 };
 pub use text_trigger::{
     TextTrigger, TextTriggerSettings, TextTriggerTarget, DEFAULT_TEXT_TRIGGER_DELAY_SECONDS,
@@ -450,6 +455,9 @@ mod tests {
             },
             ClientRequest::SetVisiblePanes {
                 pane_ids: vec![NodeId(2), NodeId(3)],
+            },
+            ClientRequest::DiscardTerminalDelivery {
+                pane_ids: vec![NodeId(2)],
             },
             ClientRequest::SetNodeExpanded {
                 node_id: NodeId(2),

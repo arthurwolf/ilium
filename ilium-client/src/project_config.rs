@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ilium_platform::file_lock::ExclusiveFileLock;
 use serde::{Deserialize, Serialize};
@@ -127,6 +127,30 @@ pub fn set_animation(
     settings: crate::background_animation::AnimationSettings,
 ) -> anyhow::Result<()> {
     update(cwd, |config| config.animation = settings.normalized())
+}
+
+/// Directory holding the global animation preference. The animation is one
+/// setting for the whole client, not a per-project choice; it reuses this
+/// module's atomic, lock-protected `.ilium/config.yaml` format under a
+/// dedicated directory beside the client's main configuration.
+pub fn global_animation_home() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "ilium").map(|dirs| dirs.config_dir().join("animation"))
+}
+
+/// Adopts the launch project's animation as the global one, once. Before the
+/// animation became global it was saved in each project's own file; the
+/// launch project's block is the closest thing to the user's choice. Does
+/// nothing when the global file already exists or the project has none.
+pub fn seed_global_animation(home: &Path, launch_project: &Path) -> anyhow::Result<bool> {
+    if home.join(RELATIVE_PATH).exists() {
+        return Ok(false);
+    }
+    let adopted = load(launch_project)?.animation;
+    if animation_is_default(&adopted) {
+        return Ok(false);
+    }
+    set_animation(home, adopted)?;
+    Ok(true)
 }
 
 /// Reads the project configuration. An absent file is a clean, empty config.
@@ -362,6 +386,33 @@ animation:
             assert!(!mutated);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn the_launch_projects_animation_seeds_the_global_one_exactly_once() {
+        let home_dir = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let (home, project) = (home_dir.path(), project_dir.path());
+        let chosen = crate::background_animation::AnimationSettings {
+            enabled: true,
+            hue_degrees: 123,
+            ..Default::default()
+        };
+        // A project without an animation block seeds nothing.
+        assert!(!seed_global_animation(home, project).unwrap());
+        assert!(!home.join(RELATIVE_PATH).exists());
+        set_animation(project, chosen.clone()).unwrap();
+        assert!(seed_global_animation(home, project).unwrap());
+        assert_eq!(load(home).unwrap().animation, chosen.normalized());
+        // Later choices are never overwritten by the project's old block.
+        let later = crate::background_animation::AnimationSettings {
+            enabled: true,
+            hue_degrees: 7,
+            ..Default::default()
+        };
+        set_animation(home, later.clone()).unwrap();
+        assert!(!seed_global_animation(home, project).unwrap());
+        assert_eq!(load(home).unwrap().animation, later.normalized());
     }
 
     #[test]

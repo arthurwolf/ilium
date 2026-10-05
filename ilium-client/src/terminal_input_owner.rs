@@ -1445,6 +1445,47 @@ impl fmt::Debug for InputShutdownReport {
 }
 
 #[cfg(test)]
+pub(crate) fn key_fixture(key: crossterm::event::KeyEvent) -> (InputEvent, QuotaGroup) {
+    fixed_event_fixture(Event::Key(key))
+}
+
+#[cfg(test)]
+pub(crate) fn mouse_fixture(mouse: crossterm::event::MouseEvent) -> (InputEvent, QuotaGroup) {
+    fixed_event_fixture(Event::Mouse(mouse))
+}
+
+#[cfg(test)]
+fn fixed_event_fixture(event: Event) -> (InputEvent, QuotaGroup) {
+    assert!(matches!(&event, Event::Key(_) | Event::Mouse(_)));
+    let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+        clients: 0,
+        jobs: 0,
+        service_jobs: 0,
+        input_bytes: 0,
+        result_bytes: 0,
+        worker_threads: 1,
+        worker_bytes: input_storage_bytes() + 4096,
+    });
+    let storage = Arc::new(InputStorage {
+        active: Mutex::new(1),
+        available: Condvar::new(),
+        _admission: quota
+            .reserve_external_storage(input_storage_bytes())
+            .unwrap(),
+    });
+    (
+        InputEvent {
+            event: Some(event),
+            payload_bytes: 0,
+            payload: None,
+            native_payload: None,
+            _slot: InputSlot { storage },
+        },
+        quota,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn paste_fixture(text: String) -> (InputEvent, QuotaGroup) {
     let bytes = text.capacity();
     let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
@@ -1527,6 +1568,44 @@ mod tests {
                 _admission: admission,
             }),
         }
+    }
+
+    #[test]
+    fn admitted_original_key_preserves_modifiers_and_storage_through_dispatch() {
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+        );
+        let (event, quota) = key_fixture(key);
+        let charged = quota.snapshot().worker_bytes;
+        assert!(charged >= input_storage_bytes());
+        assert_eq!(event.view(), &Event::Key(key));
+        event.dispatch(|original| {
+            assert_eq!(original, Event::Key(key));
+            assert_eq!(quota.snapshot().worker_bytes, charged);
+        });
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn admitted_original_mouse_preserves_coordinates_and_storage_through_dispatch() {
+        let mouse = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 47,
+            row: 13,
+            modifiers: crossterm::event::KeyModifiers::CONTROL
+                | crossterm::event::KeyModifiers::SHIFT,
+        };
+        let (event, quota) = mouse_fixture(mouse);
+        let charged = quota.snapshot().worker_bytes;
+        assert!(charged >= input_storage_bytes());
+        assert_eq!(event.view(), &Event::Mouse(mouse));
+        assert_eq!(event.unadmitted_payload_bytes(), 0);
+        event.dispatch(|original| {
+            assert_eq!(original, Event::Mouse(mouse));
+            assert_eq!(quota.snapshot().worker_bytes, charged);
+        });
+        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 
     #[test]

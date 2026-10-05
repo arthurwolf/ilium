@@ -676,6 +676,68 @@ mod tests {
             .is_err());
     }
     #[test]
+    fn plugin_fractional_entry_preserves_exact_values_and_native_schema_validation() {
+        let (mut target, mut descriptor, mut preferences) =
+            plugin_fixture(PluginField::Control("speed".into()));
+        descriptor.manifest.settings["properties"]["speed"] = json!({
+            "type":"number", "minimum":0.25, "maximum":4.5,
+            "multipleOf":0.25, "default":0.25
+        });
+        let mut authored = preferences.selected.as_ref().unwrap().settings.clone();
+        authored["speed"] = json!(0.25);
+        let selection = crate::animation_plugins::PluginSelection::new(
+            &descriptor,
+            ilium_animation_js::manifest::AnimationMode::Live,
+            authored.clone(),
+        )
+        .unwrap();
+        preferences
+            .activate_selection(&descriptor, selection)
+            .unwrap();
+        target.fence = crate::animation_plugins::PluginControlFence::new(
+            "a".repeat(64),
+            &descriptor,
+            &preferences,
+        )
+        .unwrap();
+        let crate::value_dialog::ValueDialogState::Number(dialog) = target.dialog().unwrap() else {
+            panic!("fractional number dialog");
+        };
+        assert_eq!(dialog.draft.buf, "0.25");
+        for invalid in ["0", "4.75", "NaN", "infinity", "not a number"] {
+            assert!(
+                target
+                    .prepare(
+                        &target.project,
+                        &target.fence.package_digest,
+                        &descriptor,
+                        &preferences,
+                        &crate::value_dialog::DialogOutcome::CommitNumber(invalid.into()),
+                    )
+                    .is_err(),
+                "{invalid}"
+            );
+        }
+        // The existing native validator treats multipleOf as arrow-step metadata,
+        // so direct entry must preserve an in-range value between those steps.
+        for valid in ["0.25", "0.3", "0.75", "4.5"] {
+            let desired = target
+                .prepare(
+                    &target.project,
+                    &target.fence.package_digest,
+                    &descriptor,
+                    &preferences,
+                    &crate::value_dialog::DialogOutcome::CommitNumber(valid.into()),
+                )
+                .unwrap();
+            let mut expected = authored.clone();
+            expected["speed"] = serde_json::from_str(valid).unwrap();
+            assert_eq!(desired.selected.unwrap().settings, expected);
+        }
+        assert_eq!(preferences.selected.unwrap().settings, authored);
+    }
+
+    #[test]
     fn plugin_number_preserves_native_integer_validation_and_all_other_authored_fields() {
         let (target, descriptor, preferences) =
             plugin_fixture(PluginField::Control("speed".into()));

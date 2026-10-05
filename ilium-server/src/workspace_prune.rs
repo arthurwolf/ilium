@@ -344,7 +344,7 @@ async fn admission_facts(
             "worktree contains protected session/project paths: {protected:?}"
         ));
     }
-    if state.pending_session_recovery.lock().await.is_some() {
+    if state.recovery.is_unresolved().await {
         reasons.push("resolve the pending session recovery before removing worktrees".into());
     }
     (occupied, protected, reasons)

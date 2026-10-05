@@ -28,6 +28,8 @@ pub(crate) struct AnimationPickerSave {
     pub token: Arc<()>,
     pub project_path: PathBuf,
     pub candidate: ilium_ambient::GeoLocation,
+    // Last: the admitted candidate allocation is destroyed before its lease.
+    pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {
     ValueDialog {
@@ -67,6 +69,9 @@ pub(crate) enum ConfigurationIntent {
         picker: Option<AnimationPickerSave>,
         value_dialog: Option<Arc<()>>,
         desired: Box<crate::background_animation::AnimationSettings>,
+        // Includes optimistic, intent, rollback and presentation copies.
+        // Last so the intent's payload dies before the lease.
+        location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
     },
     Separators,
 }

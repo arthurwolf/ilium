@@ -1227,3 +1227,7 @@ mod retirement_failure_tests {
         assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "root_recovery_scan_tests.rs"]
+mod root_recovery_scan_tests;

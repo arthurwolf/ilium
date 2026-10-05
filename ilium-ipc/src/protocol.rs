@@ -919,6 +919,13 @@ pub enum ClientRequest {
         prompt_epoch: String,
         last_prompt: String,
     },
+    /// The client released its parser state for these hidden panes. The
+    /// server forgets what it delivered for them, so the next time one is
+    /// named by [`Self::SetVisiblePanes`] its journal is replayed in full
+    /// rather than as a tail the client can no longer apply.
+    DiscardTerminalDelivery {
+        pane_ids: Vec<NodeId>,
+    },
 }
 
 impl ClientRequest {
@@ -972,6 +979,7 @@ impl ClientRequest {
             Self::RecordNodeActivity { .. } => "record_node_activity",
             Self::AttachInteractive { .. } => "attach_interactive",
             Self::SetVisiblePanes { .. } => "set_visible_panes",
+            Self::DiscardTerminalDelivery { .. } => "discard_terminal_delivery",
             Self::SetNodeExpanded { .. } => "set_node_expanded",
             Self::SetNodeLockedClosed { .. } => "set_node_locked_closed",
             Self::ReportLastPromptFromTranscript { .. } => "report_last_prompt_from_transcript",
@@ -1020,6 +1028,7 @@ impl ClientRequest {
                 | Self::SetPaneFocus { .. }
                 | Self::RecordNodeActivity { .. }
                 | Self::SetVisiblePanes { .. }
+                | Self::DiscardTerminalDelivery { .. }
         )
     }
 }

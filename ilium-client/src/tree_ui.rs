@@ -383,6 +383,7 @@ pub(crate) struct PaintedTreeRows {
     area: Rect,
     toolbar: bool,
     rows: Vec<(TreeNodeHit, u16)>,
+    monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     values: Vec<PaintedRowValues>,
     cost_option: crate::cost_settings::DisplayOption,
     selected_node: Option<NodeId>,
@@ -406,6 +407,7 @@ impl PaintedTreeRows {
             area,
             toolbar: false,
             rows: vec![(TreeNodeHit { id, row, line: 0 }, 2)],
+            monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             values: vec![PaintedRowValues {
                 node_id: id,
                 status: [None, None, None],
@@ -465,6 +467,7 @@ impl PaintedTreeRows {
             toolbar: is_toolbar_visible(options.focused, options.hover.toolbar_hovered),
             _metadata: None,
             rows,
+            monitoring_mode: options.agent_monitoring_mode,
             values: Vec::new(),
             cost_option: options
                 .cost
@@ -567,6 +570,42 @@ impl PaintedTreeRows {
         }
         let label = self.rows.iter().find(|(row, _)| row.row == position.y)?.1;
         let objective = label.saturating_add(OBJECTIVE_SLOT_OFFSET);
+        // Attention uses one shared status column. Tooltip ownership still
+        // follows the selected signal, rather than its former column.
+        if self.monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention {
+            if (label..objective).contains(&position.x) {
+                return Some((
+                    hit.id,
+                    StatusSlot::Identity,
+                    Position::new(label, position.y),
+                ));
+            }
+            let values = self.values.iter().find(|value| value.node_id == hit.id)?;
+            let has_objective = values.status[1].is_some();
+            let has_now = values.status[2].is_some();
+            let now = objective
+                + if has_objective {
+                    OBJECTIVE_COLUMN_WIDTH as u16
+                } else {
+                    0
+                };
+            if has_objective && (objective..now).contains(&position.x) {
+                return Some((
+                    hit.id,
+                    StatusSlot::Objective,
+                    Position::new(objective, position.y),
+                ));
+            }
+            let now_width = if has_objective {
+                NOW_COLUMN_WIDTH
+            } else {
+                OBJECTIVE_COLUMN_WIDTH
+            };
+            if has_now && (now..now + now_width as u16).contains(&position.x) {
+                return Some((hit.id, StatusSlot::Now, Position::new(now, position.y)));
+            }
+            return None;
+        }
         let now = label.saturating_add(NOW_SLOT_OFFSET);
         let (slot, column) = if (label..objective).contains(&position.x) {
             (StatusSlot::Identity, label)
@@ -979,6 +1018,7 @@ fn build_item(
                     context.focused_pane_id == Some(node.id),
                 ),
             );
+            let title_offset = label.spans.iter().take(3).map(Span::width).sum();
             let title =
                 apply_sidebar_density(apply_recent_pulse(label, flash_on), context.sidebar_density);
             let text = if let Some(workspace) = workspace
@@ -998,6 +1038,7 @@ fn build_item(
                             identifier_path.len().saturating_sub(1),
                             context.sidebar_density,
                             has_attention,
+                            title_offset,
                         ),
                         flash_on,
                     ),
@@ -1534,12 +1575,13 @@ fn pane_label_with_icons(
     } else {
         text
     };
-    status_row_label(
-        identity,
-        crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs),
-        now,
-        text,
-    )
+    let objective =
+        crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs);
+    if agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention {
+        attention_row_label(identity, objective, now, text)
+    } else {
+        status_row_label(identity, objective, now, text)
+    }
 }
 
 /// One-cell-wide activity glyphs are padded by `status_row_label`, so every
@@ -1723,6 +1765,42 @@ fn status_row_label(
     ])
 }
 
+/// Reserve one status column in Attention mode, including when empty.
+/// Retain both styled glyphs if a future signal combination supplies two.
+fn attention_row_label(
+    identity: Span<'static>,
+    objective: Span<'static>,
+    now: Span<'static>,
+    text: Span<'static>,
+) -> Line<'static> {
+    let has_objective = !objective.content.is_empty();
+    let has_now = !now.content.is_empty();
+    Line::from(vec![
+        fixed_width_icon_span(identity, NODE_ICON_COLUMN_WIDTH),
+        fixed_width_icon_span(
+            objective,
+            if has_objective {
+                crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+            } else {
+                0
+            },
+        ),
+        fixed_width_icon_span(
+            now,
+            if has_now || !has_objective {
+                if has_objective {
+                    crate::status_icons::NOW_COLUMN_WIDTH
+                } else {
+                    crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+                }
+            } else {
+                0
+            },
+        ),
+        text,
+    ])
+}
+
 /// A workspace pane's second line starts under its title, not under the
 /// identity/status columns. Its content is measured in terminal cells so a
 /// long branch retains both recognizable ends in a narrow sidebar.
@@ -1733,15 +1811,13 @@ fn worktree_branch_line(
     depth: usize,
     density: SidebarDensity,
     has_attention: bool,
+    title_offset: usize,
 ) -> Line<'static> {
     let density_width = match density {
         SidebarDensity::Compact => 0,
         SidebarDensity::Standard => 1,
         SidebarDensity::Comfortable => 2,
     };
-    let title_offset = NODE_ICON_COLUMN_WIDTH
-        + crate::status_icons::OBJECTIVE_COLUMN_WIDTH
-        + crate::status_icons::NOW_COLUMN_WIDTH;
     let prefix_width = density_width + title_offset;
     let content_width = usize::from(panel_width)
         .saturating_sub(2) // enclosing panel border
@@ -2859,6 +2935,7 @@ mod tests {
             toolbar: false,
             _metadata: None,
             rows: vec![(first, 4), (second, 5)],
+            monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             values: Vec::new(),
             action: Some((first, strip, actions)),
             cost_option: Default::default(),
@@ -4292,6 +4369,9 @@ mod tests {
             1,
             SidebarDensity::Standard,
             false,
+            NODE_ICON_COLUMN_WIDTH
+                + crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+                + crate::status_icons::NOW_COLUMN_WIDTH,
         );
         let text = line.to_string();
         assert!(text.starts_with(&" ".repeat(
@@ -4305,7 +4385,17 @@ mod tests {
         assert!(UnicodeWidthStr::width(text.as_str()) <= 40 - 2 - 1 - 2);
         assert_eq!(line.spans[2].style.fg, Some(Color::DarkGray));
 
-        let warning = worktree_branch_line("agent/fix", "🌿", 40, 0, SidebarDensity::Compact, true);
+        let warning = worktree_branch_line(
+            "agent/fix",
+            "🌿",
+            40,
+            0,
+            SidebarDensity::Compact,
+            true,
+            NODE_ICON_COLUMN_WIDTH
+                + crate::status_icons::OBJECTIVE_COLUMN_WIDTH
+                + crate::status_icons::NOW_COLUMN_WIDTH,
+        );
         assert_eq!(
             warning.spans.last().map(|span| span.content.as_ref()),
             Some(" !")

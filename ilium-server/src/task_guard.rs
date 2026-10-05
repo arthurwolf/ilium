@@ -66,6 +66,19 @@ impl<T> AbortOnDropHandle<T> {
     }
 }
 
+impl AbortOnDropHandle<()> {
+    /// Borrow the original task handle until physical completion. Cancelling
+    /// this await keeps the handle in its owner; retry never detaches the task.
+    pub(crate) async fn settle(&mut self) -> Result<(), tokio::task::JoinError> {
+        let Some(handle) = self.0.as_mut() else {
+            return Ok(());
+        };
+        let result = handle.await;
+        self.0.take();
+        result
+    }
+}
+
 impl<T> Future for AbortOnDropHandle<T> {
     type Output = Result<T, tokio::task::JoinError>;
 
@@ -83,5 +96,37 @@ impl<T> Drop for AbortOnDropHandle<T> {
         if let Some(handle) = &self.0 {
             handle.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn cancelled_borrowed_settle_retains_original_handle_until_actual_exit() {
+        let (release, gate) = tokio::sync::oneshot::channel();
+        let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let child_completed = std::sync::Arc::clone(&completed);
+        let mut owner = AbortOnDropHandle::new(tokio::spawn(async move {
+            gate.await.expect("isolated release");
+            child_completed.store(true, std::sync::atomic::Ordering::Release);
+        }));
+        let mut first = Box::pin(owner.settle());
+        std::future::poll_fn(|context| {
+            assert!(std::future::Future::poll(first.as_mut(), context).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(first);
+        assert!(
+            owner.0.is_some(),
+            "cancelled join must retain the original handle"
+        );
+        assert!(!completed.load(std::sync::atomic::Ordering::Acquire));
+        release.send(()).expect("release isolated child");
+        owner.settle().await.expect("actual physical completion");
+        assert!(completed.load(std::sync::atomic::Ordering::Acquire));
+        assert!(owner.0.is_none());
+        owner.settle().await.expect("idempotent physical join");
     }
 }

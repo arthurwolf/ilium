@@ -5,11 +5,18 @@ use super::{AnimationCacheStatus, AnimationFrame, AnimationLoopCache, AnimationS
 use crate::animation_plugins::AnimationSourceTab;
 use ilium_ambient::raster::PaintedOwner;
 use ilium_ambient::scene::{FrameReceiptId, MAX_SCENE_RECEIPT_SLOTS};
+use ilium_animation_js::helper::HelperAuthority;
+use ilium_animation_js::replay::{PendingEmission, PlaybackLease};
+use ilium_animation_js::runtime::{CommittedFrameEmission, RetainedFrameAuthority};
+#[cfg(test)]
+use ilium_execution::{Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt};
 use ilium_execution::{QuotaGroup, StorageAdmission, WorkerAdmission};
 use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind, WorkerTicket};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -64,6 +71,8 @@ pub struct SnapshotCell {
     pub article_symbol: Option<String>,
     pub article_is_continuation: bool,
     pub article_style: (bool, bool),
+    pub article_background: Option<(u8, u8, u8)>,
+    pub article_underline: bool,
 }
 
 /// Allocation admission is retained until the final Arc (including receipts)
@@ -122,6 +131,8 @@ pub struct FrameSnapshot {
     pub has_cell_colors: bool,
     cells: Vec<SnapshotCell>,
     plugin_identity: Option<PluginFrameIdentity>,
+    plugin_authority: Option<RetainedFrameAuthority>,
+    replay: Option<PlaybackLease>,
     scene_generation: Option<u64>,
     scene_receipt_id: Option<FrameReceiptId>,
     owner_ids: Vec<u32>,
@@ -201,6 +212,44 @@ impl PresentationLease {
     pub fn snapshot(&self) -> &FrameSnapshot {
         &self.frame
     }
+    /// The exact queued frame retains the original native channel. The
+    /// presenter holds the returned non-cloneable permit through backend flush.
+    pub fn begin_output(&self) -> Result<Option<CommittedFrameEmission>, String> {
+        match (&self.frame.plugin_identity, &self.frame.plugin_authority) {
+            (None, None) => Ok(None),
+            (Some(identity), Some(authority)) => {
+                if identity.revision != self.frame.revision {
+                    return Err("Plugin frame revision changed before output".into());
+                }
+                authority
+                    .begin_output(&HelperAuthority {
+                        package_digest: identity.package_digest.clone(),
+                        instance_id: identity.instance_id,
+                        plan_generation: identity.plan_generation,
+                        authorization_epoch: identity.authorization_epoch,
+                    })
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+            }
+            _ => Err("Plugin frame native authority missing".into()),
+        }
+    }
+    /// The playback lease belongs to this exact worker snapshot. A second
+    /// presentation of the same replay receipt cannot silently duplicate
+    /// source history; the worker must sample and publish a fresh frame.
+    pub fn has_replay(&self) -> bool {
+        self.frame.replay.is_some()
+    }
+    pub fn prepare_replay(&self, surviving: &[u8]) -> Result<Option<PendingEmission>, String> {
+        let Some(replay) = &self.frame.replay else {
+            return Ok(None);
+        };
+        replay
+            .fork_for_presentation()
+            .and_then(|lease| lease.prepare_emission(surviving))
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
     /// Convert only after successful actual emission. Invalid masks return
     /// lease ownership too, so semantic acknowledgements cannot disappear.
     pub fn receipt(self, surviving: Vec<u8>) -> Result<EmissionReceipt, Rejected<(Self, Vec<u8>)>> {
@@ -274,12 +323,41 @@ pub struct ServiceStatus {
     pub limited_frames: u64,
     pub is_accepting: bool,
     pub error: Option<String>,
+    #[cfg(test)]
+    pub native_task_timer_armed: bool,
+    #[cfg(test)]
+    pub finite_probe_acks: u64,
+    #[cfg(test)]
+    pub same_wake_task_and_finite: u64,
+    #[cfg(test)]
+    pub native_helper_physically_settled: bool,
 }
 
 enum SceneCommand {
     Configure(Box<RenderRequest>),
     Emitted(EmissionReceipt),
     Pause,
+    #[cfg(test)]
+    HoldRealFiniteWake {
+        entered: mpsc::SyncSender<()>,
+        release: mpsc::Receiver<()>,
+        finished: mpsc::SyncSender<()>,
+        wake_seen: mpsc::SyncSender<()>,
+        revoke_original_activation: bool,
+    },
+}
+
+#[cfg(test)]
+struct RealFiniteWakeProbe {
+    finished: mpsc::SyncSender<()>,
+}
+#[cfg(test)]
+impl Job for RealFiniteWakeProbe {
+    type Output = ();
+    type Error = String;
+    fn run(self, _: JobContext) -> Result<(), String> {
+        self.finished.send(()).map_err(|error| error.to_string())
+    }
 }
 
 #[derive(Default)]
@@ -304,6 +382,8 @@ struct Shared {
     permission_review: OnceLock<Arc<crate::animation_plugins::review_bridge::ReviewBridge>>,
     frames: Arc<AtomicUsize>,
     slots: Arc<AtomicU8>,
+    #[cfg(test)]
+    test_wake_observer: Mutex<Option<mpsc::SyncSender<()>>>,
 }
 impl Shared {
     fn is_accepting(&self) -> bool {
@@ -429,6 +509,8 @@ impl AnimationService {
             permission_review: OnceLock::new(),
             frames: Arc::new(AtomicUsize::new(0)),
             slots: Arc::new(AtomicU8::new(0)),
+            #[cfg(test)]
+            test_wake_observer: Mutex::new(None),
         });
         let weak_permission_owner = Arc::downgrade(&shared);
         let permission_review = crate::animation_plugins::review_bridge::ReviewBridge::new(
@@ -506,6 +588,37 @@ impl AnimationService {
 
     pub fn ticket(&self) -> WorkerTicket {
         self.worker.ticket()
+    }
+
+    #[cfg(test)]
+    fn test_hold_real_finite_wake(
+        &self,
+        entered: mpsc::SyncSender<()>,
+        release: mpsc::Receiver<()>,
+        finished: mpsc::SyncSender<()>,
+        wake_seen: mpsc::SyncSender<()>,
+        revoke_original_activation: bool,
+    ) -> Result<(), AdmissionError> {
+        let Ok(mut mailbox) = self.shared.mailbox.try_lock() else {
+            return Err(AdmissionError::Busy);
+        };
+        if !self.shared.is_accepting() {
+            return Err(AdmissionError::Stopped);
+        }
+        if mailbox.receipts.len() >= MAX_RECEIPTS {
+            return Err(AdmissionError::Full);
+        }
+        mailbox
+            .receipts
+            .push_back(SceneCommand::HoldRealFiniteWake {
+                entered,
+                release,
+                finished,
+                wake_seen,
+                revoke_original_activation,
+            });
+        self.shared.changed.notify_one();
+        Ok(())
     }
 
     /// Nonblocking. Rejection returns ownership so an input caller can retry.
@@ -844,6 +957,15 @@ fn run(
         // Full preserves the existing obligation to inspect native receipts.
         let _ = native_wake_sender.try_send(());
         if let Some(shared) = weak_shared.upgrade() {
+            #[cfg(test)]
+            if let Some(observer) = shared
+                .test_wake_observer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+            {
+                let _ = observer.try_send(());
+            }
             shared.changed.notify_one();
         }
     });
@@ -866,37 +988,58 @@ fn run(
     };
     let mut plugin = PluginBackend::new(
         shared.quota.clone(),
-        plugin_resources,
+        plugin_resources.clone(),
         Arc::clone(&review_bridge),
         actor_wake,
         Arc::clone(&shared.ready),
     );
     let mut cache = AnimationLoopCache::new(resources);
+    #[cfg(test)]
+    let mut finite_probe_receipt: Option<Receipt<RealFiniteWakeProbe>> = None;
     // Move the SAME guard after native/cache construction so admission closes
     // before their destructor work, including on panic or orderly exit.
     let _admission = startup_admission;
     let mut sequence = 0;
     let mut shutdown_started = false;
     loop {
-        let (request, receipts, stopping, native_wake, review_intent) = {
+        let task_deadline = plugin.next_task_deadline();
+        #[cfg(test)]
+        {
+            let mut mailbox = shared
+                .mailbox
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            mailbox.status.native_task_timer_armed = task_deadline.is_some();
+            mailbox.status.native_helper_physically_settled = plugin.is_physically_settled();
+        }
+        let (request, receipts, stopping, native_wake, task_due, review_intent) = {
             let mut mailbox = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
             let mut native_wake = false;
+            let mut task_due = false;
             loop {
                 native_wake |= native_wake_receiver.try_recv().is_ok();
+                task_due |= task_deadline.is_some_and(|deadline| Instant::now() >= deadline);
                 if (stop.is_stopped() && !shutdown_started)
                     || (!shutdown_started && mailbox.latest.is_some())
                     || !mailbox.receipts.is_empty()
                     || native_wake
+                    || task_due
                     || (!shutdown_started && review_bridge.has_intent())
                 {
                     break;
                 }
                 // Preserve the existing stop wait. A condvar notification can
                 // race sleep; the charged one-slot channel retains the wake.
-                // Timeout observes the signal, never polls any native receipt.
+                // The fixed stop observation and optional task deadline never
+                // poll finite receipts; only their original wake does that.
+                let wait = task_deadline.map_or(Duration::from_millis(50), |deadline| {
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(50))
+                });
                 mailbox = shared
                     .changed
-                    .wait_timeout(mailbox, Duration::from_millis(50))
+                    .wait_timeout(mailbox, wait)
                     .unwrap_or_else(|e| e.into_inner())
                     .0;
             }
@@ -910,6 +1053,7 @@ fn run(
                 std::mem::take(&mut mailbox.receipts),
                 stopping,
                 native_wake,
+                task_due,
                 !shutdown_started && review_bridge.has_intent(),
             )
         };
@@ -950,6 +1094,46 @@ fn run(
                     cache.pause();
                     plugin.stop();
                 }
+                #[cfg(test)]
+                SceneCommand::HoldRealFiniteWake {
+                    entered,
+                    release,
+                    finished,
+                    wake_seen,
+                    revoke_original_activation,
+                } => {
+                    // The original finite client and its completion-wake
+                    // callback remain intact. Only the scene actor is held so
+                    // the genuine receipt and monotonic task due coalesce.
+                    *shared
+                        .test_wake_observer
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner()) = Some(wake_seen);
+                    let reservation = plugin_resources
+                        .finite()
+                        .try_reserve(
+                            Lane::Io,
+                            JobCost {
+                                input_bytes: 1,
+                                result_bytes: 1,
+                            },
+                        )
+                        .expect("real finite probe admission");
+                    finite_probe_receipt = Some(
+                        reservation
+                            .submit(RealFiniteWakeProbe { finished })
+                            .expect("real finite probe submission"),
+                    );
+                    if revoke_original_activation {
+                        plugin
+                            .test_revoke_current_activation()
+                            .expect("revoke actual accepted activation");
+                    }
+                    entered.send(()).expect("scene hold observation");
+                    release
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("release held scene actor");
+                }
             }
         }
         // The original mailbox guard has exited BEFORE broker/controller work.
@@ -970,6 +1154,54 @@ fn run(
         if native_wake {
             if let Err(error) = plugin.on_native_completion() {
                 plugin.fail_current(&error);
+                shared
+                    .mailbox
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .status
+                    .error = Some(error);
+            }
+            #[cfg(test)]
+            if let Some(receipt) = finite_probe_receipt.as_mut() {
+                match receipt.try_take() {
+                    JobPoll::Ready(outcome) => {
+                        assert!(matches!(outcome.view(), JobOutcome::Finished(Ok(()))));
+                        finite_probe_receipt = None;
+                        *shared
+                            .test_wake_observer
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner()) = None;
+                        let mut mailbox = shared
+                            .mailbox
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        mailbox.status.finite_probe_acks += 1;
+                        if task_due {
+                            mailbox.status.same_wake_task_and_finite += 1;
+                        }
+                    }
+                    JobPoll::Pending => {}
+                    JobPoll::Lost | JobPoll::Taken => {
+                        panic!("real finite wake lost its original receipt")
+                    }
+                }
+            }
+        }
+        if task_due && !stopping {
+            if let Err(error) = plugin.on_task_deadline() {
+                plugin.fail_current(&error);
+                shared
+                    .mailbox
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .status
+                    .error = Some(error);
+            }
+            // A task-time error can arrive after the original finite wake
+            // was already consumed on this actor turn. Inspect logical
+            // retirement now, without collecting another finite receipt;
+            // any still-running original owner retains its later real wake.
+            if let Err(error) = plugin.settle_retirement(false) {
                 shared
                     .mailbox
                     .lock()
@@ -1094,12 +1326,16 @@ fn render_request(
             shared.frames.fetch_sub(1, Ordering::AcqRel);
             let mut mailbox = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
             mailbox.status.limited_frames += 1;
-            if !matches!(
-                reason,
-                ilium_execution::RejectReason::Busy | ilium_execution::RejectReason::WorkerBytes
-            ) {
-                mailbox.status.error =
-                    Some(format!("Animation frame admission failed: {reason:?}"));
+            // Busy is momentary lock contention. Every other refusal, WorkerBytes
+            // included, is sticky: say so, or the field silently never appears.
+            if !matches!(reason, ilium_execution::RejectReason::Busy) {
+                let quota = shared.quota.snapshot();
+                tracing::warn!(?reason, ?quota, "animation frame admission refused");
+                mailbox.status.error = Some(format!(
+                    "Animation frame admission failed: {reason:?} (worker bytes {} of {} MiB in use)",
+                    quota.worker_bytes >> 20,
+                    quota.limits.worker_bytes >> 20,
+                ));
             }
             drop(mailbox);
             shared.ready.notify_one();
@@ -1208,12 +1444,16 @@ fn render_plugin_request(
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
             mailbox.status.limited_frames += 1;
-            if !matches!(
-                reason,
-                ilium_execution::RejectReason::Busy | ilium_execution::RejectReason::WorkerBytes
-            ) {
-                mailbox.status.error =
-                    Some(format!("Plugin snapshot admission failed: {reason:?}"));
+            // Busy is momentary lock contention. Every other refusal, WorkerBytes
+            // included, is sticky: say so, or the field silently never appears.
+            if !matches!(reason, ilium_execution::RejectReason::Busy) {
+                let quota = shared.quota.snapshot();
+                tracing::warn!(?reason, ?quota, "plugin snapshot admission refused");
+                mailbox.status.error = Some(format!(
+                    "Plugin snapshot admission failed: {reason:?} (worker bytes {} of {} MiB in use)",
+                    quota.worker_bytes >> 20,
+                    quota.limits.worker_bytes >> 20,
+                ));
             }
             return;
         }
@@ -1280,6 +1520,8 @@ fn render_plugin_request(
                 has_cell_colors: true,
                 cells: frame.cells,
                 plugin_identity: Some(frame.identity),
+                plugin_authority: Some(frame.authority),
+                replay: frame.replay,
                 scene_generation: None,
                 scene_receipt_id: None,
                 owner_ids: Vec::new(),
@@ -1370,6 +1612,8 @@ impl AnimationFrame {
                     article_symbol,
                     article_is_continuation: self.article_is_continuation(x, y),
                     article_style: self.article_style(x, y),
+                    article_background: None,
+                    article_underline: false,
                 });
             }
         }
@@ -1401,6 +1645,8 @@ impl AnimationFrame {
             has_cell_colors: self.has_cell_colors,
             cells,
             plugin_identity: None,
+            plugin_authority: None,
+            replay: None,
             scene_generation: self.last_ambient.map(|key| key.generation),
             scene_receipt_id,
             owner_ids: self.raster.owner_ids.clone(),
@@ -1413,9 +1659,17 @@ impl AnimationFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::animation_plugins::review_bridge::ReviewPhase;
+    use crate::animation_plugins::{AnimationSourceTab, PluginSelection};
     use crate::background_animation::{AmbientHost, AnimationKind};
+    use crossterm::event::KeyCode;
     use ilium_ambient::{Frame, Scene};
-    use std::sync::mpsc;
+    use ilium_animation_js::manifest::AnimationMode;
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::io::{Cursor, Write};
+    use std::path::Path;
+    use std::process::Command;
 
     // Serialize this module's service admissions, without making production
     // limits depend on the Rust test harness's chosen parallelism.
@@ -1469,6 +1723,261 @@ mod tests {
             Err(ilium_execution::RejectReason::WorkerBytes)
         ));
         assert_eq!(calls, 1);
+    }
+
+    const NATIVE_TASK_SCENE_SOURCE: &str = r#"export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{}}}
+        export async function create(host){
+          const opened=await host.tasks.poll({interval_ms:200,deadline_ms:1000},()=>{});
+          if(!opened.ok)throw Error(opened.error.code);
+          return {render(context,frame){frame.cells.set_cell(0,0,{mask:1});frame.present()},dispose(){}};
+        }"#;
+
+    fn native_task_scene_archive() -> Vec<u8> {
+        let manifest = json!({"api_version":1,"id":"native-scene-tasks",
+            "name":"Native scene tasks","version":"1.0.0","entry":"entry.mjs",
+            "modes":["live"],"settings":{"type":"object","properties":{}},
+            "files":[{"path":"entry.mjs","bytes":NATIVE_TASK_SCENE_SOURCE.len(),
+                "sha256":format!("{:x}",Sha256::digest(NATIVE_TASK_SCENE_SOURCE.as_bytes()))}]});
+        let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        archive.start_file("entry.mjs", options).unwrap();
+        archive
+            .write_all(NATIVE_TASK_SCENE_SOURCE.as_bytes())
+            .unwrap();
+        archive.start_file("manifest.json", options).unwrap();
+        archive
+            .write_all(&serde_json::to_vec(&manifest).unwrap())
+            .unwrap();
+        archive.finish().unwrap().into_inner()
+    }
+
+    fn wait_for_task_scene(service: &AnimationService) {
+        let bridge = service.permission_bridge().expect("original review bridge");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut session = loop {
+            if let Some(session) = bridge.session().unwrap() {
+                break session;
+            }
+            let status = bridge.status().unwrap();
+            assert_ne!(status.phase(), ReviewPhase::Failed, "{}", status.message());
+            assert!(Instant::now() < deadline, "actual no-rights review absent");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        session.handle_key(&bridge, KeyCode::Enter).unwrap();
+        drop(session);
+        loop {
+            let phase = bridge.status().unwrap();
+            assert_ne!(phase.phase(), ReviewPhase::Failed, "{}", phase.message());
+            let status = service.try_status();
+            if phase.phase() == ReviewPhase::Ready
+                && status
+                    .as_ref()
+                    .is_some_and(|status| status.native_task_timer_armed)
+            {
+                return;
+            }
+            assert!(Instant::now() < deadline, "accepted task timer not armed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn run_native_task_scene_child(revoke_original_activation: bool) {
+        let quota = crate::execution::process_quota();
+        let resources =
+            ilium_ambient::resources::AmbientResources::new(crate::execution::test_client());
+        let worker_threads_before = quota.snapshot().worker_threads;
+        let service = AnimationService::start(resources).expect("admitted actual scene worker");
+        let mut selected = request(1, 0);
+        selected.settings.source = AnimationSourceTab::Plugin;
+        selected.settings.enabled = true;
+        selected.settings.plugin.selected = Some(PluginSelection {
+            package_id: "native-scene-tasks".into(),
+            mode: AnimationMode::Live,
+            settings: json!({}),
+        });
+        submit(&service, selected);
+        wait_for_task_scene(&service);
+
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        let (finished_sender, finished_receiver) = mpsc::sync_channel(1);
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(2);
+        service
+            .test_hold_real_finite_wake(
+                entered_sender,
+                release_receiver,
+                finished_sender,
+                wake_sender,
+                revoke_original_activation,
+            )
+            .expect("real finite-wake command admission");
+        entered_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap();
+        finished_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap();
+        wake_receiver.recv_timeout(Duration::from_secs(3)).unwrap();
+        // The accepted poll has at most a 1000 ms total lifetime. Holding the
+        // scene actor past it makes the real finite wake and task due visible
+        // together on the next actor turn, independent of helper startup time.
+        std::thread::sleep(Duration::from_millis(1100));
+        release_sender.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = service.try_status();
+            if let Some(status) = status {
+                if status.same_wake_task_and_finite > 0 && status.finite_probe_acks > 0 {
+                    if revoke_original_activation {
+                        if status.error.is_some() {
+                            break;
+                        }
+                    } else {
+                        assert!(status.error.is_none(), "{:?}", status.error);
+                        break;
+                    }
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "real finite wake/task retirement not observed"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if !revoke_original_activation {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match service.try_pause(2) {
+                    Ok(()) => break,
+                    Err(AdmissionError::Busy) if Instant::now() < deadline => {
+                        std::thread::yield_now()
+                    }
+                    Err(error) => panic!("native reconfigure/pause refused: {error:?}"),
+                }
+            }
+            loop {
+                if service
+                    .try_status()
+                    .is_some_and(|status| !status.native_task_timer_armed)
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "reconfigured task timer remained armed"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            submit(&service, request(3, 0));
+            loop {
+                if service
+                    .try_snapshot()
+                    .is_some_and(|frame| frame.revision == 3)
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "replacement scene did not render after retiring task workflow"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(service
+                .try_status()
+                .is_some_and(|status| status.error.is_none() && !status.native_task_timer_armed));
+        }
+        let helper_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if service
+                .try_status()
+                .is_some_and(|status| status.native_helper_physically_settled)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < helper_deadline,
+                "original native helper remained physically owned"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let ticket = service.ticket();
+        drop(service);
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(10))
+            .unwrap();
+        drop(ticket);
+        assert_eq!(
+            quota.snapshot().worker_threads,
+            worker_threads_before,
+            "actual scene worker/helper debit remains after physical join"
+        );
+    }
+
+    fn isolated_native_task_scene(revoke_original_activation: bool, exact_test: &str) {
+        if std::env::var_os("ILIUM_NATIVE_TASK_SCENE_CHILD").is_some() {
+            run_native_task_scene_child(revoke_original_activation);
+            return;
+        }
+        let helper = std::env::var_os("ILIUM_ANIMATION_HELPER")
+            .expect("explicit matching built helper path required");
+        assert!(Path::new(&helper).is_absolute());
+        let temporary = tempfile::tempdir().unwrap();
+        let bin = temporary.path().join("bin");
+        let data = temporary.path().join("data");
+        let config = temporary.path().join("config");
+        let cache = temporary.path().join("cache");
+        let packages = data.join("ilium/animation-plugins");
+        for path in [&bin, &packages, &config, &cache] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        // SetupJob derives the real helper as a sibling of current_exe.
+        // Copy both built artifacts into this isolated process; keep all
+        // release::verifier(), archive, and helper sandbox checks unchanged.
+        let copied_test = bin.join("ilium-client-native-task-test");
+        std::fs::copy(std::env::current_exe().unwrap(), &copied_test).unwrap();
+        let copied_helper = bin.join(format!(
+            "ilium-animation-helper{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        std::fs::copy(Path::new(&helper), &copied_helper).unwrap();
+        std::fs::write(
+            packages.join("native-scene-tasks-1.0.0.iliumanim"),
+            native_task_scene_archive(),
+        )
+        .unwrap();
+        let output = Command::new(copied_test)
+            .arg("--ignored")
+            .arg("--exact")
+            .arg(exact_test)
+            .arg("--nocapture")
+            .env("ILIUM_NATIVE_TASK_SCENE_CHILD", "1")
+            .env("XDG_DATA_HOME", &data)
+            .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_CACHE_HOME", &cache)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child scene test: status {:?}, stdout {}, stderr {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+    fn real_scene_actor_combines_finite_wake_task_due_and_reconfigures() {
+        isolated_native_task_scene(false,
+            "background_animation::worker::tests::real_scene_actor_combines_finite_wake_task_due_and_reconfigures");
+    }
+
+    #[test]
+    #[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+    fn real_scene_actor_error_retires_revoked_task_on_same_finite_wake() {
+        isolated_native_task_scene(true,
+            "background_animation::worker::tests::real_scene_actor_error_retires_revoked_task_on_same_finite_wake");
     }
 
     struct ControlledScene {

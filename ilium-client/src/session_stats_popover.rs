@@ -226,7 +226,8 @@ impl App {
             return changed;
         }
         if let Some(request) = self.session_stats_request(pane_id) {
-            self.session_stats.request_refresh(pane_id, request, now);
+            self.session_stats
+                .request_refresh_interactive(pane_id, request, now);
         }
         let is_loading = self.current_stats_entry(pane_id).is_some_and(|entry| {
             matches!(

@@ -314,7 +314,7 @@ fn next_poll_deadline(completed_at: Instant, retry_after: Option<Duration>) -> O
 }
 
 fn fetch_provider(provider: ResetProvider) -> FetchOutcome {
-    let agent = ureq::Agent::new_with_config(
+    let agent = ilium_http::agent(
         ureq::Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
             .http_status_as_error(false)

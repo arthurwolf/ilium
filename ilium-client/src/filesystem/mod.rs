@@ -22,6 +22,7 @@ mod integration_app;
 pub(crate) mod integrations;
 
 pub(crate) mod sidebar;
+pub(crate) mod startup;
 pub(crate) mod transcript_baseline;
 
 pub(crate) mod plugin_permission_controller;

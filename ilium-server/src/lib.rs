@@ -19,6 +19,7 @@ mod agent_delivery;
 mod agent_identity_guard;
 mod agent_prompt;
 pub mod config;
+mod config_refresh;
 mod detection;
 pub mod error;
 mod execution;
@@ -34,13 +35,17 @@ pub mod paths;
 mod persistence;
 mod progress_monitor;
 mod prompt_queue;
+mod ready_log;
+mod recovery;
 mod scheduled_input;
 mod session_backups;
 mod session_id;
 mod shell_title;
 mod snapshot_io;
 mod snapshot_state;
+mod sound_settings_storage;
 mod sounds;
+mod startup_progress;
 mod state;
 mod task_guard;
 mod text_trigger_config;
@@ -58,7 +63,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_detect::AgentSignature;
-use ilium_platform::secure_fs;
 use ilium_transport::{Liveness, SessionEndpoint};
 
 use crate::config::{DetectionConfig, HttpApiConfig, NotificationsConfig, SessionRecoveryConfig};
@@ -145,7 +149,7 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
 /// Consuming the resource value prevents an accidental second bank from using
 /// the same bootstrap value; clones held by logger/storage retain the ledger.
 pub async fn run_with_resources(
-    options: ServerOptions,
+    mut options: ServerOptions,
     resources: ServerResources,
 ) -> Result<(), ServerError> {
     let endpoint = SessionEndpoint::from_path(&options.socket_path);
@@ -163,8 +167,9 @@ pub async fn run_with_resources(
             path: options.socket_path.clone(),
             source: std::io::Error::other(source),
         })?;
-    if let Some(ready_log_metadata) = &options.ready_log_metadata {
-        publish_ready_log_metadata(ready_log_metadata)?;
+    let execution = execution::ServerExecution::start_with_resources(resources)?;
+    if let Some(ready_log_metadata) = options.ready_log_metadata.take() {
+        ready_log::publish(&execution.client, ready_log_metadata).await?;
     }
     tracing::info!(
         session_name = %options.session_name,
@@ -174,7 +179,17 @@ pub async fn run_with_resources(
         "detached session server listening"
     );
 
-    let (sound_requests, sound_playback_task) = sounds::spawn(Arc::clone(&options.sound_player));
+    // Admit the original startup allocation before publishing State or readers.
+    let admitted_sound_settings =
+        sounds::SharedSoundSettings::try_new(&execution.client, options.sound_settings).map_err(
+            |(reason, _original)| {
+                std::io::Error::other(format!(
+                    "initial sound settings admission refused: {reason:?}"
+                ))
+            },
+        )?;
+    let (sound_requests, sound_playback_task) =
+        sounds::spawn(Arc::clone(&options.sound_player), execution.client.clone());
     // See `task_guard`'s module doc: wrapping every long-lived child task's
     // handle here, immediately at the spawn site, ties each task's lifetime
     // to this `run` future's own stack frame -- so cancelling `run`'s task
@@ -189,17 +204,22 @@ pub async fn run_with_resources(
         socket_path: options.socket_path.clone(),
         detection_config: options.detection_config,
         notifications_config: options.notifications_config,
-        sound_settings: options.sound_settings,
+        sound_settings: admitted_sound_settings,
         sound_requests,
         custom_signatures: options.custom_signatures,
         agent_debug_menu_enabled: options.agent_debug_menu_enabled,
         progress_monitor_enabled: options.progress_monitor_enabled,
     }));
-    let execution = execution::ServerExecution::start_with_resources(resources)?;
     // This fresh State has not been published; a duplicate bootstrap would
     // indicate a composition-root bug, rather than silently multiplying pools.
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
+    }
+    let startup = startup_progress::Publisher::bind(&state, &options.socket_path).await;
+    if let Some(phase) = &startup {
+        phase
+            .publish("Starting the session server", "Preparing workers", 0, 0)
+            .await;
     }
     if let Some(path) = &options.sound_config_path {
         // Invariant: this fresh ServerState has not been shared with consumers.
@@ -218,6 +238,16 @@ pub async fn run_with_resources(
     let initial_backup_bucket = session_backups::capture_on_start(&state).await;
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
+        if let Some(phase) = &startup {
+            phase
+                .publish(
+                    "Loading the saved session",
+                    "Reading the session snapshot",
+                    0,
+                    0,
+                )
+                .await;
+        }
         match persistence::load_snapshot_for_state(&state).await {
             Ok(Some(snapshot))
                 if matches!(
@@ -225,9 +255,23 @@ pub async fn run_with_resources(
                     SessionRecoveryConfig::AskBeforeRestore
                 ) =>
             {
-                *state.pending_session_recovery.lock().await = Some(snapshot);
+                if state.recovery.install_initial(snapshot).await.is_err() {
+                    return Err(snapshot_io::admission_error(
+                        &state.snapshot_path,
+                        "recovery owner admission",
+                        "initial recovery slot was already occupied",
+                    ));
+                }
             }
-            Ok(Some(snapshot)) => restore_snapshot(&state, snapshot).await,
+            Ok(Some(snapshot)) => {
+                if restore_snapshot(&state, snapshot).await.is_break() {
+                    return Err(snapshot_io::admission_error(
+                        &state.snapshot_path,
+                        "restore frame admission",
+                        "snapshot restoration has no admitted CPU destruction owner",
+                    ));
+                }
+            }
             Ok(None) => {}
             // An admission failure is not an empty session. Starting the
             // fresh writer here could overwrite the intact recovery source.
@@ -241,6 +285,9 @@ pub async fn run_with_resources(
         }
     }
 
+    if let Some(phase) = &startup {
+        phase.finish().await;
+    }
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
     let workspace_git_requests = state.take_workspace_git_full_receiver().await;
     let git_status_task = AbortOnDropHandle::new(git_status::spawn(
@@ -250,7 +297,7 @@ pub async fn run_with_resources(
     let http_api_task =
         AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
-    let snapshot_writer_task =
+    let mut snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
     let session_backup_task = AbortOnDropHandle::new(session_backups::spawn(
         Arc::clone(&state),
@@ -282,39 +329,9 @@ pub async fn run_with_resources(
     // comment.
     tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
     state.abort_all_connection_tasks();
-    // Recovery data remains durable on disk. Return any unchosen decoded
-    // original to CPU destruction before closing the shared bank.
-    drop(state.pending_session_recovery.lock().await.take());
-    // The codec bank must survive the grace period so final ordered events
-    // can be encoded and flushed before connection cancellation.
-    if let Some(execution) = state.execution.get() {
-        execution.request_shutdown();
-    }
-    // Worktree requests are server-owned after dispatch. Joining here keeps
-    // an in-flight Git add or its exact rollback from being cut off by
-    // session shutdown, even if the requesting socket already disappeared.
-    state.finish_workspace_creation_tasks().await;
-
-    // Flush any crash-recovery mutation too recent for the background
-    // debounced writer's window to have picked up yet (a `KillSession`
-    // shutdown has already cleared the dirty flag itself, removed the
-    // snapshot file, and set `state.session_killed` -- see
-    // `ipc::handlers::handle_kill_session` and `ServerState::session_killed`
-    // -- so this is a guaranteed no-op in that case even though the
-    // connections still alive during `SHUTDOWN_GRACE_PERIOD` above could
-    // otherwise have re-dirtied the flag), then wait for the shared write
-    // lock to confirm any write that writer already had in flight has
-    // fully finished, before finally stopping it. See
-    // `persistence::spawn_snapshot_writer`'s doc comment for why this
-    // task is never aborted any earlier than this.
-    persistence::flush_pending_snapshot(&state).await;
-    {
-        let _write_guard = state.snapshot_write_lock.lock().await;
-    }
-    snapshot_writer_task.abort();
-    if let Err(error) = persistence::shutdown_snapshot_service(&state).await {
-        tracing::error!(%error, "snapshot I/O shutdown did not complete successfully");
-    }
+    // The semantic drain closes recovery admission, joins its accepted task,
+    // and retires any unchosen original before final snapshot I/O and bank stop.
+    let drain_result = drain_session_work(&state, &mut snapshot_writer_task).await;
     sound_playback_task.abort();
 
     // Best-effort: a clean `KillSession` shutdown has usually already
@@ -330,55 +347,112 @@ pub async fn run_with_resources(
         );
     }
     tracing::info!(session_name = %state.session_name, "detached session server stopped");
-    Ok(())
+    drain_result
 }
 
-/// Atomically records the exact log file for a server that has already bound
-/// its listener. The temporary file lives beside the final marker so `rename`
-/// is atomic; clients therefore observe either the previous healthy server's
-/// marker or the newly ready server's marker, never a partial path.
-fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerError> {
-    let temporary_path = metadata
-        .active_log_path_file
-        .with_extension(format!("ready-{}", std::process::id()));
-    let log_path = metadata
-        .log_path
-        .to_str()
-        .ok_or_else(|| ServerError::ReadyLogMetadata {
-            path: metadata.active_log_path_file.clone(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "ready log path is not valid UTF-8",
-            ),
-        })?;
-    let contents = format!("pid={}\nlog_path={log_path}\n", std::process::id());
-    // Mirrors `persistence::save_snapshot`'s atomic-write convention: a stale
-    // temp file left by a crashed predecessor that happened to reuse this pid
-    // is cleared so `create_new` can succeed, and the temp file is created
-    // owner-only from the start (`private_open_options`: mode 0600 plus
-    // `O_NOFOLLOW`/`O_CLOEXEC` on Unix). The previous write-then-chmod
-    // sequence here left a window where the file was world-readable and would
-    // have written through a symlink pre-planted at this predictable path.
-    let _ = std::fs::remove_file(&temporary_path);
-    let write_result = secure_fs::private_open_options()
-        .write(true)
-        .create_new(true)
-        .open(&temporary_path)
-        // The file handle is dropped inside this closure, before the rename
-        // below runs -- required on Windows, where renaming a still-open file
-        // fails.
-        .and_then(|mut temporary_file| {
-            std::io::Write::write_all(&mut temporary_file, contents.as_bytes())
-        })
-        .and_then(|()| std::fs::rename(&temporary_path, &metadata.active_log_path_file));
-    if let Err(source) = write_result {
-        let _ = std::fs::remove_file(&temporary_path);
-        return Err(ServerError::ReadyLogMetadata {
-            path: metadata.active_log_path_file.clone(),
-            source,
-        });
+/// Drain accepted semantic work and ordered persistence before stopping their bank.
+/// Call after connection cancellation so new client work cannot enter the drain.
+pub(crate) async fn drain_session_work(
+    state: &Arc<ServerState>,
+    snapshot_writer_task: &mut AbortOnDropHandle<()>,
+) -> Result<(), ServerError> {
+    // Worktree requests are server-owned after dispatch. Joining here keeps
+    // an in-flight Git add or its exact rollback from being cut off by
+    // session shutdown, even if the requesting socket already disappeared.
+    let recovery_result = state
+        .recovery
+        .close_and_drain()
+        .await
+        .map_err(|message| snapshot_io::error(&state.snapshot_path, "recovery drain", message));
+    if let Err(error) = &recovery_result {
+        tracing::error!(%error, "session recovery did not settle successfully");
     }
-    Ok(())
+    state.finish_workspace_creation_tasks().await;
+
+    // No coordinator may retain a dirty claim when final persistence starts.
+    // Finish its original in-flight ACK/failure bookkeeping before inspecting
+    // dirty state; a clean discard remains clean rather than forcing a save.
+    state.stop_snapshot_writer();
+    let writer_result = snapshot_writer_task.settle().await.map_err(|error| {
+        snapshot_io::error(
+            &state.snapshot_path,
+            "snapshot coordinator join",
+            error.to_string(),
+        )
+    });
+    if let Err(error) = &writer_result {
+        state.record_snapshot_writer_failure();
+        tracing::error!(%error, "snapshot coordinator did not finish successfully");
+    }
+    // A cancelled outer drain may retry after the original handle was reaped.
+    // Never turn its earlier join failure into a later successful shutdown.
+    let writer_result = writer_result.and_then(|()| {
+        if state.snapshot_writer_failed() {
+            Err(snapshot_io::error(
+                &state.snapshot_path,
+                "snapshot coordinator join",
+                "the original snapshot coordinator failed",
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    // An unchosen original is intentionally retained on normal shutdown.
+    // A failed accepted resolution is reported by recovery_result above.
+    let flush_result = if state.recovery.preserves_original() {
+        Ok(())
+    } else {
+        persistence::try_flush_pending_snapshot(state).await
+    };
+    if let Err(error) = &flush_result {
+        tracing::error!(%error, "final snapshot write did not complete successfully");
+    }
+    {
+        let _write_guard = state.snapshot_write_lock.lock().await;
+    }
+    let io_result = persistence::shutdown_snapshot_service(state).await;
+    if let Err(error) = &io_result {
+        tracing::error!(%error, "snapshot I/O shutdown did not complete successfully");
+    }
+    // Accepted recovery, workspace mutations and final persistence can still
+    // require this bank. Stop it only after those owners drain;
+    // final codec events were already flushed during the grace period above.
+    if let Some(publisher) = state.startup_progress.get() {
+        if let Some(phase) = publisher.begin() {
+            phase.finish().await;
+        }
+    }
+    if let Some(execution) = state.execution.get() {
+        execution.request_shutdown();
+    }
+    // Cleanup is complete even when one of the earlier stages failed. Report
+    // the first failure; the independent stage errors were all logged above.
+    recovery_result
+        .and(writer_result)
+        .and(flush_result)
+        .and(io_result)
+}
+
+/// Owned restoration frame: poll on the coordination runtime, retire on CPU.
+pub(crate) type SnapshotRestoreFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
+
+async fn snapshot_restore_frame(state: Arc<ServerState>, snapshot: persistence::SessionSnapshot) {
+    restore_snapshot_data(&state, snapshot).await;
+}
+
+pub(crate) fn snapshot_restore_frame_bytes() -> usize {
+    fn frame_size<F>(_: fn(Arc<ServerState>, persistence::SessionSnapshot) -> F) -> usize {
+        std::mem::size_of::<F>()
+    }
+    frame_size(snapshot_restore_frame)
+}
+
+pub(crate) fn boxed_snapshot_restore_future(
+    state: Arc<ServerState>,
+    snapshot: persistence::SessionSnapshot,
+) -> SnapshotRestoreFuture {
+    Box::pin(snapshot_restore_frame(state, snapshot))
 }
 
 /// Applies a crash-recovery snapshot: replaces `state.tree` wholesale (the
@@ -389,9 +463,9 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
 ///
 /// This function has two callers: `run`'s own boot sequence (when
 /// `SessionRecoveryConfig` is not `AskBeforeRestore`, the tree is still
-/// empty at this point so there is nothing to orphan) and
-/// `ipc::handlers::handle_session_recovery_resolution` (when it *is*
-/// `AskBeforeRestore`, the server serves requests -- including `NewPane` --
+/// empty at this point so there is nothing to orphan) and the server-owned
+/// `recovery::resolve` task (when it *is* `AskBeforeRestore`, the server
+/// serves requests -- including `NewPane` --
 /// against an empty tree for as long as the restore decision is pending,
 /// so by the time this runs `state.tree`/`state.panes` may already hold
 /// live panes the snapshot knows nothing about). Because `state.tree` is
@@ -422,22 +496,47 @@ fn publish_ready_log_metadata(metadata: &ReadyLogMetadata) -> Result<(), ServerE
 pub(crate) async fn restore_snapshot(
     state: &Arc<ServerState>,
     snapshot: crate::snapshot_io::LoadedSnapshot,
-) {
-    let (snapshot, storage) = snapshot.into_parts();
-    // Transfer custody before the first await. Cancellation cannot release
-    // the read admission while restored tree/history data is still live.
-    state.retain_snapshot_read_storage(storage);
-    restore_snapshot_data(state, snapshot).await;
+) -> std::ops::ControlFlow<crate::snapshot_io::LoadedSnapshot, ()> {
+    match snapshot.into_restore_future(Arc::clone(state)) {
+        std::ops::ControlFlow::Continue(mut frame) => {
+            // Poll on the original coordination runtime. Cancellation drops
+            // only this retiring handle; the actual future, pending iterators,
+            // originals and held locks are destroyed by the existing CPU bank.
+            frame.as_mut().await;
+            std::ops::ControlFlow::Continue(())
+        }
+        std::ops::ControlFlow::Break(snapshot) => {
+            #[cfg(test)]
+            {
+                // Independent no-bank fixtures qualify restore semantics only.
+                let (snapshot, storage) = snapshot.into_parts();
+                state.retain_snapshot_read_storage(storage);
+                restore_snapshot_data(state, snapshot).await;
+                std::ops::ControlFlow::Continue(())
+            }
+            #[cfg(not(test))]
+            {
+                // Preserve the exact original for the semantic owner to retry.
+                std::ops::ControlFlow::Break(snapshot)
+            }
+        }
+    }
 }
 
 async fn restore_snapshot_data(
     state: &Arc<ServerState>,
     mut snapshot: persistence::SessionSnapshot,
 ) {
+    let startup = state
+        .startup_progress
+        .get()
+        .and_then(startup_progress::Publisher::begin);
     let pane_count = snapshot.panes.len();
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
+    #[cfg(test)]
+    state.recovery.notify_restore_prepublication();
     // Prune checks the entire tree under this fence. Publish a restored tree
     // under the same fence so a new worktree user cannot appear after that
     // check and before Git removal. Respawn takes the fence again later.
@@ -497,12 +596,19 @@ async fn restore_snapshot_data(
         drop(panes);
     }
     drop(publish_guard);
+    #[cfg(test)]
+    state.recovery.after_restore_publication.notify_waiters();
     state.workspace_git_status_cache.write().await.clear();
 
     let mut failed_pane_ids = Vec::new();
     let mut missing_workspace_pane_ids = Vec::new();
-    for pane_snapshot in snapshot.panes {
+    for (restored_count, pane_snapshot) in snapshot.panes.into_iter().enumerate() {
         let node_id = pane_snapshot.node_id;
+        if let Some(phase) = &startup {
+            phase
+                .publish_pane(state, node_id, restored_count, pane_count)
+                .await;
+        }
         let (saved_location, project_root) = {
             let tree = state.tree.read().await;
             (
@@ -705,6 +811,9 @@ async fn restore_snapshot_data(
     // already-due schedule cannot race the executor into finding no
     // registered pane to write to yet.
     state.scheduled_input_changed.notify_one();
+    if let Some(phase) = &startup {
+        phase.finish().await;
+    }
 }
 
 /// End-to-end test of the crash-recovery restore path: writes a
@@ -772,7 +881,10 @@ mod restore_tests {
     #[tokio::test]
     async fn missing_worktree_restores_shell_without_running_saved_command() {
         let directory = tempfile::tempdir().expect("create tempdir");
-        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "missing-worktree-test".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -782,7 +894,7 @@ mod restore_tests {
             socket_path: directory.path().join("session.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1227,7 +1339,10 @@ mod restore_tests {
     #[tokio::test]
     async fn restore_snapshot_tears_down_a_pane_orphaned_by_the_tree_overwrite() {
         let dir = tempfile::tempdir().expect("create tempdir");
-        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "orphan-test".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(dir.path())
@@ -1237,7 +1352,7 @@ mod restore_tests {
             socket_path: dir.path().join("orphan-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1306,7 +1421,10 @@ mod restore_tests {
     async fn restore_snapshot_tears_down_an_orphaned_pane_whose_id_collides_with_a_snapshot_group()
     {
         let dir = tempfile::tempdir().expect("create tempdir");
-        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "collision-test".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(dir.path())
@@ -1316,7 +1434,7 @@ mod restore_tests {
             socket_path: dir.path().join("collision-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -1413,7 +1531,10 @@ mod restore_tests {
     #[tokio::test]
     async fn spawn_and_register_pane_tears_down_its_own_resource_if_the_node_was_removed_first() {
         let dir = tempfile::tempdir().expect("create tempdir");
-        let (sound_requests, _playback_task) = crate::sounds::spawn(Arc::new(NoopSoundPlayer));
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "new-pane-race-test".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(dir.path())
@@ -1423,7 +1544,7 @@ mod restore_tests {
             socket_path: dir.path().join("new-pane-race-test.sock"),
             detection_config: DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,

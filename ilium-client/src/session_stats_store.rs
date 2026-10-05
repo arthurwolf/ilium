@@ -25,6 +25,14 @@ use crate::session_stats::{SessionStats, StatsAccumulator};
 /// bounds how quickly new activity shows up.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
+/// Transcript readers allowed at once. One slot belongs to the background cost
+/// overlay (see `MAX_CONCURRENT_STATS_WORKERS`), the rest stay free so an open
+/// statistics dialog never waits behind multi-gigabyte background reads.
+const MAX_STATS_PASSES: usize = 3;
+
+/// Panes whose statistics are retained at once (each may hold up to 32 MiB).
+const MAX_STATS_ENTRIES: usize = 16;
+
 /// Everything the worker needs to find and read one pane's transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatsRequest {
@@ -274,15 +282,54 @@ impl SessionStatsStore {
         request: StatsRequest,
         now: Instant,
     ) -> bool {
-        if self.passes.len() >= 2 {
+        self.request_refresh_with_priority(pane_id, request, now, false)
+    }
+
+    /// Like [`Self::request_refresh`], for a pane the user is looking at. When
+    /// the cache is full the least recently refreshed idle entry of a pane
+    /// nobody is viewing gives up its slot, so an open dialog is never left
+    /// waiting for a statistics entry that background refreshes will not free.
+    pub fn request_refresh_interactive(
+        &mut self,
+        pane_id: NodeId,
+        request: StatsRequest,
+        now: Instant,
+    ) -> bool {
+        self.request_refresh_with_priority(pane_id, request, now, true)
+    }
+
+    fn request_refresh_with_priority(
+        &mut self,
+        pane_id: NodeId,
+        request: StatsRequest,
+        now: Instant,
+        is_interactive: bool,
+    ) -> bool {
+        if self.passes.len() >= MAX_STATS_PASSES {
             return false;
         }
-        if self.entries.len() >= 16 && !self.entries.contains_key(&pane_id) {
-            self.diagnostic = Some(
-                "Statistics cache capacity reached; requested pane has no complete statistics"
-                    .into(),
-            );
-            return false;
+        if self.entries.len() >= MAX_STATS_ENTRIES && !self.entries.contains_key(&pane_id) {
+            let victim = is_interactive
+                .then(|| {
+                    self.entries
+                        .iter()
+                        .filter(|(_, entry)| !entry.in_flight)
+                        .min_by_key(|(_, entry)| entry.last_started)
+                        .map(|(id, _)| *id)
+                })
+                .flatten();
+            match victim {
+                Some(victim) => {
+                    self.entries.remove(&victim);
+                }
+                None => {
+                    self.diagnostic = Some(
+                        "Statistics cache capacity reached; requested pane has no complete statistics"
+                            .into(),
+                    );
+                    return false;
+                }
+            }
         }
         if request.session_id.capacity() > 64 * 1024
             || request.project_path.capacity() > 64 * 1024
@@ -307,7 +354,26 @@ impl SessionStatsStore {
         let context_storage = match self.storage_quota.reserve_external_storage(context_bytes) {
             Ok(storage) => Arc::new(storage),
             Err(reason) => {
-                self.diagnostic = Some(format!("Statistics context storage admission: {reason:?}"));
+                let message = format!("Statistics context storage admission: {reason:?}");
+                self.diagnostic = Some(message.clone());
+                // A refusal other than momentary contention would otherwise leave
+                // the dialog on "Reading the session transcript" for good.
+                if reason != ilium_execution::RejectReason::Busy {
+                    let entry = self.entries.entry(pane_id).or_insert_with(|| StatsEntry {
+                        stats: None,
+                        state: LoadState::Idle,
+                        accumulator: None,
+                        transcript_path: None,
+                        request: request.clone(),
+                        generation: 0,
+                        in_flight: false,
+                        last_started: None,
+                        _context_storage: None,
+                    });
+                    if entry.stats.is_none() && entry.request == request {
+                        entry.state = LoadState::Unavailable(message);
+                    }
+                }
                 return false;
             }
         };
@@ -383,8 +449,12 @@ impl SessionStatsStore {
         };
         match client.try_submit(
             Lane::Io,
+            // The pass streams the transcript through a 1 MiB reader and 1 MiB
+            // line buffer; retained statistics are charged separately as
+            // external storage. Declaring more only starves the shared 512 MiB
+            // input budget (history scan, cost overlay) of admissions.
             JobCost {
-                input_bytes: 128 * 1024 * 1024,
+                input_bytes: 16 * 1024 * 1024,
                 result_bytes: 1024 * 1024,
             },
             job,

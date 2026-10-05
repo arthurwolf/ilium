@@ -85,6 +85,26 @@ impl PinnedFile {
     pub fn is_empty(&self) -> io::Result<bool> {
         self.len().map(|length| length == 0)
     }
+    pub fn modified(&self) -> io::Result<std::time::SystemTime> {
+        if identity(&self.file)? != self.identity {
+            return Err(io::Error::other("selected file changed before age read"));
+        }
+        self.file.metadata()?.modified()
+    }
+    /// Native cache use is recorded on the completed index inode. This is
+    /// advisory eviction order only: it never changes index content/authority.
+    pub fn mark_used(&self) -> io::Result<()> {
+        if identity(&self.file)? != self.identity {
+            return Err(io::Error::other("selected file changed before use mark"));
+        }
+        self.file
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))?;
+        if identity(&self.file)? != self.identity {
+            return Err(io::Error::other("selected file changed after use mark"));
+        }
+        self.file.sync_all()
+    }
+
     /// Positional reads preserve the shared selected handle's file offset.
     pub fn read_at(&self, out: &mut [u8], offset: u64) -> io::Result<usize> {
         #[cfg(target_os = "linux")]
@@ -184,6 +204,83 @@ impl PinnedDirectory {
             Err(unsupported())
         }
     }
+    /// Readers retain a shared inode lease so root-budget eviction cannot
+    /// remove chunks while a playback window can still fault them in.
+    pub fn try_shared_lease(&self) -> io::Result<DirectoryMutationLease> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let root = self.root.try_clone_file()?;
+            let dot = std::ffi::CString::new(".").map_err(io::Error::other)?;
+            let descriptor = unsafe {
+                libc::openat(
+                    root.as_raw_fd(),
+                    dot.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                )
+            };
+            if descriptor < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let file = unsafe { File::from_raw_fd(descriptor) };
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(DirectoryMutationLease { _file: file })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(unsupported())
+        }
+    }
+    /// Remove only the exact pinned regular file under the caller's directory
+    /// mutation lease. A substituted inode or symlink is refused.
+    pub fn remove_pinned_file(&self, leaf: &str, file: &PinnedFile) -> io::Result<()> {
+        validate_leaf(leaf)?;
+        if file.identity() != identity(&file.file)? {
+            return Err(io::Error::other("clip removal handle changed"));
+        }
+        self.root.remove_regular(OsStr::new(leaf), &file.file)
+    }
+    /// Drop an empty pinned clip directory only when its inode is still the
+    /// selected one. The caller holds the parent namespace mutation lease.
+    pub fn remove_empty_child(&self, leaf: &str, expected: FileIdentity) -> io::Result<()> {
+        validate_leaf(leaf)?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+            let root = self.root.try_clone_file()?;
+            let leaf = std::ffi::CString::new(leaf.as_bytes()).map_err(io::Error::other)?;
+            let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if unsafe {
+                libc::fstatat(
+                    root.as_raw_fd(),
+                    leaf.as_ptr(),
+                    stat.as_mut_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            let stat = unsafe { stat.assume_init() };
+            if stat.st_mode & libc::S_IFMT != libc::S_IFDIR
+                || stat.st_dev != expected.device
+                || stat.st_ino != expected.inode
+            {
+                return Err(io::Error::other("clip directory changed before removal"));
+            }
+            if unsafe { libc::unlinkat(root.as_raw_fd(), leaf.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            self.sync()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = expected;
+            Err(unsupported())
+        }
+    }
     pub fn sync(&self) -> io::Result<()> {
         self.root.sync_all()
     }
@@ -192,11 +289,18 @@ impl PinnedDirectory {
         #[cfg(target_os = "linux")]
         {
             static NEXT: AtomicU64 = AtomicU64::new(1);
-            let sequence = NEXT
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
-                    value.checked_add(1)
-                })
-                .map_err(|_| io::Error::other("storage temporary identity exhausted"))?;
+            let sequence = loop {
+                let current = NEXT.load(Ordering::Acquire);
+                let next = current
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("storage temporary identity exhausted"))?;
+                if NEXT
+                    .compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    break current;
+                }
+            };
             let mut random = [0u8; 16];
             getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
             let suffix = random

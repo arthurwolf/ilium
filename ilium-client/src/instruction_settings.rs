@@ -11,6 +11,9 @@ pub enum InstructionField {
     ProjectNaming,
     SmartCopy,
     AskForUpdate,
+    /// Custom remote-compaction prompt. Edited from the Remote compaction tab
+    /// only, so it is deliberately not part of `ALL` / the LLM tab lists.
+    CompactionPrompt,
 }
 impl InstructionField {
     pub const ALL: [Self; 7] = [
@@ -31,6 +34,7 @@ impl InstructionField {
             Self::ProjectNaming => "Project naming instructions",
             Self::SmartCopy => "Smart Copy instructions",
             Self::AskForUpdate => "Ask for update instructions",
+            Self::CompactionPrompt => "Remote compaction custom prompt",
         }
     }
     pub fn compact_label(self) -> &'static str {
@@ -42,6 +46,7 @@ impl InstructionField {
             Self::ProjectNaming => "Project naming",
             Self::SmartCopy => "Smart Copy",
             Self::AskForUpdate => "Ask for update",
+            Self::CompactionPrompt => "Compaction prompt",
         }
     }
     pub fn compact_description(self) -> &'static str {
@@ -53,6 +58,7 @@ impl InstructionField {
             Self::ProjectNaming => "Project names and acronyms.",
             Self::SmartCopy => "Prioritize exact-source items.",
             Self::AskForUpdate => "What status updates emphasize.",
+            Self::CompactionPrompt => "Summary instructions.",
         }
     }
     pub fn description(self) -> &'static str {
@@ -68,6 +74,10 @@ impl InstructionField {
             Self::ProjectNaming => "Preferred language and abbreviations for project names.",
             Self::SmartCopy => "Which exact-source copy targets to prioritize.",
             Self::AskForUpdate => "What agents should emphasize when asked for a status update.",
+            Self::CompactionPrompt => {
+                "Instructions the summarizer follows for the Custom compaction technique. \
+Empty uses the built-in Claude Code prompt."
+            }
         }
     }
     pub fn value(self, app: &App) -> &str {
@@ -80,6 +90,7 @@ impl InstructionField {
             Self::ProjectNaming => &i.project_naming,
             Self::SmartCopy => &i.smart_copy,
             Self::AskForUpdate => &i.ask_for_update,
+            Self::CompactionPrompt => &app.remote_compaction_settings.custom_prompt,
         }
     }
 }
@@ -133,8 +144,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, select
         } else {
             field
                 .value(app)
-                .replace('\n', " ")
                 .chars()
+                .map(|character| if character == '\n' { ' ' } else { character })
                 .take(usize::from(area.width.saturating_sub(8)))
                 .collect()
         };
@@ -158,6 +169,10 @@ impl App {
             self.settings_commit_voice_prompt(value);
             return;
         }
+        if field == InstructionField::CompactionPrompt {
+            self.settings_commit_remote_compaction_prompt(value);
+            return;
+        }
         let mut settings = self.inference_settings.clone();
         let i = &mut settings.instructions;
         match field {
@@ -167,7 +182,7 @@ impl App {
             InstructionField::ProjectNaming => i.project_naming = value,
             InstructionField::SmartCopy => i.smart_copy = value,
             InstructionField::AskForUpdate => i.ask_for_update = value,
-            InstructionField::Voice => unreachable!(),
+            InstructionField::Voice | InstructionField::CompactionPrompt => unreachable!(),
         };
         self.apply_and_persist_inference_settings(settings);
     }

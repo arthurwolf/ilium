@@ -98,6 +98,11 @@ pub async fn handle_request(
             handle_attach(state, &session, direct_tx, false).await;
             false
         }
+        ClientRequest::DiscardTerminalDelivery { .. } => {
+            // Intercepted by `ipc::connection`: delivery watermarks belong to
+            // the connection writer.
+            false
+        }
         ClientRequest::SetVisiblePanes { .. } => {
             // Per-connection stream selection is intercepted by
             // `ipc::connection` before generic request dispatch. Reaching
@@ -665,10 +670,13 @@ pub async fn handle_request(
             false
         }
         ClientRequest::Detach => true,
-        ClientRequest::KillSession => {
-            handle_kill_session(state).await;
-            true
-        }
+        ClientRequest::KillSession => match handle_kill_session(state).await {
+            Ok(()) => true,
+            Err(message) => {
+                send_direct_error(direct_tx, message.to_string()).await;
+                false
+            }
+        },
         ClientRequest::SetPaneFocus { pane_id, focused } => {
             handle_set_pane_focus(state, pane_id, focused).await;
             false
@@ -682,14 +690,39 @@ pub async fn handle_request(
             true
         }
         ClientRequest::UpdateSoundSettings { settings } => {
-            *state.sound_settings.write().await = settings;
+            match state.sound_requests.admit_settings(settings) {
+                Ok(settings) => *state.sound_settings.write().await = settings,
+                Err((reason, original)) => {
+                    send_direct_error(
+                        direct_tx,
+                        format!("sound settings admission refused: {reason:?}"),
+                    )
+                    .await;
+                    drop(original);
+                }
+            }
             false
         }
         ClientRequest::PreviewSound { source, file } => {
+            let current = state.sound_settings.read().await;
             let settings = ilium_sound::SoundSettings {
                 source,
                 file,
-                ..state.sound_settings.read().await.clone()
+                design: current.design.clone(),
+                events: current.events,
+            };
+            drop(current);
+            let settings = match state.sound_requests.admit_settings(settings) {
+                Ok(settings) => settings,
+                Err((reason, original)) => {
+                    send_direct_error(
+                        direct_tx,
+                        format!("sound preview admission refused: {reason:?}"),
+                    )
+                    .await;
+                    drop(original);
+                    return false;
+                }
             };
             crate::sounds::enqueue(
                 state,
@@ -702,6 +735,18 @@ pub async fn handle_request(
             false
         }
         ClientRequest::PreviewSoundSettings { settings } => {
+            let settings = match state.sound_requests.admit_settings(settings) {
+                Ok(settings) => settings,
+                Err((reason, original)) => {
+                    send_direct_error(
+                        direct_tx,
+                        format!("sound preview admission refused: {reason:?}"),
+                    )
+                    .await;
+                    drop(original);
+                    return false;
+                }
+            };
             crate::sounds::enqueue(
                 state,
                 crate::sounds::PlaybackRequest {
@@ -1240,42 +1285,52 @@ async fn handle_attach(
         .await;
         return;
     }
-    let recovery_pane_count = state
-        .pending_session_recovery
-        .lock()
-        .await
-        .as_ref()
-        .map(|snapshot| snapshot.panes.len());
-    if let Some(pane_count) = recovery_pane_count {
-        let snapshot = state.tree.read().await.clone();
-        send_direct(
-            direct_tx,
-            ServerEvent::PaneStateSnapshot {
-                tree: snapshot,
-                detection_evidence: Vec::new(),
-            },
-        )
-        .await;
-        let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
-        send_direct(
-            direct_tx,
-            ServerEvent::AgentDetectionSettingsChanged {
-                request_id: None,
-                result: Ok(crate::config::agent_detection_settings(
-                    &detection,
-                    &custom_signatures,
-                )),
-            },
-        )
-        .await;
-        let settings = state.text_trigger_settings.read().await.settings.clone();
-        send_direct(direct_tx, ServerEvent::TextTriggersChanged { settings }).await;
-        send_direct(
-            direct_tx,
-            ServerEvent::SessionRecoveryAvailable { pane_count },
-        )
-        .await;
-        return;
+    loop {
+        match state.recovery.attach_status().await {
+            crate::recovery::AttachStatus::Pending { pane_count } => {
+                let snapshot = state.tree.read().await.clone();
+                send_direct(
+                    direct_tx,
+                    ServerEvent::PaneStateSnapshot {
+                        tree: snapshot,
+                        detection_evidence: Vec::new(),
+                    },
+                )
+                .await;
+                let (detection, custom_signatures) =
+                    state.agent_detection_settings_snapshot().await;
+                send_direct(
+                    direct_tx,
+                    ServerEvent::AgentDetectionSettingsChanged {
+                        request_id: None,
+                        result: Ok(crate::config::agent_detection_settings(
+                            &detection,
+                            &custom_signatures,
+                        )),
+                    },
+                )
+                .await;
+                let settings = state.text_trigger_settings.read().await.settings.clone();
+                send_direct(direct_tx, ServerEvent::TextTriggersChanged { settings }).await;
+                send_direct(
+                    direct_tx,
+                    ServerEvent::SessionRecoveryAvailable { pane_count },
+                )
+                .await;
+                return;
+            }
+            crate::recovery::AttachStatus::Resolving(completion) => {
+                if let Err(message) = crate::recovery::wait_for_result(completion).await {
+                    send_direct_error(direct_tx, message.to_string()).await;
+                    return;
+                }
+            }
+            crate::recovery::AttachStatus::Failed(message) => {
+                send_direct_error(direct_tx, message.to_string()).await;
+                return;
+            }
+            crate::recovery::AttachStatus::Settled => break,
+        }
     }
 
     send_initial_state(state, direct_tx, include_terminal_output).await;
@@ -1458,34 +1513,21 @@ async fn state_synchronization_events(
     events
 }
 
-async fn handle_session_recovery_resolution(
+pub(crate) async fn handle_session_recovery_resolution(
     state: &Arc<ServerState>,
     restore: bool,
     direct_tx: &mpsc::Sender<ServerEvent>,
 ) {
-    let Some(snapshot) = state.pending_session_recovery.lock().await.take() else {
-        send_direct_error(
-            direct_tx,
-            "No session recovery decision is pending".to_string(),
-        )
-        .await;
-        return;
-    };
-    if restore {
-        crate::restore_snapshot(state, snapshot).await;
-        broadcast_and_persist(state).await;
-    } else {
-        let write_guard = Arc::clone(&state.snapshot_write_lock).lock_owned().await;
-        match crate::persistence::remove_snapshot_ordered(state, write_guard).await {
-            Ok(_write_guard) => {}
-            Err(error) => {
-                send_direct_error(
-                    direct_tx,
-                    format!("Could not discard stored session snapshot: {error}"),
-                )
-                .await;
-            }
+    let completion = match state.recovery.admit(Arc::clone(state), restore).await {
+        Ok(completion) => completion,
+        Err(refusal) => {
+            send_direct_error(direct_tx, refusal.to_string()).await;
+            return;
         }
+    };
+    if let Err(message) = crate::recovery::wait_for_result(completion).await {
+        send_direct_error(direct_tx, message.to_string()).await;
+        return;
     }
     // Every real caller reaches this only through `AttachInteractive` (the
     // TUI never issues the legacy `Attach`), which promises metadata-only
@@ -2739,14 +2781,16 @@ async fn alert_task_outcome(
         return;
     }
     if is_sound_enabled {
-        crate::sounds::enqueue(
-            state,
-            crate::sounds::PlaybackRequest {
-                settings: sound_settings,
-                event: Some(kind.sound_event()),
-                pane_name: Some(pane_name.clone()),
-            },
-        );
+        match state.sound_requests.prepare(
+            &sound_settings,
+            Some(kind.sound_event()),
+            Some(&pane_name),
+        ) {
+            Ok(request) => crate::sounds::enqueue_prepared(state, request),
+            Err(reason) => {
+                tracing::warn!(?reason, "task sound preparation refused before allocation")
+            }
+        }
     }
     if is_notification_enabled {
         let is_agent_working = session_status
@@ -6275,7 +6319,10 @@ async fn handle_mouse_input(
     }
 }
 
-async fn handle_kill_session(state: &Arc<ServerState>) {
+async fn handle_kill_session(state: &Arc<ServerState>) -> crate::recovery::Resolution {
+    // A kill must finish or refuse the accepted restore before clearing its
+    // tree and deleting its file; otherwise that restore could republish panes.
+    state.recovery.close_and_drain().await?;
     let mut tree = state.tree.write().await;
     // Fence server-owned workspace tasks while holding the same tree lock
     // they need for pane commit. Any earlier commit is cleared below; any
@@ -6332,12 +6379,13 @@ async fn handle_kill_session(state: &Arc<ServerState>) {
     // where connection tasks get aborted, after a short grace period --
     // see its comments.
     state.shutdown.notify_waiters();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     fn snapshot_io_handler_state(directory: &tempfile::TempDir) -> Arc<ServerState> {
-        let (sound_requests, _sound_receiver) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
         Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "snapshot-handler-test".into(),
             session_cwd: directory.path().to_owned(),
@@ -6346,7 +6394,7 @@ mod tests {
             socket_path: directory.path().join("isolated.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -7155,7 +7203,8 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), kill)
             .await
             .expect("kill completed")
-            .expect("kill task");
+            .expect("kill task")
+            .expect("kill succeeded");
         assert!(!state.snapshot_path.exists());
         assert!(crate::persistence::save_snapshot(&state).await.is_err());
         crate::persistence::shutdown_snapshot_service(&state)
@@ -7175,7 +7224,7 @@ mod tests {
             .await
             .expect("readback")
             .expect("saved snapshot");
-        *state.pending_session_recovery.lock().await = Some(snapshot);
+        assert!(state.recovery.install_initial(snapshot).await.is_ok());
         let (direct_tx, _direct_rx) = tokio::sync::mpsc::channel(128);
         handle_session_recovery_resolution(&state, false, &direct_tx).await;
         assert!(!state.snapshot_path.exists());
@@ -7320,7 +7369,7 @@ mod tests {
         // The extra MiB guarantees eviction even when PTY read chunk sizes vary.
         bulk.set_len(33 * 1024 * 1024)
             .expect("size sparse eviction input");
-        let (sound_requests, _sound_receiver) = tokio::sync::mpsc::channel(1);
+        let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "forwarder-two-lags".into(),
             session_cwd: directory.path().to_owned(),
@@ -7329,7 +7378,7 @@ mod tests {
             socket_path: directory.path().join("isolated.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -7707,7 +7756,10 @@ mod tests {
     #[tokio::test]
     async fn delayed_transcript_cannot_replace_exact_receipt_backed_prompt() {
         let directory = tempfile::tempdir().expect("create transcript recovery test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "exact-prompt-transcript-fence".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -7717,7 +7769,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -7968,7 +8020,10 @@ mod tests {
     #[tokio::test]
     async fn staged_automatic_enter_rejects_changed_invocation_with_same_pty() {
         let directory = tempfile::tempdir().expect("isolated staged-invocation fixture");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "staged-invocation-fence".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -7978,7 +8033,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8239,7 +8294,10 @@ mod tests {
     #[tokio::test]
     async fn bookmark_request_broadcasts_the_authoritative_tree_and_marks_it_for_persistence() {
         let directory = tempfile::tempdir().expect("create bookmark test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "bookmark-request".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8249,7 +8307,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8294,7 +8352,10 @@ mod tests {
     #[tokio::test]
     async fn locking_a_folder_closed_collapses_it_and_rejects_a_stale_expand_request() {
         let directory = tempfile::tempdir().expect("create lock test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "lock-request".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8304,7 +8365,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8392,7 +8453,10 @@ mod tests {
     #[tokio::test]
     async fn focus_acknowledges_only_unread_activity_not_restructure_activity() {
         let directory = tempfile::tempdir().expect("create activity test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "focus-activity".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8402,7 +8466,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8474,7 +8538,10 @@ mod tests {
     #[tokio::test]
     async fn hidden_terminal_output_publishes_only_the_first_unread_revision() {
         let directory = tempfile::tempdir().expect("create hidden activity directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "hidden-terminal-activity".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8486,7 +8553,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8536,7 +8603,10 @@ mod tests {
     #[tokio::test]
     async fn accepted_terminal_input_and_output_each_advance_activity() {
         let directory = tempfile::tempdir().expect("create terminal activity directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "terminal-activity".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8546,7 +8616,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -8628,7 +8698,10 @@ mod tests {
         session_name: &str,
     ) -> (Arc<ServerState>, NodeId, tempfile::TempDir) {
         let directory = tempfile::tempdir().expect("create progress monitor test directory");
-        let (sound_requests, _sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, _sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: session_name.to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -8638,7 +8711,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -9718,7 +9791,10 @@ mod tests {
     #[tokio::test]
     async fn live_recovery_emits_only_the_missing_pane_tail() {
         let directory = tempfile::tempdir().expect("create recovery test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "pane-scoped-recovery".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -9728,7 +9804,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -9905,7 +9981,10 @@ mod tests {
     #[tokio::test]
     async fn project_restructure_handler_rebases_activity_and_preserves_splits() {
         let directory = tempfile::tempdir().expect("create restructure test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "protected-split-restructure".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -9915,7 +9994,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: false,
@@ -10102,7 +10181,10 @@ mod tests {
     #[tokio::test]
     async fn reverting_a_restructure_evicts_the_orphaned_panes_agent_debug_journal() {
         let directory = tempfile::tempdir().expect("create revert test directory");
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "revert-orphan-debug".to_string(),
             session_cwd: ilium_platform::paths::canonicalize(directory.path())
@@ -10112,7 +10194,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: crate::config::DetectionConfig::default(),
             notifications_config: crate::config::NotificationsConfig::default(),
-            sound_settings: ilium_sound::SoundSettings::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
             sound_requests,
             custom_signatures: Vec::new(),
             agent_debug_menu_enabled: true,
@@ -10204,7 +10286,10 @@ mod tests {
             }
         }
         let directory = tempfile::tempdir().unwrap();
-        let (sound_requests, sound_task) = crate::sounds::spawn(Arc::new(crate::NoopSoundPlayer));
+        let (sound_requests, sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
         let _sound_guard = StopSound(sound_task);
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "semantic-transaction".into(),
@@ -10214,7 +10299,7 @@ mod tests {
             socket_path: directory.path().join("test.sock"),
             detection_config: Default::default(),
             notifications_config: Default::default(),
-            sound_settings: Default::default(),
+            sound_settings: crate::sounds::test_settings(Default::default()),
             sound_requests,
             custom_signatures: vec![],
             agent_debug_menu_enabled: false,

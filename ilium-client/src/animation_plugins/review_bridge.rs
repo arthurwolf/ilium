@@ -6,7 +6,10 @@ use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ilium_animation_js::{
     manifest::Capability,
     package::Package,
-    permissions::{PackageIdentity, PlanReview, UserChoice, Verdict},
+    permissions::{
+        Capability as NativeCapability, PackageIdentity, PlanReview, Scope, Selection, UserChoice,
+        Verdict,
+    },
 };
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ratatui::{
@@ -196,6 +199,11 @@ enum Intent {
     Cancel {
         envelope: Arc<ReviewEnvelope>,
     },
+    Pick {
+        envelope: Arc<ReviewEnvelope>,
+        request_id: String,
+        path: String,
+    },
 }
 /// Returned only to the native owning worker. resolve consumes the ORIGINAL
 /// broker-issued PlanReview, never a reconstructed stamp or deserialized grant.
@@ -207,6 +215,25 @@ pub(crate) enum ReviewAction {
     },
     Cancel {
         selection_revision: u64,
+    },
+    Pick {
+        selection_revision: u64,
+        request_id: String,
+        path: String,
+        slot: String,
+        disk_selection: Selection,
+        writable: bool,
+        review_revision: u64,
+        authorization_epoch: u64,
+    },
+    PickAudio {
+        selection_revision: u64,
+        request_id: String,
+        endpoint: String,
+        scope_device: String,
+        capability: NativeCapability,
+        review_revision: u64,
+        authorization_epoch: u64,
     },
 }
 pub(crate) struct ReviewBridge {
@@ -412,8 +439,30 @@ impl ReviewBridge {
             envelope: pending.envelope.clone(),
             view: pending.envelope.projection.clone(),
             choice_cursor: 2,
-            error: String::new(),
+            error: state.error.clone(),
+            selection_input: None,
         }))
+    }
+    pub(crate) fn picker_error(&self, selection: u64, error: &str) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Permission mailbox poisoned")?;
+        if state.selection != selection
+            || state.phase != ReviewPhase::Review
+            || state.pending.is_none()
+            || state.intent.is_some()
+        {
+            return Err("Native picker error belongs to a stale review".into());
+        }
+        state.error = error
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(240)
+            .collect();
+        drop(state);
+        self.ui_ready.notify_one();
+        Ok(())
     }
     pub(crate) fn is_current(&self, session: &ReviewSession) -> bool {
         self.state.lock().ok().is_some_and(|state| {
@@ -460,6 +509,48 @@ impl ReviewBridge {
         self.ui_ready.notify_one();
         Ok(())
     }
+    fn queue_pick(&self, session: &ReviewSession, path: String) -> Result<()> {
+        if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control) {
+            return Err("Selected path is empty or outside native limits".into());
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Permission mailbox poisoned")?;
+        let pending = state
+            .pending
+            .as_ref()
+            .ok_or("Native review no longer pending")?;
+        if state.intent.is_some() || !Arc::ptr_eq(&pending.envelope, &session.envelope) {
+            return Err("Native picker intent is stale".into());
+        }
+        if !pending
+            .envelope
+            .verdicts
+            .get(session.view.cursor)
+            .is_some_and(|verdict| *verdict == Verdict::NeedsSelection)
+        {
+            return Err("Current right does not need a native selection".into());
+        }
+        let request_id = pending
+            .envelope
+            .projection
+            .requests
+            .get(session.view.cursor)
+            .ok_or("Current native right missing")?
+            .request_id
+            .clone();
+        state.intent = Some(Intent::Pick {
+            envelope: session.envelope.clone(),
+            request_id,
+            path,
+        });
+        state.phase = ReviewPhase::Loading;
+        drop(state);
+        (self.wake_worker)();
+        self.ui_ready.notify_one();
+        Ok(())
+    }
     pub(crate) fn has_intent(&self) -> bool {
         self.state
             .lock()
@@ -501,7 +592,9 @@ impl ReviewBridge {
         };
         let pending = state.pending.take().ok_or("Native review disappeared")?;
         let envelope = match &intent {
-            Intent::Submit { envelope, .. } | Intent::Cancel { envelope } => envelope,
+            Intent::Submit { envelope, .. }
+            | Intent::Cancel { envelope }
+            | Intent::Pick { envelope, .. } => envelope,
         };
         if !Arc::ptr_eq(envelope, &pending.envelope) {
             return Err("Wrong native review token".into());
@@ -517,6 +610,57 @@ impl ReviewBridge {
                 // original teardown/invalidation; do not claim it completed.
                 Ok(Some(ReviewAction::Cancel {
                     selection_revision: selection,
+                }))
+            }
+            Intent::Pick {
+                request_id, path, ..
+            } => {
+                let item = pending
+                    .token
+                    .items()
+                    .iter()
+                    .find(|item| item.request.request_id == request_id)
+                    .ok_or("Native picker right disappeared")?;
+                if item.verdict != Verdict::NeedsSelection {
+                    return Err("Native picker verdict changed".into());
+                }
+                if let Scope::Audio { device, .. } = &item.request.right.scope {
+                    if !matches!(
+                        item.request.right.id,
+                        NativeCapability::AudioLoopback | NativeCapability::AudioMicrophone
+                    ) {
+                        return Err("Native audio picker capability mismatch".into());
+                    }
+                    return Ok(Some(ReviewAction::PickAudio {
+                        selection_revision: selection,
+                        request_id,
+                        endpoint: path,
+                        scope_device: device.clone(),
+                        capability: item.request.right.id,
+                        review_revision: pending.token.plan_revision(),
+                        authorization_epoch: pending.token.authorization_epoch(),
+                    }));
+                }
+                let Scope::Disk {
+                    slot,
+                    selection: disk_selection,
+                } = &item.request.right.scope
+                else {
+                    return Err("Native picker right is neither disk nor audio selection".into());
+                };
+                let writable = item.request.right.id == NativeCapability::DiskWrite;
+                if !writable && item.request.right.id != NativeCapability::DiskRead {
+                    return Err("Native picker capability mismatch".into());
+                }
+                Ok(Some(ReviewAction::Pick {
+                    selection_revision: selection,
+                    request_id,
+                    path,
+                    slot: slot.clone(),
+                    disk_selection: *disk_selection,
+                    writable,
+                    review_revision: pending.token.plan_revision(),
+                    authorization_epoch: pending.token.authorization_epoch(),
                 }))
             }
         }
@@ -555,14 +699,51 @@ pub(crate) struct ReviewSession {
     view: PermissionReview,
     choice_cursor: usize,
     error: String,
+    selection_input: Option<String>,
 }
 impl ReviewSession {
     pub(crate) fn handle_key(&mut self, bridge: &ReviewBridge, key: KeyCode) -> Result<()> {
         if !bridge.is_current(self) {
             return Err("Permission review changed; await native refresh".into());
         }
+        if let Some(path) = self.selection_input.as_mut() {
+            match key {
+                KeyCode::Esc => {
+                    self.selection_input = None;
+                    return Ok(());
+                }
+                KeyCode::Backspace => {
+                    path.pop();
+                    return Ok(());
+                }
+                KeyCode::Char(character) if !character.is_control() => {
+                    if path.len() + character.len_utf8() <= 4096 {
+                        path.push(character);
+                    }
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    let path = self
+                        .selection_input
+                        .take()
+                        .ok_or("Native path input vanished")?;
+                    return bridge.queue_pick(self, path);
+                }
+                _ => return Ok(()),
+            }
+        }
         match key {
             KeyCode::Esc => bridge.queue(self, true),
+            KeyCode::Char('p')
+                if self
+                    .envelope
+                    .verdicts
+                    .get(self.view.cursor)
+                    .is_some_and(|verdict| *verdict == Verdict::NeedsSelection) =>
+            {
+                self.selection_input = Some(String::new());
+                Ok(())
+            }
             KeyCode::Up => {
                 self.choice_cursor = self.choice_cursor.saturating_sub(1);
                 Ok(())
@@ -691,7 +872,15 @@ impl ReviewSession {
 
         if let Some(rect) = review_submit_rect(area) {
             let footer = if self.error.is_empty() {
-                "1–4/Space chooses · Tab changes right · Enter submits · Esc cancels"
+                if let Some(path) = &self.selection_input {
+                    frame.render_widget(
+                        Paragraph::new(format!("Selected path or exact audio source: {path}"))
+                            .style(style),
+                        rect,
+                    );
+                    return;
+                }
+                "1–4/Space chooses · Tab changes right · P selects path/source · Enter submits · Esc cancels"
             } else {
                 self.error.as_str()
             };

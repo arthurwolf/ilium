@@ -213,12 +213,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
         0
     );
     fixture.app.tree_state.select(Vec::new());
-    assert!(fixture.app.effective_animation_settings().is_none());
-    let mut other_authored = authored.clone();
-    other_authored.semantic_scope = SemanticScope::Entry;
-    fixture
-        .app
-        .install_animation_project_settings(fixture.other_path.clone(), Ok(other_authored));
+    // The authored animation is one global setting: the other project is
+    // resolved against the same settings, with no per-project load or rebind.
+    let _ = &fixture.other_path;
     assert_eq!(
         fixture
             .app
@@ -494,51 +491,63 @@ fn semantic_status_help_preserves_full_report_after_host_release() {
     );
 }
 #[test]
-fn semantic_project_binding_and_failed_authored_save_preserve_other_settings() {
+fn animation_settings_are_global_and_selecting_projects_never_rebinds_them() {
+    let home = tempfile::tempdir().unwrap();
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
-    let first_settings = AnimationSettings {
-        kind: AnimationKind::Semantic,
-        semantic_scope: SemanticScope::Entry,
+    let settings = AnimationSettings {
+        enabled: true,
+        kind: AnimationKind::MoonlitWater,
         hue_degrees: 17,
         ..Default::default()
     };
-    let second_settings = AnimationSettings {
-        kind: AnimationKind::MoonlitWater,
-        hue_degrees: 219,
-        ..Default::default()
-    };
-    crate::project_config::set_animation(first.path(), first_settings.clone()).unwrap();
-    crate::project_config::set_animation(second.path(), second_settings.clone()).unwrap();
-    let mut app = App::new("project-binding".into(), first.path().to_path_buf());
+    crate::project_config::set_animation(home.path(), settings.clone()).unwrap();
+    // A project's own old animation block must be ignored entirely.
+    crate::project_config::set_animation(
+        second.path(),
+        AnimationSettings {
+            kind: AnimationKind::MoonlitWater,
+            hue_degrees: 219,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut app = App::new("global-animation".into(), home.path().to_path_buf());
     let first_id = app.tree.add_project(first.path().to_path_buf()).unwrap();
     let second_id = app.tree.add_project(second.path().to_path_buf()).unwrap();
-    app.select_node(first_id);
     app.install_animation_project_settings(
-        first.path().to_path_buf(),
-        Ok(crate::project_config::load(first.path()).unwrap().animation),
+        home.path().to_path_buf(),
+        Ok(crate::project_config::load(home.path()).unwrap().animation),
     );
+    for project in [first_id, second_id, first_id] {
+        app.select_node(project);
+        app.synchronize_animation_project_settings();
+        app.settle_filesystem_for_test();
+        assert_eq!(app.animation_settings, settings.normalized());
+        assert_eq!(app.semantic_animation_error(), None);
+    }
+    // An edit made while another project is selected lands in the one global
+    // file and in no project.
     app.select_node(second_id);
-    app.synchronize_animation_project_settings();
-    app.settle_filesystem_for_test();
-    assert_eq!(app.animation_settings, second_settings.normalized());
     app.settings_select_animation_scene(AnimationKind::Semantic);
     app.settle_filesystem_for_test();
+    let saved = crate::project_config::load(home.path()).unwrap().animation;
+    assert_eq!(saved.kind, AnimationKind::Semantic);
+    assert_eq!(saved.hue_degrees, 17);
+    assert!(!first.path().join(".ilium/config.yaml").exists());
     assert_eq!(
-        crate::project_config::load(first.path()).unwrap().animation,
-        first_settings.normalized()
+        crate::project_config::load(second.path())
+            .unwrap()
+            .animation
+            .hue_degrees,
+        219,
+        "a project's old block is neither read nor rewritten"
     );
-    let saved_second = crate::project_config::load(second.path())
-        .unwrap()
-        .animation;
-    assert_eq!(saved_second.kind, AnimationKind::Semantic);
-    assert_eq!(saved_second.hue_degrees, 219);
-    let blocker = first.path().join("not-a-directory");
+    // A failed save keeps the previous settings and says so.
+    let blocker = home.path().join("not-a-directory");
     std::fs::write(&blocker, b"fixture").unwrap();
-    let blocked_id = app.tree.add_project(blocker.clone()).unwrap();
-    app.select_node(blocked_id);
-    app.settle_filesystem_for_test();
-    app.install_animation_project_settings(blocker.clone(), Ok(second_settings.clone()));
+    app.animation_home = blocker.clone();
+    app.install_animation_project_settings(blocker.clone(), Ok(settings.clone()));
     let before = app.animation_settings.clone();
     app.settings_select_animation_scene(AnimationKind::Semantic);
     app.settle_filesystem_for_test();

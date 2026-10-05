@@ -34,12 +34,15 @@ pub fn on_tick(
     let tree_transition_changed = app.tick_tree_transitions(now);
     let terminal_activity_changed = app.tick_terminal_activity(now);
     let autosave_wrote = app.tick_autosave();
-    let budget_saved =
-        app.tick_restructure_budget_autosave(now) | app.tick_inference_number_autosave(now);
+    let budget_saved = app.tick_restructure_budget_autosave(now)
+        | app.tick_inference_number_autosave(now)
+        | app.tick_remote_compaction_save(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let session_stats_changed = app.tick_session_stats(now);
+    let remote_compaction_started = app.tick_remote_compaction_monitor(now);
     let cost_changed = app.tick_cost(now);
+    let compaction_changed = app.tick_compaction(now);
     let model_catalog_changed = app.collect_model_catalog_preparation();
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
@@ -59,7 +62,9 @@ pub fn on_tick(
         || workspace_search_started
         || chatroom_changed
         || session_stats_changed
+        || remote_compaction_started
         || cost_changed
+        || compaction_changed
         || model_catalog_changed
         || context_menu_hover_changed
         || agent_popover_changed

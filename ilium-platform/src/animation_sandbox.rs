@@ -29,6 +29,47 @@ pub fn helper_executable_path(client_executable: &Path) -> io::Result<PathBuf> {
     )))
 }
 
+/// Fixed administrator-installed codec binary for the pipe-only Video adapter.
+/// Guest URLs, selected paths and package-relative names never choose this path.
+pub fn video_decoder_executable_path() -> io::Result<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(PathBuf::from("/usr/bin/ffmpeg"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "video decoder executable is not qualified on this platform",
+        ))
+    }
+}
+
+/// Open the inode of the *running* helper before its syscall seal. On Linux
+/// /proc/self/exe follows the loaded image even if the installation path is
+/// replaced after spawn; callers stream and hash it, then close it before seal.
+/// Other OSes remain unsupported until their sandbox has equivalent custody.
+pub fn open_running_helper_image() -> io::Result<std::fs::File> {
+    #[cfg(target_os = "linux")]
+    {
+        let image = std::fs::File::open("/proc/self/exe")?;
+        if !image.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "running helper image is not regular",
+            ));
+        }
+        Ok(image)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "running helper image custody unavailable",
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxLimits {
     pub memory_bytes: u64,

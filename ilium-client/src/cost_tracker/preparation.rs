@@ -398,19 +398,39 @@ impl CostTracker {
                 return changed;
             }
         };
-        let identity = Arc::clone(&capture.identity);
-        let Some(engine) = self.engine.take() else {
-            return changed;
-        };
-        let job = Derive { engine, capture };
-        match client.try_submit(
+        let reservation = match client.try_reserve_detailed(
             Lane::Cpu,
             JobCost {
                 input_bytes: 64 * MIB,
                 result_bytes: 4096,
             },
-            job,
         ) {
+            Ok(reservation) => reservation,
+            Err(failure) => {
+                let diagnostic = format!(
+                    "Cost CPU admission: {:?}; previous overlay retained",
+                    failure.reason
+                );
+                // Capture the rejecting ledger's evidence, not a later usage
+                // snapshot. Repeated ticks with the same refusal do not flood
+                // logs, and the unchanged engine remains available for retry.
+                if self.diagnostic.as_deref() != Some(diagnostic.as_str()) {
+                    tracing::warn!(
+                        reason = ?failure.reason,
+                        quota = ?failure.quota,
+                        "cost preparation admission refused"
+                    );
+                }
+                self.diagnostic = Some(diagnostic);
+                return true;
+            }
+        };
+        let identity = Arc::clone(&capture.identity);
+        let Some(engine) = self.engine.take() else {
+            return changed;
+        };
+        let job = Derive { engine, capture };
+        match reservation.submit(job) {
             Ok(receipt) => self.active = Some(Active { identity, receipt }),
             Err(rejected) => {
                 self.engine = Some(rejected.value.engine);

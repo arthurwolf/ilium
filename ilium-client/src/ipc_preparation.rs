@@ -275,6 +275,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
             count.vector(pane_ids);
         }
         R::SetVisiblePanes { pane_ids } => count.vector(pane_ids),
+        R::DiscardTerminalDelivery { pane_ids } => count.vector(pane_ids),
         R::UpdateSoundSettings { settings } | R::PreviewSoundSettings { settings } => {
             if let Some(path) = &settings.file {
                 count.path(path);

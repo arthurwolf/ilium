@@ -178,6 +178,7 @@ impl RestructureCompletionClient for InferenceSettings {
             system_prompt: ilium_prompts::naming::JSON_ONLY.to_string(),
             user_prompt: prompt.to_string(),
             max_tokens: RESTRUCTURE_MAX_TOKENS,
+            timeout: None,
         };
         Ok(ilium_inference::provider_from_settings(self)
             .complete(&request)?

@@ -119,6 +119,21 @@ pub fn set_terminal_scrollback(settings: &mut TerminalSettings, text: &str) -> R
     settings.scrollback_budget_mib = small_number(terminal_scrollback_spec(), text)?;
     Ok(())
 }
+pub fn terminal_engine_memory_spec() -> NumberSpec {
+    NumberSpec::Integer {
+        minimum: i128::from(TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB),
+        maximum: i128::from(TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB),
+    }
+}
+pub fn set_terminal_engine_memory(
+    settings: &mut TerminalSettings,
+    text: &str,
+) -> Result<(), String> {
+    settings.engine_memory_budget_mib =
+        u32::try_from(whole_number(terminal_engine_memory_spec(), text)?)
+            .map_err(|_| "Number exceeds this setting's storage range".to_owned())?;
+    Ok(())
+}
 pub fn editor_autosave_spec() -> NumberSpec {
     integer_spec(250, 5000)
 }

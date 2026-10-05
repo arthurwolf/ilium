@@ -181,6 +181,18 @@ fn osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
 /// `10_000 * cols * 32` bytes) regardless of pane width or the configured
 /// budget.
 const RENDER_SCROLLBACK_ROWS: usize = 10_000;
+const RENDER_SCROLLBACK_MIN_ROWS: usize = 1_000;
+/// Bytes one pane's render scrollback may retain, in the same units as
+/// `retained_allocation_bytes` (64 bytes per column per row).
+const RENDER_SCROLLBACK_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+
+/// Scrollback rows the render parser keeps at `cols` columns. Wide panes keep
+/// fewer rows so one pane's retained state stays well inside the 128 MiB
+/// terminal engine admission limit instead of stalling output permanently.
+fn render_scrollback_rows(cols: u16) -> usize {
+    (RENDER_SCROLLBACK_BUDGET_BYTES / (usize::from(cols) * 64 + 128))
+        .clamp(RENDER_SCROLLBACK_MIN_ROWS, RENDER_SCROLLBACK_ROWS)
+}
 
 /// An immutable-in-time terminal screen the user is inspecting while the
 /// live parser continues to absorb output and resize redraws behind it.
@@ -314,6 +326,7 @@ pub(crate) struct TerminalState {
     parser: vt100::Parser,
     osc_allocation: OscAllocation,
     allocated_max_columns: u16,
+    render_scrollback_rows: usize,
     allocated_max_rows: u16,
     // `vt100::Screen` exposes the current scroll *offset*
     // (`Screen::scrollback`) but no direct "how many rows have
@@ -381,7 +394,7 @@ impl TerminalState {
     }
 
     pub fn with_scrollback_budget_mib(rows: u16, cols: u16, budget_mib: u16) -> Self {
-        let parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        let parser = vt100::Parser::new(rows, cols, render_scrollback_rows(cols));
         let visible_text_fingerprint = visible_text_fingerprint(parser.screen());
         let visible_row_fingerprints = visible_row_fingerprints(parser.screen());
         let visible_text_dimensions = parser.screen().size();
@@ -390,6 +403,7 @@ impl TerminalState {
             parser,
             osc_allocation: OscAllocation::default(),
             allocated_max_columns: cols,
+            render_scrollback_rows: render_scrollback_rows(cols),
             allocated_max_rows: rows,
             scrollback_total: 0,
             historical_viewport: None,
@@ -461,7 +475,8 @@ impl TerminalState {
         self.append_history(bytes);
         self.last_output_sequence = through_sequence;
 
-        self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        self.render_scrollback_rows = render_scrollback_rows(cols.max(self.allocated_max_columns));
+        self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
         self.osc_allocation = OscAllocation::default();
         self.scrollback_total = 0;
         self.osc_allocation = self.osc_allocation.advance(bytes);
@@ -719,10 +734,27 @@ impl TerminalState {
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.allocated_max_columns = self.allocated_max_columns.max(cols);
         self.allocated_max_rows = self.allocated_max_rows.max(rows);
+        self.shrink_render_scrollback_for_width();
         self.parser.screen_mut().set_size(rows, cols);
         self.invalidate_live_render_if_visible();
         self.refresh_scrollback_total();
         self.refresh_visible_text_fingerprint();
+    }
+
+    /// Widening a pane lowers its scrollback row cap; the parser's cap is fixed
+    /// at construction, so rebuild it from the retained raw history.
+    fn shrink_render_scrollback_for_width(&mut self) {
+        let wanted = render_scrollback_rows(self.allocated_max_columns);
+        if wanted >= self.render_scrollback_rows {
+            return;
+        }
+        let (rows, cols) = self.parser.screen().size();
+        self.render_scrollback_rows = wanted;
+        let mut rebuilt = vt100::Parser::new(rows, cols, wanted);
+        for segment in &self.history_segments {
+            rebuilt.process(&segment.bytes[segment.start..]);
+        }
+        self.parser = rebuilt;
     }
 
     /// Runs `f` with the screen currently visible to the user, for rendering
@@ -917,7 +949,7 @@ impl TerminalState {
         let (rows, columns) = self.parser.screen().size();
         let rows = usize::from(rows)
             .saturating_mul(2)
-            .saturating_add(RENDER_SCROLLBACK_ROWS);
+            .saturating_add(self.render_scrollback_rows);
         self.retained_allocation_bytes()
             .saturating_add(
                 rows.saturating_mul(usize::from(columns))
@@ -929,7 +961,7 @@ impl TerminalState {
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let mut remaining_bytes = end_byte.min(self.history_retained_len);
-        let mut historical_parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+        let mut historical_parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
         for segment in &self.history_segments {
             if remaining_bytes == 0 {
                 break;
@@ -1140,9 +1172,11 @@ impl PaintedTerminal {
     }
     pub(crate) fn capture_cost(&self) -> Result<ilium_execution::JobCost, String> {
         let (rows, columns) = self.snapshot.visible.size();
-        // vt100's native screen includes its retained scrollback; words,
+        // Capture reads only the visible screen (`SmartCopySnapshot::capture`);
+        // the shared scrollback is cloned by reference, so charging the 10k-row
+        // cap here refused every pane wider than ~100 columns; words,
         // detected regions, escaped JSON and serialization scratch coexist.
-        let bytes = (usize::from(rows) * 2 + RENDER_SCROLLBACK_ROWS)
+        let bytes = (usize::from(rows) * 2)
             .saturating_mul(usize::from(columns))
             .saturating_mul(128)
             .saturating_add(
@@ -1230,7 +1264,8 @@ impl TerminalState {
     pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
         let chunk = bytes.len();
         let columns = usize::from(self.parser.screen().size().1);
-        let rows = RENDER_SCROLLBACK_ROWS
+        let rows = self
+            .render_scrollback_rows
             .saturating_sub(self.scrollback_total)
             .min(chunk);
         let history_extra = self.history_segments.back().map_or(chunk, |segment| {
@@ -1327,7 +1362,9 @@ impl TerminalState {
             self.history_origin = Arc::new(());
             self.osc8_links.clear();
             self.osc8_stream.clear();
-            self.parser = vt100::Parser::new(rows, cols, RENDER_SCROLLBACK_ROWS);
+            self.render_scrollback_rows =
+                render_scrollback_rows(cols.max(self.allocated_max_columns));
+            self.parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
             self.osc_allocation = OscAllocation::default();
             self.scrollback_total = 0;
             cursor.replay_started = true;
@@ -2109,6 +2146,28 @@ impl TerminalView {
             _pin: None,
         }
     }
+    /// Releases this hidden pane's parser engine and published screen. The
+    /// pane keeps its identity; the server journal rebuilds the screen when
+    /// the pane is next displayed. Returns false when the parser still owes
+    /// work that eviction would lose.
+    pub(crate) fn evict_parser(&mut self) -> bool {
+        match &self.frontend {
+            Some(frontend)
+                if !frontend.is_confirmed_removed() && !frontend.has_suspended_output() => {}
+            _ => return false,
+        }
+        if let Some(charge) = &self.snapshot.allocation_charge {
+            charge.retire_live();
+        }
+        self.frontend = None;
+        self.snapshot = Arc::new(
+            TerminalState::with_scrollback_budget_mib(DEFAULT_ROWS, DEFAULT_COLS, 0).publish(),
+        );
+        self.applied_ordinal = 0;
+        *self.render_cache.get_mut() = None;
+        self.admission_error = None;
+        true
+    }
     pub(crate) fn is_confirmed_removed(&self) -> bool {
         self.frontend
             .as_ref()
@@ -2519,5 +2578,27 @@ mod search_origin_tests {
         assert_eq!(retained.to_vec(), b"old needle\r\n");
         view.apply_replay(b"replacement", 100, true);
         assert!(!Arc::ptr_eq(&trimmed, &view.search_history_origin()));
+    }
+
+    #[test]
+    fn scrollback_rows_shrink_with_width_and_wide_state_fits_engine_limit() {
+        assert_eq!(render_scrollback_rows(80), RENDER_SCROLLBACK_ROWS);
+        assert!(render_scrollback_rows(320) < render_scrollback_rows(200));
+        assert_eq!(render_scrollback_rows(4096), RENDER_SCROLLBACK_MIN_ROWS);
+        let mut state = TerminalState::new(24, 80);
+        state.resize(24, 320);
+        let retained = state.retained_allocation_bytes();
+        assert!(retained < 128 * 1024 * 1024, "{retained}");
+    }
+
+    #[test]
+    fn capture_cost_admits_wide_panes_without_scrollback() {
+        for (rows, cols) in [(24u16, 80u16), (50, 120), (60, 300)] {
+            let view = TerminalView::with_scrollback_budget_mib(rows, cols, 32);
+            assert!(
+                view.painted_source().capture_cost().is_ok(),
+                "{rows}x{cols}"
+            );
+        }
     }
 }

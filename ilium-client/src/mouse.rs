@@ -112,6 +112,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             app.status_message =
                 Some("Waiting for terminal presentation before pointer input".into());
         }
+        // Keep the latest press so a click made just after a state change (a
+        // menu item right after the menu opened) is not lost.
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            app.deferred_pointer_press = Some((mouse, app.layout));
+        }
         return;
     }
     if crate::onboarding::integration::handle_mouse(app, mouse) {
@@ -508,6 +513,23 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
+    // The remote-compaction dialog is keyboard-only except for the privacy
+    // banner's close button; every other pointer event is swallowed.
+    if matches!(app.mode, Mode::RemoteCompaction) {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let close = app
+                .remote_compaction
+                .as_ref()
+                .map(|state| state.banner_close_rect.get())
+                .unwrap_or_default();
+            let position = ratatui::layout::Position::new(mouse.column, mouse.row);
+            if close.width > 0 && close.contains(position) {
+                app.dismiss_remote_compaction_privacy_banner();
+            }
+        }
+        return;
+    }
+
     // Help is a read-only full-screen reference rather than an action
     // dialog, so pointer events stay inert until it has scroll controls.
     if matches!(app.mode, Mode::Help) {
@@ -802,17 +824,15 @@ fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
     match picker.click(position, screen) {
         PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
         PickerOutcome::Cancel => app.pop_modal(),
-        PickerOutcome::Confirm(location) => {
-            match app.confirm_location_picker(&mut picker, location) {
-                Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
-                Ok(()) => app.pop_modal(),
-                Err(error) => {
-                    picker.status = Some(error.clone());
-                    app.status_message = Some(error);
-                    app.mode = Mode::LocationPicker(picker);
-                }
+        PickerOutcome::Confirm => match app.confirm_location_picker(&mut picker) {
+            Ok(()) if picker.is_saving() => app.mode = Mode::LocationPicker(picker),
+            Ok(()) => app.pop_modal(),
+            Err(error) => {
+                picker.status = Some(error.clone());
+                app.status_message = Some(error);
+                app.mode = Mode::LocationPicker(picker);
             }
-        }
+        },
     }
 }
 
@@ -2111,6 +2131,14 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
         crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
+    // An open Apply confirmation owns the pointer: everything under it is inert.
+    if state.tab == crate::app::SettingsTab::Optimization
+        && app.optimization.pending_apply.is_some()
+    {
+        app.optimization_modal_mouse(mouse, app.layout.screen_area);
+        app.mode = Mode::Settings(state);
+        return;
+    }
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
     {
@@ -3021,6 +3049,24 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                     return;
                 }
+            } else if state.tab == crate::app::SettingsTab::Optimization {
+                app.optimization_click(&mut state, layout.content_area, position);
+            } else if state.tab == crate::app::SettingsTab::RemoteCompaction {
+                if let Some(hit) = crate::remote_compaction_settings_ui::hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app,
+                ) {
+                    state.selected_row = hit.index;
+                    app.mode = Mode::Settings(state);
+                    if let crate::remote_compaction_settings_ui::HitAction::Adjust(direction) =
+                        hit.action
+                    {
+                        app.settings_adjust_remote_compaction_row(hit.row, direction);
+                    }
+                    return;
+                }
             } else if state.tab == crate::app::SettingsTab::ResetPlanning {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
                     layout.content_area,
@@ -3290,6 +3336,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);
     state.scroll = state.scroll.min(max_scroll);
+    app.optimization_sync_visibility(state.tab == crate::app::SettingsTab::Optimization);
     app.mode = Mode::Settings(state);
 }
 

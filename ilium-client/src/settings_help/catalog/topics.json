@@ -2891,6 +2891,382 @@
     ]
   },
   {
+    "id": "RCOMP-01",
+    "title": "Privacy box",
+    "explanation": "“Read what remote compaction sends away before you turn it on.”",
+    "specimen": "A bordered box at the top of the tab:\n\n╭─ Privacy decision ───────── [x] ╮\n│ Remote compaction sends this … │\n╰─────────────────────────────────╯\n\nIt names the provider and model from the Inference tab.",
+    "states": "Shown until closed; selected when it has focus. Closing it is permanent.",
+    "motion": "static.",
+    "caveat": "The transcript can hold prompts, source code, tool output and secrets, and leaves this machine for the named provider. Press x or Delete on the box, or click [x], to close it for good; it is not drawn again here or in the compaction dialog.",
+    "frames": [
+      "PRIVACY DECISION  [x]\nsends to Kilo Gateway / <model>\n"
+    ]
+  },
+  {
+    "id": "RCOMP-02",
+    "title": "Remote compaction",
+    "explanation": "“Summarize a session with the Inference model instead of sending /compact.”",
+    "specimen": "`[ ] Remote compaction` unchecked, `[x] Remote compaction` checked.",
+    "states": "Off or on.",
+    "motion": "static.",
+    "caveat": "Off keeps today's behaviour: the Compact button on a Claude or Codex pane still sends /compact. On, the button summarizes the transcript through the provider and model set in the Inference tab and resumes the agent from that summary.",
+    "frames": [
+      "[ ] Remote compaction   Compact -> /compact\n[x] Remote compaction   Compact -> summary + resume\n"
+    ]
+  },
+  {
+    "id": "RCOMP-03",
+    "title": "Compact automatically",
+    "explanation": "“Start a compaction by yourself once the context gets too full.”",
+    "specimen": "`[ ] Compact automatically` / `[x] Compact automatically`.",
+    "states": "Off or on.",
+    "motion": "static.",
+    "caveat": "Needs remote compaction switched on. The agent is compacted at its next pause, never mid-reply, and at most once per cooldown. Every automatic run is announced in the status bar.",
+    "frames": [
+      "[ ] Compact automatically\n[x] Compact automatically  (at 65% context)\n"
+    ]
+  },
+  {
+    "id": "RCOMP-04",
+    "title": "Automatic threshold",
+    "explanation": "“Choose how full the context may get before an automatic compaction starts.”",
+    "specimen": "`‹ 65% ›` from 30% to 88%.",
+    "states": "Value changes in steps of 1 percentage point; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "Keep it below the agent's own trigger: Claude Code compacts itself near 84% and Codex at 90%, so a higher value would never fire first.",
+    "frames": [
+      "‹ 65% › -> ‹ 66% ›\n"
+    ]
+  },
+  {
+    "id": "RCOMP-05",
+    "title": "Wait for a pause",
+    "explanation": "“Set how long to wait for the agent to finish its current step.”",
+    "specimen": "`‹ 2 min ›` from 10 s to 30 min.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "If the agent is still busy when the time runs out it is interrupted with Esc so the transcript is complete before it is read. Longer waits are gentler but delay the compaction.",
+    "frames": [
+      "‹ 2 min › -> ‹ 3 min ›\n"
+    ]
+  },
+  {
+    "id": "RCOMP-06",
+    "title": "Cooldown after a run",
+    "explanation": "“Set the shortest time before one pane may be compacted again automatically.”",
+    "specimen": "`‹ 10 min ›` from 1 minute to 4 hours.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "Prevents a loop when a summary is still large. Pressing Compact yourself ignores the cooldown.",
+    "frames": [
+      "‹ 10 min › -> ‹ 15 min ›\n"
+    ]
+  },
+  {
+    "id": "RCOMP-07",
+    "title": "Claude technique",
+    "explanation": "“Pick the summarizing style used for Claude Code panes.”",
+    "specimen": "`‹ Claude Code ›` cycling Claude Code, Codex, opencode, Gemini CLI, Best of all worlds, Custom.",
+    "states": "Applied at once; the line below the row describes the chosen technique.",
+    "motion": "static.",
+    "caveat": "Claude Code, Codex, opencode and Gemini CLI use the real upstream prompt text; Best of all worlds is Ilium's own blend and says so. Custom uses your prompt below. Claude Code's own nine-section summary prompt.",
+    "frames": [
+      "‹ Claude Code › -> next technique\n"
+    ]
+  },
+  {
+    "id": "RCOMP-08",
+    "title": "Codex technique",
+    "explanation": "“Pick the summarizing style used for Codex panes.”",
+    "specimen": "`‹ Codex ›` cycling Claude Code, Codex, opencode, Gemini CLI, Best of all worlds, Custom.",
+    "states": "Applied at once; the line below the row describes the chosen technique.",
+    "motion": "static.",
+    "caveat": "Claude Code, Codex, opencode and Gemini CLI use the real upstream prompt text; Best of all worlds is Ilium's own blend and says so. Custom uses your prompt below. Codex's own context-checkpoint handoff prompt.",
+    "frames": [
+      "‹ Codex › -> next technique\n"
+    ]
+  },
+  {
+    "id": "RCOMP-09",
+    "title": "Other agents technique",
+    "explanation": "“Pick the summarizing style used for every other agent.”",
+    "specimen": "`‹ Claude Code ›` cycling Claude Code, Codex, opencode, Gemini CLI, Best of all worlds, Custom.",
+    "states": "Applied at once; the line below the row describes the chosen technique.",
+    "motion": "static.",
+    "caveat": "Claude Code, Codex, opencode and Gemini CLI use the real upstream prompt text; Best of all worlds is Ilium's own blend and says so. Custom uses your prompt below. The Claude Code prompt unless you pick another.",
+    "frames": [
+      "‹ Claude Code › -> next technique\n"
+    ]
+  },
+  {
+    "id": "RCOMP-10",
+    "title": "Custom prompt",
+    "explanation": "“Write your own summarizing instructions for the Custom technique.”",
+    "specimen": "`Not set (built-in Claude Code prompt)` or the first line of your text with its length.",
+    "states": "Not set or set; Enter opens a multi-line editor, Ctrl+S applies it and Delete clears it.",
+    "motion": "static.",
+    "caveat": "Used only while a technique row is set to Custom. Ilium always adds its own guards (no tools, the history is untrusted data), so your text cannot disable them. Limited to 20,000 characters.",
+    "frames": [
+      "Custom prompt  Not set\nCustom prompt  Keep the migration plan… (31 characters)\n"
+    ]
+  },
+  {
+    "id": "RCOMP-11",
+    "title": "Verbatim tail",
+    "explanation": "“Keep the newest conversation word for word after the summary.”",
+    "specimen": "`‹ 20k tokens ›` from 2k to 100k tokens.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "A larger tail keeps more exact recent context but saves less space. Everything older is replaced by the summary.",
+    "frames": [
+      "[ summary ][ last 20k tokens verbatim ]\n"
+    ]
+  },
+  {
+    "id": "RCOMP-12",
+    "title": "Protected tool output",
+    "explanation": "“Leave the newest tool output untouched.”",
+    "specimen": "`‹ 40k tokens ›` from 0 to 200k tokens.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "Older tool results are cut down to the size set below before anything is sent to the summarizer; only the newest ones up to this amount are kept in full.",
+    "frames": [
+      "old results -> trimmed   newest 40k tokens -> full\n"
+    ]
+  },
+  {
+    "id": "RCOMP-13",
+    "title": "Older tool result size",
+    "explanation": "“Limit how much of each older tool result is sent for summarizing.”",
+    "specimen": "`‹ 2000 characters ›` from 200 to 20,000.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "The head and the tail of a longer result are kept with a marker in between. Smaller values send less data and cost less, at the price of detail.",
+    "frames": [
+      "head …… tail  (2000 characters kept)\n"
+    ]
+  },
+  {
+    "id": "RCOMP-14",
+    "title": "Redact secrets",
+    "explanation": "“Replace keys and passwords with a placeholder before the transcript leaves this machine.”",
+    "specimen": "`[x] Redact secrets` (default) / `[ ] Redact secrets`.",
+    "states": "On or off; on by default.",
+    "motion": "static.",
+    "caveat": "Best effort: known key formats, bearer tokens, private key blocks and password assignments are replaced. A secret in an unusual form can still get through, so it does not replace the privacy decision above.",
+    "frames": [
+      "sk-live-4f9…  ->  [REDACTED]\n"
+    ]
+  },
+  {
+    "id": "RCOMP-15",
+    "title": "Summarizer input window",
+    "explanation": "“Tell Ilium how much text the summarizer model can read at once.”",
+    "specimen": "`‹ 120k tokens ›` from 8k to 900k tokens.",
+    "states": "Value steps through a ladder; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "A longer history is summarized in pieces of this size and the partial summaries are merged. Set it at or below the context window of the model chosen in the Inference tab.",
+    "frames": [
+      "history 300k  ->  3 pieces of 120k  ->  merge\n"
+    ]
+  },
+  {
+    "id": "RCOMP-16",
+    "title": "Backups to keep",
+    "explanation": "“Choose how many copies of the original transcript are kept per session.”",
+    "specimen": "`‹ 3 ›` from 1 to 20.",
+    "states": "Value changes in steps of 1; saved shortly after the last change.",
+    "motion": "static.",
+    "caveat": "Each compaction first copies the original session file next to it as a .bak; older copies beyond this number are removed. Keep at least one so a compaction can be undone.",
+    "frames": [
+      "session.jsonl  session.jsonl.bak (x3)\n"
+    ]
+  },
+  {
+    "id": "RCOMP-17",
+    "title": "Summarizer model",
+    "explanation": "“See which provider and model will receive the transcript.”",
+    "specimen": "A read-only line such as `Kilo Gateway / <model>`.",
+    "states": "Display only.",
+    "motion": "static.",
+    "caveat": "Change it in the Inference tab; this page follows it. Check it before turning compaction on, because the whole transcript is sent there.",
+    "frames": [
+      "Summarizer model  Kilo Gateway / <model>\n"
+    ]
+  },
+  {
+    "id": "OPT-01",
+    "title": "Agent sub-tabs",
+    "explanation": "“Optimize one agent at a time: Codex or Claude Code.”",
+    "specimen": "[ Codex ]  Claude Code\n\nThe filled label is the agent being scanned and shown.",
+    "states": "Left/Right (or [ and ]) or a click switches the agent. Each agent keeps its own scan, report, current setting and revert record.",
+    "motion": "static.",
+    "caveat": "Switching never starts a scan and never changes an agent's configuration. A scan that is running for one agent keeps running while you look at the other.",
+    "frames": [
+      "[ Codex ]  Claude Code\n",
+      "Codex  [ Claude Code ]\n"
+    ]
+  },
+  {
+    "id": "OPT-02",
+    "title": "Scan sessions",
+    "explanation": "“Read your session transcripts and find the cheapest auto-compaction threshold.”",
+    "specimen": "[ Scan sessions ]\nCurrent model_auto_compact_token_limit: 200,000 (in ~/.codex/config.toml)",
+    "states": "Enter or s starts the scan. Nothing is scanned when the tab opens or on a timer, and nothing is written to the agent's configuration by a scan.",
+    "motion": "static.",
+    "caveat": "The first scan of a large history can take minutes and reads every transcript once; later scans reuse a cache of unchanged files. The scan only reads ~/.codex/sessions or ~/.claude/projects and never restarts anything.",
+    "frames": [
+      "[ Scan sessions ]\nNothing is scanned until you press the button.\n"
+    ]
+  },
+  {
+    "id": "OPT-03",
+    "title": "Scan progress",
+    "explanation": "“See which phase the scan is in and how far it has read.”",
+    "specimen": "SCANNING CODEX SESSIONS\nPhase: Reading transcripts\n████████░░░░░░░░  42.0%\nFiles: 1,204 of 5,678\nElapsed: 1m 05s\n[ Cancel ]",
+    "states": "Listing finds the files, Reading streams them (the bar counts bytes, so one huge file does not stall it), Analyzing builds the statistics and the simulation. Esc, c or Cancel stops the scan.",
+    "motion": "The bar advances with the bytes read; the current file name changes as files finish.",
+    "caveat": "Cancelling or a failed scan keeps the previous report on screen with a note. Leaving Settings does not stop a running scan.",
+    "frames": [
+      "Phase: Listing files\nFound 812 files\n",
+      "Phase: Reading transcripts\n████░░░░  40%\n",
+      "Phase: Analyzing\n████████  100%\n"
+    ]
+  },
+  {
+    "id": "OPT-04",
+    "title": "Recommendation and Apply",
+    "explanation": "“The cheapest threshold found, and one button to write it.”",
+    "specimen": "[ Optimal: model_auto_compact_token_limit 150,000 (trigger ~150k, within 2% of best) - Apply to Codex ]\nConfidence: medium\nFlat band: within 2%: trigger 140k-160k",
+    "states": "The button opens a confirmation with the file, key, old and new value, the diff and any override warnings. Nothing is written until you confirm. Extrapolated means no observed compaction supports that level.",
+    "motion": "static.",
+    "caveat": "Applying changes only the one key and only affects NEW agent sessions; running sessions keep the limit they loaded. A project file, an environment variable or a Codex profile can shadow the value; the confirmation says so.",
+    "frames": [
+      "Optimal: model_auto_compact_token_limit 150,000\n(trigger ~150k, within 2% of best) - Apply to Codex\n"
+    ]
+  },
+  {
+    "id": "OPT-05",
+    "title": "Re-scan and Revert",
+    "explanation": "“Scan again after the agent has written new transcripts, or undo your last apply.”",
+    "specimen": "[ Re-scan ]  [ Revert model_auto_compact_token_limit to 200,000 ]",
+    "states": "Re-scan runs the whole scan again. Revert appears only after an apply made from this tab and restores the value that was there before (or removes the key when it was not set).",
+    "motion": "static.",
+    "caveat": "Revert refuses when the file no longer holds the value that was applied, so it never overwrites an edit made since. After applying a lower threshold, the next scan sees new compactions at that level and its support improves.",
+    "frames": [
+      "[ Re-scan ]\n",
+      "[ Re-scan ]  [ Revert ... to 200,000 ]\n"
+    ]
+  },
+  {
+    "id": "OPT-06",
+    "title": "CLI default, current, recommended",
+    "explanation": "“Compare what the agent does by default, what you configured and what is recommended.”",
+    "specimen": "             Setting  Trigger  vs default\nCLI default  232,000   232k      0.0%\nCurrent      200,000   200k     -8.1%\nRecommended  150,000   150k    -16.9%",
+    "states": "Cost is simulated on your own sessions in weighted input-token equivalents with the rework of each compaction included; the vs default column is the number to look at. A missing current setting shows as not set.",
+    "motion": "static.",
+    "caveat": "A trigger between two simulated points is interpolated, and one outside the simulated range shows the nearest point; a note under the table says so. USD is an API-price equivalent, not what a plan is charged.",
+    "frames": [
+      "Recommended  150,000  150k  -16.9%\n"
+    ]
+  },
+  {
+    "id": "OPT-07",
+    "title": "Corpus and compactions",
+    "explanation": "“What the scan found and how your agent compacted so far.”",
+    "specimen": "Transcripts: 5,678 files (29.3 GB) over 212.0 days\nCompactions: 340 in 120 sessions (300 auto, 40 manual)\nFired at: p10 190k | p50 224k | p90 232k",
+    "states": "Counts of files, sessions and requests, how many compactions were automatic, the size they fired at, the first request after, the summary size and the cycle length between compactions.",
+    "motion": "static.",
+    "caveat": "Cycles of at most 3 requests are refill thrash: the agent compacted and immediately grew back. Duplicated requests from resumed or forked transcripts are removed before counting.",
+    "frames": [
+      "Compactions: 340 in 120 sessions\n"
+    ]
+  },
+  {
+    "id": "OPT-08",
+    "title": "Cost mix and cold cache",
+    "explanation": "“Where the tokens, and the money, go.”",
+    "specimen": "cache read   ██████████░░  61.2%\ncache write  ███░░░░░░░░░  17.0%\nuncached in  ██░░░░░░░░░░  10.4%\noutput       ██░░░░░░░░░░  11.4%",
+    "states": "Shares of the weighted cost by token class, the share of requests that found a cold cache and what rewriting those prefixes cost, then the models and how much of the cost sits above a given context size.",
+    "motion": "static.",
+    "caveat": "Weights follow the Agent Cost tab's price table, including your overrides; a model without a price uses relative research weights and has no dollar figure.",
+    "frames": [
+      "cache read  61.2%\n"
+    ]
+  },
+  {
+    "id": "OPT-09",
+    "title": "Fixed prefix",
+    "explanation": "“The context every session starts with, and what to gain by shrinking it.”",
+    "specimen": "First request of a session: p10 18k | p50 22k | p90 31k\nEach ~10k tokens removed lowers the optimum by about 10-15k tokens.",
+    "states": "C0 is the size of the first request of each session; the first request after a compaction shows the rebuilt prefix. A smaller prefix makes every cycle cheaper, so the optimal trigger moves lower.",
+    "motion": "static.",
+    "caveat": "The rule of thumb is first order. Ilium's own injected instruction text counts toward the prefix.",
+    "frames": [
+      "First request of a session: p50 22k\n"
+    ]
+  },
+  {
+    "id": "OPT-10",
+    "title": "Simulation by trigger",
+    "explanation": "“What each candidate threshold would have cost on your sessions.”",
+    "specimen": "Trigger  Setting  vs best  Band  Marks\n   150k  150,000    0.0%    2%  pick best\n   200k  200,000   +7.5%    5%  current",
+    "states": "Each row replays every session with that trigger. Band marks rows within 2% or 5% of the best; Support is the share of observed compactions at or below the trigger; the chart plots the extra cost over the best with P, B, D and C markers.",
+    "motion": "static.",
+    "caveat": "The replay assumes growth per turn, the post-compaction size and the rework do not depend on the trigger. A low support means the row is extrapolated, and the quality loss of more frequent summaries is not priced.",
+    "frames": [
+      "P pick  B best  D CLI default  C current\n"
+    ]
+  },
+  {
+    "id": "OPT-11",
+    "title": "Per-model optima",
+    "explanation": "“The best threshold for each model family on its own.”",
+    "specimen": "Model family   Optimum  Flat band\ngpt-5.5        160k     150k-180k\ngpt-5.5-mini   130k     120k-150k",
+    "states": "The table shows how the optimum differs between models. The setting is one global value for the whole agent and cannot be applied per model, so Apply uses the cost-weighted optimum of all models.",
+    "motion": "static.",
+    "caveat": "A family with few sessions has a wide interval; read its row as a spread, not as a second recommendation.",
+    "frames": [
+      "gpt-5.5  160k  150k-180k\n"
+    ]
+  },
+  {
+    "id": "OPT-12",
+    "title": "Rework sensitivity",
+    "explanation": "“How much the answer depends on the rework estimate.”",
+    "specimen": "Rework  Optimum  Flat band\n0.5x     130k     120k-150k\n1x       150k     140k-160k\n2x       180k     160k-200k",
+    "states": "Rework is the extra work after each compaction (re-reading files the summary lost). Its size is a default from one research corpus until your logs hold about 30 compactions; the rows show the optimum at half and double of it.",
+    "motion": "static.",
+    "caveat": "If the three optima agree closely, the recommendation does not hinge on the estimate; if they spread, treat the pick as a range.",
+    "frames": [
+      "Rework 1x  optimum 150k\n"
+    ]
+  },
+  {
+    "id": "OPT-13",
+    "title": "Compaction regimes and mapping",
+    "explanation": "“Groups of compactions that happened under different settings, and how a trigger maps to the setting value.”",
+    "specimen": "212 compactions around 224k (210k-232k), most recent regime\nmodel_auto_compact_token_limit is clamped to 90% of the window.",
+    "states": "After you apply a new threshold the logs mix two regimes; the most recent one drives the mapping and the post-compaction sizes. The mapping note says how a trigger becomes the value written to the file.",
+    "motion": "static.",
+    "caveat": "The mapping is a researched default until your own logs measure it; it is re-measured from the newest compactions when the current setting is known and consistent with them.",
+    "frames": [
+      "212 compactions around 224k\n"
+    ]
+  },
+  {
+    "id": "OPT-14",
+    "title": "Warnings",
+    "explanation": "“Limits of this analysis that you should know before applying.”",
+    "specimen": "- The corpus is larger than the retained-result cap.\n- No price for a model: relative weights are used.\n- Dollar figures are API-price equivalents.",
+    "states": "Extrapolation, default rework priors, unpriced models, truncated corpora and the plan-versus-API price caveat appear here, in addition to scan problems such as skipped files.",
+    "motion": "static.",
+    "caveat": "Warnings never block Apply; they say how much weight to give the number.",
+    "frames": [
+      "- Dollar figures are API-price equivalents.\n"
+    ]
+  },
+  {
     "id": "RESET-01",
     "title": "Monitor Claude resets",
     "explanation": "“Check the public Claude reset feed hourly for announced reset history.”",

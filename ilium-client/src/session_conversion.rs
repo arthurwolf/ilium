@@ -520,7 +520,7 @@ impl App {
         }
     }
 
-    fn remember_replacement_focus(&mut self, pane_id: NodeId) {
+    pub(crate) fn remember_replacement_focus(&mut self, pane_id: NodeId) {
         let Some(parent) = self.tree.parent_of(pane_id) else {
             return;
         };

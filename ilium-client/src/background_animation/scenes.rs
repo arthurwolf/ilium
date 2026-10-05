@@ -194,6 +194,141 @@ fn periodic_noise(u: f32, v: f32, columns: i32, rows: i32, seed: i32) -> f32 {
     upper * (1.0 - fraction_y) + lower * fraction_y
 }
 
+// This bounds only the additional cold-preparation payload, not the textures
+// or the packed loop cache. Oversized widths retain the original scalar path.
+const RIDGE_NOISE_SCRATCH_BYTES: usize = 256 * 1024;
+
+#[derive(Clone, Copy)]
+struct RidgeNoiseAxis {
+    first: usize,
+    second: usize,
+    fraction: f32,
+}
+
+impl RidgeNoiseAxis {
+    // Callers supply Texture::new's normalized coordinates and Ridge's fixed
+    // positive periods. Keep division before this multiplication at each caller.
+    fn new(coordinate: f32, period: i32) -> Self {
+        let position = coordinate * period as f32;
+        let first = position.floor() as i32;
+        let fraction = smoothstep(0.0, 1.0, position - position.floor());
+        Self {
+            first: first.rem_euclid(period) as usize,
+            second: (first + 1).rem_euclid(period) as usize,
+            fraction,
+        }
+    }
+
+    fn sample_rows(self, rows: &[f32]) -> f32 {
+        let upper = rows[self.first];
+        let lower = rows[self.second];
+        let fraction_y = self.fraction;
+        upper * (1.0 - fraction_y) + lower * fraction_y
+    }
+}
+
+struct RidgeNoiseColumn {
+    broad: [f32; 4],
+    fine: [f32; 9],
+    mist: [f32; 5],
+}
+
+fn ridge_noise_grid<const COLUMNS: usize, const ROWS: usize>(seed: i32) -> [[f32; COLUMNS]; ROWS] {
+    let mut grid = [[0.0; COLUMNS]; ROWS];
+    for (y, row) in grid.iter_mut().enumerate() {
+        for (x, value) in row.iter_mut().enumerate() {
+            // These are already wrapped coordinates. Add the seed AFTER
+            // wrapping, exactly as periodic_noise's corner closure does.
+            *value = hash(x as i32 + seed, y as i32);
+        }
+    }
+    grid
+}
+
+fn ridge_noise_horizontal<const COLUMNS: usize, const ROWS: usize>(
+    grid: &[[f32; COLUMNS]; ROWS],
+    u: f32,
+) -> [f32; ROWS] {
+    let axis = RidgeNoiseAxis::new(u, COLUMNS as i32);
+    let fraction_x = axis.fraction;
+    let mut values = [0.0; ROWS];
+    for (value, row) in values.iter_mut().zip(grid) {
+        // This is the original upper/lower expression, not a reassociated
+        // lerp. Its f32 result is reused for every visit to this lattice row.
+        *value = row[axis.first] * (1.0 - fraction_x) + row[axis.second] * fraction_x;
+    }
+    values
+}
+
+// Keep the cold loops and their stack/workspace inside this helper rather than
+// adding them to the shared prepare dispatcher. Release codegen still needs
+// inspection; this boundary is not a performance or cross-scene guarantee.
+#[inline(never)]
+fn prepare_ridge_textures(width: usize, height: usize) -> (Texture, Texture) {
+    let mut columns = Vec::<RidgeNoiseColumn>::new();
+    if width == 0
+        || height == 0
+        || width > RIDGE_NOISE_SCRATCH_BYTES / std::mem::size_of::<RidgeNoiseColumn>()
+        || columns.try_reserve_exact(width).is_err()
+    {
+        return (
+            Texture::new(width, height, |u, v| {
+                periodic_noise(u, v, 5, 4, 37) * 0.76 + periodic_noise(u, v, 11, 9, 94) * 0.24
+            }),
+            Texture::new(width, height, |u, v| periodic_noise(u, v, 7, 5, 183)),
+        );
+    }
+
+    let broad_grid = ridge_noise_grid::<5, 4>(37);
+    let fine_grid = ridge_noise_grid::<11, 9>(94);
+    let mist_grid = ridge_noise_grid::<7, 5>(183);
+    for x in 0..width {
+        let u = x as f32 / width as f32;
+        columns.push(RidgeNoiseColumn {
+            broad: ridge_noise_horizontal(&broad_grid, u),
+            fine: ridge_noise_horizontal(&fine_grid, u),
+            mist: ridge_noise_horizontal(&mist_grid, u),
+        });
+    }
+
+    // Each output texture keeps its original dimensions, row-major order and
+    // full-resolution samples. Build clouds before mist as in the scalar path.
+    let mut values = Vec::with_capacity(width * height);
+    for y in 0..height {
+        let v = y as f32 / height as f32;
+        let broad = RidgeNoiseAxis::new(v, 4);
+        let fine = RidgeNoiseAxis::new(v, 9);
+        for column in &columns {
+            values.push(
+                broad.sample_rows(&column.broad) * 0.76 + fine.sample_rows(&column.fine) * 0.24,
+            );
+        }
+    }
+    let clouds = Texture {
+        width,
+        height,
+        values,
+    };
+
+    let mut values = Vec::with_capacity(width * height);
+    for y in 0..height {
+        let v = y as f32 / height as f32;
+        let mist_y = RidgeNoiseAxis::new(v, 5);
+        for column in &columns {
+            values.push(mist_y.sample_rows(&column.mist));
+        }
+    }
+    let mist = Texture {
+        width,
+        height,
+        values,
+    };
+
+    // Nothing from columns or the corner grids enters PreparedScene. This
+    // scratch is released before the caller prepares fronts and clones base.
+    (clouds, mist)
+}
+
 fn traveling(phase: (f32, f32), time: (f32, f32)) -> f32 {
     phase.0 * time.1 - phase.1 * time.0
 }
@@ -252,12 +387,7 @@ impl SceneCache {
             AnimationKind::SleepingRidge => {
                 let ridge_settings = settings.sleeping_ridge;
                 prepare_ridge(raster, ridge_settings);
-                let clouds = Texture::new(raster.width, raster.height, |u, v| {
-                    periodic_noise(u, v, 5, 4, 37) * 0.76 + periodic_noise(u, v, 11, 9, 94) * 0.24
-                });
-                let mist = Texture::new(raster.width, raster.height, |u, v| {
-                    periodic_noise(u, v, 7, 5, 183)
-                });
+                let (clouds, mist) = prepare_ridge_textures(raster.width, raster.height);
                 let fronts = (0..raster.width)
                     .map(|x| ridge((x as f32 + 0.5) / raster.width as f32, 2, ridge_settings))
                     .collect();
@@ -1670,3 +1800,15 @@ pub(super) mod r06_pond_tests {
 pub(super) mod r07_caustic_tests {
     include!("r07_caustic_tests.rs");
 }
+
+#[cfg(test)] // R08 original-only oracle and shared fidelity tests.
+pub(super) mod r08_ridge_oracle {
+    // Descendant access to current scene internals.
+    include!("r08_ridge_oracle.rs"); // Same complete file in both arms.
+} // End R08 common tests.
+
+#[cfg(test)] // R08 tests requiring the exact B1 private helper.
+mod r08_ridge_candidate {
+    // Candidate-only registration.
+    include!("r08_ridge_candidate.rs"); // Complete helper and mutation tests.
+} // End R08 candidate tests.

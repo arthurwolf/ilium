@@ -293,6 +293,35 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             ensure_reached(app.terminal_settings.scrollback_budget_mib == target)?;
         }
+        "terminal.engine_memory_budget_mib" => {
+            let target = u32::try_from(unsigned(&value)?)
+                .map_err(|_| "Engine memory budget is too large".to_owned())?;
+            if !(crate::config::TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB
+                ..=crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB)
+                .contains(&target)
+                || target % 256 != 0
+            {
+                return Err("Engine memory budget must be 256-16384 MiB in steps of 256".to_owned());
+            }
+            // Bounded like the scrollback loop: a hand-edited unaligned value
+            // never lands on `target` by fixed steps.
+            let max_steps = ((crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB
+                - crate::config::TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB)
+                / 256
+                + 1) as usize;
+            for _ in 0..max_steps {
+                if app.terminal_settings.engine_memory_budget_mib == target {
+                    break;
+                }
+                let direction = if app.terminal_settings.engine_memory_budget_mib < target {
+                    1
+                } else {
+                    -1
+                };
+                app.settings_adjust_terminal_row(TerminalRow::EngineMemoryBudget, direction);
+            }
+            ensure_reached(app.terminal_settings.engine_memory_budget_mib == target)?;
+        }
         "terminal.new_pane_directory" => {
             let target = parse_new_pane_directory(string(&value)?)?;
             for _ in 0..3 {
@@ -829,6 +858,9 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         }
         "terminal.scrollback_budget_mib" => {
             app.settings_adjust_terminal_row(TerminalRow::ScrollbackBudget, direction)
+        }
+        "terminal.engine_memory_budget_mib" => {
+            app.settings_adjust_terminal_row(TerminalRow::EngineMemoryBudget, direction)
         }
         "terminal.new_pane_directory" => {
             app.settings_adjust_terminal_row(TerminalRow::NewPaneDirectory, direction)

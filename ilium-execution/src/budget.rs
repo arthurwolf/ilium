@@ -440,6 +440,13 @@ pub struct WorkerAdmission {
 pub struct StorageAdmission {
     _debit: Debit,
 }
+impl StorageAdmission {
+    /// Whether this held allocation debits the exact supplied native root.
+    /// Matching limits do not establish provenance. Inspecting never changes usage.
+    pub fn shares_root(&self, quota: &QuotaGroup) -> bool {
+        Arc::ptr_eq(&self._debit.root, &quota.ledger)
+    }
+}
 impl std::fmt::Debug for StorageAdmission {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -573,4 +580,54 @@ pub(crate) fn job_debit_detailed(
         tenant: Some(Arc::clone(tenant)),
         amount,
     })
+}
+
+#[cfg(test)]
+mod storage_root_tests {
+    use super::*;
+    fn quota() -> QuotaGroup {
+        QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 1024,
+            result_bytes: 1024,
+            worker_threads: 1,
+            worker_bytes: 4096,
+        })
+    }
+    #[test]
+    fn original_storage_admission_recognizes_cloned_root() {
+        let original = quota();
+        let alias = original.clone();
+        let storage = original.reserve_external_storage(128).unwrap();
+        assert!(storage.shares_root(&original));
+        assert!(storage.shares_root(&alias));
+        assert_eq!(alias.snapshot().worker_bytes, 128);
+    }
+    #[test]
+    fn independent_root_with_identical_limits_is_not_storage_authority() {
+        let original = quota();
+        let independent = quota();
+        assert_eq!(original.snapshot().limits, independent.snapshot().limits);
+        let storage = original.reserve_external_storage(128).unwrap();
+        assert!(!storage.shares_root(&independent));
+        assert_eq!(original.snapshot().worker_bytes, 128);
+        assert_eq!(independent.snapshot().worker_bytes, 0);
+    }
+    #[test]
+    fn inspecting_provenance_never_debits_or_releases_original_storage() {
+        let original = quota();
+        let independent = quota();
+        let storage = original.reserve_external_storage(128).unwrap();
+        for _ in 0..16 {
+            let _ = storage.shares_root(&original);
+            let _ = storage.shares_root(&independent);
+            assert_eq!(original.snapshot().worker_bytes, 128);
+            assert_eq!(independent.snapshot().worker_bytes, 0);
+        }
+        drop(storage);
+        assert_eq!(original.snapshot().worker_bytes, 0);
+        assert_eq!(independent.snapshot().worker_bytes, 0);
+    }
 }

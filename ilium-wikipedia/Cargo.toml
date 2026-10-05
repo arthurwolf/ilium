@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ilium-http = { version = "0.1.0", path = "../ilium-http" }
 ilium-ambient = { path = "../ilium-ambient" }
 ilium-platform = { path = "../ilium-platform" }
 scraper = "0.27.0"

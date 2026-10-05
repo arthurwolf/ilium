@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::background_animation::ComposedPresentation;
+use ilium_animation_js::replay::ReplayFlushedProof;
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
 use ratatui::backend::Backend;
@@ -137,9 +139,18 @@ pub struct PreparedFrame {
     pub frame_id: u64,
     pub layout_revision: u64,
     pub prepared_at: Instant,
+    animation: Option<ComposedPresentation>,
     _reservation: FrameReservation,
 }
 impl PreparedFrame {
+    pub fn attach_animation(&mut self, animation: Option<ComposedPresentation>) {
+        self.animation = animation;
+    }
+
+    pub fn take_animation(&mut self) -> Option<ComposedPresentation> {
+        self.animation.take()
+    }
+
     pub fn new(
         reservation: FrameReservation,
         mut buffer: Buffer,
@@ -178,6 +189,7 @@ impl PreparedFrame {
             frame_id,
             layout_revision,
             prepared_at: Instant::now(),
+            animation: None,
             _reservation: reservation,
         })
     }
@@ -187,6 +199,15 @@ pub struct PresentedFrame {
     pub frame: PreparedFrame,
     pub emitted_at: Instant,
     pub emission_duration: Duration,
+    /// A native grant changed before the first backend call. No terminal bytes
+    /// for this frame were submitted, and the previous diff base stays valid.
+    pub rejection: Option<String>,
+    /// Terminal bytes may have been emitted, but no complete flush proof exists.
+    /// The exact replay admission remains in frame.animation for UI custody.
+    pub uncertainty: Option<String>,
+    /// Original broker proof retained with this exact successful terminal ACK.
+    /// The current procedural plugin path has no protected source dots.
+    pub flush_proof: Option<ReplayFlushedProof>,
 }
 
 struct Queue {
@@ -389,7 +410,7 @@ fn emit_frames<B: Backend<Error = io::Error>>(
 ) -> io::Result<()> {
     let mut emitted: Option<Arc<GuardedBuffer>> = None;
     loop {
-        let frame = {
+        let mut frame = {
             let mut queue = shared.queue.lock().unwrap_or_else(|e| e.into_inner());
             while queue.frames.is_empty() && !queue.closing && !stop.is_stopped() {
                 queue = shared
@@ -409,22 +430,149 @@ fn emit_frames<B: Backend<Error = io::Error>>(
             }
         };
         let started = Instant::now();
-        emit_one(
-            &mut backend,
-            emitted.as_ref().map(|buffer| &***buffer),
-            &frame,
-        )?;
+        let committed = match frame.animation.as_mut() {
+            Some(animation) => {
+                match emitted_cell_mask(emitted.as_ref().map(|buffer| &***buffer), &frame.buffer)
+                    .and_then(|mask| {
+                        animation.restrict_to_emitted_cells(&mask)?;
+                        animation.begin_output()
+                    }) {
+                    Ok(committed) => committed,
+                    Err(reason) => {
+                        acknowledgements
+                            .try_send(Ok(PresentedFrame {
+                                frame,
+                                emitted_at: Instant::now(),
+                                emission_duration: started.elapsed(),
+                                rejection: Some(reason),
+                                uncertainty: None,
+                                flush_proof: None,
+                            }))
+                            .map_err(|_| {
+                                io::Error::other("presentation rejection channel unavailable")
+                            })?;
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+        // This token is the native commitment to the exact queued frame. It
+        // remains alive throughout physical output. Revocation after begin_output
+        // cannot retroactively deny bytes already in flight.
+        let output_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            emit_one(
+                &mut backend,
+                emitted.as_ref().map(|buffer| &***buffer),
+                &frame,
+            )
+        }))
+        .unwrap_or_else(|_| Err(io::Error::other("Terminal backend panicked during output")));
+        let flush_proof = match output_result {
+            Ok(()) => {
+                if let Some(committed) = committed {
+                    match committed.backend_flushed() {
+                        Ok(proof) => Some(proof),
+                        Err(error) => {
+                            let reason = format!(
+                                "Terminal flushed but original broker settlement failed: {error}"
+                            );
+                            acknowledgements
+                                .try_send(Ok(PresentedFrame {
+                                    frame,
+                                    emitted_at: Instant::now(),
+                                    emission_duration: started.elapsed(),
+                                    rejection: None,
+                                    uncertainty: Some(reason.clone()),
+                                    flush_proof: None,
+                                }))
+                                .map_err(|_| {
+                                    io::Error::other("uncertain presentation receipt unavailable")
+                                })?;
+                            return Err(io::Error::other(reason));
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+            Err(error) => {
+                let reason = if let Some(committed) = committed {
+                    match committed.backend_failed_uncertain() {
+                        Ok(()) => format!("Partial terminal output possible: {error}"),
+                        Err(settlement_error) => format!(
+                            "{error}; original uncertain-emission settlement failed: {settlement_error}"
+                        ),
+                    }
+                } else {
+                    format!("Partial terminal output possible: {error}")
+                };
+                acknowledgements
+                    .try_send(Ok(PresentedFrame {
+                        frame,
+                        emitted_at: Instant::now(),
+                        emission_duration: started.elapsed(),
+                        rejection: None,
+                        uncertainty: Some(reason.clone()),
+                        flush_proof: None,
+                    }))
+                    .map_err(|_| io::Error::other("uncertain presentation receipt unavailable"))?;
+                return Err(io::Error::new(error.kind(), reason));
+            }
+        };
         // Only a complete successful backend flush establishes the next diff base.
         emitted = Some(frame.buffer.clone());
         let acknowledgement = PresentedFrame {
             frame,
             emitted_at: Instant::now(),
             emission_duration: started.elapsed(),
+            rejection: None,
+            uncertainty: None,
+            flush_proof,
         };
         acknowledgements
             .try_send(Ok(acknowledgement))
             .map_err(|_| io::Error::other("presentation receipt channel unavailable"))?;
     }
+}
+
+/// The exact cells Ratatui offers to `Backend::draw` for this immutable
+/// previous/current pair. A successful draw+flush is required separately;
+/// this mask alone cannot claim a physical terminal effect.
+fn emitted_cell_mask(previous: Option<&Buffer>, current: &Buffer) -> Result<Vec<u8>, String> {
+    let blank = previous
+        .filter(|old| old.area == current.area)
+        .is_none()
+        .then(|| Buffer::empty(current.area));
+    let base = previous
+        .filter(|old| old.area == current.area)
+        .or(blank.as_ref())
+        .ok_or("Terminal diff base missing")?;
+    let width = usize::from(current.area.width);
+    let expected = width
+        .checked_mul(usize::from(current.area.height))
+        .ok_or("Terminal diff cell count overflow")?;
+    if current.content.len() != expected {
+        return Err("Terminal buffer geometry mismatch".into());
+    }
+    let mut emitted = vec![0_u8; expected];
+    for (column, row, _) in base.diff_iter(current) {
+        let x = column
+            .checked_sub(current.area.x)
+            .ok_or("Terminal diff column outside area")?;
+        let y = row
+            .checked_sub(current.area.y)
+            .ok_or("Terminal diff row outside area")?;
+        let index = usize::from(y)
+            .checked_mul(width)
+            .and_then(|start| start.checked_add(usize::from(x)))
+            .ok_or("Terminal diff index overflow")?;
+        let flag = emitted
+            .get_mut(index)
+            .ok_or("Terminal diff cell outside area")?;
+        *flag = 1;
+    }
+    Ok(emitted)
 }
 
 fn emit_one<B: Backend<Error = io::Error>>(
@@ -688,7 +836,7 @@ mod tests {
         assert!(text.find("FIRST_UPLOAD").unwrap() < text.find("SECOND").unwrap());
     }
     #[tokio::test]
-    async fn failed_output_never_acknowledges_a_frame() {
+    async fn failed_output_returns_uncertain_custody_without_success_proof() {
         let (entered, wait) = std::sync::mpsc::channel();
         let (release, gate) = std::sync::mpsc::channel();
         let mut presenter = Presenter::start(
@@ -705,6 +853,12 @@ mod tests {
         presenter.submit(frame(&presenter, 1, "FAIL")).unwrap();
         wait.recv_timeout(Duration::from_secs(2)).unwrap();
         release.send(()).unwrap();
+        let uncertain = presenter.acknowledgements.recv().await.unwrap().unwrap();
+        assert_eq!(uncertain.frame.frame_id, 1);
+        assert!(uncertain.uncertainty.is_some());
+        assert!(uncertain.rejection.is_none());
+        assert!(uncertain.flush_proof.is_none());
+        drop(uncertain);
         assert!(presenter.acknowledgements.recv().await.unwrap().is_err());
         assert!(presenter.shutdown().await.is_err());
     }
@@ -829,6 +983,30 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn terminal_diff_does_not_credit_unchanged_identical_braille() {
+        use ratatui::buffer::CellDiffOption;
+        let area = Rect::new(0, 0, 2, 1);
+        let mut previous = Buffer::empty(area);
+        previous[(0, 0)].set_symbol("\u{2801}");
+        previous[(1, 0)].set_symbol("\u{2801}");
+        let mut current = previous.clone();
+        assert_eq!(
+            emitted_cell_mask(Some(&previous), &current).unwrap(),
+            vec![0, 0]
+        );
+        current[(1, 0)].set_diff_option(CellDiffOption::AlwaysUpdate);
+        assert_eq!(
+            emitted_cell_mask(Some(&previous), &current).unwrap(),
+            vec![0, 1]
+        );
+        current[(1, 0)].set_diff_option(CellDiffOption::Skip);
+        assert_eq!(
+            emitted_cell_mask(Some(&previous), &current).unwrap(),
+            vec![0, 0]
+        );
+    }
+
     #[test]
     fn uncertain_output_tail_is_not_retried_on_drop() {
         struct PartialFailure(Arc<AtomicUsize>);
