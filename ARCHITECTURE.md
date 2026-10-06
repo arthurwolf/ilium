@@ -187,7 +187,7 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
   - **Identity** (which CLI, if any): walk the PTY's child process tree via `sysinfo` and match process names against the shared built-in provider registry (`claude`, `codex`, `agy`/`antigravity`), plus generic/custom signatures (`opencode`, `aider`, …). This is the primary signal — robust against UI redesigns, unlike text scraping.
   - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for markers. A literal `"esc to interrupt"` substring is one recognized "working" trigger, but real Claude Code builds also render a present-tense status line ending in an ellipsis alongside a live elapsed-time token (e.g. `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`) — `looks_like_live_status_line` catches that shape instead of matching exact wording, so it survives whichever whimsical verb is showing. A `y/n`-style confirmation line or a numbered selection menu with a `❯` cursor means blocked (`WaitingApproval`); anything else with no agent CLI detected, or an agent CLI with no such marker, is idle.
   - First-party providers implement one pure shared contract for command launch, process-name aliases, resume syntax, CLI argument parsing, labels, and deterministic ordering. Adding a supported provider extends that contract rather than duplicating special cases through the client and server.
-- **ilium-agent-session** — the shared transcript-provenance boundary used by both server-side session discovery and client-side LLM titling. It verifies Claude/Codex JSONL stores and Antigravity's UUID database plus `history.jsonl` project binding before accepting a session, preventing cross-project identities from leaking through lossy/global stores. Its pure byte parser returns a raw identity, never verified provenance. Bounded locators can inject an explicitly owned metadata parser; cancellation, admission refusal or worker failure invalidates the entire discovery attempt so partial evidence cannot become a unique match. The crate creates no execution bank or worker.
+- **ilium-agent-session** — the shared transcript-provenance boundary used by both server-side session discovery and client-side LLM titling. It verifies Claude/Codex JSONL stores and Antigravity's UUID database plus `history.jsonl` project binding before accepting a session, preventing cross-project identities from leaking through lossy/global stores. Its pure byte parser returns a raw identity, never verified provenance. Bounded locators can inject an explicitly owned metadata parser; cancellation, admission refusal or worker failure invalidates the entire discovery attempt so partial evidence cannot become a unique match. All transcript and Antigravity history reads use the platform regular-file opener: Unix opens are nonblocking before handle validation, so a path replaced by a FIFO cannot wait for a writer; ordinary symlink resolution remains supported. The crate creates no execution bank or worker.
 - **ilium-session-convert** — converts one agent session to the other built-in provider (Claude Code ⇄ Codex) so the conversation continues under the other CLI. Claude→Codex drives Codex's own `externalAgentConfig/import` session importer over a private `codex app-server` stdio child; Codex→Claude is a Rust transcript translator (user prompts, assistant text, shell/tool calls and results; reasoning and token events are dropped). It is a blocking function with step/log/progress events and a cancel flag, called from a client worker thread; the tree menu's **Convert to** action stops the pane's agent (`TerminatePaneProcess`), freezes the pane, shows the step/progress/log dialog, then `ReplacePaneWithCommand` swaps the pane for one resuming the converted session.
 - **ilium-remote-compaction** — pure compaction pipeline for Claude Code and Codex transcripts (no async, no HTTP, no PTY). It parses a session file into a neutral conversation (Claude `parentUuid` chain with `compact_boundary`/`preservedSegment`; Codex rollout with `compacted` and `replacement_history`), masks old tool output, redacts secrets, builds a deterministic file/command/error ledger, chunks the input to the summarizer window, renders the technique prompt (Claude Code, Codex, opencode, Gemini CLI, best-of-all-worlds, custom; templates live in `ilium-prompts/templates/compaction/`), and calls an injected `Summarizer` (chunk, merge, retry, re-chunk on `ContextTooLong`, deterministic fallback). It then backs the transcript up and rewrites it atomically as a compaction (a `compact_boundary` plus summary record for Claude, a `compacted` record with replacement history and a fresh `token_count` for Codex), refusing when the file grew meanwhile. `compact_session` reports step/progress/log/token events and honors a cancel flag; `transcript_is_at_pause_point` and `latest_context_usage` feed the client's monitor. The client owns the rest: `remote_compaction_worker` (blocking worker, the `Summarizer` over `ilium-inference` with a long per-request timeout), `remote_compaction_flow` (wait for a pause, freeze, `TerminatePaneProcess`, compact, `ReplacePaneWithCommand` resume, failure recovery, the automatic context monitor with cooldown and a three-failure circuit breaker), `remote_compaction_dialog` (steps, progress, token bars, log, privacy banner) and the **Remote compaction** settings tab. The toolbar Compact button routes here when the feature is enabled.
 - **ilium-ambient** — the ambient scene engines: the `Scene` contract, the shared dot `Raster`, data-driven `Control` rows and per-scene settings, the shared `GeoLocation`, address search, the world map and the pipes, stars, night-lights, clouds, video, spectrum and images scenes. No terminal, ratatui or client types; `ilium-client` hosts it (`background_animation::AmbientHost`) and owns the Settings UI, compositing and persistence.
@@ -220,6 +220,42 @@ preparation. Reserved publication remains valid during a concurrent drain;
 explicit cancellation returns work that never started. Callback panics produce
 failed receipts and leave subsequent finite jobs runnable.
 
+Bank construction also has an explicit partial-start owner:
+`Execution::start_with_custody` returns the original failure together with any
+bank whose workers already started. The caller cancels and observes that actual
+bank before retrying. The existing `Execution::start` API performs this cleanup
+on its bootstrap caller; if its five-second join deadline expires, the original
+spawn error contains a typed `StartCleanupError` retaining the bank for later
+background observation. A callback exit or elapsed deadline never establishes
+physical shutdown. This constructor seam passed all 13 debug library tests,
+strict all-target Clippy, its five new native cases in release mode and an
+optimized library build. The 74 recorded source and manifest inputs matched
+current readback; the release artifact and physical child cleanup were verified
+(`ilium-worker-foundation-native-879-1312`). A separate integration run passed
+42 debug cases across ten admission, quota, retirement, CPU and shutdown test
+binaries, plus four optimized CPU, nested-shutdown and startup-ownership cases.
+All 74 inputs matched current readback and every child was reaped before the
+isolated target was removed (`ilium-worker-foundation-integration-879-1315`).
+These checks qualify the execution foundation only. Client startup awaits one
+bootstrap owner on the existing runtime.
+A bounded transfer acknowledgement moves the actual bank only after the caller
+has taken custody; cancellation leaves it with the bootstrap owner until its
+native workers join. Failed admission retains the original initialized owners
+in `ClientExecutionStartError`. This client seam is also source-integrated and
+formatting checked, with five native cases authored but not yet executed.
+Later service-startup rollback and complete client shutdown remain separate
+integration and verification requirements.
+
+Presentation shutdown retains its completion receiver and original output
+failure across cancelled waits. The existing platform supervisor notifies the
+presenter only after native join, thread-local destruction and custody release;
+the presenter checks that physical result before returning success. It creates
+no observer thread or per-call blocking task. Output drain and physical exit
+share one five-second deadline, and observation failures retain the actual
+ticket and any original output error. This source seam and formatting checks
+are integrated; the real TLS and blocked-output cancellation tests are authored
+but remain unexecuted pending the client verification stage.
+
 Transcript metadata parsing can use the existing CPU bank through the bounded
 locator's supplied parser. Synchronous filesystem traversal and receipt waits
 belong to an admitted persistent I/O coordinator, outside the finite I/O bank;
@@ -241,6 +277,331 @@ readers awaiting frame bodies cannot consume the encoder's directional headroom.
 A dedicated codec CPU thread avoids waiting behind lengthy document jobs. These
 declarations still require queued payloads and installed projections to retain
 their own charges; bank shutdown does not close an independent bank's group.
+
+The current server IPC path still has uncovered ownership boundaries. Its raw
+64-entry direct queues and 1024-entry broadcast queue lack admission for retained
+payload bytes before cloning. Completed encoded frames retain finite encoder
+job credit through socket flush; two blocked connections can therefore exhaust
+the shared two-job encoder tenant. The client normal publisher retains a refused
+head and tail, but its final shutdown loops currently move those requests into
+an awaiting iterator and lose unpublished originals on error or cancellation.
+The frozen real-server baseline reproduced four exact native assertions:
+encoder starvation with two blocked transport flushes, stale trigger delivery
+after an A-to-B-to-A edit, missing authoritative resynchronization after a
+failed earlier delivery, and coordinator destruction of the original matcher
+engine. Its compiler passed and every case reached its intended assertion;
+these are component failures, not live TUI measurements
+(`ilium-worker-server-baseline-879-1321/gate001/primary-audit.json`).
+Private trigger corrections, complete-chunk output batching and a same-pass
+encoder transfer into the existing shared byte ledger now pass the frozen
+server library suite: 497 tests passed and nine were ignored, including all
+six new output-batching cases and nine trigger/encoder cases. All-target strict
+lint and an optimized server binary also passed. The original byte-ceiling
+regression was reproduced separately. An earlier qualification mistakenly
+reused the baseline executable for the candidate; the successful retry used
+separate targets and verified distinct test inventories and executable hashes.
+Eight gate logs, final binary identity, child reaping and scratch removal were
+independently audited. This private binary is retained, not installed or active
+(`ilium-worker-output-qualification-879-1335/primary-audit.json`).
+That first transfer bounded retained storage but still dropped its directly
+owned event and frame on the writer task after flush, error or cancellation.
+The private three-file successor now places the exact event and its single encoded frame in one
+bounded retirement envelope. Codec retention attaches before submission,
+covering abandoned result receipts; persistent storage attaches before finite
+codec credit releases. All nine actual writer-path retirement tests now pass,
+alongside the full frozen server suite: 504 passed, zero failed, nine ignored.
+All-target strict lint and an optimized server binary passed. An independent
+audit verified five gate logs, all 22 required retirement/trigger/output cases,
+release identity, child reaping and scratch removal. The retained binary is
+not installed or active (`ilium-worker-retirement-qualification-879-1339/primary-audit.json`).
+Raw producer admission before attachment remains unimplemented. The private client
+shutdown caller keeps
+its actual iterator and FIFO flush receipt in the preadmitted complete root;
+queue publication, physical flush and server acceptance remain separate facts.
+That caller has passed source review and parsing only. The asset-complete
+request-drain component reproduced the original lost-request assertion, then
+passed four ownership cases and eleven standalone connection/IPC cases, strict
+all-target lint and an optimized library build. Its 80 frozen inputs remained
+unchanged and its children and build target were retired. Six tests requiring
+the complete App remain deferred; this component result does not qualify the
+root caller or complete client (`ilium-worker-request-drain-879-1318/gate003/primary-audit.json`).
+The complete client outbox also contains prepared commands. Its private
+connection successor preserves those commands and admitted name/project leaves;
+the tested ordinary-request component cannot replace that successor unchanged.
+Assembly rejected their conflicting connection postimages explicitly. A private
+successor now rebases the drain custodian and publication permit onto the complete
+`OutboundRequest` envelope, preserving prepared commands, admitted name/project
+leaves and all existing connection tests. The current private assembly includes
+37 source targets with internally consistent successor hashes, including three
+board editor domains. The complete client preflight subsequently rejected
+assembly against its 2,047-file frozen baseline before invoking Cargo: several
+chains started at later predecessors and one animation collector forked from
+an older inference caller. The collector fork is now reconciled. An audit
+recovered seven exact initial files and verified 47 earlier source edges;
+six historical initial byte images remain unavailable. Six new composites
+against the actual frozen baseline now preserve the reviewed latest sources;
+independent exact patch replay passed for each. The complete private graph
+now selects 86 targets and preserves the earlier prerequisite edges. The
+asynchronous worktree caller and later shutdown assembly have independent
+exact replay checks; twelve shutdown edges across eight targets replayed
+without changing the earlier source selections. Board preparation now uses its
+existing completion wake before writer admission closes. Animation installers
+and the complete animation/location controller integration remain source
+prerequisites before compilation. Pending native qualification is recorded
+separately from missing source, so the compiler runner does not require tests
+to have already passed before compiling. This does not reconstruct the missing
+historical images or qualify the current workspace.
+The worktree test migration exposed a hidden-parent reply mismatch: incoming
+repository facts and errors accepted the original parent beneath a choice
+dialog, but their collectors checked only the top-level mode. Two private
+successors use the existing parent lookup for collection and installation while
+retaining project and exact dialog identity fences. Both pass scoped formatting
+and exact patch replay. Discriminating success/error retention tests are authored
+and preserve the original allocation pointers and complete accounting; their
+native qualification remains outstanding.
+Private preservation
+patches retain the baseline's CPU-decoded Settings dispatch, original editor
+accessors and admitted prompt fixtures alongside newer board/debug changes.
+These patches pass formatting and exact replay, not compilation.
+The private startup-failure successor constructs animation defaults inside the
+existing admitted I/O job and keeps them in the same retained startup output as
+the home path and read error. Four source facets pass independent hash and exact
+patch-replay checks; their native tests remain unrun. The proposed App aliases
+must be installed before UI access. Source review caught a bootstrap call to an
+uninstalled home alias; the sealed client composite now passes
+the existing session-directory fallback directly to the I/O job. The animation
+surface/worker settings-handle migration remains private and unfinished.
+The board
+domains capture the original model and command, prepare
+a validated candidate on CPU, and publish saved state only after the existing
+ordered writer acknowledges durability. Unknown write outcomes retain both
+models without automatic replay or rollback. Nine board patches replayed
+exactly against their sealed predecessors; the 17 authored board tests, seven
+prepared-command drain tests and full-client compilation remain unqualified.
+Direct filesystem cleanup also needs to advance accepted preparation before
+closing writer admission. An accepted editor writer may already hold a source
+promise while its CPU `SaveSource` operation is still pending. The private
+editor shutdown facet reuses the actual loan completion path without scheduling
+defaults or replay, and retains one shared five-second deadline. Both patches
+have independently verified hashes and exact replays; compilation and native
+save/readback checks are unrun. Accepted board preparation and closing
+instruction commits need the same ordering before their writers close; those
+consumers remain integration prerequisites. On deadline, the outer cleanup
+retains the whole App rather than claiming unconfirmed writes were saved.
+Instruction shutdown must distinguish draining from ordinary user cancellation:
+the existing Cancel path cancels preparation and forbids body submission, so
+it cannot finish an accepted commit before writer admission. A private parent
+facet now reconciles the same original completion without invoking the normal
+dialog pump. Its acknowledgement logic is byte-identical to the original,
+with exact patch replay and scoped formatting verified. Session draining and
+cleanup caller integration remain outstanding; native persistence checks have
+not run. Previously user-cancelled sessions must never be resubmitted by shutdown.
+The private cleanup caller now drives accepted family preparation before using
+the cancellation-retirement helper, which otherwise cancels live CPU receipts.
+Both normal and error cleanup filesystem calls pass the existing native input
+parent to the drain. Success must also require that parent's original completion
+has actually reconciled: taking an App notice alone is insufficient when parent
+identity validation fails. Exact caller replays and source checks passed; the
+combined native-parent fence and shutdown integration remain uncompiled.
+The shutdown fixtures also need a constructor that explicitly omits implicit
+test workers. Ordinary test `App::new` initializes several owners through the
+global test bank before a fixture can inject its own clients. Replacing those
+owners afterward cannot prove that only the isolated bank was started. The newer private fixture assembly selects 91 sources and preserves the previous
+baseline, lock and source edges. Independent replay verified its nine assembly
+stages; three helper newline corrections are composed as separate exact facets.
+Private test-only constructor facets omit all 13 direct and nested shared-bank
+acquisitions while preserving ordinary defaults. Four actual App/native-parent/
+ordered-writer shutdown cases and corrected editor-save fixtures use that seam;
+exact patch replay and formatting passed, but compilation and native execution
+have not run. These source checks do not establish isolated resource bounds.
+The separate frozen 2,074-file incomplete-source client diagnostic exited 101
+with 308 compiler error records and no native tests. Source hashes were stable;
+the runner was reaped and both owned scratch directories removed. Besides known
+animation/location gaps, shared retirement handles around board rollback models
+require `Sync` that their UI textareas cannot provide. This needs an explicit
+single-owner model transfer and immutable projection, preserving rollback.
+The diagnostic also omitted the qualified conversion candidate. A newer private
+assembly incorporates its 23 exact postimages, including two explicit predecessor
+bridges, and adds only the existing local execution dependency to the conversion
+package's lock entry. Unrelated lock changes remain rejected. The combined client
+and ordinary prompt/value caller integration are still uncompiled; package-level
+conversion tests do not qualify the full client or current workspace.
+The subsequent private assembly selects 125 sources, including the sealed
+13-source location preparation and save controller. Its App patch commutes
+with the newer shutdown and isolated-test constructor facets; inverse replay
+restores the exact previous App. The mouse merge replaces only the location
+handler, preserving the newer search and pointer ownership changes. An initial
+patch attempt encountered already-applied formatting hunks; the recovered merge
+preserves every unrelated byte and retains the failure evidence. No location
+native case or combined compiler gate has run. Two further private caller fixes
+use the initialized process quota for conversion startup and retain the same
+worktree opening request after a lost or already-consumed receipt. The latter
+includes an authored, unrun actual CPU receipt ownership regression. Board model
+transfer, ordinary value-dialog producers and the broad animation source and
+render integration remain active prerequisites to full-client qualification.
+Editor runtime caller reconciliation must preserve both ownership and existing
+admission. A private exact title-inference facet now classifies owned and loaned
+editors as nonterminal panes. Restructure and control snapshots have prepared
+immutable editor-context consumers, but their context producers, module/test
+registration and fallible App caller remain outside the selected assembly.
+The reviewed snapshot candidate would also revert shared catalogue capture to
+UI iteration and serialization; only its editor hunks were retained privately.
+Projected editor operations must retain their existing snapshot scratch debit
+when adding context preparation cost. Replacing that debit with context cost
+would leave accepted snapshot allocation unaccounted for. These consumers remain
+uncompiled and unrun; source review does not establish complete editor offload.
+Three private producer facets now prepare editor context on the existing CPU
+load and bulk-operation owners. They preserve the newer generic pane/worktree
+fences, acknowledged windows and context-aware editor operations. Both initial
+and projected loans retain the augmented scratch cost for retry, and projected
+operations add context cost to their existing snapshot cost. Exact patch replay
+passed; the pane and bulk files pass single-file formatting. The filesystem
+facet retains two inherited formatting differences. Helper/module registration,
+fallible App callers and context-refresh test adapters remain outside the graph;
+these prepared producers have not compiled or run. Context refresh must use a
+distinct operation fence kind rather than the existing prompt-snapshot kind.
+The latest private assembly selects 127 sources after six exact board-transfer
+patch replays. Mutable board models and rollback acknowledgements have single
+owners; immutable read views exclude textareas. The same original model returns
+through a bounded loan channel, and presentation surfaces install only after
+the actual terminal flush acknowledgement. Read capacity is computed by the
+existing I/O producer and CPU candidate preparation, avoiding UI column scans.
+The original and candidate textarea declarations remain conservative; legacy
+board edits and persistence capture are still open boundaries. Compiler and
+native tests have not run on this assembly.
+Independent editor producer review verified forward and reverse replays and
+preserved retry and snapshot accounting. A prepared successor assigns context
+refresh fence kind 20 and makes the editor path read-only outside its owner,
+with a setter that invalidates context identity. Exhaustive caller migration
+and current-API native fixtures are required before selecting that successor.
+The older displaced client-library check was recovered from its original exit
+receipt: compiler 101, stable source, no native execution, both recorded runners
+absent. Its diagnostics are retained and its two disposable directories removed.
+The subsequent private assembly selects 150 sources, adding the context helpers,
+fallible project gather, module registration, four adapted context test files,
+ordinary value-dialog producers and exhaustive path-accessor facets. Rebased App
+patches restore the entire current predecessor on inverse replay. Independent
+review found a remaining production snapshot path access and a test include in
+the wrong helper scope; both have exact replayed corrections and pass scoped
+format checks. These source checks still do not establish compilation or native
+behavior. RefreshContext has no production retry scheduler yet. A hidden editor
+may have no acknowledged painted window, so a refresh must preserve the original
+model and native-input fairness without fabricating geometry or occupying a
+global semantic head indefinitely. Independent source review verified the 150
+selected hashes and references for 14 context and 10 new leaf cases. Two included
+test files now use ordinary comments without changing cases or assertions.
+Production refresh scheduling and compiler/native qualification remain open.
+The next private assembly selects 154 sources. Eleven Git-token, animation
+constructor and cost/sound original-model patches replay forward and backward
+with zero fuzz and exact bytes. Git dialogs retain their matching save token
+through ordered writer acknowledgement. Cost and sound models expose immutable
+originals with CPU-computed or indexed allocation declarations; their startup
+producer, reader, update and final-release integration is still incomplete.
+The additional modules are registered, but this assembly has not compiled or
+run native tests.
+
+Further editor review found a behavior-preservation risk: optional context
+preparation adds six times the model declaration plus 1 MiB to every semantic
+input job. This can reject edits that fit the previous admission limits.
+Optional context must have admission and retry policy separate from semantic
+input, without increasing limits. The existing read-only operation capture
+already supports an unpainted editor through the actual original model and
+installed-window scalar projection; it does not require fabricated terminal
+acknowledgements. A separate failure risk remains: a panic in optional context
+preparation currently classifies a completed semantic operation as a panicked
+model. Regression fixtures for both boundaries are being prepared; no native
+failure or correction has yet been qualified. Two actual-original Defaults
+operation regressions now exercise the inherited admission plan and a test-only
+panic at the optional phase after semantic completion. Their assertions include
+original model, undo, cursor and identity preservation plus actual bank drain;
+they remain unrun. A 156-source successor also adds Git CPU catalogue opening,
+step edits and ordered acknowledgement fences. Its diagnostic compiler check
+runs against 2106 frozen files and cannot establish whole-feature acceptance.
+
+Startup still has a distinct producer gap: system-sound and audio-device
+discovery run synchronously while the startup dialog is active, before the
+shared execution bank starts. Wrapping those raw results later does not move
+their production or final failure destruction off the caller. Startup must
+transfer admitted original sources from the existing I/O/CPU owners, preserve
+execution shutdown on every startup failure, and avoid creating a second bank.
+Acknowledged pane surfaces expose another presentation accounting boundary.
+The current guarded buffer retains a shared storage declaration for two queued
+frames and the diff base, while queue reservations release independently of
+external buffer references. Multiple editor or board loans can therefore keep
+distinct older buffers alive beyond that declaration. Clearing unused pane
+caches does not bound active originals. A private actual-presenter regression
+retains acknowledged buffers and checks refusal before another frame allocation;
+it preserves all original production code and passes formatting, but has not
+compiled or run. The retained-buffer lease, pre-copy admission and final-owner
+CPU retirement remain required work, alongside the compositor copy boundary.
+Debug-log export is still being integrated across its actual replay/live cache
+producers. A private client dispatch successor now offers the whole decoded
+event wrapper to the CPU cache owner before unpacking it, restores refused
+originals at the FIFO front, and fences later events until publication. Its
+exact patch replay and scoped formatter passed; compilation, native ordering
+checks remain unverified. The private client lifecycle now configures export
+with the existing filesystem tenant and notification, pumps normal completion,
+and drains accepted exports before worker closure on every Result cleanup path.
+A bounded deadline preserves the whole App, accepted writer and execution owner
+in existing shutdown custody; combined filesystem/export errors retain both
+causes. The private export worker is now sealed across cache producers, original
+snapshot capture, CPU report preparation, ordered writes and status consumers.
+An independent audit verified 37 source and patch hashes; nine changed-file
+patches replay exactly and 14 sources pass scoped formatting. Nineteen new
+native cases, including actual Root deadline custody and persistence readback,
+are authored but unrun; full-client compilation remains outstanding.
+Its report writer validates the opened handle before truncation, rejecting
+non-regular files, FIFOs and symlinks while preserving private permissions.
+Where parent-directory synchronization is unsupported, the acknowledgement
+explicitly confirms saved file contents while leaving directory metadata
+durability unconfirmed. Actual synchronization errors retain the request and
+error without automatic replay. Location,
+animation-text and create-board preparation plus the full animation source
+migration also remain outstanding. A private CPU normalization stage now accepts
+only already admitted candidates, preserves the exact candidate on failure,
+and publishes independently retiring normalized settings. It reproduces the
+existing bounded serialization and serde normalization semantics; its three
+new cases are authored but unrun. Exact patch replay and scoped formatting
+passed. The existing typed configuration family writer now has a private
+animation payload carrying that retiring prepared owner, so queue admission
+need not traverse or copy settings. Its adapter-required owned copy executes
+on the existing I/O worker. One actual ordered-writer/readback case is authored
+but unrun. A further private successor returns the exact prepared owner in a typed durable
+animation receipt. Its save intent keeps distinct authored and committed source
+versions, rejects foreign candidates and homes, applies only newer durable
+versions, and treats duplicate acknowledgements idempotently. One additional
+real-bank fence case and the updated writer readback case are authored but
+unrun. Exact three-file patch replay and scoped formatting passed. A private App collector successor now handles the typed animation receipt and
+prompt-intent variant, with distinct authored and committed source holders.
+It reports unexpected receipts and quits without claiming a successful source
+transition; write errors do not authorize rollback or replay. Its four patches
+replay exactly and scoped formatting passes. A later collector successor
+preserves the newer inference Settings-step input acknowledgements while adding
+the same animation source holders. Private Root module registration and an
+actual startup caller now route project reads and accepted migration through
+the existing I/O tenant, then promote the original settings on CPU. This caller
+has passed formatting and exact patch replay, but depends on the unsealed App
+installer and failed-read fallback ownership. Startup publication, CPU edit
+producers and render consumers remain incomplete.
+Compilation and native collector tests are unrun, and the legacy raw settings
+fields remain until those consumers move together. Preparation does not hide
+preceding UI copies. Its private source adapter
+now represents both the original startup settings and an independently admitted
+prepared settings version, preserving the startup path owner and checked source
+revision. Two new identity/refusal tests are authored but unrun; App, writer and
+engine caller migration is still required.
+
+The semantic queue inventory covers all 48 broadcast occurrences (46 actual
+calls), 79 direct publication/helper expressions and nine allocation/recovery
+builders. Broadcast receive currently deep-clones before filtering or encoder
+admission, and full synchronization eagerly builds a vector of tree, replay and
+metadata payloads. Producer pre-copy admission and receiver sharing must both
+change; a wrapper charged after construction is insufficient. Normal lag
+recovery does not reproduce every semantic reply, and final broadcast drain
+does not repair lag (`ilium-worker-ipc-queue-inventory-879-1317/semantic`). Those
+boundaries, opaque regex/VT phases and remaining pending matcher originals are
+still open; neither physical retirement nor a passing component gate proves
+semantic delivery or completion of the worker architecture.
 
 `Client.try_reserve_detailed` returns the same finite reservation with typed
 refusal evidence. A failed quota check records the requested increment, observed
