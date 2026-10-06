@@ -89,6 +89,39 @@ pub fn prepare_catalog(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedCatalog, Error> {
+    prepare_catalog_regions(catalog, bindings, generation, limits, cancelled, None)
+}
+
+/// Catalog paths are opaque binding keys here. Every read resolves from the
+/// original retained region handle; a missing handle fails that map explicitly.
+pub fn prepare_catalog_pinned(
+    catalog: &catalog::Catalog,
+    bindings: &BTreeMap<PathBuf, MapContext>,
+    generation: u64,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    regions: &BTreeMap<PathBuf, std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>>,
+) -> Result<PreparedCatalog, Error> {
+    prepare_catalog_regions(
+        catalog,
+        bindings,
+        generation,
+        limits,
+        cancelled,
+        Some(regions),
+    )
+}
+
+fn prepare_catalog_regions(
+    catalog: &catalog::Catalog,
+    bindings: &BTreeMap<PathBuf, MapContext>,
+    generation: u64,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    regions: Option<
+        &BTreeMap<PathBuf, std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    >,
+) -> Result<PreparedCatalog, Error> {
     prepare_catalog_with(
         catalog,
         bindings,
@@ -108,10 +141,19 @@ pub fn prepare_catalog(
             };
             let result = (|| {
                 let region_directory = save.directory.join("region");
-                let allocation =
-                    index::allocated_chunks(&region_directory, cancelled).map_err(|error| {
-                        (matches!(error, region::Error::Cancelled), error.to_string())
-                    })?;
+                let pinned = match regions {
+                    Some(regions) => Some(
+                        regions
+                            .get(&save.directory)
+                            .ok_or((false, "missing retained region directory".to_owned()))?,
+                    ),
+                    None => None,
+                };
+                let allocation = match pinned {
+                    Some(directory) => index::allocated_chunks_pinned(directory, cancelled),
+                    None => index::allocated_chunks(&region_directory, cancelled),
+                }
+                .map_err(|error| (matches!(error, region::Error::Cancelled), error.to_string()))?;
                 report.allocated_chunks = allocation.chunks.len();
                 report.rejected_regions = allocation.rejected_regions;
                 let anchor = save
@@ -129,17 +171,28 @@ pub fn prepare_catalog(
                 .map_err(|error| (error == windows::Error::Cancelled, error.to_string()))?;
                 report.header_candidates = search.header_complete;
                 report.scan_complete = search.scan_complete;
-                let output = preparation::load_candidates(
-                    &region_directory,
-                    evidence::Source {
-                        map: context.map,
-                        generation,
-                    },
-                    &search.candidates,
-                    limits.loading,
-                    limits.preparation,
-                    cancelled,
-                )
+                let source = evidence::Source {
+                    map: context.map,
+                    generation,
+                };
+                let output = match pinned {
+                    Some(directory) => preparation::load_candidates_pinned(
+                        directory,
+                        source,
+                        &search.candidates,
+                        limits.loading,
+                        limits.preparation,
+                        cancelled,
+                    ),
+                    None => preparation::load_candidates(
+                        &region_directory,
+                        source,
+                        &search.candidates,
+                        limits.loading,
+                        limits.preparation,
+                        cancelled,
+                    ),
+                }
                 .map_err(|error| {
                     (
                         matches!(error, preparation::Error::Loader(loader::Error::Cancelled)),

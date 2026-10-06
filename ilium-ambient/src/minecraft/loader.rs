@@ -1,5 +1,6 @@
 //! Blocking, bounded saved-window loading for an owned preparation worker.
 use super::{chunk, coverage::Coverage, region};
+use ilium_platform::animation_files::PinnedDirectory;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -147,6 +148,89 @@ pub fn load_projected_window(
         },
         [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
         cancelled,
+    )
+}
+
+/// Selected-root variant. The caller already holds the exact native DiskRead
+/// operation and reserves the finite worker/storage costs before invoking it.
+/// Missing or rejected chunks keep their existing loader semantics.
+pub fn load_window_pinned(
+    region_directory: &PinnedDirectory,
+    requested: &BTreeSet<[i32; 2]>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<LoadedWindow, Error> {
+    let decode_limits = chunk::Limits {
+        max_sections: MAX_SECTIONS,
+        max_palette_entries: 8192,
+        max_properties: 8192,
+        max_text_units: 262144,
+    };
+    load_with_ceiling(
+        requested,
+        limits,
+        [MAX_CHUNKS, MAX_STORAGE_CHARGE],
+        cancelled,
+        |position| {
+            let Some(stored) = region::read_chunk_pinned(
+                region_directory,
+                position,
+                region::Limits::default(),
+                cancelled,
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(chunk::decode(
+                &stored.document,
+                position,
+                decode_limits,
+                cancelled,
+            )?))
+        },
+    )
+}
+
+/// Projected saved source variant. Require exact complete coverage before
+/// preparing a native route; the caller reserves the 192 MiB ceiling first.
+pub fn load_projected_window_pinned(
+    region_directory: &PinnedDirectory,
+    requested: &BTreeSet<[i32; 2]>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<LoadedWindow, Error> {
+    let limits = Limits {
+        max_chunks: MAX_PROJECTED_CHUNKS,
+        max_storage_charge: MAX_PROJECTED_STORAGE_CHARGE,
+        ..Limits::default()
+    };
+    let decode_limits = chunk::Limits {
+        max_sections: MAX_SECTIONS,
+        max_palette_entries: 8192,
+        max_properties: 8192,
+        max_text_units: 262144,
+    };
+    load_with_ceiling(
+        requested,
+        limits,
+        [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
+        cancelled,
+        |position| {
+            let Some(stored) = region::read_chunk_pinned(
+                region_directory,
+                position,
+                region::Limits::default(),
+                cancelled,
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(chunk::decode(
+                &stored.document,
+                position,
+                decode_limits,
+                cancelled,
+            )?))
+        },
     )
 }
 

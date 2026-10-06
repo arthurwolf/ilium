@@ -14,6 +14,84 @@ fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let storage = temporary.path().join("history");
     (temporary, root, storage)
 }
+#[cfg(target_os = "linux")]
+struct TraversalSessionFixture {
+    _temporary: tempfile::TempDir,
+    ancestor: PathBuf,
+    workspace: PathBuf,
+    root: PathBuf,
+    storage: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl TraversalSessionFixture {
+    fn new() -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::Builder::new()
+            .prefix("ilium-session-traversal-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let ancestor = temporary.path().join("traverse-only");
+        let workspace = ancestor.join("workspace");
+        let root = workspace.join("saves");
+        let storage = workspace.join("history");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir(&storage).unwrap();
+
+        let root = paths::canonicalize(&root).unwrap();
+        let storage = paths::canonicalize(&storage).unwrap();
+
+        std::fs::set_permissions(&ancestor, std::fs::Permissions::from_mode(0o111)).unwrap();
+
+        let fixture = Self {
+            _temporary: temporary,
+            ancestor,
+            workspace,
+            root,
+            storage,
+        };
+
+        // Canonical/search traversal succeeds, while directory read/list access
+        // to this exact ancestor does not. This deterministically reproduces
+        // the former `directory_generation` failure boundary.
+        assert_eq!(
+            paths::canonicalize(&fixture.ancestor).unwrap(),
+            fixture.ancestor.as_path()
+        );
+        assert_eq!(
+            std::fs::read_dir(&fixture.ancestor)
+                .expect_err(
+                    "run traversal permission regressions as an ordinary unprivileged user",
+                )
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            ilium_platform::secure_fs::directory_generation(&fixture.ancestor)
+                .expect_err("strict directory_generation must retain readable-directory semantics",)
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+
+        // Search permission is enough to reach a known readable descendant.
+        assert!(std::fs::read_dir(&fixture.workspace).is_ok());
+
+        fixture
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for TraversalSessionFixture {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Restore only the task-owned fixture so TempDir cleanup can descend.
+        std::fs::set_permissions(&self.ancestor, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+}
+
 fn limits() -> pipeline::Limits {
     pipeline::Limits {
         windows: super::super::windows::Limits {
@@ -294,10 +372,12 @@ fn genuine_synthetic_saved_chunk_is_prepared_without_cloning_or_world_writes() {
     let chunk = &result.maps[0].loaded().chunks[&[0, 0]];
     assert_eq!(Arc::strong_count(chunk), 1);
     assert!(!result.maps[0].targets().is_empty());
-    assert!(result.maps[0]
-        .targets()
-        .iter()
-        .all(|target| target.source == result.maps[0].source()));
+    assert!(
+        result.maps[0]
+            .targets()
+            .iter()
+            .all(|target| target.source == result.maps[0].source())
+    );
     assert_eq!(
         result.snapshot.history(),
         History::default(),
@@ -560,13 +640,15 @@ fn valid_metadata_without_region_is_reported_per_map_and_preserves_qualified_pee
         .map;
     assert_eq!(result.maps[0].source().map, qualified_id);
     assert_eq!(result.reports.len(), 2);
-    assert!(result
-        .reports
-        .iter()
-        .find(|report| report.directory == fresh)
-        .unwrap()
-        .error
-        .is_some());
+    assert!(
+        result
+            .reports
+            .iter()
+            .find(|report| report.directory == fresh)
+            .unwrap()
+            .error
+            .is_some()
+    );
     assert!(
         !fresh.join("region").exists(),
         "service never creates unexplored terrain"
@@ -684,4 +766,247 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         terrain
     );
     assert_eq!(prepared.snapshot.history(), History::default());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_session_prepares_real_chunk_after_selected_root_label_is_renamed() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let fixture = TraversalSessionFixture::new();
+    let label = fixture.root.clone();
+    let storage = fixture.storage.clone();
+    let path = save(&label, "real selected chunk", 100, true);
+    let metadata = std::fs::read(path.join("level.dat")).unwrap();
+    let terrain = std::fs::read(path.join("region/r.0.0.mca")).unwrap();
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let moved = fixture.workspace.join("moved-selected-root");
+    std::fs::rename(&label, &moved).unwrap();
+    assert!(!label.exists());
+    let prepared = prepare_pinned(&label, root, &storage, 7, limits(), &|| false).unwrap();
+    assert_eq!(prepared.availability, Availability::Ready);
+    assert_eq!(prepared.maps.len(), 1);
+    assert!(!prepared.maps[0].targets().is_empty());
+    assert_eq!(prepared.maps[0].source().map, prepared.bindings[0].map);
+    assert_eq!(prepared.maps[0].source().generation, 7);
+    assert_eq!(prepared.snapshot.history(), History::default());
+    assert!(prepared.selected.is_some());
+    let actual = moved.join(path.file_name().unwrap());
+    assert_eq!(std::fs::read(actual.join("level.dat")).unwrap(), metadata);
+    assert_eq!(
+        std::fs::read(actual.join("region/r.0.0.mca")).unwrap(),
+        terrain
+    );
+    assert!(
+        storage.join("history.json").is_file(),
+        "the real path-backed history repository must have published its catalog"
+    );
+    assert_eq!(
+        Repository::new(storage).unwrap().load(&|| false).unwrap(),
+        prepared.snapshot
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_session_rejects_storage_inside_renamed_selected_root() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let fixture = TraversalSessionFixture::new();
+    let label = fixture.root.clone();
+    save(&label, "real selected chunk", 100, true);
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let moved = fixture.workspace.join("moved-selected-root");
+    std::fs::rename(&label, &moved).unwrap();
+    let forbidden = moved.join("history-must-not-be-written");
+    assert!(matches!(
+        prepare_pinned(&label, root, &forbidden, 7, limits(), &|| false),
+        Err(Error::Invalid(
+            "repository storage must be outside selected saves root"
+        ))
+    ));
+    assert!(!forbidden.exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_selected_world_does_not_render_newer_peer_or_retire_its_binding() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let fixture = TraversalSessionFixture::new();
+    let label = fixture.root.clone();
+    let storage = fixture.storage.clone();
+    let older = save(&label, "selected older world", 1, true);
+    let newer = save(&label, "unselected newer world", 5000, true);
+    let initial = prepare(&label, &storage, 1, limits(), &|| false).unwrap();
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let identity = root
+        .child(older.file_name().unwrap().to_str().unwrap(), false)
+        .unwrap()
+        .identity();
+    let selected = prepare_selected_pinned(
+        &label,
+        root,
+        (&older, identity),
+        &storage,
+        2,
+        limits(),
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(selected.availability, Availability::Ready);
+    assert_eq!(selected.maps.len(), 1);
+    assert_eq!(selected.bindings.len(), 2);
+    assert_eq!(selected.snapshot, initial.snapshot);
+    let selected_id = selected
+        .bindings
+        .iter()
+        .find(|bound| bound.directory == older)
+        .unwrap()
+        .map;
+    let peer_id = selected
+        .bindings
+        .iter()
+        .find(|bound| bound.directory == newer)
+        .unwrap()
+        .map;
+    assert_eq!(selected.maps[0].source().map, selected_id);
+    assert_ne!(selected.maps[0].source().map, peer_id);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_selected_child_replacement_refuses_before_history_rebinding() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let fixture = TraversalSessionFixture::new();
+    let label = fixture.root.clone();
+    let storage = fixture.storage.clone();
+    let selected = save(&label, "chosen original", 100, true);
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let retained = root
+        .child(selected.file_name().unwrap().to_str().unwrap(), false)
+        .unwrap();
+    let initial = prepare_selected_pinned(
+        &label,
+        Arc::clone(&root),
+        (&selected, retained.identity()),
+        &storage,
+        1,
+        limits(),
+        &|| false,
+    )
+    .unwrap();
+    std::fs::rename(&selected, fixture.workspace.join("original-retained-world")).unwrap();
+    save(&label, "chosen original", 200, true);
+    assert!(
+        prepare_selected_pinned(
+            &label,
+            root,
+            (&selected, retained.identity()),
+            &storage,
+            2,
+            limits(),
+            &|| false
+        )
+        .is_err()
+    );
+    assert_eq!(
+        Repository::new(storage).unwrap().load(&|| false).unwrap(),
+        initial.snapshot
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_protected_history_catalog_and_writer_ignore_replaced_report_label() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let (temporary, label, storage) = fixture();
+    let selected = save(&label, "original world", 100, true);
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let child_identity = root.child("original world", false).unwrap().identity();
+    std::fs::create_dir(&storage).unwrap();
+    let history_root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&storage).unwrap()))
+            .unwrap(),
+    );
+    let repository = Repository::from_pinned(storage.clone(), history_root).unwrap();
+    let moved = temporary.path().join("retained-history");
+    std::fs::rename(&storage, &moved).unwrap();
+    std::fs::create_dir(&storage).unwrap();
+    let catalog = prepare_repository_pinned(
+        &label,
+        root,
+        Some((&selected, child_identity)),
+        repository.clone(),
+        7,
+        limits(),
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(catalog.availability, Availability::Ready);
+    assert_eq!(catalog.maps.len(), 1);
+    assert!(!storage.join("history.json").exists());
+    let committed = repository
+        .commit_history(catalog.snapshot.revision(), History::default(), &|| false)
+        .unwrap();
+    assert_eq!(repository.load(&|| false).unwrap(), committed);
+    assert!(moved.join("history.json").is_file());
+    assert_eq!(std::fs::read_dir(&storage).unwrap().count(), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_protected_history_inside_source_refuses_despite_unrelated_report_label() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let (temporary, label, _storage) = fixture();
+    let selected = save(&label, "original world", 100, true);
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let child_identity = root.child("original world", false).unwrap().identity();
+    let actual_history = label.join("host-history");
+    std::fs::create_dir(&actual_history).unwrap();
+    let history_root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(&actual_history).unwrap(),
+        ))
+        .unwrap(),
+    );
+    let repository =
+        Repository::from_pinned(temporary.path().join("unrelated-label"), history_root).unwrap();
+    let moved = temporary.path().join("renamed-source");
+    std::fs::rename(&label, &moved).unwrap();
+    assert!(matches!(
+        prepare_repository_pinned(
+            &label,
+            root,
+            Some((&selected, child_identity)),
+            repository,
+            7,
+            limits(),
+            &|| false
+        ),
+        Err(Error::Invalid(
+            "repository storage must be outside selected saves root"
+        ))
+    ));
+    assert_eq!(
+        std::fs::read_dir(moved.join("host-history"))
+            .unwrap()
+            .count(),
+        0
+    );
 }

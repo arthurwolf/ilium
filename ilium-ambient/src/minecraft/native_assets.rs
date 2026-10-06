@@ -1,6 +1,7 @@
 //! Worker-only, digest-pinned installed Java assets beneath exact selected overrides.
 //! No download, extraction, class execution, or generated model is admitted.
 use crate::voxel_landscape::{
+    VoxelLandscapeSettings,
     assets::{
         animation::{ExplicitFrame, MissingAnimation, PixelRect},
         archive::{DuplicateMember, ZipSource},
@@ -16,7 +17,7 @@ use crate::voxel_landscape::{
         review::{AssetPhase, FullPackReview, PackScope, SourceEdition},
         source::{AssetSource, SourceBytes, SourceLimits},
     },
-    pack_sources, VoxelLandscapeSettings,
+    pack_sources,
 };
 use ilium_platform::secure_fs::NoFollowDirectory;
 use std::{
@@ -187,16 +188,67 @@ fn native_review() -> Result<FullPackReview, AssetError> {
         edition: SourceEdition::Java,
         scope: PackScope::FullWorld,
         phase: AssetPhase::PrivateTestPlaceholder,
-        evidence: Label::new("native-tint-investigation-001/native-biome-climate-1.19.3.json; SHA-256-pinned installed archive")?,
+        evidence: Label::new(
+            "native-tint-investigation-001/native-biome-climate-1.19.3.json; SHA-256-pinned installed archive",
+        )?,
         author_credit: Label::new("Mojang Studios / Minecraft; local installed source")?,
-        license_record: Label::new("Local private rendering source only; no redistribution permission inferred")?,
-        restrictions: vec![Label::new("Do not bundle, extract to the project, upload, or redistribute game assets")?],
-        known_missing: vec![Label::new("Source scope is not renderer coverage: unsupported model, block-color, entity and fluid behavior must remain explicit")?],
+        license_record: Label::new(
+            "Local private rendering source only; no redistribution permission inferred",
+        )?,
+        restrictions: vec![Label::new(
+            "Do not bundle, extract to the project, upload, or redistribute game assets",
+        )?],
+        known_missing: vec![Label::new(
+            "Source scope is not renderer coverage: unsupported model, block-color, entity and fluid behavior must remain explicit",
+        )?],
     })
 }
 
 fn native_digest() -> Result<Digest256, AssetError> {
     Digest256::try_from(NATIVE_JAR_SHA256.to_owned())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum NativeArchive<'a> {
+    Path(&'a Path),
+    Pinned(&'a ilium_platform::animation_files::PinnedFile),
+}
+struct PinnedArchiveReader<'a> {
+    file: &'a ilium_platform::animation_files::PinnedFile,
+    offset: u64,
+}
+impl std::io::Read for PinnedArchiveReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.file.read_at(buffer, self.offset)?;
+        self.offset = self
+            .offset
+            .checked_add(count as u64)
+            .ok_or_else(|| std::io::Error::other("native archive read offset overflow"))?;
+        Ok(count)
+    }
+}
+fn read_jar_pinned(
+    file: &ilium_platform::animation_files::PinnedFile,
+    budget: &ByteBudget,
+    cancel: Cancel<'_>,
+) -> Result<SourceBytes, Error> {
+    cancel.check()?;
+    let length = file.len()?;
+    let modified = file.modified()?;
+    let bytes = SourceBytes::read_exact_size(
+        PinnedArchiveReader { file, offset: 0 },
+        length,
+        SourceLimits::default().archive_bytes,
+        budget,
+        cancel,
+    )?;
+    if file.len()? != length || file.modified()? != modified {
+        return Err(Error::Invalid(
+            "selected native archive changed during capture",
+        ));
+    }
+    // NativeSources' common ZIP mount still checks the exact reviewed digest.
+    Ok(bytes)
 }
 
 fn read_jar(path: &Path, budget: &ByteBudget, cancel: Cancel<'_>) -> Result<SourceBytes, Error> {
@@ -234,10 +286,41 @@ impl NativeSources {
         budget: ByteBudget,
         cancel: Cancel<'_>,
     ) -> Result<Self, Error> {
+        Self::open_archive(NativeArchive::Path(path), selected, limits, budget, cancel)
+    }
+
+    /// The host separately selects and admits this original archive descriptor.
+    /// A world directory grant never grants access to the installed JAR.
+    pub fn open_pinned(
+        file: &ilium_platform::animation_files::PinnedFile,
+        selected: Option<&VoxelLandscapeSettings>,
+        limits: Limits,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self, Error> {
+        Self::open_archive(
+            NativeArchive::Pinned(file),
+            selected,
+            limits,
+            budget,
+            cancel,
+        )
+    }
+
+    pub(crate) fn open_archive(
+        archive: NativeArchive<'_>,
+        selected: Option<&VoxelLandscapeSettings>,
+        limits: Limits,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self, Error> {
         cancel.check()?;
         limits.validate()?;
         let reservation = budget.reserve(32 * 1024, cancel)?;
-        let bytes = read_jar(path, &budget, cancel)?;
+        let bytes = match archive {
+            NativeArchive::Path(path) => read_jar(path, &budget, cancel)?,
+            NativeArchive::Pinned(file) => read_jar_pinned(file, &budget, cancel)?,
+        };
         let digest = bytes.digest();
         // Reject duplicate archive members in the native profile. A selected
         // override's existing explicit duplicate policy is kept separately.

@@ -137,12 +137,16 @@ fn route_survey_orders_short_novel_before_longer_repeated_and_stays_finite() {
     assert_eq!(tiers[0], (Choice::NovelAppearance, 1024.0, 1));
     assert_eq!(tiers[5], (Choice::NovelAppearance, 64.0, 1));
     assert_eq!(tiers[6], (Choice::RepeatedAppearance, 256.0, 1));
-    assert!(tiers[..6]
-        .iter()
-        .all(|(choice, _, _)| *choice == Choice::NovelAppearance));
-    assert!(tiers[6..10]
-        .iter()
-        .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance));
+    assert!(
+        tiers[..6]
+            .iter()
+            .all(|(choice, _, _)| *choice == Choice::NovelAppearance)
+    );
+    assert!(
+        tiers[6..10]
+            .iter()
+            .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance)
+    );
 }
 
 #[test]
@@ -367,6 +371,8 @@ fn catalog_retained_fixture() -> Bundle {
         world_seeds: BTreeMap::new(),
         root: PathBuf::from("/synthetic/saves"),
         jar: PathBuf::from("/synthetic/client.jar"),
+        selected: None,
+        native_jar: None,
         warnings: vec![String::from("synthetic warning")],
         _catalog_reservation: Arc::new(
             budget
@@ -418,4 +424,109 @@ fn catalog_retained_charge_rejects_missing_loader_accounting() {
     )
     .unwrap();
     assert!(bundle.retained_catalog_charge().is_none());
+}
+
+#[cfg(target_os = "linux")]
+fn pinned_admission_source(
+    temporary: &tempfile::TempDir,
+    runtime: Arc<SavedRuntime>,
+) -> PinnedSceneSource {
+    use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
+    let label = temporary.path().join("selected-root");
+    std::fs::create_dir(&label).unwrap();
+    std::fs::write(
+        label.join("separate-native-archive.jar"),
+        b"synthetic admission-only file",
+    )
+    .unwrap();
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&label).unwrap()))
+            .unwrap(),
+    );
+    let native_jar = Arc::new(root.open_file("separate-native-archive.jar").unwrap());
+    PinnedSceneSource {
+        root_label: label,
+        selected_world: None,
+        selected_identity: None,
+        root,
+        native_jar,
+        history_storage: temporary.path().join("host-history"),
+        history_root: None,
+        stop: None,
+        runtime,
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_scene_refuses_invalid_history_before_worker_or_runtime_retirement() {
+    let temporary = tempfile::tempdir().unwrap();
+    let env = SceneEnv::for_test(
+        temporary.path().join("cache"),
+        crate::resources::test_resources(),
+    );
+    let mut source = pinned_admission_source(&temporary, Arc::clone(&env.saved_runtime));
+    source.history_storage = PathBuf::from("relative-history");
+    let scene =
+        SavedScene::new_source(None, Some(source), &VoxelLandscapeSettings::default(), &env);
+    assert!(scene.worker.is_none());
+    assert!(!scene.history_retirement_owned);
+    let error = match scene.take_admitted() {
+        Ok(_) => panic!("unadmitted scene published"),
+        Err(error) => error,
+    };
+    assert!(error.contains("absolute"));
+    assert!(!temporary.path().join("host-history").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_scene_refuses_shared_storage_exhaustion_before_worker_or_history() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (_execution, resources) = crate::resources::isolated_test_resources();
+    let env = SceneEnv::for_test(temporary.path().join("cache"), resources);
+    // Existing host-owned credit leaves less than the original 1 GiB scene account.
+    let _occupied = env
+        .resources
+        .reserve_storage(2 * 1024 * 1024 * 1024)
+        .unwrap();
+    let source = pinned_admission_source(&temporary, Arc::clone(&env.saved_runtime));
+    let result = SavedScene::new_pinned(source, &VoxelLandscapeSettings::default(), &env);
+    let error = match result {
+        Ok(_) => panic!("unadmitted scene published"),
+        Err(error) => error,
+    };
+    assert!(error.contains("storage admission rejected"));
+    assert!(!temporary.path().join("host-history").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_scene_original_request_stop_refuses_before_worker_storage_or_history_retirement() {
+    let temporary = tempfile::tempdir().unwrap();
+    let env = SceneEnv::for_test(
+        temporary.path().join("cache"),
+        crate::resources::test_resources(),
+    );
+    let mut source = pinned_admission_source(&temporary, Arc::clone(&env.saved_runtime));
+    let original = ilium_platform::owned_worker::StopToken::default();
+    source.stop = Some(original.child());
+    original.stop();
+    let before = env.resources.finite().quota_group().snapshot().worker_bytes;
+    let scene =
+        SavedScene::new_source(None, Some(source), &VoxelLandscapeSettings::default(), &env);
+    assert!(scene.worker.is_none());
+    assert!(!scene.history_retirement_owned);
+    assert!(matches!(env.saved_runtime.gate(), Gate::Ready));
+    let reason = match scene.take_admitted() {
+        Ok(_) => panic!("cancelled scene published"),
+        Err(reason) => reason,
+    };
+    assert!(reason.contains("already cancelled"));
+    assert_eq!(
+        env.resources.finite().quota_group().snapshot().worker_bytes,
+        before
+    );
+    assert!(matches!(env.saved_runtime.gate(), Gate::Ready));
+    assert!(!temporary.path().join("host-history").exists());
 }

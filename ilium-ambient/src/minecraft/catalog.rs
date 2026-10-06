@@ -1,5 +1,6 @@
 //! Save metadata and relative recency. Header counts remain unqualified terrain.
 use super::{nbt, region};
+use ilium_platform::animation_files::{FileIdentity, PinnedDirectory};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -37,7 +38,7 @@ pub fn discover_metadata(
                 metadata,
             }),
             Err(Error::Region(region::Error::Cancelled)) => {
-                return Err(region::Error::Cancelled.into())
+                return Err(region::Error::Cancelled.into());
             }
             Err(error) => {
                 catalog.rejected_maps += 1;
@@ -110,9 +111,11 @@ pub fn metadata(document: &nbt::Document) -> Result<Metadata, Error> {
     let spawn = ["SpawnX", "SpawnY", "SpawnZ"].map(|field| nbt::get(data, field));
     let spawn_position = match spawn {
         [None, None, None] => None,
-        [Some(nbt::Tag::Int(x)), Some(nbt::Tag::Int(y)), Some(nbt::Tag::Int(z))] => {
-            Some([*x, *y, *z])
-        }
+        [
+            Some(nbt::Tag::Int(x)),
+            Some(nbt::Tag::Int(y)),
+            Some(nbt::Tag::Int(z)),
+        ] => Some([*x, *y, *z]),
         _ => return Err(Error::Invalid("partial or non-Int spawn position")),
     };
     // Canonical Java serialization writes a Long. Its native codec can coerce
@@ -161,6 +164,63 @@ pub fn read_metadata(save: &Path, cancelled: &dyn Fn() -> bool) -> Result<Metada
     let bytes = region::decompress(
         region::Compression::Gzip,
         &compressed,
+        limit.nbt.max_bytes,
+        cancelled,
+    )?;
+    let document = nbt::parse_checked(&bytes, limit.nbt, cancelled).map_err(|error| {
+        if error.reason == "cancelled" {
+            Error::Region(region::Error::Cancelled)
+        } else {
+            Error::Nbt(error)
+        }
+    })?;
+    metadata(&document)
+}
+
+/// Read one selected level.dat strictly below the original no-follow world
+/// descriptor. The caller owns the committed DiskRead ticket and finite worker.
+/// Metadata is observed twice; a changed inode or payload never publishes.
+pub fn read_metadata_pinned(
+    save: &PinnedDirectory,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Metadata, Error> {
+    let limit = region::Limits::default();
+    let capture = || -> Result<(FileIdentity, std::time::SystemTime, Vec<u8>), Error> {
+        if cancelled() {
+            return Err(region::Error::Cancelled.into());
+        }
+        let file = save.open_file("level.dat")?;
+        let identity = file.identity();
+        let length = usize::try_from(file.len()?)
+            .map_err(|_| Error::Invalid("compressed level.dat length"))?;
+        if length == 0 || length > limit.max_compressed_bytes {
+            return Err(Error::Invalid("compressed level.dat exceeds limit"));
+        }
+        let modified = file.modified()?;
+        let mut compressed = vec![0u8; length];
+        let mut offset = 0usize;
+        while offset < length {
+            if cancelled() {
+                return Err(region::Error::Cancelled.into());
+            }
+            let count = file.read_at(&mut compressed[offset..], offset as u64)?;
+            if count == 0 {
+                return Err(region::Error::Changed.into());
+            }
+            offset += count;
+        }
+        if file.len()? != length as u64 || file.modified()? != modified {
+            return Err(region::Error::Changed.into());
+        }
+        Ok((identity, modified, compressed))
+    };
+    let first = capture()?;
+    if first != capture()? {
+        return Err(region::Error::Changed.into());
+    }
+    let bytes = region::decompress(
+        region::Compression::Gzip,
+        &first.2,
         limit.nbt.max_bytes,
         cancelled,
     )?;
@@ -325,7 +385,7 @@ mod tests {
 
     #[test]
     fn reads_real_gzip_nbt_without_writing_and_rejects_truncation() {
-        use flate2::{write::GzEncoder, Compression};
+        use flate2::{Compression, write::GzEncoder};
         use std::io::Write;
         let mut bytes = vec![10, 0, 0, 10, 0, 4];
         bytes.extend(b"Data");

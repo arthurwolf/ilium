@@ -48,6 +48,7 @@ pub struct SessionCatalog {
     /// Pipeline's finite map-attempt/output walk, not exhaustive world search.
     pub catalog_complete: bool,
     pub unbound_maps: usize,
+    pub selected: Option<Arc<PinnedCatalog>>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -80,6 +81,65 @@ struct Inventory {
     generation: (u64, u64),
     directories: BTreeMap<PathBuf, (u64, u64)>,
 }
+/// Retained exact selected parent, children and region descriptors. Labels are
+/// history/report keys only and are never reopened by the selected path.
+pub struct PinnedCatalog {
+    pub root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    pub children: BTreeMap<PathBuf, Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    pub regions: BTreeMap<PathBuf, Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    inventory: Inventory,
+}
+impl std::fmt::Debug for PinnedCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PinnedCatalog")
+            .field("inventory", &self.inventory)
+            .field("region_count", &self.regions.len())
+            .finish()
+    }
+}
+impl PinnedCatalog {
+    /// Conservative retained map-node/descriptor charge plus exact label heap
+    /// capacities, carried by the scene's original shared catalog reservation.
+    pub(crate) fn retained_charge(&self) -> Option<usize> {
+        let mut bytes = std::mem::size_of::<Self>()
+            .checked_add(4096)?
+            .checked_add(self.inventory.root.capacity())?;
+        for label in self.inventory.directories.keys() {
+            bytes = bytes.checked_add(4096)?.checked_add(label.capacity())?;
+        }
+        for label in self.children.keys().chain(self.regions.keys()) {
+            bytes = bytes.checked_add(4096)?.checked_add(label.capacity())?;
+        }
+        Some(bytes)
+    }
+    fn verify(&self, cancelled: &dyn Fn() -> bool) -> Result<(), Error> {
+        let current = pinned_inventory(&self.inventory.root, &self.root, cancelled)?;
+        if current.0 != self.inventory {
+            return Err(changed(&self.inventory.root, None));
+        }
+        for (label, region) in &self.regions {
+            checkpoint(cancelled)?;
+            let child = self
+                .children
+                .get(label)
+                .ok_or(Error::Invalid("retained child missing"))?;
+            if child.child("region", false)?.identity() != region.identity() {
+                return Err(changed(label, None));
+            }
+        }
+        Ok(())
+    }
+    fn verify_bound(&self, bound: &BoundMap) -> Result<(), Error> {
+        let child = self
+            .children
+            .get(&bound.directory)
+            .ok_or(Error::Invalid("retained child missing"))?;
+        bound
+            .verify_pinned(&self.inventory.root, &self.root, child)
+            .map_err(Error::Persistence)
+    }
+}
+
 /// Blocking service for an owned worker. Root and private repository storage
 /// are supplied explicitly and must be absolute; storage must be outside the
 /// saves root. Returns complete source admissions and finite qualified maps.
@@ -90,6 +150,108 @@ pub fn prepare(
     generation: u64,
     limits: pipeline::Limits,
     cancelled: &dyn Fn() -> bool,
+) -> Result<SessionCatalog, Error> {
+    prepare_root(
+        saves_root,
+        storage_directory,
+        generation,
+        limits,
+        cancelled,
+        None,
+    )
+}
+
+/// Caller admits the complete selected DiskRead operation and worker account
+/// before invoking this blocking service. Root labels do not grant authority.
+pub fn prepare_pinned(
+    root_label: &Path,
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    storage_directory: &Path,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SessionCatalog, Error> {
+    prepare_root(
+        root_label,
+        storage_directory,
+        generation,
+        limits,
+        cancelled,
+        Some(PinnedInput {
+            root,
+            selected_label: None,
+            selected_identity: None,
+            repository: None,
+        }),
+    )
+}
+
+struct PinnedInput<'a> {
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    selected_label: Option<&'a Path>,
+    selected_identity: Option<ilium_platform::animation_files::FileIdentity>,
+    repository: Option<Repository>,
+}
+/// Prepare the named child only, after binding the COMPLETE selected parent
+/// inventory. Filtering terrain does not retire unselected history identities.
+pub fn prepare_selected_pinned(
+    root_label: &Path,
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    selected: (&Path, ilium_platform::animation_files::FileIdentity),
+    storage_directory: &Path,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SessionCatalog, Error> {
+    prepare_root(
+        root_label,
+        storage_directory,
+        generation,
+        limits,
+        cancelled,
+        Some(PinnedInput {
+            root,
+            selected_label: Some(selected.0),
+            selected_identity: Some(selected.1),
+            repository: None,
+        }),
+    )
+}
+
+/// Use the exact protected repository for both catalog binding and later writer
+/// publication. The absolute repository label is never a disk authority.
+pub fn prepare_repository_pinned(
+    root_label: &Path,
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    selected: Option<(&Path, ilium_platform::animation_files::FileIdentity)>,
+    repository: Repository,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SessionCatalog, Error> {
+    let storage_label = repository.label().to_owned();
+    prepare_root(
+        root_label,
+        &storage_label,
+        generation,
+        limits,
+        cancelled,
+        Some(PinnedInput {
+            root,
+            selected_label: selected.map(|value| value.0),
+            selected_identity: selected.map(|value| value.1),
+            repository: Some(repository),
+        }),
+    )
+}
+
+fn prepare_root(
+    saves_root: &Path,
+    storage_directory: &Path,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+    selected_root: Option<PinnedInput<'_>>,
 ) -> Result<SessionCatalog, Error> {
     checkpoint(cancelled)?;
     if !saves_root.is_absolute() || !storage_directory.is_absolute() || generation == 0 {
@@ -106,21 +268,107 @@ pub fn prepare(
         limits,
         cancelled,
     )?;
-    let observed = match std::fs::symlink_metadata(saves_root) {
-        Ok(_) => Some(inventory(saves_root, cancelled)?),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
+    let selected_label = selected_root
+        .as_ref()
+        .and_then(|input| input.selected_label);
+    let selected_identity = selected_root
+        .as_ref()
+        .and_then(|input| input.selected_identity);
+    let repository = match selected_root
+        .as_ref()
+        .and_then(|input| input.repository.clone())
+    {
+        Some(repository) => repository,
+        None => Repository::new(storage_directory.to_owned())?,
+    };
+    let selected = match selected_root {
+        Some(input) => Some(Arc::new(prepare_pinned_catalog(
+            saves_root, input.root, cancelled,
+        )?)),
+        None => None,
+    };
+    let observed = match &selected {
+        Some(selected) => Some(Inventory {
+            root: selected.inventory.root.clone(),
+            generation: selected.inventory.generation,
+            directories: selected.inventory.directories.clone(),
+        }),
+        None => match std::fs::symlink_metadata(saves_root) {
+            Ok(_) => Some(inventory(saves_root, cancelled)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        },
     };
     let root_path = match &observed {
         Some(inventory) => inventory.root.clone(),
         None => projected_path(saves_root)?,
     };
-    if projected_path(storage_directory)?.starts_with(&root_path) {
+    if repository.pinned_root().is_none()
+        && projected_path(storage_directory)?.starts_with(&root_path)
+    {
         return Err(Error::Invalid(
             "repository storage must be outside saves root",
         ));
     }
-    let repository = Repository::new(storage_directory.to_owned())?;
+    if let Some(selected) = &selected {
+        // Cache storage has separate host authority. Compare physical ancestor
+        // identities too: a renamed selected root must not bypass the exclusion.
+        if let Some(history_root) = repository.pinned_root() {
+            checkpoint(cancelled)?;
+            let ancestors = history_root.ancestor_identities(128)?;
+            if ancestors
+                .iter()
+                .any(|identity| (identity.device, identity.inode) == selected.inventory.generation)
+            {
+                return Err(Error::Invalid(
+                    "repository storage must be outside selected saves root",
+                ));
+            }
+        } else {
+            let storage = projected_path(storage_directory)?;
+            #[cfg(target_os = "linux")]
+            if projected_path_contains_generation(
+                &storage,
+                selected.inventory.generation,
+                cancelled,
+            )? {
+                return Err(Error::Invalid(
+                    "repository storage must be outside selected saves root",
+                ));
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                for ancestor in storage.ancestors() {
+                    checkpoint(cancelled)?;
+                    match std::fs::symlink_metadata(ancestor) {
+                        Ok(metadata) if metadata.is_dir() => {
+                            if secure_fs::directory_generation(ancestor)?
+                                == selected.inventory.generation
+                            {
+                                return Err(Error::Invalid(
+                                    "repository storage must be outside selected saves root",
+                                ));
+                            }
+                        }
+                        Ok(_) => (),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+            }
+        }
+    }
+    // Preserve the actual selected child's identity across the actor-to-worker
+    // handoff. Replacement must refuse before any history binding/publication.
+    if let (Some(label), Some(identity)) = (selected_label, selected_identity) {
+        let actual = observed
+            .as_ref()
+            .and_then(|inventory| inventory.directories.get(label));
+        if actual != Some(&(identity.device, identity.inode)) {
+            return Err(changed(label, None));
+        }
+    }
     let snapshot = repository.load(cancelled)?;
     let Some(observed) = observed else {
         // A missing official install may return later. Do not bind an empty
@@ -136,18 +384,43 @@ pub fn prepare(
             inventory_complete: false,
             catalog_complete: false,
             unbound_maps: 0,
+            selected: None,
         });
     };
-    verify_inventory(&observed, cancelled)?;
+    verify_source_inventory(&observed, selected.as_deref(), cancelled)?;
     let directories: Vec<_> = observed.directories.keys().cloned().collect();
-    let bound =
-        repository.bind_catalog(snapshot.revision(), &observed.root, &directories, cancelled)?;
+    let bound = match &selected {
+        Some(selected) => repository.bind_catalog_pinned(
+            snapshot.revision(),
+            &observed.root,
+            &selected.root,
+            &selected.children,
+            cancelled,
+        ),
+        None => {
+            repository.bind_catalog(snapshot.revision(), &observed.root, &directories, cancelled)
+        }
+    }
+    .map_err(Error::Persistence)?;
     checkpoint(cancelled)?;
     // Bind every safe direct directory first, including folders with missing
     // or corrupt metadata; LastPlayed/LevelName never determine their IDs.
-    let mut metadata = catalog::discover_metadata(&observed.root, cancelled)?;
-    supplement_unexplored_metadata(&directories, &mut metadata, cancelled)?;
-    verify_inventory(&observed, cancelled)?;
+    let mut metadata = match &selected {
+        Some(selected) => discover_pinned_metadata(selected, cancelled)?,
+        None => catalog::discover_metadata(&observed.root, cancelled).map_err(Error::Metadata)?,
+    };
+    if selected.is_none() {
+        supplement_unexplored_metadata(&directories, &mut metadata, cancelled)?;
+    }
+    if let Some(label) = selected_label {
+        if !observed.directories.contains_key(label) {
+            return Err(Error::Invalid(
+                "requested selected world is not an observed direct child",
+            ));
+        }
+        metadata.maps.retain(|save| save.directory == label);
+    }
+    verify_source_inventory(&observed, selected.as_deref(), cancelled)?;
     if metadata
         .maps
         .iter()
@@ -170,12 +443,18 @@ pub fn prepare(
     // known region-directory aliases; no recursive walk or world mutation.
     for binding in &bound.maps {
         checkpoint(cancelled)?;
-        binding
-            .verify(&observed.root)
-            .map_err(|error| changed(&binding.directory, Some(Error::Persistence(error))))?;
+        match &selected {
+            Some(selected) => selected.verify_bound(binding)?,
+            None => binding
+                .verify(&observed.root)
+                .map_err(|error| changed(&binding.directory, Some(Error::Persistence(error))))?,
+        }
     }
     for save in &metadata.maps {
         checkpoint(cancelled)?;
+        if selected.is_some() {
+            continue;
+        } // Region handles were opened and fenced above.
         let directory = NoFollowDirectory::open_root(&save.directory)
             .map_err(|error| changed(&save.directory, Some(Error::Io(error))))?;
         match directory.open_directory("region".as_ref()) {
@@ -186,13 +465,27 @@ pub fn prepare(
             Err(error) => return Err(changed(&save.directory, Some(Error::Io(error)))),
         }
     }
-    let prepared = pipeline::prepare_catalog(&metadata, &contexts, generation, limits, cancelled)?;
-    verify_inventory(&observed, cancelled)?;
+    let prepared = match &selected {
+        Some(selected) => pipeline::prepare_catalog_pinned(
+            &metadata,
+            &contexts,
+            generation,
+            limits,
+            cancelled,
+            &selected.regions,
+        ),
+        None => pipeline::prepare_catalog(&metadata, &contexts, generation, limits, cancelled),
+    }
+    .map_err(Error::Pipeline)?;
+    verify_source_inventory(&observed, selected.as_deref(), cancelled)?;
     for binding in &bound.maps {
         checkpoint(cancelled)?;
-        binding
-            .verify(&observed.root)
-            .map_err(|error| changed(&binding.directory, Some(Error::Persistence(error))))?;
+        match &selected {
+            Some(selected) => selected.verify_bound(binding)?,
+            None => binding
+                .verify(&observed.root)
+                .map_err(|error| changed(&binding.directory, Some(Error::Persistence(error))))?,
+        }
     }
     if prepared.unbound_maps != 0 {
         return Err(Error::Invalid(
@@ -225,7 +518,7 @@ pub fn prepare(
     }
     // PreparedMap validation can itself do bounded CPU work. Recheck source
     // observations after it and revision readback, just before delivery.
-    verify_inventory(&observed, cancelled)?;
+    verify_source_inventory(&observed, selected.as_deref(), cancelled)?;
     checkpoint(cancelled)?;
     let availability = if !maps.is_empty() {
         Availability::Ready
@@ -247,7 +540,137 @@ pub fn prepare(
         inventory_complete: true,
         catalog_complete: prepared.catalog_complete,
         unbound_maps: prepared.unbound_maps,
+        selected,
     })
+}
+
+fn pinned_inventory(
+    label: &Path,
+    root: &ilium_platform::animation_files::PinnedDirectory,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<
+    (
+        Inventory,
+        BTreeMap<PathBuf, Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    ),
+    Error,
+> {
+    checkpoint(cancelled)?;
+    if !label.is_absolute()
+        || label.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+    {
+        return Err(Error::Invalid(
+            "selected root label must be absolute and normalized",
+        ));
+    }
+    let identity = root.identity();
+    let mut directories = BTreeMap::new();
+    let mut children = BTreeMap::new();
+    // Keep the ordinary root's 4096-entry ceiling, separate from generic 1024-entry storage listing.
+    for entry in root.list_saved_catalog(MAX_DIRECTORY_ENTRIES)? {
+        checkpoint(cancelled)?;
+        if !entry.is_directory {
+            continue;
+        }
+        if children.len() == history_store::MAX_ADMISSION {
+            return Err(Error::Limit("complete directory admission batch"));
+        }
+        let child = Arc::new(root.child(&entry.name, false)?);
+        let child_identity = child.identity();
+        let directory = label.join(entry.name);
+        if directories
+            .insert(
+                directory.clone(),
+                (child_identity.device, child_identity.inode),
+            )
+            .is_some()
+        {
+            return Err(Error::Invalid("duplicate selected directory"));
+        }
+        children.insert(directory, child);
+    }
+    Ok((
+        Inventory {
+            root: label.to_owned(),
+            generation: (identity.device, identity.inode),
+            directories,
+        },
+        children,
+    ))
+}
+fn prepare_pinned_catalog(
+    label: &Path,
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PinnedCatalog, Error> {
+    let (inventory, children) = pinned_inventory(label, &root, cancelled)?;
+    let mut regions = BTreeMap::new();
+    for (label, child) in &children {
+        checkpoint(cancelled)?;
+        match child.child("region", false) {
+            Ok(region) => {
+                regions.insert(label.clone(), Arc::new(region));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(changed(label, Some(Error::Io(error)))),
+        }
+    }
+    let selected = PinnedCatalog {
+        root,
+        children,
+        regions,
+        inventory,
+    };
+    selected.verify(cancelled)?;
+    Ok(selected)
+}
+fn verify_source_inventory(
+    observed: &Inventory,
+    selected: Option<&PinnedCatalog>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), Error> {
+    match selected {
+        Some(selected) => selected.verify(cancelled),
+        None => verify_inventory(observed, cancelled),
+    }
+}
+fn discover_pinned_metadata(
+    selected: &PinnedCatalog,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<catalog::Catalog, Error> {
+    let mut metadata = catalog::Catalog::default();
+    for (label, child) in &selected.children {
+        checkpoint(cancelled)?;
+        match child.open_file("level.dat") {
+            Ok(_) => (),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                record_metadata_issue(&mut metadata, label, &error);
+                continue;
+            }
+        }
+        match catalog::read_metadata_pinned(child, cancelled) {
+            Ok(value) => metadata.maps.push(catalog::Save {
+                directory: label.clone(),
+                metadata: value,
+            }),
+            Err(catalog::Error::Region(region::Error::Cancelled)) => return Err(Error::Cancelled),
+            Err(error) => record_metadata_issue(&mut metadata, label, &error),
+        }
+    }
+    metadata.maps.sort_by(|left, right| {
+        right
+            .metadata
+            .last_played
+            .cmp(&left.metadata.last_played)
+            .then_with(|| left.directory.cmp(&right.directory))
+    });
+    Ok(metadata)
 }
 
 fn inventory(root: &Path, cancelled: &dyn Fn() -> bool) -> Result<Inventory, Error> {
@@ -449,6 +872,57 @@ fn projected_path(path: &Path) -> Result<PathBuf, Error> {
         }
     }
 }
+
+/// Compare a projected path's existing physical directory ancestry with one
+/// retained directory generation without requiring directory listing access.
+///
+/// `projected_path` has already resolved the existing physical prefix. Walk
+/// that spelling once from `/` using nofollow `O_PATH` descriptors so a raced
+/// symlink cannot be silently skipped by an advisory metadata check.
+#[cfg(target_os = "linux")]
+fn projected_path_contains_generation(
+    projected: &Path,
+    generation: (u64, u64),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<bool, Error> {
+    use ilium_platform::secure_fs::NoFollowTraversalDirectory;
+
+    if !projected.is_absolute() {
+        return Err(Error::Invalid("projected repository path must be absolute"));
+    }
+
+    checkpoint(cancelled)?;
+    let mut current = NoFollowTraversalDirectory::open_root(Path::new("/"))?;
+    if current.identity()? == generation {
+        return Ok(true);
+    }
+
+    for component in projected.components() {
+        let name = match component {
+            std::path::Component::RootDir => continue,
+            std::path::Component::Normal(name) => name,
+            _ => {
+                return Err(Error::Invalid(
+                    "projected repository path must be normalized",
+                ));
+            }
+        };
+
+        checkpoint(cancelled)?;
+        current = match current.open_directory(name) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+
+        if current.identity()? == generation {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 fn checkpoint(cancelled: &dyn Fn() -> bool) -> Result<(), Error> {
     if cancelled() {
         Err(Error::Cancelled)

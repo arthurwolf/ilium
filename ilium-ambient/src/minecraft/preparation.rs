@@ -4,6 +4,13 @@ use super::{evidence, loader, surface, windows};
 
 const MAX_WINDOWS_PER_SAVE: usize = 3;
 
+// This value keeps directory authority explicit across the common validation.
+#[derive(Clone, Copy)]
+enum WindowDirectory<'a> {
+    Path(&'a std::path::Path),
+    Pinned(&'a ilium_platform::animation_files::PinnedDirectory),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub surface: surface::Limits,
@@ -92,6 +99,44 @@ pub fn load_candidates(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<CandidateSelection, Error> {
+    load_candidates_directory(
+        WindowDirectory::Path(directory),
+        source,
+        candidates,
+        loading,
+        limits,
+        cancelled,
+    )
+}
+
+/// Read only through the retained selected region descriptor. The caller owns
+/// the original DiskRead operation and finite worker/storage admission.
+pub fn load_candidates_pinned(
+    directory: &ilium_platform::animation_files::PinnedDirectory,
+    source: evidence::Source,
+    candidates: &[windows::Candidate],
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<CandidateSelection, Error> {
+    load_candidates_directory(
+        WindowDirectory::Pinned(directory),
+        source,
+        candidates,
+        loading,
+        limits,
+        cancelled,
+    )
+}
+
+fn load_candidates_directory(
+    directory: WindowDirectory<'_>,
+    source: evidence::Source,
+    candidates: &[windows::Candidate],
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<CandidateSelection, Error> {
     if cancelled() {
         return Err(loader::Error::Cancelled.into());
     }
@@ -119,7 +164,9 @@ pub fn load_candidates(
         maximum_retained_charge,
         maximum_work_units,
         cancelled,
-        |candidate| load_candidate(directory, source, candidate, loading, limits, cancelled),
+        |candidate| {
+            load_candidate_directory(directory, source, candidate, loading, limits, cancelled)
+        },
     )
 }
 
@@ -409,6 +456,44 @@ pub fn load_candidate(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedWindow, Error> {
+    load_candidate_directory(
+        WindowDirectory::Path(directory),
+        source,
+        candidate,
+        loading,
+        limits,
+        cancelled,
+    )
+}
+
+/// Read only through the retained selected region descriptor. The caller owns
+/// the original DiskRead operation and finite worker/storage admission.
+pub fn load_candidate_pinned(
+    directory: &ilium_platform::animation_files::PinnedDirectory,
+    source: evidence::Source,
+    candidate: &windows::Candidate,
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PreparedWindow, Error> {
+    load_candidate_directory(
+        WindowDirectory::Pinned(directory),
+        source,
+        candidate,
+        loading,
+        limits,
+        cancelled,
+    )
+}
+
+fn load_candidate_directory(
+    directory: WindowDirectory<'_>,
+    source: evidence::Source,
+    candidate: &windows::Candidate,
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PreparedWindow, Error> {
     if cancelled() {
         return Err(loader::Error::Cancelled.into());
     }
@@ -458,7 +543,14 @@ pub fn load_candidate(
     {
         return Err(Error::InvalidCandidate);
     }
-    let loaded = loader::load_window(directory, requested, loading, cancelled)?;
+    let loaded = match directory {
+        WindowDirectory::Path(directory) => {
+            loader::load_window(directory, requested, loading, cancelled)?
+        }
+        WindowDirectory::Pinned(directory) => {
+            loader::load_window_pinned(directory, requested, loading, cancelled)?
+        }
+    };
     finish_window(loaded, source, candidate.bounds, 0, limits, cancelled)
 }
 

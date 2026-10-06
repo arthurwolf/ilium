@@ -21,23 +21,23 @@ use crate::{
     control::SceneSettings,
     raster::PaintedOwner,
     resources::{AmbientResources, WorkerCost},
-    scene::{Frame, FrameReceiptId, Scene, SceneEnv, MAX_SCENE_RECEIPT_SLOTS},
+    scene::{Frame, FrameReceiptId, MAX_SCENE_RECEIPT_SLOTS, Scene, SceneEnv},
     source::Worker,
     style::ScenePalette,
     voxel_landscape::{
+        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
         assets::budget::{ByteBudget, Cancel, Reservation},
         composite_selected,
         surface_raster::{self, DirectionalLight, RasterFrame, RasterLimits},
-        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
     },
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{
+        Arc, Mutex, TryLockError,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, SyncSender},
-        Arc, Mutex, TryLockError,
     },
     time::{Duration, Instant},
 };
@@ -52,6 +52,7 @@ const PREPARATION_WORKER_BYTES: usize = 64 * 1024 * 1024;
 struct PreparationResources {
     budget: ByteBudget,
     host: AmbientResources,
+    external_stop: Option<ilium_platform::owned_worker::StopToken>,
 }
 // Four default loaded windows cost at most 4 * 32 MiB by loader admission.
 // The remaining conservative logical charge covers retained target/catalog
@@ -72,6 +73,31 @@ const ALLOCATION_ISSUE_CHARGE: u64 = 4096;
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 static RASTER_STOP: AtomicBool = AtomicBool::new(false);
 
+/// Host supplies distinct saved-root, native-archive and private-history
+/// authority. Keep the runtime owner outside disposable scenes across rebuilds.
+pub struct PinnedSceneSource {
+    pub root_label: PathBuf,
+    pub selected_world: Option<PathBuf>,
+    pub selected_identity: Option<ilium_platform::animation_files::FileIdentity>,
+    pub root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    pub native_jar: Arc<ilium_platform::animation_files::PinnedFile>,
+    pub history_storage: PathBuf,
+    pub history_root: Option<Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    pub stop: Option<ilium_platform::owned_worker::StopToken>,
+    pub runtime: Arc<SavedRuntime>,
+}
+enum SourceRoot {
+    Path(PathBuf),
+    Pinned {
+        label: PathBuf,
+        selected_world: Option<PathBuf>,
+        selected_identity: Option<ilium_platform::animation_files::FileIdentity>,
+        root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+        native_jar: Arc<ilium_platform::animation_files::PinnedFile>,
+        history_root: Option<Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    },
+}
+
 struct Bundle {
     history: History,
     maps: Vec<Arc<PreparedMap>>,
@@ -79,6 +105,8 @@ struct Bundle {
     world_seeds: BTreeMap<MapId, Option<i64>>,
     root: PathBuf,
     jar: PathBuf,
+    selected: Option<Arc<session_catalog::PinnedCatalog>>,
+    native_jar: Option<Arc<ilium_platform::animation_files::PinnedFile>>,
     warnings: Vec<String>,
     budget: ByteBudget,
     _catalog_reservation: Arc<Reservation>,
@@ -110,6 +138,7 @@ pub struct SavedScene {
     settings: VoxelLandscapeSettings,
     palette: ScenePalette,
     runtime: Arc<SavedRuntime>,
+    external_stop: Option<ilium_platform::owned_worker::StopToken>,
     output: PreparedBundleOutput,
     plan_requests: Arc<Mutex<Option<PlanRequest>>>,
     plan_results: Arc<Mutex<Option<PlanResponse>>>,
@@ -119,6 +148,8 @@ pub struct SavedScene {
     retired_plans: Arc<Retirement<Plan>>,
     retired_routes: Arc<Retirement<Arc<projected_route::PreparedRoute>>>,
     worker: Option<Worker>,
+    // A refused pinned constructor never retires another scene's shared writer.
+    history_retirement_owned: bool,
     bundle: Option<Arc<Bundle>>,
     controller: Option<Controller>,
     plan: Option<Plan>,
@@ -137,6 +168,7 @@ pub struct SavedScene {
     pending_history: Option<History>,
     last_clock: Option<Clock>,
     status: Option<String>,
+    preparation_failed: bool,
 }
 
 impl SavedScene {
@@ -152,6 +184,37 @@ impl SavedScene {
         settings: &VoxelLandscapeSettings,
         env: &SceneEnv,
     ) -> Self {
+        Self::new_source(Some(saved), None, settings, env)
+    }
+
+    /// Same scene/worker/receipt implementation, with retained source handles.
+    /// Calling host must commit its original read and history rights first.
+    pub fn new_pinned(
+        source: PinnedSceneSource,
+        settings: &VoxelLandscapeSettings,
+        env: &SceneEnv,
+    ) -> Result<Self, String> {
+        Self::new_source(None, Some(source), settings, env).take_admitted()
+    }
+
+    /// Admission means the original storage account and owned preparation
+    /// worker were accepted. Catalog readiness is reported asynchronously.
+    fn take_admitted(mut self) -> Result<Self, String> {
+        if self.worker.is_none() {
+            return Err(self
+                .status
+                .take()
+                .unwrap_or_else(|| "Saved scene admission rejected".into()));
+        }
+        Ok(self)
+    }
+
+    fn new_source(
+        saved: Option<&SavedMapsSettings>,
+        pinned: Option<PinnedSceneSource>,
+        settings: &VoxelLandscapeSettings,
+        env: &SceneEnv,
+    ) -> Self {
         let output = Arc::new(Mutex::new(None));
         let plan_requests = Arc::new(Mutex::new(None));
         let plan_results = Arc::new(Mutex::new(None));
@@ -161,12 +224,17 @@ impl SavedScene {
         let retired = Arc::new(Retirement::new());
         let retired_plans = Arc::new(Retirement::new());
         let retired_routes = Arc::new(Retirement::new());
-        let runtime = Arc::clone(&env.saved_runtime);
+        let runtime = pinned
+            .as_ref()
+            .map(|source| Arc::clone(&source.runtime))
+            .unwrap_or_else(|| Arc::clone(&env.saved_runtime));
+        let external_stop = pinned.as_ref().and_then(|source| source.stop.clone());
         let settings = settings.normalized();
         let mut scene = Self {
             settings: settings.clone(),
             palette: env.palette.clone(),
             runtime: Arc::clone(&runtime),
+            external_stop: external_stop.clone(),
             output: Arc::clone(&output),
             plan_requests: Arc::clone(&plan_requests),
             plan_results: Arc::clone(&plan_results),
@@ -176,6 +244,7 @@ impl SavedScene {
             retired_plans: Arc::clone(&retired_plans),
             retired_routes: Arc::clone(&retired_routes),
             worker: None,
+            history_retirement_owned: pinned.is_none(),
             bundle: None,
             controller: None,
             plan: None,
@@ -192,25 +261,53 @@ impl SavedScene {
             pending_history: None,
             last_clock: None,
             status: Some("Preparing saved Java worlds…".into()),
+            preparation_failed: false,
         };
-        let root = match saved.saves_root() {
-            Ok(root) => root,
-            Err(error) => {
-                scene.status = Some(error);
-                return scene;
-            }
+        let storage = pinned
+            .as_ref()
+            .map(|source| source.history_storage.clone())
+            .unwrap_or_else(|| env.cache_dir.join("minecraft-saved-history"));
+        let root = match pinned {
+            Some(source) => SourceRoot::Pinned {
+                label: source.root_label,
+                selected_world: source.selected_world,
+                selected_identity: source.selected_identity,
+                root: source.root,
+                native_jar: source.native_jar,
+                history_root: source.history_root,
+            },
+            None => match saved.map(SavedMapsSettings::saves_root) {
+                Some(Ok(root)) => SourceRoot::Path(root),
+                Some(Err(error)) => {
+                    scene.status = Some(error);
+                    return scene;
+                }
+                None => {
+                    scene.status = Some("Saved source authority missing".into());
+                    return scene;
+                }
+            },
         };
-        let storage = env.cache_dir.join("minecraft-saved-history");
         if !storage.is_absolute() {
             scene.status = Some("Saved history storage root must be absolute".into());
             return scene;
         }
-        let jar = match native_assets::jar_path("") {
-            Ok(jar) => jar,
-            Err(error) => {
-                scene.status = Some(error.to_string());
-                return scene;
-            }
+        if external_stop
+            .as_ref()
+            .is_some_and(|token| token.is_stopped())
+        {
+            scene.status = Some("Saved source already cancelled".into());
+            return scene;
+        }
+        let jar = match &root {
+            SourceRoot::Pinned { .. } => PathBuf::new(), // No label/path opens a selected native archive.
+            SourceRoot::Path(_) => match native_assets::jar_path("") {
+                Ok(jar) => jar,
+                Err(error) => {
+                    scene.status = Some(error.to_string());
+                    return scene;
+                }
+            },
         };
         let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
         if generation == 0 {
@@ -246,6 +343,7 @@ impl SavedScene {
         let preparation = PreparationResources {
             budget,
             host: env.resources.clone(),
+            external_stop: external_stop.clone(),
         };
         let worker = Worker::start_admitted("saved-native-scene", admission, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
@@ -265,7 +363,11 @@ impl SavedScene {
             if !published {
                 tracing::error!("saved scene result handoff poisoned");
             }
-            while !stop.load(Ordering::Relaxed) {
+            while !stop.load(Ordering::Relaxed)
+                && !external_stop
+                    .as_ref()
+                    .is_some_and(|token| token.is_stopped())
+            {
                 drop(retired.drain());
                 drop(retired_plans.drain());
                 drop(retired_routes.drain());
@@ -275,9 +377,18 @@ impl SavedScene {
                         Err(_) => None,
                     };
                     if let Some(request) = request {
-                        let outcome =
-                            prepare_selection(bundle, &request, &settings, &stop, &desired_plan);
+                        let outcome = prepare_selection(
+                            bundle,
+                            &request,
+                            &settings,
+                            &stop,
+                            &desired_plan,
+                            external_stop.as_ref(),
+                        );
                         if !stop.load(Ordering::Relaxed)
+                            && !external_stop
+                                .as_ref()
+                                .is_some_and(|token| token.is_stopped())
                             && desired_plan.load(Ordering::Acquire) == request.sequence
                         {
                             if let Ok(mut slot) = plan_results.lock() {
@@ -318,6 +429,7 @@ impl SavedScene {
             Ok(mut slot) => slot.take(),
             Err(TryLockError::WouldBlock) => return,
             Err(TryLockError::Poisoned(_)) => {
+                self.preparation_failed = true;
                 self.status = Some("Saved preparation handoff poisoned".into());
                 return;
             }
@@ -326,6 +438,7 @@ impl SavedScene {
             Some(Ok(bundle)) => {
                 let generation = bundle.maps.first().map(|map| map.source().generation);
                 let Some(generation) = generation else {
+                    self.preparation_failed = true;
                     self.status = Some(format!(
                         "No native-bindable saved windows: {}",
                         bundle.warnings.join("; ")
@@ -339,10 +452,16 @@ impl SavedScene {
                         self.status = bundle.warnings.first().cloned();
                         self.bundle = Some(bundle);
                     }
-                    Err(error) => self.status = Some(format!("Saved tour history: {error}")),
+                    Err(error) => {
+                        self.preparation_failed = true;
+                        self.status = Some(format!("Saved tour history: {error}"));
+                    }
                 }
             }
-            Some(Err(error)) => self.status = Some(error),
+            Some(Err(error)) => {
+                self.preparation_failed = true;
+                self.status = Some(error);
+            }
             None => {}
         }
     }
@@ -507,7 +626,59 @@ impl SavedScene {
 }
 
 impl Scene for SavedScene {
+    fn saved_world_source(&self) -> Option<crate::scene::SavedWorldSource<'_>> {
+        // Only the explicitly pinned, single selected source can be borrowed.
+        // Broad native catalog scenes and generated terrain have no such grant.
+        let stop = self.external_stop.as_ref()?;
+        if stop.is_stopped() || self.preparation_failed || self.controller.is_none() {
+            return None;
+        }
+        let bundle = self.bundle.as_ref()?;
+        let selected = bundle.selected.as_ref()?;
+        if bundle.native_jar.is_none() || selected.children.len() != 1 || bundle.maps.len() != 1 {
+            return None;
+        }
+        let map = bundle.maps.first()?;
+        if map.source().generation == 0 {
+            return None;
+        }
+        Some(crate::scene::SavedWorldSource { map, stop })
+    }
+    fn readiness(&mut self) -> crate::scene::SceneReadiness {
+        use crate::scene::SceneReadiness;
+        if self
+            .external_stop
+            .as_ref()
+            .is_some_and(|token| token.is_stopped())
+        {
+            return SceneReadiness::Unavailable("Saved source cancelled".into());
+        }
+        self.receive();
+        if self.preparation_failed || self.worker.is_none() {
+            return SceneReadiness::Unavailable(
+                self.status
+                    .clone()
+                    .unwrap_or_else(|| "Saved source unavailable".into()),
+            );
+        }
+        if self.bundle.is_some() && self.controller.is_some() {
+            SceneReadiness::Ready
+        } else {
+            SceneReadiness::Preparing
+        }
+    }
+    fn has_prepared_frame(&self) -> bool {
+        self.receipt.is_some()
+    }
     fn render(&mut self, frame: &mut Frame<'_>) {
+        if self
+            .external_stop
+            .as_ref()
+            .is_some_and(|token| token.is_stopped())
+        {
+            self.status = Some("Saved source cancelled".into());
+            return;
+        }
         self.receive();
         self.receive_plan();
         self.retry_retired_plans();
@@ -658,6 +829,13 @@ impl Scene for SavedScene {
             .map(|receipt| (id, Arc::clone(receipt)));
     }
     fn presented_frame(&mut self, id: FrameReceiptId, painted: &[PaintedOwner]) {
+        if self
+            .external_stop
+            .as_ref()
+            .is_some_and(|token| token.is_stopped())
+        {
+            return;
+        }
         let Some((stored_id, receipt)) = self.receipt_slots[id.slot()].as_ref() else {
             return;
         };
@@ -769,8 +947,10 @@ impl Drop for SavedScene {
         }
         if let Some(worker) = self.worker.take() {
             worker.stop_in_background();
-        } else if let Err(error) = self.runtime.retire() {
-            tracing::warn!(%error, "saved history retirement deferred to successor gate");
+        } else if self.history_retirement_owned {
+            if let Err(error) = self.runtime.retire() {
+                tracing::warn!(%error, "saved history retirement deferred to successor gate");
+            }
         }
     }
 }
@@ -805,7 +985,7 @@ fn finish_worker_handoff(runtime: &SavedRuntime, pending: Option<History>) {
 /// initial evidence/route windows and their bound directories; no model bank
 /// or clipped map is prepared until an emitted viewport requests a route.
 fn prepare_bundle(
-    root: PathBuf,
+    source: SourceRoot,
     storage: PathBuf,
     jar: PathBuf,
     generation: u64,
@@ -813,9 +993,16 @@ fn prepare_bundle(
     runtime: &SavedRuntime,
     stop: &AtomicBool,
 ) -> Result<Bundle, String> {
+    let external = || {
+        preparation
+            .external_stop
+            .as_ref()
+            .is_some_and(|token| token.is_stopped())
+    };
+    let cancelled = || stop.load(Ordering::Relaxed) || external();
     let mut reload = false;
     loop {
-        if stop.load(Ordering::Relaxed) {
+        if cancelled() {
             return Err("Saved scene cancelled".into());
         }
         match runtime.gate() {
@@ -828,19 +1015,62 @@ fn prepare_bundle(
             Gate::Busy | Gate::Draining => std::thread::sleep(Duration::from_millis(25)),
         }
     }
-    let cancelled = || stop.load(Ordering::Relaxed);
     let budget = preparation.budget;
     let catalog_reservation = budget
-        .reserve(CATALOG_CHARGE, Cancel::new(stop))
+        .reserve(
+            CATALOG_CHARGE,
+            Cancel::new(stop).with_external_cancellation(&external),
+        )
         .map_err(|error| error.to_string())?;
-    let catalog = session_catalog::prepare(
-        &root,
-        &storage,
-        generation,
-        pipeline::Limits::default(),
-        &cancelled,
-    )
+    let repository = match &source {
+        SourceRoot::Pinned {
+            history_root: Some(root),
+            ..
+        } => Repository::from_pinned(storage.clone(), root.clone()),
+        _ => Repository::new(storage.clone()),
+    }
     .map_err(|error| error.to_string())?;
+    let (root, native_jar, catalog) = match source {
+        SourceRoot::Path(root) => {
+            let catalog = session_catalog::prepare(
+                &root,
+                &storage,
+                generation,
+                pipeline::Limits::default(),
+                &cancelled,
+            )
+            .map_err(|error| error.to_string())?;
+            (root, None, catalog)
+        }
+        SourceRoot::Pinned {
+            label,
+            selected_world,
+            selected_identity,
+            root,
+            native_jar,
+            history_root: _,
+        } => {
+            let selected = match selected_world.as_deref() {
+                Some(world_label) => Some((
+                    world_label,
+                    selected_identity
+                        .ok_or_else(|| "Selected world identity missing".to_string())?,
+                )),
+                None => None,
+            };
+            let catalog = session_catalog::prepare_repository_pinned(
+                &label,
+                root,
+                selected,
+                repository.clone(),
+                generation,
+                pipeline::Limits::default(),
+                &cancelled,
+            )
+            .map_err(|error| error.to_string())?;
+            (label, Some(native_jar), catalog)
+        }
+    };
     if reload {
         runtime
             .acknowledge_authoritative_reload()
@@ -849,12 +1079,8 @@ fn prepare_bundle(
     let history = catalog.snapshot.history();
     let revision = catalog.snapshot.revision();
     if !catalog.maps.is_empty() {
-        let writer = Writer::start(
-            Repository::new(storage).map_err(|error| error.to_string())?,
-            revision,
-            &preparation.host,
-        )
-        .map_err(|error| error.to_string())?;
+        let writer = Writer::start(repository, revision, &preparation.host)
+            .map_err(|error| error.to_string())?;
         runtime.install(writer).map_err(|error| error.to_string())?;
     }
     let mut warnings = Vec::new();
@@ -873,6 +1099,8 @@ fn prepare_bundle(
         maps: catalog.maps,
         bindings: catalog.bindings,
         world_seeds: catalog.world_seeds,
+        selected: catalog.selected,
+        native_jar,
         root,
         jar,
         warnings,
@@ -928,6 +1156,12 @@ impl Bundle {
         }
         for warning in &self.warnings {
             charge = charge.checked_add(warning.capacity())?;
+        }
+        if let Some(selected) = &self.selected {
+            charge = charge.checked_add(selected.retained_charge()?)?;
+        }
+        if self.native_jar.is_some() {
+            charge = charge.checked_add(4096)?;
         }
         Some(charge)
     }
@@ -1005,15 +1239,21 @@ fn prepare_selection(
     settings: &VoxelLandscapeSettings,
     stop: &AtomicBool,
     desired_plan: &AtomicU64,
+    external_stop: Option<&ilium_platform::owned_worker::StopToken>,
 ) -> Result<Option<(Plan, Arc<projected_route::PreparedRoute>)>, String> {
     // Header-only feasibility and an independent full decoder probe found
     // three 256-block source windows. Neither proves native render admission;
     // each selected route below still requires full projected qualification.
     const MAX_ROUTE_QUALIFICATIONS: usize = 16;
     const MAX_SELECTION_WORK: u64 = PLANNER_WORK * MAX_ROUTE_QUALIFICATIONS as u64;
-    let cancelled =
-        || stop.load(Ordering::Relaxed) || desired_plan.load(Ordering::Acquire) != request.sequence;
-    let cancel = Cancel::for_revision(stop, desired_plan, request.sequence);
+    let external = || external_stop.is_some_and(|token| token.is_stopped());
+    let cancelled = || {
+        stop.load(Ordering::Relaxed)
+            || external()
+            || desired_plan.load(Ordering::Acquire) != request.sequence
+    };
+    let cancel = Cancel::for_revision(stop, desired_plan, request.sequence)
+        .with_external_cancellation(&external);
     let maps = bundle
         .maps
         .iter()
@@ -1034,8 +1274,15 @@ fn prepare_selection(
     if maps.is_empty() {
         return Err("No saved map has canonical signed world seed and bound source".into());
     }
-    let canonical_root = ilium_platform::paths::canonicalize(&bundle.root)
-        .map_err(|error| format!("Saved maps root could not be canonicalized: {error}"))?;
+    // Original selected handles are authority; their labels are not reopened.
+    let canonical_root = if bundle.selected.is_none() {
+        Some(
+            ilium_platform::paths::canonicalize(&bundle.root)
+                .map_err(|error| format!("Saved maps root could not be canonicalized: {error}"))?,
+        )
+    } else {
+        None
+    };
     let mut allocations = BTreeMap::new();
     let mut allocation_reservations = Vec::with_capacity(maps.len());
     for map in &maps {
@@ -1045,9 +1292,6 @@ fn prepare_selection(
             .iter()
             .find(|bound| bound.map == map.source().map)
             .ok_or_else(|| "Saved route lost its bound allocation directory".to_owned())?;
-        bound
-            .verify(&canonical_root)
-            .map_err(|error| format!("Saved allocation binding changed: {error}"))?;
         let maximum_charge = (super::index::MAX_ALLOCATED_CHUNKS as u64)
             .checked_mul(ALLOCATION_POSITION_CHARGE)
             .and_then(|charge| charge.checked_add(64 * ALLOCATION_ISSUE_CHARGE + 4096))
@@ -1056,12 +1300,54 @@ fn prepare_selection(
             .budget
             .reserve(maximum_charge, cancel)
             .map_err(|error| format!("Saved allocation inventory admission failed: {error}"))?;
-        let region_directory = bound.directory.join("region");
-        let inventory = super::index::allocated_chunks(&region_directory, &cancelled)
-            .map_err(|error| format!("Saved allocation inventory failed: {error}"))?;
-        bound
-            .verify(&canonical_root)
-            .map_err(|error| format!("Saved allocation binding changed during read: {error}"))?;
+        let inventory = match (&bundle.selected, &bundle.native_jar) {
+            (Some(selected), Some(_)) => {
+                let child = selected
+                    .children
+                    .get(&bound.directory)
+                    .ok_or("Selected allocation child descriptor missing")?;
+                let region = selected
+                    .regions
+                    .get(&bound.directory)
+                    .ok_or("Selected allocation region descriptor missing")?;
+                let verify = || -> Result<(), String> {
+                    cancel.check().map_err(|error| error.to_string())?;
+                    bound
+                        .verify_pinned(&bundle.root, &selected.root, child)
+                        .map_err(|error| format!("Selected allocation binding changed: {error}"))?;
+                    if child
+                        .child("region", false)
+                        .map_err(|error| error.to_string())?
+                        .identity()
+                        != region.identity()
+                    {
+                        return Err("Selected allocation region descriptor changed".into());
+                    }
+                    Ok(())
+                };
+                verify()?;
+                let inventory = super::index::allocated_chunks_pinned(region, &cancelled)
+                    .map_err(|error| format!("Selected allocation inventory failed: {error}"))?;
+                verify()?;
+                inventory
+            }
+            (None, None) => {
+                let root = canonical_root
+                    .as_ref()
+                    .ok_or("Saved allocation root missing")?;
+                bound
+                    .verify(root)
+                    .map_err(|error| format!("Saved allocation binding changed: {error}"))?;
+                let inventory =
+                    super::index::allocated_chunks(&bound.directory.join("region"), &cancelled)
+                        .map_err(|error| format!("Saved allocation inventory failed: {error}"))?;
+                bound.verify(root).map_err(|error| {
+                    format!("Saved allocation binding changed during read: {error}")
+                })?;
+                inventory
+            }
+            _ => return Err("Selected allocation native source custody incomplete".into()),
+        };
         let super::index::AllocationIndex {
             chunks,
             issues,
@@ -1247,7 +1533,7 @@ fn prepare_selection(
                     return Err("Selected saved route lost its canonical seed".into());
                 };
                 let selected = (!settings.pack_path.is_empty()).then_some(settings);
-                match projected_route::prepare(projected_route::Inputs {
+                let inputs = projected_route::Inputs {
                     plan: &plan,
                     initial_map,
                     bound,
@@ -1262,7 +1548,32 @@ fn prepare_selection(
                     account: &bundle.budget,
                     cancel,
                     cancelled: &cancelled,
-                }) {
+                };
+                let prepared = match (&bundle.selected, &bundle.native_jar) {
+                    (Some(selected), Some(jar)) => {
+                        let child = selected
+                            .children
+                            .get(&bound.directory)
+                            .ok_or("Selected route child descriptor missing")?;
+                        let region = selected
+                            .regions
+                            .get(&bound.directory)
+                            .ok_or("Selected route region descriptor missing")?;
+                        projected_route::prepare_pinned(
+                            inputs,
+                            super::projected_source::PinnedSource {
+                                root_label: &bundle.root,
+                                root: &selected.root,
+                                child,
+                                region,
+                            },
+                            jar,
+                        )
+                    }
+                    (None, None) => projected_route::prepare(inputs),
+                    _ => return Err("Selected route native source custody incomplete".into()),
+                };
+                match prepared {
                     Ok(route) => Ok(Some((plan, Arc::new(route), maximum_length))),
                     Err(error) => {
                         if cancelled() {

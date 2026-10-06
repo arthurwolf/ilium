@@ -36,6 +36,40 @@ pub enum Error {
     Asset(#[from] AssetError),
 }
 
+/// Original selected descriptor chain. Path values are persistence labels only.
+#[derive(Clone, Copy)]
+pub struct PinnedSource<'a> {
+    pub root_label: &'a Path,
+    pub root: &'a ilium_platform::animation_files::PinnedDirectory,
+    pub child: &'a ilium_platform::animation_files::PinnedDirectory,
+    pub region: &'a ilium_platform::animation_files::PinnedDirectory,
+}
+#[derive(Clone, Copy)]
+enum SourceDirectory<'a> {
+    Path(&'a Path),
+    Pinned(PinnedSource<'a>),
+}
+impl SourceDirectory<'_> {
+    fn verify(self, bound: &BoundMap) -> Result<(), Error> {
+        match self {
+            Self::Path(root) => {
+                if !root.is_absolute() {
+                    return Err(Error::Source);
+                }
+                let canonical_root = ilium_platform::paths::canonicalize(root)?;
+                bound.verify(&canonical_root)?;
+            }
+            Self::Pinned(source) => {
+                bound.verify_pinned(source.root_label, source.root, source.child)?;
+                if source.child.child("region", false)?.identity() != source.region.identity() {
+                    return Err(Error::Source);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct QualifiedSource {
     // The projected reservation is INSIDE PreparedMap. Every map Arc retained
     // by a tile, owner receipt or renderer therefore retains its accounting.
@@ -55,25 +89,71 @@ pub fn qualify(
     cancel: Cancel<'_>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<QualifiedSource, Error> {
+    qualify_source(
+        base,
+        bound,
+        SourceDirectory::Path(saves_root),
+        request,
+        account,
+        cancel,
+        cancelled,
+    )
+}
+
+/// Qualify full projected coverage below original selected descriptors only.
+pub fn qualify_pinned(
+    base: &PreparedMap,
+    bound: &BoundMap,
+    source: PinnedSource<'_>,
+    request: &Request,
+    account: &ByteBudget,
+    cancel: Cancel<'_>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<QualifiedSource, Error> {
+    qualify_source(
+        base,
+        bound,
+        SourceDirectory::Pinned(source),
+        request,
+        account,
+        cancel,
+        cancelled,
+    )
+}
+
+fn qualify_source(
+    base: &PreparedMap,
+    bound: &BoundMap,
+    source: SourceDirectory<'_>,
+    request: &Request,
+    account: &ByteBudget,
+    cancel: Cancel<'_>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<QualifiedSource, Error> {
     cancel.check()?;
-    if !saves_root.is_absolute()
-        || base.source().map != bound.map
+    if base.source().map != bound.map
         || request.support_chunks().is_empty()
         || request.support_chunks().len() > source_footprint::MAX_REQUESTED_CHUNKS
         || !request.render_chunks().is_subset(request.support_chunks())
     {
         return Err(Error::Source);
     }
-    // The binding uses the platform canonical spelling, including Windows.
-    let canonical_root = ilium_platform::paths::canonicalize(saves_root)?;
-    bound.verify(&canonical_root)?;
+    source.verify(bound)?;
     let mut decoded_reservation =
         account.reserve(loader::MAX_PROJECTED_STORAGE_CHARGE as u64, cancel)?;
     let region_directory = bound.directory.join("region");
-    let loaded =
-        loader::load_projected_window(&region_directory, request.support_chunks(), cancelled)?;
+    let loaded = match source {
+        SourceDirectory::Path(_) => {
+            loader::load_projected_window(&region_directory, request.support_chunks(), cancelled)?
+        }
+        SourceDirectory::Pinned(source) => loader::load_projected_window_pinned(
+            source.region,
+            request.support_chunks(),
+            cancelled,
+        )?,
+    };
     cancel.check()?;
-    bound.verify(&canonical_root)?;
+    source.verify(bound)?;
     if &loaded.coverage.chunks != request.support_chunks() {
         let missing_positions = request
             .support_chunks()
@@ -93,6 +173,6 @@ pub fn qualify(
     let map =
         Arc::new(base.projected_source(Arc::new(loaded), decoded_reservation, &mut tour_budget)?);
     cancel.check()?;
-    bound.verify(&canonical_root)?;
+    source.verify(bound)?;
     Ok(QualifiedSource { map })
 }

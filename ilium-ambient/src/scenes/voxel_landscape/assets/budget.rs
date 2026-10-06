@@ -1,7 +1,7 @@
 use super::error::{AssetError, Result};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 const MIB: u64 = 1024 * 1024;
@@ -109,22 +109,32 @@ impl Limits {
 pub struct Cancel<'a> {
     stop: &'a AtomicBool,
     revision: Option<(&'a AtomicU64, u64)>,
+    external: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
 impl<'a> Cancel<'a> {
     pub fn new(stop: &'a AtomicBool) -> Self {
         Self {
             stop,
             revision: None,
+            external: None,
         }
     }
     pub fn for_revision(stop: &'a AtomicBool, revision: &'a AtomicU64, expected: u64) -> Self {
         Self {
             stop,
             revision: Some((revision, expected)),
+            external: None,
         }
+    }
+    /// Preserve original native-request cancellation through bounded decoders
+    /// without a polling thread or replacing the worker's own lifetime flag.
+    pub fn with_external_cancellation(mut self, cancelled: &'a (dyn Fn() -> bool + Sync)) -> Self {
+        self.external = Some(cancelled);
+        self
     }
     pub fn is_cancelled(self) -> bool {
         self.stop.load(Ordering::Acquire)
+            || self.external.is_some_and(|cancelled| cancelled())
             || self
                 .revision
                 .is_some_and(|(current, expected)| current.load(Ordering::Acquire) != expected)
@@ -360,6 +370,23 @@ mod tests {
         revision.store(4, Ordering::Release);
         stop.store(true, Ordering::Release);
         assert_eq!(cancel.check(), Err(AssetError::Cancelled));
+    }
+    #[test]
+    fn original_external_cancellation_refuses_new_budget_work_without_releasing_retained_credit() {
+        let native = AtomicBool::new(false);
+        let external = ilium_platform::owned_worker::StopToken::default();
+        let child = external.child();
+        let cancelled = || child.is_stopped();
+        let cancel = Cancel::new(&native).with_external_cancellation(&cancelled);
+        let budget = ByteBudget::new(32).unwrap();
+        let retained = budget.reserve(16, cancel).unwrap();
+        external.stop();
+        assert!(!native.load(Ordering::Acquire));
+        assert_eq!(cancel.check(), Err(AssetError::Cancelled));
+        assert!(budget.reserve(1, cancel).is_err());
+        assert_eq!(budget.used(), 16);
+        drop(retained);
+        assert_eq!(budget.used(), 0);
     }
     #[test]
     fn invalid_limit_configuration_is_not_silently_unbounded() {

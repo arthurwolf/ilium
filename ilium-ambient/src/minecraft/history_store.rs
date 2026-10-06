@@ -20,6 +20,7 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 pub const MAX_ADMISSION: usize = 512;
 pub const MAX_BINDINGS: usize = 4096;
@@ -158,6 +159,34 @@ impl BoundMap {
             .capacity()
             .checked_add(self.root_key.capacity())
     }
+    /// Labels select persistence keys only. Authority comes from the original
+    /// retained parent/child descriptors and a fresh no-follow child descent.
+    pub fn verify_pinned(
+        &self,
+        root_label: &Path,
+        root: &ilium_platform::animation_files::PinnedDirectory,
+        child: &ilium_platform::animation_files::PinnedDirectory,
+    ) -> Result<(), Error> {
+        require_direct_child_label(root_label, &self.directory)?;
+        let parent_identity = root.identity();
+        let child_identity = child.identity();
+        if minecraft::native_path_key(root_label)? != self.root_key
+            || (parent_identity.device, parent_identity.inode) != self.root_generation
+            || (child_identity.device, child_identity.inode) != self.directory_generation
+        {
+            return Err(Error::Invalid("bound selected save directory changed"));
+        }
+        let leaf = self
+            .directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(Error::Invalid("selected save leaf is not UTF-8"))?;
+        if root.child(leaf, false)?.identity() != child_identity {
+            return Err(Error::Invalid("selected save entry changed"));
+        }
+        Ok(())
+    }
+
     pub fn verify(&self, canonical_root: &Path) -> Result<(), Error> {
         require_direct_child(canonical_root, &self.directory)?;
         if minecraft::native_path_key(canonical_root)? != self.root_key
@@ -174,25 +203,73 @@ pub struct BoundCatalog {
     pub snapshot: Snapshot,
     pub maps: Vec<BoundMap>,
 }
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Repository {
     directory: PathBuf,
+    pinned: Option<Arc<ilium_platform::animation_files::PinnedDirectory>>,
+}
+impl std::fmt::Debug for Repository {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Repository")
+            .field("directory", &self.directory)
+            .field("pinned", &self.pinned.as_ref().map(|root| root.identity()))
+            .finish()
+    }
 }
 impl Repository {
     pub fn new(directory: PathBuf) -> Result<Self, Error> {
         if !directory.is_absolute() {
             return Err(Error::Invalid("storage directory must be absolute"));
         }
-        Ok(Self { directory })
+        Ok(Self {
+            directory,
+            pinned: None,
+        })
+    }
+    /// Host-provisioned private history namespace. The absolute label is for
+    /// reporting only; all locks, reads and publications use this original root.
+    pub fn from_pinned(
+        directory: PathBuf,
+        root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    ) -> Result<Self, Error> {
+        if !directory.is_absolute() {
+            return Err(Error::Invalid("storage label must be absolute"));
+        }
+        Ok(Self {
+            directory,
+            pinned: Some(root),
+        })
+    }
+    pub(crate) fn pinned_root(
+        &self,
+    ) -> Option<&Arc<ilium_platform::animation_files::PinnedDirectory>> {
+        self.pinned.as_ref()
+    }
+    pub fn label(&self) -> &Path {
+        &self.directory
     }
     fn transaction(&self, cancelled: &dyn Fn() -> bool) -> Result<Transaction, Error> {
         checkpoint(cancelled)?;
-        secure_fs::create_private_directory(&self.directory)?;
-        // Refuse the original final entry before canonicalization could hide
-        // a Windows junction or other alias as its plain target directory.
-        let root = NoFollowDirectory::open_root(&self.directory)?;
-        let directory = paths::canonicalize(&self.directory)?;
-        let generation = secure_fs::directory_generation(&directory)?;
+        let (root, directory, generation) = match &self.pinned {
+            Some(pinned) => {
+                let identity = pinned.identity();
+                (
+                    pinned.original_root(),
+                    self.directory.clone(),
+                    (identity.device, identity.inode),
+                )
+            }
+            None => {
+                secure_fs::create_private_directory(&self.directory)?;
+                // Refuse the original final entry before canonicalization could
+                // hide a Windows junction as its plain target directory.
+                let root = Arc::new(NoFollowDirectory::open_root(&self.directory)?);
+                let directory = paths::canonicalize(&self.directory)?;
+                let generation = secure_fs::directory_generation(&directory)?;
+                (root, directory, generation)
+            }
+        };
         // Do not reopen by path: Windows' generic private OpenOptions follows
         // a reparse point. Hold the exact handle admitted through this root.
         let lock_file = match root.create_regular(LOCK_FILE.as_ref()) {
@@ -209,6 +286,7 @@ impl Repository {
             root,
             directory,
             generation,
+            pinned: self.pinned.clone(),
         };
         transaction.verify_root()?;
         Ok(transaction)
@@ -231,25 +309,97 @@ impl Repository {
         directories: &[PathBuf],
         cancelled: &dyn Fn() -> bool,
     ) -> Result<BoundCatalog, Error> {
+        self.bind_catalog_authority(
+            expected_revision,
+            canonical_root,
+            directories,
+            cancelled,
+            None,
+        )
+    }
+
+    /// Bind a complete retained selected catalog without reopening any label.
+    /// Repository writes keep their original separately owned transaction.
+    pub fn bind_catalog_pinned(
+        &self,
+        expected_revision: u64,
+        root_label: &Path,
+        root: &ilium_platform::animation_files::PinnedDirectory,
+        children: &std::collections::BTreeMap<
+            PathBuf,
+            std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>,
+        >,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<BoundCatalog, Error> {
+        let directories: Vec<_> = children.keys().cloned().collect();
+        self.bind_catalog_authority(
+            expected_revision,
+            root_label,
+            &directories,
+            cancelled,
+            Some((root, children)),
+        )
+    }
+
+    fn bind_catalog_authority(
+        &self,
+        expected_revision: u64,
+        canonical_root: &Path,
+        directories: &[PathBuf],
+        cancelled: &dyn Fn() -> bool,
+        pinned: Option<(
+            &ilium_platform::animation_files::PinnedDirectory,
+            &std::collections::BTreeMap<
+                PathBuf,
+                std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>,
+            >,
+        )>,
+    ) -> Result<BoundCatalog, Error> {
         checkpoint(cancelled)?;
         if directories.len() > MAX_ADMISSION {
             return Err(Error::Limit("catalog admission batch"));
         }
         let transaction = self.transaction(cancelled)?;
         let current = transaction.compare(expected_revision)?;
-        let root_generation = secure_fs::directory_generation(canonical_root)?;
+        let root_generation = match pinned {
+            Some((root, _)) => {
+                let identity = root.identity();
+                (identity.device, identity.inode)
+            }
+            None => secure_fs::directory_generation(canonical_root)?,
+        };
         let root_key = minecraft::native_path_key(canonical_root)?;
         let mut snapshot = current.clone();
         let mut keys = BTreeSet::new();
         let mut maps = Vec::with_capacity(directories.len());
         for directory in directories {
             checkpoint(cancelled)?;
-            require_direct_child(canonical_root, directory)?;
+            if pinned.is_some() {
+                require_direct_child_label(canonical_root, directory)?;
+            } else {
+                require_direct_child(canonical_root, directory)?;
+            }
             let path_key = minecraft::native_path_key(directory)?;
             if !keys.insert(path_key.clone()) {
                 return Err(Error::Invalid("duplicate catalog directory"));
             }
-            let directory_generation = secure_fs::directory_generation(directory)?;
+            let directory_generation = match pinned {
+                Some((root, children)) => {
+                    let child = children
+                        .get(directory)
+                        .ok_or(Error::Invalid("selected child missing"))?;
+                    let identity = child.identity();
+                    let leaf = directory
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .ok_or(Error::Invalid("selected save leaf is not UTF-8"))?;
+                    if root.child(leaf, false)?.identity() != identity {
+                        return Err(Error::Invalid("selected child entry changed"));
+                    }
+                    (identity.device, identity.inode)
+                }
+                None => secure_fs::directory_generation(directory)?,
+            };
             let existing = snapshot.bindings.iter().find(|binding| {
                 binding.active
                     && binding.root_key == root_key
@@ -298,9 +448,25 @@ impl Repository {
         // is asserted by this whole-batch pre-publication check.
         for map in &maps {
             checkpoint(cancelled)?;
-            map.verify(canonical_root)?;
+            match pinned {
+                Some((root, children)) => map.verify_pinned(
+                    canonical_root,
+                    root,
+                    children
+                        .get(&map.directory)
+                        .ok_or(Error::Invalid("selected child missing"))?,
+                )?,
+                None => map.verify(canonical_root)?,
+            }
         }
-        if secure_fs::directory_generation(canonical_root)? != root_generation {
+        let final_root_generation = match pinned {
+            Some((root, _)) => {
+                let identity = root.identity();
+                (identity.device, identity.inode)
+            }
+            None => secure_fs::directory_generation(canonical_root)?,
+        };
+        if final_root_generation != root_generation {
             return Err(Error::Invalid("saves root changed during admission"));
         }
         checkpoint(cancelled)?;
@@ -339,13 +505,21 @@ impl Repository {
 
 struct Transaction {
     _lock: ExclusiveFileLock,
-    root: NoFollowDirectory,
+    root: Arc<NoFollowDirectory>,
     directory: PathBuf,
     generation: (u64, u64),
+    pinned: Option<Arc<ilium_platform::animation_files::PinnedDirectory>>,
 }
 impl Transaction {
     fn verify_root(&self) -> Result<(), Error> {
-        if secure_fs::directory_generation(&self.directory)? != self.generation {
+        let generation = match &self.pinned {
+            Some(root) => {
+                let identity = root.identity();
+                (identity.device, identity.inode)
+            }
+            None => secure_fs::directory_generation(&self.directory)?,
+        };
+        if generation != self.generation {
             return Err(Error::Invalid("repository directory changed"));
         }
         Ok(())
@@ -378,6 +552,61 @@ impl Transaction {
         }
         Ok(current)
     }
+    fn publish_pinned(
+        &self,
+        root: &Arc<ilium_platform::animation_files::PinnedDirectory>,
+        revision: u64,
+        bytes: &[u8],
+        cancelled: &dyn Fn() -> bool,
+        write_hook: &dyn Fn(&mut File) -> io::Result<()>,
+    ) -> Result<(), Error> {
+        use ilium_platform::animation_files::WriteMode;
+        checkpoint(cancelled)?;
+        let mut stage = root.begin_atomic(STATE_FILE, WriteMode::ReplaceEntry)?;
+        let prepared = (|| {
+            let mut file = stage.try_clone_staging_file()?;
+            write_hook(&mut file)?;
+            checkpoint(cancelled)?;
+            stage.write(bytes, MAX_STATE_BYTES)?;
+            stage.prepare_durable()?;
+            if read_bounded(stage.open_staging_readonly()?)? != bytes {
+                return Err(Error::Invalid("temporary state readback differs"));
+            }
+            self.verify_root()?;
+            checkpoint(cancelled)?;
+            stage.publish_entry()?;
+            Ok(())
+        })();
+        if let Err(source) = prepared {
+            return if stage.was_published() {
+                Err(Error::Published {
+                    revision,
+                    source: Box::new(source),
+                })
+            } else {
+                match stage.abort_unpublished() {
+                    Ok(()) => Err(source),
+                    Err(cleanup) => Err(Error::Cleanup {
+                        cause: Box::new(source),
+                        source: cleanup,
+                    }),
+                }
+            };
+        }
+        // Native rename has committed. Cancellation cannot erase this effect.
+        let confirm = (|| {
+            stage.durable_ack()?;
+            self.verify_root()?;
+            if read_bounded(self.root.open_regular(STATE_FILE.as_ref())?)? != bytes {
+                return Err(Error::Invalid("published state readback differs"));
+            }
+            Ok(())
+        })();
+        confirm.map_err(|source| Error::Published {
+            revision,
+            source: Box::new(source),
+        })
+    }
     fn publish(
         &self,
         snapshot: &Snapshot,
@@ -396,6 +625,9 @@ impl Transaction {
         }
         serialized?;
         let bytes = bounded.bytes;
+        if let Some(root) = &self.pinned {
+            return self.publish_pinned(root, snapshot.revision, &bytes, cancelled, write_hook);
+        }
         let identifier = minecraft::random_map_identifier()?;
         let token: String = identifier
             .iter()
@@ -472,6 +704,27 @@ fn checkpoint(cancelled: &dyn Fn() -> bool) -> Result<(), Error> {
         Ok(())
     }
 }
+fn require_direct_child_label(root: &Path, directory: &Path) -> Result<(), Error> {
+    if !root.is_absolute()
+        || !directory.is_absolute()
+        || directory.parent() != Some(root)
+        || root
+            .components()
+            .chain(directory.components())
+            .any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+    {
+        return Err(Error::Invalid(
+            "selected save label must be a normalized direct child",
+        ));
+    }
+    Ok(())
+}
+
 fn require_direct_child(root: &Path, directory: &Path) -> Result<(), Error> {
     if !root.is_absolute() || !directory.is_absolute() || directory.parent() != Some(root) {
         return Err(Error::Invalid(

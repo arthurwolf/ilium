@@ -1,5 +1,6 @@
 //! Saved allocations are candidate coordinates, never renderable coverage.
 use super::region;
+use ilium_platform::animation_files::PinnedDirectory;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -105,6 +106,87 @@ pub fn allocated_chunks(
     Ok(result)
 }
 
+/// The selected-root catalog uses the original no-follow directory. The
+/// caller holds its committed DiskRead operation and complete scene admission.
+/// Allocation is still a candidate index, never renderable coverage.
+pub fn allocated_chunks_pinned(
+    directory: &PinnedDirectory,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<AllocationIndex, region::Error> {
+    if cancelled() {
+        return Err(region::Error::Cancelled);
+    }
+    let mut regions = BTreeSet::new();
+    for entry in directory.list_saved_catalog(16_384)? {
+        if cancelled() {
+            return Err(region::Error::Cancelled);
+        }
+        if entry.is_directory {
+            continue;
+        }
+        let name = entry.name;
+        let mut parts = name.split('.');
+        let (Some("r"), Some(x), Some(z), Some("mca"), None) = (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+        ) else {
+            continue;
+        };
+        let (Ok(x), Ok(z)) = (x.parse::<i32>(), z.parse::<i32>()) else {
+            continue;
+        };
+        if name != format!("r.{x}.{z}.mca") {
+            continue;
+        }
+        if x.checked_mul(32).is_none() || z.checked_mul(32).is_none() {
+            return Err(region::Error::Invalid(
+                "region coordinates exceed chunk domain",
+            ));
+        }
+        regions.insert([x, z]);
+        if regions.len() > 4096 {
+            return Err(region::Error::Limit("region file count"));
+        }
+    }
+    let mut result = AllocationIndex::default();
+    for position in regions {
+        if cancelled() {
+            return Err(region::Error::Cancelled);
+        }
+        let index = match region::read_index_pinned(directory, position, cancelled) {
+            Ok(index) => index,
+            Err(region::Error::Cancelled) => return Err(region::Error::Cancelled),
+            Err(error) => {
+                result.rejected_regions += 1;
+                if result.issues.len() < 64 {
+                    result.issues.push(RegionIssue {
+                        position,
+                        message: error.to_string(),
+                    });
+                }
+                continue;
+            }
+        };
+        let origin = position.map(|coordinate| coordinate * 32);
+        for (slot, entry) in index.entries.iter().enumerate() {
+            if entry.is_none() {
+                continue;
+            }
+            result.chunks.insert([
+                origin[0] + (slot % 32) as i32,
+                origin[1] + (slot / 32) as i32,
+            ]);
+            if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
+                return Err(region::Error::Limit("allocated chunk count"));
+            }
+        }
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,10 +255,12 @@ mod tests {
         std::fs::write(directory.path().join("r.+1.0.mca"), b"bad").unwrap();
         std::fs::write(directory.path().join("r.01.0.mca"), b"bad").unwrap();
         std::fs::create_dir(directory.path().join("r.1.0.mca")).unwrap();
-        assert!(allocated_chunks(directory.path(), &|| false)
-            .unwrap()
-            .chunks
-            .is_empty());
+        assert!(
+            allocated_chunks(directory.path(), &|| false)
+                .unwrap()
+                .chunks
+                .is_empty()
+        );
         let empty = tempfile::tempdir().unwrap();
         assert!(matches!(
             allocated_chunks(empty.path(), &|| true),
@@ -196,5 +280,56 @@ mod tests {
         assert_eq!(result.issues.len(), 64);
         assert_eq!(result.issues[0].position, [0, 0]);
         assert_eq!(result.issues[63].position, [63, 0]);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_allocation_reads_original_directory_after_its_path_is_replaced() {
+        use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
+        use std::sync::Arc;
+        let temporary = tempfile::tempdir().unwrap();
+        let selected = temporary.path().join("region");
+        std::fs::create_dir(&selected).unwrap();
+        file(&selected, [-2, 1], &[0, 31, 32, 1023]);
+        let original =
+            PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&selected).unwrap()))
+                .unwrap();
+        std::fs::rename(&selected, temporary.path().join("retired-region")).unwrap();
+        std::fs::create_dir(&selected).unwrap();
+        file(&selected, [1, 2], &[0]);
+        let retained = allocated_chunks_pinned(&original, &|| false).unwrap();
+        assert!(retained.issues.is_empty());
+        assert_eq!(
+            retained.chunks,
+            [[-64, 32], [-33, 32], [-64, 33], [-33, 63]].into(),
+            "a retained original directory must never reopen its replaced path label"
+        );
+        let replacement = allocated_chunks(&selected, &|| false).unwrap();
+        assert_eq!(replacement.chunks, [[32, 64]].into());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_allocation_keeps_bounded_partial_errors_and_explicit_cancellation() {
+        use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
+        use std::sync::Arc;
+        let temporary = tempfile::tempdir().unwrap();
+        file(temporary.path(), [0, 0], &[0]);
+        for x in 1..=80 {
+            std::fs::write(temporary.path().join(format!("r.{x}.0.mca")), b"bad").unwrap();
+        }
+        let original = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(temporary.path()).unwrap(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            allocated_chunks_pinned(&original, &|| true),
+            Err(region::Error::Cancelled)
+        ));
+        let result = allocated_chunks_pinned(&original, &|| false).unwrap();
+        assert_eq!(result.chunks, [[0, 0]].into());
+        assert_eq!(result.rejected_regions, 80);
+        assert_eq!(result.issues.len(), 64);
+        assert_eq!(result.issues[0].position, [1, 0]);
+        assert_eq!(result.issues[63].position, [64, 0]);
     }
 }

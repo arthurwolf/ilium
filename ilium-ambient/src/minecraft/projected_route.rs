@@ -9,13 +9,13 @@ use super::{
     tours::{self, Plan, PreparedMap, ProjectedDisplay},
 };
 use crate::voxel_landscape::{
+    VoxelLandscapeSettings,
     assets::{
         budget::{ByteBudget, Cancel, Reservation},
         error::AssetError,
         identity::{Digest256, ResourceId},
         models::ModelCompiler,
     },
-    VoxelLandscapeSettings,
 };
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
@@ -112,6 +112,29 @@ fn certify_tile(tile: &NativeTile) -> Result<(), Error> {
 /// built. Empty exact-air tiles are still covered by the qualified source and
 /// require no mesh. A failed/missing chunk or texture rejects the WHOLE route.
 pub fn prepare(input: Inputs<'_>) -> Result<PreparedRoute, Error> {
+    prepare_source(input, None)
+}
+
+/// Render preparation keeps selected world reads on the original descriptors.
+/// The native jar remains the separately authorized asset in Inputs.
+pub fn prepare_pinned(
+    input: Inputs<'_>,
+    source: projected_source::PinnedSource<'_>,
+    native_jar: &ilium_platform::animation_files::PinnedFile,
+) -> Result<PreparedRoute, Error> {
+    if input.saves_root != source.root_label {
+        return Err(Error::Source);
+    }
+    prepare_source(input, Some((source, native_jar)))
+}
+
+fn prepare_source(
+    input: Inputs<'_>,
+    source: Option<(
+        projected_source::PinnedSource<'_>,
+        &ilium_platform::animation_files::PinnedFile,
+    )>,
+) -> Result<PreparedRoute, Error> {
     input.cancel.check()?;
     if input.plan.source() != input.initial_map.source()
         || input.bound.map != input.plan.source().map
@@ -127,15 +150,26 @@ pub fn prepare(input: Inputs<'_>) -> Result<PreparedRoute, Error> {
         input.account,
         input.cancel,
     )?);
-    let qualified = projected_source::qualify(
-        input.initial_map,
-        input.bound,
-        input.saves_root,
-        &request,
-        input.account,
-        input.cancel,
-        input.cancelled,
-    )?;
+    let qualified = match source {
+        Some((source, _)) => projected_source::qualify_pinned(
+            input.initial_map,
+            input.bound,
+            source,
+            &request,
+            input.account,
+            input.cancel,
+            input.cancelled,
+        )?,
+        None => projected_source::qualify(
+            input.initial_map,
+            input.bound,
+            input.saves_root,
+            &request,
+            input.account,
+            input.cancel,
+            input.cancelled,
+        )?,
+    };
     let map = qualified.map;
     let mut source_budget = tours::Budget::new(16_000_000, input.cancelled);
     let display = Arc::new(ProjectedDisplay::bind(
@@ -146,13 +180,22 @@ pub fn prepare(input: Inputs<'_>) -> Result<PreparedRoute, Error> {
         input.scale,
         &mut source_budget,
     )?);
-    let session = NativeSourceSession::open(
-        input.jar,
-        input.selected,
-        input.fancy_leaves,
-        input.account.clone(),
-        input.cancel,
-    )?;
+    let session = match source {
+        Some((_, native_jar)) => NativeSourceSession::open_pinned(
+            native_jar,
+            input.selected,
+            input.fancy_leaves,
+            input.account.clone(),
+            input.cancel,
+        )?,
+        None => NativeSourceSession::open(
+            input.jar,
+            input.selected,
+            input.fancy_leaves,
+            input.account.clone(),
+            input.cancel,
+        )?,
+    };
     let definitions = session.definitions()?;
     let mut compiler = ModelCompiler::new(&definitions, session.limits(), input.account.clone())?;
     let immutable_definitions = session.immutable_definitions();

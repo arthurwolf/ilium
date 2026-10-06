@@ -15,6 +15,7 @@ use super::{
     tours::PreparedMap,
 };
 use crate::voxel_landscape::{
+    VoxelLandscapeSettings,
     assets::{
         bank::TextureBank,
         block_state::BlockState,
@@ -31,7 +32,6 @@ use crate::voxel_landscape::{
         AlphaMode, BoundModel, BoundQuad, FaceMaterial, MaterialTable, MeshRegion, PreparedMesh,
         TextureRenderRule,
     },
-    VoxelLandscapeSettings,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -63,7 +63,9 @@ pub enum Error {
     Fluid(#[from] native_fluid_assembly::Error),
     #[error("saved state {0} requires an unavailable pinned native layer")]
     RenderLayer(String),
-    #[error("saved state {state} at {java_position:?} compiled to no block quads; a native built-in renderer is required")]
+    #[error(
+        "saved state {state} at {java_position:?} compiled to no block quads; a native built-in renderer is required"
+    )]
     EmptyModel {
         state: String,
         java_position: [i32; 3],
@@ -280,10 +282,42 @@ impl NativeSourceSession {
         budget: ByteBudget,
         cancel: Cancel<'_>,
     ) -> Result<Self, Error> {
+        Self::open_archive(
+            native_assets::NativeArchive::Path(jar),
+            selected,
+            fancy_leaves,
+            budget,
+            cancel,
+        )
+    }
+
+    pub fn open_pinned(
+        jar: &ilium_platform::animation_files::PinnedFile,
+        selected: Option<&VoxelLandscapeSettings>,
+        fancy_leaves: bool,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self, Error> {
+        Self::open_archive(
+            native_assets::NativeArchive::Pinned(jar),
+            selected,
+            fancy_leaves,
+            budget,
+            cancel,
+        )
+    }
+
+    fn open_archive(
+        jar: native_assets::NativeArchive<'_>,
+        selected: Option<&VoxelLandscapeSettings>,
+        fancy_leaves: bool,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self, Error> {
         cancel.check()?;
         let ids_charge = budget.reserve(8 << 20, cancel)?;
         let sources =
-            NativeSources::open(jar, selected, Default::default(), budget.clone(), cancel)?;
+            NativeSources::open_archive(jar, selected, Default::default(), budget.clone(), cancel)?;
         Ok(Self {
             sources,
             layers: RenderLayers::load(fancy_leaves)?,

@@ -2,7 +2,8 @@
 //! Two equal observations detect changes; they are NOT an atomic filesystem
 //! snapshot or a hostile-path/no-follow security boundary. Kernel I/O can block.
 use super::nbt::{self, Compound, Document, Tag};
-use flate2::{bufread::GzDecoder, Decompress, FlushDecompress, Status};
+use flate2::{Decompress, FlushDecompress, Status, bufread::GzDecoder};
+use ilium_platform::animation_files::{FileIdentity, PinnedDirectory, PinnedFile};
 use std::{
     fs::{self, File, Metadata},
     io::{self, Read, Seek, SeekFrom},
@@ -366,6 +367,190 @@ pub fn read_chunk(
         document,
     }))
 }
+// The selected world reader uses only host-opened no-follow descriptors. It is
+// called on an admitted finite I/O worker after the original DiskRead ticket was
+// committed. File names are fixed Anvil leaves, never guest path authority.
+#[derive(PartialEq, Eq)]
+struct PinnedCapture {
+    header: [u8; HEADER],
+    file_identity: FileIdentity,
+    file_len: u64,
+    modified: SystemTime,
+    external: Option<(FileIdentity, u64, SystemTime)>,
+    index: Index,
+    stored: Option<Stored>,
+}
+fn pinned_read_exact(
+    file: &PinnedFile,
+    output: &mut [u8],
+    offset: u64,
+    cancel: &dyn Fn() -> bool,
+) -> Result<()> {
+    let mut filled = 0usize;
+    while filled < output.len() {
+        check(cancel)?;
+        let at = offset
+            .checked_add(filled as u64)
+            .ok_or(Error::Limit("read offset"))?;
+        let count = file.read_at(&mut output[filled..], at)?;
+        if count == 0 {
+            return Err(Error::Changed);
+        }
+        filled += count;
+    }
+    Ok(())
+}
+fn pinned_capture(
+    directory: &PinnedDirectory,
+    expected: [i32; 2],
+    limits: Limits,
+    cancel: &dyn Fn() -> bool,
+) -> Result<PinnedCapture> {
+    check(cancel)?;
+    let region = region_of(expected);
+    let name = format!("r.{}.{}.mca", region[0], region[1]);
+    let file = directory.open_file(&name)?;
+    let identity = file.identity();
+    let file_len = file.len()?;
+    let modified = file.modified()?;
+    let mut header = [0u8; HEADER];
+    pinned_read_exact(&file, &mut header, 0, cancel)?;
+    let index = Index::parse(&header, file_len, region)?;
+    let mut external_stamp = None;
+    let stored = if let Some(entry) = index.entries[slot(expected)] {
+        let sector = u64::from(entry.sector)
+            .checked_mul(SECTOR)
+            .ok_or(Error::Limit("sector offset"))?;
+        let mut prefix = [0u8; 5];
+        pinned_read_exact(&file, &mut prefix, sector, cancel)?;
+        let length = u64::from(word(&prefix[..4]));
+        if length < 1 || length + 4 > u64::from(entry.sectors) * SECTOR {
+            return Err(Error::Invalid("chunk length outside allocated sectors"));
+        }
+        let marker = prefix[4];
+        compression(marker)?;
+        let data = if marker & 128 != 0 {
+            if length != 1 || entry.sectors != 1 {
+                return Err(Error::Invalid(
+                    "external chunk stub must occupy one sector, length 1",
+                ));
+            }
+            let name = format!("c.{}.{}.mcc", expected[0], expected[1]);
+            let external = directory.open_file(&name)?;
+            let length = external.len()?;
+            if length == 0 || length > limits.max_compressed_bytes as u64 {
+                return Err(Error::Limit("external compressed bytes"));
+            }
+            let age = external.modified()?;
+            let mut bytes = vec![0u8; length as usize];
+            pinned_read_exact(&external, &mut bytes, 0, cancel)?;
+            if external.len()? != length || external.modified()? != age {
+                return Err(Error::Changed);
+            }
+            external_stamp = Some((external.identity(), length, age));
+            bytes
+        } else {
+            if length - 1 > limits.max_compressed_bytes as u64 {
+                return Err(Error::Limit("internal compressed bytes"));
+            }
+            let mut bytes = vec![0u8; (length - 1) as usize];
+            pinned_read_exact(&file, &mut bytes, sector + 5, cancel)?;
+            bytes
+        };
+        Some(Stored {
+            marker,
+            data,
+            external_stamp: None,
+        })
+    } else {
+        None
+    };
+    let mut again = [0u8; HEADER];
+    pinned_read_exact(&file, &mut again, 0, cancel)?;
+    if again != header
+        || file.identity() != identity
+        || file.len()? != file_len
+        || file.modified()? != modified
+    {
+        return Err(Error::Changed);
+    }
+    check(cancel)?;
+    Ok(PinnedCapture {
+        header,
+        file_identity: identity,
+        file_len,
+        modified,
+        external: external_stamp,
+        index,
+        stored,
+    })
+}
+/// Header-only handle-relative allocation observation for a selected region.
+/// Two independent opens detect entry swaps and ordinary concurrent writes.
+pub fn read_index_pinned(
+    directory: &PinnedDirectory,
+    region: [i32; 2],
+    cancel: &dyn Fn() -> bool,
+) -> Result<Index> {
+    let capture = || -> Result<(FileIdentity, u64, SystemTime, [u8; HEADER], Index)> {
+        check(cancel)?;
+        let name = format!("r.{}.{}.mca", region[0], region[1]);
+        let file = directory.open_file(&name)?;
+        let identity = file.identity();
+        let length = file.len()?;
+        let modified = file.modified()?;
+        let mut header = [0u8; HEADER];
+        pinned_read_exact(&file, &mut header, 0, cancel)?;
+        let index = Index::parse(&header, length, region)?;
+        let mut again = [0u8; HEADER];
+        pinned_read_exact(&file, &mut again, 0, cancel)?;
+        if header != again || file.len()? != length || file.modified()? != modified {
+            return Err(Error::Changed);
+        }
+        Ok((identity, length, modified, header, index))
+    };
+    let first = capture()?;
+    if first != capture()? {
+        return Err(Error::Changed);
+    }
+    check(cancel)?;
+    Ok(first.4)
+}
+
+/// Read one qualified chunk from the original selected region descriptor.
+/// Two independent opens detect entry swaps and ordinary concurrent writes;
+/// no filename, symlink or stale guest identity can replace the selected root.
+pub fn read_chunk_pinned(
+    region_directory: &PinnedDirectory,
+    expected: [i32; 2],
+    limits: Limits,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Option<ChunkNbt>> {
+    let first = pinned_capture(region_directory, expected, limits, cancel)?;
+    let second = pinned_capture(region_directory, expected, limits, cancel)?;
+    if first != second {
+        return Err(Error::Changed);
+    }
+    let Some(stored) = first.stored else {
+        return Ok(None);
+    };
+    let kind = compression(stored.marker)?;
+    let bytes = decompress(kind, &stored.data, limits.nbt.max_bytes, cancel)?;
+    let document = nbt::parse_checked(&bytes, limits.nbt, cancel)?;
+    check(cancel)?;
+    let identity = verify_identity(&document, expected)?;
+    let timestamp = first.index.entries[slot(expected)]
+        .ok_or(Error::Invalid("payload without index entry"))?
+        .timestamp;
+    Ok(Some(ChunkNbt {
+        identity,
+        timestamp,
+        compression: kind,
+        external: stored.marker & 128 != 0,
+        document,
+    }))
+}
+
 fn append(out: &mut Vec<u8>, bytes: &[u8], limit: usize) -> Result<()> {
     if bytes.len() > limit.saturating_sub(out.len()) {
         return Err(Error::Limit("uncompressed bytes"));
