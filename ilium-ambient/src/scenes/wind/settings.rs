@@ -54,7 +54,7 @@ impl ChoiceEnum for EdgeMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindSettings {
-    /// Number of dots, 10..=2000. Default 250.
+    /// Number of dots, 10..=20000. Default 2000.
     pub dot_count: u32,
     /// Average dot weight, 1..=100. Light dots follow the wind, heavy dots
     /// resist it and fall faster. Default 30.
@@ -92,6 +92,14 @@ pub struct WindSettings {
     pub push_reach: u32,
     /// Largest scroll, in cells per update, that is recognised, 1..=8. Default 3.
     pub scroll_range: u32,
+    /// How strongly nearby dots repel each other so they do not bunch up,
+    /// in percent, 0..=100. 0 turns it off. Default 0.
+    pub diffusion: u32,
+    /// How often a random dot is teleported to a random empty place, in
+    /// percent of the fastest rate, 0..=100. 0 turns it off. Default 0.
+    pub dispersion: u32,
+    /// Repel nearby dots with the mouse pointer. Default on.
+    pub mouse_force: bool,
     /// Whether dots piled into one cell merge into a larger dot character.
     /// Default off.
     pub merge_dots: bool,
@@ -106,7 +114,7 @@ pub struct WindSettings {
 impl Default for WindSettings {
     fn default() -> Self {
         Self {
-            dot_count: 250,
+            dot_count: 2000,
             dot_weight: 30,
             weight_variation: 40,
             drag: 40,
@@ -123,6 +131,9 @@ impl Default for WindSettings {
             appear_push: 20,
             push_reach: 1,
             scroll_range: 3,
+            diffusion: 0,
+            dispersion: 0,
+            mouse_force: true,
             merge_dots: false,
             merge_threshold: 3,
             seed: 1,
@@ -131,7 +142,7 @@ impl Default for WindSettings {
     }
 }
 
-const DOT_COUNT: (u32, u32) = (10, 2000);
+const DOT_COUNT: (u32, u32) = (10, 20000);
 const DOT_WEIGHT: (u32, u32) = (1, 100);
 const WEIGHT_VARIATION: (u32, u32) = (0, 100);
 const DRAG: (u32, u32) = (1, 100);
@@ -139,6 +150,8 @@ const WIND_STRENGTH: (u32, u32) = (0, 100);
 const WIND_ANGLE: (u32, u32) = (0, 359);
 const ROTATION_SPEED: (i32, i32) = (-90, 90);
 const GUSTS: (u32, u32) = (0, 100);
+const DIFFUSION: (u32, u32) = (0, 100);
+const DISPERSION: (u32, u32) = (0, 100);
 const GRAVITY_STRENGTH: (u32, u32) = (1, 100);
 const BOUNCE: (u32, u32) = (0, 100);
 const SCROLL_PUSH: (u32, u32) = (0, 100);
@@ -231,6 +244,8 @@ impl SceneSettings for WindSettings {
                 .rotation_speed
                 .clamp(ROTATION_SPEED.0, ROTATION_SPEED.1),
             gusts: clamp(GUSTS, self.gusts),
+            diffusion: clamp(DIFFUSION, self.diffusion),
+            dispersion: clamp(DISPERSION, self.dispersion),
             gravity_strength: clamp(GRAVITY_STRENGTH, self.gravity_strength),
             bounce: clamp(BOUNCE, self.bounce),
             scroll_push: clamp(SCROLL_PUSH, self.scroll_push),
@@ -251,7 +266,7 @@ impl SceneSettings for WindSettings {
                 "Dots",
                 self.dot_count,
                 DOT_COUNT,
-                10,
+                50,
                 "",
                 "How many dots the wind carries. They live only in empty screen cells.",
             ),
@@ -394,6 +409,30 @@ impl SceneSettings for WindSettings {
             " cells",
             "Largest jump in cells that still counts as scrolling. Larger values follow fast scrolling but may misread new text.",
         ));
+        rows.push(range_row(
+            "diffusion",
+            "Diffusion",
+            self.diffusion,
+            DIFFUSION,
+            5,
+            "%",
+            "Nearby dots push each other apart, which keeps them from bunching up. 0% lets dots pile together freely.",
+        ));
+        rows.push(range_row(
+            "dispersion",
+            "Dispersion",
+            self.dispersion,
+            DISPERSION,
+            5,
+            "%",
+            "Every so often a random dot jumps to a random empty place on the screen. Higher values do it more often. 0% never does.",
+        ));
+        rows.push(Control::toggle(
+            "mouse_force",
+            "Mouse force",
+            self.mouse_force,
+            "The mouse pushes nearby dots away. Move the pointer to move particles; turn off to ignore it.",
+        ));
         rows.push(Control::toggle(
             "merge_dots",
             "Merge dots",
@@ -434,6 +473,7 @@ impl SceneSettings for WindSettings {
 
     fn set_control(&mut self, id: &str, value: ControlValue) -> Result<bool, String> {
         match id {
+            "mouse_force" => set_toggle(&mut self.mouse_force, &value, "Mouse force"),
             "dot_count" => set_number(&mut self.dot_count, DOT_COUNT, &value, "Dots"),
             "dot_weight" => set_number(&mut self.dot_weight, DOT_WEIGHT, &value, "Dot weight"),
             "weight_variation" => set_number(
@@ -460,6 +500,8 @@ impl SceneSettings for WindSettings {
                 ))
             }
             "gusts" => set_number(&mut self.gusts, GUSTS, &value, "Gusts"),
+            "diffusion" => set_number(&mut self.diffusion, DIFFUSION, &value, "Diffusion"),
+            "dispersion" => set_number(&mut self.dispersion, DISPERSION, &value, "Dispersion"),
             "gravity_enabled" => set_toggle(&mut self.gravity_enabled, &value, "Gravity"),
             "gravity_strength" => set_number(
                 &mut self.gravity_strength,

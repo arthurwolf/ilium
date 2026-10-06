@@ -81,6 +81,10 @@ impl WindScene {
 }
 
 impl Scene for WindScene {
+    fn pointer(&mut self, position: Option<[f32; 2]>) {
+        self.sim.set_pointer(position);
+    }
+
     fn wants_occupancy(&self) -> bool {
         true
     }
@@ -146,3 +150,6 @@ impl Scene for WindScene {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod mouse_tests;

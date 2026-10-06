@@ -26,6 +26,17 @@ const DRAG_COEFFICIENT: f32 = 5.0;
 const GRAVITY: f32 = 50.0;
 /// Push speed at 100% scroll or appear push, in cell widths per second.
 const PUSH_SPEED: f32 = 36.0;
+/// Local pointer field, measured in cell widths so it looks circular on screen.
+const MOUSE_RADIUS: f32 = 6.0;
+const MOUSE_FORCE: f32 = 180.0;
+/// Reach of the dot-to-dot repulsion, measured in cell widths.
+const DIFFUSION_RADIUS: f32 = 3.0;
+/// Repulsion acceleration between two touching dots at 100% diffusion.
+const DIFFUSION_FORCE: f32 = 60.0;
+/// Most neighbours that push one dot per step; bounds the cost in dense piles.
+const DIFFUSION_MAX_NEIGHBOURS: usize = 24;
+/// Teleported dots per second at 100% dispersion.
+const DISPERSION_RATE: f32 = 100.0;
 /// How far a displaced dot looks for an empty cell before it respawns.
 const EJECT_RADIUS: i32 = 12;
 /// Cells walked along a push direction when moving a dot out of new text.
@@ -72,6 +83,13 @@ pub struct Sim {
     mask: OccupancyMask,
     has_mask: bool,
     last_time: Option<f32>,
+    pointer: Option<[f32; 2]>,
+    /// Fractional teleports owed by the dispersion setting.
+    dispersion_owed: f32,
+    /// Scratch buffers of the neighbour search, kept to avoid per-step allocation.
+    bucket_starts: Vec<u32>,
+    bucket_items: Vec<u32>,
+    repulsion: Vec<(f32, f32)>,
 }
 
 impl Sim {
@@ -83,6 +101,11 @@ impl Sim {
             mask: OccupancyMask::default(),
             has_mask: false,
             last_time: None,
+            pointer: None,
+            dispersion_owed: 0.0,
+            bucket_starts: Vec::new(),
+            bucket_items: Vec::new(),
+            repulsion: Vec::new(),
         };
         sim.resize_population();
         sim
@@ -90,6 +113,36 @@ impl Sim {
 
     pub fn dots(&self) -> &[Dot] {
         &self.dots
+    }
+
+    pub fn set_pointer(&mut self, position: Option<[f32; 2]>) {
+        self.pointer = position.filter(|position| {
+            position
+                .iter()
+                .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        });
+    }
+
+    fn mouse_at(&self, dot: &Dot) -> (f32, f32) {
+        let Some(pointer) = self.pointer.filter(|_| self.settings.mouse_force) else {
+            return (0.0, 0.0);
+        };
+        let dx = dot.x - pointer[0] * f32::from(self.mask.width());
+        let dy = (dot.y - pointer[1] * f32::from(self.mask.height())) * ASPECT;
+        let distance = dx.hypot(dy);
+        if distance >= MOUSE_RADIUS {
+            return (0.0, 0.0);
+        }
+        // A dot exactly under the pointer needs a finite, deterministic direction.
+        let (ux, uy) = if distance > 0.0001 {
+            (dx / distance, dy / distance)
+        } else {
+            let angle = dot.weight_roll * std::f32::consts::PI;
+            (angle.cos(), angle.sin())
+        };
+        let falloff = 1.0 - distance / MOUSE_RADIUS;
+        let force = MOUSE_FORCE * falloff * falloff;
+        (ux * force, uy * force)
     }
 
     /// Test helper: stops every dot at one place.
@@ -420,7 +473,112 @@ impl Sim {
         }
     }
 
+    /// Fills `self.repulsion` with the push each dot gets from its close
+    /// neighbours. Dots are binned into square buckets of `DIFFUSION_RADIUS`
+    /// (rows scaled by `ASPECT` so buckets look square on screen), so only the
+    /// 3x3 buckets around a dot are searched.
+    fn compute_repulsion(&mut self) {
+        let count = self.dots.len();
+        self.repulsion.clear();
+        self.repulsion.resize(count, (0.0, 0.0));
+        let strength = self.settings.diffusion as f32 / 100.0 * DIFFUSION_FORCE;
+        if strength <= 0.0 || count < 2 {
+            return;
+        }
+        let columns = (f32::from(self.mask.width()) / DIFFUSION_RADIUS).ceil() as usize + 1;
+        let rows = (f32::from(self.mask.height()) * ASPECT / DIFFUSION_RADIUS).ceil() as usize + 1;
+        let bucket_of = |dot: &Dot| -> usize {
+            let column = ((dot.x / DIFFUSION_RADIUS).max(0.0) as usize).min(columns - 1);
+            let row = ((dot.y * ASPECT / DIFFUSION_RADIUS).max(0.0) as usize).min(rows - 1);
+            row * columns + column
+        };
+        // Counting sort of dot indices by bucket.
+        let mut starts = std::mem::take(&mut self.bucket_starts);
+        let mut items = std::mem::take(&mut self.bucket_items);
+        starts.clear();
+        starts.resize(columns * rows + 1, 0);
+        for dot in &self.dots {
+            starts[bucket_of(dot) + 1] += 1;
+        }
+        for index in 1..starts.len() {
+            starts[index] += starts[index - 1];
+        }
+        items.clear();
+        items.resize(count, 0);
+        let mut fill = starts.clone();
+        for (index, dot) in self.dots.iter().enumerate() {
+            let bucket = bucket_of(dot);
+            items[fill[bucket] as usize] = index as u32;
+            fill[bucket] += 1;
+        }
+        for index in 0..count {
+            let dot = self.dots[index];
+            let bucket = bucket_of(&dot);
+            let (column, row) = (bucket % columns, bucket / columns);
+            let (mut push_x, mut push_y) = (0.0_f32, 0.0_f32);
+            let mut seen = 0;
+            'search: for neighbour_row in row.saturating_sub(1)..=(row + 1).min(rows - 1) {
+                for neighbour_column in
+                    column.saturating_sub(1)..=(column + 1).min(columns - 1)
+                {
+                    let bucket = neighbour_row * columns + neighbour_column;
+                    for slot in starts[bucket]..starts[bucket + 1] {
+                        let other_index = items[slot as usize] as usize;
+                        if other_index == index {
+                            continue;
+                        }
+                        let other = self.dots[other_index];
+                        let dx = dot.x - other.x;
+                        let dy = (dot.y - other.y) * ASPECT;
+                        let distance = dx.hypot(dy);
+                        if distance >= DIFFUSION_RADIUS {
+                            continue;
+                        }
+                        // Dots on the same spot need a finite, deterministic direction.
+                        let (ux, uy) = if distance > 0.0001 {
+                            (dx / distance, dy / distance)
+                        } else {
+                            let angle = (dot.weight_roll - other.weight_roll
+                                + index as f32 * 0.618)
+                                * std::f32::consts::PI;
+                            (angle.cos(), angle.sin())
+                        };
+                        let falloff = 1.0 - distance / DIFFUSION_RADIUS;
+                        push_x += ux * falloff * falloff;
+                        push_y += uy * falloff * falloff;
+                        seen += 1;
+                        if seen >= DIFFUSION_MAX_NEIGHBOURS {
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            self.repulsion[index] = (push_x * strength, push_y * strength);
+        }
+        self.bucket_starts = starts;
+        self.bucket_items = items;
+    }
+
+    /// Teleports random dots to random empty cells at the dispersion rate.
+    fn disperse(&mut self, dt: f32) {
+        if self.settings.dispersion == 0 || self.dots.is_empty() {
+            return;
+        }
+        self.dispersion_owed += self.settings.dispersion as f32 / 100.0 * DISPERSION_RATE * dt;
+        // Never owe more than one pass over the dots; a long gap is dropped.
+        self.dispersion_owed = self.dispersion_owed.min(self.dots.len() as f32);
+        while self.dispersion_owed >= 1.0 {
+            self.dispersion_owed -= 1.0;
+            let index = (self.rng.next_u64() % self.dots.len() as u64) as usize;
+            let mut dot = self.dots[index];
+            self.place_in_empty_cell(&mut dot);
+            self.dots[index] = dot;
+        }
+    }
+
     fn step(&mut self, dt: f32, time: f32) {
+        self.compute_repulsion();
+        self.disperse(dt);
         let angle = self.wind_angle(time);
         let drag = self.settings.drag as f32 / 100.0 * DRAG_COEFFICIENT;
         let gravity = if self.settings.gravity_enabled {
@@ -433,8 +591,10 @@ impl Sim {
             let mut dot = self.dots[index];
             let mass = self.mass(&dot);
             let (wind_x, wind_y) = self.wind_at(angle, dot.x, dot.y, time);
-            let ax = (wind_x - drag * dot.vx) / mass;
-            let ay = (wind_y + mass * gravity - drag * dot.vy) / mass;
+            let (mouse_x, mouse_y) = self.mouse_at(&dot);
+            let (spread_x, spread_y) = self.repulsion[index];
+            let ax = (wind_x + mouse_x - drag * dot.vx) / mass + spread_x;
+            let ay = (wind_y + mouse_y + mass * gravity - drag * dot.vy) / mass + spread_y;
             dot.vx = (dot.vx + ax * dt).clamp(-MAX_SPEED, MAX_SPEED);
             dot.vy = (dot.vy + ay * dt).clamp(-MAX_SPEED, MAX_SPEED);
             let next_x = dot.x + dot.vx * dt;
