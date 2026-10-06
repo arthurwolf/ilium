@@ -14,7 +14,7 @@ pub const PACKAGES: &[(&str, &str, &str)] = &[
     (
         "carpet",
         "carpet-1.0.0.iliumanim",
-        "08eaa2889f12698a541b8914b7940b883f9328966a25289a3b5cddac772a40ae",
+        "05abd4bd37231f1cb7502ae037a9bb7af39043440c72b173948cd12ceb8caf8b",
     ),
 ];
 

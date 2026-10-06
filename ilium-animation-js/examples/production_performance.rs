@@ -32,7 +32,7 @@ mod benchmark {
     use ilium_animation_js::{
         engine::{
             initialize_engine, ArraySpec, CreateState, Engine, EngineLimits, RenderOutput,
-            TypedArrayKind,
+            ServiceAuthority, TypedArrayKind,
         },
         manifest::AnimationMode,
         package::{Package, PackageLimits},
@@ -320,6 +320,7 @@ mod benchmark {
         let mut blocked = 0;
         let mut measured = 0;
         let mut async_parity_blocked = 0;
+        let mut failed_cases = Vec::new();
         for case in &options.cases {
             let reason=match case.as_str() {
                 "beach-classic"|"beach-rich"=>Some("native client PreparedScene/shoreline renderers are private; this crate has neither a public native Beach factory nor a client dependency"),
@@ -333,12 +334,24 @@ mod benchmark {
                 );
                 continue;
             }
-            measure(case, &options, &carpet.package, &env, &quota)?;
+            // Preserve the requested inventory even when a real render fails.
+            // Each invocation owns its scene/engine; returning drops that case
+            // before the next one. A failed case never counts as measured.
+            if let Err(error) = measure(case, &options, &carpet.package, &env, &quota) {
+                emit(
+                    json!({"type":"result","case":case,"status":"ERROR","message":error.to_string(),"package_digest":carpet.package.digest()}),
+                );
+                failed_cases.push(case.clone());
+                continue;
+            }
             measured += 1;
             if case == "carpet-3" {
                 async_parity_blocked += 1;
             }
         }
+        emit(
+            json!({"type":"case_inventory","requested":options.cases,"failed":failed_cases,"measured":measured,"blocked":blocked}),
+        );
         drop(carpet);
         drop(beach);
         drop(env);
@@ -353,8 +366,14 @@ mod benchmark {
         }
         drop(execution);
         emit(
-            json!({"type":"summary","measured_cases":measured,"blocked_cases":blocked,"async_parity_blocked_measured_cases":async_parity_blocked,"status":if blocked==0 && async_parity_blocked==0{"measured"}else{"partial"},"retained_worker_threads":quota.snapshot().worker_threads,"retained_worker_bytes":quota.snapshot().worker_bytes,"retained_note":"process-global V8 platform remains initialized; this is not a zero-resource claim"}),
+            json!({"type":"summary","measured_cases":measured,"blocked_cases":blocked,"failed_cases":failed_cases.len(),"async_parity_blocked_measured_cases":async_parity_blocked,"status":if !failed_cases.is_empty(){"failed"}else if blocked==0 && async_parity_blocked==0{"measured"}else{"partial"},"retained_worker_threads":quota.snapshot().worker_threads,"retained_worker_bytes":quota.snapshot().worker_bytes,"retained_note":"process-global V8 platform remains initialized; this is not a zero-resource claim"}),
         );
+        if !failed_cases.is_empty() {
+            return Err(fail(&format!(
+                "benchmark cases failed: {}",
+                failed_cases.join(", ")
+            )));
+        }
         Ok(())
     }
     fn specification(name: &str, kind: TypedArrayKind, elements: usize) -> ArraySpec {
@@ -499,6 +518,15 @@ mod benchmark {
             .min(package.manifest().limits.preparation_ms);
         let mut engine = Engine::new(Arc::clone(package), limits, quota.clone())?;
         engine.install_bootstrap(TRUSTED_BOOTSTRAP)?;
+        // Embedded comparison authority is a native fixture, not service grants.
+        engine.bind_service_authority(
+            package.digest(),
+            ServiceAuthority {
+                instance_id: 1,
+                plan_generation: 1,
+                authorization_epoch: 1,
+            },
+        )?;
         engine.configure_ambient(AnimationMode::Live, ambient.carpet.seed as u32)?;
         engine.load()?;
         let environment = json!({"viewport":{"cell_width":options.width,"cell_height":options.height,"dot_width":options.width*2,"dot_height":options.height*4,"revision":1},"available":{"pointer":mode==0,"audio":false,"gpu":false,"location":false}});

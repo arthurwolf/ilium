@@ -12,16 +12,17 @@ use ilium_animation_js::{
     },
 };
 use ilium_execution::{QuotaGroup, QuotaLimits};
+use ilium_platform::animation_files::PinnedDirectory;
 #[cfg(target_os = "linux")]
-use ilium_platform::animation_files::{PinnedDirectory, WriteMode};
+use ilium_platform::animation_files::WriteMode;
 use ilium_platform::secure_fs::NoFollowDirectory;
 #[cfg(target_os = "linux")]
 use sha2::Digest;
+use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
-    sync::Arc,
 };
 #[cfg(target_os = "linux")]
 fn operation<'a>(

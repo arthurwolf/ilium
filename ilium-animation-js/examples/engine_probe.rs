@@ -20,7 +20,10 @@ fn main() {
 #[cfg(feature = "v8-runtime")]
 fn run() -> ilium_animation_js::error::Result<()> {
     use ilium_animation_js::{
-        engine::{initialize_engine, ArraySpec, CreateState, Engine, EngineLimits, TypedArrayKind},
+        engine::{
+            initialize_engine, ArraySpec, CreateState, Engine, EngineLimits, ServiceAuthority,
+            TypedArrayKind,
+        },
         error::AnimationError,
         manifest::AnimationMode,
         package::{Package, PackageLimits},
@@ -108,6 +111,15 @@ fn run() -> ilium_animation_js::error::Result<()> {
     let started = Instant::now();
     let mut engine = Engine::new(Arc::clone(&package), EngineLimits::default(), quota.clone())?;
     engine.install_bootstrap(PROBE_BOOTSTRAP)?;
+    // Probe-local native activation; external rights remain ungranted.
+    engine.bind_service_authority(
+        package.digest(),
+        ServiceAuthority {
+            instance_id: 1,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        },
+    )?;
     engine.load()?;
     let environment = serde_json::json!({"viewport":{"cell_width":width,"cell_height":height,"dot_width":width*2,"dot_height":height*4,"revision":1},"available":{"pointer":false,"audio":false,"gpu":false,"location":false}});
     let plan = engine.plan(&settings, mode, &environment)?;

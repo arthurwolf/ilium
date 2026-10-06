@@ -222,3 +222,154 @@ fn native_saved_receipts_bind_exact_root_frame_and_final_dot_counts() {
     drop(factory);
     std::fs::remove_dir(&path).unwrap();
 }
+
+#[test]
+fn saved_world_preparing_or_placeholder_cannot_publish_or_consume_receipt_slots() {
+    // A synthetic selected source exercises the actual native service and
+    // palette wrapper; it never opens a user's world or grants history credit.
+    use ilium_ambient::{
+        scene::{FrameReceiptId, PaletteScene, SceneReadiness},
+        style::ScenePalette,
+        Frame, Scene,
+    };
+    use ilium_animation_js::{
+        error::{AnimationError, Result},
+        native_worlds::{HostWorldScene, SavedWorldFactory, SavedWorldGrant, SourceIdentity},
+    };
+    use ilium_platform::secure_fs::NoFollowDirectory;
+    use std::sync::{
+        atomic::{AtomicU8, AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct Fixture {
+        state: Arc<AtomicU8>,
+        renders: Arc<AtomicUsize>,
+        seals: Arc<AtomicUsize>,
+    }
+    impl Scene for Fixture {
+        fn readiness(&mut self) -> SceneReadiness {
+            match self.state.load(Ordering::Acquire) {
+                0 => SceneReadiness::Preparing,
+                3 => SceneReadiness::Unavailable("fixture unavailable".into()),
+                _ => SceneReadiness::Ready,
+            }
+        }
+        fn render(&mut self, frame: &mut Frame<'_>) {
+            self.renders.fetch_add(1, Ordering::AcqRel);
+            if self.state.load(Ordering::Acquire) == 2 {
+                frame.raster.owned_dot(0, 0, 1., 7);
+            }
+        }
+        fn has_prepared_frame(&self) -> bool {
+            self.state.load(Ordering::Acquire) == 2
+        }
+        fn seal_frame(&mut self, _: FrameReceiptId) {
+            self.seals.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    struct Factory {
+        quota: QuotaGroup,
+        root: Arc<NoFollowDirectory>,
+        state: Arc<AtomicU8>,
+        renders: Arc<AtomicUsize>,
+        seals: Arc<AtomicUsize>,
+    }
+    impl SavedWorldFactory for Factory {
+        fn prepare(
+            &mut self,
+            grant: &SavedWorldGrant,
+            _: &AmbientResources,
+        ) -> Result<HostWorldScene> {
+            let scene = PaletteScene::new(
+                Box::new(Fixture {
+                    state: self.state.clone(),
+                    renders: self.renders.clone(),
+                    seals: self.seals.clone(),
+                }),
+                ScenePalette::default(),
+            );
+            Ok(HostWorldScene::from_host(
+                Box::new(scene),
+                grant.identity(),
+                Arc::new(self.quota.reserve_external_storage(4096).unwrap()),
+                self.root.clone(),
+            ))
+        }
+    }
+    struct EmptyDirectory(std::path::PathBuf);
+    impl Drop for EmptyDirectory {
+        fn drop(&mut self) {
+            // This fixture created one empty directory, never any user data.
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+    let directory = EmptyDirectory(std::env::temp_dir().join(format!(
+        "ilium-world-readiness-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    std::fs::create_dir(&directory.0).unwrap();
+    let (_execution, resources, quota) = host();
+    let root = Arc::new(NoFollowDirectory::open_root(&directory.0).unwrap());
+    let state = Arc::new(AtomicU8::new(0));
+    let renders = Arc::new(AtomicUsize::new(0));
+    let seals = Arc::new(AtomicUsize::new(0));
+    let mut factory = Factory {
+        quota: quota.clone(),
+        root: root.clone(),
+        state: state.clone(),
+        renders: renders.clone(),
+        seals: seals.clone(),
+    };
+    let grant =
+        SavedWorldGrant::from_host(root, SourceIdentity::from_host_digest([19; 32]), 19, true)
+            .unwrap();
+    let mut service = WorldService::new(resources, quota.clone(), 19).unwrap();
+    let handle = service.insert_saved(grant, &mut factory).unwrap();
+    let baseline = quota.snapshot().worker_bytes;
+
+    assert!(matches!(
+        service.render(handle, request()),
+        Err(AnimationError::Preparing("world source"))
+    ));
+    assert_eq!(renders.load(Ordering::Acquire), 0);
+    assert_eq!(quota.snapshot().worker_bytes, baseline);
+
+    state.store(1, Ordering::Release);
+    for _ in 0..4 {
+        assert!(matches!(
+            service.render(handle, request()),
+            Err(AnimationError::Preparing("world frame"))
+        ));
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+    }
+    assert_eq!(renders.load(Ordering::Acquire), 4);
+    assert_eq!(seals.load(Ordering::Acquire), 0);
+
+    state.store(3, Ordering::Release);
+    assert!(matches!(
+        service.render(handle, request()),
+        Err(AnimationError::Runtime(message)) if message.contains("fixture unavailable")
+    ));
+    assert_eq!(renders.load(Ordering::Acquire), 4);
+    assert_eq!(quota.snapshot().worker_bytes, baseline);
+
+    state.store(2, Ordering::Release);
+    let first = service.render(handle, request()).unwrap();
+    let second = service.render(handle, request()).unwrap();
+    let third = service.render(handle, request()).unwrap();
+    assert_eq!(first.receipt().sequence(), 1);
+    assert_eq!(second.receipt().sequence(), 2);
+    assert_eq!(third.receipt().sequence(), 3);
+    assert_eq!(first.raster().owner_ids[0], 7);
+    assert_eq!(seals.load(Ordering::Acquire), 3);
+    assert!(service.render(handle, request()).is_err());
+    drop((first, second, third));
+    assert_eq!(quota.snapshot().worker_bytes, baseline);
+    drop(service);
+    drop(factory);
+}

@@ -9,6 +9,8 @@ pub enum AnimationError {
     Integrity(String),
     #[error("unsupported animation API version: {0}")]
     ApiVersion(u32),
+    #[error("native animation preparing: {0}")]
+    Preparing(&'static str),
     #[error("JavaScript runtime: {0}")]
     Runtime(String),
     #[error("permission denied: {0}")]

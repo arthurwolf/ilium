@@ -592,6 +592,15 @@ impl WorldService {
             .binding
             .lock()
             .map_err(|_| error("native source custody poisoned"))?;
+        match binding.scene.readiness() {
+            ilium_ambient::scene::SceneReadiness::Preparing => {
+                return Err(AnimationError::Preparing("world source"));
+            }
+            ilium_ambient::scene::SceneReadiness::Unavailable(reason) => {
+                return Err(error(&reason));
+            }
+            ilium_ambient::scene::SceneReadiness::Ready => {}
+        }
         let pixels = usize::from(request.width) * usize::from(request.height) * 8;
         let bytes = pixels * 64 + 16 * 1024 * 1024 + 4096;
         let admission = self
@@ -615,6 +624,9 @@ impl WorldService {
             wall: request.wall,
             now: request.now,
         });
+        if !binding.scene.has_prepared_frame() {
+            return Err(AnimationError::Preparing("world frame"));
+        }
         if raster.dots.len() != pixels
             || raster.owner_ids.len() != pixels
             || colors.len() != usize::from(request.width) * usize::from(request.height)
