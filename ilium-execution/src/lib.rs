@@ -42,7 +42,7 @@ pub use job::{
 pub use pool::{
     Client, Execution, ExecutionConfig, ExecutionMonitor, ExternalReservation, Health,
     JoinObservation, JoinReport, JoinUseError, Lane, LaneConfig, LaneHealth, Phase, Reservation,
-    RetirementHandle, ShutdownMode, StartError,
+    RetirementHandle, ShutdownMode, StartCleanupError, StartError, StartFailure,
 };
 pub use retirement::{
     RetirementFailure, RetirementReservation, Retiring, RetiringArc, RETIREMENT_SLOTS,

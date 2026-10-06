@@ -159,6 +159,189 @@ pub struct ClientExecution {
     location_search: Client,
 }
 
+/// Initialized identities and the actual partial bank survive every refusal.
+#[derive(Default)]
+struct ClientStartupState {
+    execution: Option<Execution>,
+    general: Option<Client>,
+    location_search: Option<Client>,
+    primary: Option<StartError>,
+    observation: Option<Result<ilium_execution::JoinReport, ilium_execution::JoinUseError>>,
+}
+impl ClientStartupState {
+    fn bootstrap(&mut self) {
+        tokenizers::utils::parallelism::set_parallelism(false);
+        // The unchanged aggregate identity requires no physical bank yet.
+        let aggregate = match general_admission_group() {
+            Ok(aggregate) => aggregate,
+            Err(reason) => {
+                self.primary = Some(StartError::Admission(reason));
+                return;
+            }
+        };
+        if let Err(error) = self.populate(process_quota(), bank_config(), &aggregate) {
+            self.primary = Some(error);
+            self.observe_cleanup_background(Instant::now() + Duration::from_secs(5));
+        }
+    }
+    fn populate(
+        &mut self,
+        quota: QuotaGroup,
+        config: ExecutionConfig,
+        aggregate: &ilium_execution::AdmissionGroup,
+    ) -> Result<(), StartError> {
+        match Execution::start_with_custody(quota, config) {
+            Ok(execution) => self.execution = Some(execution),
+            Err(failure) => {
+                let (error, execution) = failure.into_parts();
+                self.execution = execution;
+                return Err(error);
+            }
+        }
+        self.general = Some(
+            self.execution
+                .as_ref()
+                .expect("started bank")
+                .client_in_group(
+                    aggregate,
+                    ClientLimits {
+                        jobs: 60,
+                        service_jobs: 1,
+                        input_bytes: 512 * MIB,
+                        result_bytes: 512 * MIB,
+                    },
+                )
+                .map_err(StartError::Admission)?,
+        );
+        self.location_search = Some(
+            self.general
+                .as_ref()
+                .expect("general original admitted")
+                .child(ClientLimits {
+                    jobs: 1,
+                    service_jobs: 0,
+                    input_bytes: 16 * MIB,
+                    result_bytes: 4 * MIB,
+                })
+                .map_err(StartError::Admission)?,
+        );
+        Ok(())
+    }
+    fn observe_cleanup_background(&mut self, deadline: Instant) {
+        let Some(execution) = self.execution.as_mut() else {
+            return;
+        };
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let observation = execution.join_until_background(deadline);
+        let complete = matches!(&observation, Ok(report) if report.shutdown_complete);
+        self.observation = Some(observation);
+        if complete {
+            // No semantic jobs are accepted during populate. Release every
+            // initialized identity only after the original bank physically joined.
+            self.location_search = None;
+            self.general = None;
+            self.execution = None;
+        }
+    }
+    fn finish_cancelled_bootstrap(&mut self) {
+        // Startup accepted no jobs. Keep the actual bank on this existing
+        // runtime blocking owner until its native workers physically exit.
+        while self.execution.is_some() {
+            self.observe_cleanup_background(Instant::now() + Duration::from_secs(5));
+        }
+    }
+}
+
+struct StartupTransfer(std::sync::mpsc::SyncSender<()>);
+impl StartupTransfer {
+    fn accept(self) {
+        let _ = self.0.send(());
+    }
+}
+// Dropping the sender means cancellation. The bootstrap owner, rather than a
+// detached result or a second observer task, owns and joins the actual bank.
+struct StartupBackground {
+    state: Arc<Mutex<ClientStartupState>>,
+    transferred: bool,
+}
+impl Drop for StartupBackground {
+    fn drop(&mut self) {
+        if !self.transferred {
+            self.state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .finish_cancelled_bootstrap();
+        }
+    }
+}
+
+/// A lost observer or failed join retains the actual bank, not just its text.
+pub struct ClientExecutionStartError {
+    state: Arc<Mutex<ClientStartupState>>,
+    observer: Option<tokio::task::JoinError>,
+}
+impl ClientExecutionStartError {
+    pub fn with_primary_error<R>(&self, inspect: impl FnOnce(Option<&StartError>) -> R) -> R {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        inspect(state.primary.as_ref())
+    }
+    pub fn retains_execution(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .execution
+            .is_some()
+    }
+    pub fn is_retryable_busy(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        self.observer.is_none()
+            && state.execution.is_none()
+            && state.general.is_none()
+            && state.location_search.is_none()
+            && matches!(
+                state.primary,
+                Some(StartError::Admission(RejectReason::Busy))
+            )
+    }
+    /// Explicit exceptional observation on a background owner, never the UI.
+    pub fn observe_cleanup_background(&self, deadline: Instant) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.observe_cleanup_background(deadline);
+        state.execution.is_none()
+    }
+}
+impl std::fmt::Debug for ClientExecutionStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        f.debug_struct("ClientExecutionStartError")
+            .field("primary", &state.primary)
+            .field("partial_bank_retained", &state.execution.is_some())
+            .field("cleanup_observation", &state.observation)
+            .field("observer", &self.observer)
+            .finish()
+    }
+}
+impl std::fmt::Display for ClientExecutionStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(primary) = &state.primary {
+            write!(f, "client bank startup: {primary}")?;
+        }
+        if let Some(observer) = &self.observer {
+            write!(f, "; startup observer failed: {observer}")?;
+        }
+        if state.execution.is_some() {
+            f.write_str("; actual partial bank retained")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for ClientExecutionStartError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.observer.as_ref().map(|error| error as _)
+    }
+}
+
 // One source of truth for constructor and selected-composition admission.
 fn bank_config() -> ExecutionConfig {
     let bank = |threads, resident_bytes_per_thread| LaneConfig {
@@ -184,34 +367,76 @@ impl ClientExecution {
     /// Production calls bootstrap_process_quota before logging; independent
     /// fixture banks do not designate the process supervisor. Interactive
     /// codecs use this bank with the original directional admission groups.
-    pub fn start() -> Result<Self, StartError> {
-        // Tokenization executes on its admitted engine owner. Do not create
-        // an implicit process-global Rayon pool outside physical admission.
-        tokenizers::utils::parallelism::set_parallelism(false);
-        let quota = process_quota();
-        let execution = Execution::start(quota, bank_config())?;
-        let aggregate = general_admission_group().map_err(StartError::Admission)?;
-        let general = execution
-            .client_in_group(
-                &aggregate,
-                ClientLimits {
-                    jobs: 60,
-                    service_jobs: 1,
-                    input_bytes: 512 * MIB,
-                    result_bytes: 512 * MIB,
-                },
-            )
-            .map_err(StartError::Admission)?;
-        // One tenant identity for every picker hosted by this execution. Its
-        // one-job limit remains charged across picker replacement or closure.
-        let location_search = general
-            .child(ClientLimits {
-                jobs: 1,
-                service_jobs: 0,
-                input_bytes: 16 * MIB,
-                result_bytes: 4 * MIB,
-            })
-            .map_err(StartError::Admission)?;
+    pub fn start() -> Result<Self, ClientExecutionStartError> {
+        let mut state = ClientStartupState::default();
+        state.bootstrap();
+        Self::finish_startup(Arc::new(Mutex::new(state)), None)
+    }
+    /// Native bootstrap runs off the interactive loop on its existing runtime.
+    /// Only completion transfers through the observer; the shared slot owns
+    /// all initialized originals even if the observer returns an error.
+    pub async fn start_async() -> Result<Self, ClientExecutionStartError> {
+        Self::start_async_with(ClientStartupState::bootstrap, || {}).await
+    }
+    async fn start_async_with(
+        bootstrap: impl FnOnce(&mut ClientStartupState) + Send + 'static,
+        finished: impl FnOnce() + Send + 'static,
+    ) -> Result<Self, ClientExecutionStartError> {
+        let state = Arc::new(Mutex::new(ClientStartupState::default()));
+        let background = Arc::clone(&state);
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (transfer_tx, transfer_rx) = std::sync::mpsc::sync_channel(1);
+        let transfer = StartupTransfer(transfer_tx);
+        let observer = tokio::task::spawn_blocking(move || {
+            let mut owner = StartupBackground {
+                state: background,
+                transferred: false,
+            };
+            bootstrap(
+                &mut owner
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()),
+            );
+            let announced = ready_tx.send(()).is_ok();
+            owner.transferred = announced && transfer_rx.recv().is_ok();
+            drop(owner);
+            finished();
+        });
+        if ready_rx.await.is_err() {
+            // The native bootstrap panicked: the exact shared slots survive
+            // through the typed observer error, including poisoned state.
+            return Self::finish_startup(state, observer.await.err());
+        }
+        let result = Self::finish_startup(state, None);
+        transfer.accept();
+        result
+    }
+    fn finish_startup(
+        state: Arc<Mutex<ClientStartupState>>,
+        observer: Option<tokio::task::JoinError>,
+    ) -> Result<Self, ClientExecutionStartError> {
+        if observer.is_some() {
+            return Err(ClientExecutionStartError { state, observer });
+        }
+        let mut original = state.lock().unwrap_or_else(|error| error.into_inner());
+        if original.primary.is_some() {
+            drop(original);
+            return Err(ClientExecutionStartError {
+                state,
+                observer: None,
+            });
+        }
+        // Every fallible admission stored its owner before the next stage.
+        let execution = original.execution.take().expect("completed bank bootstrap");
+        let general = original
+            .general
+            .take()
+            .expect("completed general admission");
+        let location_search = original
+            .location_search
+            .take()
+            .expect("completed location admission");
         Ok(Self {
             execution,
             general,
@@ -333,7 +558,7 @@ fn test_bank() -> &'static std::sync::Mutex<(ClientExecution, Client)> {
         let execution = loop {
             match ClientExecution::start() {
                 Ok(execution) => break execution,
-                Err(StartError::Admission(RejectReason::Busy)) if Instant::now() < deadline => {
+                Err(error) if error.is_retryable_busy() && Instant::now() < deadline => {
                     std::thread::yield_now();
                 }
                 Err(error) => panic!("shared test bank startup: {error}"),
@@ -619,3 +844,7 @@ mod composition_tests {
         assert_eq!(encoder.usage().clients, before_encoder);
     }
 }
+
+#[cfg(test)]
+#[path = "execution_startup_tests.rs"]
+mod execution_startup_tests;

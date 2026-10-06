@@ -101,6 +101,120 @@ pub enum StartError {
         source: io::Error,
     },
 }
+/// Construction refusal with the SAME bank that already started, if any.
+/// No worker identifiers are inferred from a process-global registry.
+pub struct StartFailure {
+    error: StartError,
+    execution: Option<Execution>,
+}
+impl From<StartError> for StartFailure {
+    fn from(error: StartError) -> Self {
+        Self {
+            error,
+            execution: None,
+        }
+    }
+}
+impl fmt::Debug for StartFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StartFailure")
+            .field("error", &self.error)
+            .field("partial_execution_retained", &self.execution.is_some())
+            .finish()
+    }
+}
+impl StartFailure {
+    pub fn into_parts(self) -> (StartError, Option<Execution>) {
+        (self.error, self.execution)
+    }
+    /// Legacy bootstrap callers still observe actual partial-bank exit. On a
+    /// deadline the original Spawn source and bank stay in the typed io source.
+    fn into_legacy_error(self) -> StartError {
+        let (primary, execution) = self.into_parts();
+        let Some(mut execution) = execution else {
+            return primary;
+        };
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let observed = execution.join_until_background(Instant::now() + Duration::from_secs(5));
+        if matches!(&observed, Ok(report) if report.shutdown_complete) {
+            drop(execution);
+            return primary;
+        }
+        // The only partial-construction boundary is the original spawn call.
+        let StartError::Spawn {
+            lane,
+            index,
+            source,
+        } = primary
+        else {
+            unreachable!("partial bank exists only after a worker spawn refusal")
+        };
+        let kind = source.kind();
+        StartError::Spawn {
+            lane,
+            index,
+            source: io::Error::new(
+                kind,
+                StartCleanupError {
+                    primary: StartError::Spawn {
+                        lane,
+                        index,
+                        source,
+                    },
+                    state: std::sync::Mutex::new(StartCleanupState {
+                        execution,
+                        observed,
+                    }),
+                },
+            ),
+        }
+    }
+}
+/// Exceptional legacy bootstrap custody; Display never substitutes for it.
+pub struct StartCleanupError {
+    primary: StartError,
+    state: std::sync::Mutex<StartCleanupState>,
+}
+struct StartCleanupState {
+    execution: Execution,
+    observed: Result<JoinReport, JoinUseError>,
+}
+impl StartCleanupError {
+    pub fn primary(&self) -> &StartError {
+        &self.primary
+    }
+    pub fn observe_background(&self, deadline: Instant) -> Result<bool, JoinUseError> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let report = state.execution.join_until_background(deadline)?;
+        let complete = report.shutdown_complete;
+        state.observed = Ok(report);
+        Ok(complete)
+    }
+}
+impl fmt::Debug for StartCleanupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        f.debug_struct("StartCleanupError")
+            .field("primary", &self.primary)
+            .field("observation", &state.observed)
+            .finish_non_exhaustive()
+    }
+}
+impl fmt::Display for StartCleanupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}; partial execution remains in startup custody",
+            self.primary
+        )
+    }
+}
+impl std::error::Error for StartCleanupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.primary)
+    }
+}
+
 impl fmt::Display for StartError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
@@ -384,37 +498,48 @@ impl Execution {
     /// cancels siblings; their platform records retain every worker debit until
     /// actual join. The supplied QuotaGroup remains observable after failure.
     pub fn start(quota: QuotaGroup, config: ExecutionConfig) -> Result<Self, StartError> {
+        Self::start_with_custody(quota, config).map_err(StartFailure::into_legacy_error)
+    }
+    /// Return the original refusal and any actual partial bank to its caller.
+    /// The caller must close and physically observe this owner before retry.
+    pub fn start_with_custody(
+        quota: QuotaGroup,
+        config: ExecutionConfig,
+    ) -> Result<Self, StartFailure> {
+        Self::start_with_spawn_probe(quota, config, |_, _| Ok(()))
+    }
+    fn start_with_spawn_probe(
+        quota: QuotaGroup,
+        config: ExecutionConfig,
+        mut before_spawn: impl FnMut(Lane, usize) -> io::Result<()>,
+    ) -> Result<Self, StartFailure> {
         if ON_BANK_THREAD.with(Cell::get) {
-            return Err(StartError::InvalidConfig(
-                "cannot create banks inside bank callbacks",
-            ));
+            return Err(
+                StartError::InvalidConfig("cannot create banks inside bank callbacks").into(),
+            );
         }
         let configs = config.array();
         let mut total = 0usize;
         for c in &configs {
             if (c.threads == 0) != (c.queue_slots == 0) {
-                return Err(StartError::InvalidConfig(
-                    "disabled bank must have zero queue slots",
-                ));
+                return Err(
+                    StartError::InvalidConfig("disabled bank must have zero queue slots").into(),
+                );
             }
             if c.queue_slots > quota.snapshot().limits.jobs {
-                return Err(StartError::InvalidConfig(
-                    "queue slots exceed shared job limit",
-                ));
+                return Err(
+                    StartError::InvalidConfig("queue slots exceed shared job limit").into(),
+                );
             }
             total = total
                 .checked_add(c.threads)
                 .ok_or(StartError::InvalidConfig("thread overflow"))?;
         }
         if total > MAX_OWNED_WORKERS {
-            return Err(StartError::InvalidConfig(
-                "banks exceed platform worker capacity",
-            ));
+            return Err(StartError::InvalidConfig("banks exceed platform worker capacity").into());
         }
         if total == 0 {
-            return Err(StartError::InvalidConfig(
-                "at least one bank thread is required",
-            ));
+            return Err(StartError::InvalidConfig("at least one bank thread is required").into());
         }
         // Reserve retained bank storage and all thread resources BEFORE
         // allocating queues or spawning. Monitors can outlive actual joins.
@@ -458,23 +583,33 @@ impl Execution {
             let body_shared = Arc::clone(&execution.shared);
             let stop = execution.shared.stop.child();
             let name = format!("ilium-exec-{}-{index}", lane.name());
-            let owner = spawn_owned(
-                &name,
-                WorkerKind::Cooperative,
-                stop,
-                move || {
-                    // Captured by PLATFORM WorkerState, not merely the callback.
-                    // It survives body return, TLS teardown and hung retirement.
-                    // Remaining private ticket references may extend it further.
-                    let _keep_debit_alive = &debit;
-                },
-                move |stop| run_bank(body_shared, lane, stop),
-            )
-            .map_err(|source| StartError::Spawn {
-                lane,
-                index,
-                source,
-            })?;
+            let owner = before_spawn(lane, index).and_then(|()| {
+                spawn_owned(
+                    &name,
+                    WorkerKind::Cooperative,
+                    stop,
+                    move || {
+                        // Captured by PLATFORM WorkerState, not merely the callback.
+                        // It survives body return, TLS teardown and hung retirement.
+                        // Remaining private ticket references may extend it further.
+                        let _keep_debit_alive = &debit;
+                    },
+                    move |stop| run_bank(body_shared, lane, stop),
+                )
+            });
+            let owner = match owner {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(StartFailure {
+                        error: StartError::Spawn {
+                            lane,
+                            index,
+                            source,
+                        },
+                        execution: Some(execution),
+                    })
+                }
+            };
             execution.workers.push(WorkerRecord { lane, owner });
         }
         Ok(execution)
@@ -1231,3 +1366,7 @@ mod retirement_failure_tests {
 #[cfg(test)]
 #[path = "root_recovery_scan_tests.rs"]
 mod root_recovery_scan_tests;
+
+#[cfg(test)]
+#[path = "startup_custody_tests.rs"]
+mod startup_custody_tests;
