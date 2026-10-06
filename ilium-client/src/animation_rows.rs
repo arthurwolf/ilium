@@ -117,8 +117,16 @@ impl SliderSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowKind {
-    Scene { is_active: bool },
+    Scene {
+        is_active: bool,
+    },
     Slider(SliderSpec),
+    Number {
+        minimum: i128,
+        maximum: i128,
+        step: i128,
+        value: i128,
+    },
     Choice,
     Toggle,
     Text,
@@ -210,6 +218,24 @@ impl RowView {
         }
     }
 
+    pub fn number(&self) -> Option<(i128, i128, i128, i128)> {
+        match self.kind {
+            RowKind::Slider(spec) => Some((
+                i128::from(spec.minimum),
+                i128::from(spec.maximum),
+                i128::from(spec.step),
+                i128::from(spec.value),
+            )),
+            RowKind::Number {
+                minimum,
+                maximum,
+                step,
+                value,
+            } => Some((minimum, maximum, step, value)),
+            _ => None,
+        }
+    }
+
     /// Status-line text for the first disabled option, if any.
     pub fn disabled_notice(&self) -> Option<String> {
         self.disabled_options.first().map(DisabledOption::notice)
@@ -260,7 +286,7 @@ impl RowModel {
             .map(|(row, control)| {
                 control.as_ref().map_or_else(
                     || row.view(settings, &scene_controls, context),
-                    control_view,
+                    |control| control_view(row, settings.kind, control),
                 )
             })
             .collect();
@@ -461,21 +487,33 @@ pub fn rows(settings: &AnimationSettings, context: &RowContext) -> Vec<Animation
     rows
 }
 
-fn control_view(control: &Control) -> RowView {
-    let kind = match &control.kind {
-        ControlKind::Slider { min, max, step, .. } => RowKind::Slider(SliderSpec {
-            logarithmic: control.id == "loop_seconds",
-            minimum: *min,
-            maximum: *max,
-            step: *step,
-            value: match &control.value {
-                ControlValue::Number(number) => *number,
-                _ => *min,
-            },
-        }),
-        ControlKind::Choice { .. } => RowKind::Choice,
-        ControlKind::Toggle => RowKind::Toggle,
-        ControlKind::Text { .. } => RowKind::Text,
+fn control_view(row: &AnimationRow, animation_kind: AnimationKind, control: &Control) -> RowView {
+    let wide_number = matches!(row, AnimationRow::SceneControl("seed"))
+        .then(|| crate::value_animation::animation_number_spec(animation_kind, control))
+        .flatten();
+    let kind = if let Some((minimum, maximum, step, value)) = wide_number {
+        RowKind::Number {
+            minimum,
+            maximum,
+            step,
+            value,
+        }
+    } else {
+        match &control.kind {
+            ControlKind::Slider { min, max, step, .. } => RowKind::Slider(SliderSpec {
+                logarithmic: control.id == "loop_seconds",
+                minimum: *min,
+                maximum: *max,
+                step: *step,
+                value: match &control.value {
+                    ControlValue::Number(number) => *number,
+                    _ => *min,
+                },
+            }),
+            ControlKind::Choice { .. } => RowKind::Choice,
+            ControlKind::Toggle => RowKind::Toggle,
+            ControlKind::Text { .. } => RowKind::Text,
+        }
     };
     let disabled_options = disabled_options_of(control);
     // Why an option is greyed out comes first: the help line is only two
@@ -577,11 +615,11 @@ impl AnimationRow {
             },
             Self::Common(id) => settings
                 .common_control(id)
-                .map_or_else(missing, |control| control_view(&control)),
+                .map_or_else(missing, |control| control_view(self, settings.kind, &control)),
             Self::SceneControl(id) => scene_controls
                 .iter()
                 .find(|control| control.id == *id)
-                .map_or_else(missing, control_view),
+                .map_or_else(missing, |control| control_view(self, settings.kind, control)),
             Self::Location => {
                 if settings.kind == AnimationKind::OpenStreetMap {
                     let value = settings.ambient.openstreetmap.picker_location()
@@ -795,6 +833,28 @@ pub fn help_ids() -> Vec<String> {
 #[cfg(test)]
 mod overhaul_tests {
     use super::*;
+
+    #[test]
+    fn voxel_world_seed_is_a_wide_number_over_the_original_text_control() {
+        let settings = AnimationSettings {
+            kind: AnimationKind::VoxelLandscape,
+            ..Default::default()
+        };
+        let model = RowModel::new(&settings, &RowContext::default());
+        let row = model
+            .rows()
+            .iter()
+            .position(|row| *row == AnimationRow::SceneControl("seed"))
+            .expect("voxel seed row");
+        let control = model.control(row).expect("native seed control");
+        assert!(matches!(control.kind, ControlKind::Text { .. }));
+        assert!(matches!(control.value, ControlValue::Text(_)));
+        assert_eq!(
+            model.view(row).and_then(RowView::number),
+            Some((0, u32::MAX as i128, 1, 71_839)),
+        );
+        assert!(model.view(row).unwrap().slider().is_none());
+    }
 
     #[test]
     fn displayed_controls_retain_their_full_option_and_numeric_metadata() {

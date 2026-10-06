@@ -527,3 +527,52 @@ mod atmosphere_tests {
         assert!(!settings.controls().iter().any(|r| r.id == "atmosphere"));
     }
 }
+
+#[cfg(test)]
+mod seed_domain_tests {
+    use super::*;
+
+    #[test]
+    fn world_seed_text_setter_and_persistence_keep_the_complete_u32_domain() {
+        let mut settings = VoxelLandscapeSettings::default();
+        let seed_control = settings
+            .controls()
+            .into_iter()
+            .find(|control| control.id == "seed")
+            .expect("world seed control");
+        assert!(matches!(
+            seed_control.kind,
+            crate::control::ControlKind::Text { .. }
+        ));
+        assert!(matches!(seed_control.value, ControlValue::Text(_)));
+        for value in [0_u32, i32::MAX as u32, i32::MAX as u32 + 1, u32::MAX] {
+            assert_eq!(
+                settings.set_control("seed", ControlValue::Text(value.to_string())),
+                Ok(true),
+            );
+            assert_eq!(settings.seed, value);
+            let restored: VoxelLandscapeSettings =
+                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.seed, value);
+            assert_eq!(
+                restored
+                    .controls()
+                    .into_iter()
+                    .find(|control| control.id == "seed")
+                    .expect("restored world seed control")
+                    .value,
+                ControlValue::Text(value.to_string()),
+            );
+        }
+        for invalid in ["-1", "1.5", "4294967296", ""] {
+            let before = settings.clone();
+            assert!(
+                settings
+                    .set_control("seed", ControlValue::Text(invalid.to_owned()))
+                    .is_err(),
+                "accepted {invalid:?}",
+            );
+            assert_eq!(settings, before);
+        }
+    }
+}

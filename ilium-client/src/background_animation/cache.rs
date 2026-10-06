@@ -456,3 +456,8 @@ mod tests {
 mod replacement_lifecycle_tests {
     include!("replacement_lifecycle_tests.rs");
 }
+
+#[cfg(test)]
+mod r08_ridge_cache_tests {
+    include!("r08_ridge_cache_tests.rs");
+}

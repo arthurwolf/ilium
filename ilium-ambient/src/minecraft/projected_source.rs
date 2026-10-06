@@ -22,6 +22,7 @@ pub enum Error {
     Unqualified {
         missing: usize,
         first: Option<[i32; 2]>,
+        missing_positions: Vec<[i32; 2]>,
     },
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -74,16 +75,15 @@ pub fn qualify(
     cancel.check()?;
     bound.verify(&canonical_root)?;
     if &loaded.coverage.chunks != request.support_chunks() {
+        let missing_positions = request
+            .support_chunks()
+            .difference(&loaded.coverage.chunks)
+            .copied()
+            .collect::<Vec<_>>();
         return Err(Error::Unqualified {
-            missing: request
-                .support_chunks()
-                .difference(&loaded.coverage.chunks)
-                .count(),
-            first: request
-                .support_chunks()
-                .difference(&loaded.coverage.chunks)
-                .next()
-                .copied(),
+            missing: missing_positions.len(),
+            first: missing_positions.first().copied(),
+            missing_positions,
         });
     }
     // Decoding holds the full ceiling. Retained map Arcs need only the loader's

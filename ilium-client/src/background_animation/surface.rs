@@ -83,6 +83,7 @@ pub struct AnimationSurface {
     composition: Option<PresentationLease>,
     composed_bits: Vec<u8>,
     error: Option<String>,
+    visibility: crate::animation_visibility::VisibilityCheck,
     #[cfg(test)]
     initial_frame: Option<super::AnimationFrame>,
     #[cfg(test)]
@@ -117,6 +118,7 @@ impl Default for AnimationSurface {
             composition: None,
             composed_bits: Vec::new(),
             error: None,
+            visibility: Default::default(),
             #[cfg(test)]
             initial_frame: None,
             #[cfg(test)]
@@ -243,6 +245,7 @@ impl AnimationSurface {
                 previous != settings || *columns != width || *rows != height
             });
         if changed {
+            self.visibility = Default::default();
             if !self.can_queue_configuration() {
                 self.error = Some("Animation configuration queue full; retry this change".into());
                 return Err(AdmissionError::Full);
@@ -561,6 +564,22 @@ impl AnimationSurface {
         self.last_request = None;
         self.flush();
     }
+    pub(crate) fn check_visibility(
+        &mut self,
+        buffer: &ratatui::buffer::Buffer,
+        foreground: (u8, u8, u8),
+        light: bool,
+        black_backdrop: bool,
+    ) {
+        let mut check = std::mem::take(&mut self.visibility);
+        check.update(self, buffer, foreground, light, black_backdrop);
+        self.visibility = check;
+    }
+
+    pub(crate) fn visibility_warning(&self) -> bool {
+        self.visibility.warning()
+    }
+
     pub fn width(&self) -> u16 {
         self.display.as_ref().map_or(0, |frame| frame.width)
     }

@@ -42,6 +42,7 @@ mod animation_hover;
 mod animation_plugins;
 mod animation_rows;
 mod animation_settings_ui;
+mod animation_visibility;
 pub mod app;
 pub mod ascii_chart;
 #[cfg(test)]
@@ -657,7 +658,8 @@ async fn run_inner(
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(columns, rows))
         .unwrap_or_else(|error| match error {});
 
-    let execution = crate::execution::ClientExecution::start()
+    let execution = crate::execution::ClientExecution::start_async()
+        .await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     let outbound_admission = execution

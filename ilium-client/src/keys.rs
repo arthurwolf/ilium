@@ -2951,12 +2951,10 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Enter | KeyCode::Char('*')
             if state.tab == SettingsTab::Animations
-                && matches!(
-                    app.animation_row_model()
-                        .view(state.selected_row)
-                        .map(|view| &view.kind),
-                    Some(crate::animation_rows::RowKind::Slider(_))
-                ) =>
+                && app
+                    .animation_row_model()
+                    .view(state.selected_row)
+                    .is_some_and(|view| view.number().is_some()) =>
         {
             let row = state.selected_row;
             app.mode = Mode::Settings(state);
@@ -2965,12 +2963,10 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Char(character @ ('-' | '+'))
             if state.tab == SettingsTab::Animations
-                && matches!(
-                    app.animation_row_model()
-                        .view(state.selected_row)
-                        .map(|view| &view.kind),
-                    Some(crate::animation_rows::RowKind::Slider(_))
-                ) =>
+                && app
+                    .animation_row_model()
+                    .view(state.selected_row)
+                    .is_some_and(|view| view.number().is_some()) =>
         {
             app.settings_adjust_animation_row(
                 state.selected_row,

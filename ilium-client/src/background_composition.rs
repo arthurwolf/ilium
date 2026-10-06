@@ -208,6 +208,12 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         && settings.kind == crate::background_animation::AnimationKind::Aurora;
     if is_preview {
         let area = buffer.area;
+        app.animation_frame.check_visibility(
+            buffer,
+            (red, green, blue),
+            app.ui_settings.color_scheme == crate::theme::ColorScheme::Light,
+            black_backdrop,
+        );
         // Article letters in label whitespace become part of the UI wording.
         // Keep the same page coordinates, but leave Settings chrome opaque.
         let preview_area =

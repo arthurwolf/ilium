@@ -110,6 +110,27 @@ pub(crate) fn draw_at_with_cursor(
         cursor = draw_mode_overlay(frame, area, app, mode).or(cursor);
     }
     cursor = draw_mode_overlay(frame, area, app, &app.mode).or(cursor);
+    if app.is_animation_preview_visible()
+        && app.animation_frame.visibility_warning()
+        && area.height > 3
+    {
+        let credit_rows = if app.effective_animation_kind()
+            == Some(crate::background_animation::AnimationKind::OpenStreetMap)
+        {
+            crate::layout::osm_attribution_area(area).height
+        } else {
+            0
+        };
+        let height = if area.width < 105 { 2 } else { 1 };
+        if area.height > credit_rows + height + 2 {
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new("Animation hard to see? Colors may blend with the background. Try Color preset, brightness or lightness.")
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .style(ratatui::style::Style::default().fg(ratatui::style::Color::Black).bg(ratatui::style::Color::Yellow)),
+                ratatui::layout::Rect::new(area.x, area.bottom() - credit_rows - height - 2, area.width, height),
+            );
+        }
+    }
     // The listed modes paint no late layer. Every other mode (or a suspended
     // parent) can touch a scene cell with the SAME Braille glyph, which a final
     // Buffer comparison cannot detect. Withhold its source history entirely.

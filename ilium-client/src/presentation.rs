@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use crate::background_animation::ComposedPresentation;
 use ilium_animation_js::replay::ReplayFlushedProof;
 use ilium_execution::{QuotaGroup, StorageAdmission};
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
+use ilium_platform::owned_worker::{
+    spawn_owned_with_completion, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
+};
 use ratatui::backend::Backend;
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::layout::Position;
@@ -226,6 +228,9 @@ pub struct Presenter {
     slots: Arc<FrameSlots>,
     pub acknowledgements: mpsc::Receiver<io::Result<PresentedFrame>>,
     completion: Option<oneshot::Receiver<io::Result<()>>>,
+    shutdown_emission: Option<Result<(), Arc<GuardedFailure>>>,
+    physical_exit: Arc<tokio::sync::Notify>,
+    observed_exit: Option<WorkerExit>,
     _worker: OwnedWorker,
 }
 impl Presenter {
@@ -278,11 +283,13 @@ impl Presenter {
         // successful frame receipts while the UI is performing shutdown.
         let (acks, acknowledgements) = mpsc::channel(FRAME_SLOTS + 1);
         let (done, completion) = oneshot::channel();
+        let physical_exit = Arc::new(tokio::sync::Notify::new());
+        let exit_wake = physical_exit.clone();
         let wake = shared.clone();
         let owned = shared.clone();
         let failure_allocation = slots.allocation.clone();
         let wake_allocation = slots.allocation.clone();
-        let worker = spawn_owned(
+        let worker = spawn_owned_with_completion(
             "ilium-presentation",
             WorkerKind::SynchronousIo,
             StopToken::default(),
@@ -315,6 +322,7 @@ impl Presenter {
                 drop(restoration);
                 let _ = done.send(result);
             },
+            Arc::new(move || exit_wake.notify_one()),
         )
         .map_err(|error| guarded_failure(error, slots.allocation.clone()))?;
         Ok(Self {
@@ -322,6 +330,9 @@ impl Presenter {
             slots,
             acknowledgements,
             completion: Some(completion),
+            shutdown_emission: None,
+            physical_exit,
+            observed_exit: None,
             _worker: worker,
         })
     }
@@ -375,21 +386,131 @@ impl Presenter {
     /// Drain admitted graphics effects before terminal restoration. Waiting is
     /// asynchronous; no join or terminal syscall executes on the UI thread.
     pub async fn shutdown(&mut self) -> io::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(5);
         self.shared
             .queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .closing = true;
         self.shared.changed.notify_all();
-        let Some(completion) = self.completion.take() else {
-            return Ok(());
+        let mut wait_failure = None;
+        if let Some(completion) = self.completion.as_mut() {
+            let emission =
+                match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), completion)
+                    .await
+                {
+                    Ok(Ok(result)) => Some(result),
+                    Ok(Err(_)) => Some(Err(io::Error::other("presentation completion was lost"))),
+                    Err(_) => {
+                        wait_failure =
+                            Some(io::Error::other("presentation completion deadline elapsed"));
+                        None
+                    }
+                };
+            if let Some(emission) = emission {
+                self.completion = None;
+                self.shutdown_emission = Some(emission.map_err(|error| {
+                    error
+                        .get_ref()
+                        .and_then(|source| source.downcast_ref::<Arc<GuardedFailure>>())
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            Arc::new(GuardedFailure {
+                                error,
+                                _allocation: self.slots.allocation.clone(),
+                            })
+                        })
+                }));
+            }
+        }
+        // The callback acknowledgement precedes native return and TLS Drop.
+        // The existing supervisor publishes this ticket only after real join.
+        // Even a repeated shutdown must observe that physical exit.
+        let ticket = self._worker.ticket();
+        // The existing supervisor supplies one finite post-join notification.
+        // Cancellation preserves the receiver/result in this owner; observing
+        // physical exit creates no helper task or additional native thread.
+        let mut physical_failure = None;
+        if self.observed_exit.is_none() {
+            let joined = self.physical_exit.notified();
+            tokio::pin!(joined);
+            joined.as_mut().enable();
+            self.observed_exit = ticket.exit();
+            if self.observed_exit.is_none() {
+                match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), joined)
+                    .await
+                {
+                    Ok(()) => self.observed_exit = ticket.exit(),
+                    Err(_) => {
+                        physical_failure = Some(io::Error::other(
+                            "presentation physical exit deadline elapsed",
+                        ))
+                    }
+                }
+                if self.observed_exit.is_none() && physical_failure.is_none() {
+                    physical_failure = Some(io::Error::other(
+                        "presentation exit notification lacks a physical result",
+                    ));
+                }
+            }
+        }
+        if self.observed_exit == Some(WorkerExit::Joined) && wait_failure.is_none() {
+            return match &self.shutdown_emission {
+                Some(Ok(())) => Ok(()),
+                Some(Err(error)) => Err(io::Error::new(error.error.kind(), error.clone())),
+                None => Err(guarded_failure(
+                    io::Error::other("presentation has no completion result"),
+                    self.slots.allocation.clone(),
+                )),
+            };
+        }
+        let failure = match physical_failure.or(wait_failure) {
+            Some(error) => error,
+            None => io::Error::other("presentation thread panicked"),
         };
-        completion.await.map_err(|_| {
-            guarded_failure(
-                io::Error::other("presentation owner panicked"),
-                self.slots.allocation.clone(),
-            )
-        })?
+        Err(guarded_failure(
+            io::Error::other(PresentationExitFailure {
+                observation: failure,
+                emission: self
+                    .shutdown_emission
+                    .as_ref()
+                    .and_then(|result| result.as_ref().err())
+                    .cloned(),
+                ticket,
+            }),
+            self.slots.allocation.clone(),
+        ))
+    }
+}
+
+/// Keep the physical ticket and original output failure inspectable after a
+/// deadline. Supervisor custody remains charged until the actual thread exits.
+struct PresentationExitFailure {
+    observation: io::Error,
+    emission: Option<Arc<GuardedFailure>>,
+    ticket: WorkerTicket,
+}
+impl std::fmt::Debug for PresentationExitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PresentationExitFailure")
+            .field("worker", &self.ticket.id())
+            .field("observation", &self.observation)
+            .field("emission", &self.emission)
+            .finish()
+    }
+}
+impl std::fmt::Display for PresentationExitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.observation.fmt(f)?;
+        if let Some(error) = &self.emission {
+            write!(f, "; output: {error}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for PresentationExitFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.observation)
     }
 }
 
@@ -621,6 +742,91 @@ mod tests {
     use ratatui::layout::Rect;
     use std::io::Write;
 
+    #[tokio::test]
+    async fn shutdown_waits_for_original_thread_local_cleanup_after_body_completion() {
+        struct ExitGate {
+            entered: std::sync::mpsc::SyncSender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+        }
+        impl Drop for ExitGate {
+            fn drop(&mut self) {
+                let _ = self.entered.send(());
+                let _ = self.release.recv();
+            }
+        }
+        struct ReleaseOnDrop(Option<std::sync::mpsc::SyncSender<()>>);
+        impl ReleaseOnDrop {
+            fn release(&mut self) {
+                if let Some(release) = self.0.take() {
+                    let _ = release.send(());
+                }
+            }
+        }
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+        thread_local! {
+            static EXIT_GATE: std::cell::RefCell<Option<ExitGate>> = const {
+                std::cell::RefCell::new(None)
+            };
+        }
+        let quota = test_quota();
+        let (entered, observed) = std::sync::mpsc::sync_channel(1);
+        let (release, gate) = std::sync::mpsc::sync_channel(1);
+        let mut release_on_drop = ReleaseOnDrop(Some(release));
+        let mut presenter = Presenter::start_with_cleanup(
+            CrosstermBackend::new(Vec::<u8>::new()),
+            &quota,
+            move || {
+                EXIT_GATE.with(|slot| {
+                    *slot.borrow_mut() = Some(ExitGate {
+                        entered,
+                        release: gate,
+                    });
+                })
+            },
+        )
+        .unwrap();
+        // Start the exact production drain without polling the shutdown future.
+        // TLS entry proves its body completion has already been published.
+        presenter.shared.queue.lock().unwrap().closing = true;
+        presenter.shared.changed.notify_all();
+        observed.recv_timeout(Duration::from_secs(2)).unwrap();
+        let ticket = presenter._worker.ticket();
+        assert_eq!(ticket.exit(), None);
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), presenter.shutdown())
+                .await
+                .is_err(),
+            "body completion must not acknowledge physical presenter shutdown"
+        );
+        // The timeout drops the shutdown future. Its real callback result and
+        // sole observer must remain on the original presenter through retry.
+        assert!(matches!(presenter.shutdown_emission, Some(Ok(()))));
+        let exit_wake = presenter.physical_exit.clone();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), presenter.shutdown())
+                .await
+                .is_err()
+        );
+        assert!(Arc::ptr_eq(&presenter.physical_exit, &exit_wake));
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        release_on_drop.release();
+        tokio::time::timeout(Duration::from_secs(2), presenter.shutdown())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            ticket.exit(),
+            Some(ilium_platform::owned_worker::WorkerExit::Joined)
+        );
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        presenter.shutdown().await.unwrap();
+    }
+
     struct GatedWrite {
         entered: std::sync::mpsc::Sender<()>,
         release: std::sync::mpsc::Receiver<()>,
@@ -744,6 +950,12 @@ mod tests {
             &original(&ack_error),
             &original(&completion_error)
         ));
+        let repeated_error = presenter.shutdown().await.unwrap_err();
+        assert!(Arc::ptr_eq(
+            &original(&completion_error),
+            &original(&repeated_error)
+        ));
+        drop(repeated_error);
         let ticket = presenter._worker.ticket();
         drop(presenter);
         ticket
@@ -756,6 +968,59 @@ mod tests {
         assert_eq!(quota.snapshot().worker_bytes, FRAME_STORAGE_BYTES);
         drop(completion_error);
         assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn cancelled_shutdown_preserves_pending_original_output_failure() {
+        struct ReleaseOnDrop(Option<std::sync::mpsc::Sender<()>>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                if let Some(release) = self.0.take() {
+                    let _ = release.send(());
+                }
+            }
+        }
+        let quota = test_quota();
+        let (entered, observed) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let mut release_on_drop = ReleaseOnDrop(Some(release));
+        let mut presenter = Presenter::start(
+            CrosstermBackend::new(GatedWrite {
+                entered,
+                release: blocked,
+                bytes: Arc::default(),
+                first: true,
+                fail: true,
+            }),
+            &quota,
+        )
+        .unwrap();
+        presenter
+            .submit(frame(&presenter, 1, "ORIGINAL_FAILURE"))
+            .unwrap();
+        observed.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), presenter.shutdown())
+                .await
+                .is_err()
+        );
+        assert!(presenter.completion.is_some());
+        assert!(presenter.shutdown_emission.is_none());
+        assert!(presenter.observed_exit.is_none());
+        release_on_drop.0.take().unwrap().send(()).unwrap();
+        let error = presenter.shutdown().await.unwrap_err();
+        let repeated = presenter.shutdown().await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        let original = |error: &io::Error| {
+            error
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<Arc<GuardedFailure>>()
+                .unwrap()
+                .clone()
+        };
+        assert!(Arc::ptr_eq(&original(&error), &original(&repeated)));
+        assert_eq!(presenter._worker.ticket().exit(), Some(WorkerExit::Joined));
     }
 
     #[test]

@@ -664,15 +664,8 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         .filter(|&&position| position != [0, 0])
         .copied()
         .collect::<Vec<_>>();
-    let error = projected_source::qualify(
-        base,
-        bound,
-        &root,
-        &request,
-        &account,
-        cancel,
-        &|| false,
-    );
+    let error =
+        projected_source::qualify(base, bound, &root, &request, &account, cancel, &|| false);
     let (missing, first, missing_positions) = match error {
         Err(projected_source::Error::Unqualified {
             missing,

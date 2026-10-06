@@ -439,6 +439,19 @@ pub fn value_control(
                 spec.value < spec.maximum,
             )
         }
+        RowKind::Number {
+            minimum,
+            maximum,
+            value,
+            ..
+        } => (
+            ControlKind::Number,
+            rect,
+            view.label.as_str(),
+            label_cap(model.region(row)?) as u16,
+            value > minimum,
+            value < maximum,
+        ),
         RowKind::Choice => {
             let cap = label_cap(model.region(row)?);
             let marker = disabled_marker(view, rect.width, cap);
@@ -590,9 +603,11 @@ pub fn hit(
         RowKind::Toggle | RowKind::Text | RowKind::Location | RowKind::Action => {
             AnimationHit::Activate(row)
         }
-        RowKind::Choice | RowKind::Scene { .. } | RowKind::Slider(_) | RowKind::Status => {
-            AnimationHit::Select(row)
-        }
+        RowKind::Choice
+        | RowKind::Scene { .. }
+        | RowKind::Slider(_)
+        | RowKind::Number { .. }
+        | RowKind::Status => AnimationHit::Select(row),
     })
 }
 
@@ -1128,6 +1143,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             RowKind::Slider(_) => {
                 draw_slider(frame, area, &model, row, view, scrolls, style);
             }
+            RowKind::Number { .. } => {
+                if let Some(control) = value_control(area, &model, row, scrolls) {
+                    control.render(frame, value_styles(style));
+                }
+            }
             RowKind::Choice => {
                 if let Some(control) = value_control(area, &model, row, scrolls) {
                     control.render(frame, value_styles(style));
@@ -1163,10 +1183,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let footer_top = panel.bottom() - footer_height;
     let help = model
         .view(state.selected_row)
-        .map_or_else(String::new, |view| match view.slider() {
-            Some(spec) => format!(
+        .map_or_else(String::new, |view| match view.number() {
+            Some((minimum, maximum, _, _)) => format!(
                 "{}: {} ({}..{}). {}",
-                view.label, view.value, spec.minimum, spec.maximum, view.help
+                view.label, view.value, minimum, maximum, view.help
             ),
             None => format!("{}: {}. {}", view.label, view.value, view.help),
         });
@@ -1333,6 +1353,7 @@ mod tests {
             "tide_range_m",
             "wiki_render_mode",
             "wind_mode",
+            "world_source",
             "semantic_scope",
         ];
         let identity = |settings: &AnimationSettings| {
@@ -1399,6 +1420,29 @@ mod tests {
                             "{kind:?}: visibility state walk exceeded its explicit safety bound"
                         );
                     }
+                }
+            }
+        }
+        if kind == AnimationKind::VoxelLandscape {
+            for source in [0, 1] {
+                let controls = variants
+                    .iter()
+                    .map(AnimationSettings::scene_controls)
+                    .find(|controls| {
+                        controls.iter().any(|control| {
+                            control.id == "world_source"
+                                && control.value == ControlValue::Index(source)
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("VoxelLandscape: metadata walk never reached world source {source}")
+                    });
+                for id in ["seed", "atmosphere", "detail", "pan_direction"] {
+                    assert_eq!(
+                        controls.iter().any(|control| control.id == id),
+                        source == 0,
+                        "VoxelLandscape: world source {source} exposed incorrect {id} visibility"
+                    );
                 }
             }
         }
@@ -1540,7 +1584,7 @@ mod tests {
                                                 checked_choices += 1;
                                                 ("←", "→", "+", ControlAction::OpenChoices)
                                             }
-                                            RowKind::Slider(_) => {
+                                            RowKind::Slider(_) | RowKind::Number { .. } => {
                                                 checked_numbers += 1;
                                                 ("−", "+", "*", ControlAction::EditNumber)
                                             }
@@ -1638,7 +1682,7 @@ mod tests {
                                                 );
                                             }
                                         }
-                                        if matches!(view.kind, RowKind::Slider(_)) {
+                                        if view.number().is_some() {
                                             let slot_center = 2 * u32::from(geometry.value_slot.x)
                                                 + u32::from(geometry.value_slot.width);
                                             let value_center = 2 * u32::from(geometry.value.x)
@@ -1687,7 +1731,7 @@ mod tests {
                     choices += 1;
                     ("←", "→", "+", ControlAction::OpenChoices)
                 }
-                RowKind::Slider(_) => {
+                RowKind::Slider(_) | RowKind::Number { .. } => {
                     numbers += 1;
                     ("−", "+", "*", ControlAction::EditNumber)
                 }
@@ -3504,5 +3548,88 @@ mod tests {
                 eprintln!("--- {width}x{height}\n{joined}");
             }
         }
+    }
+
+    #[test]
+    fn voxel_seed_exact_keyboard_entry_persists_the_complete_u32_domain_and_cancel_is_inert() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        for text in ["0", "2147483647", "2147483648", "4294967295"] {
+            let row = row_index(&app, &AnimationRow::SceneControl("seed"));
+            set_selected_row(&mut app, row);
+            crate::keys::handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Char('*'), KeyModifiers::NONE)),
+            );
+            let Mode::ValueDialog(host) = &mut app.mode else {
+                panic!("voxel seed number dialog");
+            };
+            let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
+                panic!("voxel seed numeric state");
+            };
+            number.draft = crate::text_prompt::TextPromptState::new(text);
+            crate::keys::handle_event(
+                &mut app,
+                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            );
+            assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, Mode::Settings(_)));
+            assert_eq!(
+                app.animation_settings
+                    .scene_control("seed")
+                    .expect("voxel seed control")
+                    .value,
+                ControlValue::Text(text.to_owned()),
+            );
+            assert_eq!(
+                crate::project_config::load(project.path())
+                    .unwrap()
+                    .animation
+                    .scene_control("seed")
+                    .expect("persisted voxel seed control")
+                    .value,
+                ControlValue::Text(text.to_owned()),
+            );
+        }
+        let before = app
+            .animation_settings
+            .scene_control("seed")
+            .expect("voxel seed control")
+            .value;
+        let row = row_index(&app, &AnimationRow::SceneControl("seed"));
+        set_selected_row(&mut app, row);
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('*'), KeyModifiers::NONE)),
+        );
+        let Mode::ValueDialog(host) = &mut app.mode else {
+            panic!("voxel seed number dialog");
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("voxel seed numeric state");
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("0");
+        crate::keys::handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        assert_eq!(
+            app.animation_settings
+                .scene_control("seed")
+                .expect("voxel seed control")
+                .value,
+            before,
+        );
+        assert_eq!(
+            crate::project_config::load(project.path())
+                .unwrap()
+                .animation
+                .scene_control("seed")
+                .expect("persisted voxel seed control")
+                .value,
+            before,
+        );
     }
 }

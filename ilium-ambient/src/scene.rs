@@ -200,6 +200,18 @@ impl PaletteScene {
 }
 
 impl Scene for PaletteScene {
+    fn saved_world_source(&self) -> Option<SavedWorldSource<'_>> {
+        self.inner.saved_world_source()
+    }
+
+    fn readiness(&mut self) -> SceneReadiness {
+        self.inner.readiness()
+    }
+
+    fn has_prepared_frame(&self) -> bool {
+        self.inner.has_prepared_frame()
+    }
+
     fn pointer(&mut self, position: Option<[f32; 2]>) {
         self.inner.pointer(position);
     }
@@ -325,6 +337,22 @@ impl Frame<'_> {
     }
 }
 
+/// Actual source preparation, independent of informational status messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SceneReadiness {
+    Preparing,
+    Ready,
+    Unavailable(String),
+}
+
+/// Borrow the selected native source under its original lifetime. This is a
+/// Rust host boundary, never a script-supplied source or capability.
+#[derive(Clone, Copy)]
+pub struct SavedWorldSource<'a> {
+    pub map: &'a crate::minecraft::tours::PreparedMap,
+    pub stop: &'a ilium_platform::owned_worker::StopToken,
+}
+
 /// A stateful scene. Created by the registry from settings; the host drops it
 /// (which must stop every thread and child process it owns) whenever the
 /// settings that affect it change or another scene is selected.
@@ -339,6 +367,24 @@ impl Frame<'_> {
 /// * Time may only be read from `Frame`, never from the system clock, so
 ///   scenes are testable.
 pub trait Scene: Send {
+    /// Borrow an already selected saved source without opening paths or
+    /// acquiring another source. Ordinary and generated scenes provide none.
+    fn saved_world_source(&self) -> Option<SavedWorldSource<'_>> {
+        None
+    }
+
+    /// Poll already owned preparation state without I/O, blocking or starting
+    /// work. A ready source may still be preparing its first viewport.
+    fn readiness(&mut self) -> SceneReadiness {
+        SceneReadiness::Ready
+    }
+
+    /// Whether the last render produced a real prepared frame and receipt.
+    /// Saved sources must not publish their initial placeholder as ready ink.
+    fn has_prepared_frame(&self) -> bool {
+        true
+    }
+
     /// Latest pointer position in normalized screen coordinates. Optional input
     /// does not consume terminal/UI mouse events and must never block.
     fn pointer(&mut self, _position: Option<[f32; 2]>) {}
@@ -429,6 +475,14 @@ pub trait Scene: Send {
 pub struct MessageScene(pub String);
 
 impl Scene for MessageScene {
+    fn readiness(&mut self) -> SceneReadiness {
+        SceneReadiness::Unavailable(self.0.clone())
+    }
+
+    fn has_prepared_frame(&self) -> bool {
+        false
+    }
+
     fn render(&mut self, _frame: &mut Frame<'_>) {}
 
     fn status(&self) -> Option<String> {
@@ -465,6 +519,45 @@ mod palette_scene_tests {
             now: SystemTime::UNIX_EPOCH,
         });
         colors
+    }
+
+    #[test]
+    fn palette_wrapper_preserves_unavailable_source_and_missing_frame() {
+        let mut scene = PaletteScene::new(
+            Box::new(MessageScene("source qualification failed".into())),
+            ScenePalette::default(),
+        );
+        assert_eq!(
+            scene.readiness(),
+            SceneReadiness::Unavailable("source qualification failed".into())
+        );
+        assert!(!scene.has_prepared_frame());
+        assert!(scene.saved_world_source().is_none());
+    }
+
+    #[test]
+    fn ordinary_scene_is_ready_without_a_preparation_owner() {
+        let mut scene = PaletteScene::new(Box::new(Flat), ScenePalette::default());
+        assert_eq!(scene.readiness(), SceneReadiness::Ready);
+        assert!(scene.has_prepared_frame());
+        assert!(scene.saved_world_source().is_none());
+    }
+
+    #[test]
+    fn palette_wrapper_preserves_pending_source_without_a_prepared_frame() {
+        struct PreparingScene;
+        impl Scene for PreparingScene {
+            fn render(&mut self, _frame: &mut Frame<'_>) {}
+            fn readiness(&mut self) -> SceneReadiness {
+                SceneReadiness::Preparing
+            }
+            fn has_prepared_frame(&self) -> bool {
+                false
+            }
+        }
+        let mut scene = PaletteScene::new(Box::new(PreparingScene), ScenePalette::default());
+        assert_eq!(scene.readiness(), SceneReadiness::Preparing);
+        assert!(!scene.has_prepared_frame());
     }
 
     #[test]

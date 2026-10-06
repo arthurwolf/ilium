@@ -3149,10 +3149,11 @@ impl App {
                 self.animation_settings.kind,
                 model.effective_kind()
             );
-            let target = AnimationControlTarget::new(
+            let target = AnimationControlTarget::new_for_animation(
                 self.animation_write_path()?,
                 identity,
                 scope,
+                self.animation_settings.kind,
                 control,
             )?;
             crate::value_dialog_host::ValueDialogHost::animation(target)
@@ -8428,7 +8429,18 @@ impl App {
         let Some(control) = control else {
             return;
         };
-        let stepped = control.stepped(direction);
+        let stepped = match crate::value_animation::stepped_animation_number(
+            self.animation_settings.kind,
+            &control,
+            direction,
+        ) {
+            Ok(Some(value)) => Some(value),
+            Ok(None) => control.stepped(direction),
+            Err(message) => {
+                self.status_message = Some(message);
+                return;
+            }
+        };
         // A step that could not move (the only other option is disabled)
         // tells the user why instead of silently doing nothing.
         if stepped.as_ref() == Some(&control.value) {
