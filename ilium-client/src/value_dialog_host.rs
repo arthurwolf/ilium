@@ -633,6 +633,52 @@ impl ValueDialogHost {
     }
 }
 
+impl crate::app::App {
+    pub(crate) fn begin_agent_from_line_provider_dialog(
+        &mut self,
+        parent: Box<crate::agent_from_line::CreateAgentFromLineState>,
+    ) {
+        match ValueDialogHost::agent_from_line_provider(&parent) {
+            Ok(host) => self.push_modal_over(
+                crate::app::Mode::CreateAgentFromLine(parent),
+                crate::app::Mode::ValueDialog(Box::new(host)),
+            ),
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = crate::app::Mode::CreateAgentFromLine(parent);
+            }
+        }
+    }
+
+    pub(crate) fn begin_board_storage_dialog(&mut self, parent: crate::app::CreateBoardState) {
+        match ValueDialogHost::board_storage(&parent) {
+            Ok(host) => self.push_modal_over(
+                crate::app::Mode::CreateBoard(parent),
+                crate::app::Mode::ValueDialog(Box::new(host)),
+            ),
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = crate::app::Mode::CreateBoard(parent);
+            }
+        }
+    }
+    pub(crate) fn begin_trigger_scope_dialog(
+        &mut self,
+        parent: Box<crate::text_trigger_dialog::TextTriggerDialogState>,
+    ) {
+        match ValueDialogHost::trigger_scope(&parent) {
+            Ok(host) => self.push_modal_over(
+                crate::app::Mode::TextTriggerDialog(parent),
+                crate::app::Mode::ValueDialog(Box::new(host)),
+            ),
+            Err(error) => {
+                self.status_message = Some(error);
+                self.mode = crate::app::Mode::TextTriggerDialog(parent);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,51 +940,5 @@ mod tests {
         host.begin_save(std::sync::Arc::clone(&retry));
         assert!(!host.finish_save(&token, Ok(())));
         assert!(host.finish_save(&retry, Ok(())));
-    }
-}
-
-impl crate::app::App {
-    pub(crate) fn begin_agent_from_line_provider_dialog(
-        &mut self,
-        parent: Box<crate::agent_from_line::CreateAgentFromLineState>,
-    ) {
-        match ValueDialogHost::agent_from_line_provider(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::CreateAgentFromLine(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::CreateAgentFromLine(parent);
-            }
-        }
-    }
-
-    pub(crate) fn begin_board_storage_dialog(&mut self, parent: crate::app::CreateBoardState) {
-        match ValueDialogHost::board_storage(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::CreateBoard(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::CreateBoard(parent);
-            }
-        }
-    }
-    pub(crate) fn begin_trigger_scope_dialog(
-        &mut self,
-        parent: Box<crate::text_trigger_dialog::TextTriggerDialogState>,
-    ) {
-        match ValueDialogHost::trigger_scope(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::TextTriggerDialog(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::TextTriggerDialog(parent);
-            }
-        }
     }
 }

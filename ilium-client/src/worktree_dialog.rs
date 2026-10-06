@@ -916,6 +916,25 @@ fn draw_line(frame: &mut Frame, area: Rect, text: String, selected: bool) {
     frame.render_widget(Paragraph::new(text).style(selected_style(selected)), area);
 }
 
+fn render_choice(
+    frame: &mut Frame,
+    screen: Rect,
+    state: &WorktreeDialogState,
+    field: crate::value_worktree::WorkspaceChoice,
+) {
+    let style = selected_style(state.focus == field.focus());
+    field.control(screen, state).render(
+        frame,
+        crate::value_control::ControlStyles {
+            label: style,
+            value: style,
+            button: style,
+            disabled: Style::new().fg(Color::DarkGray),
+            ..Default::default()
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1179,23 +1198,4 @@ mod tests {
             .draw(|frame| draw_dialog(frame, frame.area(), &state))
             .unwrap();
     }
-}
-
-fn render_choice(
-    frame: &mut Frame,
-    screen: Rect,
-    state: &WorktreeDialogState,
-    field: crate::value_worktree::WorkspaceChoice,
-) {
-    let style = selected_style(state.focus == field.focus());
-    field.control(screen, state).render(
-        frame,
-        crate::value_control::ControlStyles {
-            label: style,
-            value: style,
-            button: style,
-            disabled: Style::new().fg(Color::DarkGray),
-            ..Default::default()
-        },
-    );
 }

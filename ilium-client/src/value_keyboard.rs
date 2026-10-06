@@ -390,8 +390,10 @@ mod tests {
         assert_eq!(app.keyboard_settings, original);
         app.config_dir = Some(directory.path().into());
         app.onboarding_progress.wizard.step = crate::onboarding::state::Step::KeyboardPractice;
-        let mut ui = crate::onboarding::screen::WizardUi::default();
-        ui.keyboard_editing = true;
+        let ui = crate::onboarding::screen::WizardUi {
+            keyboard_editing: true,
+            ..Default::default()
+        };
         app.onboarding = Some(ui);
         app.begin_keyboard_prefix_dialog(KeyboardPrefix::General);
         assert!(matches!(app.mode, Mode::ValueDialog(_)));

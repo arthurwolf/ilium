@@ -336,7 +336,11 @@ mod tests {
 
     fn draw(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| crate::ui::draw(frame, app)).unwrap();
+        // Hover timing is advanced explicitly; hold the independent animation
+        // clock fixed so scene motion cannot change the comparison frames.
+        terminal
+            .draw(|frame| crate::ui::draw_at(frame, app, std::time::Duration::ZERO))
+            .unwrap();
         terminal
     }
 
@@ -461,6 +465,9 @@ mod tests {
         let (mut app, _project) = backend_app(80, 24);
         let y = select_backend_row(&mut app);
         let content = content_area(&app);
+        // Preview composition initializes its visibility warning after painting.
+        // Establish that independent footer before comparing hover frames.
+        let _ = draw(&mut app, 80, 24);
         let before = draw(&mut app, 80, 24);
         pointer(
             &mut app,
@@ -469,6 +476,7 @@ mod tests {
             y,
         );
         let resting = draw(&mut app, 80, 24);
+        assert!(app.animation_hover.is_some_and(|hover| !hover.is_shown));
         assert_eq!(
             screen_rows(&before),
             screen_rows(&resting),
