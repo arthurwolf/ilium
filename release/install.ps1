@@ -278,7 +278,7 @@ function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [strin
     $actual = [IO.File]::ReadAllBytes($versionPath)
     if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($expected)) { throw 'Archive VERSION differs from the requested release.' }
     if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne '21a195c4641ab73914ba0d7ad535ffbdff1ab116323f933f0df9cce973e33777' -or
-        (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne '08eaa2889f12698a541b8914b7940b883f9328966a25289a3b5cddac772a40ae') { throw 'Official animation archive differs from compiled release identity.' }
+        (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne '05abd4bd37231f1cb7502ae037a9bb7af39043440c72b173948cd12ceb8caf8b') { throw 'Official animation archive differs from compiled release identity.' }
 }
 
 function Confirm-IliumBinaryVersion([string]$Directory, [string]$Version) {
@@ -347,7 +347,7 @@ function Test-IliumOwnedVersion([string]$Root, [string]$Version, [switch]$AllowM
     foreach ($property in $receipt.PSObject.Properties) {
         if ($property.Name -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or $property.Value -cnotmatch '\A[0-9a-f]{64}\z') { return $false }
         if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne '21a195c4641ab73914ba0d7ad535ffbdff1ab116323f933f0df9cce973e33777') { return $false }
-        if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne '08eaa2889f12698a541b8914b7940b883f9328966a25289a3b5cddac772a40ae') { return $false }
+        if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne '05abd4bd37231f1cb7502ae037a9bb7af39043440c72b173948cd12ceb8caf8b') { return $false }
         $path = Join-Path $directory $property.Name
         Assert-IliumPlainPath $path
         if (-not [IO.File]::Exists($path)) { if ($AllowMissing) { continue }; return $false }
