@@ -2226,6 +2226,38 @@ fn draw_pane_runtime(
                     frame.buffer_mut(),
                 );
                 draw_smart_copy_highlights(frame, terminal_area, session);
+            } else if let Some(source) = app.frozen_screens.get(&viewport.pane_id) {
+                source.with_screen(|screen| {
+                    terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
+                });
+                let dialog_width = terminal_area.width.min(52);
+                let dialog_height = terminal_area.height.min(7);
+                let dialog_area = Rect {
+                    x: terminal_area.x + terminal_area.width.saturating_sub(dialog_width) / 2,
+                    y: terminal_area.y + terminal_area.height.saturating_sub(dialog_height) / 2,
+                    width: dialog_width,
+                    height: dialog_height,
+                };
+                frame.render_widget(Clear, dialog_area);
+                frame.render_widget(
+                    Paragraph::new(vec![
+                        Line::from(Span::styled(
+                            "Agent frozen",
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )),
+                        Line::from("Click the button or press Enter to resume it"),
+                        Line::from(Span::styled(
+                            "      [ Unfreeze agent ]      ",
+                            Style::default()
+                                .fg(Color::Black)
+                                .bg(Color::LightGreen)
+                                .add_modifier(Modifier::BOLD),
+                        )),
+                    ])
+                    .alignment(Alignment::Center)
+                    .block(theme::block(true).title(theme::chrome_title("Frozen agent"))),
+                    dialog_area,
+                );
             } else if let Some(source) = app.selection_terminal_source(viewport.pane_id) {
                 source.with_screen(|screen| {
                     terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());

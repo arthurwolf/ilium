@@ -1095,6 +1095,12 @@ pub struct UiSettings {
     /// that now-empty container (cascading upward through ancestor groups).
     /// Projects, split views and the root are never auto-closed.
     pub auto_remove_empty_groups: bool,
+    pub auto_freeze_enabled: bool,
+    pub auto_freeze_after_seconds: u64,
+    pub auto_freeze_done: bool,
+    pub auto_freeze_idle: bool,
+    pub auto_freeze_waiting_approval: bool,
+    pub auto_freeze_waiting_background: bool,
     /// Global glyph assignments for every configurable sidebar icon role.
     pub icons: IconSettings,
 }
@@ -1127,6 +1133,12 @@ impl Default for UiSettings {
             terminal_text_selection_enabled: true,
             lock_closed_enabled: true,
             auto_remove_empty_groups: true,
+            auto_freeze_enabled: false,
+            auto_freeze_after_seconds: 6 * 60 * 60,
+            auto_freeze_done: true,
+            auto_freeze_idle: false,
+            auto_freeze_waiting_approval: false,
+            auto_freeze_waiting_background: false,
             icons: IconSettings::default(),
         }
     }
@@ -1240,6 +1252,12 @@ struct RawUiConfig {
     terminal_text_selection_enabled: Option<bool>,
     lock_closed_enabled: Option<bool>,
     auto_remove_empty_groups: Option<bool>,
+    auto_freeze_enabled: Option<bool>,
+    auto_freeze_after_seconds: Option<u64>,
+    auto_freeze_done: Option<bool>,
+    auto_freeze_idle: Option<bool>,
+    auto_freeze_waiting_approval: Option<bool>,
+    auto_freeze_waiting_background: Option<bool>,
     #[serde(default)]
     icons: HashMap<String, String>,
     task_progress_frames: Option<Vec<String>>,
@@ -1750,6 +1768,21 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         auto_remove_empty_groups: raw
             .auto_remove_empty_groups
             .unwrap_or(defaults.auto_remove_empty_groups),
+        auto_freeze_enabled: raw
+            .auto_freeze_enabled
+            .unwrap_or(defaults.auto_freeze_enabled),
+        auto_freeze_after_seconds: raw
+            .auto_freeze_after_seconds
+            .unwrap_or(defaults.auto_freeze_after_seconds)
+            .max(1),
+        auto_freeze_done: raw.auto_freeze_done.unwrap_or(defaults.auto_freeze_done),
+        auto_freeze_idle: raw.auto_freeze_idle.unwrap_or(defaults.auto_freeze_idle),
+        auto_freeze_waiting_approval: raw
+            .auto_freeze_waiting_approval
+            .unwrap_or(defaults.auto_freeze_waiting_approval),
+        auto_freeze_waiting_background: raw
+            .auto_freeze_waiting_background
+            .unwrap_or(defaults.auto_freeze_waiting_background),
         icons,
     })
 }
@@ -2949,6 +2982,30 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "auto_remove_empty_groups".to_string(),
         toml::Value::Boolean(ui.auto_remove_empty_groups),
+    );
+    table.insert(
+        "auto_freeze_enabled".to_string(),
+        toml::Value::Boolean(ui.auto_freeze_enabled),
+    );
+    table.insert(
+        "auto_freeze_after_seconds".to_string(),
+        toml::Value::Integer(ui.auto_freeze_after_seconds as i64),
+    );
+    table.insert(
+        "auto_freeze_done".to_string(),
+        toml::Value::Boolean(ui.auto_freeze_done),
+    );
+    table.insert(
+        "auto_freeze_idle".to_string(),
+        toml::Value::Boolean(ui.auto_freeze_idle),
+    );
+    table.insert(
+        "auto_freeze_waiting_approval".to_string(),
+        toml::Value::Boolean(ui.auto_freeze_waiting_approval),
+    );
+    table.insert(
+        "auto_freeze_waiting_background".to_string(),
+        toml::Value::Boolean(ui.auto_freeze_waiting_background),
     );
     let icons = IconTarget::ALL
         .into_iter()
@@ -4303,6 +4360,12 @@ mod tests {
             terminal_text_selection_enabled: false,
             lock_closed_enabled: false,
             auto_remove_empty_groups: false,
+            auto_freeze_enabled: true,
+            auto_freeze_after_seconds: 900,
+            auto_freeze_done: true,
+            auto_freeze_idle: true,
+            auto_freeze_waiting_approval: false,
+            auto_freeze_waiting_background: true,
             use_stable_glyphs: true,
             icons,
         };

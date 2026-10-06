@@ -49,6 +49,7 @@ pub fn on_tick(
     let animation_hover_changed = app.tick_animation_hover(now);
     let location_picker_changed = app.tick_location_picker();
     let smart_copy_light_changed = app.tick_smart_copy_light(now);
+    let auto_freeze_changed = app.tick_auto_freeze(now);
     app.drain_pending_staged_keystrokes(now);
     let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     app.maybe_show_agent_setup_prompt();
@@ -71,6 +72,7 @@ pub fn on_tick(
         || animation_hover_changed
         || location_picker_changed
         || smart_copy_light_changed
+        || auto_freeze_changed
         || setup_prompt_changed
 }
 

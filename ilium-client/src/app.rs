@@ -724,10 +724,16 @@ pub enum AppearanceRow {
     TerminalTextSelection,
     LockClosedEnabled,
     AutoRemoveEmptyGroups,
+    AutoFreeze,
+    AutoFreezeAfter,
+    AutoFreezeDone,
+    AutoFreezeIdle,
+    AutoFreezeWaitingApproval,
+    AutoFreezeWaitingBackground,
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 18] = [
+    const GENERAL: [AppearanceRow; 24] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::TreeRowManagementControls,
@@ -746,6 +752,12 @@ impl AppearanceRow {
         Self::TerminalTextSelection,
         Self::LockClosedEnabled,
         Self::AutoRemoveEmptyGroups,
+        Self::AutoFreeze,
+        Self::AutoFreezeAfter,
+        Self::AutoFreezeDone,
+        Self::AutoFreezeIdle,
+        Self::AutoFreezeWaitingApproval,
+        Self::AutoFreezeWaitingBackground,
     ];
 
     /// Rows visible for the active card. Hidden values remain persisted so
@@ -1235,6 +1247,8 @@ pub enum ContextMenuAction {
     /// Converts the target agent pane's session to the other built-in
     /// provider (see `crate::session_conversion`).
     ConvertTo(BuiltinAgentProvider),
+    Freeze,
+    Unfreeze,
     ShowSplitView,
     ToggleGroup,
     NewTerminal,
@@ -1299,6 +1313,7 @@ impl ContextMenuAction {
             Self::ConvertTo(BuiltinAgentProvider::Claude) => IconTarget::Claude,
             Self::ConvertTo(BuiltinAgentProvider::Codex) => IconTarget::Codex,
             Self::ConvertTo(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
+            Self::Freeze | Self::Unfreeze => IconTarget::Lock,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
             Self::ToggleGroup | Self::NewGroup => IconTarget::Group,
             Self::NewAgent(BuiltinAgentProvider::Claude) => IconTarget::Claude,
@@ -1330,6 +1345,8 @@ impl ContextMenuAction {
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::AskForUpdate => "Ask for update".to_string(),
             Self::ConvertTo(provider) => format!("Convert to {}", provider.label()),
+            Self::Freeze => "Freeze agent".to_string(),
+            Self::Unfreeze => "Unfreeze agent".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
@@ -2328,6 +2345,10 @@ pub struct App {
     /// Panes whose agent is being converted: their terminal output is ignored
     /// so the last screen stays on display behind the conversion dialog.
     pub frozen_panes: HashSet<NodeId>,
+    /// Pinned terminal frames retained while an agent process is frozen.
+    pub(crate) frozen_screens: HashMap<NodeId, crate::terminal_view::PaintedTerminal>,
+    /// Start time of the current auto-freeze eligibility window per pane.
+    pub(crate) auto_freeze_since: HashMap<NodeId, Instant>,
     /// The active "Convert to" dialog, if any (see `Mode::ConvertSession`).
     pub conversion: Option<Box<crate::session_conversion::ConversionDialogState>>,
     /// Conversion the event loop must start on a blocking worker.
@@ -2896,6 +2917,8 @@ impl App {
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
             frozen_panes: HashSet::new(),
+            frozen_screens: HashMap::new(),
+            auto_freeze_since: HashMap::new(),
             conversion: None,
             pending_conversion_start: None,
             pending_conversion_cancel: false,
@@ -4563,6 +4586,27 @@ impl App {
         self.is_completed_agent_pane(viewport.pane_id)
             .then(|| completed_agent_action::layout(viewport))
             .flatten()
+    }
+
+    pub(crate) fn frozen_unfreeze_button(&self, viewport: PaneViewport) -> Option<Rect> {
+        self.frozen_screens.contains_key(&viewport.pane_id).then(|| {
+            let area = viewport.content_area;
+            let height = area.height.min(7);
+            let width = area.width.min(52);
+            let dialog = Rect {
+                x: area.x + area.width.saturating_sub(width) / 2,
+                y: area.y + area.height.saturating_sub(height) / 2,
+                width,
+                height,
+            };
+            let button_width = dialog.width.min(22);
+            Rect {
+                x: dialog.x + dialog.width.saturating_sub(button_width) / 2,
+                y: dialog.y + dialog.height.saturating_sub(2),
+                width: button_width,
+                height: 1,
+            }
+        })
     }
 
     /// Whether `pane_id` is a terminal agent that has finished its current
@@ -9999,6 +10043,41 @@ impl App {
             AppearanceRow::TerminalTextSelection => self.settings_toggle_terminal_text_selection(),
             AppearanceRow::LockClosedEnabled => self.settings_toggle_lock_closed_enabled(),
             AppearanceRow::AutoRemoveEmptyGroups => self.settings_toggle_auto_remove_empty_groups(),
+            AppearanceRow::AutoFreeze => {
+                let mut ui = self.ui_settings.clone();
+                ui.auto_freeze_enabled = !ui.auto_freeze_enabled;
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::AutoFreezeAfter => {
+                let mut ui = self.ui_settings.clone();
+                let step = 15 * 60;
+                ui.auto_freeze_after_seconds = if direction < 0 {
+                    ui.auto_freeze_after_seconds.saturating_sub(step).max(step)
+                } else {
+                    ui.auto_freeze_after_seconds.saturating_add(step)
+                };
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::AutoFreezeDone => {
+                let mut ui = self.ui_settings.clone();
+                ui.auto_freeze_done = !ui.auto_freeze_done;
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::AutoFreezeIdle => {
+                let mut ui = self.ui_settings.clone();
+                ui.auto_freeze_idle = !ui.auto_freeze_idle;
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::AutoFreezeWaitingApproval => {
+                let mut ui = self.ui_settings.clone();
+                ui.auto_freeze_waiting_approval = !ui.auto_freeze_waiting_approval;
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AppearanceRow::AutoFreezeWaitingBackground => {
+                let mut ui = self.ui_settings.clone();
+                ui.auto_freeze_waiting_background = !ui.auto_freeze_waiting_background;
+                self.apply_and_persist_ui_settings(ui);
+            }
         }
     }
 
@@ -14657,6 +14736,11 @@ impl App {
                 if let Some(provider) = self.conversion_target_for(target) {
                     actions.insert(insert_at, ContextMenuAction::ConvertTo(provider));
                 }
+                if self.frozen_panes.contains(&target) {
+                    actions.insert(0, ContextMenuAction::Unfreeze);
+                } else if self.agent_session_ids.contains_key(&target) {
+                    actions.insert(0, ContextMenuAction::Freeze);
+                }
             }
             Some(Node {
                 kind:
@@ -14730,6 +14814,8 @@ impl App {
             }
             ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
             ContextMenuAction::ConvertTo(provider) => self.action_convert_session(target, provider),
+            ContextMenuAction::Freeze => self.action_freeze_agent(target),
+            ContextMenuAction::Unfreeze => self.action_unfreeze_agent(target),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
@@ -14780,6 +14866,160 @@ impl App {
             }
             ContextMenuAction::Settings => self.action_open_settings(),
         }
+    }
+
+    pub fn action_freeze_agent(&mut self, pane_id: NodeId) {
+        if self.frozen_panes.contains(&pane_id) {
+            return;
+        }
+        let Some(PaneRuntime::Terminal(term)) = self.panes.get(&pane_id) else {
+            self.status_message = Some("Only a live agent pane can be frozen".to_string());
+            return;
+        };
+        let Ok(screen) = term.painted_source().pinned() else {
+            self.status_message = Some("Could not retain the agent screen".to_string());
+            return;
+        };
+        self.frozen_screens.insert(pane_id, screen);
+        self.persist_frozen_screen(pane_id);
+        self.frozen_panes.insert(pane_id);
+        let resume_command = self
+            .tree
+            .get(pane_id)
+            .and_then(|node| match &node.kind {
+                NodeKind::Pane { status, .. } => status
+                    .agent_state()
+                    .and_then(|state| state.class.provider())
+                    .map(|provider| provider.command_line().to_string()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.queue_request(ClientRequest::FreezePane {
+            pane_id,
+            resume_command,
+        });
+        self.status_message = Some("Agent frozen; process is being stopped".to_string());
+    }
+
+    fn frozen_screen_path(&self, pane_id: NodeId) -> Option<PathBuf> {
+        self.config_dir
+            .as_ref()
+            .map(|dir| dir.join("frozen-screens").join(format!("{}.bin", pane_id.0)))
+    }
+
+    fn persist_frozen_screen(&self, pane_id: NodeId) {
+        let Some(screen) = self.frozen_screens.get(&pane_id) else {
+            return;
+        };
+        let Some(path) = self.frozen_screen_path(pane_id) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let temporary = path.with_extension("bin.tmp");
+        if std::fs::write(&temporary, screen.frozen_bytes()).is_ok() {
+            let _ = std::fs::rename(temporary, path);
+        }
+    }
+
+    pub(crate) fn restore_frozen_screen(&mut self, pane_id: NodeId) {
+        let Some(path) = self.frozen_screen_path(pane_id) else {
+            return;
+        };
+        let Ok(bytes) = std::fs::read(path) else {
+            return;
+        };
+        if let Ok(screen) = crate::terminal_view::PaintedTerminal::from_frozen_bytes(&bytes) {
+            self.frozen_screens.insert(pane_id, screen);
+        }
+    }
+
+    pub fn action_unfreeze_agent(&mut self, pane_id: NodeId) {
+        let Some(session_id) = self.agent_session_ids.get(&pane_id).cloned() else {
+            self.status_message =
+                Some("Cannot unfreeze: session identity is unavailable".to_string());
+            return;
+        };
+        let Some(provider) = self.tree.get(pane_id).and_then(|node| match &node.kind {
+            NodeKind::Pane { status, .. } => status
+                .agent_state()
+                .and_then(|state| state.class.provider()),
+            _ => None,
+        }) else {
+            self.status_message =
+                Some("Cannot unfreeze: agent provider is unavailable".to_string());
+            return;
+        };
+        self.frozen_panes.remove(&pane_id);
+        self.auto_freeze_since.remove(&pane_id);
+        self.queue_request(ClientRequest::ReplacePaneWithCommand {
+            pane_id,
+            command_line: crate::session_conversion::ConversionDialogState::resume_command(
+                provider,
+                &session_id,
+            ),
+        });
+        self.status_message = Some("Unfreezing agent…".to_string());
+    }
+
+    pub(crate) fn tick_auto_freeze(&mut self, now: Instant) -> bool {
+        let settings = crate::agent_freeze::AutoFreezeSettings {
+            enabled: self.ui_settings.auto_freeze_enabled,
+            after: Duration::from_secs(self.ui_settings.auto_freeze_after_seconds),
+            freeze_done: self.ui_settings.auto_freeze_done,
+            freeze_waiting_for_input: self.ui_settings.auto_freeze_idle,
+            freeze_waiting_for_approval: self.ui_settings.auto_freeze_waiting_approval,
+            freeze_waiting_for_background: self.ui_settings.auto_freeze_waiting_background,
+        };
+        let pane_ids: Vec<NodeId> = self
+            .tree
+            .panes()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Pane {
+                    content: PaneContentKind::Terminal,
+                    status: PaneStatus::Agent(state),
+                    ..
+                } if !self.frozen_panes.contains(&node.id) => settings
+                    .should_freeze(
+                        state.activity(),
+                        self.auto_freeze_since
+                            .get(&node.id)
+                            .map_or(Duration::ZERO, |since| {
+                                now.saturating_duration_since(*since)
+                            }),
+                    )
+                    .then_some(node.id)
+                    .or_else(|| {
+                        (settings.state_for(state.activity())
+                            == crate::agent_freeze::AutoFreezeState::Eligible)
+                            .then_some(node.id)
+                    }),
+                _ => None,
+            })
+            .collect();
+        let live_ids: HashSet<NodeId> = self.tree.panes().map(|node| node.id).collect();
+        self.auto_freeze_since
+            .retain(|pane_id, _| live_ids.contains(pane_id));
+        for node in self.tree.panes() {
+            let eligible = matches!(&node.kind, NodeKind::Pane { status: PaneStatus::Agent(state), .. } if settings.state_for(state.activity()) == crate::agent_freeze::AutoFreezeState::Eligible);
+            if eligible && !self.frozen_panes.contains(&node.id) {
+                self.auto_freeze_since.entry(node.id).or_insert(now);
+            } else {
+                self.auto_freeze_since.remove(&node.id);
+            }
+        }
+        let mut changed = false;
+        for pane_id in pane_ids {
+            let Some(since) = self.auto_freeze_since.get(&pane_id).copied() else {
+                continue;
+            };
+            if now.saturating_duration_since(since) >= settings.after {
+                self.action_freeze_agent(pane_id);
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Sends the rendered status-check prompt followed by Enter to every eligible pane
@@ -16816,6 +17056,19 @@ impl App {
             ) {
                 self.action_close_completed_agent(id);
             }
+            return;
+        }
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(
+                crossterm::event::MouseButton::Left
+            )
+        ) && self
+            .frozen_unfreeze_button(viewport)
+            .is_some_and(|button| button.contains(position))
+        {
+            self.focus_pane(id);
+            self.action_unfreeze_agent(id);
             return;
         }
         if matches!(

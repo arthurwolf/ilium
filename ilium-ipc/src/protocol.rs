@@ -890,6 +890,12 @@ pub enum ClientRequest {
         pane_id: NodeId,
         command_line: String,
     },
+    /// Stops an agent process and durably leaves the terminal pane frozen.
+    /// Appended for bincode stability.
+    FreezePane {
+        pane_id: NodeId,
+        resume_command: String,
+    },
     /// Previews an unsaved sound-studio draft through the detached server.
     /// Appended to preserve every earlier bincode request discriminant.
     PreviewSoundSettings {
@@ -999,6 +1005,7 @@ impl ClientRequest {
             Self::UpdateAgentDetectionSettings { .. } => "update_agent_detection_settings",
             Self::TerminatePaneProcess { .. } => "terminate_pane_process",
             Self::ReplacePaneWithCommand { .. } => "replace_pane_with_command",
+            Self::FreezePane { .. } => "freeze_pane",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
@@ -1364,6 +1371,12 @@ pub enum ServerEvent {
     /// pane's process tree is proven stopped. Sent to the requester only.
     /// Appended to preserve existing bincode discriminants.
     PaneProcessTerminated {
+        pane_id: NodeId,
+        result: Result<(), String>,
+    },
+    /// Outcome of `ClientRequest::FreezePane`; successful frozen origins are
+    /// retained in the crash-recovery snapshot and restore as inert panes.
+    PaneFrozen {
         pane_id: NodeId,
         result: Result<(), String>,
     },

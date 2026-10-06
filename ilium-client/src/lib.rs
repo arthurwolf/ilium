@@ -33,6 +33,7 @@ pub mod agent_config_writer;
 pub mod agent_debug_export;
 pub mod agent_debug_ui;
 pub mod agent_feature_setup;
+pub mod agent_freeze;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;

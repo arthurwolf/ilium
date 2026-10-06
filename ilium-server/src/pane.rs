@@ -198,6 +198,9 @@ pub enum TerminalOrigin {
     /// ordinary shell syntax (arguments, quoting, pipes) works without
     /// this crate needing its own shell-word-splitter.
     Command(String),
+    /// A stopped agent whose resume command is retained for an explicit
+    /// unfreeze. Restarting Ilium restores the pane without launching it.
+    Frozen { resume_command: String },
 }
 
 impl TerminalOrigin {
@@ -209,6 +212,7 @@ impl TerminalOrigin {
         match self {
             TerminalOrigin::PlainShell => "shell",
             TerminalOrigin::Command(command_line) => command_line,
+            TerminalOrigin::Frozen { .. } => "frozen agent",
         }
     }
 
@@ -224,6 +228,7 @@ impl TerminalOrigin {
                 .map(|(provider, _session_id)| provider.command_line())
                 .unwrap_or_else(|| self.default_pane_name()),
             TerminalOrigin::PlainShell => self.default_pane_name(),
+            TerminalOrigin::Frozen { .. } => self.default_pane_name(),
         }
     }
 }
@@ -958,6 +963,10 @@ struct TerminalLaunchPlan {
 fn terminal_launch_plan(origin: &TerminalOrigin) -> TerminalLaunchPlan {
     match origin {
         TerminalOrigin::PlainShell => TerminalLaunchPlan {
+            command_line: None,
+            session_id: None,
+        },
+        TerminalOrigin::Frozen { .. } => TerminalLaunchPlan {
             command_line: None,
             session_id: None,
         },

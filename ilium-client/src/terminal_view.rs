@@ -1134,6 +1134,54 @@ pub(crate) struct PaintedTerminal {
     _pin: Option<Arc<crate::terminal_parsing::SnapshotPin>>,
 }
 impl PaintedTerminal {
+    pub(crate) fn from_frozen_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() < 4 {
+            return Err("frozen terminal snapshot is truncated".to_string());
+        }
+        let rows = u16::from_le_bytes([bytes[0], bytes[1]]).max(1);
+        let cols = u16::from_le_bytes([bytes[2], bytes[3]]).max(1);
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        parser.process(&bytes[4..]);
+        let snapshot = TerminalSnapshot {
+            visible: Arc::new(parser.screen().clone()),
+            history: TerminalHistorySnapshot {
+                segments: Arc::new(Vec::new()),
+                retained_len: 0,
+                origin: Arc::new(()),
+                _allocation_charge: None,
+                _pin_charge: None,
+            },
+            links: VecDeque::new(),
+            scrollback_total: 0,
+            scrollback_position: 0,
+            scrolled_back: false,
+            sequence: 0,
+            revision: 0,
+            mouse: !matches!(
+                parser.screen().mouse_protocol_mode(),
+                vt100::MouseProtocolMode::None
+            ),
+            paste: parser.screen().bracketed_paste(),
+            allocation_charge: None,
+        };
+        Ok(Self {
+            identity: Arc::new(()),
+            ordinal: 0,
+            snapshot: Arc::new(snapshot),
+            _live: None,
+            _pin: None,
+        })
+    }
+
+    pub(crate) fn frozen_bytes(&self) -> Vec<u8> {
+        let (rows, cols) = self.snapshot.visible.size();
+        let mut bytes = Vec::with_capacity(4);
+        bytes.extend_from_slice(&rows.to_le_bytes());
+        bytes.extend_from_slice(&cols.to_le_bytes());
+        bytes.extend_from_slice(&self.snapshot.visible.contents_formatted());
+        bytes
+    }
+
     pub(crate) fn with_screen<R>(&self, read: impl FnOnce(&vt100::Screen) -> R) -> R {
         read(&self.snapshot.visible)
     }

@@ -63,6 +63,17 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.apply_pane_process_terminated(pane_id, result);
             None
         }
+        ServerEvent::PaneFrozen { pane_id, result } => {
+            if result.is_ok() {
+                app.frozen_panes.insert(pane_id);
+                app.restore_frozen_screen(pane_id);
+            } else {
+                app.frozen_panes.remove(&pane_id);
+                app.frozen_screens.remove(&pane_id);
+                app.status_message = Some(format!("Agent freeze failed: {}", result.unwrap_err()));
+            }
+            None
+        }
         event @ ServerEvent::ScreenUpdate { pane_id, .. } => {
             if app.frozen_panes.contains(&pane_id) {
                 return None;
@@ -639,6 +650,10 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_panes
         .retain(|pane_id| live_pane_ids.contains(pane_id));
+    app.frozen_screens
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
+    app.auto_freeze_since
+        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.apply_pending_replacement_focus();
     app.terminal_activity.retain_panes(&live_pane_ids);
     app.retain_requested_pane_sizes(&live_pane_ids);

@@ -646,6 +646,7 @@ fn capture_estimated_bytes(
                 let command = match origin {
                     TerminalOrigin::Command(command) => command.capacity(),
                     TerminalOrigin::PlainShell => 0,
+                    TerminalOrigin::Frozen { resume_command } => resume_command.capacity(),
                 };
                 let mut amount = command
                     .saturating_add(runtime.session_id.as_ref().map_or(0, String::capacity))

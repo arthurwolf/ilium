@@ -495,7 +495,8 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::ClosePaneWithWorkspaceDisposition { .. }
         | R::QueryWorkspaceInventory { .. }
         | R::QueryWorkspaceCloseOffer { .. }
-        | R::TerminatePaneProcess { .. } => {}
+        | R::TerminatePaneProcess { .. }
+        | R::FreezePane { .. } => {}
     }
     count.bytes
 }

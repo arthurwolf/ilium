@@ -755,6 +755,9 @@ impl HeapBytes for ServerEvent {
             Self::PaneProcessTerminated { pane_id, result } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(result.heap_bytes()),
+            Self::PaneFrozen { pane_id, result } => 0usize
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(result.heap_bytes()),
         }
     }
 }

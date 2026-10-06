@@ -160,7 +160,9 @@ impl ProjectionRetention {
                 }
                 Err(_) => (Slot::DetectionSettingsError, None),
             },
-            TextTriggersChanged { .. } | PaneProcessTerminated { .. } => (global, None),
+            TextTriggersChanged { .. }
+            | PaneProcessTerminated { .. }
+            | PaneFrozen { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });
         update

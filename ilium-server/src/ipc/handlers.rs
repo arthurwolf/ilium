@@ -400,6 +400,10 @@ pub async fn handle_request(
             handle_terminate_pane_process(state, pane_id, direct_tx).await;
             false
         }
+        ClientRequest::FreezePane { pane_id, resume_command } => {
+            handle_freeze_pane(state, pane_id, resume_command, direct_tx).await;
+            false
+        }
         ClientRequest::ReplacePaneWithCommand {
             pane_id,
             command_line,
@@ -1451,6 +1455,12 @@ async fn state_synchronization_events(
             .flat_map(|(pane_id, resource)| match resource {
                 PaneResource::Terminal(runtime) => {
                     let mut events = Vec::new();
+                    if matches!(runtime.origin, TerminalOrigin::Frozen { .. }) {
+                        events.push(ServerEvent::PaneFrozen {
+                            pane_id: *pane_id,
+                            result: Ok(()),
+                        });
+                    }
                     if let Some(event) =
                         terminal_output_synchronization.event_for(*pane_id, &runtime.session)
                     {
@@ -3600,6 +3610,36 @@ async fn handle_terminate_pane_process(
     .await;
     let _ = direct_tx
         .send(ServerEvent::PaneProcessTerminated {
+            pane_id,
+            result: outcome,
+        })
+        .await;
+}
+
+async fn handle_freeze_pane(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    resume_command: String,
+    direct_tx: &mpsc::Sender<ServerEvent>,
+) {
+    let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
+        control
+            .terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT)
+            .map(|_| ())
+            .or_else(|_| control.kill_direct_child().map_err(std::io::Error::other))
+    })
+    .await;
+    if outcome.is_ok() {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            runtime.origin = TerminalOrigin::Frozen { resume_command };
+        }
+    }
+    if outcome.is_ok() {
+        broadcast_and_persist(state).await;
+    }
+    let _ = direct_tx
+        .send(ServerEvent::PaneFrozen {
             pane_id,
             result: outcome,
         })

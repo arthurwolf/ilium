@@ -3928,8 +3928,8 @@
     "id": "AN-66",
     "title": "Wind",
     "explanation": "Dots blown across the empty parts of your screen by a fixed or rotating wind, with gusts, drag and optional gravity. Dots live only in cells that show no text and bounce off everything else. Scrolling text pushes nearby dots the way it moves; text that appears from nowhere pushes them away more gently. Its own controls appear below the Background row.",
-    "specimen": "Dots · Dot weight · Weight variation · Air drag · Wind strength · Wind direction · Wind mode · Gusts · Gravity · Bounce · Screen edges · Scroll push · Appear push · Push reach · Scroll detection · Merge dots",
-    "states": "Fixed wind blows one way; Rotating turns steadily at the chosen speed. Gravity and Merge dots reveal their strength rows when switched on. Merged dots draw a larger dot character where several dots pile into one cell.",
+    "specimen": "Dots · Dot weight · Weight variation · Air drag · Wind strength · Wind direction · Wind mode · Gusts · Gravity · Bounce · Screen edges · Scroll push · Appear push · Push reach · Scroll detection · Diffusion · Dispersion · Merge dots",
+    "states": "Fixed wind blows one way; Rotating turns steadily at the chosen speed. Gravity and Merge dots reveal their strength rows when switched on. Merged dots draw a larger dot character where several dots pile into one cell. Diffusion pushes close dots apart so they do not bunch up; Dispersion makes a random dot jump to a random empty place now and then. Both are off at 0%.",
     "motion": "Light dots follow the wind closely and are pushed hard; heavy dots resist both and fall faster. The workspace is sampled every frame, so the dots react to scrolling and typing as they happen. Motion Off freezes the dots.",
     "caveat": "Wind reads only which cells are blank, never their content. Text that looks like a block moved is recognised as scrolling; unusual redraws count as text appearing. Dots draw in the shared dot color. Live only: never precomputed into the loop cache.",
     "frames": [

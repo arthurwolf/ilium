@@ -829,6 +829,12 @@ pub fn settings_help_anchors(
                     AppearanceRow::LockClosedEnabled => "AP-24",
                     AppearanceRow::ProjectSeparators => "AP-25",
                     AppearanceRow::AutoRemoveEmptyGroups => "AP-26",
+                    AppearanceRow::AutoFreeze => "AP-27",
+                    AppearanceRow::AutoFreezeAfter => "AP-28",
+                    AppearanceRow::AutoFreezeDone => "AP-29",
+                    AppearanceRow::AutoFreezeIdle => "AP-30",
+                    AppearanceRow::AutoFreezeWaitingApproval => "AP-31",
+                    AppearanceRow::AutoFreezeWaitingBackground => "AP-32",
                 };
                 let selected = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode)
                     .get(state.selected_row)
@@ -3843,6 +3849,22 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::TerminalTextSelection => "Terminal text selection",
         AppearanceRow::LockClosedEnabled => "Lock-closed items",
         AppearanceRow::AutoRemoveEmptyGroups => "Auto-remove empty groups",
+        AppearanceRow::AutoFreeze => "Auto-freeze agents",
+        AppearanceRow::AutoFreezeAfter => "Auto-freeze delay",
+        AppearanceRow::AutoFreezeDone => "Freeze finished agents",
+        AppearanceRow::AutoFreezeIdle => "Freeze idle agents",
+        AppearanceRow::AutoFreezeWaitingApproval => "Freeze approval waits",
+        AppearanceRow::AutoFreezeWaitingBackground => "Freeze background waits",
+    }
+}
+
+fn format_duration(seconds: u64) -> String {
+    if seconds % 86_400 == 0 {
+        format!("{} days", seconds / 86_400)
+    } else if seconds % 3_600 == 0 {
+        format!("{} hours", seconds / 3_600)
+    } else {
+        format!("{} minutes", seconds / 60)
     }
 }
 
@@ -3922,6 +3944,12 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         AppearanceRow::LockClosedEnabled => {
             "Double-click a project, group, or folder row (or use its right-click menu) to lock it closed, showing a lock icon and blocking expansion until unlocked. Disabling this only hides the gesture and menu action -- an already-locked entry stays locked."
         }
+        AppearanceRow::AutoFreeze => "Automatically stop eligible inactive agent processes while retaining their screens in the tree.",
+        AppearanceRow::AutoFreezeAfter => "How long an eligible agent must remain inactive before freezing.",
+        AppearanceRow::AutoFreezeDone => "Include agents whose work has completed.",
+        AppearanceRow::AutoFreezeIdle => "Include agents waiting for new user input.",
+        AppearanceRow::AutoFreezeWaitingApproval => "Include agents waiting for approval.",
+        AppearanceRow::AutoFreezeWaitingBackground => "Include agents waiting for background tasks.",
     }
 }
 
@@ -4049,6 +4077,42 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         }
         AppearanceRow::AutoRemoveEmptyGroups => {
             if ui.auto_remove_empty_groups {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AutoFreeze => {
+            if ui.auto_freeze_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AutoFreezeAfter => format_duration(ui.auto_freeze_after_seconds),
+        AppearanceRow::AutoFreezeDone => {
+            if ui.auto_freeze_done {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AutoFreezeIdle => {
+            if ui.auto_freeze_idle {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AutoFreezeWaitingApproval => {
+            if ui.auto_freeze_waiting_approval {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
+        AppearanceRow::AutoFreezeWaitingBackground => {
+            if ui.auto_freeze_waiting_background {
                 "On".to_string()
             } else {
                 "Off".to_string()

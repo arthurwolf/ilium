@@ -694,6 +694,18 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
         return;
     }
 
+    if key.code == KeyCode::Enter
+        && app.focus == FocusTarget::Pane
+        && app
+            .active_pane_id()
+            .is_some_and(|pane_id| app.frozen_panes.contains(&pane_id))
+    {
+        if let Some(pane_id) = app.active_pane_id() {
+            app.action_unfreeze_agent(pane_id);
+        }
+        return;
+    }
+
     if app.pending_terminal_link.is_some() {
         if key.code == KeyCode::Esc {
             app.pending_terminal_link = None;
