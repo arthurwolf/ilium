@@ -95,7 +95,7 @@ pub fn replace_file_durably(source: &Path, destination: &Path) -> io::Result<()>
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         };
         let wide = |path: &Path| -> io::Result<Vec<u16>> {
             let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();
@@ -335,6 +335,18 @@ pub use crate::nofollow_windows::NoFollowDirectory;
 #[cfg(not(any(unix, windows)))]
 pub struct NoFollowDirectory;
 
+/// Linux-only directory capability for crossing ancestors that grant search
+/// permission without granting directory read/list permission.
+///
+/// This type is intentionally narrower than [`NoFollowDirectory`]. Its `O_PATH`
+/// descriptor may only be used to continue a nofollow walk or to open the final
+/// selected readable resource. It cannot be listed, synchronized, mutated, or
+/// cloned into a selected-directory capability.
+#[cfg(target_os = "linux")]
+pub struct NoFollowTraversalDirectory {
+    file: std::fs::File,
+}
+
 /// Whether this platform can safely create and verify worktree ownership
 /// markers and copy included files without following substituted paths.
 pub const fn supports_nofollow_directories() -> bool {
@@ -394,6 +406,156 @@ pub fn spawn_directory_generation(path: &Path) -> io::Result<Option<(u64, u64)>>
 #[cfg(not(any(unix, windows)))]
 pub fn spawn_directory_generation(_path: &Path) -> io::Result<Option<(u64, u64)>> {
     Ok(None)
+}
+
+#[cfg(target_os = "linux")]
+impl NoFollowTraversalDirectory {
+    /// Starts a traversal without requiring read/list access to the directory.
+    ///
+    /// The pre/post identity check gives this public root constructor the same
+    /// changed-during-open refusal as `NoFollowDirectory::open_root`.
+    pub fn open_root(path: &Path) -> io::Result<Self> {
+        use std::os::fd::FromRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        let before = std::fs::symlink_metadata(path)?;
+        if !before.file_type().is_dir() || before.file_type().is_symlink() {
+            return Err(io::Error::other("traversal root must be a real directory"));
+        }
+
+        let path = unix_c_string(path.as_os_str())?;
+        // `O_PATH` obtains pathname authority without requiring directory read
+        // permission. Later relative lookups still require ordinary search
+        // permission from the kernel.
+        //
+        // SAFETY: `path` is a valid NUL-terminated byte string. On success this
+        // transfers ownership of the returned descriptor to `File`.
+        let descriptor = unsafe {
+            libc::open(
+                path.as_ptr(),
+                libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // SAFETY: successful `open` returned a fresh descriptor owned here.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        let after = file.metadata()?;
+        if !after.file_type().is_dir() || before.dev() != after.dev() || before.ino() != after.ino()
+        {
+            return Err(io::Error::other("traversal root changed while opening"));
+        }
+
+        Ok(Self { file })
+    }
+
+    /// Returns the physical identity of this already pinned traversal
+    /// directory without upgrading it to a readable directory capability.
+    ///
+    /// `fstat` through an `O_PATH` descriptor needs neither directory listing
+    /// permission nor pathname reopening. The descriptor remains suitable only
+    /// for the restricted traversal operations exposed by this type.
+    pub fn identity(&self) -> io::Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = self.file.metadata()?;
+        if !metadata.file_type().is_dir() {
+            return Err(io::Error::other("traversal handle is not a directory"));
+        }
+
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
+    /// Continues the handle-relative walk through one real directory component.
+    pub fn open_directory(&self, name: &std::ffi::OsStr) -> io::Result<Self> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // `O_DIRECTORY` plus the post-open file-type check deliberately prevents
+        // the `O_PATH | O_NOFOLLOW` symlink-descriptor special case from turning
+        // a symlink into traversal authority.
+        //
+        // SAFETY: `self.file` is an owned live directory descriptor and `name`
+        // is exactly one NUL-terminated path component.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // SAFETY: successful `openat` returned a fresh descriptor owned here.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        if !file.metadata()?.file_type().is_dir() {
+            return Err(io::Error::other("traversal child must be a real directory"));
+        }
+
+        Ok(Self { file })
+    }
+
+    /// Opens the selected directory as the ordinary readable directory
+    /// capability required by listing, sync, leases, and `PinnedDirectory`.
+    pub fn open_readable_directory(&self, name: &std::ffi::OsStr) -> io::Result<NoFollowDirectory> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // SAFETY: the traversal descriptor is a pinned directory authority and
+        // `name` is one validated child component.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // SAFETY: successful `openat` returned a fresh descriptor owned here.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        if !file.metadata()?.file_type().is_dir() {
+            return Err(io::Error::other("selected child is not a directory"));
+        }
+
+        Ok(NoFollowDirectory { file })
+    }
+
+    /// Opens the selected file directly from a traversal-only parent.
+    pub fn open_regular(&self, name: &std::ffi::OsStr) -> io::Result<std::fs::File> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+
+        let name = unix_child_name(name)?;
+        // Keep the ordinary selected-file contract: read-only, nofollow, and
+        // nonblocking so a substituted FIFO cannot block the picker.
+        //
+        // SAFETY: the parent descriptor is live and `name` is one validated,
+        // NUL-terminated path component.
+        let descriptor = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // SAFETY: successful `openat` returned a fresh descriptor owned here.
+        let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+        if !file.metadata()?.file_type().is_file() {
+            return Err(io::Error::other("selected child is not a regular file"));
+        }
+
+        Ok(file)
+    }
 }
 
 #[cfg(unix)]

@@ -807,6 +807,25 @@ impl Client {
         })
     }
 
+    /// Immutable single external-payload ceilings across root and ancestors.
+    /// External owners use no finite bank slot, so disabled CPU workers do not
+    /// refuse this capability. Occupancy and shutdown can still race checked
+    /// admission; this reports permanent limits, never currently free bytes.
+    pub fn maximum_external_job_cost(&self) -> Result<JobCost, RejectReason> {
+        if !self.is_open() {
+            return Err(RejectReason::Closed);
+        }
+        let root = self.shared.quota.snapshot().limits;
+        if root.jobs == 0 {
+            return Err(RejectReason::JobLimit);
+        }
+        let tenant = self.tenant.maximum_job_cost()?;
+        Ok(JobCost {
+            input_bytes: root.input_bytes.min(tenant.input_bytes),
+            result_bytes: root.result_bytes.min(tenant.result_bytes),
+        })
+    }
+
     /// Registers a feature identity beneath this client's aggregate limits.
     /// Every job and retained outcome charges both identities through its
     /// final owner. Clones share a child; registering siblings cannot multiply

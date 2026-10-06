@@ -48,6 +48,10 @@ pub mod native_math;
 pub mod native_math_bridge;
 #[cfg(feature = "native-host")]
 pub mod native_media;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_presentation_host;
+#[cfg(feature = "native-host")]
+pub mod native_saved_factory;
 #[cfg(all(
     feature = "v8-runtime",
     feature = "native-host",
@@ -66,6 +70,8 @@ pub mod native_video_decoder;
     feature = "native-network"
 ))]
 pub mod native_video_host;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_world_host;
 #[cfg(all(feature = "native-host", feature = "v8-runtime"))]
 pub mod native_world_region;
 #[cfg(feature = "native-host")]
@@ -89,6 +95,8 @@ pub mod trust;
 pub mod world_region;
 #[cfg(feature = "native-host")]
 pub mod world_region_encoding;
+#[cfg(feature = "native-host")]
+pub mod world_region_saved;
 
 #[cfg(all(test, feature = "v8-runtime"))]
 mod v8_dependency_tests {

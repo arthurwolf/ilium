@@ -1083,6 +1083,91 @@ impl PermissionBroker {
             .committed = true; // Mark before any possibly partial effect.
         Ok(issue()) // Hold the external broker lock through this bounded issue; never wait for I/O completion here.
     } // Actual completion and uncertain outcome belong to the native operation receipt.
+    /// Atomically commit one bounded native effect which depends on several
+    /// independently dispatched original requests. Each ticket keeps its own
+    /// accepted demand and exact scoped needs; no union creates a new grant.
+    pub fn commit_group<T>(
+        &mut self,
+        tickets: &[&OperationTicket],
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        let ids = self.check_operation_group(tickets, false)?;
+        // All fallible validation finished before changing any ticket. The
+        // exclusive broker owner prevents operation-map mutation in this loop.
+        for (id, operation) in &mut self.operations {
+            if ids.contains(id) {
+                operation.committed = true;
+            }
+        }
+        Ok(issue())
+    }
+    /// Publish one result only while every original dependency remains current.
+    /// Refusal retains every ticket for the native completion/cleanup owner.
+    pub fn deliver_group<T>(
+        &mut self,
+        tickets: &[&OperationTicket],
+        publish: impl FnOnce() -> T,
+    ) -> Result<T> {
+        let ids = self.check_operation_group(tickets, true)?;
+        for id in ids {
+            self.operations.remove(&id);
+        }
+        Ok(publish())
+    }
+    /// Actual native failure/cancellation has completed. Authenticate the whole
+    /// original same-activation group before removing any metadata; stale grants
+    /// can settle, but foreign/duplicate tickets cannot partially release a group.
+    pub fn settle_group_without_delivery(&mut self, tickets: &[&OperationTicket]) -> Result<()> {
+        if tickets.is_empty() || tickets.len() > 8 {
+            return Err(PermissionError::Invalid(
+                "native operation settlement count",
+            ));
+        }
+        let stamp = tickets[0].stamp;
+        let mut ids = BTreeSet::new();
+        for ticket in tickets {
+            if ticket.stamp != stamp || !ids.insert(ticket.operation_id) {
+                return Err(PermissionError::Invalid(
+                    "native operation settlement identity",
+                ));
+            }
+            self.operation(ticket)?;
+        }
+        for id in ids {
+            self.operations.remove(&id);
+        }
+        Ok(())
+    }
+    fn check_operation_group(
+        &self,
+        tickets: &[&OperationTicket],
+        committed: bool,
+    ) -> Result<BTreeSet<u64>> {
+        if tickets.is_empty() || tickets.len() > 8 {
+            return Err(PermissionError::Invalid(
+                "native operation dependency count",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        let stamp = tickets[0].stamp;
+        for ticket in tickets {
+            if ticket.stamp != stamp || !ids.insert(ticket.operation_id) {
+                return Err(PermissionError::Invalid(
+                    "native operation dependency identity",
+                ));
+            }
+            let operation = self.operation(ticket)?;
+            if operation.committed != committed {
+                return Err(if committed {
+                    PermissionError::NotCommitted
+                } else {
+                    PermissionError::AlreadyCommitted
+                });
+            }
+            self.check_needs(&operation.channel, &operation.demand_id, &operation.needs)?;
+        }
+        Ok(ids)
+    }
     pub fn deliver<T>(
         &mut self,
         ticket: &OperationTicket,
@@ -2302,4 +2387,147 @@ mod tests {
             Err(PermissionError::Capacity)
         )); // Stored payload has its own cap.
     } // The parent should display these failures without activating privileged work.
+    fn group_active(broker: &mut PermissionBroker, instance: u64) -> Activation {
+        let review = broker
+            .prepare(
+                instance,
+                1,
+                plan(vec![
+                    request("net", net(), true),
+                    request("pointer", pointer(), true),
+                ]),
+                BTreeMap::new(),
+            )
+            .unwrap();
+        broker
+            .resolve(review, BTreeMap::new())
+            .unwrap()
+            .activation
+            .unwrap()
+    }
+    fn group_tickets(
+        broker: &mut PermissionBroker,
+        active: &Activation,
+    ) -> (OperationTicket, OperationTicket) {
+        let first = broker
+            .dispatch(&active.channel, CallPhase::Async, "work_net", need())
+            .unwrap();
+        let second = broker
+            .dispatch(
+                &active.channel,
+                CallPhase::Async,
+                "work_pointer",
+                vec![OperationNeed::new(pointer(), None).unwrap()],
+            )
+            .unwrap();
+        (first, second)
+    }
+    #[test]
+    fn grouped_original_dependencies_commit_and_deliver_once() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        let mut issued = 0;
+        owner.commit_group(&[&a, &b], || issued += 1).unwrap();
+        assert_eq!(issued, 1);
+        assert!(owner
+            .committed_operation_grants(&a, &active.channel)
+            .is_ok());
+        assert!(owner
+            .committed_operation_grants(&b, &active.channel)
+            .is_ok());
+        assert_eq!(owner.deliver_group(&[&a, &b], || 123).unwrap(), 123);
+        assert!(owner.operations.is_empty());
+        assert!(owner.deliver_group(&[&a, &b], || ()).is_err());
+    }
+    #[test]
+    fn grouped_commit_refusal_does_not_partially_commit_or_issue() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        owner.commit(&b, || ()).unwrap();
+        let mut issued = false;
+        assert!(owner.commit_group(&[&a, &b], || issued = true).is_err());
+        assert!(!issued);
+        assert!(!owner.operation(&a).unwrap().committed);
+        owner.commit(&a, || ()).unwrap();
+    }
+    #[test]
+    fn grouped_original_dependencies_refuse_duplicate_foreign_and_cross_instance_tickets() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, _b) = group_tickets(&mut owner, &active);
+        assert!(owner.commit_group(&[], || ()).is_err());
+        assert!(owner.commit_group(&[&a, &a], || ()).is_err());
+        let other_active = group_active(&mut owner, 2);
+        let (_, cross) = group_tickets(&mut owner, &other_active);
+        assert!(owner.commit_group(&[&a, &cross], || ()).is_err());
+        let mut foreign_owner = broker(true, vec![net(), pointer()]);
+        let foreign_active = group_active(&mut foreign_owner, 1);
+        let (_, foreign) = group_tickets(&mut foreign_owner, &foreign_active);
+        assert!(owner.commit_group(&[&a, &foreign], || ()).is_err());
+        assert!(!owner.operation(&a).unwrap().committed);
+    }
+    #[test]
+    fn grouped_delivery_after_revocation_retains_every_original_custody_ticket() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        owner.commit_group(&[&a, &b], || ()).unwrap();
+        let _invalidation = owner.revoke(pointer()).unwrap();
+        let mut published = false;
+        assert!(owner.deliver_group(&[&a, &b], || published = true).is_err());
+        assert!(!published);
+        assert_eq!(owner.operations.len(), 2);
+        // Synthetic body-completion point: only now may the native owner settle.
+        owner.settle_without_delivery(&a).unwrap();
+        owner.settle_without_delivery(&b).unwrap();
+        assert!(owner.operations.is_empty());
+    }
+    #[test]
+    fn grouped_native_settlement_refuses_foreign_dependency_without_partial_release() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        let mut foreign_owner = broker(true, vec![net(), pointer()]);
+        let foreign_active = group_active(&mut foreign_owner, 1);
+        let (_, foreign) = group_tickets(&mut foreign_owner, &foreign_active);
+        assert!(owner
+            .settle_group_without_delivery(&[&a, &foreign])
+            .is_err());
+        assert_eq!(owner.operations.len(), 2);
+        assert!(owner.settle_group_without_delivery(&[&a, &a]).is_err());
+        assert_eq!(owner.operations.len(), 2);
+        owner.settle_group_without_delivery(&[&a, &b]).unwrap();
+        assert!(owner.operations.is_empty());
+    }
+    #[test]
+    fn grouped_native_completion_settles_original_tickets_after_revocation() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        owner.commit_group(&[&a, &b], || ()).unwrap();
+        let invalidation = owner.revoke(pointer()).unwrap();
+        assert!(invalidation.authorization_epoch > 0);
+        owner.settle_group_without_delivery(&[&a, &b]).unwrap();
+        assert!(owner.operations.is_empty());
+    }
+    #[test]
+    fn grouped_delivery_can_settle_metadata_even_when_native_publication_returns_error() {
+        let mut owner = broker(true, vec![net(), pointer()]);
+        let active = group_active(&mut owner, 1);
+        let (a, b) = group_tickets(&mut owner, &active);
+        owner.commit_group(&[&a, &b], || ()).unwrap();
+        let settled = std::sync::atomic::AtomicBool::new(false);
+        let outcome: std::result::Result<(), &str> = owner
+            .deliver_group(&[&a, &b], || {
+                settled.store(true, std::sync::atomic::Ordering::Release);
+                Err("synthetic helper delivery error after broker settlement")
+            })
+            .unwrap();
+        assert!(outcome.is_err());
+        assert!(settled.load(std::sync::atomic::Ordering::Acquire));
+        assert!(owner.operations.is_empty());
+        assert!(owner.settle_group_without_delivery(&[&a, &b]).is_err());
+    }
 } // End complete permission tests.

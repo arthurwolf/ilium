@@ -6,8 +6,8 @@ use std::{
     fs::File,
     io::{self, Write},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
     },
 };
 #[cfg(not(target_os = "linux"))]
@@ -147,6 +147,61 @@ impl PinnedDirectory {
     pub fn identity(&self) -> FileIdentity {
         self.identity
     }
+    /// Shares this already pinned directory descriptor with another trusted
+    /// native reader. A pathname derived from the directory is not authority.
+    pub fn original_root(&self) -> Arc<NoFollowDirectory> {
+        Arc::clone(&self.root)
+    }
+    /// Native-only physical ancestry for proving a protected history root is
+    /// outside a selected source tree. Walks fixed `..` entries from the retained
+    /// descriptor, never reconstructs authority from an old path label.
+    pub fn ancestor_identities(&self, maximum: usize) -> io::Result<Vec<FileIdentity>> {
+        if maximum == 0 || maximum > 128 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ancestor bound",
+            ));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let mut current = self.root.try_clone_file()?;
+            let mut ancestors = Vec::with_capacity(maximum);
+            let parent_name = c"..";
+            loop {
+                let current_identity = identity(&current)?;
+                if ancestors.contains(&current_identity) {
+                    return Err(io::Error::other("directory ancestry cycle"));
+                }
+                ancestors.push(current_identity);
+                // SAFETY: current is an owned live directory descriptor and the
+                // fixed NUL-terminated parent name cannot contain guest input.
+                let descriptor = unsafe {
+                    libc::openat(
+                        current.as_raw_fd(),
+                        parent_name.as_ptr(),
+                        libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                    )
+                };
+                if descriptor < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                // SAFETY: successful openat transfers this fresh descriptor.
+                let parent = unsafe { File::from_raw_fd(descriptor) };
+                if identity(&parent)? == current_identity {
+                    return Ok(ancestors);
+                }
+                if ancestors.len() == maximum {
+                    return Err(io::Error::other("directory ancestry exceeds bound"));
+                }
+                current = parent;
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(unsupported())
+        }
+    }
     pub fn open_file(&self, leaf: &str) -> io::Result<PinnedFile> {
         validate_leaf(leaf)?;
         PinnedFile::from_host(self.root.open_regular(OsStr::new(leaf))?)
@@ -163,6 +218,25 @@ impl PinnedDirectory {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "directory entry limit",
+            ));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            linux_list(self, maximum)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(unsupported())
+        }
+    }
+    /// Existing saved-scene catalog ceiling, independently reserved by its
+    /// complete scene account before a worker reads this descriptor. Ordinary
+    /// selected-resource callers retain the 1,024-entry `list` ceiling.
+    pub fn list_saved_catalog(&self, maximum: usize) -> io::Result<Vec<DirectoryEntry>> {
+        if maximum == 0 || maximum > 16_384 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "saved catalog directory entry limit",
             ));
         }
         #[cfg(target_os = "linux")]
@@ -318,6 +392,7 @@ impl PinnedDirectory {
                 mode,
                 identity,
                 published: false,
+                aborted: false,
                 bytes: 0,
             })
         }
@@ -351,11 +426,51 @@ pub struct AtomicFile {
     mode: WriteMode,
     identity: FileIdentity,
     published: bool,
+    aborted: bool,
     bytes: usize,
 }
 impl AtomicFile {
+    /// Native-only hook view of the original staging inode. The file remains
+    /// unpublished; callers must validate the complete bounded readback before
+    /// publication. No script receives this file or its temporary name.
+    pub fn try_clone_staging_file(&self) -> io::Result<File> {
+        if self.published || self.aborted || identity(&self.file)? != self.identity {
+            return Err(io::Error::other("staging file no longer unpublished"));
+        }
+        self.file.try_clone()
+    }
+    pub fn open_staging_readonly(&self) -> io::Result<File> {
+        if self.published || self.aborted {
+            return Err(io::Error::other("staging file no longer available"));
+        }
+        let file = self.root.root.open_regular(OsStr::new(&self.temporary))?;
+        if identity(&file)? != self.identity {
+            return Err(io::Error::other("staging readback inode changed"));
+        }
+        Ok(file)
+    }
+    /// True only after the actual native rename syscall succeeded, even when
+    /// subsequent identity/durability confirmation returned an error.
+    pub fn was_published(&self) -> bool {
+        self.published
+    }
+    /// Remove only the original unpublished staging inode, reporting cleanup
+    /// failures to callers that must retain an explicit failed-write receipt.
+    pub fn abort_unpublished(&mut self) -> io::Result<()> {
+        if self.published {
+            return Err(io::Error::other("published atomic file cannot be aborted"));
+        }
+        if !self.aborted {
+            self.root
+                .root
+                .remove_regular(OsStr::new(&self.temporary), &self.file)?;
+            self.aborted = true;
+        }
+        Ok(())
+    }
     pub fn write(&mut self, bytes: &[u8], maximum: usize) -> io::Result<()> {
         if self.published
+            || self.aborted
             || self
                 .bytes
                 .checked_add(bytes.len())
@@ -386,7 +501,10 @@ impl AtomicFile {
                 .mutations
                 .lock()
                 .map_err(|_| io::Error::other("directory mutation guard poisoned"))?;
-            if self.published || self.root.open_file(&self.temporary)?.identity() != self.identity {
+            if self.published
+                || self.aborted
+                || self.root.open_file(&self.temporary)?.identity() != self.identity
+            {
                 return Err(io::Error::other("atomic source identity changed"));
             }
             let root = self.root.root.try_clone_file()?;
@@ -440,7 +558,7 @@ impl AtomicFile {
 }
 impl Drop for AtomicFile {
     fn drop(&mut self) {
-        if !self.published {
+        if !self.published && !self.aborted {
             let _ = self
                 .root
                 .root
@@ -631,5 +749,52 @@ mod tests {
         );
         drop(lease);
         assert!(other.try_exclusive_lease().is_ok());
+    }
+    #[test]
+    fn pinned_ancestry_tracks_physical_parent_after_old_label_replacement() {
+        let fixture = tempfile::tempdir().unwrap();
+        let original = fixture.path().join("original");
+        std::fs::create_dir(&original).unwrap();
+        let root =
+            PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&original).unwrap()))
+                .unwrap();
+        let parent = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(fixture.path()).unwrap(),
+        ))
+        .unwrap();
+        std::fs::rename(&original, fixture.path().join("retained")).unwrap();
+        std::fs::create_dir(&original).unwrap();
+        let replacement =
+            PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&original).unwrap()))
+                .unwrap();
+        let ancestry = root.ancestor_identities(128).unwrap();
+        assert_eq!(ancestry[0], root.identity());
+        assert!(ancestry.contains(&parent.identity()));
+        assert!(!ancestry.contains(&replacement.identity()));
+        assert!(root.ancestor_identities(0).is_err());
+        assert!(root.ancestor_identities(129).is_err());
+        assert!(root.ancestor_identities(1).is_err());
+    }
+    #[test]
+    fn pinned_atomic_abort_removes_original_stage_and_refuses_later_publication() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = Arc::new(
+            PinnedDirectory::from_host(Arc::new(
+                NoFollowDirectory::open_root(fixture.path()).unwrap(),
+            ))
+            .unwrap(),
+        );
+        let mut stage = root
+            .begin_atomic("history", WriteMode::ReplaceEntry)
+            .unwrap();
+        stage.write(b"unfinished", 128).unwrap();
+        stage.abort_unpublished().unwrap();
+        stage.abort_unpublished().unwrap();
+        assert!(!stage.was_published());
+        assert!(stage.write(b"extra", 128).is_err());
+        assert!(stage.publish_entry().is_err());
+        assert!(stage.try_clone_staging_file().is_err());
+        assert!(stage.open_staging_readonly().is_err());
+        assert!(root.list(8).unwrap().is_empty());
     }
 }

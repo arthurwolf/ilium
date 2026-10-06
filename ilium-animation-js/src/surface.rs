@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize}; // Metadata is bounded JSON; sample planes 
 use std::collections::{BTreeMap, BTreeSet}; // Bound retained text and unique native evidence identities.
 use std::io::{self, Write}; // Count metadata bytes without allocating an oversized JSON copy.
 use std::num::NonZeroU64; // Option<SourceToken> remains one machine-sized provenance entry.
+use std::sync::atomic::{AtomicU64, Ordering}; // One issuer covers replay, video, and world source tokens.
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 pub const MAX_CELLS: usize = 131_072; // Match the supplied worker's absolute cell ceiling.
@@ -553,7 +554,22 @@ pub struct Planes {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)] // No Deserialize implementation or public integer field.
 #[repr(transparent)] // Preserve NonZeroU64's guaranteed Option niche for the declared owner-plane budget.
 pub struct SourceToken(NonZeroU64); // The native evidence store owns the authenticated meaning.
+static NEXT_NATIVE_SOURCE_TOKEN: AtomicU64 = AtomicU64::new(1);
 impl SourceToken {
+    /// Reserve disjoint process-local token values for every native evidence issuer.
+    /// The range is never recycled while a retained frame or replay may name it.
+    pub(crate) fn reserve_native_range(length: usize) -> Result<u64> {
+        let span = u64::try_from(length).map_err(|_| SurfaceError::Capacity)?;
+        if span == 0 {
+            return Err(SurfaceError::Invalid("empty native source token range"));
+        }
+        NEXT_NATIVE_SOURCE_TOKEN
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |first| {
+                first.checked_add(span)
+            })
+            .map_err(|_| SurfaceError::Capacity)
+    }
+
     // Only a trusted prepared-source adapter constructs a token.
     pub(crate) fn from_native(value: u64) -> Result<Self> {
         NonZeroU64::new(value)

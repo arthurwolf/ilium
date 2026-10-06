@@ -583,21 +583,12 @@ fn prepared_world_blit_reuses_actual_retained_native_raster_without_redrawing() 
         .unwrap();
     let stop = StopToken::default();
     let baseline = quota.snapshot().worker_bytes;
-    // Generated geometry has no saved-state owner. Host authentication keeps
-    // those dots uncredited instead of manufacturing history/source evidence.
-    let prepared = PreparedBlit::world(
-        frame.clone(),
-        binding(),
-        &quota,
-        [255; 3],
-        &stop,
-        |actual, owner| {
-            assert!(std::ptr::eq(actual, frame.as_ref()));
-            assert_ne!(owner, 0);
-            Ok(None)
-        },
-    )
-    .unwrap();
+    // Native source tokens identify original lit dots. Saved-world history
+    // credit is authenticated separately from this retained draw binding.
+    let world_binding = worlds.bind_draw_source(&frame).unwrap();
+    assert!(std::sync::Arc::ptr_eq(world_binding.frame(), &frame));
+    let prepared =
+        PreparedBlit::world(world_binding.clone(), binding(), &quota, [255; 3], &stop).unwrap();
     assert!(quota.snapshot().worker_bytes > baseline);
     let media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
     let mut authority = Authority {
@@ -647,7 +638,14 @@ fn prepared_world_blit_reuses_actual_retained_native_raster_without_redrawing() 
         panic!("gray32 native world plane")
     };
     assert_eq!(data, &frame.raster().dots);
-    assert!(output.patches[0].owners.iter().all(Option::is_none));
+    for (index, (dot, owner)) in data.iter().zip(&output.patches[0].owners).enumerate() {
+        if *dot > 0.0 {
+            let token = owner.expect("original lit world dot token");
+            assert_eq!(world_binding.source_index(token), Some(index));
+        } else {
+            assert!(owner.is_none());
+        }
+    }
 }
 
 #[test]

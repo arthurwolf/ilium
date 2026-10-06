@@ -5,7 +5,7 @@ use crate::{
     native_media::{
         Admitted, ImageHandle, ImagePixels, NativeMedia, TextSpan, TextStyle as MediaStyle,
     },
-    native_worlds::NativeWorldFrame,
+    native_worlds::{NativeWorldFrame, WorldDotBinding},
     surface::{
         Blend, ColourSpace, Command, Data, Format, Mode, NativeOutput, NativePatch, NativeRenderer,
         NativeSpan, NativeText, Rect, Shape, SourceToken, SurfaceError, VectorOp,
@@ -14,7 +14,7 @@ use crate::{
 use ilium_ambient::raster::Raster;
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::owned_worker::StopToken;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 type Result<T> = std::result::Result<T, SurfaceError>;
@@ -67,6 +67,7 @@ struct WorldOwners {
     tokens: Vec<Option<SourceToken>>,
     palette_rgb: [u8; 3],
     _storage: StorageAdmission,
+    binding: Arc<WorldDotBinding>,
 }
 impl PreparedBlit {
     /// Host-only preparation AFTER authorizing the original native image and
@@ -96,20 +97,19 @@ impl PreparedBlit {
             pixels: PreparedPixels::Image { image, owner },
         })
     }
-    /// Preparation retains the actual world frame/receipt and maps its native
-    /// owner IDs through the host's authenticated receipt evidence store. The
-    /// mapping callback must verify that frame/source/receipt, not trust JSON.
+    /// Preparation retains the original native world/frame binding. Each lit
+    /// source dot receives its process-unique host token before any guest draw.
     pub fn world(
-        frame: Arc<NativeWorldFrame>,
+        world_binding: Arc<WorldDotBinding>,
         binding: DrawBinding,
         quota: &QuotaGroup,
         palette_rgb: [u8; 3],
         stop: &StopToken,
-        mut authenticate: impl FnMut(&NativeWorldFrame, u32) -> Result<Option<u64>>,
     ) -> Result<Self> {
         if stop.is_stopped() {
             return Err(SurfaceError::Stale);
         }
+        let frame = Arc::clone(world_binding.frame());
         let raster = frame.raster();
         let count = raster
             .width
@@ -134,29 +134,23 @@ impl PreparedBlit {
             .reserve_external_storage(
                 count
                     .checked_mul(8)
-                    .and_then(|size| size.checked_add(8192 * 128 + 256))
+                    .and_then(|size| size.checked_add(256))
                     .ok_or(SurfaceError::Capacity)?,
             )
             .map_err(|_| SurfaceError::Capacity)?;
         let mut tokens = Vec::with_capacity(count);
-        let mut authenticated = BTreeMap::new();
         for (index, owner) in raster.owner_ids.iter().enumerate() {
             if index.is_multiple_of(64) && stop.is_stopped() {
                 return Err(SurfaceError::Stale);
             }
-            let token = if *owner == 0 {
+            let token = if raster.dots[index] == 0.0 {
                 None
-            } else if let Some(token) = authenticated.get(owner) {
-                *token
             } else {
-                if authenticated.len() >= 8192 {
-                    return Err(SurfaceError::Capacity);
-                }
-                let token = authenticate(&frame, *owner)?
+                world_binding
+                    .token_for(&frame, index, *owner)
+                    .map_err(|_| SurfaceError::Invalid("world dot binding"))?
                     .map(SourceToken::from_native)
-                    .transpose()?;
-                authenticated.insert(*owner, token);
-                token
+                    .transpose()?
             };
             tokens.push(token);
         }
@@ -168,9 +162,18 @@ impl PreparedBlit {
                     tokens,
                     palette_rgb,
                     _storage: storage,
+                    binding: world_binding,
                 }),
             },
         })
+    }
+    /// Retain the exact source frame range for the terminal snapshot. This is
+    /// native Rust custody only; handles and tokens are not guest-visible.
+    pub fn world_dot_binding(&self) -> Option<Arc<WorldDotBinding>> {
+        match &self.pixels {
+            PreparedPixels::World { owners, .. } => Some(Arc::clone(&owners.binding)),
+            PreparedPixels::Image { .. } => None,
+        }
     }
     fn dimensions(&self) -> (usize, usize) {
         match &self.pixels {

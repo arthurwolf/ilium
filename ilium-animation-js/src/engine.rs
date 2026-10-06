@@ -393,6 +393,27 @@ impl ServiceValue {
     ) -> Result<Self> {
         Self::copy_parts(metadata, arrays, planes, limits, quota, None)
     }
+
+    #[cfg(test)]
+    pub(crate) fn copy_from_borrowed_host_with_admission_hook(
+        metadata: &Value,
+        arrays: &[ArraySpec],
+        planes: &BTreeMap<String, &[u8]>,
+        limits: &EngineLimits,
+        quota: QuotaGroup,
+        after_admission: impl FnOnce(&StorageAdmission) -> Result<()>,
+    ) -> Result<Self> {
+        Self::copy_parts_inner(
+            metadata,
+            arrays,
+            planes,
+            limits,
+            quota,
+            None,
+            after_admission,
+        )
+    }
+
     pub(crate) fn copy_request_from_host(
         metadata: &Value,
         arrays: &[ArraySpec],
@@ -412,6 +433,22 @@ impl ServiceValue {
         quota: QuotaGroup,
         budget: Option<&Arc<ServiceBudget>>,
     ) -> Result<Self> {
+        Self::copy_parts_inner(metadata, arrays, planes, limits, quota, budget, |_| Ok(()))
+    }
+
+    fn copy_parts_inner<B, F>(
+        metadata: &Value,
+        arrays: &[ArraySpec],
+        planes: &BTreeMap<String, B>,
+        limits: &EngineLimits,
+        quota: QuotaGroup,
+        budget: Option<&Arc<ServiceBudget>>,
+        after_admission: F,
+    ) -> Result<Self>
+    where
+        B: AsRef<[u8]>,
+        F: FnOnce(&StorageAdmission) -> Result<()>,
+    {
         // Share one bounded construction path.
         limits.validate()?; // Reject caller attempts to enlarge configured hard ceilings.
         let (json_bytes, binary_bytes, wire_bytes) =
@@ -426,6 +463,7 @@ impl ServiceValue {
                 arrays.len(),
             )?)
             .map_err(admission_error)?; // Use the producer's original root before making a copy.
+        after_admission(&admission)?;
         let mut copied = BTreeMap::new(); // The new map is covered by the live storage admission.
         for (name, bytes) in planes {
             let bytes = bytes.as_ref();
@@ -5035,3 +5073,7 @@ mod pure_source_contracts {
 #[cfg(test)]
 #[path = "borrowed_service_contract_tests.rs"]
 mod borrowed_service_contract_tests;
+
+#[cfg(test)]
+#[path = "world_region_guest_transport_tests.rs"]
+mod guest_region_transport_tests;

@@ -337,17 +337,25 @@ mod benchmark {
             // Preserve the requested inventory even when a real render fails.
             // Each invocation owns its scene/engine; returning drops that case
             // before the next one. A failed case never counts as measured.
-            if let Err(error) = measure(case, &options, &carpet.package, &env, &quota) {
-                emit(
-                    json!({"type":"result","case":case,"status":"ERROR","message":error.to_string(),"package_digest":carpet.package.digest()}),
-                );
+            let exact_masks = match measure(case, &options, &carpet.package, &env, &quota) {
+                Ok(exact_masks) => exact_masks,
+                Err(error) => {
+                    emit(
+                        json!({"type":"result","case":case,"status":"ERROR","message":error.to_string(),"package_digest":carpet.package.digest()}),
+                    );
+                    failed_cases.push(case.clone());
+                    continue;
+                }
+            };
+            if case == "carpet-3" {
+                async_parity_blocked += 1;
+            } else if !exact_masks {
+                // Retain diagnostic timings, but never count differing output
+                // as a comparable native/plugin measurement.
                 failed_cases.push(case.clone());
                 continue;
             }
             measured += 1;
-            if case == "carpet-3" {
-                async_parity_blocked += 1;
-            }
         }
         emit(
             json!({"type":"case_inventory","requested":options.cases,"failed":failed_cases,"measured":measured,"blocked":blocked}),
@@ -372,6 +380,11 @@ mod benchmark {
             return Err(fail(&format!(
                 "benchmark cases failed: {}",
                 failed_cases.join(", ")
+            )));
+        }
+        if blocked != 0 || async_parity_blocked != 0 {
+            return Err(fail(&format!(
+                "benchmark is incomplete: {blocked} blocked choices and {async_parity_blocked} asynchronous parity diagnostics"
             )));
         }
         Ok(())
@@ -459,7 +472,7 @@ mod benchmark {
         package: &Arc<Package>,
         env: &SceneEnv,
         quota: &QuotaGroup,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mode = case
             .strip_prefix("carpet-")
             .ok_or_else(|| fail("unexpected measurement case"))?
@@ -838,8 +851,8 @@ mod benchmark {
         // Timings remain diagnostic until differential output is qualified.
         // This emits no synthetic CPU measurement or unqualified speed ratio.
         emit(
-            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else{"measured"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"native_completion_callbacks":native_completion_callbacks.get(),"v8_completion_callbacks":js_completion_callbacks.get(),"completion_policy":"original native Scene.status and V8 status records; same logical time and zero delta for continuation; monotonic Surface sequences","qualification":"completion-aligned component diagnostic; total native render elapsed includes original search scheduling/wait; V8 full elapsed includes cooperative continuation handoffs; worker CPU and live cadence unmeasured; output/decision qualification still required before ratios"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"construction_preparation_included_in_frame_distribution":false,"first_frame_included_in_distribution":options.warmup==0}),
+            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else if different_braille_cells==0{"measured"}else{"diagnostic_mask_mismatch"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"native_completion_callbacks":native_completion_callbacks.get(),"v8_completion_callbacks":js_completion_callbacks.get(),"completion_policy":"original native Scene.status and V8 status records; same logical time and zero delta for continuation; monotonic Surface sequences","qualification":"completion-aligned component diagnostic; total native render elapsed includes original search scheduling/wait; V8 full elapsed includes cooperative continuation handoffs; worker CPU and live cadence unmeasured; output/decision qualification still required before ratios"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"construction_preparation_included_in_frame_distribution":false,"first_frame_included_in_distribution":options.warmup==0}),
         );
-        Ok(())
+        Ok(different_braille_cells == 0)
     }
 }

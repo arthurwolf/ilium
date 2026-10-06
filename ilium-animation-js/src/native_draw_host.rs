@@ -6,6 +6,7 @@ use crate::{
     native_draw::{DrawAuthority, DrawBinding, DrawLimits, NativeDraw, PreparedBlit},
     native_media::{ImageHandle, MediaLimits, NativeMedia},
     native_video::TimedVideoFrame,
+    native_worlds::{NativeWorldFrame, WorldDotBinding, WorldService},
     runtime::PackageInstance,
     sources::NativeSourceImage,
     surface::{FrameMeta, NoNativeRenderer, Outcome, Planes, Snapshot, Surface, SurfaceError},
@@ -14,7 +15,14 @@ use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::owned_worker::StopToken;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+static NEXT_WORLD_FRAME_KEY: AtomicU64 = AtomicU64::new(1);
 const MAX_PREPARED: usize = 64;
 struct GuardedDraw<'a> {
     binding: &'a DrawBinding,
@@ -47,6 +55,7 @@ pub struct NativeDrawHost {
     prepared: BTreeMap<String, PreparedBlit>,
     source_images: BTreeMap<String, crate::native_media::ImageHandle>,
     video_images: BTreeMap<String, crate::native_media::ImageHandle>,
+    world_frames: BTreeSet<String>,
     quota: QuotaGroup,
     limits: DrawLimits,
     _metadata: StorageAdmission,
@@ -62,6 +71,7 @@ impl NativeDrawHost {
             prepared: BTreeMap::new(),
             source_images: BTreeMap::new(),
             video_images: BTreeMap::new(),
+            world_frames: BTreeSet::new(),
             quota,
             limits,
             _metadata: metadata,
@@ -183,6 +193,76 @@ impl NativeDrawHost {
         Ok(
             json!({"id":key,"kind":"image","width":pixels.width,"height":pixels.height,"format":"rgba8","sha256":sha256}),
         )
+    }
+    /// Register a real retained native world raster under the current helper
+    /// activation. The world service checks original instance, epoch, scene Arc,
+    /// quota and receipt before issuing process-unique source tokens. No RGBA
+    /// image descriptor or script-provided owner identifier is involved.
+    pub fn retain_world_frame(
+        &mut self,
+        instance: &mut PackageInstance,
+        worlds: &WorldService,
+        frame: &Arc<NativeWorldFrame>,
+        stop: &StopToken,
+    ) -> Result<Value> {
+        let authority = instance.frame_authority().ok_or_else(|| {
+            AnimationError::PermissionDenied("world draw activation missing".into())
+        })?;
+        let binding = DrawBinding {
+            package_digest: authority.package_digest,
+            instance_id: authority.instance_id,
+            plan_generation: authority.plan_generation,
+            authorization_epoch: authority.authorization_epoch,
+        };
+        let world_binding = worlds.bind_draw_source(frame)?;
+        let prepared =
+            PreparedBlit::world(world_binding, binding, &self.quota, [255, 255, 255], stop)
+                .map_err(|error| {
+                    AnimationError::Runtime(format!("prepare world frame: {error}"))
+                })?;
+        let number = NEXT_WORLD_FRAME_KEY
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .map_err(|_| AnimationError::Budget("world frame handle identities".into()))?;
+        let key = format!("world-frame-{number}");
+        self.retain_prepared(instance, &key, prepared)?;
+        self.world_frames.insert(key.clone());
+        let (width, height) = frame.dimensions();
+        Ok(json!({
+            "id":key, "kind":"worlds.frame", "revision":1,
+            "status":{"state":"ready"}, "world_id":frame.world_id(),
+            "width":width, "height":height,
+            "source_identity":frame.source_identity().hex()
+        }))
+    }
+    /// The world owner acknowledges closure after its own request succeeds.
+    /// In-flight immutable snapshots retain their source Arcs independently.
+    pub fn release_world_frame(&mut self, key: &str) -> Result<()> {
+        if !self.world_frames.remove(key) {
+            return Err(AnimationError::PermissionDenied(
+                "unknown original world frame".into(),
+            ));
+        }
+        self.prepared.remove(key).ok_or_else(|| {
+            AnimationError::Runtime("world frame prepared mapping disappeared".into())
+        })?;
+        Ok(())
+    }
+    /// Retain only the bindings whose native prepared entries still exist.
+    /// The caller stores them with an accepted frame until terminal receipt.
+    pub fn world_bindings(&self) -> Vec<Arc<WorldDotBinding>> {
+        let mut bindings: Vec<_> = self
+            .world_frames
+            .iter()
+            .filter_map(|key| {
+                self.prepared
+                    .get(key)
+                    .and_then(PreparedBlit::world_dot_binding)
+            })
+            .collect();
+        bindings.sort_unstable_by_key(|binding| binding.range_start());
+        bindings
     }
     pub fn release_video_image(&mut self, key: &str) -> Result<()> {
         let handle = self.video_images.remove(key).ok_or_else(|| {
@@ -341,6 +421,7 @@ impl NativeDrawHost {
     }
     pub fn revoke(&mut self) {
         self.prepared.clear();
+        self.world_frames.clear();
         for (_, handle) in std::mem::take(&mut self.source_images) {
             let _ = self.media.close(handle);
         }

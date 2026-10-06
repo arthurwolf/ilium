@@ -42,11 +42,157 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use std::sync::{Condvar, Mutex};
+
 const VERSION: u16 = 2; // Reject old JSON-only service envelopes rather than silently changing their meaning.
 const MAX_JSON: usize = 256 * 1024;
 const MAX_BINARY: usize = 32 * 1024 * 1024;
 const MAX_PLANES: usize = 48; // Up to 16 surface/working planes plus 32 borrowed inputs.
 const MAX_REQUESTS: usize = 64;
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct HelperTransportTestState {
+    arm_complete_service_ack_failure: bool,
+    target_sequence: Option<u64>,
+    packet_released_sequence: Option<u64>,
+    acknowledgement_failure_sequence: Option<u64>,
+    write_succeeded: Option<bool>,
+    service_plane_pointer: Option<usize>,
+    interrupt_next_physical_retirement: bool,
+    retirement_interruptions: usize,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct HelperTransportTestControl {
+    state: Mutex<HelperTransportTestState>,
+    changed: Condvar,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HelperTransportTestSnapshot {
+    pub(crate) target_sequence: Option<u64>,
+    pub(crate) packet_released_sequence: Option<u64>,
+    pub(crate) acknowledgement_failure_sequence: Option<u64>,
+    pub(crate) write_succeeded: Option<bool>,
+    pub(crate) service_plane_pointer: Option<usize>,
+    pub(crate) retirement_interruptions: usize,
+    pub(crate) session_closed: bool,
+    pub(crate) physically_retired: bool,
+}
+
+#[cfg(test)]
+impl HelperTransportTestControl {
+    fn state(&self) -> std::sync::MutexGuard<'_, HelperTransportTestState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    fn arm_complete_service_ack_failure(&self) -> Result<()> {
+        let mut state = self.state();
+        if state.arm_complete_service_ack_failure || state.target_sequence.is_some() {
+            return Err(invalid("test CompleteService interruption already armed"));
+        }
+        state.arm_complete_service_ack_failure = true;
+        state.target_sequence = None;
+        state.packet_released_sequence = None;
+        state.acknowledgement_failure_sequence = None;
+        state.write_succeeded = None;
+        state.service_plane_pointer = None;
+        state.interrupt_next_physical_retirement = true;
+        state.retirement_interruptions = 0;
+        Ok(())
+    }
+
+    fn register_complete_service(&self, sequence: u64) {
+        let mut state = self.state();
+        if !state.arm_complete_service_ack_failure {
+            return;
+        }
+        state.arm_complete_service_ack_failure = false;
+        state.target_sequence = Some(sequence);
+        self.changed.notify_all();
+    }
+
+    fn packet_released(
+        &self,
+        sequence: u64,
+        write_succeeded: bool,
+        service_plane_pointer: Option<usize>,
+    ) {
+        let mut state = self.state();
+        if state.target_sequence != Some(sequence) {
+            return;
+        }
+        state.packet_released_sequence = Some(sequence);
+        state.write_succeeded = Some(write_succeeded);
+        state.service_plane_pointer = service_plane_pointer;
+        self.changed.notify_all();
+    }
+
+    fn intercept_response(&self, sequence: u64) -> bool {
+        let mut state = self.state();
+        if state.target_sequence != Some(sequence) {
+            return false;
+        }
+        // Missing writer evidence must fail the injection without stranding
+        // the original pipe worker during test cleanup.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while state.packet_released_sequence != Some(sequence) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let (next, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|poison| poison.into_inner());
+            state = next;
+        }
+        if state.write_succeeded != Some(true) {
+            return false;
+        }
+        if state.acknowledgement_failure_sequence.is_some() {
+            return false;
+        }
+        state.acknowledgement_failure_sequence = Some(sequence);
+        self.changed.notify_all();
+        true
+    }
+
+    fn interrupt_physical_retirement_once(&self) -> bool {
+        let mut state = self.state();
+        if !state.interrupt_next_physical_retirement {
+            return false;
+        }
+        state.interrupt_next_physical_retirement = false;
+        state.retirement_interruptions += 1;
+        self.changed.notify_all();
+        true
+    }
+
+    fn snapshot(
+        &self,
+        session_closed: bool,
+        physically_retired: bool,
+    ) -> HelperTransportTestSnapshot {
+        let state = self.state();
+        HelperTransportTestSnapshot {
+            target_sequence: state.target_sequence,
+            packet_released_sequence: state.packet_released_sequence,
+            acknowledgement_failure_sequence: state.acknowledgement_failure_sequence,
+            write_succeeded: state.write_succeeded,
+            service_plane_pointer: state.service_plane_pointer,
+            retirement_interruptions: state.retirement_interruptions,
+            session_closed,
+            physically_retired,
+        }
+    }
+}
 
 fn loaded_helper_digest() -> Result<[u8; 32]> {
     let mut image = animation_sandbox::open_running_helper_image()?;
@@ -882,6 +1028,8 @@ pub struct HelperSession {
     native_publication: bool, // Never join workers inside serialized broker publication.
     deferred_retirement: bool, // Uncertain transport keeps original custody until scope exits.
     pending_seed: Option<PendingSeed>,
+    #[cfg(test)]
+    test_transport: Arc<HelperTransportTestControl>,
 }
 /// Initial playback choices, passed unchanged into the helper initialization.
 #[derive(Debug, Clone)]
@@ -944,6 +1092,8 @@ impl HelperSession {
         let (writer, writes) = mpsc::sync_channel::<Option<Packet>>(1); // Preserve one bounded outbound queue.
         let (responses, reader) = mpsc::sync_channel::<Result<Packet>>(1); // Preserve one response for each command.
         let service_budget = ServiceBudget::new(&limits.engine); // This occupancy fence debits no independent quota bank.
+        #[cfg(test)]
+        let test_transport = Arc::new(HelperTransportTestControl::default());
         let mut session = Self {
             // Own native startup before any further fallible operation.
             authority, // Keep immutable session identity independent from accepted activation.
@@ -971,6 +1121,8 @@ impl HelperSession {
             native_publication: false,
             pending_seed: None,
             deferred_retirement: false, // Launch is not physical retirement.
+            #[cfg(test)]
+            test_transport: Arc::clone(&test_transport),
         }; // All later startup failures now use one retirement owner.
         let input = session
             .child
@@ -988,6 +1140,8 @@ impl HelperSession {
         let hold = Arc::clone(&admission);
         let storage_hold = Arc::clone(&storage);
         let sender = session.writer.clone(); // Wake the original bounded writer queue during native cancellation.
+        #[cfg(test)]
+        let test_writer = Arc::clone(&test_transport);
         session.workers.push(owned_worker::spawn_owned(
             // Session ownership protects every subsequent startup failure.
             "ilium-plugin-pipe-write",
@@ -1006,8 +1160,28 @@ impl HelperSession {
                 while !stop.is_stopped() {
                     match writes.recv() {
                         Ok(Some(packet)) => {
+                            #[cfg(not(test))]
                             if write_packet(&mut input, &packet).is_err() {
                                 break;
+                            }
+                            #[cfg(test)]
+                            {
+                                let sequence = packet.envelope.sequence;
+                                let service_plane_pointer = packet
+                                    .service
+                                    .as_ref()
+                                    .and_then(|value| value.planes().get("b0"))
+                                    .map(|bytes| bytes.as_ptr() as usize);
+                                let write_result = write_packet(&mut input, &packet);
+                                drop(packet);
+                                test_writer.packet_released(
+                                    sequence,
+                                    write_result.is_ok(),
+                                    service_plane_pointer,
+                                );
+                                if write_result.is_err() {
+                                    break;
+                                }
                             }
                         }
                         _ => break,
@@ -1018,6 +1192,8 @@ impl HelperSession {
         let wake = cancel.clone();
         let hold = Arc::clone(&admission);
         let storage_hold = Arc::clone(&storage);
+        #[cfg(test)]
+        let test_reader = Arc::clone(&test_transport);
         let reader_worker = owned_worker::spawn_owned(
             "ilium-plugin-pipe-read",
             WorkerKind::SynchronousIo,
@@ -1033,6 +1209,15 @@ impl HelperSession {
                 let mut output = output;
                 while !stop.is_stopped() {
                     let packet = read_packet(&mut output);
+                    #[cfg(test)]
+                    if let Ok(response) = &packet {
+                        if test_reader.intercept_response(response.envelope.sequence) {
+                            let _ = responses.try_send(Err(invalid(
+                                "test interrupted CompleteService acknowledgement after packet release",
+                            )));
+                            break;
+                        }
+                    }
                     let failed = packet.is_err();
                     if responses.try_send(packet).is_err() || failed {
                         break;
@@ -1227,6 +1412,8 @@ impl HelperSession {
         if service.is_some() && !matches!(&command, Command::CompleteService { .. }) {
             return Err(invalid("service planes outside completion"));
         } // Completion borrows immutable admitted planes.
+        #[cfg(test)]
+        let test_complete_service = matches!(&command, Command::CompleteService { .. });
         let sequence = self
             .sequence
             .checked_add(1)
@@ -1247,6 +1434,10 @@ impl HelperSession {
         if Instant::now() >= deadline {
             return Err(invalid("helper transaction deadline"));
         } // Refuse an unissued command without a sequence gap.
+        #[cfg(test)]
+        if test_complete_service {
+            self.test_transport.register_complete_service(sequence);
+        }
         self.sequence = sequence; // Commit only a completely validated packet.
         let response = self.exchange(packet, service_page, deadline)?; // All uncertain send/read failures retire the transport.
         if !returned_binary && !response.planes.is_empty() {
@@ -1878,6 +2069,28 @@ impl HelperSession {
     pub fn is_physically_retired(&self) -> bool {
         self.physically_retired
     } // Only successful original child shutdown and every worker join establish this fact.
+
+    #[cfg(test)]
+    pub(crate) fn arm_complete_service_ack_failure_for_test(&self) -> Result<()> {
+        self.test_transport.arm_complete_service_ack_failure()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transport_test_snapshot(&self) -> HelperTransportTestSnapshot {
+        self.test_transport
+            .snapshot(self.closed, self.physically_retired)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sequence_for_test(&self) -> u64 {
+        self.sequence
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_pending_service_request_for_test(&self, id: u64) -> bool {
+        self.pending.contains_key(&id)
+    }
+
     pub fn dispose(&mut self) -> Result<()> {
         // Optional bounded guest disposal never substitutes for native retirement.
         if self.closed {
@@ -1920,6 +2133,13 @@ impl HelperSession {
             self.deferred_retirement = true;
             return Err(invalid(
                 "physical retirement deferred until native publication guard exits",
+            ));
+        }
+        #[cfg(test)]
+        if self.test_transport.interrupt_physical_retirement_once() {
+            self.closed = true;
+            return Err(invalid(
+                "test interrupted physical retirement before child shutdown",
             ));
         }
         // Retire this helper independently of runtime's native Activation and PermissionBroker.

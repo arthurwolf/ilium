@@ -86,6 +86,7 @@ fn session_without_process(quota: &QuotaGroup) -> (HelperSession, mpsc::Receiver
             native_publication: false,
             deferred_retirement: false,
             pending_seed: None,
+            test_transport: Arc::new(HelperTransportTestControl::default()),
         },
         writes,
     ) // No fake child, successful join or physical-retirement flag is supplied.

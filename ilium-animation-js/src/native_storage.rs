@@ -9,17 +9,19 @@ use crate::{
 };
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::animation_files::{
-    validate_leaf, DirectoryEntry, FileIdentity, PinnedDirectory, PinnedFile, WriteMode,
+    DirectoryEntry, FileIdentity, PinnedDirectory, PinnedFile, WriteMode, validate_leaf,
 };
 use ilium_platform::secure_fs::NoFollowDirectory;
+#[cfg(target_os = "linux")]
+use ilium_platform::secure_fs::NoFollowTraversalDirectory;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io,
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -127,8 +129,13 @@ enum SelectedNative {
     File(Arc<PinnedFile>),
     Folder(Arc<PinnedDirectory>),
 }
+struct HostSelectionLabel {
+    path: PathBuf,
+    _admission: Arc<StorageAdmission>,
+}
 pub struct SelectedStorage {
     native: SelectedNative,
+    host_label: Option<HostSelectionLabel>,
     binding: HostBinding,
     slot: String,
     writable: bool,
@@ -174,22 +181,51 @@ impl SelectedStorage {
         if parts.is_empty() {
             return Err(invalid("selected path cannot be filesystem root"));
         }
+
+        // Linux separates search-only ancestor traversal from the readable
+        // selected leaf. Other platforms retain their existing directory walk.
+        #[cfg(target_os = "linux")]
+        let mut current = NoFollowTraversalDirectory::open_root(Path::new("/"))?;
+        #[cfg(not(target_os = "linux"))]
         let mut current = NoFollowDirectory::open_root(Path::new("/"))?;
+
+        // On Linux the selected leaf is deliberately not opened as `O_PATH`.
+        // It is opened below as the ordinary readable directory/file capability.
+        #[cfg(target_os = "linux")]
+        let directory_parts = &parts[..parts.len() - 1];
+        #[cfg(not(target_os = "linux"))]
         let directory_parts = if selection == Selection::File {
             &parts[..parts.len() - 1]
         } else {
             parts.as_slice()
         };
+
         for part in directory_parts {
             current = current.open_directory(std::ffi::OsStr::new(part))?;
         }
-        match selection {
-            Selection::Folder => Self::folder_from_host(
-                Arc::new(PinnedDirectory::from_host(Arc::new(current))?),
-                slot,
-                writable,
-                quota,
-            ),
+
+        // Admit retained reporting bytes before cloning the trusted picker path.
+        // The label supplies stable history keys; it never reopens disk authority.
+        let label_admission = Arc::new(reserve(
+            &quota,
+            4096 + std::mem::size_of::<HostSelectionLabel>() + 128,
+        )?);
+
+        let mut resource = match selection {
+            Selection::Folder => {
+                // The selected folder itself must retain the existing readable
+                // descriptor semantics used by list/write/sync/lease consumers.
+                #[cfg(target_os = "linux")]
+                let current = current
+                    .open_readable_directory(std::ffi::OsStr::new(parts[parts.len() - 1]))?;
+
+                Self::folder_from_host(
+                    Arc::new(PinnedDirectory::from_host(Arc::new(current))?),
+                    slot,
+                    writable,
+                    quota,
+                )
+            }
             Selection::File => {
                 if writable {
                     return Err(invalid("selected file write requires parent-entry policy"));
@@ -197,7 +233,12 @@ impl SelectedStorage {
                 let file = current.open_regular(std::ffi::OsStr::new(parts[parts.len() - 1]))?;
                 Self::file_from_host(Arc::new(PinnedFile::from_host(file)?), slot, quota)
             }
-        }
+        }?;
+        resource.host_label = Some(HostSelectionLabel {
+            path: path.to_owned(),
+            _admission: label_admission,
+        });
+        Ok(resource)
     }
     pub fn matches_right(&self, right: &Right) -> bool {
         let Scope::Disk { slot, selection } = &right.scope else {
@@ -384,6 +425,7 @@ impl SelectedStorage {
     ) -> Result<Self> {
         let resource = Self {
             native,
+            host_label: None,
             binding,
             slot,
             writable,
@@ -395,6 +437,46 @@ impl SelectedStorage {
     }
     pub fn binding(&self) -> &HostBinding {
         &self.binding
+    }
+    /// Borrow only the original selected folder handle. The caller must hold
+    /// an issued DiskRead operation ticket for `operation_need(false)` before
+    /// any use of this root; this accessor does not grant a permission.
+    pub fn original_world_folder(&self, quota: &QuotaGroup) -> Result<Arc<NoFollowDirectory>> {
+        self.check_quota(quota)?;
+        match &self.native {
+            SelectedNative::Folder(root) => Ok(root.original_root()),
+            SelectedNative::File(_) => Err(AnimationError::PermissionDenied(
+                "world source requires a selected folder".into(),
+            )),
+        }
+    }
+    /// Original picker label for native history keys, never for filesystem I/O.
+    /// Handle-only host fixtures deliberately have no invented label. Borrowed
+    /// storage remains charged to this selected resource for its whole lifetime.
+    pub fn original_folder_label(&self, quota: &QuotaGroup) -> Result<&Path> {
+        self.check_quota(quota)?;
+        if !matches!(&self.native, SelectedNative::Folder(_)) {
+            return Err(AnimationError::PermissionDenied(
+                "world label requires selected folder".into(),
+            ));
+        }
+        self.host_label
+            .as_ref()
+            .map(|label| label.path.as_path())
+            .ok_or_else(|| invalid("original trusted picker label unavailable"))
+    }
+    /// Native archive readers borrow the original selected file, under their
+    /// own bounded decoder/account admission. This does not read generic asset
+    /// bytes or apply the generic 8 MiB asset-response limit. The outer owner
+    /// must commit this resource's DiskRead ticket before any actual file read.
+    pub fn original_archive_file(&self, quota: &QuotaGroup) -> Result<Arc<PinnedFile>> {
+        self.check_quota(quota)?;
+        match &self.native {
+            SelectedNative::File(file) => Ok(Arc::clone(file)),
+            SelectedNative::Folder(_) => Err(AnimationError::PermissionDenied(
+                "native archive requires selected file".into(),
+            )),
+        }
     }
     fn check_quota(&self, quota: &QuotaGroup) -> Result<()> {
         if !self.quota.shares_root(quota) {
@@ -485,6 +567,72 @@ const PERSISTENT_MAGIC: &[u8; 8] = b"ILCACHE1";
 const PERSISTENT_HEADER: usize = 52;
 /// Disk I/O only. A native service operation must dispatch, commit and deliver
 /// the original StatePersist ticket around the finite job using this owner.
+/// Host-only history storage under the original `state.persist/session`
+/// authority. A separate principal directory prevents raw cache/state keys
+/// from reading or overwriting the native tour repository.
+pub struct ProtectedWorldHistory {
+    host_root: Arc<PinnedDirectory>,
+    principal_directory: String,
+    report_label: PathBuf,
+    quota: QuotaGroup,
+    _metadata: StorageAdmission,
+}
+impl ProtectedWorldHistory {
+    /// No directory creation or reads occur before the original service commit.
+    pub fn new(
+        principal: &PackageIdentity,
+        host_root: Arc<PinnedDirectory>,
+        quota: QuotaGroup,
+    ) -> Result<Self> {
+        let metadata = reserve(&quota, 65536)?;
+        let principal_directory = format!(
+            "principal-{:x}",
+            Sha256::digest(serde_json::to_vec(&(principal, "world-history-session"))?)
+        );
+        // Absolute report/key label only. No caller may open this synthetic path.
+        let report_label =
+            PathBuf::from("/ilium-protected-world-history").join(&principal_directory);
+        Ok(Self {
+            host_root,
+            principal_directory,
+            report_label,
+            quota,
+            _metadata: metadata,
+        })
+    }
+    pub fn report_label(&self) -> &Path {
+        &self.report_label
+    }
+    pub fn operation_need(&self) -> Result<OperationNeed> {
+        OperationNeed::new(
+            Right {
+                id: Capability::StatePersist,
+                scope: Scope::Namespace {
+                    name: "session".into(),
+                },
+            },
+            None,
+        )
+        .map_err(auth)
+    }
+    /// The caller must hold the original committed persistence operation and
+    /// admit returned handle/label storage into the saved-scene binding account.
+    /// Cancellation after creation never claims the directory was not created.
+    pub fn root_after_issue(
+        &self,
+        cancellation: &StorageCancellation,
+        quota: &QuotaGroup,
+    ) -> Result<Arc<PinnedDirectory>> {
+        if !self.quota.shares_root(quota) {
+            return Err(invalid("protected history quota mismatch"));
+        }
+        cancellation.check()?;
+        let root = self.host_root.child(&self.principal_directory, true)?;
+        self.host_root.sync()?;
+        cancellation.check()?;
+        Ok(Arc::new(root))
+    }
+}
 pub struct PersistentCache {
     host_root: Arc<PinnedDirectory>,
     principal_directory: String,

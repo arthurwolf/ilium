@@ -28,7 +28,6 @@ use std::{
     time::Duration,
 };
 const META_BYTES: usize = 65536;
-static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 static NEXT_PRESENTATION: AtomicU64 = AtomicU64::new(1);
 fn failure(message: &str) -> AnimationError {
     AnimationError::Runtime(format!("replay: {message}"))
@@ -202,22 +201,37 @@ pub trait ReplayAuthorization: Send + Sync {
         proof: &ReplayFlushedProof,
     ) -> Result<()>;
 }
+/// Each presentation lease owns one opaque native identity. Its Arc is
+/// shared only with the committed backend operation and its exact flush proof;
+/// a same-plan proof from another queued frame cannot settle this lease.
+#[derive(Debug)]
+pub struct TerminalFrameStamp {
+    _private: (),
+}
+impl TerminalFrameStamp {
+    pub fn for_native_presentation() -> Arc<Self> {
+        Arc::new(Self { _private: () })
+    }
+}
 /// The terminal owner can construct this only after its original broker
 /// settles a complete physical flush. It carries no guessed source dots.
 pub struct ReplayFlushedProof {
     broker: Arc<Mutex<PermissionBroker>>,
     authority: ReplayAuthority,
+    frame_stamp: Option<Arc<TerminalFrameStamp>>,
     _storage: StorageAdmission,
 }
 impl ReplayFlushedProof {
     pub(crate) fn from_native(
         broker: Arc<Mutex<PermissionBroker>>,
         authority: ReplayAuthority,
+        frame_stamp: Option<Arc<TerminalFrameStamp>>,
         storage: StorageAdmission,
     ) -> Self {
         Self {
             broker,
             authority,
+            frame_stamp,
             _storage: storage,
         }
     }
@@ -227,6 +241,18 @@ impl ReplayFlushedProof {
         authority: &ReplayAuthority,
     ) -> bool {
         Arc::ptr_eq(&self.broker, broker) && &self.authority == authority
+    }
+    pub(crate) fn belongs_to_frame(
+        &self,
+        broker: &Arc<Mutex<PermissionBroker>>,
+        authority: &ReplayAuthority,
+        stamp: &Arc<TerminalFrameStamp>,
+    ) -> bool {
+        self.belongs_to(broker, authority)
+            && self
+                .frame_stamp
+                .as_ref()
+                .is_some_and(|original| Arc::ptr_eq(original, stamp))
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -563,8 +589,10 @@ impl FrozenEvidence {
             if !stable.insert(digest) {
                 return Err(failure("duplicate native source evidence"));
             }
-            let token = SourceToken::from_native(native_id(&NEXT_TOKEN)?)
-                .map_err(|e| failure(&e.to_string()))?;
+            let token = SourceToken::from_native(
+                SourceToken::reserve_native_range(1).map_err(|e| failure(&e.to_string()))?,
+            )
+            .map_err(|e| failure(&e.to_string()))?;
             entries.insert(
                 token.evidence_key(),
                 EvidenceEntry {

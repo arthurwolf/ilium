@@ -5,11 +5,11 @@ use crate::{
     engine::{ArraySpec, CompletionState, HostRequest, ServiceValue, TypedArrayKind},
     error::{AnimationError, Result},
     native_storage::{
-        MemoryNamespace, PersistentCache, RetainedBytes, RetainedListing, SelectedStorage,
-        StorageCancellation,
+        MemoryNamespace, PersistentCache, ProtectedWorldHistory, RetainedBytes, RetainedListing,
+        SelectedStorage, StorageCancellation,
     },
     package::valid_path,
-    permissions::{Capability, OperationNeed, Right, Scope},
+    permissions::{Capability, OperationNeed, PackageIdentity, Right, Scope},
     plan_authorization::operation_demand,
     runtime::{PackageInstance, ServiceOperation},
 };
@@ -351,6 +351,9 @@ pub struct NativeAssetHost {
     selected: BTreeMap<String, (String, Arc<SelectedStorage>)>,
     selected_pending: BTreeMap<u64, SelectedRecord>,
     persistent: Arc<PersistentCache>,
+    world_history: Option<Arc<ProtectedWorldHistory>>,
+    storage_principal: PackageIdentity,
+    state_root: Arc<PinnedDirectory>,
     state_request_id: Option<String>,
     persistent_pending: BTreeMap<u64, PersistentRecord>,
     cancellation: StorageCancellation,
@@ -391,7 +394,14 @@ impl NativeAssetHost {
             bundle_id: instance.bundle_asset_id(),
             selected,
             selected_pending: BTreeMap::new(),
-            persistent: Arc::new(PersistentCache::new(&principal, state_root, quota.clone())?),
+            world_history: None,
+            persistent: Arc::new(PersistentCache::new(
+                &principal,
+                Arc::clone(&state_root),
+                quota.clone(),
+            )?),
+            storage_principal: principal,
+            state_root,
             state_request_id,
             persistent_pending: BTreeMap::new(),
             cancellation: StorageCancellation::default(),
@@ -435,6 +445,69 @@ impl NativeAssetHost {
             && self.pending.is_empty()
             && self.selected_pending.is_empty()
             && self.persistent_pending.is_empty()
+    }
+    /// Resolve an SDK world grant to its exact selected native resource. This
+    /// performs no I/O and grants no right; the world owner must dispatch,
+    /// commit and deliver an operation using this resource's DiskRead need.
+    pub fn selected_world_folder(&self, grant: &Value) -> Result<(String, Arc<SelectedStorage>)> {
+        let selected = self.selected_disk_asset(grant)?;
+        selected.1.original_world_folder(&self.quota)?;
+        Ok(selected)
+    }
+    /// Separate original selected-file demand; a folder/world grant cannot
+    /// authorize the native archive. No disk read or broker commit occurs here.
+    pub fn selected_native_archive(&self, grant: &Value) -> Result<(String, Arc<SelectedStorage>)> {
+        let selected = self.selected_disk_asset(grant)?;
+        selected.1.original_archive_file(&self.quota)?;
+        Ok(selected)
+    }
+    /// Resolve the actual original session-persistence request. This returns
+    /// no guest-writable key and performs no directory creation or disk read.
+    pub fn selected_world_history(&mut self) -> Result<(String, Arc<ProtectedWorldHistory>)> {
+        if self.closed {
+            return Err(AnimationError::PermissionDenied(
+                "asset owner retired".into(),
+            ));
+        }
+        let request_id = self.state_request_id.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied(
+                "saved world requires original session persistence".into(),
+            )
+        })?;
+        let request_id = request_id.clone();
+        if self.world_history.is_none() {
+            self.world_history = Some(Arc::new(ProtectedWorldHistory::new(
+                &self.storage_principal,
+                Arc::clone(&self.state_root),
+                self.quota.clone(),
+            )?));
+        }
+        let history = self
+            .world_history
+            .as_ref()
+            .ok_or_else(|| invalid("protected history construction incomplete"))?;
+        Ok((request_id, Arc::clone(history)))
+    }
+    fn selected_disk_asset(&self, grant: &Value) -> Result<(String, Arc<SelectedStorage>)> {
+        if self.closed {
+            return Err(AnimationError::PermissionDenied(
+                "asset owner retired".into(),
+            ));
+        }
+        let projected = grant
+            .as_object()
+            .filter(|value| {
+                value.len() == 2 && value.get("kind").and_then(Value::as_str) == Some("asset")
+            })
+            .ok_or_else(|| invalid("selected native asset projection"))?;
+        let id = projected
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("selected native asset ID"))?;
+        let (request_id, resource) = self.selected.get(id).ok_or_else(|| {
+            AnimationError::PermissionDenied("unknown original selected native asset".into())
+        })?;
+        Ok((request_id.clone(), Arc::clone(resource)))
     }
     /// Resolve an SDK Video asset against the already constructed bundle and
     /// selected-resource registries. This method performs no disk read and

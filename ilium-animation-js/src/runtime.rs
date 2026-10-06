@@ -32,6 +32,7 @@ use crate::{
     plan_authorization::AuthorizationProjection,
     replay::{
         GrantLineage, ReplayAccess, ReplayAuthority, ReplayAuthorization, ReplayFlushedProof,
+        TerminalFrameStamp,
     },
     trust::{PackageIdentity as VerifiedIdentity, TrustVerifier},
 };
@@ -75,6 +76,52 @@ pub struct PackageInstance {
     creation: Option<CreateState>,
     settings: Value,
     // Original storage is owned by the shared broker through its FINAL native owner.
+}
+
+/// Read-only retirement evidence for one exact helper session. The Arc identity
+/// is minted with PackageInstance and only retire_helper publishes true after
+/// the original child and every original pipe worker have physically exited.
+#[derive(Clone)]
+pub(crate) struct HelperRetirementEvidence {
+    retired: Arc<AtomicBool>,
+}
+impl HelperRetirementEvidence {
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.retired, &other.retired)
+    }
+    pub(crate) fn is_physically_retired(&self) -> bool {
+        self.retired.load(Ordering::Acquire)
+    }
+}
+
+/// Native-only settlement evidence bound to the exact request allocation and
+/// original ticket Arcs. Only actual broker delivery/settlement updates the flag;
+/// helper transport or deferred-retirement errors cannot erase that evidence.
+pub(crate) struct ServiceGroupSettlement {
+    request: HostRequest,
+    tickets: Vec<Arc<OperationTicket>>,
+    settled: AtomicBool,
+}
+impl ServiceGroupSettlement {
+    pub(crate) fn was_settled(&self) -> bool {
+        self.settled.load(Ordering::Acquire)
+    }
+    fn check_original(&self, operations: &[&ServiceOperation]) -> Result<()> {
+        let request = original_service_group_request(operations)?;
+        if !std::ptr::eq(&*self.request, &**request)
+            || self.tickets.len() != operations.len()
+            || self
+                .tickets
+                .iter()
+                .zip(operations)
+                .any(|(ticket, operation)| !Arc::ptr_eq(ticket, &operation.ticket))
+        {
+            return Err(AnimationError::PermissionDenied(
+                "foreign service group settlement receipt".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Original broker channel retained with a published frame. The coordinates in
@@ -172,6 +219,7 @@ pub struct CommittedFrameEmission {
     broker: Arc<Mutex<PermissionBroker>>,
     expected: HelperAuthority,
     ticket: Option<FrameEmissionTicket>,
+    frame_stamp: Option<Arc<TerminalFrameStamp>>,
     storage: Option<StorageAdmission>,
 }
 
@@ -208,6 +256,7 @@ impl CommittedFrameEmission {
                 revision: self.expected.plan_generation,
                 authorization_epoch: self.expected.authorization_epoch,
             },
+            self.frame_stamp.take(),
             storage,
         ))
     }
@@ -281,7 +330,81 @@ impl RetainedFrameAuthority {
         })
     }
 
+    /// Charge the original root before the scene worker allocates terminal
+    /// source-index sets and raw owner counters. The caller retains this lease
+    /// through the complete bounded mapping pass.
+    pub fn reserve_world_receipt_scratch(&self, bytes: usize) -> Result<StorageAdmission> {
+        self.quota
+            .reserve_external_storage(bytes.max(1))
+            .map_err(|error| {
+                AnimationError::Budget(format!("world terminal mapping scratch: {error:?}"))
+            })
+    }
+    /// This exact non-cloneable proof was minted by the same original broker
+    /// after a complete terminal flush. Revocation after begin_output does not
+    /// invalidate already emitted bytes; foreign channels cannot use the proof.
+    pub fn validate_flushed_proof(
+        &self,
+        frame: &HelperAuthority,
+        stamp: &Arc<TerminalFrameStamp>,
+        proof: &ReplayFlushedProof,
+    ) -> Result<()> {
+        let authority = ReplayAuthority {
+            package_digest: frame.package_digest.clone(),
+            instance_id: frame.instance_id,
+            revision: frame.plan_generation,
+            authorization_epoch: frame.authorization_epoch,
+        };
+        if frame != &self.expected || !proof.belongs_to_frame(&self.broker, &authority, stamp) {
+            return Err(AnimationError::PermissionDenied(
+                "world terminal proof belongs to another original broker or plan".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// World history proof is created only for a source retained by this
+    /// original quota root and the exact queued frame's terminal flush.
+    #[allow(clippy::too_many_arguments)] // Keep explicit bounded inputs and original authority at this existing boundary.
+    pub fn world_emission_after_proof(
+        &self,
+        frame: &HelperAuthority,
+        stamp: &Arc<TerminalFrameStamp>,
+        proof: &ReplayFlushedProof,
+        binding: &Arc<crate::native_worlds::WorldDotBinding>,
+        source_indices: &[usize],
+        emitted_owner_dots: &std::collections::BTreeMap<u32, u32>,
+        composition_revision: u64,
+    ) -> Result<crate::native_worlds::WorldEmission> {
+        self.validate_flushed_proof(frame, stamp, proof)?;
+        if !binding.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "world source belongs to a foreign native quota root".into(),
+            ));
+        }
+        crate::native_worlds::WorldEmission::after_proven_host_emission(
+            binding,
+            source_indices,
+            emitted_owner_dots,
+            composition_revision,
+        )
+    }
+
     pub fn begin_output(&self, frame: &HelperAuthority) -> Result<CommittedFrameEmission> {
+        self.begin_output_inner(frame, None)
+    }
+    pub fn begin_output_for_presentation(
+        &self,
+        frame: &HelperAuthority,
+        stamp: Arc<TerminalFrameStamp>,
+    ) -> Result<CommittedFrameEmission> {
+        self.begin_output_inner(frame, Some(stamp))
+    }
+    fn begin_output_inner(
+        &self,
+        frame: &HelperAuthority,
+        frame_stamp: Option<Arc<TerminalFrameStamp>>,
+    ) -> Result<CommittedFrameEmission> {
         if frame != &self.expected {
             return Err(AnimationError::PermissionDenied(
                 "published frame identity differs from original native owner".into(),
@@ -315,6 +438,7 @@ impl RetainedFrameAuthority {
             broker: Arc::clone(&self.broker),
             expected: frame.clone(),
             ticket: Some(ticket),
+            frame_stamp,
             storage: Some(storage),
         })
     }
@@ -687,6 +811,25 @@ impl ServiceOperation {
         &self.request
     } // Borrow immutable binary planes without separating their original-root admission.
 } // Cancellation may signal request().stop_token(), but actual job ownership still determines terminal settlement.
+
+fn original_service_group_request<'a>(
+    operations: &[&'a ServiceOperation],
+) -> Result<&'a HostRequest> {
+    let first = operations
+        .first()
+        .copied()
+        .filter(|_| operations.len() <= 8)
+        .ok_or_else(|| AnimationError::Runtime("service dependency count must be 1..8".into()))?;
+    if operations
+        .iter()
+        .any(|operation| !std::ptr::eq(&*operation.request, &*first.request))
+    {
+        return Err(AnimationError::PermissionDenied(
+            "service dependencies do not retain the original request".into(),
+        ));
+    }
+    Ok(&first.request)
+}
 
 // Observations describe the broker's current actual grant, never the requested
 // ceiling. A native binding identity is not a registered guest AssetHandle and
@@ -1548,6 +1691,135 @@ impl PackageInstance {
             self.replay_completed_yield_count += 1;
         }
         Ok(outcome)
+    }
+    /// World requests are carried by the original accepted helper, with the
+    /// current native activation and one shared quota root. A copied world id
+    /// never substitutes for this request authority.
+    pub(crate) fn check_native_world_request(
+        &self,
+        request: &HostRequest,
+    ) -> Result<ServiceAuthority> {
+        if self.mode != AnimationMode::Live
+            || self.helper_retired
+            || !matches!(
+                request.method.as_str(),
+                "worlds.open"
+                    | "worlds.frame"
+                    | "worlds.close"
+                    | "worlds.frame.close"
+                    | "worlds.list"
+                    | "worlds.region"
+                    | "worlds.model"
+            )
+            || !request.payload.shares_root(&self.quota)
+            || request.is_cancelled()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "invalid live world request".into(),
+            ));
+        }
+        self.live_helper_authority()?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)
+    }
+    pub(crate) fn native_world_authority(&self) -> Result<ServiceAuthority> {
+        if self.mode != AnimationMode::Live {
+            return Err(AnimationError::PermissionDenied(
+                "world requests require live mode".into(),
+            ));
+        }
+        self.live_helper_authority()
+    }
+    pub(crate) fn complete_native_world(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.check_native_world_request(request)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "foreign world result root".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("world activation missing".into()))?;
+        let digest = self.package.digest();
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })
+    }
+    /// Presentation subscriptions are explicit live observers of native
+    /// terminal ACKs, not an implicit render-side service acquisition.
+    pub(crate) fn check_native_presentation_request(
+        &self,
+        request: &HostRequest,
+    ) -> Result<ServiceAuthority> {
+        if self.mode != AnimationMode::Live
+            || self.helper_retired
+            || !matches!(
+                request.method.as_str(),
+                "presentation.subscribe" | "presentation.next" | "presentation.close"
+            )
+            || !request.payload.shares_root(&self.quota)
+            || request.is_cancelled()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "invalid live presentation request".into(),
+            ));
+        }
+        self.live_helper_authority()?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)
+    }
+    pub(crate) fn with_native_presentation_registry<T>(
+        &self,
+        request: &HostRequest,
+        mutate: impl FnOnce(ServiceAuthority) -> Result<T>,
+    ) -> Result<T> {
+        self.check_native_presentation_request(request)?;
+        let broker = lock_broker(&self.broker)?;
+        let authority = self.current_service_authority_locked(&broker)?;
+        self.validate_service_request_locked(request, authority)?;
+        mutate(authority)
+    }
+    pub(crate) fn native_presentation_authority(&self) -> Result<ServiceAuthority> {
+        if self.mode != AnimationMode::Live {
+            return Err(AnimationError::PermissionDenied(
+                "presentation requires live mode".into(),
+            ));
+        }
+        self.live_helper_authority()
+    }
+    pub(crate) fn complete_native_presentation(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.check_native_presentation_request(request)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "foreign presentation result root".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("presentation activation missing".into())
+        })?;
+        let digest = self.package.digest();
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            helper.complete_service_request(request.id, authority, value)
+        })
     }
     /// Select an exact original accepted audio request after durable resolution.
     /// A script source string, copied accepted-plan JSON, or same-root quota
@@ -2477,6 +2749,115 @@ impl PackageInstance {
             .commit(&operation.ticket, issue)
             .map_err(permission_error) // Native issue must be bounded and must not wait for I/O or run JavaScript.
     } // Actual body lifetime remains with the native job/receipt, not the committed ticket alone.
+    /// One native effect can depend on multiple individually accepted scoped
+    /// rights. Every operation must retain the exact same original request Arc;
+    /// a copied correlation ID cannot join another body's authorization.
+    pub(crate) fn commit_service_group<T>(
+        &mut self,
+        operations: &[&ServiceOperation],
+        issue: impl FnOnce() -> T,
+    ) -> Result<T> {
+        self.live_helper_authority()?;
+        let request = original_service_group_request(operations)?;
+        self.validate_service_request(request)?;
+        if request.is_cancelled() {
+            return Err(AnimationError::Runtime(
+                "service group request is already terminal".into(),
+            ));
+        }
+        let tickets: Vec<_> = operations
+            .iter()
+            .map(|operation| operation.ticket.as_ref())
+            .collect();
+        lock_broker(&self.broker)?
+            .commit_group(&tickets, issue)
+            .map_err(permission_error)
+    }
+    pub(crate) fn prepare_service_group_settlement(
+        &self,
+        operations: &[&ServiceOperation],
+    ) -> Result<Arc<ServiceGroupSettlement>> {
+        self.live_helper_authority()?;
+        let request = original_service_group_request(operations)?;
+        self.validate_service_request(request)?;
+        Ok(Arc::new(ServiceGroupSettlement {
+            request: request.clone(),
+            tickets: operations
+                .iter()
+                .map(|operation| Arc::clone(&operation.ticket))
+                .collect(),
+            settled: AtomicBool::new(false),
+        }))
+    }
+    /// Use only after genuine native completion or known unissued work. The
+    /// opaque receipt proves prior settlement if delivery returned an error.
+    pub(crate) fn settle_service_group(
+        &mut self,
+        operations: &[&ServiceOperation],
+        settlement: &ServiceGroupSettlement,
+    ) -> Result<()> {
+        settlement.check_original(operations)?;
+        if settlement.was_settled() {
+            return Ok(());
+        }
+        let tickets: Vec<_> = operations
+            .iter()
+            .map(|operation| operation.ticket.as_ref())
+            .collect();
+        lock_broker(&self.broker)?
+            .settle_group_without_delivery(&tickets)
+            .map_err(permission_error)?;
+        settlement.settled.store(true, Ordering::Release);
+        Ok(())
+    }
+    /// Deliver one helper completion only after all original dependencies pass
+    /// current authorization. Refused delivery retains all unsettled tickets.
+    pub(crate) fn complete_authorized_group(
+        &mut self,
+        operations: &[&ServiceOperation],
+        value: ServiceValue,
+        settlement: &ServiceGroupSettlement,
+    ) -> Result<CompletionState> {
+        settlement.check_original(operations)?;
+        if settlement.was_settled() {
+            return Err(AnimationError::PermissionDenied(
+                "service group already settled".into(),
+            ));
+        }
+        let request = original_service_group_request(operations)?;
+        if !value.shares_root(&self.quota) {
+            return Err(AnimationError::PermissionDenied(
+                "foreign service group result root".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        if self.helper_retired {
+            self.settle_service_group(operations, settlement)?;
+            return Ok(CompletionState::Cancelled);
+        }
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        let digest = self.package.digest();
+        let tickets: Vec<_> = operations
+            .iter()
+            .map(|operation| operation.ticket.as_ref())
+            .collect();
+        self.helper.with_native_publication(|helper| {
+            let mut broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            broker
+                .deliver_group(&tickets, || {
+                    // Broker removed all original tickets before this callback.
+                    // Publish evidence before helper I/O/deferred retirement.
+                    settlement.settled.store(true, Ordering::Release);
+                    helper.complete_service_request(request.id, authority, value)
+                })
+                .map_err(permission_error)?
+        })
+    }
     pub(crate) fn complete_authorized(
         &mut self,
         operation: &ServiceOperation,
@@ -2920,6 +3301,36 @@ impl PackageInstance {
     /// never satisfies this predicate.
     pub fn is_physically_retired(&self) -> bool {
         self.helper_retired && self.helper.is_physically_retired()
+    }
+
+    /// Native adapters retain this opaque evidence before helper retirement.
+    /// It exposes neither script data nor a writable retirement bit.
+    pub(crate) fn helper_retirement_evidence(&self) -> HelperRetirementEvidence {
+        HelperRetirementEvidence {
+            retired: Arc::clone(&self.replay_retired_proof),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn arm_complete_service_ack_failure_for_test(&self) -> Result<()> {
+        self.helper.arm_complete_service_ack_failure_for_test()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn helper_transport_test_snapshot(
+        &self,
+    ) -> crate::helper::HelperTransportTestSnapshot {
+        self.helper.transport_test_snapshot()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn helper_sequence_for_test(&self) -> u64 {
+        self.helper.sequence_for_test()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn helper_has_pending_service_request_for_test(&self, id: u64) -> bool {
+        self.helper.has_pending_service_request_for_test(id)
     }
 
     pub fn retire_helper(&mut self) -> Result<()> {

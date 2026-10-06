@@ -1,5 +1,6 @@
 //! Actual packaged-animation/helper check. JSONL stdout; no network acquisition.
-//! Synthetic pointer, clock and TV inputs verify transport/rendering only.
+//! Synthetic pointer/clock inputs and a synthetic TV service descriptor verify
+//! transport/rendering only; no provider, permission-broker or live-feed proof.
 #[cfg(feature = "v8-runtime")]
 fn main() {
     if let Err(error) = check::run() {
@@ -21,7 +22,10 @@ fn main() {
 #[cfg(feature = "v8-runtime")]
 mod check {
     use ilium_animation_js::{
-        engine::{ArraySpec, CreateState, ServiceAuthority, TypedArrayKind},
+        engine::{
+            ArraySpec, CompletionState, CreateState, EngineLimits, ServiceAuthority, ServiceValue,
+            TypedArrayKind,
+        },
         helper::{HelperAuthority, HelperLimits, HelperPlayback, HelperSession},
         manifest::AnimationMode,
         package::{Package, PackageLimits},
@@ -189,9 +193,46 @@ mod check {
                     return Err(fail("unexpected output contract"));
                 }
                 let mut creation = helper.start_create(&settings, &plan)?;
+                let mut fixture_tv_opened = false;
                 for _ in 0..8 {
-                    if !helper.take_requests().is_empty() {
-                        return Err(fail("unexpected external acquisition"));
+                    let requests = helper.take_requests();
+                    if !requests.is_empty() {
+                        if is_beach
+                            || mode != AnimationMode::Live
+                            || settings["mode"] != 4
+                            || fixture_tv_opened
+                            || requests.len() != 1
+                        {
+                            return Err(fail("unexpected external acquisition"));
+                        }
+                        let request = requests.into_iter().next().unwrap();
+                        if request.method != "sources.chess.open"
+                            || request.payload.metadata() != &json!({"game_id":"tv","max_hz":1})
+                            || !request.payload.arrays().is_empty()
+                            || !request.payload.planes().is_empty()
+                        {
+                            return Err(fail("unexpected synthetic TV source request"));
+                        }
+                        // Fixture-only native return: preserve the actual request ID,
+                        // activation and original-root admission through the helper ACK.
+                        // This deliberately does not grant a right or run a provider.
+                        let result = ServiceValue::copy_from_host(
+                            &json!({"ok":true,"value":{"id":"synthetic-tv-transport-fixture","kind":"sources.chess","revision":1,"status":{"state":"ready"},"latest":{"available":true,"revision":1,"game_id":"synthetic-helper-fixture","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","moves":[],"white":"synthetic fixture","black":"synthetic fixture","state":"playing"}}}),
+                            &[],
+                            &BTreeMap::new(),
+                            &EngineLimits::default(),
+                            quota.clone(),
+                        )?;
+                        if helper.complete_service_request(request.id, request.authority, result)?
+                            != CompletionState::Delivered
+                        {
+                            return Err(fail("synthetic TV descriptor was not acknowledged"));
+                        }
+                        fixture_tv_opened = true;
+                        println!(
+                            "{}",
+                            json!({"type":"fixture","choice":choice,"method":request.method,"synthetic_inputs":true,"scope":"source-handle transport only; no provider or broker acquisition"})
+                        );
                     }
                     if creation == CreateState::Ready {
                         break;
@@ -233,7 +274,7 @@ mod check {
                         match settings["mode"].as_i64() {
                             Some(0) => json!({"pointer":{"x":0.5,"y":0.5,"inside":true}}),
                             Some(4) => {
-                                json!({"chess":{"available":true,"revision":1,"game_id":"synthetic-helper-fixture","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","moves":[],"white":"synthetic fixture","black":"synthetic fixture","state":"playing"}})
+                                json!({"clock":{"epoch_ms":1_800_000_000_000_u64,"timezone":"UTC"}})
                             }
                             Some(7 | 8) => {
                                 json!({"clock":{"epoch_ms":1_800_000_000_000_u64+50*(sequence-1),"timezone":"UTC"}})
@@ -242,7 +283,7 @@ mod check {
                         }
                     };
                     let render_started = std::time::Instant::now();
-                    let frame = helper.render(&json!({"viewport":viewport,"time":seconds,"wall":seconds,"delta":if sequence==1{0.0}else{0.05},"wall_delta":if sequence==1{0.0}else{0.05},"settings":settings,"visible":true,"inputs":inputs,"render_policy":{"can_skip_occluded":false},"_ilium_frame":{"key":key,"shape":shape}}),&output).map_err(|error| { eprintln!("{}",json!({"type":"error","choice":choice,"mode":mode,"sequence":sequence,"render_wall_ms":render_started.elapsed().as_secs_f64()*1000.0,"message":error.to_string()})); error })?;
+                    let frame = helper.render(&json!({"viewport":viewport,"time":seconds,"wall":seconds,"delta":if sequence==1{0.0}else{0.05},"wall_delta":if sequence==1{0.0}else{0.05},"settings":settings,"visible":true,"inputs":inputs,"render_policy":{"can_skip_occluded":false},"_ilium_frame":{"key":key,"shape":shape}}),&output).inspect_err(|error| { eprintln!("{}",json!({"type":"error","choice":choice,"mode":mode,"sequence":sequence,"render_wall_ms":render_started.elapsed().as_secs_f64()*1000.0,"message":error.to_string()})); })?;
                     if frame.metadata["presented"] != true || frame.metadata["error"] != Value::Null
                     {
                         return Err(fail("packaged frame was not presented successfully"));

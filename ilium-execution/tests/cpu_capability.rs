@@ -80,3 +80,89 @@ fn disabled_cpu_worker_or_queue_is_permanent_capability_refusal() {
         Err(RejectReason::InvalidCost)
     );
 }
+
+#[test]
+fn external_cost_ceiling_includes_ancestors_and_does_not_report_free_capacity() {
+    let mut execution = execution(1, 4);
+    let parent = execution.client(limits(4, 8192, 32768)).unwrap();
+    let middle = parent.child(limits(4, 32768, 12288)).unwrap();
+    let leaf = middle.child(limits(4, 24576, 8192)).unwrap();
+    let expected = JobCost {
+        input_bytes: 8192,
+        result_bytes: 8192,
+    };
+    assert_eq!(leaf.maximum_external_job_cost(), Ok(expected));
+    let reservation = leaf
+        .try_reserve_external(JobCost {
+            input_bytes: 4096,
+            result_bytes: 4096,
+        })
+        .unwrap();
+    // A capability ceiling stays immutable while actual occupancy changes.
+    assert_eq!(leaf.maximum_external_job_cost(), Ok(expected));
+    drop(reservation);
+    assert!(matches!(
+        leaf.try_reserve_external(JobCost {
+            input_bytes: 8193,
+            result_bytes: 4096,
+        }),
+        Err(RejectReason::InputBytes)
+    ));
+    let wide = execution.client(limits(4, 32768, 32768)).unwrap();
+    assert_eq!(
+        wide.maximum_external_job_cost(),
+        Ok(JobCost {
+            input_bytes: 16384,
+            result_bytes: 16384,
+        })
+    );
+    let zero_parent = execution.client(limits(0, 8192, 8192)).unwrap();
+    let child = zero_parent.child(limits(4, 8192, 8192)).unwrap();
+    assert_eq!(
+        child.maximum_external_job_cost(),
+        Err(RejectReason::JobLimit)
+    );
+    execution.request_shutdown(ilium_execution::ShutdownMode::Drain);
+    assert_eq!(leaf.maximum_external_job_cost(), Err(RejectReason::Closed));
+    let report = execution
+        .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(report.shutdown_complete);
+    assert_eq!(report.remaining_workers, 0);
+    assert_eq!(leaf.quota_group().snapshot().jobs, 0);
+}
+
+#[test]
+fn external_actor_capability_does_not_require_a_cpu_worker_or_queue() {
+    let mut execution = execution(0, 0);
+    let client = execution.client(limits(1, 8192, 8192)).unwrap();
+    assert_eq!(
+        client.maximum_cpu_job_cost(),
+        Err(RejectReason::InvalidCost)
+    );
+    assert_eq!(
+        client.maximum_external_job_cost(),
+        Ok(JobCost {
+            input_bytes: 8192,
+            result_bytes: 8192,
+        })
+    );
+    let reservation = client
+        .try_reserve_external(JobCost {
+            input_bytes: 4096,
+            result_bytes: 4096,
+        })
+        .unwrap();
+    drop(reservation);
+    execution.request_shutdown(ilium_execution::ShutdownMode::Drain);
+    assert_eq!(
+        client.maximum_external_job_cost(),
+        Err(RejectReason::Closed)
+    );
+    let report = execution
+        .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(report.shutdown_complete);
+    assert_eq!(report.remaining_workers, 0);
+    assert_eq!(client.quota_group().snapshot().jobs, 0);
+}
