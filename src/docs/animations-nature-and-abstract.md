@@ -564,7 +564,7 @@ Wind reacts to your terminals. When a cell gains a character, Wind works out whe
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
-| Dots | `dot_count` | 10 to 2000, step 10 | 250 | How many dots the wind carries. They live only in empty screen cells. |
+| Dots | `dot_count` | 10 to 20000, step 50 | 2000 | How many dots the wind carries. They live only in empty screen cells. |
 | Dot weight | `dot_weight` | 1 to 100, step 5 | 30 | Average weight. Light dots follow the wind and pushes closely; heavy dots resist both and fall faster under gravity. |
 | Weight variation | `weight_variation` | 0 to 100%, step 5 | 40% | How much the weights of single dots differ. 0% makes all dots identical. |
 | Air drag | `drag` | 1 to 100%, step 5 | 40% | Resistance of the air. High drag stops dots quickly and lowers their top speed. |
@@ -581,6 +581,8 @@ Wind reacts to your terminals. When a cell gains a character, Wind works out whe
 | Appear push | `appear_push` | 0 to 100%, step 5 | 20% | Speed given to dots by text that appears from nowhere, such as typing. Usually gentler than scrolling. |
 | Push reach | `push_reach` | 0 to 4 cells, step 1 | 1 | How many cells away from changing text a dot is still pushed. 0 pushes only dots the text lands on. |
 | Scroll detection | `scroll_range` | 1 to 8 cells, step 1 | 3 | Largest jump in cells that still counts as scrolling. Larger values follow fast scrolling but may misread new text. |
+| Diffusion | `diffusion` | 0 to 100%, step 5 | 0% | Nearby dots push each other apart, which keeps them from bunching up. 0% lets dots pile together freely. |
+| Dispersion | `dispersion` | 0 to 100%, step 5 | 0% | Every so often a random dot jumps to a random empty place on the screen. Higher values do it more often (up to 100 dots per second). 0% never does. |
 | Merge dots | `merge_dots` | on / off | off | Dots piled into one cell become a larger dot character; twice as many become a larger one still. |
 | Merge at | `merge_threshold` | 2 to 12 dots, step 1 | 3 | How many dots in one cell make the larger dot. Shown only while Merge dots is on. |
 | Random seed | `seed` | 0 to 9999, step 1 | 1 | Selects the starting positions and weights of the dots. |

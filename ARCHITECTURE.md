@@ -117,7 +117,7 @@ The three live maps share the embedded Natural Earth coastline. USGS retains all
 
 Pi (`ilium-ambient::pi_digits`) computes an exact bounded integer-spigot prefix with single-process generation admission and prepares an atlas from unchanged bundled Cascadia Code on an owned worker. Native text and map labels use the bounded `Scene::native_glyph` hook through the client host; font Braille uses actual glyph coverage. Chess (`ilium-ambient::live_chess`) owns a bounded Lichess TV line stream, validates authoritative FEN positions and draws original supersampled silhouettes. Feed clocks are last-reported values; the protocol supplies no observation timestamp, so only receipt age is claimed. No synthetic replay is used by these live scenes.
 
-Wind (`ilium-ambient::scenes::wind`) is the one scene that reacts to the workspace. The `Scene` contract gained `wants_occupancy` and `occupancy(&OccupancyMask)`: for a scene that asks, `background_composition::screen_occupancy` builds a mask of every cell the compositor may not paint (outside the painted regions, or not a safe blank) from the final workspace buffer before each frame request, and `AnimationSurface::set_occupancy` carries it to the worker with a change counter that is part of the request and render-cache identity, so an unchanged screen costs nothing and other scenes pay nothing. Inside the scene, `flow` compares consecutive masks: a row that gained cells and equals a neighbouring row of the previous mask (whose source row changed) is vertical scroll, a shifted row is horizontal motion, anything else is text appearing from nowhere. `sim` integrates dots under wind, gusts, drag and optional gravity in fixed sub-steps, confines them to empty cells, and turns each classified cell into an impulse (along the motion for scroll, away from the cell for appearance) that also moves dots out of the newly occupied cell. Merged dots are scene-owned native glyphs, so the shared look still colours them.
+Wind (`ilium-ambient::scenes::wind`) is the one scene that reacts to the workspace. The `Scene` contract gained `wants_occupancy` and `occupancy(&OccupancyMask)`: for a scene that asks, `background_composition::screen_occupancy` builds a mask of every cell the compositor may not paint (outside the painted regions, or not a safe blank) from the final workspace buffer before each frame request, and `AnimationSurface::set_occupancy` carries it to the worker with a change counter that is part of the request and render-cache identity, so an unchanged screen costs nothing and other scenes pay nothing. Inside the scene, `flow` compares consecutive masks: a row that gained cells and equals a neighbouring row of the previous mask (whose source row changed) is vertical scroll, a shifted row is horizontal motion, anything else is text appearing from nowhere. `sim` integrates dots under wind, gusts, drag and optional gravity in fixed sub-steps, confines them to empty cells, optionally repels close dots from each other (diffusion: a bucket grid keeps the neighbour search local, so 20000 dots stay affordable), teleports random dots to random empty cells at a set rate (dispersion), and turns each classified cell into an impulse (along the motion for scroll, away from the cell for appearance) that also moves dots out of the newly occupied cell. Merged dots are scene-owned native glyphs, so the shared look still colours them.
 
 Carpet (`ilium-ambient::scenes::carpet`) separates typed controls, bounded hidden-body simulations, legal chess, and hatch projection. Compact sphere/capsule heights combine by maximum; a reusable sampled height field bends only the hatch lines, leaving color and dither to the client. Camera projection and inverse ground picking share one transform. The default-enabled Infinite lines control extends the flat hatch lattice to viewport edges, including lines outside the simulation square; disabling it restores square-clipped ink. Exterior lines remain decorative: picking and all simulation coordinates retain the finite ground domain. The client forwards optional field-relative pointer coordinates through `Scene::pointer` without consuming terminal mouse events. Simulation speed integrates elapsed time without replaying backward clock corrections; civil clocks read `Frame::now` and an explicit UTC offset. Automated chess uses an owned cancellable search worker with stale-result guards; live chess reuses authoritative Lichess TV positions and retains captured-piece fades through subsequent feed updates. Presentation reconfiguration preserves games; changing the seed requests a fresh scene.
 
@@ -245,6 +245,127 @@ in `ClientExecutionStartError`. This client seam is also source-integrated and
 formatting checked, with five native cases authored but not yet executed.
 Later service-startup rollback and complete client shutdown remain separate
 integration and verification requirements.
+
+The complete client ownership migration is not qualified yet. The latest
+isolated all-target check reached the client and reported 163 error records
+and 19 warnings; all 2,108 frozen inputs matched their retained originals.
+Remaining callers still use removed prompt constructors, raw configuration
+paths and incomplete animation controller APIs. Private corrections explicitly
+convert cursor coordinates, borrow editor paths, retain the declared request
+byte bound and let the durable editor writer borrow its retiring source on
+I/O. Their exact source patches are verified, but compilation and native
+persistence, ordering and final-disposal checks remain outstanding.
+
+Configuration-directory consumers are being migrated to the existing
+`Source<PathBuf>` and `Snapshot<PathBuf>` ownership boundary. Writer payloads
+must retain the same admitted path through rejection and acknowledgement,
+and borrow that path during I/O. Startup currently constructs its prepared
+state on the terminal-owning caller; wrapping a path there does not establish
+CPU offloading or bound its original production. The admitted startup producer,
+all callers and the final source-release gate must close together before this
+boundary can be accepted.
+
+The private directory-source integration now includes the Cost, Voice, Remote,
+Git, Inference and Agent writer-refusal slots. Each slot keeps the rejected
+command, destination and intent for an ordered retry instead of rebuilding a
+write. Cost preparation captures its destination and checks source identity
+before publication. The two Cost modules are wired into the private client
+graph. Exact patch replay and scoped formatting pass; these sources have not
+been compiled or exercised. The actual startup producer, configuration-delivery
+consumers and value-dialog cancellation/shutdown ownership remain open.
+
+The private caller inventory also covers directory assignment fixtures: 61
+scoped edits reuse the existing CPU-admitted directory helper and preserve the
+same destination alias in a keyboard-prefix target. Inference acknowledgement
+fixtures retain the actual delivered snapshot through their callback, and the
+missing-directory Git fixture explicitly retires its retained terminal state.
+These fixtures use the existing shared test client; they do not establish
+isolated-bank qualification. Exact forward and inverse patches and Rust parsing
+pass, while current-client compilation and native execution remain unrun.
+
+Numeric initial sources now have private signed-integer and fixed-decimal
+variants in the existing admitted CPU constructor. Fixed precision preserves
+Sound Pulse Rate's trailing decimal place; signed formatting preserves negative
+Sweep and Harmony values. The declared body bound includes the requested
+precision, and nonfinite values retain the original failure request. Two
+actual-bank formatting regression cases are authored but have not run. Complete
+Sound producer, edit, acknowledgement and shutdown integration is still required.
+
+Private animation and Sound companion sources now compose with the current
+directory and prompt changes. This includes CPU edit/resolution controllers,
+immutable animation row sharing, Sound model preparation and cached previews,
+plus the module declarations required to expose them. Recommendation capture
+shares the admitted incoming projection instead of copying its body on the UI.
+Exact forward/inverse source replay passes; this combined client graph remains
+uncompiled. Animation destination publication, save-pump migration, complete
+Sound caller/publication integration, and native fixtures are still required.
+
+The Sound writer migration must preserve the existing 64 KiB serialized-command
+limit and bounded serde normalization before publishing prepared settings. The
+private Sound Update job now reuses the existing sink and normalization on its
+CPU worker before constructing a non-Clone validated write object. Local and
+Preview keep their existing behavior. The existing ordered writer also has a
+private family entry that accepts the captured destination snapshot and returns
+that same original with payload and intent on admission refusal. No new writer
+or execution bank is introduced. Exactly three production Sound save callers
+still require migration. A preparation receipt is not a durable
+save acknowledgement, and Studio Save must report success only after the ordered
+writer confirms the original destination and desired settings.
+
+The private Sound family writer now consumes the validated prepared object and
+calls the existing borrowed durable saver. Its receipt returns the original
+settings snapshot. The application acknowledgement checks both that snapshot
+and the captured destination before reporting success; a replaced settings
+source cannot finish a current dialog. A non-Clone save intent keeps the previous
+and desired settings, studio model, native input, dialog identity and single
+prepared outbound request. Queue acceptance and CPU completion remain distinct
+from durable success.
+
+The Sound pending owner uses the existing CPU and outbound clients, retains
+original requests across admission retries, and includes cancellation and receipt
+loss in family shutdown accounting. Its external admission preflight uses a
+read-only capability ceiling that includes the root and every client ancestor;
+that ceiling does not represent free capacity and does not require a CPU worker.
+Actual reservation still checks occupancy. The owner has twelve authored
+actual-bank tests, still unrun. All four execution capability cases passed
+in debug and release in the frozen source assembly, including the two new
+cases with physical shutdown and zero outstanding jobs. Strict all-target
+execution-crate Clippy and scoped formatting also passed. The exact capability
+method and test additions are now in the shared checkout; the optimized execution
+library is retained, not installed. Current platform filesystem/process-control
+sources differ from that tested assembly and remain unchanged, so these results
+do not establish current workspace qualification. The four Sound save intent cases remain
+unrun. Three UI save producers, publication after writer
+acceptance, complete refused-writer custody, and physical retirement qualification
+remain unfinished. Exact source replay and scoped formatting do not establish
+compiler, native, release or live acceptance.
+
+Private Sound intake now retains the original settings, destination and catalogue
+sources while their bounded admission advances. It visits at most one source
+and 128 records per turn; catalogue selection and path copying stay in the
+existing CPU job. Cancellation must promote raw sources before closing the bank.
+The same ordered writer now has a typed Sound acceptance mapper: on refusal it
+returns the complete original write and intent; only successful admission moves
+the single prepared outbound request into a non-Clone publication. Three actual
+writer/readback cases and nine capture cases are authored but unrun. Root App
+consumers and all three save producers still need wiring before these private
+adapters can affect the client.
+
+The control-search proposal is not adopted. Its independent source audit found
+incoming query disposal on admission refusal and continuation routing to the
+previous search after a newer query fails. It also changes receipt/error behavior
+and does not account for continuation allocations. These boundaries must be
+corrected and tested with actual original invocation ownership before replacing
+the existing control-search path.
+
+Animation configuration writes must keep the startup-owned `animation_home`
+destination; that path is separate from the general configuration directory.
+Input tests use the existing admitted reader and its original event envelopes,
+with one shared test lock for the process-wide terminal-input claim. The private
+test bridge only exposes this reader to sibling test modules. Corrected animation
+input handlers retain semantic navigation across presentation acknowledgements
+and check the active editor or row source separately; these source corrections
+still require native ordering tests and complete caller integration.
 
 Presentation shutdown retains its completion receiver and original output
 failure across cancelled waits. The existing platform supervisor notifies the
@@ -516,7 +637,43 @@ panic at the optional phase after semantic completion. Their assertions include
 original model, undo, cursor and identity preservation plus actual bank drain;
 they remain unrun. A 156-source successor also adds Git CPU catalogue opening,
 step edits and ordered acknowledgement fences. Its diagnostic compiler check
-runs against 2106 frozen files and cannot establish whole-feature acceptance.
+failed before reaching the client because the frozen transcript dependency
+lacked the newer parser exports required by session conversion. All 2106
+retained original hashes matched; the compiler and runner were reaped and both
+disposable directories removed. The next private assembly adds the exact
+transcript library source from the qualified regular-file-read component; its
+manifest and request-evidence dependency already match that qualification.
+The new diagnostic check uses 2108 frozen files and still cannot establish
+whole-feature acceptance or native behavior.
+
+The subsequent private source assembly selects 161 sources. Eleven exact
+forward/inverse patches add cost/sound installers and replace cost capture,
+identity, derivation metadata and published overlays with aliases of the same
+CPU-admitted settings original. UI capture uses cached declarations and original
+identity; deep price-table copies remain on the existing CPU owner. A narrow
+successor adds the three model-source shutdown releases and preserves refused
+originals. These are source integrations, not compiler or native-test results;
+user edits, writer acknowledgements, sound consumers and startup publication
+still require closure. The board Enter repair now includes three actual-original
+input fixtures with 47 assertions, also unexecuted; the separate voice/control
+board mutation path is not covered by those fixtures.
+
+An additional unselected App/UI facet samples one shallow animation settings
+descriptor before composition and carries that exact descriptor into pending
+emission geometry. It exposes acknowledged originals only after the existing
+matching terminal-emission acknowledgement, with layout, mode and source-tab
+fences. Source-dependent scrolling and selection belong to that captured
+descriptor. The renderer/producer integration and native acknowledgement tests
+remain incomplete. Error chrome must retain a separately admitted CPU original;
+copying a 4 KiB preview into the existing total 4096-byte metadata envelope would
+exceed its allowance. The current metadata static assertion remains unchanged.
+Independent source review found that composed and acknowledged animation
+descriptors would survive the existing editor-only frame release. An unselected
+successor explicitly releases both readers at the actual presentation-drain
+boundary before CPU-bank retirement. The renderer successor now consumes the
+same captured sources and scalars and retains CPU-produced error chrome through
+a separate admitted original. Those source changes still need complete caller
+integration and actual emitted/rejected/shutdown test execution.
 
 Startup still has a distinct producer gap: system-sound and audio-device
 discovery run synchronously while the startup dialog is active, before the
@@ -524,6 +681,12 @@ shared execution bank starts. Wrapping those raw results later does not move
 their production or final failure destruction off the caller. Startup must
 transfer admitted original sources from the existing I/O/CPU owners, preserve
 execution shutdown on every startup failure, and avoid creating a second bank.
+The read-only startup inventory pins 23 sources across 26 boundaries. The sound
+catalogue's count and depth limits do not bound environment-supplied root paths,
+name bytes, traversal work or temporary collections. The platform audio library
+also allocates device collections before returning public iterators, so capping
+the collected result afterward cannot establish a producer peak bound. These
+specific allocation and early-failure ownership boundaries remain unresolved.
 Acknowledged pane surfaces expose another presentation accounting boundary.
 The current guarded buffer retains a shared storage declaration for two queued
 frames and the diff base, while queue reservations release independently of
@@ -1769,3 +1932,96 @@ Keyboard practice owns a private `ilium-core::Tree` and resolves the real config
 ### Additive user instructions
 
 `ilium-inference::PromptInstructions` persists six optional fields under `[inference.instructions]`; the existing voice field remains `[voice].custom_prompt`. `instruction_settings::InstructionField` maps both the central LLM Instructions tab and feature tabs to these same values and save paths. Editors preserve authored text; prompt builders trim surrounding whitespace and interpolate it once into optional `.hbs` sections. Naming workers copy current inference settings when dispatching new requests. Restructure includes guidance on every corrective retry, Smart Copy adds only its selection preferences to the system prompt, and Ask for update renders its instructions when invoked. Empty fields preserve the built-in prompt output.
+
+Sound application integration (private, not yet compiled): fixed typed settings selectors capture the same Sound settings, catalogue, directory and native input aliases. Admission scans, edits, normalization, preview preparation and path checks belong to the existing CPU/I/O lanes. Borrowed dialog commits check the pending head before capturing their admitted selection or numeric draft; refusal retains the complete capture. Queue admission establishes custody, while only the matching ordered durability receipt may report saved. Studio actions now target the same captured job path rather than constructing settings bodies or announcing success before acknowledgement. The settings Choice opener, prepared studio creation, application result publication, preview receipt ownership and shutdown disposition are still integration requirements. Exact private source graph1509 is retained at /var/tmp/ilium-worker-sound-borrowed-callers-union-879-1509/source-graph.json; source replay and formatting are verified, but the combined client and native behavior are not qualified.
+
+Sound pipeline qualification boundary: the private application head now spans raw capture, finite CPU preparation, validated writer intent and the actual existing ordered writer. Permanent preparation/write failures retain their complete originals for reported disposition; full-writer refusal retains the same write, destination, outbound and CPU retention guard. Local and preview results transfer the whole retained owner to the application, which must keep its own input/lifecycle gate through preview I/O. The existing choice CPU preparation also preserves the legacy file-selector ordering, deduplication, no-file entry and disabled outside-catalog selection. Combined-source all-target client compilation is running diagnostically against graph1516; application publication, prepared studio/choice opening and native lifecycle tests are not yet qualified.
+
+Root879 checkpoint1526: private Sound choice opening, retained prepared choice seed, narrow App collector and reported-failure disposal composed into graph1525 (220 selected sources, SHA 76c0e32231db6634498005941802987a956e706639a6f15b47d083b2d09ddf96). Ten exact forward/inverse replay edges and all selected hashes verified; new native cases remain unrun. Diagnostic compiler1518 stays frozen on predecessor1516 under monitor115; no polling or source replacement. Root still owes Sound App publication, preview/shutdown lifecycle and full eleven-area acceptance. No canonical Rust adoption, installation or process restart in this checkpoint.
+
+Root879 checkpoint1531: graph1529 adds private Sound App result consumer on the existing configuration collector. Actual writer acceptance gates authored Source installation and single prepared outbound transfer; same-original existing studio installation preserves presentation, and borrowed error reporting precedes disposal. All external preview/local/publication owners now participate in native-input and shutdown pending gates. Three exact replay edges and220selected hashes verified; owned Rust formatting/narrow App parsing passed, compilation/native UNRUN. Preview handoff remains an unintegrated IO-owner slot, new-studio opening and explicit stale/publication disposition remain incomplete. Worker1527 owns preview receipt lifecycle; worker1530 owns captured opening; Root owns all caller integration. Original compiler1518 remains frozen under115. No canonical Rust adoption/install/restart; full eleven-area goal stays active.
+
+Root879 checkpoint1539: private graph1537 closes reported stale Local Sound result disposal (whole admitted owner retained through token/status error then CPU retirement) and studio waveform borrowed preview() consumer. Twoexactforward/inversereplays/scopedfmt and220hashes verified; compilation/nativeUNRUNfor1537. Actual diagnostic1518 on predecessor1516 finished Cargo101/runner1,238errors,2138frozenfiles0drift,0survivors,exactscratchremoved. Full inventory1533 handed to existing choiceowner1535; preview1527 and opening1530 remaininflight. Monitor115 audited/cleared; searchcorrection sameconversation recoveredtab1689071829 currentlyConnectioninterruptedwaitingcompleteanswer,notterminalsuccess/failure; timer1534 aliveverified andmonitor118positivehealthyregistration,nomoreresubmissions/polling. Full11areagoal active,allintegratednative/release/PTy/performance stillowed. NocanonicalRustadoption/install/restart.
+
+Root879 checkpoint1548: private graph1547 (222 selected sources, SHA d1b3e736987b61ba24a19af272056deddaa531d5b5f719ef27d5a28d2d3d6baa) integrates the actual Sound preview IO owner into App/Family pending, retry, cancellation and shutdown-report collection. The complete prepared/native/outbound owner and actual validation Retained survive through same-source/studio/revision checks and single prepared publication, or explicit error disposition. Existing IO lane reused; no extra bank/thread. Ten real-bank fixtures are authored but unrun; running/panic/Lost forcing and native Some still require lawful fixtures. Two scoped choice corrections preserve all30variants;13 legacy source/refusal boundaries remain incomplete. Eleven exact replay edges, all222 hashes and scoped Rust formatting verified; current compilation/native/release/live UNRUN. Prior1518 compiler failed238errors, no compiler currently running. Captured studioopening1530 still in flight; monitor118 sole observer of original search correction timer1534. Full11area goal remains active; no canonical Rust adoption, binary install or user restart.
+
+
+Root879 checkpoint1557, 2026-10-06: Sound studio opening is privately integrated into App initialization, the ordered pending gate, collection and shutdown. Automatic opening captures the actual settings Source after older sound heads and outstanding configuration writes settle. Publication retains its exact wizard fence until the complete admitted owner is disposed. Failed preparation preserves the matching identity through bounded disposal retries; cancellation now transfers the same raw capture into a reportable failure before release. Existing CPU/I/O execution is reused.
+
+Graph1556 contains224 selected sources; all selected hashes and13 new forward/inverse patch edges were verified. Scoped formatting and narrow App parsing passed. Three opening fixtures and one capture-cancellation fixture are authored, UNRUN. All-target diagnostic compiler1554 freezes predecessor1553 with2144 files; the cancellation successor is not included in that compiler run. Combined monitor124 observes that compiler and the original search review inspection1534 without agent polling. Registration123 briefly replaced118; combined124 restores observation of both unchanged originals. No job was restarted.
+
+The complete11-area goal remains active and incomplete. Inventory1549 records335 Ui references and42 Reset references across21 files. Exact definitions confirm Reset is three scalar fields; Ui owns variable IconSettings strings and progress frames and needs complete-family source admission. Naming882 was given that corrected dependency. Existing onboarding fixtures/readers,13 legacy choice contracts, current-client compilation, native checks, release artifacts, isolated PTYs and matched measurements remain outstanding. No canonical Rust adoption, Git mutation, binary installation or user-process restart in this checkpoint.
+
+
+Root879 checkpoint1561, 2026-10-06: private graph1559 adds the exact Ui/Reset Family admission provider (225 selected hashes verified). Ui schema has25 fields, with66 icon String capacities plus the progress-frame Vec backing and each frame String capacity. Exhaustive patterns and a Copy bound enforce that other fields remain allocation-free; Reset has3 scalar fields and no heap records. One forward/inverse replay and pinned formatting check passed. Two actual-source promotion fixtures are authored, UNRUN. Initial generation rejected a guessed Ui field count27 before producing Rust; authoritative25-field inventory corrected that assumption. Naming882 received the sealed provider for its existing startup675 integration. Live App/choice/writer source migration remains incomplete.
+
+Original compiler1554 still observes frozen predecessor1553 via combined monitor124; no agent polling or compiler rerun. Existing workers own disjoint keys/mouse callers and remaining onboarding Sound consumers privately. Caller tracing found an existing exact native inference-step owner, shared with SettingsStep CPU preparation and writer acknowledgements, so model arrows can reuse that owner rather than discard ModelStepRefusal or create another queue. Empty OpenAI/Ollama catalogue refresh behavior must remain unchanged; Kilo fallback stays in actual CPU choice preparation. Voice caller inventory1560 records21 definition/test/production references; control String mappings currently discard complete refusal semantics and need repair. Full eleven-area goal remains active; current client tests/release/live and matched performance are unqualified. No canonical Rust adoption, Git mutation, installation or user-process restart.
+
+
+Root879 checkpoint1566, 2026-10-06: private graph1563 (225 selected sources, SHA 0013da6a3de8f38cc5a7ec8fd9fafd13c9d83a0ed67bc776af4406be229ec744) now includes the complete Sound onboarding1557 consumer/fixture migration and keys/mouse1557 caller patch. All selected hashes and both exact forward/inverse caller replay edges verified; scoped formatting passed. The two new caller classifier cases, Sound readback/geometry cases and Ui/Reset promotion cases remain authored and UNRUN. Of48 prior key/mouse compiler records,34 have source adaptations;14 require the actual acknowledged PaintedAnimationSettings producer and whole RowTextSeed contract. No geometry substitute was introduced.
+
+Three disjoint existing workers now own Ui/Reset Source/application/writer integration1560; Voice refusal original-source/catalogue/native preservation1564; and stale accepted Sound publication lifecycle1565. The latter currently lacks a normal/shutdown disposition, so a retained accepted owner can stall the pending gate. Voice currently drops captured Source and whole command in refusal mappings. Ui startup requires fixed CPU-derived progress facts before installation; queue admission is not an installed source or a durability acknowledgement. Existing input Repeat and worktree-cursor refusal seams are explicit App dependencies. Original diagnostic compiler1554 remains frozen on1553 under combined monitor124; no agent polling, restart or later-source compiler claim. Full11-area goal stays active and incomplete; current combined compilation, native/release/PTy/performance acceptance remain outstanding. No canonical Rust adoption, Git mutation, installation or user-owned process restart. Evidence /var/tmp/ilium-worker-key-mouse-union-879-1563/checkpoint-1566.json.
+
+
+Sound publication and clipboard delivery boundaries (private candidate1569, not yet compiled): queue acceptance preserves a single prepaid outbound request independently of disk durability. A superseded authored Source prevents old UI/studio installation, but does not discard accepted semantic output or the original writer acknowledgement. Configuration acknowledgement collection must first dispose pending accepted publication in both normal and closing paths. The existing Sound producer retains its external job/byte debit through actual output, rather than releasing credit when transferring to the outbox.
+
+Atomic clipboard input also requires an ordered semantic owner for replay-mode controls. The current native Rename path still falls into borrowed synchronous character replay; a whole-edit literal insertion would change Enter, Tab and mode-transition behavior. Inventory1568 records43 Replay-mode patterns, and a native-ingress fixture is authored but unrun. The finite replay candidate must retain the same native envelope, scan on the existing CPU lane, and advance each byte span only after the matching semantic action settles. Ui/Reset startup facts and Voice per-write native custody remain separate incomplete integration boundaries. Source selection/replay/format evidence is checkpoint1571; whole-client and runtime acceptance remain unproven.
+
+
+Original clipboard completion identity (private graph1572, not compiled): the replay owner retains one original paste and one offered semantic action. Each action has an original allocation, monotonic sequence, key and exact UTF-8 byte span. Sequence exhaustion is refused before an action is offered. Byte acknowledgement requires the actual consumer receipt to retain that same action identity through asynchronous preparation; matching the clipboard allocation alone cannot distinguish successive children. A resource refusal, lost receipt or stale destination retains the undelivered suffix for explicit disposition. Existing completion outcomes overload deliberate Escape and stale cancellation, and also overload handled no-op with one resource refusal; these producer contracts require explicit integration rather than a blanket success mapping. Inventory1575 covers442 client sources and records81 lexical completion constructors/124 further uses. App/lib and delayed completion producers remain unintegrated; nine replay fixtures are authored but unrun.
+
+
+Voice operation identity and durability (private integration, not compiled): the global accepted-operations counter is a sequence allocator across configuration families, not proof of the currently active Voice command. Voice needs its exact accepted operation and captured settings/destination/native owner tied to the actual preparation head, then moved into each existing ordered writer intent before releasing that head. A single slot for all queued Voice writes cannot preserve overlapping accepted operations. Prompt admission retains complete refusal/retry captures; Voice semantic completion waits for the matching actual terminal writer callback. The sealed prompt patch1573 provides capture and checked transfer APIs, but Family/writer/callback integration is still absent. Original client diagnostic1554 failed231 primary records on older frozen1553; private repair graph1581 has exact patch/format/hash evidence only, with no newer compilation or runtime claim.
+
+
+Root879 checkpoint1590, 2026-10-06: read-only reconciliation1582 accounts for all231 original primary compiler spans (34 source-adapted/uncompiled,98 Root-required,95 owned,4 external startup contracts). Root then repaired board diagnostic231 by moving the same pending storage action before immutable storage/column borrows; writer/revision/save return unchanged, exact patch replay and pinned fmt0. Private graph1589 includes that repair and reviewed paste parent1574 (four exact edges,228 selected hashes verified). Paste has ten authored UNRUN fixtures and bounded metadata admission, but App causal action stamps, actual modal/domain completion bridges and normal/shutdown integration remain absent. No current compiler/native/release/live claim. Ui1560 retains App/lib/Family; trigger1584 owns trigger dialog/preparation; animation1585 owns eight controller leaves. Root retains per-head/per-write Voice identity and paste integration after owner release. Authoritative Ui policy correction: legacy custom TOML serialization had no generic64KiB Ui normalization; preserve actual existing source/writer capacity eligibility. Monitor130 alone observes next inspection of the interrupted original search review; no poll or resend. Full11-area goal remains ACTIVE. Evidence /var/tmp/ilium-worker-paste-parent-union-879-1589/checkpoint-1590.json.
+
+
+Root879 checkpoint1593, 2026-10-06: private graph1592 verifies228 selected hashes and adds exact debug-log caller repair1591. Cache summary borrows the current DebugCacheOwner so live loading state is independent of the older immutable journal; history borrows that journal without clone. Original compiler errors14/15 have exact forward/inverse patch and pinned fmt0 evidence; one loading-state divergence fixture is AUTHORED_UNRUN. This is not debug-history offloading: full filtering/counting/styled-history formatting/wrapping still occurs on UI and remains a required cache/filter/width-bound CPU projection. CreateBoard original constructor/suggestion also retains raw UI formatting and missing constructors; actual source-backed preparation and initial draft identity fencing remain required. No current compiler/native/release/live acceptance. Ui1560 owns App/lib/Family and now the exact additive config_prompt_ack Ui/Reset arms; trigger1584 and animation1585 remain disjoint, animation includes private RowModel capacity/context closure. Root causal paste and per-write Voice integration follow owner release. Search monitor130 remains the sole observer; original interrupted conversation retained without poll/resend. Full11-area goal ACTIVE. Evidence /var/tmp/ilium-worker-debug-ui-borrow-union-879-1592/checkpoint-1593.json.
+
+
+Root879 checkpoint1618, 2026-10-06: private graph1617 verifies251 selected source hashes and exact forward/inverse composition. Released Ui1560, Voice1564/1573/1604, animation1594 and debug-history1600 are source-selected. Root caller repairs1605 and animation capacity fixture1609 have pinned scoped fmt0. Independent Ui1607 found two production defects: Reset live publication incorrectly waited for writer admission, and unknown long icon paths allocated full diagnostics before the declared error bound. Root1611 repairs both; two actual-bank regressions are AUTHORED_UNRUN. Voice1604 retains per-write acceptance/source/destination/native and gates success on actual durable ACK; ordinary Ui/Reset/source-install collectors now participate in the family pump. Debug1600 reuses original journals and prepares wrapped native windows on CPU; Root1616 additionally fences SAME admitted name arena/index, not equal text. Coordinator1613 is owned separately; App scheduling/wake/fields/module/shutdown still require Root integration. Current compiler, native, release, live and matched performance are UNQUALIFIED. Causal paste, incoming Ui facts, startup/frame preparation, terminal failure disposition and remaining inventory are still open. Sole search monitor130 has no terminal notification and is not polled or resent. No canonical Rust adoption, installation or user-process restart. Full eleven-area goal remains ACTIVE. Evidence /var/tmp/ilium-worker-debug-name-fence-union-879-1617/checkpoint-1618.json.
+
+
+Root879 checkpoint1626, 2026-10-06: private graph1625 selects254 hash-verified sources with18 exact forward/inverse edges. Root1623 inventories110 affected references/16 targets and adapts14 caller files, including three actual editor completion consumers. Replay identity is now captured before prompt poll/cancel, preserved through choice-filter continuation, and returned only by matching editor installation; ordinary native completions remain unstamped. One actual-scanner/editor callback fixture, four PromptReplay1622 cases and six DebugCoordinator1613 cases are AUTHORED_UNRUN. Pinned scoped format passes; current compilation/native/release/live/performance remain UNQUALIFIED. Modal replay1624 is separately owned, and all43 replay modes, asynchronous commit stamps, App dispatcher and debug composition/wake/shutdown still require integration. Search130 was handled: one permitted built-in Retry was accepted in the SAME conversation; monitor132 is the sole next inspection, without agent polling or a new submission. Full eleven-area goal remains ACTIVE; canonical Rust and user-owned processes unchanged. Evidence /var/tmp/ilium-worker-prompt-replay-caller-union-879-1625/checkpoint-1626.json.
+
+
+Root879 checkpoint1632, 2026-10-06: private graph1629 has255 verified selected sources; six debug1627 integration edges have exact forward/inverse reconstruction and scoped pinned format0. App captures actual displayed/underlying pane dimensions, scroll/filter, original journal/name and complete fixed theme Block; finite CPU preparation reuses the existing document client and physical bank. Review1628 D1 corrected: refused capture cannot label old source current, and incompatible current dimensions cannot paint an old window. Two App actual-CPU cases are AUTHORED_UNRUN. Normal retry/wake and presenter-after-release shutdown drain preserve unsettled/lost supervisors in original App custody; fixed fields are accounted by existing size_of<ShutdownOriginals>. Diagnostic compiler1630 is registered under monitor134, last verified2164-file frozen assembly/30percent; no polling or acceptance claim. Modal1624 remains source-only and unselected, requiring Root parent instance/notice and per-action cancellation integration. Search132 remains sole separately scheduled inspection after one accepted built-in Retry. All eleven areas remain ACTIVE/incomplete; current native/release/live/PTy/matched metrics outstanding. No canonical Rust adoption, Git mutation, installation or user-owned process restart. Evidence /var/tmp/ilium-worker-debug-root-union-879-1629/checkpoint-1632.json.
+
+
+Root879 checkpoint1641, 2026-10-06: private graph1640 selects259 hash-verified sources with exact forward/inverse modal-parent and loop edges. Modal1624 now source-selected: actual scanner action retained by CPU modal head and returned in actual Model notice. Root1634 fences accepted editor instance, action sequence/native/span before acknowledgement; Lost retains child/supervisor, cancellation after mutation never fabricates an untouched-span cancellation. Three explicitly synthetic-notice protocol cases use actual scanner actions; four real modal fixtures remain AUTHORED_UNRUN. Independent review1635 found no concrete new source defect. Root1639 advances one scanner action per ordinary coordinator turn and retires a completed original only after actual matching acknowledgement; fixes existing test-bank mutable join receiver. Scoped pinned fmt/check0, compiler/native UNRUN for graph1640. Domain Enter/Tab/non-prompt destinations and shutdown failure/disposal remain incomplete; read-only full-route inventory1638 delegated. Frozen compiler1630 monitor134 continues on prior graph1629 without polling; sole search132 likewise awaits terminal notification. Full eleven-area goal ACTIVE/incomplete, no current release/live/PTy/performance acceptance. No canonical Rust adoption, Git mutation, install or user-process restart. Evidence /var/tmp/ilium-worker-replay-loop-union-879-1640/checkpoint-1641.json.
+
+
+Root879 checkpoint1651, 2026-10-06: terminal diagnostic1630 audited actual Cargo101/runner1 and208 error diagnostics on frozen graph1629, no source drift, log hash verified, original runner absent and child report empty, both exact SSD scratch paths removed; monitor134 handled/cleared. Private graph1649 selects259 verified source hashes. Root1643 declares actual selected paste_replay and consumes Ui installation once across live publication/later writer admission;1646 preserves saving ValueDialog leaves under exhaustive release;1648 reports/retains actual failed shutdown notice instead of inventing cancellation by dropping it. Scoped pinned fmt/check and exact forward/inverse edges0; current graph compiler/native/release/live unqualified. Replay1638 inventories43/43 Char/Enter/Tab modes with19 producer sources and5 routing dependencies; complete domain/non-prompt causal routing still required. Client worker owns five private value callers/typed complete refusal contracts; Root owns outer App/consumer custody. Animation worker read-only contract closure1650. Search132 remains independently scheduled/unpolled, no resubmission. Full eleven-area goal ACTIVE/incomplete; workspace checks, release, actual PTYs and matched latency/frame-age/CPU/memory remain outstanding. No canonical Rust adoption, Git mutation, install or user-process restart. Evidence /var/tmp/ilium-worker-shutdown-notice-union-879-1649/checkpoint-1651.json.
+
+
+Root879 checkpoint1657, 2026-10-06: private graph1656 (259 selected source hashes, SHA ef0246d85ae5de9e0a294fa366544d4ffb6c137b7292271f12f52789aeb8d133) incorporates the five reviewed settings caller files and the narrow immutable autosave discovery repair. Root read the full settings patch and successor before selection; corrected typed Err conversion and returned inference family/directory captures preserve original refusal inputs. Exact forward/inverse patch reconstruction passed; scoped formatting passed. This is source-only evidence: no compilation/native/release/live acceptance for the current graph. The previous diagnostic1630 remains handled Cargo101; monitor134 is cleared, not running.
+
+Accepted inference preparation still lacks the captured destination in its eventual writer head and currently rereads App.config_dir; returning complete refusal inputs does not resolve accepted-write routing. Outer settings failure custody, actual scalar catalogues and original test caller preparation remain incomplete. Root Ui intake inventory1654 records31 direct/event references. Incoming AgentDebugMenuChanged and ProgressMonitorEnabledChanged must preserve their original Received envelope through existing CPU Ui publication, without disk saving or server echo. The Ui worker owns config_ui_update/app/reset_commit; Root retains App/lib/render_cache and every direct consumer. Animation worker owns only config_family_app/ack/save_pump for actual three missing family owners and real animation writer acknowledgements. No extra resolution owner, worker pool or provider quota. Full eleven-area goal ACTIVE/incomplete; workspace checks, matched release/PTY/performance proof and canonical Rust adoption remain outstanding. No Git mutation, install or user-owned process restart.
+
+
+Root879 checkpoint1662, 2026-10-06: private graph1661 (261 selected source hashes, SHA ff65ba6e66056eb747e5a5972e5bb3e299fea90c3f3dc1ac48dfec278ed88fde) includes reviewed Ui1655 original server-event owner plus Root1658 ordered outer intake and1660 Root consumer adapters. The actual Received envelope is inline in the existing Ui command; its two fixed facts are computed on the existing CPU owner, with no persistence intent or outbound echo. Refusal preserves the same settings Source and received original. Root retains one complete outer refusal, includes it in the256 incoming-event limit, and retries the same capture before younger server events or native edits. Closed/stale/accounting failure remains reportable under full-App custody. Source promotion/release at shutdown is authored; its config_family_app caller remains an animation-worker successor dependency. No status removal counts as cancellation.
+
+All seven Ui producer/intake selection edges and two Root Result-consumer edges reconstructed exactly with forward/inverse fuzz0. Scoped pinned formatting passed. Two actual-CPU Ui fixtures are authored UNRUN; original geometry, voice and tree fixture assertions remain preserved. The remaining render_cache/direct-consumer migration is owned by the existing Ui worker, and is NOT selected yet; the current graph therefore still has a known Result producer dependency and is not compiler-qualified. Animation worker separately owns three real family owners, original writer observer/backpressure and the outer-source shutdown call. Captured accepted inference destination, broad native input/refusal custody, original tests, current full-client compiler/lint/release/PTY/performance and complete eleven-area acceptance remain incomplete. Goal ACTIVE; no compiler job currently running. No canonical Rust adoption, Git mutation, installation or user-owned process restart. Browser handoff unavailable; original search tab/monitor132 preserved without polling, resubmission or a new outcome claim.
+
+
+Root879 checkpoint1670, 2026-10-06: private graph1668 selects262 verified source hashes (SHA a7e4883a956f86f065d35b11f7c544ea9ee68245526d033f94f8e60b6da9adc8). Reviewed direct Ui1660 producers/consumers and1662 successor restore whole modal-flow closure through existing cancellation guards. Animation1650 successor001 plus narrow successor002 fixture correction select the three existing animation/edit/editor family owners and actual ordered writer observer; committed animation Source alias refresh follows the acknowledged write. Root1667 adapts the production callback and all three external fixture callsites: one inline complete refused intent/completion/directory owner, same-original retry before younger polling, immediate actual observer collection with the original configuration client available, and normal/test/shutdown barriers. Full-App custody covers the inline header; checked extra reservation prepays the one transient refusal Box separately from original payload debits. No extra pool or resolution owner.
+
+All ten animation selection edges reconstructed exactly forward/inverse at fuzz0; six Root targets pass pinned rustfmt format/check. Authored native/CPU cases remain UNRUN. Frozen all-target compiler1669 is now running under monitor135: last verified2167 assembled files/30percent, PID3365831 verified at launch. Diagnostic-only: known source gaps prevent acceptance. The monitor supplies the terminal notification; do not poll or restart this job. Original search132 remains pending, with its unavailable browser-control handoff recorded and original tab preserved. Full eleven-area goal ACTIVE/incomplete: accepted inference destination capture, remaining original input/domain ownership, current compiler/native/lint/release/real-PTY and matched performance remain owed. Canonical Rust is unchanged; no Git mutation, installation or user-owned process restart. Graph /var/tmp/ilium-worker-animation-callback-union-879-1668/source-graph.json; compiler receipts /var/tmp/ilium-worker-client-graph-879-1669.
+
+
+Root879 checkpoint1677, 2026-10-06: private graph1676 selects262 verified sources, SHA85ea8ca1740f3d7dfa8d011a5df41097feef1e0813a38387373c4ec5b98cb472. Accepted inference edits now capture the original configuration directory at semantic admission; present paths share paid retirement before CPU acceptance. Commit and writer retry do not reread a later App.config_dir. An originally absent destination remains absent, with the installed preference explicitly Unsaved. Review1673 exposed an inherited terminal-ready head blocking shutdown; successor001 offers actual unsaved errors to original instruction/prompt/value observers, releases the paid completed CPU preparation, and preserves local desired/error state without inventing disk success or cancellation. Review1675 found no new concrete source defect; all five reviewed current hashes verified. Two exact forward/inverse selection edges and two-file pinned formatting/check passed. Caller inventory scans463 frozen/selected client Rust files, seven declaration/caller records, signature unchanged.
+
+Two regressions are AUTHORED_UNRUN: accepted original path replacement with disk readback, and absent original path with production drain_filesystem. The shutdown fixture is scalar Budget/NativeNone only; instruction-parent/prompt/nativeSome disposal and actual native execution remain owed. Frozen compiler1669 monitor135 continues on prior graph1668, last verified2167 assembled files/30percent; no polling, restart or graph1676 compiler claim. Search132 remains independently pending; browser-control failure is not a generation outcome. Complete eleven-area goal ACTIVE/incomplete: current compiler/native/lint/release/PTY, broader original-input custody, pre-acceptance path capture in retained model/prompt requests, and matched performance remain unfinished. Canonical Rust unchanged; no Git mutation, installation or user-owned process restart. Source proposal /var/tmp/ilium-worker-inference-destination-root-879-1671-successor001/manifest.json; reviews /var/tmp/ilium-worker-inference-destination-review-879-1673.json and1675.json; current graph /var/tmp/ilium-worker-inference-destination-union-879-1676/source-graph.json.
+
+
+Root879 checkpoint1683, 2026-10-06: terminal compiler1669/monitor135 audited and handled: Cargo101/runner1, 111 primary errors from132 diagnostics, frozen2167 files unchanged, no surviving children. Both exact task-owned SSD scratch folders removed and absence verified; terminal monitor cleared after audit. Current private graph1682 selects262 verified hashes (SHAa1c3a72570ca61349ae47937d5e059b71b1c5947b136879b1ae4218b343313b3). App-only1681 repairs emitted prompt cursor helper, changed-number autosave call, borrowed RetiringArc choice source, editor path accessors, and EditorOwned autosave deadlines through exact installed-model getter. Exact forward/inverse patch reconstruction and pinned rustfmt1.96.1 format/check pass. Compiler/native/lint/release remain UNRUN for this graph. Search capture and SaveAs still contain original UI copies; accessor adaptation is not offloading acceptance.
+
+Three distinct private implementation lanes active:1678 value host/choice/leaf typed refusals;1679 instruction acceptance and full Voice refusal ownership;1680 successor startup original-home Source plus actual animation writer consumers/fixtures. Root retains App/lib/keys/mouse/tick caller integration. Preacceptance inference/Voice target capture, loaned-editor search/native contracts, Naming882 startup/frame dependencies and all eleven-area integration/verification remain incomplete. Search monitor132 is independently pending with unavailable browser-control handoff, original tab retained and no resubmission. No compiler job currently active. Canonical Rust unchanged; no Git/install/user-owned restart. Proposal /var/tmp/ilium-worker-app-caller-repair-879-1681/manifest.json; compiler receipts /var/tmp/ilium-worker-client-graph-879-1669; graph /var/tmp/ilium-worker-app-caller-union-879-1682/source-graph.json.
+
+
+Root879 checkpoint1702, 2026-10-06: private graph1701 selects264 verified hashes (SHAff665189495b003492b4b472a1dca193740cfc2c28e443c7023997b0a65a349b). Reviewed inference1690 captures the original optional directory at first retained model/control/onboarding/prompt request; all463-client-source captured API callers inventoried. Central complete InferenceUpdateRefusal returns actual Source/directory/command/token on all4failure paths and retries the same original without App recapture. Two actual refused-model path replacement/original-None writer/readback/drain regressions AUTHORED_UNRUN; existing accepted-preparation regressions preserved. Reviews1685/1690 hash-bound, no actionable new source defect; host1678 companion source retirement remains required.
+
+Instruction1679 selected plus Root1687: full Voice refusal retained; exact active acceptance proof; actual instruction source custody fences native FIFO; clear collector runs without modal; fixture immediately proves typed handoff. PreCPU VoiceCapture, terminal refusal/mismatch native reconciliation and shutdown disposition remain incomplete. Animation1680 and1692 selected: actual IO producer moves original home into measured Source with same client; typed refusal retains accepted migration/read result; path-only retry uses enabled admission wake and bank-close fallback. Root1697 fixed CoordinatorOriginals slot preserves original before await, with sizeof complete root metadata accounting. Read-only1698 source review accepted; cancellation/physical retirement native checks UNRUN.
+
+Root1694/1700 adapt six value indices and borrowed emitted-editor Path fence; immutable ROM glyphs now travel as ConfigText::Static through the existing UI CPU-update queue, avoiding UI String allocation. All staged exact forward/inverse reconstructions and scoped pinned fmt/check pass. No current graph compiler/native/lint/release/PTY/performance claim; compiler1669 remains terminal failed/audited/cleaned. Search132 independently pending, original tab retained and no resubmission. Value host1678 and original semantic/native refusal integration remain unfinished, along with Naming882 startup/frame contracts and full eleven-area acceptance. Canonical Rust unchanged; no Git mutation/install/user-owned restart. Reviews and exact source proposals retained under /var/tmp/ilium-worker-*-879; current graph /var/tmp/ilium-worker-icon-text-caller-union-879-1701/source-graph.json.
