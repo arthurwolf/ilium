@@ -193,7 +193,7 @@ fn transcript_metadata_matches_bounded(
     budget: &TranscriptReadBudget,
     parser: Option<&dyn TranscriptMetadataParser>,
 ) -> bool {
-    let Ok(file) = std::fs::File::open(path) else {
+    let Ok(file) = ilium_platform::secure_fs::open_regular_file(path) else {
         return false;
     };
     let mut reader = BufReader::new(file);
@@ -506,7 +506,7 @@ impl TranscriptLocator {
             .join(".gemini")
             .join("antigravity-cli")
             .join("history.jsonl");
-        let Ok(file) = std::fs::File::open(history_path) else {
+        let Ok(file) = ilium_platform::secure_fs::open_regular_file(&history_path) else {
             return false;
         };
         if let Some(budget) = &self.read_budget {
@@ -562,7 +562,7 @@ fn transcript_metadata_matches(
     expected_session_id: &str,
     expected_project_cwd: &Path,
 ) -> bool {
-    let Ok(file) = std::fs::File::open(path) else {
+    let Ok(file) = ilium_platform::secure_fs::open_regular_file(path) else {
         return false;
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
@@ -717,6 +717,89 @@ fn looks_like_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn transcript_reads_reject_fifo_without_waiting_for_a_writer() {
+        use std::{sync::mpsc, time::Duration};
+        for reader in 0..3 {
+            let directory = tempfile::tempdir().expect("private FIFO fixture");
+            let path = directory.path().join("transcript.jsonl");
+            assert!(std::process::Command::new("/usr/bin/mkfifo")
+                .arg(&path)
+                .status()
+                .expect("mkfifo installed")
+                .success());
+            let source = path.clone();
+            let (sender, receiver) = mpsc::channel();
+            let child = std::thread::spawn(move || {
+                let matched = match reader {
+                    0 => transcript_metadata_matches_bounded(
+                        &AgentClass::Claude,
+                        &source,
+                        "session",
+                        Path::new("/project"),
+                        &TranscriptReadBudget::new(TranscriptReadLimits {
+                            line_bytes: 4096,
+                            total_read_bytes: 8192,
+                            scanned_entries: 64,
+                            retained_path_bytes: 65536,
+                        }),
+                        None,
+                    ),
+                    1 => transcript_metadata_matches(
+                        &AgentClass::Claude,
+                        &source,
+                        "session",
+                        Path::new("/project"),
+                    ),
+                    _ => {
+                        let home = source.parent().expect("fixture parent");
+                        let history = home.join(".gemini/antigravity-cli");
+                        std::fs::create_dir_all(&history).expect("history fixture");
+                        std::fs::rename(&source, history.join("history.jsonl"))
+                            .expect("history FIFO");
+                        TranscriptLocator::new_bounded(
+                            home,
+                            Path::new("/project"),
+                            TranscriptReadLimits {
+                                line_bytes: 4096,
+                                total_read_bytes: 8192,
+                                scanned_entries: 64,
+                                retained_path_bytes: 65536,
+                            },
+                        )
+                        .antigravity_history_matches("session")
+                    }
+                };
+                sender.send(matched).expect("result receiver remains owned");
+            });
+            let before_release = receiver.recv_timeout(Duration::from_secs(1));
+            if matches!(before_release, Err(mpsc::RecvTimeoutError::Timeout)) {
+                // Release the original blocking reader and physically join it
+                // before failing the assertion. No orphan test thread remains.
+                let fifo = if reader == 2 {
+                    directory
+                        .path()
+                        .join(".gemini/antigravity-cli/history.jsonl")
+                } else {
+                    path
+                };
+                drop(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(fifo)
+                        .expect("release original reader"),
+                );
+            }
+            child.join().expect("reader physically joined");
+            assert!(
+                before_release.is_ok(),
+                "transcript reader {reader} blocked waiting for a FIFO writer"
+            );
+            assert!(!before_release.expect("timely result"));
+        }
+    }
 
     #[test]
     fn raw_metadata_parser_preserves_unresolved_project_spelling() {
