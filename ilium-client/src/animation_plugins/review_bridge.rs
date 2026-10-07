@@ -309,14 +309,30 @@ impl ReviewBridge {
         if state.selection != selection || state.pending.is_some() || state.intent.is_some() {
             return Err("Native review superseded or already pending".into());
         }
+        let empty = review.items().is_empty();
+        if empty {
+            // No requested right needs user consent. Retain the original token
+            // and use the same fenced native resolution path as a UI submit.
+            state.intent = Some(Intent::Submit {
+                envelope: envelope.clone(),
+                answers: BTreeMap::new(),
+            });
+        }
         state.pending = Some(PendingReview {
             envelope,
             token: review,
         });
-        state.phase = ReviewPhase::Review;
+        state.phase = if empty {
+            ReviewPhase::Resolving
+        } else {
+            ReviewPhase::Review
+        };
         state.error.clear();
         drop(state);
         self.ui_ready.notify_one();
+        if empty {
+            (self.wake_worker)();
+        }
         Ok(())
     }
     /// Call for every original broker epoch/plan transition BEFORE publishing

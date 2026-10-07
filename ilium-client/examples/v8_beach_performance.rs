@@ -4,7 +4,7 @@
 use ilium_animation_js::{
     engine::{
         initialize_engine, ArraySpec, CreateState, Engine, EngineLimits, RenderOutput,
-        TypedArrayKind,
+        ServiceAuthority, TypedArrayKind,
     },
     manifest::AnimationMode,
     package::{Package, PackageLimits},
@@ -77,12 +77,13 @@ struct Options {
     fps: u32,
     warmup: usize,
     frames: usize,
+    diagnostic_render_ms: Option<u64>,
 }
 fn options() -> Result<Option<Options>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments == ["--help"] {
         emit(
-            json!({"type":"result","usage":"v8_beach_performance --package ABS --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT","cases":["beach-classic","beach-rich"],"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000]}}),
+            json!({"type":"result","usage":"v8_beach_performance --package ABS --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT [--diagnostic-render-ms INTEGER]","cases":["beach-classic","beach-rich"],"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000],"diagnostic_render_ms":[1,10000]},"diagnostic_warning":"An explicit diagnostic budget does not qualify production deadlines"}),
         );
         return Ok(None);
     }
@@ -95,12 +96,12 @@ fn options() -> Result<Option<Options>> {
         "--warmup",
         "--frames",
     ];
-    if arguments.len() != allowed.len() * 2 {
+    if arguments.len() != allowed.len() * 2 && arguments.len() != (allowed.len() + 1) * 2 {
         return Err(invalid("every documented flag is required exactly once"));
     }
     let mut flags = BTreeMap::new();
     for pair in arguments.chunks_exact(2) {
-        if !allowed.contains(&pair[0].as_str())
+        if (!allowed.contains(&pair[0].as_str()) && pair[0] != "--diagnostic-render-ms")
             || flags.insert(pair[0].as_str(), pair[1].as_str()).is_some()
         {
             return Err(invalid("unknown or duplicate flag"));
@@ -139,6 +140,11 @@ fn options() -> Result<Option<Options>> {
         fps: number("--fps", 1, 30)? as u32,
         warmup: number("--warmup", 0, 1000)? as usize,
         frames: number("--frames", 1, 10000)? as usize,
+        diagnostic_render_ms: if flags.contains_key("--diagnostic-render-ms") {
+            Some(number("--diagnostic-render-ms", 1, 10000)?)
+        } else {
+            None
+        },
     }))
 }
 fn spec(name: &str, kind: TypedArrayKind, elements: usize) -> ArraySpec {
@@ -227,6 +233,11 @@ fn measure(
     let layout = shape.layout()?;
     let mut limits = EngineLimits::default();
     limits.render_ms = limits.render_ms.min(package.manifest().limits.render_ms);
+    // Diagnostic only: measure frames that the production deadline refuses.
+    // This isolated example does not change the helper or manifest policy.
+    if let Some(milliseconds) = options.diagnostic_render_ms {
+        limits.render_ms = milliseconds;
+    }
     limits.preparation_ms = limits
         .preparation_ms
         .min(package.manifest().limits.preparation_ms);
@@ -249,6 +260,16 @@ fn measure(
     let preparation = Instant::now();
     let mut engine = Engine::new(Arc::clone(package), limits, quota.clone())?;
     engine.install_bootstrap(TRUSTED_BOOTSTRAP)?;
+    // Match the native fixture authority used by the Carpet comparison. This
+    // binds the embedded activation; it grants no external service access.
+    engine.bind_service_authority(
+        package.digest(),
+        ServiceAuthority {
+            instance_id: 1,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        },
+    )?;
     engine.load()?;
     let environment = json!({"viewport":{"cell_width":options.width,"cell_height":options.height,"dot_width":layout.width,"dot_height":layout.height,"revision":1},"available":{"pointer":false,"audio":false,"gpu":false,"location":false}});
     let plan = engine.plan(&settings, AnimationMode::Live, &environment)?;
@@ -375,6 +396,11 @@ fn measure(
         if n.1.len() != j.2.len() {
             return Err(invalid("packed native/V8 dimensions mismatch"));
         }
+        if index == 0 {
+            emit(
+                json!({"type":"progress","case":if style==ShorelineStyle::Classic{"beach-classic"}else{"beach-rich"},"first_v8_render_ns":j.1,"first_v8_pipeline_ns":j.0,"diagnostic_render_ms":options.diagnostic_render_ms,"production_deadline_qualified":options.diagnostic_render_ms.is_none()}),
+            );
+        }
         if index < options.warmup {
             continue;
         }
@@ -443,7 +469,7 @@ fn run() -> Result<()> {
         .collect();
     emit(
         json!({"type":"manifest","benchmark":"v8_beach_performance","benchmark_source_sha256":digest(include_bytes!("v8_beach_performance.rs")),"bootstrap_sha256":digest(TRUSTED_BOOTSTRAP.as_bytes()),"native_baselines":baselines,"package":options.package,"package_sha256":package.digest(),"width_cells":options.width,"height_cells":options.height,
-        "fps":options.fps,"warmup":options.warmup,"frames":options.frames,"clock":"host monotonic chosen fixed simulation timestamps",
+        "fps":options.fps,"warmup":options.warmup,"frames":options.frames,"diagnostic_render_ms":options.diagnostic_render_ms,"production_deadline_qualified":options.diagnostic_render_ms.is_none(),"clock":"host monotonic chosen fixed simulation timestamps",
         "native_boundary":"actual public AnimationFrame::render with original SceneCache and native pack, then public glyph collection",
         "v8_boundary":"trusted bootstrap, seeded binary views, render/detach, Surface acceptance and exact native default appearance/threshold pack",
         "excludes":["protected helper isolation/IPC","permission acquisition","UI composition","terminal emission"],"root":"isolated finite qualification root16 workers/2304MiB; not a client coexistence claim","cpu_time_ns":null}),

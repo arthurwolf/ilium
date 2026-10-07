@@ -911,6 +911,7 @@ fn validate_media_request(request: &HostRequest) -> Result<()> {
                 | "media.video.pause"
                 | "media.video.seek"
                 | "media.video.close"
+                | "gpu.render"
         )
     {
         return Err(AnimationError::PermissionDenied(
@@ -1429,6 +1430,49 @@ impl PackageInstance {
         let authority = self.current_service_authority_locked(&broker)?;
         self.validate_service_request_locked(request, authority)?;
         validate_media_request(request)
+    }
+
+    /// GPU rendering is a privileged bounded operation even though this
+    /// backend currently rasterizes on the CPU. Require an accepted exact
+    /// `device.gpu` grant for the mesh kernel before allocating any pixels.
+    pub(crate) fn check_gpu_permission(&self) -> Result<()> {
+        let owner = Arc::clone(&self.broker);
+        let broker = lock_broker(&owner)?;
+        let active = self
+            .activation
+            .as_ref()
+            .ok_or_else(|| AnimationError::PermissionDenied("native activation missing".into()))?;
+        for permission in &self.projection.permission_plan.permissions {
+            if permission.id != crate::permissions::Capability::DeviceGpu {
+                continue;
+            }
+            let crate::permissions::Scope::Gpu { kernels } = &permission.scope else {
+                continue;
+            };
+            if !kernels.iter().any(|kernel| kernel == "mesh") {
+                continue;
+            }
+            let Some(request_id) = permission.request_id.as_deref() else {
+                continue;
+            };
+            if !active
+                .plan
+                .demands
+                .contains_key(&crate::plan_authorization::operation_demand(request_id))
+            {
+                continue;
+            }
+            if broker
+                .grant(&active.channel, request_id)
+                .map_err(permission_error)?
+                .is_some()
+            {
+                return Ok(());
+            }
+        }
+        Err(AnimationError::PermissionDenied(
+            "no accepted device.gpu mesh grant".into(),
+        ))
     }
     /// Bounded registry insertion only: no decode, image destruction, I/O,
     /// JavaScript or worker wait is permitted inside the broker mutex.

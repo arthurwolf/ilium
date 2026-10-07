@@ -164,6 +164,37 @@ pub(crate) fn publish_native_review(
         },
     )?
 }
+/// Project retained failures without changing activation or cleanup ownership.
+pub(crate) fn activation_failure_message(update: &ActivationUpdate) -> String {
+    let message = match update {
+        ActivationUpdate::Failed { message, .. } => message.clone(),
+        ActivationUpdate::Finished(resolution) => {
+            let mut reasons = Vec::new();
+            if let Some(error) = &resolution.creation_error {
+                reasons.push(format!("Startup: {error}"));
+            }
+            if let Some(error) = &resolution.authority_error {
+                reasons.push(format!("Authority retirement: {error}"));
+            }
+            if let Some(error) = &resolution.teardown_error {
+                reasons.push(format!("Cleanup: {error}"));
+            }
+            if !resolution.denied_required.is_empty() {
+                reasons.push(format!(
+                    "Required rights denied: {}",
+                    resolution.denied_required.join(", ")
+                ));
+            }
+            if reasons.is_empty() {
+                reasons.push("Native activation returned no accepted creation state".into());
+            }
+            reasons.join("; ")
+        }
+        ActivationUpdate::Review(_) => "Native permission review is still pending".into(),
+    };
+    message.chars().take(2048).collect()
+}
+
 /// Borrow the caller-retained effect inventory: refusal never drops stop or
 /// activation cleanup ownership. Caller retries/settles it before another poll.
 pub(crate) fn publish_controller_outcome(
@@ -183,15 +214,9 @@ pub(crate) fn publish_controller_outcome(
                 Some(ilium_animation_js::engine::CreateState::Pending) => ReviewPhase::Creating,
                 None => ReviewPhase::Failed,
             };
-            bridge.set_phase(
-                selection_revision,
-                phase,
-                if phase == ReviewPhase::Failed {
-                    Some("Required rights denied or native startup/authority/teardown failed")
-                } else {
-                    None
-                },
-            )
+            let failure =
+                (phase == ReviewPhase::Failed).then(|| activation_failure_message(update));
+            bridge.set_phase(selection_revision, phase, failure.as_deref())
         }
         ActivationUpdate::Failed { message, stop } => {
             if let Some(invalidation) = stop.as_ref().and_then(|stop| stop.invalidation.as_ref()) {
@@ -239,4 +264,55 @@ pub(crate) fn publish_cancellation(
         return Err(error.clone());
     }
     bridge.set_phase(selection_revision, ReviewPhase::Cancelled, None)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use ilium_animation_js::{error::AnimationError, runtime::InstanceResolution};
+
+    #[test]
+    fn native_activation_diagnostic_preserves_startup_and_cleanup_failures() {
+        let update = ActivationUpdate::Finished(InstanceResolution {
+            invalidation: Invalidation {
+                authorization_epoch: 1,
+                instance_ids: vec![],
+                operations: vec![],
+                all_rights_blocked: false,
+            },
+            denied_required: vec![],
+            creation: None,
+            creation_error: Some(AnimationError::Runtime(
+                "bootstrap compilation: unexpected token".into(),
+            )),
+            authority_error: Some(AnimationError::PermissionDenied(
+                "retirement authority lost".into(),
+            )),
+            teardown_error: Some(AnimationError::Runtime(
+                "helper retirement incomplete".into(),
+            )),
+            activation_invalidation: None,
+        });
+        let message = activation_failure_message(&update);
+        assert!(
+            message.contains("bootstrap compilation: unexpected token"),
+            "{message}"
+        );
+        assert!(message.contains("retirement authority lost"), "{message}");
+        assert!(
+            message.contains("helper retirement incomplete"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn native_activation_diagnostic_preserves_controller_load_failure() {
+        let update = ActivationUpdate::Failed {
+            message: "Permission ledger load: access denied".into(),
+            stop: None,
+        };
+        assert!(
+            activation_failure_message(&update).contains("Permission ledger load: access denied")
+        );
+    }
 }

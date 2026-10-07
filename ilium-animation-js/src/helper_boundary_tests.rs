@@ -26,6 +26,46 @@ fn authority() -> HelperAuthority {
         authorization_epoch: 1,
     }
 } // The launch stamp intentionally differs from the accepted active epoch.
+
+#[test]
+#[ignore = "requires ILIUM_ANIMATION_HELPER and delegated Linux sandbox; run explicitly for native qualification"]
+fn boundary_actual_helper_startup_failure_returns_reason_and_retires_workers() {
+    let bytes = super::isolation_qualification::archive("export function plan(){return {}};");
+    let quota = super::isolation_qualification::quota();
+    let executable = std::env::var("ILIUM_ANIMATION_HELPER")
+        .expect("actual built helper absolute path required");
+    let result = HelperSession::launch(
+        Path::new(&executable),
+        &bytes,
+        "{", // Trusted bootstrap intentionally fails compilation before package load.
+        HelperAuthority {
+            package_digest: format!("{:x}", sha2::Sha256::digest(&bytes)),
+            instance_id: 73,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        },
+        HelperLimits::default(),
+        quota.clone(),
+        HelperPlayback {
+            mode: crate::manifest::AnimationMode::Live,
+            ambient_seed: 0,
+        },
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(mut helper) => {
+            helper.dispose().unwrap();
+            panic!("malformed startup bootstrap unexpectedly succeeded");
+        }
+    };
+    assert!(
+        error.to_string().contains("bootstrap compilation"),
+        "{error}"
+    );
+    assert_eq!(quota.snapshot().worker_threads, 0);
+    assert_eq!(quota.snapshot().worker_bytes, 0);
+}
+
 fn request(quota: &QuotaGroup, budget: &Arc<ServiceBudget>, id: u64) -> HostRequest {
     // Construct only through the real admitted native ingress constructor.
     let arrays = [ArraySpec {
@@ -198,11 +238,13 @@ fn boundary_completion_cancel_and_drain_commands_are_nonacquiring() {
         assert!(!command.permits_acquisition());
     } // Every listed command must reject fresh guest service acquisition.
     assert!(Command::Pump.permits_acquisition());
-    assert!(Command::StartCreate {
-        settings: json!({}),
-        accepted_plan: json!({})
-    }
-    .permits_acquisition()); // Preserve the two explicit authorized continuation entrypoints.
+    assert!(
+        Command::StartCreate {
+            settings: json!({}),
+            accepted_plan: json!({})
+        }
+        .permits_acquisition()
+    ); // Preserve the two explicit authorized continuation entrypoints.
     for state in [
         CompletionState::Delivered,
         CompletionState::Unknown,
@@ -212,27 +254,36 @@ fn boundary_completion_cancel_and_drain_commands_are_nonacquiring() {
         let record = completion_record(7, active(), Ok(state));
         assert_eq!(completed_state(record, 7, active()).unwrap(), state);
     } // Correlation preserves every distinct native terminal outcome.
-    assert!(completed_state(
-        completion_record(7, active(), Ok(CompletionState::Delivered)),
-        8,
-        active()
-    )
-    .is_err()); // A different request cannot consume an otherwise successful ACK.
-    assert!(completed_state(
-        completion_record(7, active(), Ok(CompletionState::Delivered)),
-        7,
-        ServiceAuthority {
-            authorization_epoch: 4,
-            ..active()
-        }
-    )
-    .is_err()); // A different active epoch cannot consume the ACK either.
+    assert!(
+        completed_state(
+            completion_record(7, active(), Ok(CompletionState::Delivered)),
+            8,
+            active()
+        )
+        .is_err()
+    ); // A different request cannot consume an otherwise successful ACK.
+    assert!(
+        completed_state(
+            completion_record(7, active(), Ok(CompletionState::Delivered)),
+            7,
+            ServiceAuthority {
+                authorization_epoch: 4,
+                ..active()
+            }
+        )
+        .is_err()
+    ); // A different active epoch cannot consume the ACK either.
 } // Actual no-checkpoint behavior is also forced through the real engine and actual helper qualification.
 #[test] // Two individually legal 48-plane requests must be paged rather than flattened into one illegal packet.
 fn boundary_actual_engine_requests_page_without_plane_collision_or_checkpoint() {
     // Use the real engine owner with a pure in-memory serialization sink.
     let (_serial, quota) = crate::engine::boundary_tests::fixture_lock(); // Share the same unit-test platform/root as all private engine tests.
-    let mut engine=crate::engine::boundary_tests::engine("export async function create(){await Promise.all([__ilium_dispatch('fixture.one',Array.from({length:48},(_,i)=>new Uint8Array([i]))),__ilium_dispatch('fixture.two',Array.from({length:48},(_,i)=>new Uint8Array([255-i])))]);return {render(){},dispose(){}}}",crate::engine::boundary_tests::SIMPLE,EngineLimits::default(),quota); // Actual native traversal owns each immutable plane before paging.
+    let mut engine = crate::engine::boundary_tests::engine(
+        "export async function create(){await Promise.all([__ilium_dispatch('fixture.one',Array.from({length:48},(_,i)=>new Uint8Array([i]))),__ilium_dispatch('fixture.two',Array.from({length:48},(_,i)=>new Uint8Array([255-i])))]);return {render(){},dispose(){}}}",
+        crate::engine::boundary_tests::SIMPLE,
+        EngineLimits::default(),
+        quota,
+    ); // Actual native traversal owns each immutable plane before paging.
     assert_eq!(
         engine.start_create(&json!({}), &json!({})).unwrap(),
         CreateState::Pending
@@ -344,11 +395,13 @@ fn boundary_actual_helper_retirement_preserves_native_activation_until_actual_em
         .unwrap();
     instance.accept_frame(true).unwrap();
     let mut emitted = 0;
-    assert!(instance
-        .with_playback_authority(&expected, || {
-            emitted += 1;
-        })
-        .is_err());
+    assert!(
+        instance
+            .with_playback_authority(&expected, || {
+                emitted += 1;
+            })
+            .is_err()
+    );
     assert_eq!(emitted, 0);
     instance.retire_helper().unwrap();
     assert!(instance.is_physically_retired());
@@ -365,11 +418,13 @@ fn boundary_actual_helper_retirement_preserves_native_activation_until_actual_em
     assert_eq!(emitted, 1);
     let invalidation = instance.revoke_activation().unwrap().unwrap();
     assert!(invalidation.instance_ids.contains(&expected.instance_id));
-    assert!(instance
-        .with_playback_authority(&expected, || {
-            emitted += 1;
-        })
-        .is_err());
+    assert!(
+        instance
+            .with_playback_authority(&expected, || {
+                emitted += 1;
+            })
+            .is_err()
+    );
     assert_eq!(emitted, 1);
     drop(resolution);
     drop(instance);
@@ -383,7 +438,7 @@ fn boundary_actual_helper_retirement_preserves_native_activation_until_actual_em
 #[ignore = "requires ILIUM_ANIMATION_HELPER and delegated Linux sandbox; run explicitly for native qualification"] // Do not replace native process admission with a facade fixture or remove this prerequisite.
 fn boundary_actual_helper_copy_ack_never_runs_the_next_acquiring_continuation() {
     // A premature checkpoint would leave an undrained child request before the next pump.
-    let source="export async function create(){const first=await __ilium_dispatch('fixture.first',{data:new Uint8Array([7,8,9])});if(!(first instanceof Uint8Array))throw Error('binary_result_kind');await __ilium_dispatch('fixture.after_ack',{data:first});return {render(c,f){f.gray.fill(0.25);f.present()},dispose(){}}}"; // A second actual native request can arise only from the first completion's continuation.
+    let source = "export async function create(){const first=await __ilium_dispatch('fixture.first',{data:new Uint8Array([7,8,9])});if(!(first instanceof Uint8Array))throw Error('binary_result_kind');await __ilium_dispatch('fixture.after_ack',{data:first});return {render(c,f){f.gray.fill(0.25);f.present()},dispose(){}}}"; // A second actual native request can arise only from the first completion's continuation.
     let bytes = super::isolation_qualification::archive(source);
     let quota = super::isolation_qualification::quota();
     let executable =

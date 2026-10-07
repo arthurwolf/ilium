@@ -11,6 +11,7 @@ default = ["v8-runtime", "native-host", "native-network"]
 v8-runtime = ["dep:v8"]
 native-host = ["dep:ilium-ambient", "dep:chrono", "dep:ilium-wikipedia", "dep:image", "dep:cosmic-text", "dep:unicode-width", "dep:unicode-segmentation"]
 native-network = ["dep:ureq"]
+diagnostic-profiler = ["v8-runtime"]
 
 [dependencies]
 ilium-ambient = { version = "0.1.0", path = "../ilium-ambient", optional = true }

@@ -219,3 +219,75 @@ fn actual_helper_generic_image_copy_refusal_retains_request_result_until_physica
     images.release_terminal_after_helper_retirement(&mut drawing);
     assert!(images.is_drained());
 }
+
+#[test]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+fn actual_helper_images_borrow_registered_producer_without_transferring_close() {
+    let quota = quota();
+    let script = script("const opened=await host.media.images.decode({bytes:raw,max_pixels:4}); if(!opened.ok)throw Error('decode_ack'); const resized=await host.media.images.resize({image:opened.value,width:1,height:1,filter:'nearest'}); if(!resized.ok)throw Error('borrow_resize_ack'); const sampled=await host.media.images.sample({image:opened.value,rectangle:{x:0,y:0,width:1,height:1},format:'gray32'}); if(!sampled.ok || Math.abs(sampled.value[0]-0.2126)>0.01)throw Error('borrow_sample_ack'); host.media.images.close(opened.value); host.media.images.close(resized.value);");
+    let mut instance = instance(&script, quota.clone(), HelperLimits::default());
+    let mut drawing =
+        NativeDrawHost::new(quota.clone(), MediaLimits::default(), DrawLimits::default()).unwrap();
+    let mut producer = NativeImageHost::new(quota.clone()).unwrap();
+    let mut consumer = NativeImageHost::new(quota.clone()).unwrap();
+    let mut methods = Vec::new();
+    let mut creation = CreateState::Pending;
+    for _ in 0..12 {
+        for request in instance.requests().unwrap() {
+            methods.push(request.method.clone());
+            let is_producer_close = request.method == "media.images.close"
+                && request
+                    .payload
+                    .metadata()
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| id.parse::<u64>().ok())
+                    .is_some_and(|id| producer.owned.contains(&id));
+            let owner = if request.method == "media.images.decode" || is_producer_close {
+                &mut producer
+            } else {
+                &mut consumer
+            };
+            assert!(owner
+                .dispatch(&mut instance, &mut drawing, request)
+                .unwrap()
+                .is_none());
+            for id in &producer.owned {
+                assert!(
+                    consumer.owned_image(ImageHandle::from_id(*id)).is_err(),
+                    "borrowing must not give the consumer close custody"
+                );
+            }
+        }
+        creation = instance.pump().unwrap();
+        if creation == CreateState::Ready && methods.len() == 5 {
+            break;
+        }
+    }
+    assert_eq!(creation, CreateState::Ready);
+    assert_eq!(
+        methods,
+        [
+            "media.images.decode",
+            "media.images.resize",
+            "media.images.sample",
+            "media.images.close",
+            "media.images.close"
+        ]
+    );
+    assert!(producer.owned.is_empty() && consumer.owned.is_empty());
+    assert!(producer.pending.is_empty() && consumer.pending.is_empty());
+    assert!(instance.stop().cancellation.is_ok());
+    assert!(instance.is_physically_retired());
+    producer.revoke();
+    consumer.revoke();
+    producer.release_terminal_after_helper_retirement(&mut drawing);
+    consumer.release_terminal_after_helper_retirement(&mut drawing);
+    assert!(producer.is_drained() && consumer.is_drained());
+    drop(instance);
+    drop(producer);
+    drop(consumer);
+    drop(drawing);
+    assert_eq!(quota.snapshot().worker_bytes, 0);
+    assert_eq!(quota.snapshot().worker_threads, 0);
+}

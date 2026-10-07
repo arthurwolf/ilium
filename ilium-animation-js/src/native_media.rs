@@ -310,6 +310,18 @@ impl NativeMedia {
             .ok_or_else(|| invalid("unknown image handle"))?;
         Ok(())
     }
+    pub fn solid_image(&mut self, rgba: [u8; 4]) -> Result<ImageHandle> {
+        let admission = charge(&self.quota, 4 + 64)?;
+        self.insert(Admitted {
+            quota: self.quota.clone(),
+            value: ImagePixels {
+                width: 1,
+                height: 1,
+                rgba: rgba.to_vec(),
+            },
+            admission,
+        })
+    }
     pub fn decode(&mut self, encoded: &[u8], stop: &StopToken) -> Result<ImageHandle> {
         self.decode_bounded(encoded, self.limits.pixels, stop)
     }
@@ -963,6 +975,44 @@ impl NativeMedia {
             admission,
         })
     }
+
+    /// Rasterize a bounded textured mesh directly into an admitted RGBA image.
+    /// The mesh admission is retained while the RGB result is converted once;
+    /// the returned handle therefore keeps the original quota custody.
+    pub fn mesh_image(
+        &mut self,
+        width: u32,
+        height: u32,
+        triangles: &[MeshTriangle],
+        stop: &StopToken,
+    ) -> Result<ImageHandle> {
+        let rendered = self.mesh(width, height, triangles, stop)?;
+        let (output, admission) = rendered.into_parts();
+        let count = (output.width as usize)
+            .checked_mul(output.height as usize)
+            .ok_or_else(|| invalid("mesh image dimensions"))?;
+        if output.rgb.len() != count {
+            return Err(invalid("mesh image RGB shape"));
+        }
+        let mut rgba = allocation::<u8>(
+            count
+                .checked_mul(4)
+                .ok_or_else(|| invalid("mesh image RGBA overflow"))?,
+        )?;
+        for (source, target) in output.rgb.iter().zip(rgba.chunks_exact_mut(4)) {
+            target[..3].copy_from_slice(source);
+            target[3] = 255;
+        }
+        self.insert(Admitted {
+            quota: self.quota.clone(),
+            value: ImagePixels {
+                width: output.width,
+                height: output.height,
+                rgba,
+            },
+            admission,
+        })
+    }
     /// The only public font contract: CascadiaCode-Regular, CSS-style pixel
     /// size, one line, and integer pixel bounding dimensions. An empty string
     /// has zero extent. The renderer uses the identical bundled face and line
@@ -1279,6 +1329,51 @@ mod admitted_image_import_tests {
         })
     }
     // Synthetic in-memory codec fixture, never provider/network/user data.
+    #[test]
+    fn mesh_image_matches_native_rgb_and_releases_all_pixel_custody() {
+        let quota = quota();
+        let mut media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+        let texture = media.solid_image([23, 47, 89, 255]).unwrap();
+        let vertex = |x, y| MeshVertex {
+            x,
+            y,
+            depth: 0.5,
+            uv: [0., 0.],
+        };
+        let triangles = [MeshTriangle {
+            vertices: [vertex(0., 0.), vertex(8., 0.), vertex(0., 8.)],
+            texture,
+            sort_key: 0,
+        }];
+        let reference = media.mesh(8, 8, &triangles, &StopToken::default()).unwrap();
+        assert!(reference.view().rgb.contains(&[23, 47, 89]));
+        let image = media
+            .mesh_image(8, 8, &triangles, &StopToken::default())
+            .unwrap();
+        let snapshot = media.snapshot(image).unwrap();
+        assert_eq!((snapshot.view().width, snapshot.view().height), (8, 8));
+        for (rgba, rgb) in snapshot
+            .view()
+            .rgba
+            .chunks_exact(4)
+            .zip(&reference.view().rgb)
+        {
+            assert_eq!(&rgba[..3], rgb);
+            assert_eq!(rgba[3], 255);
+        }
+        let before = quota.snapshot().worker_bytes;
+        let stop = StopToken::default();
+        stop.stop();
+        assert!(media.mesh_image(8, 8, &triangles, &stop).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, before);
+        media.close(image).unwrap();
+        media.close(texture).unwrap();
+        drop(snapshot);
+        drop(reference);
+        drop(media);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
     fn decoded(media: &mut NativeMedia, color: [u8; 4]) -> ImageHandle {
         let _encoding = charge(&media.quota, 1024 * 1024).unwrap();
         let fixture = ImageBuffer::from_pixel(1, 1, Rgba(color));

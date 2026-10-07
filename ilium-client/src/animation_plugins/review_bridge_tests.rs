@@ -63,6 +63,47 @@ fn bridge(quota: QuotaGroup) -> Arc<ReviewBridge> {
     ReviewBridge::new(quota, Arc::new(Notify::new()), Box::new(|| {})).unwrap()
 }
 #[test]
+fn empty_native_plan_resolves_without_an_interactive_permission_screen() {
+    let (package, principal, mut broker) = fixture();
+    let bridge = bridge(quota(2 * REVIEW_BYTES));
+    bridge.select(1, true).unwrap();
+    let native = broker
+        .prepare(
+            7,
+            1,
+            PermissionPlan {
+                permissions: vec![],
+                demands: vec![],
+            },
+            BTreeMap::new(),
+        )
+        .unwrap();
+    let epoch = native.authorization_epoch();
+    bridge.publish(1, &package, &principal, native).unwrap();
+    assert!(bridge.session().unwrap().is_none());
+    assert_eq!(bridge.status().unwrap().phase(), ReviewPhase::Resolving);
+    let Some(ReviewAction::Resolve {
+        review: original_review,
+        answers,
+        ..
+    }) = bridge.take_action(1, 7, 1, epoch).unwrap()
+    else {
+        panic!("empty original native plan must reach the existing resolution owner");
+    };
+    assert!(original_review.items().is_empty());
+    assert_eq!(original_review.instance_id(), 7);
+    assert!(answers.is_empty());
+    assert!(bridge.take_action(1, 7, 1, epoch).unwrap().is_none());
+
+    // An actual requested right still requires the original interactive consent.
+    bridge.select(2, true).unwrap();
+    bridge
+        .publish(2, &package, &principal, review(&mut broker, 2))
+        .unwrap();
+    let mut session = bridge.session().unwrap().unwrap();
+    assert!(session.handle_key(&bridge, KeyCode::Enter).is_err());
+}
+#[test]
 fn denied_unresolved_default_and_all_four_exact_native_choices() {
     for choice in PermissionChoice::ALL {
         let (package, principal, mut broker) = fixture();
@@ -92,6 +133,7 @@ fn denied_unresolved_default_and_all_four_exact_native_choices() {
 #[test]
 fn path_input_queues_only_current_needs_selection_disk_right() {
     let (package, principal, _) = fixture();
+    assert!(principal.principal_key().starts_with("unsigned:"));
     let right = Right {
         id: NativeCapability::DiskRead,
         scope: Scope::Disk {
@@ -129,6 +171,7 @@ fn path_input_queues_only_current_needs_selection_disk_right() {
     bridge.select(1, true).unwrap();
     bridge.publish(1, &package, &principal, native).unwrap();
     let mut session = bridge.session().unwrap().unwrap();
+    assert!(session.handle_key(&bridge, KeyCode::Char('1')).is_err());
     session.handle_key(&bridge, KeyCode::Char('p')).unwrap();
     for character in "/tmp/fixture".chars() {
         session
@@ -161,6 +204,7 @@ fn path_input_queues_only_current_needs_selection_disk_right() {
 #[test]
 fn selected_audio_source_uses_current_native_right_and_review_fence() {
     let (package, principal, _) = fixture();
+    assert!(principal.principal_key().starts_with("unsigned:"));
     let scope = Scope::Audio {
         device: "microphone".into(),
         products: std::collections::BTreeSet::from([
@@ -198,6 +242,7 @@ fn selected_audio_source_uses_current_native_right_and_review_fence() {
     bridge.select(1, true).unwrap();
     bridge.publish(1, &package, &principal, native).unwrap();
     let mut session = bridge.session().unwrap().unwrap();
+    assert!(session.handle_key(&bridge, KeyCode::Char('1')).is_err());
     session.handle_key(&bridge, KeyCode::Char('p')).unwrap();
     for character in "alsa_input.fixture".chars() {
         session

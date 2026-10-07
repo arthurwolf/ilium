@@ -441,9 +441,31 @@ pub fn execute(
         at: request.deadline,
     };
     deadline.check()?;
-    let (count, layout, scratch) = request.layout()?;
-    let _scratch = charge(quota, scratch + 4096)?;
+    let (count, _, scratch) = request.layout()?;
+    let scratch_admission = charge(quota, scratch + 4096)?;
     let admission = charge(quota, count * 4 + 512)?;
+    execute_admitted(request, quota, stop, scratch_admission, admission)
+}
+
+fn execute_admitted(
+    request: MathRequest,
+    quota: &QuotaGroup,
+    stop: &StopToken,
+    scratch_admission: StorageAdmission,
+    admission: StorageAdmission,
+) -> Result<Arc<MathOutput>> {
+    if !request.input.quota.shares_root(quota) {
+        return Err(invalid("foreign quota input"));
+    }
+    let deadline = Deadline {
+        stop: stop.clone(),
+        at: request.deadline,
+    };
+    deadline.check()?;
+    let (count, layout, _) = request.layout()?;
+    // Storage belongs to the original job before launch. Hold scratch through
+    // computation and transfer output admission into the retained MathOutput.
+    let _scratch = scratch_admission;
     let mut values = allocate(count)?;
     let input = request.input.values();
     match &request.parameters {
@@ -834,12 +856,20 @@ impl MathHandle {
 struct ComputeJob {
     request: MathRequest,
     quota: QuotaGroup,
+    scratch: StorageAdmission,
+    output: StorageAdmission,
 }
 impl Job for ComputeJob {
     type Output = Arc<MathOutput>;
     type Error = AnimationError;
     fn run(self, context: JobContext) -> Result<Self::Output> {
-        execute(self.request, &self.quota, &context.stop_token())
+        execute_admitted(
+            self.request,
+            &self.quota,
+            &context.stop_token(),
+            self.scratch,
+            self.output,
+        )
     }
 }
 struct Slot {
@@ -893,6 +923,13 @@ impl NativeMath {
             return Err(AnimationError::Budget("math handle capacity".into()));
         }
         let (count, _, scratch) = request.layout()?;
+        if Instant::now() >= request.deadline {
+            return Err(invalid("deadline exceeded"));
+        }
+        // Refuse storage before publishing a CPU job. The worker must not race
+        // descriptor publication for storage admission after successful submit.
+        let scratch_admission = charge(&self.quota, scratch + 4096)?;
+        let output_admission = charge(&self.quota, count * 4 + 512)?;
         let cost = JobCost {
             input_bytes: request.input.values.len() * 4 + scratch + 4096,
             result_bytes: count * 4 + 4096,
@@ -911,6 +948,8 @@ impl NativeMath {
             .submit(ComputeJob {
                 request,
                 quota: self.quota.clone(),
+                scratch: scratch_admission,
+                output: output_admission,
             })
             .map_err(|rejected| {
                 AnimationError::Budget(format!("math CPU submission: {:?}", rejected.reason))

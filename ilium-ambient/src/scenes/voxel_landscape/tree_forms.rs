@@ -25,6 +25,23 @@ fn crown(
     geometry.canopy(center, radii)
 }
 
+fn flat_canopy(
+    geometry: &mut TreeGeometry,
+    center: [i16; 3],
+    radius: i16,
+    layers: i16,
+) -> Result<(), GeometryError> {
+    for layer in 0..layers {
+        let layer_radius = (radius - layer).max(1);
+        crown(
+            geometry,
+            [center[0], center[1], center[2] + layer],
+            [layer_radius, layer_radius, 0],
+        )?;
+    }
+    Ok(())
+}
+
 /// Texture-bank-independent semantic state ready for the shared model resolver.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeVoxelState {
@@ -155,6 +172,7 @@ pub fn build(
         Growth::Old => (height + 3).min(40),
     };
     let spread = if growth == Growth::Young { 2 } else { 3 };
+    let acacia_variant = (entropy >> 40) % 3;
     let mut geometry = TreeGeometry::default();
     use TreeShape::*;
     if profile.shape == Fallen {
@@ -172,9 +190,25 @@ pub fn build(
         1
     };
     let base = if profile.shape == Mangrove { 3 } else { 0 };
-    for x in 0..width {
-        for y in 0..width {
-            geometry.branch([x, y, base], [x, y, height + base])?;
+    if profile.shape == Forked {
+        let bend = (height * 2 / 3).max(1);
+        geometry.branch([0, 0, base], [0, 0, bend])?;
+        match acacia_variant {
+            1 => {
+                geometry.branch([0, 0, bend], [2, 0, height + base])?;
+                geometry.branch([0, 0, bend], [-2, 0, (height - 1).max(1)])?;
+            }
+            2 => {
+                geometry.branch([0, 0, bend], [1, 0, height + base - 1])?;
+                geometry.branch([1, 0, height + base - 1], [2, 0, height + base + 2])?;
+            }
+            _ => geometry.branch([0, 0, bend], [2, 0, height + base])?,
+        }
+    } else {
+        for x in 0..width {
+            for y in 0..width {
+                geometry.branch([x, y, base], [x, y, height + base])?;
+            }
         }
     }
     match profile.shape {
@@ -204,17 +238,17 @@ pub fn build(
             }
             crown(&mut geometry, [0, 0, height + 1], [spread, spread, 2])?;
         }
-        Forked => {
-            for end in [[3, 1, height], [-2, 2, (height - 1).max(1)]] {
-                geometry.branch([0, 0, (height / 2).max(1)], end)?;
-                crown(&mut geometry, end, [spread + 1, spread, 0])?;
-                crown(
-                    &mut geometry,
-                    [end[0], end[1], end[2] + 1],
-                    [spread, spread - 1, 0],
-                )?;
+        Forked => match acacia_variant {
+            1 => {
+                flat_canopy(&mut geometry, [2, 0, height + base], 3, 3)?;
+                flat_canopy(&mut geometry, [-2, 0, (height - 1).max(1)], 2, 2)?;
             }
-        }
+            2 => {
+                flat_canopy(&mut geometry, [1, 0, height + base - 1], 2, 1)?;
+                flat_canopy(&mut geometry, [2, 0, height + base + 2], 2, 2)?;
+            }
+            _ => flat_canopy(&mut geometry, [2, 0, height + base], 3, 3)?,
+        },
         Spruce | Pine | GiantSpruce | GiantPine => {
             let first_layer = match profile.shape {
                 Pine => (height - 3).max(1),
@@ -346,6 +380,64 @@ mod tests {
                 .unwrap()
         };
         assert!(low_leaf(&spruce) < low_leaf(&pine));
+    }
+
+    #[test]
+    fn oak_and_birch_share_the_common_form_while_acacia_keeps_its_diagonal_trunk() {
+        let normalized_leaves = |id: &str| {
+            let profile = profile(id).unwrap();
+            let geometry = build(profile, Growth::Mature, 97).unwrap();
+            let cells: BTreeMap<_, _> = geometry.cells().collect();
+            let trunk_top = cells
+                .iter()
+                .filter(|(_, cell)| matches!(cell, TreeCell::Log(_)))
+                .map(|(position, _)| position[2])
+                .max()
+                .unwrap();
+            let leaves = cells
+                .iter()
+                .filter(|(_, cell)| **cell == TreeCell::Leaf)
+                .map(|(position, _)| [position[0], position[1], position[2] - trunk_top])
+                .collect::<std::collections::BTreeSet<_>>();
+            let crown_height = leaves.iter().map(|position| position[2]).max().unwrap()
+                - leaves.iter().map(|position| position[2]).min().unwrap();
+            (leaves, crown_height)
+        };
+        let (oak, oak_crown_height) = normalized_leaves("minecraft:oak");
+        let (birch, birch_crown_height) = normalized_leaves("minecraft:birch_bees_0002");
+        let acacia_forms = [0, 1_u64 << 40, 2_u64 << 40].map(|entropy| {
+            build(
+                profile("minecraft:acacia").unwrap(),
+                Growth::Mature,
+                entropy,
+            )
+            .unwrap()
+        });
+
+        assert_eq!(
+            oak, birch,
+            "ordinary birch follows the common oak canopy form"
+        );
+        assert_eq!(oak_crown_height, birch_crown_height);
+        assert_ne!(acacia_forms[0], acacia_forms[1]);
+        assert_ne!(acacia_forms[1], acacia_forms[2]);
+        for acacia in acacia_forms {
+            assert!(
+                acacia
+                    .cells()
+                    .any(|(_, cell)| matches!(cell, TreeCell::Log(LogAxis::X | LogAxis::GroundY))),
+                "acacia should keep its characteristic diagonal trunk"
+            );
+            let leaf_levels: std::collections::BTreeSet<_> = acacia
+                .cells()
+                .filter(|(_, cell)| *cell == TreeCell::Leaf)
+                .map(|(position, _)| position[2])
+                .collect();
+            assert!(
+                leaf_levels.len() <= 4,
+                "acacia canopy should remain a small number of flat leaf layers"
+            );
+        }
     }
 
     #[test]

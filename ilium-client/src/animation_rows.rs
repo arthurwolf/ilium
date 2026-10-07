@@ -929,6 +929,32 @@ mod overhaul_tests {
         assert!(!view.value.contains("Shared observer"));
         assert!(view.value.contains("Paris"));
     }
+
+    #[test]
+    fn saved_scene_status_keeps_the_bar_compact_and_the_activity_log_in_help() {
+        let settings = AnimationSettings {
+            kind: AnimationKind::VoxelLandscape,
+            ..Default::default()
+        };
+        let status = "Route [====......] 4/16\nElapsed: 00:42 · ETA unavailable\nRecent activity:\n+00:08 · Scanning saved region files";
+        let model = RowModel::new(
+            &settings,
+            &RowContext {
+                scene_status: Some(status.to_owned()),
+                ..Default::default()
+            },
+        );
+        let index = model
+            .rows()
+            .iter()
+            .position(|row| *row == AnimationRow::SceneStatus)
+            .unwrap();
+        let view = model.view(index).unwrap();
+
+        assert_eq!(view.value, "Route [====......] 4/16");
+        assert!(view.help.contains("Elapsed: 00:42 · ETA unavailable"));
+        assert!(view.help.contains("Scanning saved region files"));
+    }
 }
 
 #[cfg(test)] // Verify full source values reach the existing openable Text row path.

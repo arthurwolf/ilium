@@ -29,15 +29,15 @@ use ilium_platform::{
     owned_worker::{self, OwnedWorker, StopToken, WorkerKind},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque}, // Bound unissued requests and terminal inventories by retained leases.
     io::{Read, Write},
     path::Path,
     sync::{
-        mpsc::{self, Receiver, SyncSender},
         Arc,
+        mpsc::{self, Receiver, SyncSender},
     },
     time::{Duration, Instant},
 };
@@ -252,6 +252,13 @@ pub struct HelperLimits {
     pub sandbox: SandboxLimits,
     pub engine: EngineLimits,
     pub operation_timeout: Duration,
+}
+impl HelperLimits {
+    /// Declared child task capacity plus the two parent transport workers.
+    /// Both the application ceiling and launch admission use this same count.
+    pub fn worker_capacity(&self) -> usize {
+        self.sandbox.maximum_tasks as usize + 2
+    }
 }
 impl Default for HelperLimits {
     fn default() -> Self {
@@ -1070,7 +1077,7 @@ impl HelperSession {
         }
         // Parent-root debit precedes process/thread/buffer creation. The helper's
         // separate ledger does not replace this application's physical custody.
-        let worker_count = limits.sandbox.maximum_tasks as usize + 2;
+        let worker_count = limits.worker_capacity();
         let physical = usize::try_from(limits.sandbox.memory_bytes)
             .map_err(|_| AnimationError::Budget("helper memory limit".into()))?
             .checked_add(4 * 1024 * 1024)
@@ -2327,11 +2334,40 @@ impl ChildServices {
 pub fn run_helper_ipc() -> Result<()> {
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
+    run_helper_ipc_transport(&mut input, &mut output)
+}
+
+fn run_helper_ipc_transport(input: &mut impl Read, output: &mut impl Write) -> Result<()> {
+    let mut startup_authority = None;
+    let result = run_helper_ipc_inner(input, output, &mut startup_authority);
+    if let (Err(error), Some(authority)) = (&result, startup_authority) {
+        // Initialization has the same authenticated terminal response as later
+        // commands. Never report uncorrelated input or retry a failed ready write.
+        write_packet(
+            output,
+            &Packet::new(
+                0,
+                authority,
+                "error",
+                json!({"error":error.to_string().chars().take(2048).collect::<String>()}),
+                BTreeMap::new(),
+            ),
+        )?;
+    }
+    result
+}
+
+fn run_helper_ipc_inner(
+    mut input: &mut impl Read,
+    mut output: &mut impl Write,
+    startup_authority: &mut Option<HelperAuthority>,
+) -> Result<()> {
     let mut initial = read_packet(&mut input)?;
     if initial.envelope.kind != "command" || initial.envelope.sequence != 0 {
         return Err(invalid("first packet must initialize"));
     }
     let authority = initial.envelope.authority.clone();
+    *startup_authority = Some(authority.clone());
     let Command::Initialize {
         bootstrap,
         sandbox,
@@ -2391,6 +2427,9 @@ pub fn run_helper_ipc() -> Result<()> {
     engine.configure_ambient(mode, ambient_seed)?;
     let proof = animation_sandbox::seal_current_helper()?;
     engine.load()?;
+    // From this point the command loop owns terminal diagnostics. A failed
+    // ready write must not append a second packet to a partly written response.
+    *startup_authority = None;
     write_packet(
         &mut output,
         &Packet::new(
@@ -2647,6 +2686,51 @@ pub fn run_helper_ipc() -> Result<()> {
 #[cfg(test)]
 mod protocol_tests {
     use super::*;
+    #[test]
+    fn startup_failure_reports_original_reason_with_initial_authority() {
+        let initial = Packet::new(
+            0,
+            authority(),
+            "command",
+            serde_json::to_value(Command::Dispose).unwrap(),
+            BTreeMap::new(),
+        );
+        let mut input = Vec::new();
+        write_packet(&mut input, &initial).unwrap();
+        let mut output = Vec::new();
+        let error = run_helper_ipc_transport(&mut input.as_slice(), &mut output).unwrap_err();
+        assert!(error.to_string().contains("missing initialization"));
+        let mut response_bytes = output.as_slice();
+        let response = read_packet(&mut response_bytes).unwrap();
+        assert_eq!(response.envelope.sequence, 0);
+        assert_eq!(response.envelope.authority, initial.envelope.authority);
+        assert_eq!(response.envelope.kind, "error");
+        assert!(
+            response.envelope.payload["error"]
+                .as_str()
+                .unwrap()
+                .contains("missing initialization")
+        );
+        assert!(response.planes.is_empty());
+        assert!(response_bytes.is_empty());
+    }
+
+    #[test]
+    fn startup_without_initial_correlation_emits_no_error_packet() {
+        let initial = Packet::new(
+            1,
+            authority(),
+            "command",
+            serde_json::to_value(Command::Dispose).unwrap(),
+            BTreeMap::new(),
+        );
+        let mut input = Vec::new();
+        write_packet(&mut input, &initial).unwrap();
+        let mut output = Vec::new();
+        assert!(run_helper_ipc_transport(&mut input.as_slice(), &mut output).is_err());
+        assert!(output.is_empty());
+    }
+
     fn authority() -> HelperAuthority {
         HelperAuthority {
             package_digest: "a".repeat(64),
@@ -2745,9 +2829,11 @@ mod protocol_tests {
         assert!(validated_requests(&payload, true, 9, pending.len(), 1).is_err());
         assert_eq!(pending, BTreeSet::from([9]));
         assert!(validated_requests(&json!({"requests":null}), true, 9, 1, 1).is_err());
-        assert!(validated_requests(&json!({"requests":[]}), false, 9, 1, 1)
-            .unwrap()
-            .is_empty());
+        assert!(
+            validated_requests(&json!({"requests":[]}), false, 9, 1, 1)
+                .unwrap()
+                .is_empty()
+        );
     }
     #[test]
     fn queued_seed_packet_retains_original_storage_after_local_guard_drops() {
@@ -2780,10 +2866,12 @@ mod protocol_tests {
     }
     #[test]
     fn informational_status_has_closed_schema_and_bounded_utf8() {
-        assert!(validate_status(
-            &json!({"records":[{"kind":"log","level":"info","message":"chess"}],"dropped":0})
-        )
-        .is_ok());
+        assert!(
+            validate_status(
+                &json!({"records":[{"kind":"log","level":"info","message":"chess"}],"dropped":0})
+            )
+            .is_ok()
+        );
         for invalid in [
             json!({"records":[],"dropped":0,"owner":1}),
             json!({"records":[{"kind":"log","level":"info","message":"x".repeat(4097)}],"dropped":0}),
@@ -2809,10 +2897,10 @@ mod protocol_tests {
     }
     #[test]
     fn dense_or_deep_json_is_rejected_before_dom_allocation() {
-        assert!(validate_json_structure(
-            format!("{}0{}", "[".repeat(33), "]".repeat(33)).as_bytes()
-        )
-        .is_err());
+        assert!(
+            validate_json_structure(format!("{}0{}", "[".repeat(33), "]".repeat(33)).as_bytes())
+                .is_err()
+        );
         assert!(validate_json_structure(format!("[{}0]", "0,".repeat(4097)).as_bytes()).is_err());
         assert!(validate_json_structure(br#"{"value":"braces { [ \" ignored"}"#).is_ok());
     }
@@ -2954,15 +3042,17 @@ mod protocol_tests {
             sender.send(packet).unwrap(); // Transfer custody into the queue.
             drop(value); // Drop only the producer alias.
             assert_eq!(quota.snapshot().worker_bytes, retained_bytes); // Preserve the original debit.
-            assert!(ServiceValue::copy_request_from_host(
-                &metadata,
-                &arrays,
-                &planes,
-                &limits,
-                quota.clone(),
-                &budget
-            )
-            .is_err()); // Do not recycle an occupied slot.
+            assert!(
+                ServiceValue::copy_request_from_host(
+                    &metadata,
+                    &arrays,
+                    &planes,
+                    &limits,
+                    quota.clone(),
+                    &budget
+                )
+                .is_err()
+            ); // Do not recycle an occupied slot.
             let packet = receiver.recv().unwrap(); // Recover the same packet owner.
             let mut wire = Vec::new(); // Use raw test wire, outside quota.
             write_packet(&mut wire, &packet).unwrap(); // Run real complete preflight.
@@ -3065,15 +3155,17 @@ mod protocol_tests {
         drop(request); // Drop one request owner.
         drop(alias); // Keep the escaped payload alive.
         assert!(quota.snapshot().worker_bytes > 0); // Preserve its admitted bytes.
-        assert!(ServiceValue::copy_request_from_host(
-            &metadata,
-            &arrays,
-            &planes,
-            &limits,
-            quota.clone(),
-            &budget
-        )
-        .is_err()); // Do not recycle its occupied slot.
+        assert!(
+            ServiceValue::copy_request_from_host(
+                &metadata,
+                &arrays,
+                &planes,
+                &limits,
+                quota.clone(),
+                &budget
+            )
+            .is_err()
+        ); // Do not recycle its occupied slot.
         assert_eq!(value_alias.planes(), &planes); // Preserve bytes after cancellation.
         budget.close(); // Close admission without release.
         assert!(quota.snapshot().worker_bytes > 0); // Closure is not physical release.
@@ -3093,38 +3185,32 @@ mod protocol_tests {
             json!({"constructor":0}),
         ] {
             // Reject malformed reference graphs.
-            assert!(ServiceValue::copy_from_host(
-                &invalid,
-                &arrays,
-                &planes,
-                &limits,
-                quota.clone()
-            )
-            .is_err()); // Run actual metadata validation.
+            assert!(
+                ServiceValue::copy_from_host(&invalid, &arrays, &planes, &limits, quota.clone())
+                    .is_err()
+            ); // Run actual metadata validation.
             assert_eq!(quota.snapshot().worker_bytes, 0); // Reject before admission.
         } // Markers cannot mint native handles.
         let mut overflow = arrays.clone(); // Corrupt shape without altering bytes.
         overflow[1].elements = usize::MAX; // Exercise checked multiplication.
-        assert!(ServiceValue::copy_from_host(
-            &metadata,
-            &overflow,
-            &planes,
-            &limits,
-            quota.clone()
-        )
-        .is_err()); // Reject shape overflow.
+        assert!(
+            ServiceValue::copy_from_host(&metadata, &overflow, &planes, &limits, quota.clone())
+                .is_err()
+        ); // Reject shape overflow.
         let mut hidden = planes.clone(); // Add an undeclared physical plane.
         hidden.insert("extra".into(), vec![1]); // Expose hidden-byte smuggling.
         assert!(
             ServiceValue::copy_from_host(&metadata, &arrays, &hidden, &limits, quota.clone())
                 .is_err()
         ); // Require complete inventory.
-        assert!(ArraySpec::try_from(ArrayConfig {
-            name: "b0".into(),
-            kind: "f64".into(),
-            elements: 1
-        })
-        .is_err()); // Reject unsupported element kinds.
+        assert!(
+            ArraySpec::try_from(ArrayConfig {
+                name: "b0".into(),
+                kind: "f64".into(),
+                elements: 1
+            })
+            .is_err()
+        ); // Reject unsupported element kinds.
         assert_eq!(quota.snapshot().worker_bytes, 0); // Retain zero admitted custody.
         let other = service_quota(); // Create a deliberately foreign root.
         let value =
@@ -3159,39 +3245,45 @@ mod protocol_tests {
             ),
             Err(AnimationError::Budget(_))
         )); // Refusal must remain an error.
-        assert!(completed_state(
-            completion_record(7, stamp, Ok(CompletionState::Delivered)),
-            8,
-            stamp
-        )
-        .is_err()); // Reject another request's ACK.
+        assert!(
+            completed_state(
+                completion_record(7, stamp, Ok(CompletionState::Delivered)),
+                8,
+                stamp
+            )
+            .is_err()
+        ); // Reject another request's ACK.
         let stale = ServiceAuthority {
             authorization_epoch: stamp.authorization_epoch + 1,
             ..stamp
         }; // Change only mutable epoch.
-        assert!(completed_state(
-            completion_record(7, stamp, Ok(CompletionState::Delivered)),
-            7,
-            stale
-        )
-        .is_err()); // Reject stale active authority.
+        assert!(
+            completed_state(
+                completion_record(7, stamp, Ok(CompletionState::Delivered)),
+                7,
+                stale
+            )
+            .is_err()
+        ); // Reject stale active authority.
         for (state, error) in [
             ("delivered", Some("unexpected".to_owned())),
             ("refused", None),
             ("unknown_state", None),
         ] {
             // Reject contradictory ACK states.
-            assert!(completed_state(
-                CompletionRecord {
-                    id: 7,
-                    authority: stamp.into(),
-                    state: state.into(),
-                    error
-                },
-                7,
-                stamp
-            )
-            .is_err()); // Never publish through malformed ACKs.
+            assert!(
+                completed_state(
+                    CompletionRecord {
+                        id: 7,
+                        authority: stamp.into(),
+                        state: state.into(),
+                        error
+                    },
+                    7,
+                    stamp
+                )
+                .is_err()
+            ); // Never publish through malformed ACKs.
         } // Real IPC tests check no checkpoint.
     } // Broker publication remains separate.
 }
@@ -3308,11 +3400,13 @@ pub(crate) mod isolation_qualification {
         eprintln!("actual sealed V8 helper resources: {resources:?}");
         let probe = helper.probe().unwrap();
         assert_eq!(probe.as_object().unwrap().len(), 9);
-        assert!(probe
-            .as_object()
-            .unwrap()
-            .values()
-            .all(|value| value == &Value::Bool(true)));
+        assert!(
+            probe
+                .as_object()
+                .unwrap()
+                .values()
+                .all(|value| value == &Value::Bool(true))
+        );
         assert_eq!(
             helper
                 .plan(&json!({}), AnimationMode::Live, &json!({}))
@@ -3326,9 +3420,11 @@ pub(crate) mod isolation_qualification {
         let requests = helper.take_requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, "http.request");
-        assert!(helper
-            .complete_request(requests[0].id + 1, &json!({"value":0.5}))
-            .is_err());
+        assert!(
+            helper
+                .complete_request(requests[0].id + 1, &json!({"value":0.5}))
+                .is_err()
+        );
         helper
             .complete_request(requests[0].id, &json!({"value":0.5}))
             .unwrap();
@@ -3369,16 +3465,18 @@ pub(crate) mod isolation_qualification {
             helper.start_create(&json!({}), &json!({})).unwrap(),
             CreateState::Ready
         );
-        assert!(helper
-            .render(
-                &json!({}),
-                &[ArraySpec {
-                    name: "gray".into(),
-                    kind: TypedArrayKind::F32,
-                    elements: usize::MAX
-                }]
-            )
-            .is_err());
+        assert!(
+            helper
+                .render(
+                    &json!({}),
+                    &[ArraySpec {
+                        name: "gray".into(),
+                        kind: TypedArrayKind::F32,
+                        elements: usize::MAX
+                    }]
+                )
+                .is_err()
+        );
         helper.cancel().unwrap();
         assert!(helper.pump().is_err());
         drop(helper);

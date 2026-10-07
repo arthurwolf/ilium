@@ -4606,6 +4606,7 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     }
     #[test]
     fn native_seed_shape_count_caps_remain_48_and_refuse_before_copy() {
+        let (_serial, _root) = fixture_lock();
         let mut engine = split_seed_engine("input=planes.source;");
         let specs: Vec<_> = (0..48)
             .map(|n| ArraySpec {
@@ -4690,6 +4691,7 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     }
     #[test]
     fn pre_render_ambient_is_bound_before_guest_module_evaluation() {
+        let (_serial, _root) = fixture_lock();
         fn capture() -> Value {
             let source = r#"
                 const savedDate = Date;
@@ -4739,6 +4741,26 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
         assert_eq!(first["ambientFacilitiesHidden"], true);
         assert_eq!(first["localeParseRejected"], true);
         assert_ne!(first["firstRandom"], first["nextRandom"]);
+    }
+    #[cfg(feature = "diagnostic-profiler")]
+    #[test]
+    fn inspector_cpu_profile_contains_the_render_function() {
+        let (_serial, _root) = fixture_lock();
+        let source = r#"export async function create(){return {render(_context,frame){let value=0;for(let i=0;i<250000;i++)value=Math.sin(value+i);frame.gray.fill(value);},dispose(){}};}"#;
+        let mut engine = engine(source, "{working,sealed,input}");
+        let (output, profile) = engine
+            .render_with_cpu_profile(
+                &json!({}),
+                &[ArraySpec {
+                    name: "gray".into(),
+                    kind: TypedArrayKind::F32,
+                    elements: 4,
+                }],
+            )
+            .unwrap();
+        assert_eq!(output.planes["gray"].len(), 16);
+        let nodes = profile["nodes"].as_array().unwrap();
+        assert!(nodes.iter().any(|node| node["callFrame"]["functionName"] == "render"));
     }
 } // End native frame contracts.
 

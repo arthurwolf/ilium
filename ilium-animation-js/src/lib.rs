@@ -28,6 +28,8 @@ pub mod native_compute_host;
 pub mod native_draw;
 #[cfg(all(feature = "native-host", feature = "v8-runtime"))]
 pub mod native_draw_host;
+#[cfg(all(feature = "native-host", feature = "v8-runtime"))]
+pub mod native_gpu_host;
 #[cfg(all(
     feature = "v8-runtime",
     feature = "native-host",

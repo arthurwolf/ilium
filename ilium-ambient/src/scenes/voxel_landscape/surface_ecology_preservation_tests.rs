@@ -1,4 +1,47 @@
 use super::*;
+
+#[test]
+fn woodland_tree_cover_forms_seeded_spatial_patches() {
+    let (mut total, mut selected, mut neighboring_pairs, mut adjacent_selected) =
+        (0_u64, 0_u64, 0_u64, 0_u64);
+    let (width, height) = (192_i32, 192_i32);
+    for gy in 0..height {
+        for gx in 0..width {
+            let x = gx * 13 - 1248;
+            let y = gy * 13 - 1248;
+            let cover = tree_local_cover_percent(71839, x, y, 80);
+            assert!((60..=100).contains(&cover));
+            let chosen = hash2(71839 ^ 0x7472_6565, i64::from(gx), i64::from(gy)) % 100 < cover;
+            total += 1;
+            selected += u64::from(chosen);
+            if gx + 1 < width {
+                let next_cover = tree_local_cover_percent(71839, x + 13, y, 80);
+                let next =
+                    hash2(71839 ^ 0x7472_6565, i64::from(gx + 1), i64::from(gy)) % 100 < next_cover;
+                neighboring_pairs += 1;
+                adjacent_selected += u64::from(chosen && next);
+            }
+        }
+    }
+    let mean_cover = selected as f64 / total as f64;
+    let adjacent_joint_rate = adjacent_selected as f64 / neighboring_pairs as f64;
+    assert!((0.78..=0.82).contains(&mean_cover), "mean={mean_cover}");
+    assert!(
+        adjacent_joint_rate > mean_cover * mean_cover + 0.003,
+        "adjacent_joint_rate={adjacent_joint_rate}, independent={}",
+        mean_cover * mean_cover
+    );
+    let patches = |seed| {
+        (-4..4)
+            .flat_map(|gy| {
+                (-4..4).map(move |gx| tree_local_cover_percent(seed, gx * 78, gy * 78, 80))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(patches(71839), patches(71839));
+    assert_ne!(patches(71839), patches(71840));
+}
+
 #[test]
 fn ecology_every_biome_source_and_all_132_growth_pairs_remain_reachable() {
     let azalea_biomes = [

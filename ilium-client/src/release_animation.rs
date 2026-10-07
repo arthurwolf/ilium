@@ -1,18 +1,26 @@
 //! Headless installed animation qualification through the shipped client and
 //! its sibling helper. This command runs inside the package's native launcher.
 
-use crate::{animation_plugins::PluginCatalogue, execution};
-use anyhow::{bail, Context, Result};
+use crate::{
+    animation_plugins::PluginCatalogue,
+    execution,
+    filesystem::plugin_permissions::{
+        PermissionCompletion, PersistenceStamp, PluginPermissionFiles,
+    },
+};
+use anyhow::{Context, Result, bail};
 use ilium_animation_js::{
+    TRUSTED_BOOTSTRAP,
     engine::{ArraySpec, CreateState, TypedArrayKind},
     helper::HelperLimits,
     manifest::AnimationMode,
-    permissions::Ceiling,
+    permissions::{Ceiling, PlanReview},
     release,
-    runtime::{InstancePreparation, PackageInstance},
+    runtime::{InstancePreparation, PackageInstance, VerifiedPreparation},
     surface::{Data, Format, FrameMeta, NoNativeRenderer, Planes, Shape, Surface},
-    TRUSTED_BOOTSTRAP,
 };
+use ilium_execution::{Client, ClientLimits};
+use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,7 +28,62 @@ use std::{
     fs,
     io::{self, Write},
     path::Path,
+    sync::Arc,
+    time::Duration,
 };
+
+async fn prepare_with_native_ledger(
+    verified: VerifiedPreparation,
+    client: &Client,
+    root: Arc<PinnedDirectory>,
+) -> Result<(PackageInstance, PlanReview)> {
+    let notification = Arc::new(tokio::sync::Notify::new());
+    let wake = Arc::clone(&notification);
+    let mut files = PluginPermissionFiles::new(
+        client,
+        root,
+        Arc::clone(&notification),
+        Arc::new(move || wake.notify_one()),
+    )
+    .map_err(anyhow::Error::msg)?;
+    let stamp = PersistenceStamp {
+        selection_revision: verified.instance_id(),
+        instance_id: verified.instance_id(),
+        plan_revision: 1,
+        authorization_epoch: verified.authorization_epoch(),
+    };
+    let fence = files.bind(verified.principal(), stamp)?;
+    files.request_load(&fence)?;
+    let loaded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(completion) = files.collect() {
+                return match completion {
+                    PermissionCompletion::Loaded(loaded) => Ok(loaded),
+                    PermissionCompletion::Failed(error) => Err(anyhow::Error::new(error)),
+                    PermissionCompletion::Written(_) => anyhow::bail!("unexpected ledger write"),
+                };
+            }
+            notification.notified().await;
+        }
+    })
+    .await
+    .context("native permission ledger load deadline")??;
+    let snapshot = loaded
+        .view()
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    if !snapshot.is_current() || snapshot.stamp() != stamp {
+        bail!("native permission ledger load lost its selection binding");
+    }
+    // None comes only from this actual missing-state load, never an assumed
+    // empty ledger. The broker consumes remembered bytes before helper launch.
+    let prepared = verified.prepare(snapshot.bytes())?;
+    files.close_admission();
+    if !files.is_physically_settled() {
+        bail!("native permission ledger load is not physically settled");
+    }
+    Ok(prepared)
+}
 
 fn regular_bytes(path: &Path) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)
@@ -66,7 +129,21 @@ fn emit(record: serde_json::Value) -> Result<()> {
 
 /// The normal CLI bootstrap already registered the single process quota.
 /// The nested helper consumes and returns a debit from that exact owner.
-pub fn probe() -> Result<()> {
+pub async fn probe() -> Result<()> {
+    let bank = execution::ClientExecution::start_async().await?;
+    let result = probe_with_bank(&bank).await;
+    let shutdown = bank.shutdown().await;
+    match (result, shutdown) {
+        (Err(error), Err(shutdown)) => {
+            Err(error.context(format!("probe bank shutdown: {shutdown}")))
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error).context("probe bank shutdown"),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
     let client = std::env::current_exe().context("installed client executable")?;
     let client_bytes = regular_bytes(&client)?;
     let helper = ilium_platform::animation_sandbox::helper_executable_path(&client)
@@ -78,6 +155,24 @@ pub fn probe() -> Result<()> {
     let catalogue = PluginCatalogue::discover_default().map_err(anyhow::Error::msg)?;
     let verifier = release::verifier().context("compiled official trust inventory")?;
     let quota = execution::process_quota();
+    let permission_client = bank
+        .client(ClientLimits {
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 8 * 1024 * 1024,
+            result_bytes: 32 * 1024 * 1024,
+        })
+        .map_err(|error| anyhow::anyhow!("permission client admission: {error:?}"))?;
+    let _root_storage = quota
+        .reserve_external_storage(64 * 1024)
+        .map_err(|error| anyhow::anyhow!("permission root admission: {error:?}"))?;
+    let directories =
+        directories::ProjectDirs::from("", "", "ilium").context("Ilium permission directory")?;
+    let permission_path = directories.config_dir().join("animation-permissions");
+    ilium_platform::secure_fs::create_private_directory(&permission_path)?;
+    let permission_root = Arc::new(PinnedDirectory::from_host(Arc::new(
+        NoFollowDirectory::open_root(&permission_path)?,
+    ))?);
     let baseline = quota.snapshot();
     let mut archives = Vec::with_capacity(release::PACKAGES.len());
     for &(id, filename, expected_digest) in release::PACKAGES {
@@ -120,9 +215,10 @@ pub fn probe() -> Result<()> {
             quota: quota.clone(),
         })
         .with_context(|| format!("{id} archive verification"))?;
-        let (mut instance, review) = verified
-            .prepare_without_rights()
-            .with_context(|| format!("{id} helper plan"))?;
+        let (mut instance, review) =
+            prepare_with_native_ledger(verified, &permission_client, Arc::clone(&permission_root))
+                .await
+                .with_context(|| format!("{id} helper plan"))?;
         let render_result = (|| -> Result<()> {
             if instance.package().manifest().id != *id
                 || instance.active_identity().is_some()
@@ -192,7 +288,8 @@ pub fn probe() -> Result<()> {
                 ];
                 let (output, retained_storage) = instance
                     .render(
-                        &json!({"time":sequence as f64 * 0.2,"wall":0.0,"delta":0.2,"inputs":{}}),
+                        &json!({"time":sequence as f64 * 0.2,"wall":0.0,"delta":0.2,"inputs":{},
+                            "_ilium_frame":{"key":seed.key,"shape":seed.shape}}),
                         &arrays,
                     )?
                     .into_parts();

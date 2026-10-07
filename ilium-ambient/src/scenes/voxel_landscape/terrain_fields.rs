@@ -137,6 +137,65 @@ impl TerrainFields {
         self.shape(x, z, climate, rivers)
     }
 
+    fn inland_lake_basin(
+        &self,
+        x: i32,
+        z: i32,
+        climate: TerrainClimate,
+        mountain_height: f64,
+        island_weight: f64,
+        uncarved_height: i16,
+    ) -> Option<(i16, Option<i16>)> {
+        let wetland_core = climate.humidity > 0.70
+            && climate.continentalness < 0.18
+            && mountain_height <= 32.0;
+        if climate.continentalness <= 0.08
+            || mountain_height >= 48.0
+            || island_weight >= 0.85
+            || wetland_core
+        {
+            return None;
+        }
+
+        const CELL_SIZE: i64 = 192;
+        let (world_x, world_z) = (i64::from(x), i64::from(z));
+        let (grid_x, grid_z) = (world_x.div_euclid(CELL_SIZE), world_z.div_euclid(CELL_SIZE));
+        let mut nearest = None;
+        for cell_x in grid_x - 1..=grid_x + 1 {
+            for cell_z in grid_z - 1..=grid_z + 1 {
+                let site = hash2(self.seed ^ 0x696e_6c61_6e64_6c6b, cell_x, cell_z);
+                if site % 6 != 0 {
+                    continue;
+                }
+                let center_x = cell_x * CELL_SIZE + 48 + ((site >> 8) % 96) as i64;
+                let center_z = cell_z * CELL_SIZE + 48 + ((site >> 16) % 96) as i64;
+                let radius_x = 20.0 + ((site >> 24) % 21) as f64;
+                let radius_z = 17.0 + ((site >> 32) % 20) as f64;
+                let dx = (world_x - center_x) as f64 / radius_x;
+                let dz = (world_z - center_z) as f64 / radius_z;
+                let roughness =
+                    0.07 * value2(self.seed ^ 0x6c61_6b65_726f_7567, world_x, world_z, 13);
+                let distance = (dx * dx + dz * dz).sqrt() + roughness;
+                if distance > 1.08 {
+                    continue;
+                }
+                let water_level = SURFACE_SEA_LEVEL + 4 + ((site >> 40) % 7) as i16;
+                if nearest.is_none_or(|(nearest_distance, _)| distance < nearest_distance) {
+                    nearest = Some((distance, water_level));
+                }
+            }
+        }
+        let (distance, water_level) = nearest?;
+        let bank_height = f64::from(water_level - 4) + 5.0 * smoothstep(0.58, 1.08, distance);
+        let basin_weight = 1.0 - smoothstep(0.72, 1.08, distance);
+        let height = (f64::from(uncarved_height)
+            + (bank_height - f64::from(uncarved_height)) * basin_weight)
+            .round()
+            .clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
+        let water = (distance < 0.72 && height < water_level).then_some(water_level);
+        Some((height, water))
+    }
+
     fn shape(&self, x: i32, z: i32, climate: TerrainClimate, rivers: bool) -> TerrainSample {
         let sea = f64::from(SURFACE_SEA_LEVEL);
         let inland = smoothstep(-0.08, 0.35, climate.continentalness);
@@ -229,6 +288,15 @@ impl TerrainFields {
         let uncarved_height = (f64::from(uncarved_height) + relief)
             .round()
             .clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
+        let lake = self.inland_lake_basin(
+            x,
+            z,
+            climate,
+            mountain_height,
+            island_weight,
+            uncarved_height,
+        );
+        let uncarved_height = lake.map_or(uncarved_height, |(height, _)| height);
         let valley_strength = if rivers && !island {
             1.0 - smoothstep(0.015, 0.075, climate.river_distance)
         } else {
@@ -246,7 +314,10 @@ impl TerrainFields {
             && uncarved_height >= SURFACE_SEA_LEVEL
             && valley_strength > 0.55
             && height < river_level;
-        let water_level = if height < SURFACE_SEA_LEVEL {
+        let lake_water = lake.and_then(|(_, water)| water);
+        let water_level = if lake_water.is_some() {
+            lake_water
+        } else if height < SURFACE_SEA_LEVEL {
             Some(SURFACE_SEA_LEVEL)
         } else if river {
             Some(river_level)
@@ -329,6 +400,37 @@ mod tests {
     }
 
     #[test]
+    fn inland_lakes_are_elevated_and_independent_of_the_river_toggle() {
+        let terrain = TerrainFields::new(71839);
+        let mut elevated_water = 0;
+        let mut inland_elevated_water = 0;
+        for z in (-2048..=2048).step_by(16) {
+            for x in (-2048..=2048).step_by(16) {
+                let sample = terrain.sample(x, z, false);
+                let Some(level) = sample
+                    .water_level
+                    .filter(|level| *level > SURFACE_SEA_LEVEL)
+                else {
+                    continue;
+                };
+                assert!(
+                    sample.height < level,
+                    "lake surface must cover its basin: {sample:?}"
+                );
+                assert_eq!(sample, terrain.sample(x, z, false));
+                assert_eq!(Some(level), terrain.sample(x, z, true).water_level);
+                elevated_water += 1;
+                inland_elevated_water += usize::from(sample.climate.continentalness > 0.08);
+            }
+        }
+        assert!(elevated_water > 0, "the inland terrain contains no lakes");
+        assert!(
+            inland_elevated_water > 0,
+            "elevated lakes occur only on the coastal shelf"
+        );
+    }
+
+    #[test]
     fn natural_rivers_cross_historical_band_boundaries() {
         let mut crossings = 0;
         for seed in [1, 7, 31, 173] {
@@ -353,9 +455,11 @@ mod tests {
                 let disabled = terrain.sample(x, z, false);
                 assert_eq!(disabled.height, disabled.uncarved_height);
                 assert!(!disabled.river);
-                if enabled.river && disabled.height > SURFACE_SEA_LEVEL {
+                if enabled.river
+                    && disabled.height > SURFACE_SEA_LEVEL
+                    && disabled.water_level.is_none()
+                {
                     inland_river = true;
-                    assert!(disabled.water_level.is_none());
                 }
                 coastal_water |= disabled.height < SURFACE_SEA_LEVEL
                     && disabled.water_level == Some(SURFACE_SEA_LEVEL);

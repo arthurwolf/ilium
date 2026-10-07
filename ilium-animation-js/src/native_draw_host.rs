@@ -119,6 +119,19 @@ impl NativeDrawHost {
         self.prepared.remove(&handle.id().to_string());
         Ok(())
     }
+    /// Borrow a regular image only after its producer registered the original
+    /// raster under this package's native authority. Allocation alone does not
+    /// publish an image, and this lookup does not transfer close ownership.
+    pub(crate) fn registered_image_handle(&self, key: &str) -> Option<ImageHandle> {
+        if !self.prepared.contains_key(key) {
+            return None;
+        }
+        let id = key.parse::<u64>().ok().filter(|id| *id != 0)?;
+        if id.to_string() != key {
+            return None;
+        }
+        Some(ImageHandle::from_id(id))
+    }
     /// Source V2 owns these mappings and its own close/seed invalidation. A
     /// generic image operation may borrow only the existing native allocation.
     pub(crate) fn source_image_handle(&self, key: &str) -> Option<ImageHandle> {
@@ -126,6 +139,19 @@ impl NativeDrawHost {
     }
     pub(crate) fn video_image_handle(&self, key: &str) -> Option<ImageHandle> {
         self.video_images.get(key).copied()
+    }
+    #[cfg(test)]
+    pub(crate) fn register_test_image(&mut self, handle: ImageHandle) {
+        // Synthetic component binding; production publication always uses the
+        // admitted PackageInstance boundary above.
+        let binding = DrawBinding {
+            package_digest: "11".repeat(32),
+            instance_id: 1,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        };
+        let prepared = PreparedBlit::image(&self.media, handle, binding, None).unwrap();
+        self.prepared.insert(handle.id().to_string(), prepared);
     }
     /// Move the decoder's original admitted RGBA Arc into the shared image and
     /// prepared-draw registries. The caller must have obtained this frame from
@@ -425,5 +451,58 @@ impl NativeDrawHost {
         for (_, handle) in std::mem::take(&mut self.source_images) {
             let _ = self.media.close(handle);
         }
+    }
+}
+
+#[cfg(test)]
+mod registered_image_tests {
+    use super::*;
+    use ilium_execution::QuotaLimits;
+
+    #[test]
+    fn readonly_lookup_requires_original_registration_and_expires_on_close() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 16 * 1024 * 1024,
+        });
+        let mut drawing =
+            NativeDrawHost::new(quota.clone(), MediaLimits::default(), DrawLimits::default())
+                .unwrap();
+        let image = drawing.media_mut().solid_image([255, 0, 0, 255]).unwrap();
+        let key = image.id().to_string();
+        assert!(
+            drawing.registered_image_handle(&key).is_none(),
+            "an allocated but unpublished image must not resolve"
+        );
+        // Exercise the real registry and prepared raster with a synthetic test
+        // binding. This test does not qualify broker admission or helper ACK.
+        let binding = DrawBinding {
+            package_digest: "11".repeat(32),
+            instance_id: 1,
+            plan_generation: 1,
+            authorization_epoch: 1,
+        };
+        let prepared = PreparedBlit::image(drawing.media(), image, binding, None).unwrap();
+        drawing.prepared.insert(key.clone(), prepared);
+        assert_eq!(
+            drawing.registered_image_handle(&key).unwrap().id(),
+            image.id()
+        );
+        assert!(
+            drawing
+                .registered_image_handle(&format!("0{key}"))
+                .is_none(),
+            "aliases cannot bypass the exact native registration key"
+        );
+        assert!(drawing.registered_image_handle("999999999").is_none());
+        drawing.close_image(image).unwrap();
+        assert!(drawing.registered_image_handle(&key).is_none());
+        drop(drawing);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 }

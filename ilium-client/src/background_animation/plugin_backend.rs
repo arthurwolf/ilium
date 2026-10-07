@@ -40,6 +40,7 @@ use ilium_animation_js::{
         CachedInputProvider, ClockObservation, LocationObservation, NativeFrameInputs,
         OcclusionObservation, PointerObservation,
     },
+    native_gpu_host::NativeGpuHost,
     native_http_host::{HttpEvent, HttpObservation, NativeHttpHost},
     native_image_host::NativeImageHost,
     native_media::MediaLimits,
@@ -107,6 +108,7 @@ struct Presentation {
     surface: Surface,
     clock: AnimationClock,
     compute: NativeComputeHost,
+    gpu: NativeGpuHost,
     http: NativeHttpHost,
     sources: NativeSourceOwner,
     drawing: NativeDrawHost,
@@ -1156,6 +1158,7 @@ fn presentation_finite_work_drained(presentation: &Presentation) -> bool {
     // Valid decoded image allocations can be released only after the helper
     // has physically exited. Their presence is not an outstanding finite job.
     presentation.compute.is_drained()
+        && presentation.gpu.is_drained()
         && presentation.http.is_drained()
         && presentation.sources.is_drained()
         && presentation.assets.is_drained()
@@ -1178,6 +1181,7 @@ fn revoke_presentation(presentation: &mut Presentation) {
     presentation.audio.stop();
     presentation.tasks.revoke();
     presentation.compute.revoke();
+    presentation.gpu.revoke();
     presentation.http.cancel_all();
     presentation.sources.cancel_all();
     presentation.images.revoke();
@@ -1200,6 +1204,9 @@ fn release_presentation_after_helper_retirement(
         .release_terminal_after_helper_retirement();
     presentation
         .images
+        .release_terminal_after_helper_retirement(&mut presentation.drawing);
+    presentation
+        .gpu
         .release_terminal_after_helper_retirement(&mut presentation.drawing);
     presentation
         .assets
@@ -1973,7 +1980,7 @@ impl PluginBackend {
             };
             let Some(creation) = creation else {
                 workflow.halted = true;
-                return Err("Native permission activation was refused or failed".into());
+                return Err(review_controller::activation_failure_message(update));
             };
             if workflow.presentation.is_none() {
                 let instance = workflow
@@ -2889,6 +2896,7 @@ impl Presentation {
             instance.engine_limits().clone(),
         )
         .map_err(|error| error.to_string())?;
+        let gpu = NativeGpuHost::new(quota.clone()).map_err(|error| error.to_string())?;
         let sources = NativeSourceOwner::new(source_client, quota.clone())?;
 
         let shape = shape(instance.plan(), request.width, request.height)?;
@@ -2958,6 +2966,7 @@ impl Presentation {
             surface,
             clock,
             compute,
+            gpu,
             http,
             sources,
             drawing,
@@ -3158,6 +3167,18 @@ impl Presentation {
                     }
                     continue;
                 }
+                let gpu = self
+                    .gpu
+                    .dispatch(instance, &mut self.drawing, request)
+                    .map_err(|error| error.to_string());
+                let request = match gpu {
+                    Ok(None) => continue,
+                    Ok(Some(request)) => request,
+                    Err(error) => {
+                        self.undispatched = requests.collect();
+                        return Err(error);
+                    }
+                };
                 let compute = self
                     .compute
                     .dispatch(instance, request)

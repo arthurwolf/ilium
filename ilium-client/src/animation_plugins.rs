@@ -1260,6 +1260,102 @@ mod tests {
     }
 
     #[test]
+    fn plugin_issue_popover_renders_both_package_paths_and_failure_reasons() {
+        let project = tempfile::tempdir().expect("project");
+        let mut app = crate::app::App::new("plugin-issues-test".into(), project.path().into());
+        let catalogue = PluginCatalogue {
+            entries: Vec::new(),
+            issues: vec![
+                CatalogueIssue {
+                    path: PathBuf::from("beach.iliumanim"),
+                    message: "release digest mismatch".into(),
+                },
+                CatalogueIssue {
+                    path: PathBuf::from("carpet.iliumanim"),
+                    message: "entry.mjs is missing".into(),
+                },
+            ],
+        };
+        let model = PluginPanelModel::new(&catalogue, &PluginPreferences::default());
+        let row = model
+            .rows
+            .iter()
+            .position(|row| *row == PluginPanelRow::Issues)
+            .unwrap();
+        app.plugin_issue_hover = Some(crate::animation_hover::AnimationHover {
+            row,
+            since: std::time::Instant::now(),
+            is_shown: true,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(160, 30)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                draw_plugin_issue_popover(
+                    frame,
+                    frame.area(),
+                    &app,
+                    &model,
+                    &PluginPanelState::default(),
+                );
+            })
+            .expect("draw");
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        for detail in [
+            "Package inspection details",
+            "beach.iliumanim",
+            "release digest mismatch",
+            "carpet.iliumanim",
+            "entry.mjs is missing",
+        ] {
+            assert!(
+                rendered.contains(detail),
+                "missing rendered detail: {detail}"
+            );
+        }
+
+        // Pending hover and stale row identity must not expose unrelated errors.
+        let shown = app.plugin_issue_hover.unwrap();
+        for hover in [
+            crate::animation_hover::AnimationHover {
+                is_shown: false,
+                ..shown
+            },
+            crate::animation_hover::AnimationHover {
+                row: row + 1,
+                ..shown
+            },
+        ] {
+            app.plugin_issue_hover = Some(hover);
+            terminal
+                .draw(|frame| {
+                    draw_plugin_issue_popover(
+                        frame,
+                        frame.area(),
+                        &app,
+                        &model,
+                        &PluginPanelState::default(),
+                    );
+                })
+                .expect("hidden draw");
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(!rendered.contains("beach.iliumanim"));
+            assert!(!rendered.contains("carpet.iliumanim"));
+        }
+    }
+
+    #[test]
     fn edits_validate_the_entire_schema_and_do_not_mutate_authored_values() {
         let entry = descriptor();
         let authored = json!({"mode":"life","speed":3});

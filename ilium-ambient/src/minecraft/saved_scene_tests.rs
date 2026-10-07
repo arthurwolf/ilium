@@ -4,6 +4,73 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 #[test]
+fn saved_scene_status_exposes_phase_elapsed_time_and_unknown_eta_while_preparing() {
+    let env = SceneEnv::for_test(
+        std::env::temp_dir().join("saved-status-progress"),
+        crate::resources::test_resources(),
+    );
+    let saved = SavedMapsSettings {
+        source: WorldSource::SavedMaps,
+        saves_folder: std::env::temp_dir()
+            .join("ilium-saved-status-progress-empty")
+            .display()
+            .to_string(),
+    };
+    let scene = SavedScene::new(&saved, &VoxelLandscapeSettings::default(), &env);
+
+    let status = scene.status().expect("preparing scene has a status report");
+    let summary = status.lines().next().unwrap_or_default();
+    assert!(
+        summary.contains('['),
+        "summary should show its progress bar: {summary}"
+    );
+    assert!(
+        status.contains("Elapsed:"),
+        "report should show elapsed time: {status}"
+    );
+    assert!(
+        status.contains("ETA: unavailable"),
+        "report should not invent an ETA without a measured work rate: {status}"
+    );
+}
+
+#[test]
+fn preparation_progress_is_bounded_and_keeps_phase_counts_monotonic() {
+    let progress = PreparationProgress::new();
+    progress.phase(
+        4,
+        "Checking projected route",
+        "Reached projected route checks",
+    );
+    progress.phase(2, "Scanning maps", "A stale phase update arrived");
+    for event in 0..10 {
+        progress.record(&format!("test activity {event}"));
+    }
+
+    let report = progress.report();
+    assert!(
+        report.contains("phase 4/6"),
+        "phase count regressed: {report}"
+    );
+    assert!(
+        report.contains("ETA: unavailable"),
+        "ETA must remain honest: {report}"
+    );
+    assert!(
+        report.contains("test activity 2"),
+        "oldest retained event missing: {report}"
+    );
+    assert!(
+        report.contains("test activity 9"),
+        "latest event missing: {report}"
+    );
+    assert!(
+        !report.contains("test activity 1"),
+        "event log exceeded its bound: {report}"
+    );
+}
+
+#[test]
 fn pending_route_replays_pixels_without_receipt_or_history_credit() {
     // Synthetic presentation-only buffer: no claimed world decode or native
     // paint proof. Actual original blank transitions are retained in audit319.

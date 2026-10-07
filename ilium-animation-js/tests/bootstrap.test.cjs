@@ -581,3 +581,41 @@ test("packed receipt copies original owner projection before input alias mutatio
     assert.equal(received.owners[0].dots, 1);
     assert(Object.isFrozen(received.owners[0]));
 });
+
+test('replay freeze refuses invalid byte bounds before native dispatch', async () => {
+    let calls = 0;
+    const env = environment(() => {
+        calls += 1;
+        return { __proto__: null, ok: true, value: { __proto__: null, recording_id: 'fixture-recording', sha256: 'a'.repeat(64) } };
+    });
+    for (const expression of ['undefined', '0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
+        const result = await env.evaluate(`__ilium_host.replay.freeze({sources:[],max_bytes:${expression}})`);
+        assert.equal(result.ok, false, `invalid capture bound ${expression} must refuse`);
+    }
+    const unexpected = await env.evaluate('__ilium_host.replay.freeze({sources:[],max_bytes:1024,extra:true})');
+    assert.equal(unexpected.ok, false);
+    assert.equal(calls, 0, 'invalid replay capture options must not reach native dispatch');
+});
+
+test('replay freeze validates the native recording identity without inventing one', async () => {
+    // Facade-only synthetic replies; no recording/source custody qualification.
+    let reply = { __proto__: null, recording_id: 'fixture-recording', sha256: 'a'.repeat(64) };
+    let calls = 0;
+    const env = environment((method, payload) => {
+        assert.equal(method, 'replay.freeze');
+        assert.equal(payload.max_bytes, 1024);
+        calls += 1;
+        return { __proto__: null, ok: true, value: reply };
+    });
+    const valid = await env.evaluate('__ilium_host.replay.freeze({sources:[],max_bytes:1024})');
+    assert.equal(valid.ok, true);
+    assert.equal(valid.value.recording_id, 'fixture-recording');
+    assert.equal(valid.value.sha256, 'a'.repeat(64));
+    assert(Object.isFrozen(valid.value));
+    for (const value of [{}, { recording_id: '', sha256: 'a'.repeat(64) }, { recording_id: 'fixture-recording', sha256: 'wrong' }, { recording_id: 'fixture-recording', sha256: 'a'.repeat(64), extra: true }]) {
+        reply = { __proto__: null, ...value };
+        const result = await env.evaluate('__ilium_host.replay.freeze({sources:[],max_bytes:1024})');
+        assert.equal(result.ok, false, 'malformed native recording reply must refuse');
+    }
+    assert.equal(calls, 5);
+});

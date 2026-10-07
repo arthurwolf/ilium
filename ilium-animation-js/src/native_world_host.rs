@@ -3,7 +3,7 @@
 //! grants. Selected saved-world reads require the separate original DiskRead
 //! operation and handle-based loader; no pathname-derived substitute exists.
 use crate::{
-    engine::{CompletionState, EngineLimits, HostRequest, ServiceValue},
+    engine::{ArraySpec, CompletionState, EngineLimits, HostRequest, ServiceValue, TypedArrayKind},
     error::{AnimationError, Result},
     manifest::AnimationMode,
     native_asset_host::NativeAssetHost,
@@ -55,6 +55,7 @@ const WORLD_LIST_WORK_BYTES: usize = 32 * 1024 * 1024;
 const MAX_REGION_CELLS: usize = 65_536;
 const REGION_WORK_PER_CELL: usize = 256;
 const MIN_REGION_PALETTE_METADATA_BYTES: usize = 70;
+const MAX_MODEL_VERTICES: usize = 32_768;
 /// Count every pending output at its requested maximum until the original
 /// operation has been delivered or settled. Existing rows for the same grant
 /// may be replaced atomically only after that delivery ACK.
@@ -688,6 +689,88 @@ impl NativeWorldHost {
 
     fn region(&mut self, instance: &mut PackageInstance, request: &HostRequest) -> Result<()> {
         self.region_inner(instance, request, |_| {})
+    }
+
+    fn model(&mut self, instance: &mut PackageInstance, request: &HostRequest) -> Result<()> {
+        instance.check_native_world_request(request)?;
+        let fields = Self::fields(request, &["world", "name"])?;
+        if fields.len() != 2 {
+            return Err(invalid("world model request shape"));
+        }
+        let world_id = Self::handle_id(fields, "world", "worlds")?.to_owned();
+        let name = fields
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty() && name.len() <= 128)
+            .ok_or_else(|| invalid("world model name"))?;
+        let world = self
+            .active_worlds
+            .get(&world_id)
+            .ok_or_else(|| invalid("unknown original world for model"))?;
+        let (vertices, indices) =
+            match self
+                .service
+                .generated_model(world.handle, name, MAX_MODEL_VERTICES)
+            {
+                Ok(model) => model,
+                Err(error) => {
+                    return self.refuse(instance, request, "world_model_failed", &error.to_string())
+                }
+            };
+        let vertex_bytes = vertices
+            .len()
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| invalid("world model vertex byte overflow"))?;
+        let index_bytes = indices
+            .len()
+            .checked_mul(std::mem::size_of::<u32>())
+            .ok_or_else(|| invalid("world model index byte overflow"))?;
+        let _scratch = self
+            .quota
+            .reserve_external_storage(vertex_bytes.saturating_add(index_bytes))
+            .map_err(|error| AnimationError::Budget(format!("world model scratch: {error:?}")))?;
+        let vertex_plane = vertices
+            .iter()
+            .flat_map(|value| value.to_ne_bytes())
+            .collect::<Vec<_>>();
+        let index_plane = indices
+            .iter()
+            .flat_map(|value| value.to_ne_bytes())
+            .collect::<Vec<_>>();
+        let arrays = [
+            ArraySpec {
+                name: "b0".into(),
+                kind: TypedArrayKind::F32,
+                elements: vertices.len(),
+            },
+            ArraySpec {
+                name: "b1".into(),
+                kind: TypedArrayKind::U32,
+                elements: indices.len(),
+            },
+        ];
+        let planes = BTreeMap::from([
+            (String::from("b0"), vertex_plane),
+            (String::from("b1"), index_plane),
+        ]);
+        let value = json!({"ok":true,"value":{
+            "vertices":{"$ilium_binary":"b0"},
+            "indices":{"$ilium_binary":"b1"}
+        }});
+        let result = ServiceValue::copy_from_host(
+            &value,
+            &arrays,
+            &planes,
+            &self.limits,
+            self.quota.clone(),
+        )?;
+        match self.complete_service_value(instance, request, result)? {
+            CompletionState::Delivered => Ok(()),
+            CompletionState::Unknown | CompletionState::TimedOut | CompletionState::Cancelled => {
+                self.closed = true;
+                Err(invalid("world model completion was not delivered"))
+            }
+        }
     }
 
     #[cfg(test)]
@@ -1741,13 +1824,7 @@ impl NativeWorldHost {
             "worlds.close" => self.close_world(instance, &request)?,
             "worlds.frame.close" => self.close_frame(instance, &request, draw)?,
             "worlds.region" => self.region(instance, &request)?,
-            "worlds.model" => {
-                let result = json!({"ok":false,"error":{"code":"world_model_unavailable","message":"No native model and texture bank is bound to this world."}});
-                if self.complete(instance, &request, result)? != CompletionState::Delivered {
-                    self.closed = true;
-                    return Err(invalid("world refusal ACK uncertain"));
-                }
-            }
+            "worlds.model" => self.model(instance, &request)?,
             _ => return Err(invalid("world method inventory")),
         }
         Ok(None)
@@ -2070,6 +2147,29 @@ mod region_dispatch_tests {
         ); // End host registry insertion.
         (id, handle, identity) // Return projections only for assertions and request construction.
     } // End generated source installation.
+
+    #[test]
+    fn generated_world_model_reuses_admitted_faces_with_typed_geometry_bounds() {
+        let (_execution, mut host, _quota) = world_host();
+        let (_id, handle, _identity) = install_generated(&mut host);
+        let (vertices, indices) = host
+            .service
+            .generated_model(handle, "terrain", MAX_MODEL_VERTICES)
+            .unwrap();
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert_eq!(vertices.len() % 3, 0);
+        assert_eq!(indices.len() % 3, 0);
+        assert!(indices.iter().all(|index| {
+            usize::try_from(*index)
+                .ok()
+                .is_some_and(|index| index < vertices.len() / 3)
+        }));
+        assert!(host
+            .service
+            .generated_model(handle, "saved", MAX_MODEL_VERTICES)
+            .is_err());
+    }
 
     #[test] // Reach the actual parser, host registry, WorldService collector, encoder and response constructor.
     fn registered_generated_region_prepares_native_u16_result_without_frame_or_history_authority() {

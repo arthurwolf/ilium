@@ -32,7 +32,12 @@ fn ecology_final_cover(
             } => (*anchor, *configuration),
             _ => continue,
         };
-        assert!(receipts.get(&(anchor, configuration)).is_some_and(|count| *count > 0), "Final tree cell lacks a nonempty publication receipt: {position:?} {anchor:?} {configuration}");
+        assert!(
+            receipts
+                .get(&(anchor, configuration))
+                .is_some_and(|count| *count > 0),
+            "Final tree cell lacks a nonempty publication receipt: {position:?} {anchor:?} {configuration}"
+        );
         let profile = tree_profiles::profile(configuration)
             .expect("Final tree owner must resolve to a retained source profile");
         if matches!(&block.owner, SourceOwner::TreeDecoration { .. }) {
@@ -273,7 +278,10 @@ fn original_dry_mangrove_world_and_retained_cores_have_actual_root_contact() {
             bed_contacts += 1;
             bed_owners.insert((*anchor, *configuration));
         }
-        eprintln!("ecology_root_contact center={center:?} cover={counts:?} wet_columns={wet_columns} dry_columns={dry_columns} wet_roots={wet_roots} dry_roots={dry_roots} bed_contacts={bed_contacts} bed_owners={}", bed_owners.len());
+        eprintln!(
+            "ecology_root_contact center={center:?} cover={counts:?} wet_columns={wet_columns} dry_columns={dry_columns} wet_roots={wet_roots} dry_roots={dry_roots} bed_contacts={bed_contacts} bed_owners={}",
+            bed_owners.len()
+        );
         assert_eq!(wet_columns + dry_columns, counts["named_columns"]);
         assert!(
             wet_columns * 20 >= counts["named_columns"]
@@ -383,7 +391,11 @@ fn natural_vegetation_scalar_changes_features_without_changing_world_identity() 
     };
     assert_eq!(entity_snapshot(&full), entity_snapshot(&saturated));
     assert_eq!(full.source_limitations, saturated.source_limitations);
-    eprintln!("ecology_scalar half_candidate_owners={} full_candidate_owners={} half_cover={half_cover:?} full_cover={full_cover:?}", half_keys.len(), full_keys.len());
+    eprintln!(
+        "ecology_scalar half_candidate_owners={} full_candidate_owners={} half_cover={half_cover:?} full_cover={full_cover:?}",
+        half_keys.len(),
+        full_keys.len()
+    );
 }
 // Packet288: fixed-atmosphere tests call the original generator and admission APIs.
 pub(super) fn night_flora_settings(atmosphere: usize) -> VoxelLandscapeSettings {
@@ -450,9 +462,11 @@ fn night_flora_closed_candidate_keeps_provider_and_soil_admission() {
         candidate.cells[0].state.properties,
         [("schedule_tick", "true")]
     );
-    assert!(!ENTRIES
-        .iter()
-        .any(|entry| entry.id == "minecraft:open_eyeblossom"));
+    assert!(
+        !ENTRIES
+            .iter()
+            .any(|entry| entry.id == "minecraft:open_eyeblossom")
+    );
     for support in [HabitatCell::Sand, HabitatCell::Soil] {
         let mut placement = FloraPlacement::new(4).unwrap();
         let result = placement.admit(
@@ -557,13 +571,16 @@ fn night_flora_only_explicit_night_changes_the_natural_counterpart() {
         unrelated_flora += usize::from(matches!(expected.owner, SourceOwner::Flora { .. }));
     }
     assert!(flowers > 0 && unrelated_flora > 0);
-    assert!(!night
-        .blocks
-        .values()
-        .any(|block| { block.state.id().as_str() == "minecraft:closed_eyeblossom" }));
-    assert!(!day
-        .blocks
-        .values()
-        .chain(storm.blocks.values())
-        .any(|block| { block.state.id().as_str() == "minecraft:open_eyeblossom" }));
+    assert!(
+        !night
+            .blocks
+            .values()
+            .any(|block| { block.state.id().as_str() == "minecraft:closed_eyeblossom" })
+    );
+    assert!(
+        !day.blocks
+            .values()
+            .chain(storm.blocks.values())
+            .any(|block| { block.state.id().as_str() == "minecraft:open_eyeblossom" })
+    );
 }

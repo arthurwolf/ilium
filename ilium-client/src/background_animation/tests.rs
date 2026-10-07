@@ -1437,12 +1437,18 @@ fn every_common_control_including_the_look_rows_round_trips() {
         let control = settings
             .common_control(id)
             .unwrap_or_else(|| panic!("{id} resolves"));
-        let Some(stepped) = control.stepped(1) else {
+        let Some(mut stepped) = control.stepped(1) else {
             continue;
         };
+        // Defaults may sit at a slider boundary. Step inward before asserting
+        // a change; a clamped step must remain a truthful no-change result.
+        if stepped == control.value {
+            assert_eq!(settings.set_common_control(id, stepped.clone()), Ok(false));
+            stepped = control.stepped(-1).expect("step-capable control");
+        }
         assert_eq!(
             settings.set_common_control(id, stepped.clone()),
-            Ok(true),
+            Ok(stepped != control.value),
             "{id}"
         );
         assert_eq!(

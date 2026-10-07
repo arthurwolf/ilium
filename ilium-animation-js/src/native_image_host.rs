@@ -306,7 +306,13 @@ impl NativeImageHost {
             .filter(|number| *number != 0)
             .ok_or_else(|| invalid("generic image ID"))?;
         let handle = ImageHandle::from_id(number);
-        self.owned_image(handle)?;
+        if !self.owned.contains(&number) && drawing.registered_image_handle(id).is_none() {
+            return Err(AnimationError::PermissionDenied(
+                "foreign native image".into(),
+            ));
+        }
+        // GPU images share the authoritative prepared registry but keep their
+        // producer's close custody. Only sample/resize use this borrowed lookup.
         Ok(handle)
     }
     pub fn dispatch(

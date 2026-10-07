@@ -1,10 +1,10 @@
 //! B1-specific policy and candidate tests. Flat worlds below are explicitly synthetic.
 use super::super::assets::budget::Cancel;
 use super::super::surface_viewport::{
-    visible_tiles, MAX_VIEWPORT_TILES, SOURCE_Z_MAX, SOURCE_Z_MIN,
+    MAX_VIEWPORT_TILES, SOURCE_Z_MAX, SOURCE_Z_MIN, visible_tiles,
 };
 use super::geology_public_tests::{
-    bare_settings, centers, natural_fossil_witness, owned, square, TARGETS,
+    TARGETS, bare_settings, centers, natural_fossil_witness, owned, square,
 };
 use super::*;
 use std::{
@@ -13,7 +13,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use surface_geology::{
-    desert_fossil, terrain_materials, ExposedFossil, FOSSIL_MAX_CELLS, FOSSIL_SOURCE,
+    ExposedFossil, FOSSIL_MAX_CELLS, FOSSIL_SOURCE, desert_fossil, terrain_materials,
 };
 
 fn copy_fossil(fossil: &ExposedFossil) -> ExposedFossil {
@@ -350,10 +350,12 @@ fn fossil_variants_are_connected_oriented_ribs_with_supported_feet() {
             ];
             dimensions.sort();
             assert!(matches!(dimensions, [5 | 7, 9 | 13]));
-            assert!(fossil
-                .cells
-                .iter()
-                .all(|(p, _)| p.iter().all(|v| v.unsigned_abs() <= 16)));
+            assert!(
+                fossil
+                    .cells
+                    .iter()
+                    .all(|(p, _)| p.iter().all(|v| v.unsigned_abs() <= 16))
+            );
             let footprint = (dimensions[0] * dimensions[1]) as usize;
             let occupied_xy: BTreeSet<_> = fossil.cells.iter().map(|(p, _)| [p[0], p[1]]).collect();
             assert!(
@@ -477,17 +479,19 @@ fn whole_fossil_footprint_rejects_wet_wrong_biome_relief_and_cancellation() {
                 })
                 .unwrap();
             let sampled = Cell::new(0);
-            assert!(desert_fossil(
-                71839,
-                grid,
-                |_| {
-                    sampled.set(sampled.get() + 1);
-                    (base, SurfaceBiome::Desert)
-                },
-                || false
-            )
-            .unwrap()
-            .is_none());
+            assert!(
+                desert_fossil(
+                    71839,
+                    grid,
+                    |_| {
+                        sampled.set(sampled.get() + 1);
+                        (base, SurfaceBiome::Desert)
+                    },
+                    || false
+                )
+                .unwrap()
+                .is_none()
+            );
             assert_eq!(
                 sampled.get(),
                 0,
@@ -617,13 +621,15 @@ fn synthetic_fossils_cross_signed_split_shifted_and_tile_seams() {
         let region = square([fossil.anchor[0], fossil.anchor[1]], 12);
         let mut whole = flat_world(region);
         let mut full_reserved = BTreeSet::new();
-        assert!(project_fossil(
-            &mut whole,
-            &mut full_reserved,
-            copy_fossil(&fossil),
-            &|| false
-        )
-        .unwrap());
+        assert!(
+            project_fossil(
+                &mut whole,
+                &mut full_reserved,
+                copy_fossil(&fossil),
+                &|| false
+            )
+            .unwrap()
+        );
         let pieces = [
             Region {
                 minimum: region.minimum,
@@ -708,13 +714,15 @@ fn synthetic_fossils_cross_signed_split_shifted_and_tile_seams() {
             .iter()
             .find(|p| !pieces[0].contains(**p))
             .unwrap();
-        assert!(!project_fossil(
-            &mut left,
-            &mut BTreeSet::from([blocked]),
-            copy_fossil(&fossil),
-            &|| false
-        )
-        .unwrap());
+        assert!(
+            !project_fossil(
+                &mut left,
+                &mut BTreeSet::from([blocked]),
+                copy_fossil(&fossil),
+                &|| false
+            )
+            .unwrap()
+        );
         assert_eq!(owned(&left, pieces[0]), before);
     }
 }
@@ -798,10 +806,12 @@ fn natural_fossil_equals_whole_candidate_and_survives_projection_and_vegetation(
             }
         }
         validate_generated_height(&whole).unwrap();
-        assert!(whole
-            .blocks
-            .keys()
-            .all(|p| (SOURCE_Z_MIN..SOURCE_Z_MAX).contains(&f64::from(p[2]))));
+        assert!(
+            whole
+                .blocks
+                .keys()
+                .all(|p| (SOURCE_Z_MIN..SOURCE_Z_MAX).contains(&f64::from(p[2])))
+        );
     }
     settings.vegetation_percent = 0;
     let tiled_region = Region {

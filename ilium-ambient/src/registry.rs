@@ -815,8 +815,9 @@ mod quiet_catalog_tests {
     ];
 
     #[test]
-    fn seventeen_distinct_entries_append_without_reordering_existing_kinds() {
-        assert_eq!(&AmbientKind::ALL[30..], &QUIET_KINDS);
+    fn growth_and_seventeen_quiet_entries_append_without_reordering_existing_kinds() {
+        assert_eq!(AmbientKind::ALL[30], AmbientKind::Growth);
+        assert_eq!(&AmbientKind::ALL[31..], &QUIET_KINDS);
         let unique: HashSet<_> = AmbientKind::ALL.into_iter().collect();
         assert_eq!(unique.len(), AmbientKind::ALL.len());
         for kind in QUIET_KINDS {

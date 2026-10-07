@@ -32,7 +32,7 @@ use crate::{
     },
 };
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -43,6 +43,136 @@ use std::{
 };
 
 const SCENE_ACCOUNT: u64 = 1024 * 1024 * 1024;
+const PREPARATION_PROGRESS_PHASES: usize = 6;
+const MAX_PREPARATION_EVENTS: usize = 8;
+const MAX_PREPARATION_EVENT_CHARS: usize = 160;
+
+#[derive(Clone)]
+struct PreparationProgress {
+    started_at: Instant,
+    state: Arc<Mutex<PreparationProgressState>>,
+}
+
+struct PreparationProgressState {
+    completed_phases: usize,
+    phase: String,
+    events: VecDeque<(Duration, String)>,
+    active: bool,
+}
+
+impl PreparationProgress {
+    fn new() -> Self {
+        let progress = Self {
+            started_at: Instant::now(),
+            state: Arc::new(Mutex::new(PreparationProgressState {
+                completed_phases: 0,
+                phase: "Starting the saved-world preparation worker".into(),
+                events: VecDeque::new(),
+                active: true,
+            })),
+        };
+        progress.record("Starting the saved-world preparation worker");
+        progress
+    }
+
+    fn phase(&self, completed_phases: usize, phase: &str, event: &str) {
+        let Ok(mut state) = self.state.try_lock() else {
+            return;
+        };
+        state.completed_phases = state
+            .completed_phases
+            .max(completed_phases.min(PREPARATION_PROGRESS_PHASES));
+        state.phase = bounded_progress_text(phase);
+        push_preparation_event(&mut state, self.started_at.elapsed(), event);
+    }
+
+    fn record(&self, event: &str) {
+        let Ok(mut state) = self.state.try_lock() else {
+            return;
+        };
+        push_preparation_event(&mut state, self.started_at.elapsed(), event);
+    }
+
+    fn finish(&self, event: &str) {
+        self.phase(
+            PREPARATION_PROGRESS_PHASES,
+            "Saved camera route ready",
+            event,
+        );
+        if let Ok(mut state) = self.state.try_lock() {
+            state.active = false;
+        }
+    }
+
+    fn fail(&self, event: &str) {
+        self.record(event);
+        if let Ok(mut state) = self.state.try_lock() {
+            state.active = false;
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.state.try_lock().map_or(true, |state| state.active)
+    }
+
+    fn report(&self) -> String {
+        let elapsed = self.started_at.elapsed();
+        let snapshot = match self.state.try_lock() {
+            Ok(state) => (
+                state.completed_phases,
+                state.phase.clone(),
+                state.events.iter().cloned().collect::<Vec<_>>(),
+            ),
+            Err(_) => {
+                return format!(
+                    "Saved worlds [{}] phase ?/{PREPARATION_PROGRESS_PHASES}\nNow: Updating preparation details\nElapsed: {}\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot",
+                    ".".repeat(PREPARATION_PROGRESS_PHASES),
+                    format_elapsed(elapsed)
+                );
+            }
+        };
+        let (completed, phase, events) = snapshot;
+        let bar = format!(
+            "[{}{}]",
+            "#".repeat(completed),
+            ".".repeat(PREPARATION_PROGRESS_PHASES.saturating_sub(completed))
+        );
+        let mut report = format!(
+            "Saved worlds {bar} phase {completed}/{PREPARATION_PROGRESS_PHASES}\nNow: {phase}\nElapsed: {}\nETA: unavailable (no measured work rate)\nRecent activity:",
+            format_elapsed(elapsed)
+        );
+        if events.is_empty() {
+            report.push_str("\n+00:00 · Waiting for the first preparation stage");
+        } else {
+            for (at, event) in events {
+                report.push_str(&format!("\n+{} · {event}", format_elapsed(at)));
+            }
+        }
+        report
+    }
+}
+
+fn push_preparation_event(state: &mut PreparationProgressState, at: Duration, event: &str) {
+    if state.events.len() == MAX_PREPARATION_EVENTS {
+        state.events.pop_front();
+    }
+    state.events.push_back((at, bounded_progress_text(event)));
+}
+
+fn bounded_progress_text(value: &str) -> String {
+    value.chars().take(MAX_PREPARATION_EVENT_CHARS).collect()
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    format!(
+        "{:02}:{:02}:{:02}",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
+}
+
 #[path = "saved_display.rs"]
 mod display;
 // Additional native stack/decompression scratch outside the retained account.
@@ -169,6 +299,7 @@ pub struct SavedScene {
     last_clock: Option<Clock>,
     status: Option<String>,
     preparation_failed: bool,
+    progress: PreparationProgress,
 }
 
 impl SavedScene {
@@ -230,6 +361,7 @@ impl SavedScene {
             .unwrap_or_else(|| Arc::clone(&env.saved_runtime));
         let external_stop = pinned.as_ref().and_then(|source| source.stop.clone());
         let settings = settings.normalized();
+        let progress = PreparationProgress::new();
         let mut scene = Self {
             settings: settings.clone(),
             palette: env.palette.clone(),
@@ -262,6 +394,7 @@ impl SavedScene {
             last_clock: None,
             status: Some("Preparing saved Java worlds…".into()),
             preparation_failed: false,
+            progress: progress.clone(),
         };
         let storage = pinned
             .as_ref()
@@ -279,24 +412,24 @@ impl SavedScene {
             None => match saved.map(SavedMapsSettings::saves_root) {
                 Some(Ok(root)) => SourceRoot::Path(root),
                 Some(Err(error)) => {
-                    scene.status = Some(error);
+                    scene.fail_preparation(error);
                     return scene;
                 }
                 None => {
-                    scene.status = Some("Saved source authority missing".into());
+                    scene.fail_preparation("Saved source authority missing");
                     return scene;
                 }
             },
         };
         if !storage.is_absolute() {
-            scene.status = Some("Saved history storage root must be absolute".into());
+            scene.fail_preparation("Saved history storage root must be absolute");
             return scene;
         }
         if external_stop
             .as_ref()
             .is_some_and(|token| token.is_stopped())
         {
-            scene.status = Some("Saved source already cancelled".into());
+            scene.fail_preparation("Saved source already cancelled");
             return scene;
         }
         let jar = match &root {
@@ -304,14 +437,14 @@ impl SavedScene {
             SourceRoot::Path(_) => match native_assets::jar_path("") {
                 Ok(jar) => jar,
                 Err(error) => {
-                    scene.status = Some(error.to_string());
+                    scene.fail_preparation(error.to_string());
                     return scene;
                 }
             },
         };
         let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
         if generation == 0 {
-            scene.status = Some("Saved scene generation exhausted".into());
+            scene.fail_preparation("Saved scene generation exhausted");
             return scene;
         }
         // One physical lease covers this shared account, including map/bank
@@ -319,14 +452,15 @@ impl SavedScene {
         let physical_storage = match env.resources.reserve_storage(SCENE_ACCOUNT as usize) {
             Ok(storage) => storage,
             Err(error) => {
-                scene.status = Some(format!("Saved scene storage admission rejected: {error:?}"));
+                scene
+                    .fail_preparation(format!("Saved scene storage admission rejected: {error:?}"));
                 return scene;
             }
         };
         let budget = match ByteBudget::with_storage(SCENE_ACCOUNT, physical_storage) {
             Ok(budget) => budget,
             Err(error) => {
-                scene.status = Some(error.to_string());
+                scene.fail_preparation(error.to_string());
                 return scene;
             }
         };
@@ -336,7 +470,7 @@ impl SavedScene {
         }) {
             Ok(admission) => admission,
             Err(error) => {
-                scene.status = Some(format!("Saved preparation admission rejected: {error:?}"));
+                scene.fail_preparation(format!("Saved preparation admission rejected: {error:?}"));
                 return scene;
             }
         };
@@ -345,13 +479,25 @@ impl SavedScene {
             host: env.resources.clone(),
             external_stop: external_stop.clone(),
         };
+        let worker_progress = progress.clone();
         let worker = Worker::start_admitted("saved-native-scene", admission, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::BelowNormal,
             );
-            let result =
-                prepare_bundle(root, storage, jar, generation, preparation, &runtime, &stop)
-                    .map(Arc::new);
+            let result = prepare_bundle(
+                root,
+                storage,
+                jar,
+                generation,
+                preparation,
+                &runtime,
+                &stop,
+                &worker_progress,
+            )
+            .map(Arc::new);
+            if let Err(error) = &result {
+                worker_progress.fail(&format!("Saved-world preparation failed: {error}"));
+            }
             let planner_bundle = result.as_ref().ok().cloned();
             let published = match output.lock() {
                 Ok(mut slot) => {
@@ -384,6 +530,7 @@ impl SavedScene {
                             &stop,
                             &desired_plan,
                             external_stop.as_ref(),
+                            &worker_progress,
                         );
                         if !stop.load(Ordering::Relaxed)
                             && !external_stop
@@ -415,31 +562,37 @@ impl SavedScene {
         match worker {
             Ok(worker) => scene.worker = Some(worker),
             Err(error) => {
-                scene.status = Some(format!("Could not start saved preparation: {error}"))
+                scene.fail_preparation(format!("Could not start saved preparation: {error}"));
             }
         }
         scene
+    }
+
+    fn fail_preparation(&mut self, error: impl Into<String>) {
+        let error = error.into();
+        self.progress.fail(&error);
+        self.preparation_failed = true;
+        self.status = Some(error);
     }
 
     fn receive(&mut self) {
         if self.bundle.is_some() {
             return;
         }
-        let result = match self.output.try_lock() {
-            Ok(mut slot) => slot.take(),
+        let (result, poisoned) = match self.output.try_lock() {
+            Ok(mut slot) => (slot.take(), false),
             Err(TryLockError::WouldBlock) => return,
-            Err(TryLockError::Poisoned(_)) => {
-                self.preparation_failed = true;
-                self.status = Some("Saved preparation handoff poisoned".into());
-                return;
-            }
+            Err(TryLockError::Poisoned(_)) => (None, true),
         };
+        if poisoned {
+            self.fail_preparation("Saved preparation handoff poisoned");
+            return;
+        }
         match result {
             Some(Ok(bundle)) => {
                 let generation = bundle.maps.first().map(|map| map.source().generation);
                 let Some(generation) = generation else {
-                    self.preparation_failed = true;
-                    self.status = Some(format!(
+                    self.fail_preparation(format!(
                         "No native-bindable saved windows: {}",
                         bundle.warnings.join("; ")
                     ));
@@ -451,16 +604,19 @@ impl SavedScene {
                         self.controller = Some(controller);
                         self.status = bundle.warnings.first().cloned();
                         self.bundle = Some(bundle);
+                        self.progress.phase(
+                            2,
+                            "Waiting for the first animation viewport",
+                            "Saved-world catalog is ready; awaiting viewport dimensions",
+                        );
                     }
                     Err(error) => {
-                        self.preparation_failed = true;
-                        self.status = Some(format!("Saved tour history: {error}"));
+                        self.fail_preparation(format!("Saved tour history: {error}"));
                     }
                 }
             }
             Some(Err(error)) => {
-                self.preparation_failed = true;
-                self.status = Some(error);
+                self.fail_preparation(error);
             }
             None => {}
         }
@@ -497,15 +653,22 @@ impl SavedScene {
                     }
                     self.active_size = Some(response.size);
                     self.unavailable_size = None;
+                    self.status = None;
+                    self.progress
+                        .finish("Saved camera route passed full viewport qualification");
                 }
                 None => {
                     self.unavailable_size = Some(response.size);
                     self.status = Some("No eligible saved tour in finite survey".into());
+                    self.progress
+                        .fail("No saved camera route passed the finite candidate survey");
                 }
             },
             Err(error) => {
                 self.unavailable_size = Some(response.size);
                 self.status = Some(format!("Saved tour planner: {error}"));
+                self.progress
+                    .fail(&format!("Saved camera route preparation failed: {error}"));
             }
         }
     }
@@ -549,6 +712,14 @@ impl SavedScene {
         });
         self.plan_pending = Some((sequence, size));
         self.status = Some("Selecting a saved camera route…".into());
+        self.progress.phase(
+            2,
+            "Starting route selection for the current viewport",
+            &format!(
+                "Route selection requested for {} by {} cells",
+                size[0], size[1]
+            ),
+        );
     }
     fn retire_plan(&mut self, plan: Plan) {
         if let Err(plan) = self.retired_plans.try_retire(plan) {
@@ -912,6 +1083,21 @@ impl Scene for SavedScene {
         12
     }
     fn status(&self) -> Option<String> {
+        if self.progress.is_active() {
+            let report = self.progress.report();
+            return Some(match self.status.as_deref() {
+                Some(status) if status != "Preparing saved Java worlds…" => {
+                    format!("{report}\nLatest status: {status}")
+                }
+                _ => report,
+            });
+        }
+        if self.preparation_failed {
+            return self
+                .status
+                .as_ref()
+                .map(|status| format!("{status}\n{}", self.progress.report()));
+        }
         self.status.clone()
     }
 }
@@ -992,7 +1178,13 @@ fn prepare_bundle(
     preparation: PreparationResources,
     runtime: &SavedRuntime,
     stop: &AtomicBool,
+    progress: &PreparationProgress,
 ) -> Result<Bundle, String> {
+    progress.phase(
+        0,
+        "Waiting for the saved-history runtime",
+        "Checking whether saved-world history is ready for this scene",
+    );
     let external = || {
         preparation
             .external_stop
@@ -1030,6 +1222,11 @@ fn prepare_bundle(
         _ => Repository::new(storage.clone()),
     }
     .map_err(|error| error.to_string())?;
+    progress.phase(
+        0,
+        "Scanning saved-world catalogs",
+        "Reading saved-world metadata, map indexes, and history records",
+    );
     let (root, native_jar, catalog) = match source {
         SourceRoot::Path(root) => {
             let catalog = session_catalog::prepare(
@@ -1071,6 +1268,15 @@ fn prepare_bundle(
             (label, Some(native_jar), catalog)
         }
     };
+    progress.phase(
+        1,
+        "Validating map windows and source bindings",
+        &format!(
+            "Catalog scan finished with {} map windows and {} source bindings",
+            catalog.maps.len(),
+            catalog.bindings.len()
+        ),
+    );
     if reload {
         runtime
             .acknowledge_authoritative_reload()
@@ -1107,6 +1313,14 @@ fn prepare_bundle(
         budget,
         _catalog_reservation: Arc::new(catalog_reservation),
     };
+    progress.phase(
+        1,
+        "Retaining the qualified saved-world catalog",
+        &format!(
+            "Retaining {} qualified saved-map windows",
+            bundle.maps.len()
+        ),
+    );
     drop(catalog.metadata);
     drop(catalog.reports);
     drop(catalog.snapshot);
@@ -1123,6 +1337,15 @@ fn prepare_bundle(
             .retain_catalog_charge(Arc::clone(&bundle._catalog_reservation))
             .map_err(|error| error.to_string())?;
     }
+    progress.phase(
+        2,
+        "Waiting for the first animation viewport",
+        &format!(
+            "Saved-world catalog ready: {} windows across {} source bindings",
+            bundle.maps.len(),
+            bundle.bindings.len()
+        ),
+    );
     Ok(bundle)
 }
 
@@ -1240,12 +1463,18 @@ fn prepare_selection(
     stop: &AtomicBool,
     desired_plan: &AtomicU64,
     external_stop: Option<&ilium_platform::owned_worker::StopToken>,
+    progress: &PreparationProgress,
 ) -> Result<Option<(Plan, Arc<projected_route::PreparedRoute>)>, String> {
     // Header-only feasibility and an independent full decoder probe found
     // three 256-block source windows. Neither proves native render admission;
     // each selected route below still requires full projected qualification.
     const MAX_ROUTE_QUALIFICATIONS: usize = 16;
     const MAX_SELECTION_WORK: u64 = PLANNER_WORK * MAX_ROUTE_QUALIFICATIONS as u64;
+    progress.phase(
+        2,
+        "Building the viewport's saved-chunk inventory",
+        "The first viewport arrived; checking which saved chunks can support a complete camera route",
+    );
     let external = || external_stop.is_some_and(|token| token.is_stopped());
     let cancelled = || {
         stop.load(Ordering::Relaxed)
@@ -1285,7 +1514,16 @@ fn prepare_selection(
     };
     let mut allocations = BTreeMap::new();
     let mut allocation_reservations = Vec::with_capacity(maps.len());
-    for map in &maps {
+    for (index, map) in maps.iter().enumerate() {
+        progress.phase(
+            2,
+            "Building the viewport's saved-chunk inventory",
+            &format!(
+                "Scanning allocated chunk headers for saved map {} of {}",
+                index + 1,
+                maps.len()
+            ),
+        );
         cancel.check().map_err(|error| error.to_string())?;
         let bound = bundle
             .bindings
@@ -1383,6 +1621,11 @@ fn prepare_selection(
     let mut query_limited_tiers = 0;
     let mut failures = Vec::<String>::new();
     let mut attempted = 0;
+    progress.phase(
+        3,
+        "Surveying camera-route candidates",
+        "Starting the finite route survey across qualified saved-map windows",
+    );
     let mut candidate_eligibility = |source: super::evidence::Source,
                                      line: super::coverage::Line,
                                      focus_y: f64,
@@ -1508,6 +1751,14 @@ fn prepare_selection(
                 // candidate even if its projected source later fails.
                 excluded.insert(plan.route());
                 *attempts_by_map.entry(plan.source().map).or_default() += 1;
+                progress.phase(
+                    3,
+                    "Surveying camera-route candidates",
+                    &format!(
+                        "Surveyed a {choice:?} route candidate in map {:?}",
+                        plan.source().map
+                    ),
+                );
                 Ok(SurveyStep::Candidate((maximum_length, plan)))
             },
             |(maximum_length, plan)| {
@@ -1548,7 +1799,17 @@ fn prepare_selection(
                     account: &bundle.budget,
                     cancel,
                     cancelled: &cancelled,
+                    progress: &|event| {
+                        progress.phase(4, "Decoding and projecting the selected route", event)
+                    },
                 };
+                progress.phase(
+                    4,
+                    "Decoding and projecting the selected route",
+                    &format!(
+                        "Validating candidate {attempted} of {MAX_ROUTE_QUALIFICATIONS} against the full viewport and texture pack"
+                    ),
+                );
                 let prepared = match (&bundle.selected, &bundle.native_jar) {
                     (Some(selected), Some(jar)) => {
                         let child = selected
@@ -1574,7 +1835,14 @@ fn prepare_selection(
                     _ => return Err("Selected route native source custody incomplete".into()),
                 };
                 match prepared {
-                    Ok(route) => Ok(Some((plan, Arc::new(route), maximum_length))),
+                    Ok(route) => {
+                        progress.phase(
+                            5,
+                            "Finalizing the qualified camera route",
+                            &format!("Candidate {attempted} passed full viewport qualification"),
+                        );
+                        Ok(Some((plan, Arc::new(route), maximum_length)))
+                    }
                     Err(error) => {
                         if cancelled() {
                             return Err("Saved route preparation cancelled".into());
@@ -1597,6 +1865,9 @@ fn prepare_selection(
                                 plan.route()
                             ));
                         }
+                        progress.record(&format!(
+                            "Candidate {attempted} rejected by source, model, or texture qualification: {error}"
+                        ));
                         Ok(None)
                     }
                 }

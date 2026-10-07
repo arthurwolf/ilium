@@ -982,6 +982,91 @@ impl WorldService {
         .map_err(|reason| AnimationError::Runtime(format!("selected region: {reason:?}")))?;
         encode(projection, Some(source.stop))
     }
+    /// Export the already admitted generated terrain mesh. This is deliberately
+    /// a narrow native model name: it reuses visible faces from the prepared
+    /// world and never reconstructs geometry from a guest path or string.
+    pub fn generated_model(
+        &self,
+        handle: WorldHandle,
+        name: &str,
+        max_vertices: usize,
+    ) -> Result<(Vec<f32>, Vec<u32>)> {
+        self.check(handle)?;
+        if name != "terrain" {
+            return Err(error("native generated model name unavailable"));
+        }
+        let entry = self
+            .worlds
+            .get(&handle.id)
+            .ok_or_else(|| error("native world missing"))?;
+        let binding = entry
+            .binding
+            .lock()
+            .map_err(|_| error("native source custody poisoned"))?;
+        let world = binding
+            .generated
+            .as_ref()
+            .ok_or_else(|| error("selected source has no generated terrain model"))?;
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for block in &world.blocks {
+            let [x, y, z] = block.position;
+            let x = x as f32;
+            let y = y as f32;
+            let z = z as f32;
+            let faces = [
+                (
+                    block.faces[0],
+                    [
+                        [x, y, z + 1.],
+                        [x + 1., y, z + 1.],
+                        [x + 1., y + 1., z + 1.],
+                        [x, y + 1., z + 1.],
+                    ],
+                ),
+                (
+                    block.faces[1],
+                    [
+                        [x, y + 1., z],
+                        [x + 1., y + 1., z],
+                        [x + 1., y + 1., z + 1.],
+                        [x, y + 1., z + 1.],
+                    ],
+                ),
+                (
+                    block.faces[2],
+                    [
+                        [x + 1., y, z],
+                        [x + 1., y + 1., z],
+                        [x + 1., y + 1., z + 1.],
+                        [x + 1., y, z + 1.],
+                    ],
+                ),
+            ];
+            for (visible, corners) in faces {
+                if !visible {
+                    continue;
+                }
+                let current = vertices.len() / 3;
+                if current
+                    .checked_add(4)
+                    .is_none_or(|count| count > max_vertices)
+                {
+                    return Err(error("native generated model exceeds vertex bound"));
+                }
+                for corner in corners {
+                    vertices.extend_from_slice(&corner);
+                }
+                let base = u32::try_from(current)
+                    .map_err(|_| error("native generated model index range"))?;
+                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
+        }
+        if vertices.is_empty() {
+            return Err(error("native generated model has no visible faces"));
+        }
+        Ok((vertices, indices))
+    }
     /// Preserve the selected-save-only public entry point.
     pub fn saved_region(
         &mut self,

@@ -7,7 +7,7 @@ use super::{
         error::{AssetError, Result},
         identity::ResourceId,
     },
-    noise::hash2,
+    noise::{hash2, value2},
     settings::VoxelLandscapeSettings,
     surface_biome_selector,
     surface_biomes::{OrganismSource, SurfaceBiome, SURFACE_AZALEA_INDICATOR_CONFIGURATION_ID},
@@ -368,7 +368,8 @@ fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
     match biome {
         BambooJungle | DarkForest | Jungle | PaleGarden => 85,
         BirchForest | DappledForest | Forest | SnowyTaiga | Taiga => 80,
-        OldGrowthBirchForest | OldGrowthPineTaiga | OldGrowthSpruceTaiga => 75,
+        OldGrowthBirchForest => 95,
+        OldGrowthPineTaiga | OldGrowthSpruceTaiga => 75,
         MangroveSwamp | WoodedBadlands => 70,
         CherryGrove | FlowerForest => 60,
         Grove | Swamp => 55,
@@ -382,6 +383,20 @@ fn tree_cover_percent(biome: SurfaceBiome) -> u64 {
         Badlands | Beach | Desert | ErodedBadlands | FrozenPeaks | JaggedPeaks | SnowyBeach
         | SnowySlopes | StonyPeaks | StonyShore => 0,
     }
+}
+
+fn tree_local_cover_percent(seed: u64, x: i32, y: i32, base: u64) -> u64 {
+    let base = base.min(100);
+    let headroom = base.min(100 - base) as f64;
+    let patch = value2(seed ^ 0x776f_6f64_6c61_6e64, i64::from(x), i64::from(y), 78);
+    (base as f64 + headroom * patch).round().clamp(0.0, 100.0) as u64
+}
+
+fn flora_local_cover_percent(seed: u64, x: i32, y: i32, base: u64) -> u64 {
+    let base = base.min(100);
+    let headroom = base.min(100 - base) as f64;
+    let patch = value2(seed ^ 0x666c_6f72_615f_7061, i64::from(x), i64::from(y), 64);
+    (base as f64 + headroom * patch).round().clamp(0.0, 100.0) as u64
 }
 
 // These are authored ecological weights, not extracted native feature frequencies.
@@ -2173,6 +2188,7 @@ fn prepare_with_tree_configuration(
             let cover = tree_cover_percent(biome)
                 * (settings.vegetation_percent.clamp(0, 100) as u64)
                 / 100;
+            let cover = tree_local_cover_percent(seed, x, y, cover);
             if hash % 100 >= cover {
                 continue;
             }
@@ -2361,7 +2377,9 @@ fn prepare_with_tree_configuration(
             // but admit more candidates so full-scene views carry the visible
             // grass, flowers, reeds and biome-specific ground cover expected
             // from a Minecraft-like surface.
-            if hash % 100 >= (settings.vegetation_percent.min(100) as u64) * 72 / 100 {
+            let base_cover = (settings.vegetation_percent.min(100) as u64) * 72 / 100;
+            let local_cover = flora_local_cover_percent(seed, x, y, base_cover);
+            if hash % 100 >= local_cover {
                 continue;
             }
             let (sample, biome) = sample_ground(&fields, &settings, x, y);
@@ -3512,6 +3530,76 @@ mod tests {
             .count();
         assert!(grass_selections > flower_selections);
     }
+
+    #[test]
+    fn flora_cover_forms_global_patches_without_changing_mean_density() {
+        let (mut total, mut selected, mut summed_cover, mut neighbor_pairs, mut adjacent_selected) =
+            (0_u64, 0_u64, 0_u64, 0_u64, 0_u64);
+        let (width, height) = (192_i32, 192_i32);
+        for gy in 0..height {
+            for gx in 0..width {
+                let x = gx * 4 - 384;
+                let y = gy * 4 - 384;
+                let cover = flora_local_cover_percent(71839, x, y, 72);
+                assert_eq!(cover, flora_local_cover_percent(71839, x, y, 72));
+                summed_cover += cover;
+                let chosen =
+                    hash2(71839 ^ 0x0066_6c6f_7261, i64::from(gx), i64::from(gy)) % 100 < cover;
+                total += 1;
+                selected += u64::from(chosen);
+                if gx + 1 < width {
+                    let next_x = x + 4;
+                    let next_cover = flora_local_cover_percent(71839, next_x, y, 72);
+                    let next = hash2(71839 ^ 0x0066_6c6f_7261, i64::from(gx + 1), i64::from(gy))
+                        % 100
+                        < next_cover;
+                    neighbor_pairs += 1;
+                    adjacent_selected += u64::from(chosen && next);
+                }
+            }
+        }
+        let mean_selected = selected as f64 / total as f64;
+        let mean_local_cover = summed_cover as f64 / total as f64;
+        let adjacent_joint_rate = adjacent_selected as f64 / neighbor_pairs as f64;
+        assert!(
+            (mean_selected - mean_local_cover / 100.0).abs() < 0.015,
+            "selected={mean_selected}, local cover={mean_local_cover}%"
+        );
+        assert!(
+            adjacent_joint_rate > mean_selected * mean_selected + 0.01,
+            "adjacent_joint_rate={adjacent_joint_rate}, independent={}",
+            mean_selected * mean_selected
+        );
+        let (mut ensemble_total, mut ensemble_selected) = (0_u64, 0_u64);
+        for seed in 71839..71855 {
+            for gy in 0..height {
+                for gx in 0..width {
+                    let x = gx * 4 - 384;
+                    let y = gy * 4 - 384;
+                    let cover = flora_local_cover_percent(seed, x, y, 72);
+                    let chosen =
+                        hash2(seed ^ 0x0066_6c6f_7261, i64::from(gx), i64::from(gy)) % 100 < cover;
+                    ensemble_total += 1;
+                    ensemble_selected += u64::from(chosen);
+                }
+            }
+        }
+        let ensemble_mean = ensemble_selected as f64 / ensemble_total as f64;
+        assert!(
+            (0.70..=0.74).contains(&ensemble_mean),
+            "mean={ensemble_mean}"
+        );
+        let sample = |seed| {
+            (-4..4)
+                .flat_map(|gy| {
+                    (-4..4).map(move |gx| flora_local_cover_percent(seed, gx * 64, gy * 64, 72))
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sample(71839), sample(71839));
+        assert_ne!(sample(71839), sample(71840));
+    }
+
     #[test]
     fn surface_azalea_indicators_are_reachable_without_replacing_forest_prescriptions() {
         let mut selected = BTreeSet::new();

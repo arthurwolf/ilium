@@ -707,9 +707,12 @@ impl PermissionBroker {
             let binding = bindings.get(&request_id).cloned(); // Only native picker/table values enter here.
             check_binding(&right, binding.as_ref(), false)?; // Missing selections remain explicit.
             let mut verdict = self.verdict(&right, binding.as_ref()); // Manifest, policy, grants, and revocations intersect.
-            if verdict == Verdict::Allowed && right.needs_binding() && binding.is_none() {
+            if matches!(verdict, Verdict::Allowed | Verdict::Prompt)
+                && right.needs_binding()
+                && binding.is_none()
+            {
                 verdict = Verdict::NeedsSelection;
-            } // Automatic rights cannot invent files/devices.
+            } // Selection does not grant consent: an untrusted binding must be reviewed again.
             items.push(ReviewItem {
                 request: ReviewedRequest {
                     request_id,
@@ -1710,6 +1713,15 @@ mod tests {
             scope: Scope::AnimationViewport,
         }
     } // Independent optional right.
+    fn disk_folder() -> Right {
+        Right {
+            id: Capability::DiskRead,
+            scope: Scope::Disk {
+                slot: "pictures".to_owned(),
+                selection: Selection::Folder,
+            },
+        }
+    }
     fn request(id: &str, right: Right, required: bool) -> PermissionRequest {
         // Complete untrusted-plan fixture.
         PermissionRequest {
@@ -2163,6 +2175,156 @@ mod tests {
             Err(PermissionError::WrongPrincipal)
         )); // Unsigned replacement cannot inherit authority.
     } // Failed restore consumes its broker and has no permissive default path.
+    #[test]
+    fn unverified_resource_selection_precedes_but_never_replaces_explicit_consent() {
+        let disk = disk_folder();
+        let selected = HostBinding::new(BindingKind::Folder, "root_a".to_owned())
+            .expect("selected native folder");
+        let other = HostBinding::new(BindingKind::Folder, "root_b".to_owned())
+            .expect("different native folder");
+        let mut unsigned = broker(false, vec![disk.clone()]);
+        let unbound = unsigned
+            .prepare(
+                1,
+                1,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::new(),
+            )
+            .expect("unbound unsigned resource review");
+        assert_eq!(unbound.items()[0].verdict, Verdict::NeedsSelection);
+        assert!(matches!(
+            unsigned.resolve(
+                unbound,
+                choices(&[("disk", UserChoice::AllowSession)]),
+            ),
+            Err(PermissionError::SelectionRequired(id)) if id == "disk"
+        ));
+        let selected_review = unsigned
+            .prepare(
+                1,
+                2,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::from([("disk".to_owned(), selected.clone())]),
+            )
+            .expect("selected unsigned resource review");
+        assert_eq!(selected_review.items()[0].verdict, Verdict::Prompt);
+        assert!(matches!(
+            unsigned.resolve(selected_review, BTreeMap::new()),
+            Err(PermissionError::DecisionRequired(id)) if id == "disk"
+        ));
+        let consent_review = unsigned
+            .prepare(
+                1,
+                3,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::from([("disk".to_owned(), selected.clone())]),
+            )
+            .expect("explicit consent review");
+        assert_eq!(consent_review.items()[0].verdict, Verdict::Prompt);
+        let active = unsigned
+            .resolve(
+                consent_review,
+                choices(&[("disk", UserChoice::AllowSession)]),
+            )
+            .expect("explicit selected-resource consent")
+            .activation
+            .expect("required selected resource activation");
+        assert_eq!(active.plan.grants["disk"].binding.as_ref(), Some(&selected));
+        let wrong = vec![OperationNeed::new(disk.clone(), Some(other))
+            .expect("different selected-resource need")];
+        assert!(matches!(
+            unsigned.dispatch(&active.channel, CallPhase::Async, "work_disk", wrong),
+            Err(PermissionError::Denied)
+        ));
+        let exact =
+            vec![OperationNeed::new(disk, Some(selected)).expect("exact selected-resource need")];
+        let ticket = unsigned
+            .dispatch(&active.channel, CallPhase::Async, "work_disk", exact)
+            .expect("exact selected resource dispatch");
+        unsigned
+            .settle_without_delivery(&ticket)
+            .expect("selected-resource fixture settlement");
+    }
+    #[test]
+    fn missing_resource_selection_preserves_trust_and_denial_precedence() {
+        let disk = disk_folder();
+        let selected = HostBinding::new(BindingKind::Folder, "root_a".to_owned())
+            .expect("selected native folder");
+        let mut trusted = broker(true, vec![disk.clone()]);
+        let trusted_unbound = trusted
+            .prepare(
+                1,
+                1,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::new(),
+            )
+            .expect("trusted unbound resource review");
+        assert_eq!(trusted_unbound.items()[0].verdict, Verdict::NeedsSelection);
+        let trusted_bound = trusted
+            .prepare(
+                1,
+                2,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::from([("disk".to_owned(), selected.clone())]),
+            )
+            .expect("trusted selected resource review");
+        assert_eq!(trusted_bound.items()[0].verdict, Verdict::Allowed);
+        let trusted_active = trusted
+            .resolve(trusted_bound, BTreeMap::new())
+            .expect("trusted selected resource resolution")
+            .activation
+            .expect("trusted selected resource activation");
+        assert_eq!(
+            trusted_active.plan.grants["disk"].binding.as_ref(),
+            Some(&selected)
+        );
+        let mut user_denied = broker(false, vec![disk.clone()]);
+        let denial_review = user_denied
+            .prepare(
+                1,
+                1,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::from([("disk".to_owned(), selected.clone())]),
+            )
+            .expect("user-denial prompt");
+        assert_eq!(denial_review.items()[0].verdict, Verdict::Prompt);
+        let denied = user_denied
+            .resolve(
+                denial_review,
+                choices(&[("disk", UserChoice::DenyRemembered)]),
+            )
+            .expect("remembered resource denial");
+        assert!(denied.activation.is_none());
+        let denied_unbound = user_denied
+            .prepare(
+                1,
+                2,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::new(),
+            )
+            .expect("remembered denied resource review");
+        assert_eq!(denied_unbound.items()[0].verdict, Verdict::UserDenied);
+        let manifest = Ceiling {
+            permissions: vec![disk.clone()],
+        };
+        let mut host_denied = PermissionBroker::new(
+            identity(false, b"host-denied-resource"),
+            manifest,
+            Ceiling {
+                permissions: Vec::new(),
+            },
+        )
+        .expect("host-denied resource broker");
+        let host_denied_review = host_denied
+            .prepare(
+                1,
+                1,
+                plan(vec![request("disk", disk, true)]),
+                BTreeMap::new(),
+            )
+            .expect("host-denied resource review");
+        assert_eq!(host_denied_review.items()[0].verdict, Verdict::HostDenied);
+    }
     #[test] // Host-selected identity is part of the grant, independently of the picker slot.
     fn remembered_disk_grants_require_the_same_revalidated_resource() {
         // Test changed roots and forged operation substitution.
@@ -2198,15 +2360,33 @@ mod tests {
         let mut reopened = broker(false, vec![disk.clone()])
             .restore_remembered(&saved)
             .expect("restore ledger"); // No native handle was resurrected.
-        let review = reopened
+        let unbound = reopened
             .prepare(
                 1,
                 1,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::new(),
+            )
+            .expect("remembered resource without reopened binding");
+        assert_eq!(unbound.items()[0].verdict, Verdict::NeedsSelection);
+        let exact = reopened
+            .prepare(
+                1,
+                2,
+                plan(vec![request("disk", disk.clone(), true)]),
+                BTreeMap::from([("disk".to_owned(), a)]),
+            )
+            .expect("reopened exact remembered resource");
+        assert_eq!(exact.items()[0].verdict, Verdict::Allowed);
+        let changed = reopened
+            .prepare(
+                1,
+                3,
                 plan(vec![request("disk", disk, true)]),
                 BTreeMap::from([("disk".to_owned(), b)]),
             )
-            .expect("reopened B"); // The pathname may have changed identity.
-        assert_eq!(review.items()[0].verdict, Verdict::Prompt); // A newly resolved root needs a new decision.
+            .expect("reopened different resource");
+        assert_eq!(changed.items()[0].verdict, Verdict::Prompt);
     } // File containment/symlink-safe opening remains the native adapter's responsibility.
     #[test] // A verified package still cannot invent a user-selected file/device.
     fn canceled_optional_selection_preserves_fallback() {

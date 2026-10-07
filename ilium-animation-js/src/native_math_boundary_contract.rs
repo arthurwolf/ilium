@@ -50,6 +50,53 @@ fn wait_snapshot(quota: &QuotaGroup, expected: ilium_execution::QuotaSnapshot) {
 fn quota() -> QuotaGroup {
     crate::engine::inventory_contracts::quota()
 }
+#[test]
+fn boundary_math_storage_refusal_precedes_cpu_launch_without_partial_custody() {
+    use crate::native_math::{parameters_from_wire, MathInput, MathRequest, NativeMath};
+    let _serial = serial();
+    let quota = quota();
+    let baseline = quota.snapshot();
+    let (execution, resources, _wake) = bank(&quota);
+    let mut native = NativeMath::new(resources.clone(), quota.clone(), 1).unwrap();
+    let input = MathInput::from_host(&[3., 4., 0.], quota.clone()).unwrap();
+    let request = MathRequest::new(
+        input.clone(),
+        parameters_from_wire(
+            "transform",
+            &BTreeMap::from([("operation".into(), 1.), ("components".into(), 3.)]),
+        )
+        .unwrap(),
+        1024,
+        1000,
+    )
+    .unwrap();
+    let original = quota.snapshot();
+    // Synthetic quota pressure leaves one byte less than this real kernel's
+    // 4096 scratch bytes plus its 12-byte output and 512-byte output metadata.
+    // The pressure lease allocates no fabricated production payload.
+    let pressure = quota
+        .reserve_external_storage(
+            original.limits.worker_bytes - original.worker_bytes - (4096 + 12 + 512 - 1),
+        )
+        .unwrap();
+    let before = quota.snapshot();
+    assert!(
+        native.submit(request, 1).is_err(),
+        "insufficient output storage must refuse before CPU launch"
+    );
+    assert_eq!(
+        quota.snapshot(),
+        before,
+        "refusal must release partial scratch admission and publish no job"
+    );
+    drop(pressure);
+    assert_eq!(quota.snapshot(), original);
+    drop(input);
+    drop(native);
+    drop(resources);
+    drop(execution);
+    wait_snapshot(&quota, baseline);
+}
 fn bank(quota: &QuotaGroup) -> (Execution, AmbientResources, mpsc::Receiver<()>) {
     // Start one task-local finite CPU bank with the supplied native-math fixture sizes.
     let zero = LaneConfig {
@@ -273,7 +320,13 @@ fn boundary_real_math_uses_original_bank_and_keeps_typed_result_without_completi
     wake.recv_timeout(Duration::from_secs(3)).unwrap();
     let output = with_current(&broker, &activation, |current| {
         assert!(bridge.poll(&handle, current)?);
-        Ok(bridge.observe_retained_output(&handle, current)?.unwrap())
+        let output = bridge.observe_retained_output(&handle, current)?;
+        assert!(
+            output.is_some(),
+            "original native math terminal status: {}",
+            bridge.descriptor(&handle, current, &limits())?.metadata()
+        );
+        Ok(output.unwrap())
     })
     .unwrap();
     assert_eq!(output.values(), &[0.6_f32, 0.8, 0.0]);

@@ -71,6 +71,8 @@ pub struct Inputs<'a> {
     pub account: &'a ByteBudget,
     pub cancel: Cancel<'a>,
     pub cancelled: &'a dyn Fn() -> bool,
+    /// Reports concrete stages and bounded chunk counts to the preparation UI.
+    pub progress: &'a dyn Fn(&str),
 }
 
 pub struct PreparedRoute {
@@ -160,6 +162,7 @@ fn prepare_source(
     )>,
 ) -> Result<PreparedRoute, Error> {
     input.cancel.check()?;
+    (input.progress)("Checking projected viewport source coverage");
     if input.plan.source() != input.initial_map.source()
         || input.bound.map != input.plan.source().map
     {
@@ -207,6 +210,7 @@ fn prepare_source(
         input.scale,
         &mut source_budget,
     )?);
+    (input.progress)("Viewport coverage is complete; binding the camera display");
     let session = match source {
         Some((_, native_jar)) => NativeSourceSession::open_pinned(
             native_jar,
@@ -230,8 +234,15 @@ fn prepare_source(
         compiler.enable_immutable_source_cache();
     }
     let mut ids = BTreeSet::<ResourceId>::new();
-    for &chunk in request.render_chunks() {
+    let render_chunks = request.render_chunks();
+    for (index, &chunk) in render_chunks.iter().enumerate() {
         input.cancel.check()?;
+        (input.progress)(&format!(
+            "Collecting texture-model requirements from viewport chunk {}/{}, {} unique models so far",
+            index + 1,
+            render_chunks.len(),
+            ids.len()
+        ));
         if !immutable_definitions {
             compiler.reset_for_next_tile();
         }
@@ -264,6 +275,10 @@ fn prepare_source(
     // Release every retained parsed selector/base model before the importer
     // reserves decoded selected textures in the same finite scene account.
     drop(compiler);
+    (input.progress)(&format!(
+        "Loading selected texture-pack assets for {} required models",
+        ids.len()
+    ));
     let shared = session.import(ids, input.cancel)?;
     let bank_epoch = shared.bank_epoch();
     let definitions = shared.definitions()?;
@@ -286,8 +301,14 @@ fn prepare_source(
     {
         return Err(Error::Limit);
     }
-    for &chunk in request.render_chunks() {
+    for (index, &chunk) in render_chunks.iter().enumerate() {
         input.cancel.check()?;
+        (input.progress)(&format!(
+            "Building rendered viewport tile {}/{}, {} tiles ready",
+            index + 1,
+            render_chunks.len(),
+            tiles.len()
+        ));
         if !immutable_definitions {
             compiler.reset_for_next_tile();
         }

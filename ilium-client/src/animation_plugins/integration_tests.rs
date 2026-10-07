@@ -18,6 +18,75 @@ fn app() -> (App, tempfile::TempDir) {
     (app, project)
 }
 
+#[test]
+fn actual_plugin_issue_hover_dismisses_when_pointer_leaves_content() {
+    let (mut app, _project) = app();
+    app.plugin_catalogue = Some(
+        crate::execution::test_client()
+            .try_reserve_external(ilium_execution::JobCost {
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .expect("catalogue admission")
+            .retain(PluginCatalogue {
+                entries: vec![],
+                issues: vec![CatalogueIssue {
+                    path: PathBuf::from("corrupt.iliumanim"),
+                    message: "truncated ZIP".into(),
+                }],
+            })
+            .expect("retained catalogue"),
+    );
+    let Mode::Settings(state) = &mut app.mode else {
+        panic!("settings");
+    };
+    state.animation_source_tab = AnimationSourceTab::Plugin;
+    for (column, row) in [(0, 0), (0, 10)] {
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings");
+        };
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+        let panel = crate::animation_settings_ui::plugin_panel_area(layout.content_area);
+        let issue_row = app
+            .plugin_panel_model()
+            .rows
+            .iter()
+            .position(|row| *row == PluginPanelRow::Issues)
+            .expect("issue row");
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: panel.x,
+                row: panel.y + u16::try_from(issue_row).expect("visible issue row"),
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            app.plugin_issue_hover.is_some(),
+            "pointer over issue row must establish hover"
+        );
+        app.tick_plugin_issue_hover(
+            std::time::Instant::now() + crate::animation_hover::HOVER_DELAY,
+        );
+        assert!(app.plugin_issue_hover.is_some_and(|hover| hover.is_shown));
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            app.plugin_issue_hover.is_none(),
+            "pointer at {column},{row} must dismiss issue popover"
+        );
+    }
+}
+
 fn install_metadata(app: &mut App) {
     let manifest: Manifest = serde_json::from_value(json!({
         "api_version":1,"id":"carpet","name":"Carpet","version":"1.0.0",
