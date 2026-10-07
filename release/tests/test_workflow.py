@@ -227,6 +227,11 @@ class WorkflowTests(unittest.TestCase):
             'test-macos': '${{ github.workspace }}/target/debug/ilium',
             'test-windows': '${{ github.workspace }}\\target\\debug\\ilium.exe',
         }
+        expected_helpers = {
+            'test-linux': '${{ github.workspace }}/target/debug/ilium-animation-helper',
+            'test-macos': '${{ github.workspace }}/target/debug/ilium-animation-helper',
+            'test-windows': '${{ github.workspace }}\\target\\debug\\ilium-animation-helper.exe',
+        }
         for job_name, binary in expected_binaries.items():
             with self.subTest(job=job_name):
                 steps = ci['jobs'][job_name]['steps']
@@ -234,6 +239,7 @@ class WorkflowTests(unittest.TestCase):
                 environment = test_step['env']
                 self.assertEqual(environment.get('RUST_TEST_THREADS'), '1')
                 self.assertEqual(environment.get('ILIUM_PTY_SMOKE_BINARY'), binary)
+                self.assertEqual(environment.get('ILIUM_ANIMATION_HELPER'), expected_helpers[job_name])
                 if job_name != 'test-windows':
                     self.assertEqual(
                         environment.get('ILIUM_NAMING_EVIDENCE_DIR'),
@@ -260,9 +266,14 @@ class WorkflowTests(unittest.TestCase):
                     )
                     self.assertEqual(environment['RUST_TEST_THREADS'], '1')
                     executable = 'ilium.exe' if operating_system == 'windows' else 'ilium'
+                    helper = 'ilium-animation-helper.exe' if operating_system == 'windows' else 'ilium-animation-helper'
                     self.assertEqual(
                         environment['ILIUM_PTY_SMOKE_BINARY'],
                         str(cargo_target / target['rust_target'] / 'release' / executable),
+                    )
+                    self.assertEqual(
+                        environment['ILIUM_ANIMATION_HELPER'],
+                        str(cargo_target / target['rust_target'] / 'release' / helper),
                     )
                     if operating_system == 'windows':
                         self.assertNotIn('ILIUM_NAMING_EVIDENCE_DIR', environment)

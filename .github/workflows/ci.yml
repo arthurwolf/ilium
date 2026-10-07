@@ -95,6 +95,7 @@ jobs:
                 # test binaries use the runner's full parallelism.
                 RUST_TEST_THREADS: '1'
                 ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}/target/debug/ilium
+                ILIUM_ANIMATION_HELPER: ${{ github.workspace }}/target/debug/ilium-animation-helper
                 ILIUM_NAMING_EVIDENCE_DIR: ${{ runner.temp }}/ilium-naming-evidence
 
     test-windows:
@@ -122,6 +123,7 @@ jobs:
                 # runner stack while sibling tests spawn more processes.
                 RUST_TEST_THREADS: '1'
                 ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}\target\debug\ilium.exe
+                ILIUM_ANIMATION_HELPER: ${{ github.workspace }}\target\debug\ilium-animation-helper.exe
 
     test-macos:
         name: Test (macOS)
@@ -147,4 +149,5 @@ jobs:
                 # and serialized execution so first-exec detection can settle.
                 RUST_TEST_THREADS: '1'
                 ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}/target/debug/ilium
+                ILIUM_ANIMATION_HELPER: ${{ github.workspace }}/target/debug/ilium-animation-helper
                 ILIUM_NAMING_EVIDENCE_DIR: ${{ runner.temp }}/ilium-naming-evidence

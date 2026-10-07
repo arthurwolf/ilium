@@ -205,8 +205,11 @@ def logged(command, root, log, environment=None, timeout=10_800):
 def configure_workspace_test_environment(environment, target, work, cargo_target):
     environment['RUST_TEST_THREADS'] = '1'
     executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'
+    helper_executable = 'ilium-animation-helper.exe' if target['os'] == 'windows' else 'ilium-animation-helper'
     candidate = cargo_target / target['rust_target'] / 'release' / executable
+    helper = cargo_target / target['rust_target'] / 'release' / helper_executable
     environment['ILIUM_PTY_SMOKE_BINARY'] = str(candidate)
+    environment['ILIUM_ANIMATION_HELPER'] = str(helper)
     if target['os'] in ('linux', 'macos'):
         evidence_directory = work / 'naming-title-evidence'
         evidence_directory.mkdir(mode=0o700)
