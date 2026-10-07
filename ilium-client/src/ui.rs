@@ -13,6 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
@@ -1186,28 +1187,23 @@ fn draw_text_trigger_dialog(
         }),
         layout.enabled,
     );
-    let preview = if state.regexp.buf.is_empty() {
-        "Enter a regexp to preview matching sample lines.".to_owned()
-    } else {
-        match regex::Regex::new(&state.regexp.buf) {
-            Ok(regex) => {
-                let mut lines = state
-                    .sample_text()
-                    .lines()
-                    .map(|line| preview_text_trigger_line(&regex, line))
-                    .collect::<Vec<_>>();
-                if regex.is_match(&state.message.buf) {
-                    lines.push(
-                        "⚠ Reply also matches this regexp; echoed input can loop.".to_owned(),
-                    );
-                }
-                lines.join("\n")
-            }
-            Err(error) => format!("Invalid regexp: {error}"),
-        }
+    let (preview, preview_title) = state.preview_display();
+    let preview_title = match state.preview_issue() {
+        Some(issue) => Line::from(vec![
+            Span::raw("LIVE PREVIEW · "),
+            Span::raw(issue.message()),
+        ]),
+        None => Line::from(preview_title),
     };
+    // Only visible rows need paragraph objects. The worker-owned text stays
+    // borrowed; drawing never rebuilds or joins the complete prepared result.
+    let preview_lines = preview
+        .lines()
+        .take(usize::from(layout.preview.height.saturating_sub(2)))
+        .map(Line::from)
+        .collect::<Vec<_>>();
     frame.render_widget(
-        Paragraph::new(preview).block(theme::block(false).title("LIVE PREVIEW")),
+        Paragraph::new(preview_lines).block(theme::block(false).title(preview_title)),
         layout.preview,
     );
     frame.render_widget(
@@ -1229,22 +1225,6 @@ fn draw_text_trigger_dialog(
             .style(Style::new().add_modifier(Modifier::DIM)),
         layout.hint,
     );
-}
-
-fn preview_text_trigger_line(regex: &regex::Regex, line: &str) -> String {
-    let Some(found) = regex.find(line) else {
-        return format!("· {line}");
-    };
-    let matched = &line[found.start()..found.end()];
-    if matched.is_empty() {
-        return format!("✓ {line}  ⟪zero-width match⟫");
-    }
-    format!(
-        "✓ {}[{}]{}",
-        &line[..found.start()],
-        matched,
-        &line[found.end()..]
-    )
 }
 
 fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) -> Option<Position> {
@@ -1434,69 +1414,59 @@ fn draw_context_menu(
     current_tree_order: crate::config::TreeOrder,
     ui: &crate::config::UiSettings,
 ) {
-    let lines: Vec<Line> = menu
-        .actions
-        .iter()
-        .enumerate()
-        .map(|(index, action)| {
-            let style = if index == menu.selected_index {
-                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            Line::from(Span::styled(
-                format!(
-                    "{} {}",
-                    context_menu_icon(ui, action.icon_target()),
-                    action.label()
-                ),
-                style,
-            ))
-        })
-        .collect();
-    let title = app_menu_title(menu);
-    let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(title)));
+    let layout = menu.layout();
+    let width = menu.area.width.saturating_sub(2);
+    let icon_width = popup_icon_width(ui, menu.actions.iter().map(|action| action.icon_target()));
+    let lines = popup_rows(&layout, width, |index| {
+        let action = menu.actions[index];
+        popup_action_line(
+            &action.label(),
+            popup_icon(ui, action.icon_target(), icon_width),
+            None,
+            action.has_submenu(),
+            width,
+            popup_action_style(index == menu.selected_index, false),
+        )
+    });
+    let title = popup_title(app_menu_title(menu), &layout);
+    let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(&title)));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
 
     let Some(submenu) = &menu.submenu else {
         return;
     };
-    let lines: Vec<Line> = submenu
-        .items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            let mut style = if index == submenu.selected_index {
-                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            if item.disabled_reason.is_some() {
-                style = style.fg(Color::Gray).add_modifier(Modifier::DIM);
-            }
-            let check = match item.action {
-                SubmenuItemAction::SetTreeOrder(tree_order) if tree_order == current_tree_order => {
-                    "✓"
-                }
-                _ => " ",
-            };
-            Line::from(Span::styled(
-                format!(
-                    " {check}{} {}",
-                    context_menu_icon(ui, submenu.parent.icon_target()),
-                    item.label
-                ),
-                style,
-            ))
-        })
-        .collect();
+    let layout = submenu.layout();
+    let width = submenu.area.width.saturating_sub(2);
+    let icon_width = popup_icon_width(ui, std::iter::once(submenu.parent.icon_target()));
+    let lines = popup_rows(&layout, width, |index| {
+        let item = &submenu.items[index];
+        let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
+            Some(
+                matches!(item.action, SubmenuItemAction::SetTreeOrder(order) if order == current_tree_order),
+            )
+        } else {
+            None
+        };
+        popup_action_line(
+            &item.label,
+            popup_icon(ui, submenu.parent.icon_target(), icon_width),
+            checked,
+            false,
+            width,
+            popup_action_style(
+                index == submenu.selected_index,
+                item.disabled_reason.is_some(),
+            ),
+        )
+    });
     let title = match submenu.parent {
         crate::app::ContextMenuAction::OrderBy => "Order by".to_string(),
         crate::app::ContextMenuAction::NewAgent(provider) => format!("New {}", provider.label()),
         crate::app::ContextMenuAction::Worktree => "Worktree".to_string(),
         _ => "Actions".to_string(),
     };
+    let title = popup_title(&title, &layout);
     let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(&title)));
     frame.render_widget(Clear, submenu.area);
     frame.render_widget(widget, submenu.area);
@@ -1563,7 +1533,7 @@ fn draw_scheduled_input_dialog(
     let layout = crate::scheduled_input::dialog_layout(screen_area);
     frame.render_widget(Clear, layout.popup);
     frame.render_widget(
-        theme::block(true).title(theme::chrome_title("Hit key(s) X time from now")),
+        theme::block(true).title(theme::chrome_title("Schedule keystrokes")),
         layout.popup,
     );
     let pane_name = app
@@ -1895,30 +1865,134 @@ fn draw_terminal_pane_context_menu(
     menu: &crate::terminal_context_menu::TerminalPaneContextMenu,
     ui: &crate::config::UiSettings,
 ) {
-    let lines: Vec<Line> = menu
-        .actions
-        .iter()
-        .enumerate()
-        .map(|(index, action)| {
-            let style = if index == menu.selected_index {
-                Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            Line::from(Span::styled(
-                format!(
-                    "{} {}",
-                    context_menu_icon(ui, action.icon_target()),
-                    action.label()
-                ),
-                style,
-            ))
-        })
-        .collect();
-    let widget = Paragraph::new(lines)
-        .block(theme::block(true).title(theme::chrome_title("Terminal actions")));
+    let layout = menu.layout();
+    let width = menu.area.width.saturating_sub(2);
+    let icon_width = popup_icon_width(ui, menu.actions.iter().map(|action| action.icon_target()));
+    let lines = popup_rows(&layout, width, |index| {
+        let action = &menu.actions[index];
+        let unavailable = matches!(
+            action,
+            crate::terminal_context_menu::TerminalContextAction::LastSubmittedPromptUnavailable
+        );
+        popup_action_line(
+            &action.label(),
+            popup_icon(ui, action.icon_target(), icon_width),
+            None,
+            false,
+            width,
+            popup_action_style(index == menu.selected_index, unavailable),
+        )
+    });
+    let title = popup_title("Terminal actions", &layout);
+    let widget = Paragraph::new(lines).block(theme::block(true).title(theme::chrome_title(&title)));
     frame.render_widget(Clear, menu.area);
     frame.render_widget(widget, menu.area);
+}
+
+/// Measure one gutter across the menu so narrow and wide glyphs align labels.
+fn popup_icon_width(
+    ui: &crate::config::UiSettings,
+    targets: impl Iterator<Item = IconTarget>,
+) -> usize {
+    if !ui.show_context_menu_icons {
+        return 0;
+    }
+    targets
+        .map(|target| UnicodeWidthStr::width(ui.icons.glyph(target)))
+        .max()
+        .unwrap_or(0)
+}
+
+fn popup_icon(ui: &crate::config::UiSettings, target: IconTarget, width: usize) -> String {
+    if !ui.show_context_menu_icons {
+        return String::new();
+    }
+    let glyph = ui.icons.glyph(target);
+    format!(
+        "{glyph}{}",
+        " ".repeat(width.saturating_sub(UnicodeWidthStr::width(glyph)))
+    )
+}
+
+/// All popup surfaces share decoration, horizontal padding and selection.
+fn popup_rows(
+    layout: &crate::context_menu_layout::MenuLayout,
+    width: u16,
+    action_line: impl Fn(usize) -> Line<'static>,
+) -> Vec<Line<'static>> {
+    use crate::context_menu_layout::MenuRow;
+    layout
+        .rows
+        .iter()
+        .map(|row| match row {
+            MenuRow::Padding => Line::from(""),
+            MenuRow::Separator => Line::from(Span::styled(
+                format!("  {}", "─".repeat(usize::from(width.saturating_sub(4)))),
+                theme::border_style(false),
+            )),
+            MenuRow::Action(index) => action_line(*index),
+        })
+        .collect()
+}
+
+fn popup_action_style(selected: bool, muted: bool) -> Style {
+    let style = if selected {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    if muted {
+        style.add_modifier(Modifier::DIM)
+    } else {
+        style
+    }
+}
+
+fn popup_action_line(
+    label: &str,
+    icon: String,
+    checked: Option<bool>,
+    submenu: bool,
+    width: u16,
+    style: Style,
+) -> Line<'static> {
+    let marker = match checked {
+        Some(true) => "✓ ",
+        Some(false) => "  ",
+        None => "",
+    };
+    let icon = icon.trim_start();
+    let prefix = if icon.is_empty() {
+        format!("  {marker}")
+    } else {
+        format!("  {marker}{icon}  ")
+    };
+    let suffix = if submenu { " ▸ " } else { "  " };
+    let available = usize::from(width)
+        .saturating_sub(UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(suffix));
+    let mut clipped = String::new();
+    let mut columns = 0;
+    for grapheme in label.graphemes(true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if columns + grapheme_width > available {
+            break;
+        }
+        clipped.push_str(grapheme);
+        columns += grapheme_width;
+    }
+    let gap = " ".repeat(available.saturating_sub(columns));
+    Line::from(Span::styled(
+        format!("{prefix}{clipped}{gap}{suffix}"),
+        style,
+    ))
+}
+
+fn popup_title(base: &str, layout: &crate::context_menu_layout::MenuLayout) -> String {
+    format!(
+        "{base}{}{}",
+        if layout.has_rows_above { " ↑" } else { "" },
+        if layout.has_rows_below { " ↓" } else { "" }
+    )
 }
 
 /// Keeps menu renderers text-only when the accessibility preference is off,
@@ -3872,7 +3946,7 @@ mod tests {
         // is read back as one extra space.
         let icon = context_menu_icon(&app.ui_settings, IconTarget::TopLevel);
         let wide_cell_padding = " ".repeat(icon.width().saturating_sub(icon.chars().count()));
-        let active_row = format!("✓{icon}{wide_cell_padding} Age down (oldest first)");
+        let active_row = format!("✓ {}{wide_cell_padding}  Oldest first", icon.trim_start());
         assert!(rendered.contains(&active_row));
         assert_eq!(rendered.matches('✓').count(), 1);
     }
@@ -3931,7 +4005,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(rendered.contains("Hit key(s) X time from now"));
+        assert!(rendered.contains("Schedule keystrokes"));
         assert!(rendered.contains("Schedule input for release shell"));
         assert!(rendered.contains("Hours"));
         assert!(rendered.contains("Minutes"));
@@ -3943,12 +4017,63 @@ mod tests {
 
     #[test]
     fn text_trigger_dialog_visually_marks_matches_and_loop_risk() {
+        use ilium_execution::{
+            Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+        };
+        const MIB: usize = 1024 * 1024;
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            QuotaGroup::new(QuotaLimits {
+                clients: 4,
+                jobs: 4,
+                service_jobs: 0,
+                input_bytes: 64 * MIB,
+                result_bytes: 32 * MIB,
+                worker_threads: 1,
+                worker_bytes: 64 * MIB,
+            }),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 4,
+                    priority: None,
+                    resident_bytes_per_thread: MIB,
+                },
+                io: disabled,
+                service: disabled,
+            },
+        )
+        .expect("isolated actual preview CPU worker");
+        let client = execution
+            .client(crate::text_trigger_dialog::preview_limits())
+            .unwrap();
         let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.configure_text_trigger_preview(client);
         let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
         state.regexp.buf = "ready".to_owned();
         state.message.buf = "ready".to_owned();
         state.sample = TextArea::from(vec!["not yet".to_owned(), "system ready now".to_owned()]);
         app.mode = Mode::TextTriggerDialog(Box::new(state));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.reconcile_text_trigger_preview();
+            let Mode::TextTriggerDialog(state) = &app.mode else {
+                panic!("dialog lost");
+            };
+            if state.preview_display().0.contains("echoed input can loop") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "actual CPU preview did not complete"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         app.set_screen_area(Rect::new(0, 0, 100, 34));
         let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
 
@@ -3967,6 +4092,39 @@ mod tests {
         assert!(rendered.contains("· not yet"));
         assert!(rendered.contains("✓ system [ready] now"));
         assert!(rendered.contains("echoed input can loop"));
+        let Mode::TextTriggerDialog(state) = &mut app.mode else {
+            panic!("dialog lost");
+        };
+        state.regexp = crate::text_prompt::TextPromptState::new("a".repeat(256 * 1024 + 1));
+        state.mark_preview_dirty();
+        app.reconcile_text_trigger_preview();
+        let Mode::TextTriggerDialog(state) = &app.mode else {
+            panic!("dialog lost");
+        };
+        assert_eq!(
+            state.preview_issue(),
+            Some(crate::text_trigger_dialog::TextTriggerPreviewIssue::CaptureLimit)
+        );
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let refused = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(refused.contains("bounded capture limit"));
+        assert!(
+            refused.contains("✓ system [ready] now"),
+            "last completed preview must remain visible on refusal"
+        );
+        app.close_text_trigger_preview();
+        execution.request_shutdown(ShutdownMode::Drain);
+        let report = execution
+            .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+        app.collect_closed_text_trigger_preview();
     }
 
     #[test]
@@ -4178,5 +4336,343 @@ mod source_touch_provenance_tests {
         app.mode = Mode::Normal;
         app.modal_stack.push(Mode::Help);
         assert!(!late_layers_are_source_transparent(&app));
+    }
+}
+
+#[cfg(test)]
+mod context_menu_visual_tests {
+    use super::*;
+    use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn context_menu_joined_emoji_label_preserves_row_width() {
+        let line = popup_action_line("👩‍💻 work", String::new(), None, true, 20, Style::new());
+        assert_eq!(UnicodeWidthStr::width(line.spans[0].content.as_ref()), 20);
+        assert!(line.spans[0].content.ends_with(" ▸ "));
+    }
+
+    #[test]
+    fn context_menu_custom_icon_gutter_aligns_labels_and_submenu_arrows() {
+        let mut ui = crate::config::UiSettings::default();
+        ui.icons.terminal = "T".into();
+        ui.icons.editor = "📝".into();
+        let gutter = popup_icon_width(&ui, [IconTarget::Terminal, IconTarget::Editor].into_iter());
+        let line = |target| {
+            popup_action_line(
+                "Command",
+                popup_icon(&ui, target, gutter),
+                None,
+                true,
+                30,
+                Style::new(),
+            )
+        };
+        let narrow = line(IconTarget::Terminal);
+        let wide = line(IconTarget::Editor);
+        let narrow_text = &narrow.spans[0].content;
+        let wide_text = &wide.spans[0].content;
+        let column = |text: &str| UnicodeWidthStr::width(&text[..text.find("Command").unwrap()]);
+        assert_eq!(column(narrow_text), column(wide_text));
+        assert_eq!(UnicodeWidthStr::width(narrow_text.as_ref()), 30);
+        assert_eq!(UnicodeWidthStr::width(wide_text.as_ref()), 30);
+        assert!(narrow_text.ends_with(" ▸ "));
+        assert!(wide_text.ends_with(" ▸ "));
+        ui.show_context_menu_icons = false;
+        assert_eq!(popup_icon_width(&ui, [IconTarget::Terminal].into_iter()), 0);
+        let text_only = popup_action_line(
+            "Command",
+            popup_icon(&ui, IconTarget::Terminal, 0),
+            None,
+            false,
+            30,
+            Style::new(),
+        );
+        assert!(text_only.spans[0].content.starts_with("  Command"));
+    }
+
+    fn save_frame(name: &str, terminal: &Terminal<TestBackend>) {
+        let Ok(directory) = std::env::var("ILIUM_MENU_RENDER_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        assert!(directory.is_absolute());
+        std::fs::create_dir_all(&directory).unwrap();
+        let buffer = terminal.backend().buffer();
+        let cells: Vec<_> = buffer
+            .content()
+            .iter()
+            .map(|cell| {
+                serde_json::json!({
+                    "text": cell.symbol(), "fg": format!("{:?}", cell.fg),
+                    "bg": format!("{:?}", cell.bg), "modifier": format!("{:?}", cell.modifier),
+                })
+            })
+            .collect();
+        let path = directory.join(format!("{name}.json"));
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "type": "artifact", "fixture": name, "width": buffer.area.width,
+                "height": buffer.area.height, "cells": cells,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        println!("{}", serde_json::json!({"type":"artifact", "path": path}));
+    }
+
+    #[test]
+    fn context_menu_visual_target_matrix_uses_production_actions() {
+        use ilium_core::{
+            AgentActivity, AgentClass, PaneContentKind, PaneStatus, SplitOrientation,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "synthetic menu matrix".into(),
+            directory.path().to_path_buf(),
+        );
+        let project = app
+            .tree
+            .add_project(directory.path().to_path_buf())
+            .unwrap();
+        let group = app.tree.add_group(project, "work").unwrap();
+        let folder = app
+            .tree
+            .add_folder(group, directory.path().join("files"))
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(group, "split", SplitOrientation::Vertical, &[])
+            .unwrap();
+        let shell = app
+            .tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        let editor = app
+            .tree
+            .add_pane(group, "notes", PaneContentKind::Editor)
+            .unwrap();
+        let markdown = app
+            .tree
+            .add_pane(group, "tasks.md", PaneContentKind::Editor)
+            .unwrap();
+        app.restored_editor_paths
+            .insert(markdown, directory.path().join("tasks.md"));
+        let board = app
+            .tree
+            .add_pane(group, "board", PaneContentKind::Board)
+            .unwrap();
+        let mut targets = vec![
+            ("root", ROOT_ID),
+            ("project", project),
+            ("group", group),
+            ("folder", folder),
+            ("split", split),
+            ("shell", shell),
+            ("editor", editor),
+            ("markdown", markdown),
+            ("board", board),
+        ];
+        for (name, class) in [
+            ("claude", AgentClass::Claude),
+            ("codex", AgentClass::Codex),
+            ("antigravity", AgentClass::Antigravity),
+        ] {
+            let pane = app
+                .tree
+                .add_pane(group, name, PaneContentKind::Terminal)
+                .unwrap();
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(class, AgentActivity::Idle, None),
+                )
+                .unwrap();
+            targets.push((name, pane));
+        }
+        let worktree = app
+            .tree
+            .add_pane(group, "worktree", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_workspace(
+                worktree,
+                Some(ilium_core::PaneWorkspace {
+                    workspace_id: Some("synthetic-menu-workspace".into()),
+                    repo_common_dir: directory.path().join("repo.git"),
+                    worktree_root: directory.path().join("worktree"),
+                    branch: "synthetic-branch".into(),
+                    base_ref: "main".into(),
+                    base_commit: "synthetic".into(),
+                    created_by_ilium: true,
+                    created_at_unix: 0,
+                }),
+            )
+            .unwrap();
+        targets.push(("worktree", worktree));
+        app.set_screen_area(Rect::new(0, 0, 100, 40));
+        for (name, target) in targets {
+            app.open_context_menu(target, 2, 2);
+            let Mode::ContextMenu(menu) = &app.mode else {
+                panic!("{name} menu");
+            };
+            let layout = menu.layout();
+            for (row, visual_row) in layout.rows.iter().enumerate() {
+                if let crate::context_menu_layout::MenuRow::Action(index) = visual_row {
+                    assert_eq!(layout.action_at(row as u16), Some(*index), "{name}");
+                }
+            }
+            let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings)
+                })
+                .unwrap();
+            save_frame(&format!("tree-target-{name}"), &terminal);
+        }
+    }
+
+    #[test]
+    fn context_menu_visual_tree_groups_padding_and_short_screen_reachability() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("menu visual fixture".into(), project.path().to_path_buf());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        for (width, height) in [(100, 40), (80, 24), (40, 10)] {
+            app.set_screen_area(Rect::new(0, 0, width, height));
+            app.open_context_menu(pane, 2, 2);
+            let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                panic!("menu");
+            };
+            for (name, selected) in [("first", 0), ("last", menu.actions.len() - 1)] {
+                menu.selected_index = selected;
+                let layout = menu.layout();
+                let row = layout
+                    .row_for_action(selected)
+                    .expect("selected action is visible");
+                assert_eq!(layout.action_at(row), Some(selected));
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        draw_context_menu(
+                            frame,
+                            &menu,
+                            app.ui_settings.tree_order,
+                            &app.ui_settings,
+                        )
+                    })
+                    .unwrap();
+                let cell = &terminal.backend().buffer()[(menu.area.x + 1, menu.area.y + 1 + row)];
+                assert_eq!(Some(cell.bg), theme::selected_style().bg);
+                assert_eq!(cell.symbol(), " ", "selected rows retain left padding");
+                save_frame(&format!("tree-{width}x{height}-{name}"), &terminal);
+            }
+        }
+        app.set_screen_area(Rect::new(0, 0, 100, 40));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("menu");
+        };
+        let order = menu
+            .actions
+            .iter()
+            .position(|action| *action == crate::app::ContextMenuAction::OrderBy)
+            .unwrap();
+        menu.selected_index = order;
+        app.open_context_submenu(&mut menu, crate::app::ContextMenuAction::OrderBy);
+        let submenu = menu.submenu.as_ref().unwrap();
+        assert_eq!(
+            submenu.area.y,
+            menu.area.y + 1 + menu.layout().row_for_action(order).unwrap()
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_context_menu(frame, &menu, app.ui_settings.tree_order, &app.ui_settings)
+            })
+            .unwrap();
+        save_frame("tree-order-submenu", &terminal);
+    }
+
+    #[test]
+    fn context_menu_visual_terminal_uses_the_same_groups_and_selection() {
+        let mut actions = vec![
+            TerminalContextAction::ShowAgentDebugLog,
+            TerminalContextAction::ToggleAgentToolbar {
+                currently_visible: true,
+            },
+            TerminalContextAction::CopySelectionToClipboard,
+            TerminalContextAction::CopyLastSubmittedPromptToClipboard {
+                prompt: "synthetic prompt".into(),
+            },
+            TerminalContextAction::CopyLineToClipboard,
+            TerminalContextAction::CopyVisibleTerminalToClipboard,
+            TerminalContextAction::CopyFullTerminalHistoryToClipboard,
+            TerminalContextAction::CopyHistoryFilePathToClipboard {
+                path: "/synthetic/history.jsonl".into(),
+            },
+            TerminalContextAction::PasteClipboard,
+        ];
+        actions.sort_by_key(TerminalContextAction::menu_order);
+        let mut menu = TerminalPaneContextMenu {
+            pane_id: ROOT_ID,
+            source_line_text: "synthetic line".into(),
+            visible_contents: "synthetic screen".into(),
+            full_history: "synthetic history".into(),
+            selection_text: Some("synthetic selection".into()),
+            area: Rect::new(2, 2, 44, 17),
+            actions,
+            selected_index: 0,
+            row_offset: 0,
+            preparation_generation: 0,
+            _preparation_hold: None,
+        };
+        assert_eq!(
+            menu.actions.first(),
+            Some(&TerminalContextAction::CopySelectionToClipboard)
+        );
+        assert_eq!(
+            menu.actions.last(),
+            Some(&TerminalContextAction::ShowAgentDebugLog)
+        );
+        for icons in [true, false] {
+            let mut ui = crate::config::UiSettings::default();
+            ui.show_context_menu_icons = icons;
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| draw_terminal_pane_context_menu(frame, &menu, &ui))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(3, 3)].symbol(), " ", "top breathing room");
+            let separators = menu
+                .layout()
+                .rows
+                .iter()
+                .filter(|row| matches!(row, crate::context_menu_layout::MenuRow::Separator))
+                .count();
+            assert_eq!(separators, 3);
+            save_frame(
+                if icons {
+                    "terminal-icons"
+                } else {
+                    "terminal-text"
+                },
+                &terminal,
+            );
+        }
+        menu.area = Rect::new(0, 0, 40, 10);
+        menu.selected_index = menu.actions.len() - 1;
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_terminal_pane_context_menu(frame, &menu, &crate::config::UiSettings::default())
+            })
+            .unwrap();
+        save_frame("terminal-short-last", &terminal);
     }
 }

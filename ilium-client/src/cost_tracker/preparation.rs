@@ -877,7 +877,9 @@ mod tests {
             .unwrap();
         let stats_hold = statistics
             .try_reserve_external(JobCost {
-                input_bytes: 128 * MIB,
+                // The scan now reserves 64 MiB. Fill the unchanged 384 MiB
+                // statistics band so the receipt still blocks CPU admission.
+                input_bytes: 320 * MIB,
                 result_bytes: 0,
             })
             .unwrap();
@@ -923,8 +925,8 @@ mod tests {
         assert!(tracker.history.has_result());
         assert_eq!(tracker.history.entries().len(), 1);
         assert!(
-            quota.snapshot().input_bytes <= 320 * MIB,
-            "coordinator must release the original256MiB receipt before CPU admission"
+            quota.snapshot().input_bytes <= 512 * MIB,
+            "coordinator must release the original 64 MiB receipt before CPU admission"
         );
         tracker.settle_for_test(&input);
         assert_eq!(tracker.engine.as_ref().unwrap().history.entries().len(), 1);
@@ -1086,9 +1088,9 @@ mod tests {
         if ready {
             // Actual IO publication, before the coordinator has consumed it.
             done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert_eq!(quota.snapshot().input_bytes, 256 * MIB);
+            assert_eq!(quota.snapshot().input_bytes, 64 * MIB);
         } else {
-            assert_eq!(quota.snapshot().input_bytes, 256 * MIB + 4096);
+            assert_eq!(quota.snapshot().input_bytes, 64 * MIB + 4096);
         }
         let revision = tracker.history.revision();
         tracker.set_history_cache_path(Some(home.path().join("changed-cache.json")));

@@ -4139,6 +4139,18 @@ fn settings_control_row(
 ) -> Option<(Rect, String, u16)> {
     use crate::value_config::BoardNumber;
     let (virtual_y, label, label_width) = match state.tab {
+        SettingsTab::RemoteCompaction => {
+            let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
+            let view =
+                crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
+            let span = view.rows.iter().find(|span| span.row == current)?;
+            (
+                usize::from(span.control_line),
+                current.label().to_owned(),
+                span.control_x.saturating_sub(ROW_LEFT_INSET + 1),
+            )
+        }
+
         SettingsTab::Appearance => {
             let current_row =
                 *AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row)?;
@@ -4251,13 +4263,27 @@ pub(crate) fn settings_number_control(
     let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
     let (spec, text) = field.snapshot(app);
     let value = match field {
+        crate::value_settings::SettingsNumber::Remote(row) => {
+            use crate::remote_compaction_settings::RemoteCompactionRow;
+            match row {
+                RemoteCompactionRow::Threshold => format!("{text}%"),
+                RemoteCompactionRow::PauseTimeout => format!("{text} s"),
+                RemoteCompactionRow::Cooldown => format!("{text} min"),
+                RemoteCompactionRow::TailTokens
+                | RemoteCompactionRow::ProtectedToolTokens
+                | RemoteCompactionRow::SummarizerContextTokens => format!("{text} tokens"),
+                RemoteCompactionRow::ToolResultChars => format!("{text} chars"),
+                _ => text.clone(),
+            }
+        }
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
         crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
         crate::value_settings::SettingsNumber::Ui(
-            crate::value_settings::UiNumber::CompletedProgressHideAfter,
+            crate::value_settings::UiNumber::CompletedProgressHideAfter
+            | crate::value_settings::UiNumber::AutoFreezeAfter,
         ) => format!("{text} s"),
         _ => text.clone(),
     };
@@ -4393,9 +4419,7 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
         SettingsTab::Api => crate::app::ApiRow::ALL.len(),
-        SettingsTab::RemoteCompaction => {
-            crate::remote_compaction_settings_ui::rows(app).len()
-        }
+        SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::rows(app).len(),
         _ => 0,
     }
 }
@@ -5589,6 +5613,7 @@ mod number_control_tests {
                 SettingsTab::Inference,
                 SettingsTab::Sound,
                 SettingsTab::VoiceControl,
+                SettingsTab::RemoteCompaction,
             ] {
                 let state = SettingsState {
                     tab,
@@ -5734,6 +5759,7 @@ mod number_control_tests {
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
             SettingsTab::ResetPlanning,
+            SettingsTab::RemoteCompaction,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -7281,8 +7307,11 @@ mod tests {
             "settings-test".to_string(),
             std::path::PathBuf::from("/tmp"),
         );
-        let area = Rect::new(0, 0, 60, 100);
+        let content_height = appearance_view(&app.ui_settings, 0, 60).lines.len();
+        let area = Rect::new(0, 0, 60, u16::try_from(content_height).unwrap());
         assert_eq!(max_scroll(SettingsTab::Appearance, &app, 0, area), 0);
+        let overflow = Rect::new(0, 0, area.width, area.height - 1);
+        assert_eq!(max_scroll(SettingsTab::Appearance, &app, 0, overflow), 1);
     }
 
     #[test]

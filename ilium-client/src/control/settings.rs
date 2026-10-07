@@ -84,7 +84,12 @@ pub fn execute(app: &mut App, command: SettingsCommand) -> Result<ExecutionRecei
             ))
         }
         SettingsAction::PreviewSound => {
-            app.settings_preview_sound();
+            if !app.settings_preview_sound() {
+                return Err(app
+                    .status_message
+                    .clone()
+                    .unwrap_or_else(|| "Sound preview request was refused".into()));
+            }
             Ok(ExecutionReceipt::queued(
                 ilium_prompts::voice::VOICE_SETTINGS_REQUESTED_A_SOUND_PREVIEW,
             ))
@@ -1172,6 +1177,23 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn preview_control_reports_actual_refusal_instead_of_queued() {
+        let mut app = App::new("preview-refusal".into(), PathBuf::from("/tmp/project"));
+        app.outbound_admission = None;
+        let command = || SettingsCommand {
+            action: SettingsAction::PreviewSound,
+            path: None,
+            value: None,
+            direction: None,
+        };
+        let failure = execute(&mut app, command()).unwrap_err();
+        assert!(failure.contains("Request rejected before admission"));
+        app.sound_settings.source = SoundSourceKind::Muted;
+        assert_eq!(execute(&mut app, command()).unwrap_err(), "Sound is muted");
+        assert!(app.take_outbound_requests().is_empty());
+    }
 
     #[test]
     fn setting_values_are_normalized_without_accepting_unknown_paths() {

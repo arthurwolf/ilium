@@ -842,6 +842,69 @@ async fn decode_client_request<R: AsyncRead + Unpin>(
         .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))
 }
 
+/// The SAME event allocation enters this envelope before CPU publication. Its
+/// optional frame is populated exactly once by that CPU callback. Retirement
+/// metadata has its own small debit; large backings are covered first by the
+/// original codec retention, then by the shared persistent storage guard.
+struct StoredServerEvent {
+    frame: Option<ilium_ipc::EncodedFrame>,
+    event: ServerEvent,
+    storage_bytes: usize,
+    #[cfg(test)]
+    drop_notice: Option<encoded_storage_tests::OriginalDropNotice>,
+}
+
+#[cfg(test)]
+impl Drop for StoredServerEvent {
+    fn drop(&mut self) {
+        if let Some(notice) = &mut self.drop_notice {
+            notice.before_original_drop(&self.event, self.frame.as_ref());
+        }
+        // Fields drop in order: the notice runs AFTER the actual frame/event
+        // destructors, while RetirementEnvelope still owns all their guards.
+    }
+}
+
+/// A terminal refusal before attachment returns the original, not its string
+/// representation. Existing connection exits discard it explicitly by dropping
+/// this error. Producer-owned retry/cancellation custody is still required:
+/// these raw input allocations precede this function's admission boundary.
+pub(crate) struct ServerEventAdmissionRefusal {
+    pub(crate) reason: ilium_execution::RejectReason,
+    pub(crate) original: ServerEvent,
+}
+impl std::fmt::Debug for ServerEventAdmissionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ServerEventAdmissionRefusal")
+            .field("reason", &self.reason)
+            .field("original_kind", &std::mem::discriminant(&self.original))
+            .finish_non_exhaustive()
+    }
+}
+impl std::fmt::Display for ServerEventAdmissionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "server event admission refused: {:?}; exact original returned without delivery",
+            self.reason,
+        )
+    }
+}
+impl std::error::Error for ServerEventAdmissionRefusal {}
+
+fn unadmitted_server_event(
+    reason: ilium_execution::RejectReason,
+    original: ServerEvent,
+) -> ilium_ipc::IpcError {
+    // io::Error retains this typed source. A producer can recover the exact
+    // event by consuming/downcasting it; no original is replaced by a String.
+    ilium_ipc::IpcError::Io(std::io::Error::other(ServerEventAdmissionRefusal {
+        reason,
+        original,
+    }))
+}
+
 async fn write_server_event<W>(
     frame_writer: &mut FrameWriter<W>,
     mut event: ServerEvent,
@@ -851,8 +914,8 @@ async fn write_server_event<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    // Sample authoritative trigger settings before the worker, releasing the
-    // read lock before any CPU admission or potentially blocked output.
+    // Authority replacement is still raw-input preparation. Producers must arrange
+    // producer custody for the displaced value and for snapshot cancellation.
     if matches!(&event, ServerEvent::TextTriggersChanged { .. }) {
         let authority = state.ok_or_else(|| {
             ilium_ipc::IpcError::Io(std::io::Error::other(
@@ -862,23 +925,85 @@ where
         event = crate::text_trigger_config::snapshot(authority).await;
     }
     let preparation = codec_client(state, false)?;
-    let reservation = preparation
+    // Acquire the empty envelope before scarce codec credit. The raw event
+    // already exists; preattachment cancellation still needs producer custody.
+    let retirement = match preparation
+        .reserve_retirement::<StoredServerEvent>(std::mem::size_of::<StoredServerEvent>())
+        .await
+    {
+        Ok(retirement) => retirement,
+        Err(reason) => return Err(unadmitted_server_event(reason, event)),
+    };
+    let reservation = match preparation
         .reserve(ilium_execution::Lane::Cpu, SERVER_CODEC_COST)
         .await
-        .map_err(|error| {
-            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
-                "server codec admission: {error:?}"
-            )))
-        })?;
+    {
+        Ok(reservation) => reservation,
+        Err(reason) => return Err(unadmitted_server_event(reason, event)),
+    };
+    #[cfg(test)]
+    let drop_notice = encoded_storage_tests::take_original_notice(&event, &preparation);
+    let mut stored = retirement.attach(StoredServerEvent {
+        frame: None,
+        event,
+        storage_bytes: 0,
+        #[cfg(test)]
+        drop_notice,
+    });
+    // MUST precede submit: rejected publication, NotStarted and a delivered
+    // result abandoned in its receipt can all drop on the coordinating task.
+    // The outer Retained guard alone would release credit after enqueueing
+    // retirement, before the blocked CPU actually destroyed these originals.
+    stored.set_retention(reservation.retention());
     let encoded = preparation
         .run_reserved(reservation, move |_| {
-            let frame = ilium_ipc::encode_frame(&event)?;
-            Ok::<_, ilium_ipc::IpcError>((frame, event))
+            let frame = ilium_ipc::encode_frame(&stored.event)?;
+            let storage_bytes = stored
+                .event
+                .retained_bytes()
+                .checked_add(frame.retained_bytes())
+                .and_then(|bytes| {
+                    bytes.checked_add(std::mem::size_of::<ilium_execution::StorageAdmission>())
+                })
+                .and_then(|bytes| bytes.checked_add(2 * std::mem::size_of::<usize>()))
+                .ok_or_else(|| {
+                    ilium_ipc::IpcError::Io(std::io::Error::other(
+                        "encoded server event storage size overflow",
+                    ))
+                })?;
+            stored.frame = Some(frame);
+            stored.storage_bytes = storage_bytes;
+            #[cfg(test)]
+            encoded_storage_tests::observe_encoded_original(&stored);
+            Ok::<_, ilium_ipc::IpcError>(stored)
         })
         .await
         .map_err(|error| ilium_ipc::IpcError::Io(std::io::Error::other(error)))?;
-    frame_writer.write_encoded(&encoded.view().0).await?;
-    record_delivered_terminal_sequence(delivered_terminal_sequences, &encoded.view().1);
+    let (mut stored, result_retention) = encoded.into_parts();
+    // This drops only a reference to the same debit; the envelope already owns
+    // another reference and therefore also covers storage-wait cancellation.
+    drop(result_retention);
+    #[cfg(test)]
+    encoded_storage_tests::observe_storage_wait(&stored);
+    let storage = preparation
+        .reserve_storage(stored.storage_bytes)
+        .await
+        .map_err(|error| {
+            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                "server encoded storage admission: {error:?}"
+            )))
+        })?;
+    stored.set_storage_guard(storage);
+    stored.clear_retention();
+    frame_writer
+        .write_encoded(
+            stored
+                .frame
+                .as_ref()
+                .expect("successful encoder populated its frame"),
+        )
+        .await?;
+    record_delivered_terminal_sequence(delivered_terminal_sequences, &stored.event);
     Ok(())
 }
 
@@ -2015,3 +2140,7 @@ mod text_trigger_ordering_regressions {
         assert_newer_rules_survive_queued_old_event(true, false).await;
     }
 }
+
+#[cfg(test)]
+#[path = "encoded_storage_tests.rs"]
+mod encoded_storage_tests;

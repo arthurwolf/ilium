@@ -782,26 +782,63 @@ fn dispatch_multiline_prompt_action(app: &mut App, action: crate::modal::DialogA
     crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, modifiers)));
 }
 
+/// Returns a popup's content row, excluding all four frame edges.
+fn popup_content_row(area: Rect, position: Position) -> Option<u16> {
+    if position.x <= area.x
+        || position.x >= area.right().saturating_sub(1)
+        || position.y <= area.y
+        || position.y >= area.bottom().saturating_sub(1)
+    {
+        return None;
+    }
+    position.y.checked_sub(area.y.saturating_add(1))
+}
+
 fn handle_terminal_pane_context_menu_mouse(
     app: &mut App,
     mut menu: crate::terminal_context_menu::TerminalPaneContextMenu,
     mouse: MouseEvent,
 ) {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::TerminalPaneContextMenu(menu);
-        return;
-    }
+    menu.row_offset = menu.layout().row_offset;
     let position = Position::new(mouse.column, mouse.row);
-    if !menu.area.contains(position) || position.y < menu.area.y.saturating_add(1) {
-        app.mode = Mode::Normal;
+    if !menu.area.contains(position) {
+        app.mode = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            Mode::Normal
+        } else {
+            Mode::TerminalPaneContextMenu(menu)
+        };
         return;
     }
-    let action_index = usize::from(position.y - menu.area.y.saturating_add(1));
-    let Some(action) = menu.actions.get(action_index).cloned() else {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            menu.selected_index = menu.selected_index.saturating_sub(1);
+            app.mode = Mode::TerminalPaneContextMenu(menu);
+            return;
+        }
+        MouseEventKind::ScrollDown => {
+            menu.selected_index =
+                (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
+            app.mode = Mode::TerminalPaneContextMenu(menu);
+            return;
+        }
+        MouseEventKind::Moved | MouseEventKind::Down(MouseButton::Left) => {}
+        _ => {
+            app.mode = Mode::TerminalPaneContextMenu(menu);
+            return;
+        }
+    }
+    let Some(action_index) =
+        popup_content_row(menu.area, position).and_then(|row| menu.layout().action_at(row))
+    else {
         app.mode = Mode::TerminalPaneContextMenu(menu);
         return;
     };
     menu.selected_index = action_index;
+    if matches!(mouse.kind, MouseEventKind::Moved) {
+        app.mode = Mode::TerminalPaneContextMenu(menu);
+        return;
+    }
+    let action = menu.actions[action_index].clone();
     app.execute_terminal_context_action(action, menu);
 }
 
@@ -1398,12 +1435,51 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
 
 /// Handles an activated context-menu entry or dismisses a click outside.
 fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseEvent) {
+    menu.row_offset = menu.layout().row_offset;
+    if let Some(submenu) = menu.submenu.as_mut() {
+        submenu.row_offset = submenu.layout().row_offset;
+    }
     let position = Position::new(mouse.column, mouse.row);
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) {
+        let scroll_down = matches!(mouse.kind, MouseEventKind::ScrollDown);
+        if let Some(submenu) = menu
+            .submenu
+            .as_mut()
+            .filter(|submenu| submenu.area.contains(position))
+        {
+            submenu.selected_index = if scroll_down {
+                (submenu.selected_index + 1).min(submenu.items.len().saturating_sub(1))
+            } else {
+                submenu.selected_index.saturating_sub(1)
+            };
+            if let Some(reason) = submenu
+                .items
+                .get(submenu.selected_index)
+                .and_then(|item| item.disabled_reason.as_ref())
+            {
+                app.status_message = Some(reason.clone());
+            }
+        } else if menu.area.contains(position) {
+            menu.selected_index = if scroll_down {
+                (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1))
+            } else {
+                menu.selected_index.saturating_sub(1)
+            };
+            menu.submenu = None;
+        }
+        menu.hover_candidate = None;
+        app.mode = Mode::ContextMenu(menu);
+        return;
+    }
     if matches!(mouse.kind, MouseEventKind::Moved) {
         if let Some(submenu) = menu.submenu.as_mut() {
             if submenu.area.contains(position) {
-                let row = usize::from(position.y.saturating_sub(submenu.area.y.saturating_add(1)));
-                if position.y > submenu.area.y && row < submenu.items.len() {
+                let row = popup_content_row(submenu.area, position)
+                    .and_then(|row| submenu.layout().action_at(row));
+                if let Some(row) = row {
                     submenu.selected_index = row;
                     if let Some(reason) = &submenu.items[row].disabled_reason {
                         app.status_message = Some(reason.clone());
@@ -1415,8 +1491,9 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
             }
         }
         if menu.area.contains(position) {
-            let row = usize::from(position.y.saturating_sub(menu.area.y.saturating_add(1)));
-            if position.y > menu.area.y && row < menu.actions.len() {
+            let row =
+                popup_content_row(menu.area, position).and_then(|row| menu.layout().action_at(row));
+            if let Some(row) = row {
                 menu.selected_index = row;
                 let action = menu.actions[row];
                 if action.has_submenu() {
@@ -1433,6 +1510,8 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
                     menu.submenu = None;
                     menu.hover_candidate = None;
                 }
+            } else {
+                menu.hover_candidate = None;
             }
         } else {
             menu.hover_candidate = None;
@@ -1447,12 +1526,12 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
 
     if let Some(submenu) = &menu.submenu {
         if submenu.area.contains(position) {
-            let content_top = submenu.area.y.saturating_add(1);
-            if position.y < content_top {
+            let Some(item_row) = popup_content_row(submenu.area, position)
+                .and_then(|row| submenu.layout().action_at(row))
+            else {
                 app.mode = Mode::ContextMenu(menu);
                 return;
-            }
-            let item_row = usize::from(position.y - content_top);
+            };
             let Some(item) = submenu.items.get(item_row) else {
                 app.mode = Mode::ContextMenu(menu);
                 return;
@@ -1474,20 +1553,13 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
         app.mode = Mode::Normal;
         return;
     }
-    // The block's top border occupies `menu.area.y` itself, so the first
-    // action row starts one line below it. A plain `saturating_sub` would
-    // silently clamp a click on that border row to `0`, misattributing it
-    // to the first action instead of treating it as a click on the frame.
-    let content_top = menu.area.y.saturating_add(1);
-    if position.y < content_top {
+    // Frame, padding and separators never dispatch a command.
+    let Some(item_row) =
+        popup_content_row(menu.area, position).and_then(|row| menu.layout().action_at(row))
+    else {
         app.mode = Mode::ContextMenu(menu);
         return;
-    }
-    let item_row = (position.y - content_top) as usize;
-    if item_row >= menu.actions.len() {
-        app.mode = Mode::ContextMenu(menu);
-        return;
-    }
+    };
     menu.selected_index = item_row;
     app.select_node(menu.target);
     let action = menu.actions[item_row];
@@ -2131,6 +2203,17 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
         crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
+    // Invalidate before header/sidebar/editor early returns: the issue-row
+    // handler below only sees pointer events inside the content area.
+    if mouse.kind != MouseEventKind::Moved
+        || state.tab != crate::app::SettingsTab::Animations
+        || state.animation_source_tab != crate::animation_plugins::AnimationSourceTab::Plugin
+        || state.animation_fullscreen
+        || state.plugin_editor.is_some()
+        || !layout.content_area.contains(position)
+    {
+        app.clear_plugin_issue_hover();
+    }
     // An open Apply confirmation owns the pointer: everything under it is inert.
     if state.tab == crate::app::SettingsTab::Optimization
         && app.optimization.pending_apply.is_some()
@@ -3099,16 +3182,17 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app,
                 ) {
                     state.selected_row = hit.index;
+                    // A label/banner click only selects the row, but still
+                    // retains the settings mode taken by the mouse dispatcher.
+                    app.mode = Mode::Settings(state);
                     if let crate::remote_compaction_settings_ui::HitAction::Adjust(direction) =
                         hit.action
                     {
-                        app.mode = Mode::Settings(state);
                         app.settings_adjust_remote_compaction_row(hit.row, direction);
                     } else if let crate::remote_compaction_settings_ui::HitAction::OpenChoice(
                         target,
                     ) = hit.action
                     {
-                        app.mode = Mode::Settings(state);
                         app.begin_settings_choice_dialog(
                             crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
                         );
@@ -4029,14 +4113,18 @@ mod tree_order_context_mouse_tests {
             .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .unwrap();
         app.open_context_menu(pane, 2, 2);
-        let (order_column, order_row) = match &app.mode {
+        let (order_column, order_row) = match &mut app.mode {
             Mode::ContextMenu(menu) => {
                 let index = menu
                     .actions
                     .iter()
                     .position(|action| *action == crate::app::ContextMenuAction::OrderBy)
                     .unwrap();
-                (menu.area.x + 1, menu.area.y + 1 + index as u16)
+                menu.selected_index = index;
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + menu.layout().row_for_action(index).unwrap(),
+                )
             }
             _ => panic!("context menu should be open"),
         };
@@ -4052,7 +4140,10 @@ mod tree_order_context_mouse_tests {
                     .iter()
                     .position(|tree_order| *tree_order == crate::config::TreeOrder::NameAscending)
                     .unwrap();
-                (submenu.area.x + 1, submenu.area.y + 1 + index as u16)
+                (
+                    submenu.area.x + 1,
+                    submenu.area.y + 1 + submenu.layout().row_for_action(index).unwrap(),
+                )
             }
             _ => panic!("parent context menu should remain open"),
         };
@@ -4083,7 +4174,10 @@ mod tree_order_context_mouse_tests {
                             )
                     })
                     .unwrap();
-                (menu.area.x + 1, menu.area.y + 1 + index as u16)
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + menu.layout().row_for_action(index).unwrap(),
+                )
             }
             _ => panic!("context menu should open"),
         };
@@ -4104,7 +4198,10 @@ mod tree_order_context_mouse_tests {
         let (item_column, item_row) = match &app.mode {
             Mode::ContextMenu(menu) => {
                 let submenu = menu.submenu.as_ref().expect("agent submenu");
-                (submenu.area.x + 1, submenu.area.y + 2)
+                (
+                    submenu.area.x + 1,
+                    submenu.area.y + 1 + submenu.layout().row_for_action(1).unwrap(),
+                )
             }
             _ => panic!("context menu should remain open"),
         };
@@ -4114,6 +4211,86 @@ mod tree_order_context_mouse_tests {
             app.status_message.as_deref(),
             Some("Checking Git repository…")
         );
+    }
+
+    #[test]
+    fn context_menu_frame_padding_and_separators_never_execute_commands() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("menu hit fixture".into(), project.path().to_path_buf());
+        app.set_screen_area(Rect::new(0, 0, 100, 40));
+        app.open_context_menu(ROOT_ID, 2, 2);
+        let Mode::ContextMenu(menu) = &app.mode else {
+            panic!("menu");
+        };
+        let area = menu.area;
+        let mut points = vec![
+            (area.x, area.y + 2),
+            (area.right() - 1, area.y + 2),
+            (area.x + 2, area.y),
+            (area.x + 2, area.bottom() - 1),
+        ];
+        for (row, visual) in menu.layout().rows.iter().enumerate() {
+            if !matches!(visual, crate::context_menu_layout::MenuRow::Action(_)) {
+                points.push((area.x + 2, area.y + 1 + row as u16));
+            }
+        }
+        for (column, row) in points {
+            click(&mut app, column, row);
+            let Mode::ContextMenu(menu) = &app.mode else {
+                panic!("decoration dispatched at {column},{row}");
+            };
+            assert_eq!(menu.selected_index, 0);
+            assert!(menu.submenu.is_none());
+        }
+    }
+
+    #[test]
+    fn context_menu_wheel_reaches_last_action_and_hover_keeps_rows_still() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("menu scroll fixture".into(), project.path().to_path_buf());
+        app.set_screen_area(Rect::new(0, 0, 40, 10));
+        app.open_context_menu(ROOT_ID, 0, 0);
+        let count = match &app.mode {
+            Mode::ContextMenu(menu) => menu.actions.len(),
+            _ => panic!("menu"),
+        };
+        for _ in 0..count {
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::ScrollDown,
+                    column: 3,
+                    row: 3,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+        }
+        let (selected, row, offset) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                assert_eq!(menu.selected_index, count - 1);
+                let layout = menu.layout();
+                (
+                    menu.selected_index,
+                    menu.area.y + 1 + layout.row_for_action(menu.selected_index).unwrap(),
+                    layout.row_offset,
+                )
+            }
+            _ => panic!("wheel must not dispatch"),
+        };
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 3,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::ContextMenu(menu) = &app.mode else {
+            panic!("hover");
+        };
+        assert_eq!(menu.selected_index, selected);
+        assert_eq!(menu.layout().row_offset, offset);
     }
 }
 
@@ -4176,7 +4353,7 @@ mod markdown_board_context_mouse_tests {
                     .expect("Markdown editor menu should contain create-board action");
                 (
                     menu.area.x + 1,
-                    menu.area.y + 1 + u16::try_from(action_index).unwrap(),
+                    menu.area.y + 1 + menu.layout().row_for_action(action_index).unwrap(),
                 )
             }
             _ => panic!("right click should open the tree context menu"),

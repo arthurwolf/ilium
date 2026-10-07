@@ -144,6 +144,7 @@ pub fn set_editor_autosave_delay(settings: &mut EditorSettings, text: &str) -> R
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarNumber {
+    AutoFreezeAfter,
     VoiceVolume,
     LastPromptLines,
     ProgressLines,
@@ -155,7 +156,8 @@ pub enum ScalarNumber {
     NotificationCoalesce,
 }
 impl ScalarNumber {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
+        Self::AutoFreezeAfter,
         Self::VoiceVolume,
         Self::LastPromptLines,
         Self::ProgressLines,
@@ -168,6 +170,7 @@ impl ScalarNumber {
     ];
     pub fn spec(self) -> NumberSpec {
         let (minimum, maximum) = match self {
+            Self::AutoFreezeAfter => (1, i128::from(i64::MAX)),
             Self::VoiceVolume => (0, 100),
             Self::LastPromptLines => (
                 i128::from(config::MIN_LAST_PROMPT_MAX_LINES),

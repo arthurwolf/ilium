@@ -303,7 +303,38 @@ mod tests {
             press(&mut app, KeyCode::Left);
             assert_eq!(app.remote_compaction_settings.technique(target), start);
             press(&mut app, KeyCode::Enter);
+            let crate::app::Mode::ValueDialog(host) = &app.mode else {
+                panic!("Enter opens the technique catalogue");
+            };
+            let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
+                panic!("technique choice dialog");
+            };
+            assert_eq!(choice.selected_id.as_deref(), Some(start.id()));
+            let current = choice
+                .options()
+                .iter()
+                .position(|option| option.id == start.id())
+                .unwrap();
+            let wanted = choice
+                .options()
+                .iter()
+                .position(|option| option.id == next.id())
+                .unwrap();
+            for _ in 0..current.abs_diff(wanted) {
+                press(
+                    &mut app,
+                    if wanted > current {
+                        KeyCode::Down
+                    } else {
+                        KeyCode::Up
+                    },
+                );
+            }
+            press(&mut app, KeyCode::Enter);
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, crate::app::Mode::Settings(_)));
             assert_eq!(app.remote_compaction_settings.technique(target), next);
+            assert_eq!(saved(&directory).technique(target), next);
         }
 
         let threshold = index_of(RemoteCompactionRow::Threshold);
@@ -377,6 +408,8 @@ mod tests {
         // A click inside the box but off the button only selects the row.
         click(&mut app, content.x + 6, content.y + banner.first_line + 1);
         assert!(!app.remote_compaction_settings.privacy_banner_dismissed);
+        assert!(matches!(&app.mode, crate::app::Mode::Settings(state)
+            if state.tab == crate::app::SettingsTab::RemoteCompaction && state.selected_row == 0));
         click(
             &mut app,
             content.x + banner.control_x + 1,
@@ -402,38 +435,50 @@ mod tests {
         click(&mut app, content.x + 8, content.y + enabled.first_line);
         assert!(app.remote_compaction_settings.enabled);
 
-        let threshold = span(RemoteCompactionRow::Threshold);
-        click(
-            &mut app,
-            content.x + threshold.control_x + 4,
-            content.y + threshold.control_line,
-        );
+        let control_geometry = |app: &App, row: RemoteCompactionRow| {
+            let crate::app::Mode::Settings(state) = &app.mode else {
+                panic!("settings fixture");
+            };
+            let index = crate::remote_compaction_settings_ui::rows(app)
+                .iter()
+                .position(|candidate| *candidate == row)
+                .unwrap();
+            crate::settings_ui::settings_number_control(content_area(app), app, state, index)
+                .map(|(_, control)| control.geometry())
+                .or_else(|| {
+                    crate::settings_ui::settings_choice_control(
+                        content_area(app),
+                        app,
+                        state,
+                        index,
+                    )
+                    .map(|(_, control)| control.geometry())
+                })
+                .unwrap()
+        };
+        let threshold = control_geometry(&app, RemoteCompactionRow::Threshold);
+        click(&mut app, threshold.next.x, threshold.next.y);
         assert_eq!(app.remote_compaction_settings.threshold_percent, 66);
-        click(
-            &mut app,
-            content.x + threshold.control_x,
-            content.y + threshold.control_line,
-        );
-        click(
-            &mut app,
-            content.x + threshold.control_x,
-            content.y + threshold.control_line,
-        );
+        for _ in 0..2 {
+            let threshold = control_geometry(&app, RemoteCompactionRow::Threshold);
+            click(&mut app, threshold.previous.x, threshold.previous.y);
+        }
         assert_eq!(app.remote_compaction_settings.threshold_percent, 64);
         // Clicking the description line under a stepper never changes it.
+        let threshold = span(RemoteCompactionRow::Threshold);
         click(
             &mut app,
             content.x + threshold.control_x + 4,
             content.y + threshold.control_line + 1,
         );
         assert_eq!(app.remote_compaction_settings.threshold_percent, 64);
+        assert!(matches!(app.mode, crate::app::Mode::Settings(_)));
 
-        let claude = span(RemoteCompactionRow::Technique(TechniqueTarget::Claude));
-        click(
-            &mut app,
-            content.x + claude.control_x + 5,
-            content.y + claude.control_line,
+        let claude = control_geometry(
+            &app,
+            RemoteCompactionRow::Technique(TechniqueTarget::Claude),
         );
+        click(&mut app, claude.value.x, claude.value.y);
         assert_eq!(
             app.remote_compaction_settings.claude_technique,
             Technique::Codex

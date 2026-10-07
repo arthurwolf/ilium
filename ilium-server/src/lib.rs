@@ -20,6 +20,7 @@ mod agent_identity_guard;
 mod agent_prompt;
 pub mod config;
 mod config_refresh;
+mod chatroom_router;
 mod detection;
 pub mod error;
 mod execution;
@@ -297,6 +298,7 @@ pub async fn run_with_resources(
     let http_api_task =
         AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
+    let chatroom_router_task = AbortOnDropHandle::new(chatroom_router::spawn(Arc::clone(&state)));
     let mut snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
     let session_backup_task = AbortOnDropHandle::new(session_backups::spawn(
@@ -319,6 +321,7 @@ pub async fn run_with_resources(
     git_status_task.abort();
     http_api_task.abort();
     scheduled_input_task.abort();
+    chatroom_router_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
     }

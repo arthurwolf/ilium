@@ -246,6 +246,180 @@ formatting checked, with five native cases authored but not yet executed.
 Later service-startup rollback and complete client shutdown remain separate
 integration and verification requirements.
 
+Canonical bank shutdown now retains the actual `ClientExecution` in one shared
+custody slot, observed by the existing runtime blocking task. A bounded transfer
+acknowledgement separates observation from accepting its result. Deadline or
+join refusal returns `ClientExecutionShutdownError` inside the public I/O error;
+the caller can inspect its native report and repeat background cleanup on the
+same bank. Observer-construction panics return that same typed custody instead
+of unwinding the bank. Canceling an accepted observation leaves that task with the original owner
+until physical/admitted shutdown completes, including the original quota charges.
+It creates no replacement execution bank or supervisor. Final root aggregation
+keeps an earlier client error alongside execution custody in
+`ExecutionShutdownFailure`, rather than losing the latter through `Result::and`.
+Other cleanup aggregation and complete App disposal remain separate gaps.
+
+The original real-CPU deadline case reproduced the intended missing-custody
+assertion. Eight native component cases now pass: same-bank deadline retry,
+cancellation before observation, cancellation with a blocked CPU callback,
+observer panic, prior-error aggregation with a live retirement reservation, and
+public Send/Sync error retention, plus queued cancellation during runtime shutdown
+and observer-construction panic. The queued case saturates Tokio's blocking pool
+at one thread: the already accepted observer runs after runtime shutdown, and the
+same tenant stays charged until physical cleanup. This disproves the initial
+review suspicion of accepted queued callbacks being discarded in this path.
+The construction-panic case reproduced its intended assertion before correction.
+The isolated one-CPU fixture uses the real
+execution foundation and Tokio; it excludes production process quotas and the
+complete App graph. Its error adapter includes the exact production aggregation
+helper and selected terminal-error variant, rather than the whole error enum.
+All four captured input hashes were unchanged during the final run. Evidence is
+retained at `/home/arthur/.local/share/ilium-bank-shutdown-component-20261007/`.
+The canonical client library check passed in 17.15 s with 18 warnings; scoped
+formatting passed before the construction-panic correction. Independent ownership
+review has a retained correction addendum; full test-target qualification,
+strict lint, release and runtime/performance acceptance remain outstanding.
+A fresh canonical all-target check reached the client library with 18 warnings
+but exceeded its 110-second command budget (exit 124). That attempt does not
+establish all-target compilation or a source/compiler failure.
+
+Sound-preview publication has one admission-status owner shared by settings,
+the onboarding signature preview and the sound studio. Control commands return
+the actual refusal instead of unconditionally claiming a queued request.
+Accepted requests are reported as requested, rather than claiming playback. The original
+refusal assertion reproduced; three exact-method component cases pass using real
+bounded request admission and a physically joined isolated CPU bank. The minimal
+App adapter includes the complete retained-byte visitor but excludes parser
+barriers and the full settings/onboarding graph. Additional canonical caller
+tests compile in the canonical client test target (15.79 s, exit 0). The first
+compiler attempt rejected private-field accesses; the tests now use the existing
+test drain. Full native caller execution remains unqualified.
+Evidence is retained at
+`/home/arthur/.local/share/ilium-sound-preview-admission-20261007/`.
+The UI's synchronous selected-file check, startup sound/device discovery and
+server playback-result delivery still require worker integration and full runtime
+qualification; this status correction does not complete the audio boundary.
+
+Startup sound scanning and input/output device enumeration now run as one finite
+job on the existing client I/O lane after bank construction. Startup awaits its
+typed receipt instead of executing filesystem and native-device calls on the
+runtime thread. Existing enumeration-error logging and empty-list fallback are
+preserved. Cancellation requests stop between native phases; a blocked native
+call retains its actual job credit until return. No additional bank or thread is
+created. One client/job admits 64 MiB each for working and result storage; a
+capacity-based audit rejects an oversized catalogue before UI installation.
+The same retained result charge moves into the final App field, after both sound
+discovery and device-name vectors in destruction order. It remains local until
+the originals are installed, including failures during intermediate startup.
+This conservatively retains the whole declaration through UI lifetime.
+
+Sound discovery also shares a 65,536-entry traversal budget across roots and
+recursive calls, counting unsupported files, directories and failed entries.
+Exhaustion stops further traversal and sets the existing UI truncation flag;
+finishing exactly at the limit does not report truncation. One additional
+iterator entry may be yielded to establish that more work exists; its metadata
+and path are not inspected. The playable-file
+and depth limits remain in place. This bounds entry inspection, not time spent
+inside a blocking filesystem call or environment-root/path-byte allocations.
+All 20 sound-library native tests, sound-crate strict Clippy, scoped formatting
+and the affected release-library build pass. Three new small-budget real-file
+fixtures cover nested unsupported entries, shared roots and exact completion;
+they do not exercise 65,536 actual entries or provide an original failing
+regression run. Independent source review found no new correctness defect.
+Evidence: `/home/arthur/.local/share/ilium-sound-traversal-budget-20261007/`.
+
+The same shared scan owner now caps retained sound text at 8 MiB, charging actual
+capacities of paths, canonical deduplication identities, display names and
+collection strings before insertion. Checked arithmetic refuses overflow.
+Path/name expansion is screened before display conversion and collection cloning;
+canonicalization and directory iteration can still allocate native scratch before
+validation. A refused candidate does not enter either the identity set or sound
+vector. Container slots remain bounded separately by the 4,096-sound limit.
+The existing truncation notice reports text refusal, and ordinary duplicates do
+not consume text twice. Platform root/environment allocation and root-directory
+storage remain outside this text budget; this is not a complete process-memory
+or native-host bound.
+After source review, remaining-credit checks run after supported-file filtering
+and canonical deduplication, preserving skipped entries at exhausted credit.
+Extension matching remains case-insensitive without allocating a lowercase copy.
+All 24 native sound tests, scoped strict Clippy/formatting and the affected release
+library build pass. Four new fixtures cover text refusal, actual-capacity debit,
+exact/overflow admission and duplicate/unsupported entries at exhausted credit.
+Evidence: `/home/arthur/.local/share/ilium-sound-text-budget-20261007/`.
+
+Platform sound-root candidates now share a 64-root and 256 KiB allocated-text
+budget before retained vector insertion. The Linux XDG list is rejected when its
+encoded length exceeds 256 KiB, before splitting into components. Ordinary
+platform ordering and user-root fallback remain unchanged; admission refusal
+sets the final truncation notice without preventing accepted roots from scanning.
+The retained root deduplication set contains only admitted candidates; count and
+text caps bound its copied paths. Root filtering may release candidates without
+reusing their conservative credit. Environment reads and native candidate path
+construction still happen before validation; these are not a hard transient
+allocation, native-host or filesystem-blocking-time bound.
+All 30 Linux native sound tests, scoped strict Clippy/formatting and the release
+library build pass. Six root fixtures exercise count/capacity/overflow refusal,
+accepted-root scanning and oversized/ordinary XDG lists without global environment
+mutation. Source review covers the root builder; non-Linux branches have not been
+compiled or executed in this qualification. Evidence:
+`/home/arthur/.local/share/ilium-sound-roots-budget-20261007/`.
+
+Input/output device catalogue preparation now shares one bounded collector:
+256 processed devices, 4 KiB per formatted name and 64 KiB aggregate allocated
+name capacity per direction. Formatting writes into a checked writer instead of
+first constructing an unbounded `to_string()` result. Each chunk is checked
+before reservation/append, and allocated capacity is validated before retention.
+One additional iterator item may establish count overflow without formatting it.
+Complete admitted names preserve ordinary sorting and deduplication. Refusal
+returns a fixed typed error, so the existing startup error log/empty fallback
+remains truthful; a partial catalogue is never reported as complete. Native host
+construction, iterator internals and Display implementation scratch remain
+outside this bound. Stream/callback ownership, provider execution and latency
+are unchanged by this catalogue preparation boundary.
+All 53 voice-library native tests pass, including six new collector fixtures for
+sorted deduplication, infinite enumeration/count refusal, oversized names, shared
+text exhaustion, exact limits and rejected formatting chunks. Scoped strict
+Clippy/formatting pass. These fixtures exercise original bounded preparation
+without requiring real host-device enumeration; native-host/runtime and full
+client qualification remain separate requirements.
+The affected voice release-library build also passes (93 s). Independent review
+found no new catalogue defect and identified the separate saved-name
+`find_device` enumeration as unbounded at that checkpoint; the following
+integration applies the same preparation limits. Evidence:
+`/home/arthur/.local/share/ilium-device-catalogue-budget-20261007/`.
+
+Saved-name selection now uses the same checked name preparation in one pass,
+returning the original native device owner at the first matching name. It does
+not clone the device or enumerate again. Discarded preceding names consume the
+64 KiB aggregate preparation budget, bounding formatting work as well as retained
+text; processed-device and per-name caps match catalogue preparation. Oversized
+requested names fail before advancing the iterator. Missing names preserve the
+existing named-device error, while an exhausted budget returns explicit resource
+refusal. The default-device path for absent/blank configuration is unchanged.
+Native host/iterator/Display internals remain outside these preparation limits.
+All 58 native voice tests, scoped strict Clippy/formatting and the affected release
+library build pass. Five new lookup tests cover original-allocation return and
+early termination, empty/missing names, infinite scans, oversized requests and
+cumulative discarded-name preparation. Actual native-host selection and full
+client/runtime qualification remain unverified. Evidence:
+`/home/arthur/.local/share/ilium-device-lookup-budget-20261007/`.
+Current canonical client library/test-target compilation also passes (85 s,
+existing warnings). Independent source review found no concrete lookup defect;
+one extra device may be yielded before count refusal and native enumeration
+starts before requested-name helper validation. This compiler check covers the
+current callers but does not execute full App/native-host behavior or establish
+an immutable whole-workspace qualification.
+
+This is an offloading and ownership integration, not proof of capped upstream
+allocation: environment-root collection, filesystem traversal scratch and native
+audio-host allocation still require producer bounds and measurement. The existing
+startup dialog also writes directly before presenter ownership begins. Four
+native I/O/admission/cancellation/capacity tests pass against the complete original
+module and actual dependency libraries. Canonical client library/test-target
+compilation passes (77 s); complete App native execution, actual host enumeration,
+strict lint, release and live behavior remain unqualified. Qualification is recorded under
+`/home/arthur/.local/share/ilium-startup-audio-worker-20261007/`.
+
 The complete client ownership migration is not qualified yet. The latest
 isolated all-target check reached the client and reported 163 error records
 and 19 warnings; all 2,108 frozen inputs matched their retained originals.
@@ -255,6 +429,176 @@ convert cursor coordinates, borrow editor paths, retain the declared request
 byte bound and let the durable editor writer borrow its retiring source on
 I/O. Their exact source patches are verified, but compilation and native
 persistence, ordering and final-disposal checks remain outstanding.
+
+The canonical client library check on 2026-10-07 passed (`cargo check -p
+ilium-client --lib --offline --locked -j 1`, 26.15 seconds), with 18 library
+warnings. This check used the existing target and current canonical sources;
+it is distinct from the private value-owner candidate's all-target failures.
+It does not compile the test target or qualify strict lint, release or runtime
+behavior. The log is retained in
+`/var/tmp/ilium-worker-server-retirement-canonical-20261007/client-bounded-check.log`.
+An independent canonical-only client audit covers the eleven requested areas
+and records 43 unchanged source hashes at
+`/home/arthur/.local/share/ilium-worker-client-audit-20261007/README.md`.
+It identifies six prioritized gaps: bank shutdown custody, zero-request flush
+custody, modal paste replay, CPU save capture, startup discovery and truthful
+Sound preview publication. Server-only boundaries are explicitly excluded from
+that client evidence. The zero-request native regression attempt hit its
+120-second limit before a test result. A subsequent native component harness
+compiled the canonical shutdown module and exact FIFO-publication code. Both
+zero-request pending/closed receipt cases reached their intended original
+assertions, then passed after correcting the final-custody predicate; fixture
+banks physically joined. Source hashes were unchanged within each run. Evidence
+is retained at `/home/arthur/.local/share/ilium-zero-barrier-component-20261007/`.
+This harness excludes the complete App and codec-capture path, so it does not
+qualify the full client test target.
+An extended component run also compiles the complete canonical FIFO sender and
+request-capacity admission functions. Four original test bodies pass: the two
+empty-batch cases, full-queue cancellation, and closed-writer refusal with
+additional cleanup originals. They verify allocation identity, unchanged
+admission debits, overlapping-batch refusal and preservation of the earlier
+cleanup error. The fixture uses actual execution banks, Tokio channels and
+retained request guards; its notification service and selected `TerminalSetup`
+error-variant adapter exclude the complete process/error graph. All five input
+hashes remained unchanged during the run, and fixture banks physically joined.
+The native log and dependency/source hashes are retained at
+`/home/arthur/.local/share/ilium-request-cancellation-component-20261007/gate-002/`.
+The subsequent canonical Cargo-emitted client library binary executed all six
+request/flush cases, including the two stream/codec cases, successfully. The
+same scoped run passed eight bank-shutdown, four startup-audio, three App
+preview, two onboarding and one control-publication cases: 24 total. All 1,229
+captured source hashes remained unchanged. Native linking used an existing
+hash-verified ONNX Runtime 1.24.2 library through child-only aliases; no runtime
+was installed. Evidence is retained at
+`/home/arthur/.local/share/ilium-worker-client-native-integration-20261007/gate-002/terminal-audit.json`.
+
+Whole-client acceptance remains open. The broader run of that same binary
+timed out after 174.06 seconds, without a final libtest summary. Partial output
+records 2,658 passing, 26 failing and 40 ignored cases, including startup,
+presentation, parser-admission, cost-preparation and animation/settings
+failures. These partial counts are not final suite results. One animation UI
+paint/hit case ran over 60 seconds. Source, binary and runtime hashes stayed
+stable during the run; owned children were reaped and aliases removed. The
+exact failed cases require diagnosis before another acceptance run. Evidence:
+`/home/arthur/.local/share/ilium-worker-client-native-integration-20261007/gate-003/terminal-audit.json`.
+Workspace lint/formatting, affected release artifacts, real terminal behavior
+and matched performance measurements remain separate outstanding gates.
+
+Follow-up native diagnosis reproduced obsolete test assumptions in scan-debit
+sizes, aggregate-client registration and the presentation receipt sequence.
+Fixture corrections leave production limits unchanged: the history-drain test
+fills the same admission bands and requires the old scan receipt to release
+before CPU admission; startup counts each actual aggregate/general/location
+identity; presentation distinguishes physical join from surviving ticket
+custody and consumes uncertain-frame custody before the terminal error.
+Fresh binaries pass all five startup cases, seven history cases and all fifteen
+presentation cases, including resize/diff-base, FIFO output, cancellation,
+uncertainty, physical exit and last-owner allocation disposal. Nine incidental
+semantic-presentation cases also pass. All 1,229 captured sources stayed stable
+within each qualification run. Evidence is retained under the same native
+integration directory in `gate-006/terminal-audit.json` and
+`gate-007/terminal-audit.json`. The latter harness initially rejected its count
+because Rust's substring filter selected nine additional cases; native exit was
+zero and the audit confirms every required case passed. No rerun was needed.
+Other broad-suite failures and its long-running animation case remain unresolved.
+
+Further exact diagnosis separates obsolete settings fixtures from production
+errors. Four corrected fixture cases pass in a fresh binary without changing
+production controls or limits (`gate-009/result.json`). Remote-compaction
+choice options now use the same stable `Technique::id()` values accepted by
+the save parser. Its pointer dispatcher restores Settings ownership even when
+a hit only selects the privacy-banner row. All twelve remote-compaction and
+fifteen settings-choice native cases pass with acknowledged commit and disk
+readback (`gate-010/terminal-audit.json`, 1,229 source hashes unchanged).
+These focused checks do not qualify the whole client, release or live behavior.
+
+The next canonical client all-target compilation passes (`gate-011`, 1,229
+source hashes unchanged). Strict Clippy exits 101 in the ambient dependency:
+Growth default/clamp/precedence expressions, the terrain multiple check, and
+Wind's indexed loop and nine-argument function. This does not establish clean
+client lint. The 27-record consumer census confirms active stream/location
+storage guards, shared completion wakes and clipboard acknowledgement
+collectors; unread lifetime guards must not be removed. Two separate
+JavaScript-extension integration warnings were referred to their owner.
+The document-window worker's redundant notification alias/accessor is removed;
+its completion callback retains the actual wake. The fresh all-target compiler
+passes (`gate-012`). Its first native compile reached the overall deadline;
+the native-only `gate-013` then emitted a fresh binary. The exact inventory was
+two window and three syntax cases; all five pass, including physical CPU
+publication, retained emitted-frame ownership, cross-line syntax and unsplit
+70 KiB lines. The count mismatch was a harness failure and was reconciled against
+the unchanged native binary without another compilation. Receipt:
+`gate-013/native-followup/terminal-audit.json`. Workspace tests, release, PTY and
+matched performance remain open.
+
+The canonical Markdown caller inventory confirms that `parse_bounded`, layout
+preparation and image decoding are reached only inside CPU-bank callbacks;
+image reads occur in the I/O stage. Synchronous `parse` callers are test-only.
+UI drawing consumes the installed prepared document. This source inventory
+does not establish large-document latency: bounded source capture still copies
+lines on the event loop. Separately, accepted editor saves scan all lines on
+the UI and clone them after ordered-writer admission. Replacing this with
+stale-result recapture would discard the accepted revision when edits arrive;
+save offloading requires an immutable original-revision ownership boundary.
+The older private editor candidate requires a vendored textarea storage-scan
+API and broad original-model loan plumbing. Its global input barrier serializes
+all editor operations and can refuse a second save while capture is pending;
+that is not present in canonical behavior. It remains uncompiled source-only
+proposal evidence, not a drop-in save fix. The exact dependency and caller map
+is `editor-source-integration-set.jsonl` in the inventory directory below.
+The eleven-area inventory and precise Markdown amendment are retained under
+`~/.local/share/ilium-worker-whole-goal-audit-20261007/`. Historical qualification
+limitations in that inventory are leads until current receipts are reconciled.
+
+Text Trigger live previews now have a per-App finite owner on the existing
+shared CPU bank. The UI copies admitted draft chunks up to 64 KiB/256 sample
+lines per turn; regex compilation, matching, highlighting and reply-loop checks
+run on CPU threads. Draft identity and semantic revision fence publication;
+previous immutable output remains visible during preparation. Captures and
+outputs have independent retirement admission, accepted receipts remain owned
+through cancellation, and transient refusal retries the same captured job.
+Limits cover two jobs, 256 KiB each for regexp/message, 1 MiB/16,384 sample lines
+and 2 MiB preview text. Regex AST/compiler scratch remains an opaque allocation
+peak outside the cooperative job declaration; this is not a measured RSS bound.
+Shutdown closes the preview owner without waiting, collects its receipts while
+the bank enforces the physical-exit deadline, and reports lost or unsettled
+receipts. Config writes retain their separate ordered acknowledgement and exact
+draft dismissal fence. This caller integration is source-only pending compilation
+and focused native worker, rendering and persistence-readback checks.
+Two bounded native-compile attempts timed out before emitting a binary;
+zero requested cases ran. The second captured 1,231 unchanged source hashes
+and seven stable owned/caller files, with no compiler errors. Its per-attempt
+ONNX Runtime alias path caused environment-tracked dependency rebuilds. The
+third gate reused that exact verified runtime path and eliminated dependency
+rebuilds, but native client compilation still exceeded 175 s; zero cases ran.
+A longer 900 s compile-and-native gate is registered with monitor83, awaiting
+its terminal notification. Independent source review found no concrete preview
+cancellation/modal/stale-result defect. Receipts remain under
+`~/.local/share/ilium-trigger-preview-worker-20261007/gate-004/`; native success
+has not been established.
+
+Generic non-terminal paste now has an authored bounded continuation. Its
+incremental UTF-8 cursor consumes CRLF atomically; the event loop dispatches at
+most 128 derived keys per turn, blocks later input receipt until the suffix is
+finished, and retains the original `InputEvent` and storage lease throughout.
+Shutdown transfers the untouched original plus its consumed UTF-8 byte count
+into input failure custody. Before replay, the client reserves the existing
+execution CPU-retirement service; successful completion transfers the original
+envelope there for destruction, while refusal preserves the untouched paste.
+Focused cursor, custody and CPU-thread disposal tests are authored. This
+integrated source has not yet passed its current-source compile/native gate, so
+ordering, shutdown, CPU destruction, release and live behavior remain
+unqualified. The source inventory is saved in
+`~/.local/share/ilium-worker-whole-goal-audit-20261007/generic-paste-replay-inventory.jsonl`.
+
+An immutable 1,232-file workspace snapshot failed the complete formatting check
+in 14 files, with no capture drift or snapshot mutation. Three root-owned
+preview integration hunks have since been corrected and pass scoped formatting;
+the other owners' changes remain intact. The complete workspace check still
+needs to pass. Source/log identities and cleanup evidence are retained in
+`~/.local/share/ilium-workers-format-20261007-001/`. Blanket freezes are not a
+qualification mechanism; future native checks use immutable source snapshots,
+and gate004's source identity must be reconciled with subsequent edits.
 
 Configuration-directory consumers are being migrated to the existing
 `Source<PathBuf>` and `Snapshot<PathBuf>` ownership boundary. Writer payloads
@@ -399,13 +743,29 @@ A dedicated codec CPU thread avoids waiting behind lengthy document jobs. These
 declarations still require queued payloads and installed projections to retain
 their own charges; bank shutdown does not close an independent bank's group.
 
+The encoded-output retirement component is now source-integrated in the canonical server (2026-10-07): the exact event and frame share a preadmitted retirement envelope; storage attaches before finite codec credit is released, and delivery watermarks advance only after socket flush. Nine imported writer-path ownership cases await current-source compilation and execution. Historical private qualification below does not establish current canonical test, release or live status. Raw producer queues and preattachment cancellation remain uncovered.
+
 The current server IPC path still has uncovered ownership boundaries. Its raw
 64-entry direct queues and 1024-entry broadcast queue lack admission for retained
-payload bytes before cloning. Completed encoded frames retain finite encoder
-job credit through socket flush; two blocked connections can therefore exhaust
+payload bytes before cloning. Before the source integration above, completed encoded frames retained finite encoder
+job credit through socket flush; two blocked connections could exhaust
 the shared two-job encoder tenant. The client normal publisher retains a refused
-head and tail, but its final shutdown loops currently move those requests into
-an awaiting iterator and lose unpublished originals on error or cancellation.
+head and tail. Canonical final shutdown now keeps its request iterator and actual
+FIFO flush receiver outside cancelable futures, reserves a queue slot before
+taking an original, and returns unpublished originals and their admission guards
+in a typed error after terminal cleanup. Current-source tests cover closed
+writers, canceled publication, canceled flush without replay, and failed flush
+uncertainty; the library check passed, while full client test-target compilation
+and execution remain pending. Two regressions
+target the zero-request case: a queued but unacknowledged barrier still owns
+an unresolved receipt even when the accepted-prefix count is zero. The current
+cleanup predicate now retains both pending and closed receipts independently
+of the accepted-prefix count. Two native component cases reproduce the original
+failure and pass with the correction; complete-client qualification remains
+pending. Prepared-command
+successors and CPU retirement of the complete failed root still require
+integration and qualification. Queue publication, transport flush and server
+acceptance remain separate facts.
 The frozen real-server baseline reproduced four exact native assertions:
 encoder starvation with two blocked transport flushes, stale trigger delivery
 after an A-to-B-to-A edit, missing authoritative resynchronization after a
@@ -446,9 +806,28 @@ all-target lint and an optimized library build. Its 80 frozen inputs remained
 unchanged and its children and build target were retired. Six tests requiring
 the complete App remain deferred; this component result does not qualify the
 root caller or complete client (`ilium-worker-request-drain-879-1318/gate003/primary-audit.json`).
-The complete client outbox also contains prepared commands. Its private
+The private client candidate also contains prepared commands. Its private
 connection successor preserves those commands and admitted name/project leaves;
 the tested ordinary-request component cannot replace that successor unchanged.
+The canonical client currently stores `Vec<AdmittedRequest>` in its outbox;
+prepared-command migration is a separate pending integration, rather than an
+existing canonical queue variant.
+
+Current producer inventory for pre-encoding server admission (2026-10-07):
+`ServerState::broadcast` accepts raw owned events and sends them through the
+1024-entry broadcast channel. Production callers are in `state`, `lib`,
+`scheduled_input`, `progress_monitor`, `detection`, `text_triggers`,
+`agent_debug`, `text_trigger_config`, and `ipc::handlers`. The connection owns
+the broadcast receiver and the 64-entry direct-reply channel. Direct producers
+and retained sender owners are in `ipc::handlers`, `workspace`,
+`workspace_prune`, and `voice_relay`; their queue contracts must migrate
+together. The handler's `tree_snapshot` clones under a read lock before
+publication, while `VoiceRelay::offer` copies sentence strings before awaiting
+queue capacity. Admission attached only by the encoder cannot account for
+either earlier allocation or a broadcast receiver's cloned payload. A complete
+upstream migration must account for payload construction, queue residence and
+each retained consumer, and preserve ordered replies, voice acknowledgements,
+replay and lag recovery. No upstream admission migration is claimed here.
 Assembly rejected their conflicting connection postimages explicitly. A private
 successor now rebases the drain custodian and publication permit onto the complete
 `OutboundRequest` envelope, preserving prepared commands, admitted name/project

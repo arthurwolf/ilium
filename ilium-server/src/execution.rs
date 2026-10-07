@@ -199,6 +199,19 @@ impl ServerExecution {
             encoder,
         })
     }
+    #[cfg(test)]
+    pub(crate) fn test_monitor(&self) -> ilium_execution::ExecutionMonitor {
+        self._owner.monitor()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_join_until_background(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> Result<ilium_execution::JoinReport, ilium_execution::JoinUseError> {
+        self._owner.join_until_background(deadline)
+    }
+
     pub(crate) fn request_shutdown(&self) {
         self._owner.request_shutdown(ShutdownMode::Cancel);
         self.client.completed.notify_waiters();
@@ -249,6 +262,36 @@ impl ExecutionClient {
             }
         }
     }
+    /// Reserve only bounded retirement metadata here. The payload's backing
+    /// bytes must independently retain their codec/storage guard after attach.
+    pub(crate) async fn reserve_retirement<T: Send + 'static>(
+        &self,
+        declared_bytes: usize,
+    ) -> Result<ilium_execution::RetirementReservation<T>, ilium_execution::RejectReason> {
+        let retirement = self.foundation.retirement();
+        loop {
+            let notified = self.completed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            match retirement.try_reserve::<T>(declared_bytes) {
+                Ok(reservation) => return Ok(reservation),
+                Err(ilium_execution::RejectReason::Busy) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                Err(ilium_execution::RejectReason::WorkerBytes) => notified.await,
+                Err(ilium_execution::RejectReason::QueueFull) => {
+                    // Foundation releases storage (and its wake) BEFORE the
+                    // retirement slot. A waiter can wake in that tiny interval
+                    // and observe the old slot count; no later slot wake exists.
+                    // Reuse the existing admission deadline to close that race.
+                    // This is an admission retry, never a second disposal queue.
+                    let _ = tokio::time::timeout(ADMISSION_WAIT_REPORT, notified).await;
+                }
+                Err(reason) => return Err(reason),
+            }
+        }
+    }
+
     /// Wait for capacity outside the coordinating loops. A closed bank is an
     /// explicit error; only temporary admission pressure waits for release.
     pub(crate) async fn reserve(

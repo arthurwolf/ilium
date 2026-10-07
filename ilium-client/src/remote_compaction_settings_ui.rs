@@ -455,7 +455,9 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                     } else {
                         format!("− {value} + *")
                     }
-                } else { value };
+                } else {
+                    value
+                };
                 let control_style = if selected {
                     selected_style
                 } else if row.kind() == RemoteCompactionRowKind::ReadOnly {
@@ -606,8 +608,7 @@ pub fn hit_with_button(
                 let value_start = span.control_x + 2;
                 let value_end = value_start + UnicodeWidthStr::width(value.as_str()) as u16;
                 let value_hit = (value_start..value_end).contains(&virtual_x);
-                if span.row.kind() == RemoteCompactionRowKind::Select
-                    && virtual_x == value_end + 1
+                if span.row.kind() == RemoteCompactionRowKind::Select && virtual_x == value_end + 1
                 {
                     if let RemoteCompactionRow::Technique(target) = span.row {
                         HitAction::OpenChoice(target)

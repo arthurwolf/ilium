@@ -249,6 +249,7 @@ enum InputFailureKind {
     },
     Undispatched {
         original: InputEvent,
+        consumed_paste_bytes: Option<usize>,
         previous: Option<Box<InputFailure>>,
     },
 }
@@ -275,6 +276,25 @@ impl InputFailure {
         Self {
             kind: InputFailureKind::Undispatched {
                 original,
+                consumed_paste_bytes: None,
+                previous: previous.map(Box::new),
+            },
+        }
+    }
+    pub(crate) fn undispatched_after_paste(
+        original: InputEvent,
+        consumed_paste_bytes: usize,
+        previous: Option<Self>,
+    ) -> Self {
+        let Event::Paste(text) = original.view() else {
+            unreachable!("paste replay failure retains its original Paste event")
+        };
+        assert!(consumed_paste_bytes <= text.len());
+        assert!(text.is_char_boundary(consumed_paste_bytes));
+        Self {
+            kind: InputFailureKind::Undispatched {
+                original,
+                consumed_paste_bytes: Some(consumed_paste_bytes),
                 previous: previous.map(Box::new),
             },
         }
@@ -316,6 +336,23 @@ impl InputFailure {
             _ => None,
         }
     }
+    /// UTF-8 byte prefix whose derived key events were already dispatched
+    /// before shutdown; the complete original Paste remains in custody.
+    pub fn consumed_paste_bytes(&self) -> Option<usize> {
+        match &self.kind {
+            InputFailureKind::Undispatched {
+                consumed_paste_bytes,
+                ..
+            } => *consumed_paste_bytes,
+            InputFailureKind::Combined { first, next } => first
+                .consumed_paste_bytes()
+                .or_else(|| next.consumed_paste_bytes()),
+            InputFailureKind::Shutdown(report) => report
+                .failure()
+                .and_then(InputFailure::consumed_paste_bytes),
+            _ => None,
+        }
+    }
     pub fn shutdown_report(&self) -> Option<&InputShutdownReport> {
         match &self.kind {
             InputFailureKind::Shutdown(report) => Some(report),
@@ -333,7 +370,18 @@ impl fmt::Display for InputFailure {
             InputFailureKind::Refused { reason, original } => write!(formatter,
                 "terminal input retained one whole original after {reason:?}; {} payload bytes are outside admission",
                 original.unadmitted_payload_bytes()),
-            InputFailureKind::Undispatched { original, previous } => write!(formatter,
+            InputFailureKind::Undispatched {
+                original,
+                consumed_paste_bytes: Some(consumed_paste_bytes),
+                previous,
+            } => write!(formatter,
+                "terminal input shutdown retained an undispatched original ({} payload bytes, consumed paste prefix {consumed_paste_bytes} bytes); previous failure={}",
+                original.retained_payload_bytes(), previous.is_some()),
+            InputFailureKind::Undispatched {
+                original,
+                consumed_paste_bytes: None,
+                previous,
+            } => write!(formatter,
                 "terminal input shutdown retained an undispatched original ({} payload bytes); previous failure={}",
                 original.retained_payload_bytes(), previous.is_some()),
             InputFailureKind::Shutdown(report) => write!(formatter,

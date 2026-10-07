@@ -506,10 +506,16 @@ impl SettingsChoice {
                 app.ui_settings.attention_running_indicator,
                 |value| value.label().into(),
             ),
-            Self::RemoteTechnique(target) => catalog(
-                &ilium_remote_compaction::Technique::ALL,
-                app.remote_compaction_settings.technique(target),
-                |value| value.label().into(),
+            Self::RemoteTechnique(target) => (
+                ilium_remote_compaction::Technique::ALL
+                    .into_iter()
+                    .map(|value| ChoiceOption {
+                        id: value.id().into(),
+                        label: value.label().into(),
+                        disabled_reason: None,
+                    })
+                    .collect(),
+                app.remote_compaction_settings.technique(target).id().into(),
             ),
         }
     }
@@ -751,7 +757,8 @@ impl App {
         macro_rules! select {
             ($values:expr, $destination:expr) => {{
                 $destination = $values
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .find(|value| format!("{value:?}") == id)
                     .ok_or("This option is no longer available")?;
             }};

@@ -61,6 +61,7 @@ pub mod compaction_ui;
 pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
+mod context_menu_layout;
 pub mod control;
 pub mod cost_app;
 pub mod cost_history;
@@ -153,6 +154,8 @@ pub use smart_copy_selection::{
 };
 pub mod goal_resume_link;
 mod input_backlog;
+mod paste_cursor;
+mod shutdown_requests;
 pub mod smart_copy_tokens;
 pub mod smart_copy_workers;
 mod source_line_facts;
@@ -162,6 +165,7 @@ mod source_window_surface;
 mod source_window_syntax;
 mod source_windows;
 pub mod split_layout;
+mod startup_audio;
 pub mod status_icons;
 pub mod syntax;
 pub mod terminal_activity;
@@ -287,6 +291,10 @@ const MAX_MERGED_SCREEN_BYTES_PER_BATCH: usize = 64 * 1024;
 /// bounded so a key-repeat or pointer flood cannot starve incoming terminal
 /// frames forever.
 const MAX_INPUT_EVENTS_PER_BATCH: usize = 64;
+/// Maximum character-oriented key events replayed from one admitted paste in
+/// one UI turn. The original input lease stays with the continuation between
+/// turns, and later input cannot overtake it.
+const MAX_PASTE_KEYS_PER_TURN: usize = 128;
 /// Terminal output is visual state, not input acknowledgement. Capping its
 /// redraw cadence at 30 Hz leaves CPU for parsing and input while every
 /// keyboard/pointer-driven change still bypasses this limit immediately.
@@ -514,27 +522,6 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         log_path = %options.log_path.display(),
         "ilium-client starting"
     );
-    startup_dialog.show("Starting ilium", "Finding system sounds", Some(0.15));
-    let sound_discovery = ilium_sound::discover_system_sounds();
-    startup_dialog.show(
-        "Starting ilium",
-        "Detecting audio input devices",
-        Some(0.35),
-    );
-    let voice_input_devices = ilium_voice::available_input_devices().unwrap_or_else(|error| {
-        tracing::warn!(%error, "failed to enumerate voice input devices");
-        Vec::new()
-    });
-    startup_dialog.show(
-        "Starting ilium",
-        "Detecting audio output devices",
-        Some(0.55),
-    );
-    let voice_output_devices = ilium_voice::available_output_devices().unwrap_or_else(|error| {
-        tracing::warn!(%error, "failed to enumerate voice output devices");
-        Vec::new()
-    });
-
     let result = run_inner(
         &options,
         PreparedStartup {
@@ -542,11 +529,6 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
             config_dir,
             should_open_onboarding,
             is_agent_setup_policy_available,
-            sound_discovery,
-            voice_devices: VoiceDeviceCatalog {
-                input: voice_input_devices,
-                output: voice_output_devices,
-            },
             guard,
             input_reservation,
             startup_dialog,
@@ -608,11 +590,6 @@ fn init_config(
     (config, config_dir, is_agent_setup_policy_available)
 }
 
-struct VoiceDeviceCatalog {
-    input: Vec<String>,
-    output: Vec<String>,
-}
-
 // Field order restores terminal state before releasing the session share,
 // including when a failed presenter start drops its cleanup closure.
 struct InputTerminalGuard {
@@ -626,8 +603,6 @@ struct PreparedStartup {
     config_dir: Option<PathBuf>,
     should_open_onboarding: bool,
     is_agent_setup_policy_available: bool,
-    sound_discovery: ilium_sound::SoundDiscovery,
-    voice_devices: VoiceDeviceCatalog,
     guard: InputTerminalGuard,
     input_reservation: terminal_input_owner::InputReservation,
     startup_dialog: crate::startup_dialog::StartupDialog,
@@ -642,17 +617,11 @@ async fn run_inner(
         config_dir,
         should_open_onboarding,
         is_agent_setup_policy_available,
-        sound_discovery,
-        voice_devices,
         guard,
         input_reservation,
         mut startup_dialog,
     } = startup;
     startup_dialog.show("Starting ilium", "Starting background workers", Some(0.7));
-    let VoiceDeviceCatalog {
-        input: voice_input_devices,
-        output: voice_output_devices,
-    } = voice_devices;
     // Only the presenter owns terminal diffing, encoding and writes. The UI
     // terminal is an inert composition surface; get_frame does not run a diff.
     let (columns, rows) = crossterm::terminal::size().map_err(ClientError::TerminalSetup)?;
@@ -662,7 +631,39 @@ async fn run_inner(
     let execution = crate::execution::ClientExecution::start_async()
         .await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
+    startup_dialog.show(
+        "Starting ilium",
+        "Finding sounds and audio devices",
+        Some(0.75),
+    );
+    let audio_client = execution
+        .client(crate::startup_audio::limits())
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "startup audio client admission: {error:?}"
+            )))
+        })?;
+    let audio_catalogue = crate::startup_audio::discover(audio_client)
+        .await
+        .map_err(ClientError::TerminalSetup)?;
+    let (audio_catalogue, audio_retention) = audio_catalogue.into_parts();
+    let crate::startup_audio::AudioCatalogue {
+        sounds: sound_discovery,
+        inputs: voice_input_devices,
+        outputs: voice_output_devices,
+    } = audio_catalogue;
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
+    app.configure_paste_retirement(execution.retirement());
+    let text_trigger_preview_client = execution
+        .client(crate::text_trigger_dialog::preview_limits())
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "text trigger preview startup: {error:?}"
+            )))
+        })?;
+    let text_trigger_preview_notification =
+        app.configure_text_trigger_preview(text_trigger_preview_client);
+
     let outbound_admission = execution
         .client(crate::ipc_preparation::request_limits())
         .map_err(|error| {
@@ -906,6 +907,8 @@ async fn run_inner(
     let mut demonstration_retirement_failed = false;
     let mut input_owner = None;
     let mut input_failure = None;
+    let mut shutdown_requests = shutdown_requests::ShutdownRequests::default();
+    let mut request_drain_cause = None;
     let mut deferred_input = input_backlog::InputBacklog::default();
     let result = async {
     let mut presentation_frame_id = 0_u64;
@@ -966,6 +969,7 @@ async fn run_inner(
     app.sound_discovery = sound_discovery;
     app.voice_input_devices = voice_input_devices;
     app.voice_output_devices = voice_output_devices;
+    app.startup_audio_retention = Some(audio_retention);
     app.config_dir = config_dir;
     app.onboarding_progress = config.onboarding;
     if should_open_onboarding {
@@ -1111,7 +1115,16 @@ async fn run_inner(
             input_failure = Some(failure);
             break;
         }
-        if app.pending_native_paste.is_none() {
+        if advance_pending_key_paste(
+            &mut app,
+            &mut naming_workers,
+            &mut icon_search_workers,
+            home_dir.as_deref(),
+        ) {
+            needs_redraw = true;
+            needs_immediate_redraw = true;
+        }
+        if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
@@ -1159,6 +1172,7 @@ async fn run_inner(
             tick_delay = tick_delay.min(Duration::from_millis(50));
         }
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
+        if let Some(delay) = app.text_trigger_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.light_copy_selection.as_ref().and_then(|owner| owner.retry_delay()) { tick_delay = tick_delay.min(delay); }
         if !app.light_copy_recovery.is_empty() || !app.light_copy_restored.is_empty() { tick_delay = tick_delay.min(Duration::from_millis(100)); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
@@ -1198,6 +1212,7 @@ async fn run_inner(
             _ = context_notification.notified() => { needs_redraw=true; }
             _ = external_open_notification.notified() => { needs_redraw |= app.collect_external_open(); }
             _ = document_notification.notified() => { needs_redraw = true; }
+            _ = text_trigger_preview_notification.notified() => { needs_redraw |= app.reconcile_text_trigger_preview(); }
             _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
             _ = statistics_notification.notified() => {
                 needs_redraw |= app.session_stats.drain_events();
@@ -1214,7 +1229,7 @@ async fn run_inner(
                 app.projection_admission_wake = None;
                 app.projection_busy_retry_at = None;
             }
-            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();}
+            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview();}
             completion = app.debug_logging.next_completion() => {
                 apply_debug_logging_completion(&mut app, completion);
                 needs_redraw = true;
@@ -1268,7 +1283,8 @@ async fn run_inner(
             _ = animation_admission_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
             }
-            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && deferred_input.is_empty() => {
+            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() => {}
+            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() => {
                 match input_event {
                     Some(event) => {
                         if let Some(failure) = dispatch_ready_input_events(
@@ -1459,6 +1475,7 @@ async fn run_inner(
             let _ = reset_settings_tx.send(app.reset_planning_settings.clone());
         }
 
+        needs_redraw |= app.reconcile_text_trigger_preview();
         dispatch_pending_app_work(
             &mut app,
             &mut naming_workers,
@@ -1778,11 +1795,14 @@ async fn run_inner(
                     &mut naming_workers, &mut icon_search_workers,
                     &mut trigger_execution_lease, home_dir.as_deref());
             }
-            for request in app.take_admitted_outbound_requests() {
-                connection.requests.send_admitted(request).await.map_err(|_| ClientError::TerminalSetup(
-                    std::io::Error::new(std::io::ErrorKind::BrokenPipe,
-                        "accepted terminal input could not drain before detach")))?;
-            }
+            shutdown_requests.adopt_batch(app.take_admitted_outbound_requests()).map_err(|original| {
+                for request in original { app.enqueue_admitted_request(request); }
+                ClientError::TerminalSetup(std::io::Error::other("request drain overlaps an unpublished batch"))
+            })?;
+            shutdown_requests.publish(&connection.requests).await.map_err(|cause| {
+                request_drain_cause = Some(cause);
+                ClientError::TerminalSetup(std::io::Error::other(cause))
+            })?;
             let (events, intents, owner) = app.terminal_pending_work();
             if events == 0 && intents == 0 && owner == Some((0, 0))
                 && animation_presentations.is_empty()
@@ -1861,9 +1881,12 @@ async fn run_inner(
             ClientError::TerminalSetup(std::io::Error::other(error)))
     };
     tokio::time::timeout(Duration::from_secs(5), terminal_drain).await
-        .map_err(|_| ClientError::TerminalSetup(std::io::Error::new(
+        .map_err(|_| {
+            request_drain_cause = Some(shutdown_requests::DrainCause::Deadline);
+            ClientError::TerminalSetup(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "terminal detach deadline: accepted bytes or input remain unacknowledged")))??;
+            "terminal detach deadline: accepted bytes or input remain unacknowledged"))
+        })??;
     onboarding_voice.shutdown().await;
     demonstration_media.request(false);
 
@@ -1886,23 +1909,28 @@ async fn run_inner(
             let completion = app.debug_logging.next_completion().await;
             apply_debug_logging_completion(&mut app, completion);
         }
-        for request in app.take_admitted_outbound_requests() {
-            connection.requests.send_admitted(request).await.map_err(|_| {
-                crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(
-                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "request writer closed during final drain")))
-            })?;
-        }
-        connection.requests.flush().await.map_err(crate::connection::ConnectionError::RequestDrain)?;
+        shutdown_requests.adopt_batch(app.take_admitted_outbound_requests()).map_err(|original| {
+            for request in original { app.enqueue_admitted_request(request); }
+            crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(std::io::Error::other("request drain overlaps an unpublished batch")))
+        })?;
+        shutdown_requests.finish(&connection.requests).await.map_err(|cause| {
+            request_drain_cause = Some(cause);
+            crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(std::io::Error::other(cause)))
+        })?;
         app.confirm_exact_prompt_reports_flushed();
         Ok::<(),crate::connection::ConnectionError>(())
     };
     tokio::time::timeout(Duration::from_secs(5), request_drain).await
-        .map_err(|_| crate::connection::ConnectionError::DrainDeadline)??;
+        .map_err(|_| {
+            request_drain_cause = Some(shutdown_requests::DrainCause::Deadline);
+            crate::connection::ConnectionError::DrainDeadline
+        })??;
 
     // Only the explicit Restart menu action can request a process re-exec.
     // Input failures and undispatched originals are returned after cleanup.
     Ok(app.exit_reason.unwrap_or(ClientExitReason::Quit))
     }.await;
+    input_failure = retain_interrupted_key_paste(&mut app, input_failure);
     if let Some(pending) = app.pending_native_paste.take() {
         input_failure = Some(terminal_input_owner::InputFailure::undispatched(
             pending.event,
@@ -2178,10 +2206,31 @@ async fn run_inner(
     app.session_stats.cancel_pending();
     app.cost_tracker.cancel_pending();
     app.model_catalog_preparation.close();
-    let execution_result = execution
-        .shutdown()
-        .await
-        .map_err(ClientError::TerminalSetup);
+    app.close_text_trigger_preview();
+    // Completed/cancelled receipts retain retirement storage until collected.
+    // Reconcile them while the shared owner enforces its physical-exit deadline.
+    let execution_shutdown = execution.shutdown();
+    tokio::pin!(execution_shutdown);
+    let execution_result = loop {
+        app.collect_closed_text_trigger_preview();
+        tokio::select! {
+            result = &mut execution_shutdown => break result,
+            _ = text_trigger_preview_notification.notified() => {},
+            _ = filesystem_admission_notification.notified() => {},
+        }
+    };
+    app.collect_closed_text_trigger_preview();
+    let text_trigger_preview_result = match app.text_trigger_preview.as_ref() {
+        Some(preview) if preview.settlement_issue().is_some() => Err(ClientError::TerminalSetup(
+            std::io::Error::other(preview.settlement_issue().unwrap().message()),
+        )),
+        Some(preview) if !preview.is_settled() => {
+            Err(ClientError::TerminalSetup(std::io::Error::other(
+                "text trigger preview receipts remain unsettled after execution shutdown",
+            )))
+        }
+        _ => Ok(()),
+    };
     let result = shutdown_result
         .and(normal_shutdown_result)
         .and(demonstration_shutdown_result)
@@ -2191,16 +2240,33 @@ async fn run_inner(
         .and(icon_shutdown_result)
         .and(animation_receipt_result)
         .and(animation_shutdown_result)
+        .and(text_trigger_preview_result)
         .and(logging_result)
         .and(filesystem_result)
-        .and(execution_result)
         .and(result);
+    let result = match execution_result {
+        Ok(()) => result,
+        Err(shutdown) => Err(crate::error::preserve_execution_shutdown_error(
+            shutdown,
+            result.err(),
+        )),
+    };
     let result = match selection_shutdown_result {
         Ok(()) => result,
         Err(selection) => Err(crate::smart_copy_selection::preserve_shutdown_error(
             selection,
             result.err(),
         )),
+    };
+    let remaining_requests = app.take_admitted_outbound_requests();
+    let result = if shutdown_requests.has_unresolved_publication() || !remaining_requests.is_empty()
+    {
+        let error = shutdown_requests
+            .into_failure(request_drain_cause.unwrap_or(shutdown_requests::DrainCause::Aborted))
+            .with_cleanup(remaining_requests, result.err());
+        Err(ClientError::TerminalSetup(std::io::Error::other(error)))
+    } else {
+        result
     };
     let retirement = input_shutdown_result.err();
     if input_failure.is_some() || retirement.is_some() {
@@ -3847,7 +3913,8 @@ fn dispatch_ready_input_events(
         for_each_ready_input_event_until(&mut ready, first, |event| {
             match event {
                 Ok(event) => {
-                    let destination = if matches!(event.view(), Event::Paste(_)) {
+                    let is_paste = matches!(event.view(), Event::Paste(_));
+                    let destination = if is_paste {
                         app.native_terminal_paste_destination()
                     } else {
                         None
@@ -3867,6 +3934,44 @@ fn dispatch_ready_input_events(
                             icon_search_workers,
                             home_dir,
                         );
+                    } else if is_paste {
+                        if crate::keys::intercept_event(app, event.view()) {
+                            app.tick_layout_animation(Instant::now());
+                            dispatch_pending_app_work(
+                                app,
+                                naming_workers,
+                                icon_search_workers,
+                                home_dir,
+                            );
+                        } else if crate::keys::requires_key_paste_replay(app) {
+                            app.last_tree_click = None;
+                            let mut replay = crate::paste_cursor::PasteReplay::new(event);
+                            let admission = app
+                                .paste_retirement
+                                .as_ref()
+                                .ok_or(ilium_execution::RejectReason::Closed)
+                                .and_then(|retirement| replay.reserve_retirement(retirement));
+                            match admission {
+                                Ok(()) => app.pending_key_paste = Some(replay),
+                                Err(reason) => {
+                                    let (original, _) = replay.into_parts();
+                                    failure = Some(terminal_input_owner::InputFailure::refused(
+                                        reason, original,
+                                    ));
+                                }
+                            }
+                        } else {
+                            event.dispatch(|event| {
+                                crate::keys::handle_event_after_intercept(app, event);
+                                app.tick_layout_animation(Instant::now());
+                                dispatch_pending_app_work(
+                                    app,
+                                    naming_workers,
+                                    icon_search_workers,
+                                    home_dir,
+                                );
+                            });
+                        }
                     } else {
                         event.dispatch(|event| {
                             dispatch_input_event(
@@ -3887,7 +3992,9 @@ fn dispatch_ready_input_events(
                     error,
                 ));
             }
-            failure.is_none() && app.pending_native_paste.is_none()
+            failure.is_none()
+                && app.pending_native_paste.is_none()
+                && app.pending_key_paste.is_none()
         })
     };
     if let Err(refused) = deferred.restore(None, lookahead) {
@@ -3903,6 +4010,47 @@ fn dispatch_ready_input_events(
         }
     }
     failure
+}
+
+/// Dispatches one bounded batch from the active character-oriented paste.
+/// The original envelope remains in `App` until every derived key has passed
+/// through the normal input route.
+fn advance_pending_key_paste(
+    app: &mut App,
+    naming_workers: &mut NamingWorkers,
+    icon_search_workers: &mut IconSearchWorkers,
+    home_dir: Option<&std::path::Path>,
+) -> bool {
+    let Some(mut replay) = app.pending_key_paste.take() else {
+        return false;
+    };
+
+    for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
+        app.handle_event(Event::Key(key));
+    }
+    dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
+
+    if replay.is_complete() {
+        replay.retire_original();
+    } else {
+        app.pending_key_paste = Some(replay);
+    }
+    true
+}
+
+fn retain_interrupted_key_paste(
+    app: &mut App,
+    previous: Option<terminal_input_owner::InputFailure>,
+) -> Option<terminal_input_owner::InputFailure> {
+    let Some(replay) = app.pending_key_paste.take() else {
+        return previous;
+    };
+    let (original, consumed_bytes) = replay.into_parts();
+    Some(terminal_input_owner::InputFailure::undispatched_after_paste(
+        original,
+        consumed_bytes,
+        previous,
+    ))
 }
 
 trait InputBatchItem: Sized {
@@ -4441,6 +4589,33 @@ mod responsiveness_tests {
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn shutdown_retains_original_paste_and_reports_the_consumed_prefix() {
+        let project_directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "paste-shutdown-test".to_owned(),
+            project_directory.path().to_path_buf(),
+        );
+        let (original, quota) =
+            terminal_input_owner::paste_fixture("a\r\né".to_owned());
+        let original_pointer = match original.view() {
+            Event::Paste(text) => text.as_ptr(),
+            _ => unreachable!("paste fixture contains a paste"),
+        };
+        let mut replay = crate::paste_cursor::PasteReplay::new(original);
+        assert_eq!(replay.next_keys(2).len(), 2);
+        app.pending_key_paste = Some(replay);
+
+        let failure = retain_interrupted_key_paste(&mut app, None).unwrap();
+
+        assert_eq!(failure.consumed_paste_bytes(), Some(3));
+        assert!(matches!(failure.original().unwrap().view(), Event::Paste(text)
+            if text.as_ptr() == original_pointer && text == "a\r\né"));
+        assert!(quota.snapshot().worker_bytes > 0);
+        drop(failure);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 
     #[test]

@@ -58,6 +58,29 @@ pub enum TerminalContextAction {
 }
 
 impl TerminalContextAction {
+    pub const fn menu_order(&self) -> (u8, u8) {
+        match self {
+            Self::OpenInEditor { .. } => (0, 0),
+            Self::OpenExternally(_) => (0, 1),
+            Self::CopySelectionToClipboard => (1, 0),
+            Self::CopyLineToClipboard => (1, 1),
+            Self::CopyVisibleTerminalToClipboard => (1, 2),
+            Self::CopyFullTerminalHistoryToClipboard => (1, 3),
+            Self::CopyLastSubmittedPromptToClipboard { .. }
+            | Self::LastSubmittedPromptUnavailable => (2, 0),
+            Self::CopyPreviousExactPromptToClipboard { .. } => (2, 1),
+            Self::CopyHistoryFilePathToClipboard { .. } => (2, 2),
+            Self::PasteClipboard => (3, 0),
+            Self::PasteScreenInto { .. } => (3, 1),
+            Self::ToggleAgentToolbar { .. } => (4, 0),
+            Self::ShowAgentDebugLog => (4, 1),
+        }
+    }
+
+    pub const fn menu_group(&self) -> u8 {
+        self.menu_order().0
+    }
+
     /// Returns the shared icon role used by this terminal action.
     pub const fn icon_target(&self) -> crate::icon_settings::IconTarget {
         use crate::icon_settings::IconTarget;
@@ -95,15 +118,13 @@ impl TerminalContextAction {
                 "Copy last submitted prompt".to_string()
             }
             Self::CopyPreviousExactPromptToClipboard { .. } => {
-                "Copy previous exact prompt (latest unavailable)".to_string()
+                "Copy previous exact prompt".to_string()
             }
             Self::LastSubmittedPromptUnavailable => "Last submitted prompt unavailable".to_string(),
-            Self::CopyLineToClipboard => "Copy line to clipboard".to_string(),
-            Self::CopyVisibleTerminalToClipboard => {
-                "Copy visible terminal to clipboard".to_string()
-            }
-            Self::CopyFullTerminalHistoryToClipboard => "Copy full terminal history".to_string(),
-            Self::CopyHistoryFilePathToClipboard { .. } => "Copy path to history file".to_string(),
+            Self::CopyLineToClipboard => "Copy line".to_string(),
+            Self::CopyVisibleTerminalToClipboard => "Copy visible screen".to_string(),
+            Self::CopyFullTerminalHistoryToClipboard => "Copy full history".to_string(),
+            Self::CopyHistoryFilePathToClipboard { .. } => "Copy history file path".to_string(),
             Self::PasteClipboard => "Paste clipboard".to_string(),
             Self::PasteScreenInto {
                 direction,
@@ -138,7 +159,24 @@ pub struct TerminalPaneContextMenu {
     pub area: Rect,
     pub actions: Vec<TerminalContextAction>,
     pub selected_index: usize,
+    pub(crate) row_offset: usize,
     pub(crate) preparation_generation: u64,
     pub(crate) _preparation_hold:
         Option<ilium_execution::Retained<Option<ilium_execution::Retained<()>>>>,
+}
+
+impl TerminalPaneContextMenu {
+    pub(crate) fn layout(&self) -> crate::context_menu_layout::MenuLayout {
+        let groups: Vec<_> = self
+            .actions
+            .iter()
+            .map(TerminalContextAction::menu_group)
+            .collect();
+        crate::context_menu_layout::MenuLayout::with_offset(
+            &groups,
+            self.selected_index,
+            self.area.height.saturating_sub(2),
+            self.row_offset,
+        )
+    }
 }

@@ -359,11 +359,11 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
                     CliError::ServerReportedError(format!("release embedding probe: {error:#}"))
                 })
         }
-        Some(Command::ReleaseAnimationProbe) => {
-            ilium_client::release_animation::probe().map_err(|error| {
+        Some(Command::ReleaseAnimationProbe) => ilium_client::release_animation::probe()
+            .await
+            .map_err(|error| {
                 CliError::ServerReportedError(format!("release animation probe: {error:#}"))
-            })
-        }
+            }),
         None => {
             attach_or_create(
                 session::DEFAULT_SESSION_NAME,
@@ -664,11 +664,7 @@ fn next_progress_request_id() -> u64 {
         .map_or(0, |duration| duration.as_nanos() as u64);
     let process_component = u64::from(std::process::id()).rotate_left(32);
     let request_id = unix_nanos ^ process_component ^ sequence.rotate_left(17);
-    if request_id == 0 {
-        1
-    } else {
-        request_id
-    }
+    if request_id == 0 { 1 } else { request_id }
 }
 
 async fn wait_for_progress_response(
@@ -1058,7 +1054,7 @@ async fn kill_session(session_name: &str, cwd: &Path) -> Result<(), CliError> {
             match event {
                 ilium_ipc::ServerEvent::TreeSnapshot(_) => return Ok(()),
                 ilium_ipc::ServerEvent::Error { message } => {
-                    return Err(CliError::received_server_error(message, _event_retention))
+                    return Err(CliError::received_server_error(message, _event_retention));
                 }
                 _ => {}
             }
@@ -1180,7 +1176,7 @@ async fn run_new_workspace_pane(
                     });
                 }
                 ServerEvent::Error { message } => {
-                    return Err(CliError::received_server_error(message, _event_retention))
+                    return Err(CliError::received_server_error(message, _event_retention));
                 }
                 _ => {}
             }
@@ -1226,10 +1222,10 @@ async fn run_new_workspace_pane(
                                 facts,
                                 _event_retention,
                             )
-                        })
+                        });
                 }
                 ServerEvent::Error { message } => {
-                    return Err(CliError::received_server_error(message, _event_retention))
+                    return Err(CliError::received_server_error(message, _event_retention));
                 }
                 _ => {}
             }
@@ -1405,7 +1401,7 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
                     return Ok(Some(tree.panes().count()));
                 }
                 ilium_ipc::ServerEvent::Error { message } => {
-                    return Err(CliError::received_server_error(message, _event_retention))
+                    return Err(CliError::received_server_error(message, _event_retention));
                 }
                 _ => {}
             }
@@ -1443,7 +1439,7 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
                     return Some(Err(CliError::received_server_error(
                         message,
                         _event_retention,
-                    )))
+                    )));
                 }
                 ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
                     let grew =
@@ -1577,9 +1573,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
-        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
-        shell_join, workspace_provider, Cli, Command, ProgressCommand,
+        Cli, Command, ProgressCommand, chatroom_project_root, client_restart_args,
+        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
+        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
     };
     use clap::Parser;
 
@@ -1643,9 +1639,11 @@ mod tests {
                 OsString::from("review"),
             ]
         );
-        assert!(!arguments
-            .iter()
-            .any(|argument| { argument == "--restart-server" || argument == "--reset-session" }));
+        assert!(
+            !arguments.iter().any(|argument| {
+                argument == "--restart-server" || argument == "--reset-session"
+            })
+        );
     }
 
     #[test]
@@ -1835,16 +1833,18 @@ mod tests {
 
     #[test]
     fn progress_no_longer_exposes_goal_pause_or_resume_controls() {
-        assert!(Cli::try_parse_from([
-            "ilium",
-            "progress",
-            "set",
-            "--command",
-            "/work/status --json",
-            "--goal-policy",
-            "pause-and-resume",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from([
+                "ilium",
+                "progress",
+                "set",
+                "--command",
+                "/work/status --json",
+                "--goal-policy",
+                "pause-and-resume",
+            ])
+            .is_err()
+        );
         for operation in ["arm-goal-resume", "disarm-goal-resume"] {
             assert!(
                 Cli::try_parse_from(["ilium", "progress", operation, "--monitor-id", "42"])

@@ -365,6 +365,89 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
 }
 
 #[tokio::test]
+async fn named_chatroom_reference_submits_each_forwarded_line_to_the_named_pane() {
+    let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the chatroom fixture");
+    let echo_path = write_line_echoing_binary(fake_bin_dir.path(), "chatroom-reference");
+    let mut server = TestServer::start("named-reference-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "named-reference-test".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::Command(echo_path.to_string_lossy().into_owned()),
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let tree = expect_event(
+        &mut client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() == 1),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = tree else {
+        unreachable!("predicate only returns a populated tree")
+    };
+    let pane_id = first_launch_project_pane(&tree);
+    write_frame(
+        &mut client,
+        &ClientRequest::RenameNode {
+            node_id: pane_id,
+            title: "@compiler".to_owned(),
+            short_title: None,
+            inferred_icon: None,
+        },
+    )
+    .await
+    .unwrap();
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node| node.name == "@compiler"))
+    })
+    .await;
+
+    std::fs::write(
+        server.project_cwd.join("CHATROOM.md"),
+        "- 2026-10-07 05:00:00 +02:00 | @sender | @compiler\\n/goal wake the compiler\n",
+    )
+    .expect("append the chatroom reference record");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut submitted = 0;
+    while submitted < 4 {
+        let event = tokio::time::timeout_at(deadline, read_frame::<ServerEvent, _>(&mut client))
+            .await
+            .expect("named reference events should arrive before timeout")
+            .expect("read named reference event");
+        match event {
+            ServerEvent::PanePromptSubmitted {
+                pane_id: submitted_pane_id,
+                source: PromptSubmissionSource::ScheduledInput,
+            } if submitted_pane_id == pane_id => submitted += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        submitted, 4,
+        "each verbatim line and newline submits separately"
+    );
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
 async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter() {
     let fake_bin_dir = tempfile::tempdir().expect("create fake Codex directory");
     let fake_codex_path = write_delayed_ready_codex_binary(fake_bin_dir.path());

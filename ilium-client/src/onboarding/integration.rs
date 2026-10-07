@@ -420,8 +420,7 @@ fn activate(app: &mut App, hit: Hit) {
         Hit::DefaultPreview => {
             let mut settings = app.sound_settings.clone();
             settings.source = ilium_sound::SoundSourceKind::BundledChirping;
-            app.queue_request(ilium_ipc::ClientRequest::PreviewSoundSettings { settings });
-            app.status_message = Some("Playing the Ilium signature sound".into());
+            app.request_sound_preview(settings, "Ilium signature sound preview requested");
         }
         Hit::Back => app.onboarding_progress.wizard.back(),
         Hit::Continue => {
@@ -1371,8 +1370,7 @@ fn apply_studio_action(app: &mut App, action: super::studio_ui::StudioAction) {
         StudioAction::ToggleEvent(event) => studio.draft.events.toggle(event),
         StudioAction::Play => {
             let settings = studio.draft.clone();
-            app.queue_request(ilium_ipc::ClientRequest::PreviewSoundSettings { settings });
-            app.status_message = Some("Playing your current sound design".into());
+            app.request_sound_preview(settings, "Current sound design preview requested");
             return;
         }
         StudioAction::Save => {
@@ -1771,6 +1769,29 @@ mod tests {
         assert!(
             matches!(app.take_outbound_requests().as_slice(),[ClientRequest::PreviewSoundSettings{settings}] if settings.source==ilium_sound::SoundSourceKind::BundledChirping)
         );
+    }
+
+    #[test]
+    fn onboarding_preview_refusals_are_not_reported_as_playback() {
+        let mut app = app_at(Step::SoundChoice);
+        app.outbound_admission = None;
+        activate(&mut app, Hit::DefaultPreview);
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("Request rejected before admission")));
+        app.status_message = None;
+        let mut settings = app.sound_settings.clone();
+        settings.source = ilium_sound::SoundSourceKind::Generated;
+        app.onboarding.as_mut().unwrap().studio =
+            Some(super::super::studio::SoundStudio::new(settings));
+        apply_studio_action(&mut app, super::super::studio_ui::StudioAction::Play);
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|status| status.contains("Request rejected before admission")));
     }
 
     #[test]

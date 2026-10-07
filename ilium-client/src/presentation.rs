@@ -823,8 +823,13 @@ mod tests {
             ticket.exit(),
             Some(ilium_platform::owned_worker::WorkerExit::Joined)
         );
-        assert_eq!(quota.snapshot().worker_threads, 0);
         presenter.shutdown().await.unwrap();
+        // Joined proves physical exit. The original ticket and presenter
+        // still retain their wake's admission until their last owner drops.
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        drop(ticket);
+        drop(presenter);
+        assert_eq!(quota.snapshot().worker_threads, 0);
     }
 
     struct GatedWrite {
@@ -857,14 +862,20 @@ mod tests {
     fn frame(presenter: &Presenter, id: u64, text: &str) -> PreparedFrame {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 2));
         buffer[(0, 0)].set_symbol(text);
-        PreparedFrame::new(
-            presenter.try_reserve().unwrap(),
-            buffer,
-            Some(Position::new(1, 1)),
-            id,
-            id,
-        )
-        .unwrap()
+        // The production API may refuse while the output worker briefly owns
+        // the queue lock. Fixture setup must exercise the admitted frame path.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let reservation = loop {
+            if let Some(reservation) = presenter.try_reserve() {
+                break reservation;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture frame was never admitted"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        PreparedFrame::new(reservation, buffer, Some(Position::new(1, 1)), id, id).unwrap()
     }
     #[tokio::test]
     async fn blocked_logical_drop_retains_worker_and_escaped_frame_until_actual_join() {
@@ -930,6 +941,22 @@ mod tests {
         )
         .unwrap();
         presenter.submit(frame(&presenter, 1, "FAILED")).unwrap();
+        // The first receipt returns the original frame with uncertainty,
+        // before the terminal error receipt. It is never a successful flush.
+        let uncertain = presenter
+            .acknowledgements
+            .recv()
+            .await
+            .unwrap()
+            .expect("uncertain frame custody precedes the terminal error");
+        assert_eq!(uncertain.frame.frame_id, 1);
+        assert!(uncertain.rejection.is_none());
+        assert!(uncertain
+            .uncertainty
+            .as_deref()
+            .unwrap()
+            .contains("forced partial stream failure"));
+        assert!(uncertain.flush_proof.is_none());
         let acknowledgement = presenter.acknowledgements.recv().await.unwrap();
         let ack_error = match acknowledgement {
             Err(error) => error,
@@ -967,6 +994,9 @@ mod tests {
         drop(ack_error);
         assert_eq!(quota.snapshot().worker_bytes, FRAME_STORAGE_BYTES);
         drop(completion_error);
+        assert_eq!(quota.snapshot().worker_bytes, FRAME_STORAGE_BYTES);
+        assert_eq!(uncertain.frame.buffer[(0, 0)].symbol(), "FAILED");
+        drop(uncertain);
         assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 

@@ -42,7 +42,6 @@ pub(crate) struct WindowCompletion {
 pub(crate) struct SourceWindowPreparation {
     budget: Arc<crate::editor_capture_budget::CaptureBudget>,
     client: Client,
-    notification: Arc<Notify>,
     slots: Vec<Slot>,
 }
 fn terminal(reason: RejectReason) -> bool {
@@ -52,6 +51,7 @@ fn terminal(reason: RejectReason) -> bool {
     )
 }
 impl SourceWindowPreparation {
+    #[cfg(test)]
     pub fn new(client: Client) -> Self {
         Self::with_notification(client, Arc::new(Notify::new()))
     }
@@ -60,7 +60,6 @@ impl SourceWindowPreparation {
         Self {
             budget: Arc::new(crate::editor_capture_budget::CaptureBudget::new()),
             client: client.with_completion_wake(move || wake.notify_one()),
-            notification,
             slots: Vec::with_capacity(4),
         }
     }
@@ -83,9 +82,6 @@ impl SourceWindowPreparation {
             }
             false
         });
-    }
-    pub fn notification(&self) -> Arc<Notify> {
-        self.notification.clone()
     }
     pub fn retry_delay(&self, now: Instant) -> Option<Duration> {
         self.slots

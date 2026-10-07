@@ -31,6 +31,69 @@ const MAX_DISCOVERED_SOUNDS: usize = 4_096;
 /// Sound themes are shallow in practice. This avoids recursively exploring a
 /// misplaced or cyclic mount even though directory symlinks are not followed.
 const MAX_DISCOVERY_DEPTH: usize = 8;
+/// Count every filesystem entry, including unsupported files and directories.
+/// The playable-file limit alone cannot bound traversal of an empty theme.
+const MAX_DISCOVERY_ENTRIES: usize = 65_536;
+/// Retained dynamic text, including canonical identities used for deduplication.
+/// Container slots remain separately bounded by MAX_DISCOVERED_SOUNDS.
+const MAX_DISCOVERY_TEXT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SOUND_ROOTS: usize = 64;
+const MAX_SOUND_ROOT_TEXT_BYTES: usize = 256 * 1024;
+
+#[derive(Default)]
+struct SoundRoots {
+    directories: Vec<SoundDirectory>,
+    text_bytes: usize,
+    was_truncated: bool,
+}
+
+impl SoundRoots {
+    fn push(&mut self, directory: SoundDirectory) -> bool {
+        let bytes = directory
+            .path
+            .capacity()
+            .checked_add(directory.origin.capacity())
+            .and_then(|bytes| self.text_bytes.checked_add(bytes));
+        let Some(bytes) = bytes.filter(|bytes| *bytes <= MAX_SOUND_ROOT_TEXT_BYTES) else {
+            self.was_truncated = true;
+            return false;
+        };
+        if self.directories.len() >= MAX_SOUND_ROOTS {
+            self.was_truncated = true;
+            return false;
+        }
+        self.text_bytes = bytes;
+        self.directories.push(directory);
+        true
+    }
+}
+
+struct DiscoveryTraversal {
+    remaining_entries: usize,
+    remaining_text_bytes: usize,
+    was_truncated: bool,
+}
+
+impl DiscoveryTraversal {
+    fn visit(&mut self) -> bool {
+        if self.remaining_entries == 0 {
+            self.was_truncated = true;
+            return false;
+        }
+        self.remaining_entries -= 1;
+        true
+    }
+
+    fn retain_text(&mut self, bytes: Option<usize>) -> bool {
+        let remaining = bytes.and_then(|bytes| self.remaining_text_bytes.checked_sub(bytes));
+        let Some(remaining) = remaining else {
+            self.was_truncated = true;
+            return false;
+        };
+        self.remaining_text_bytes = remaining;
+        true
+    }
+}
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Which playback source the user selected.
@@ -414,10 +477,18 @@ pub fn event_for_signals(previous: Option<&PaneSignals>, new: &PaneSignals) -> O
 /// files. Missing folders are expected and omitted, so the UI presents only
 /// options proven to exist on the current machine.
 pub fn discover_system_sounds() -> SoundDiscovery {
-    let directories = existing_sound_directories();
+    discover_sound_roots(existing_sound_directories())
+}
+
+fn discover_sound_roots(roots: SoundRoots) -> SoundDiscovery {
+    let directories = roots.directories;
     let mut sounds = Vec::new();
     let mut seen_paths = HashSet::new();
-    let mut was_truncated = false;
+    let mut traversal = DiscoveryTraversal {
+        remaining_entries: MAX_DISCOVERY_ENTRIES,
+        remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+        was_truncated: false,
+    };
 
     for directory in &directories {
         collect_sounds(
@@ -426,9 +497,9 @@ pub fn discover_system_sounds() -> SoundDiscovery {
             0,
             &mut sounds,
             &mut seen_paths,
-            &mut was_truncated,
+            &mut traversal,
         );
-        if was_truncated {
+        if traversal.was_truncated {
             break;
         }
     }
@@ -449,7 +520,7 @@ pub fn discover_system_sounds() -> SoundDiscovery {
         platform: platform_label(),
         directories,
         sounds,
-        was_truncated,
+        was_truncated: roots.was_truncated || traversal.was_truncated,
     }
 }
 
@@ -490,32 +561,39 @@ fn collect_sounds(
     depth: usize,
     sounds: &mut Vec<SystemSound>,
     seen_paths: &mut HashSet<PathBuf>,
-    was_truncated: &mut bool,
+    traversal: &mut DiscoveryTraversal,
 ) {
-    if *was_truncated || depth > MAX_DISCOVERY_DEPTH {
+    if traversal.was_truncated || depth > MAX_DISCOVERY_DEPTH {
         return;
     }
     let Ok(entries) = std::fs::read_dir(current) else {
         return;
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        if !traversal.visit() {
+            return;
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
         if sounds.len() >= MAX_DISCOVERED_SOUNDS {
-            *was_truncated = true;
+            traversal.was_truncated = true;
             return;
         }
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
         let path = entry.path();
+        // Bound recursion paths independently of remaining retained text.
+        if path.as_os_str().len() > MAX_DISCOVERY_TEXT_BYTES {
+            traversal.was_truncated = true;
+            return;
+        }
         if file_type.is_dir() {
-            collect_sounds(
-                directory,
-                &path,
-                depth + 1,
-                sounds,
-                seen_paths,
-                was_truncated,
-            );
+            collect_sounds(directory, &path, depth + 1, sounds, seen_paths, traversal);
+            if traversal.was_truncated {
+                return;
+            }
             continue;
         }
         // `DirEntry::file_type()` reports the entry itself, not the symlink
@@ -531,48 +609,83 @@ fn collect_sounds(
         }
 
         let identity = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if !seen_paths.insert(identity) {
+        if seen_paths.contains(&identity) {
             continue;
         }
+        // Lossy decoding and separator replacement can each expand the path
+        // threefold. Check only new playable identities, so skipped entries
+        // and duplicates do not falsely exhaust retained text admission.
+        if path
+            .as_os_str()
+            .len()
+            .checked_mul(9)
+            .and_then(|bytes| bytes.checked_add(directory.origin.len()))
+            .and_then(|bytes| bytes.checked_add(identity.as_os_str().len()))
+            .is_none_or(|bytes| bytes > traversal.remaining_text_bytes)
+        {
+            traversal.was_truncated = true;
+            return;
+        }
         let relative = path.strip_prefix(&directory.path).unwrap_or(&path);
-        sounds.push(SystemSound {
+        let sound = SystemSound {
             display_name: relative
                 .with_extension("")
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, " / "),
             collection: directory.origin.clone(),
             path,
-        });
+        };
+        let bytes = sound
+            .path
+            .capacity()
+            .checked_add(identity.capacity())
+            .and_then(|bytes| bytes.checked_add(sound.display_name.capacity()))
+            .and_then(|bytes| bytes.checked_add(sound.collection.capacity()));
+        if !traversal.retain_text(bytes) {
+            return;
+        }
+        seen_paths.insert(identity);
+        sounds.push(sound);
     }
 }
 
 fn is_supported_sound_file(path: &Path) -> bool {
-    let extension = path
-        .extension()
-        .and_then(OsStr::to_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
 
     #[cfg(target_os = "windows")]
-    return extension == "wav";
+    return extension.eq_ignore_ascii_case("wav");
 
     #[cfg(not(target_os = "windows"))]
-    matches!(
-        extension.as_str(),
-        "wav" | "oga" | "ogg" | "mp3" | "flac" | "aiff" | "aif" | "m4a"
-    )
+    ["wav", "oga", "ogg", "mp3", "flac", "aiff", "aif", "m4a"]
+        .iter()
+        .any(|supported| extension.eq_ignore_ascii_case(supported))
 }
 
-fn existing_sound_directories() -> Vec<SoundDirectory> {
+fn existing_sound_directories() -> SoundRoots {
     let mut candidates = platform_sound_directories();
     let mut seen = HashSet::new();
-    candidates.retain(|candidate| candidate.path.is_dir() && seen.insert(candidate.path.clone()));
+    candidates
+        .directories
+        .retain(|candidate| candidate.path.is_dir() && seen.insert(candidate.path.clone()));
     candidates
 }
 
 #[cfg(target_os = "linux")]
-fn platform_sound_directories() -> Vec<SoundDirectory> {
-    let mut directories = Vec::new();
+fn collect_xdg_sound_roots(directories: &mut SoundRoots, list: &OsStr) {
+    if list.len() > MAX_SOUND_ROOT_TEXT_BYTES {
+        directories.was_truncated = true;
+        return;
+    }
+    for base in std::env::split_paths(list).filter(|base| base.is_absolute()) {
+        if !directories.push(sound_directory(base.join("sounds"), "XDG sound themes")) {
+            break;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn platform_sound_directories() -> SoundRoots {
+    let mut directories = SoundRoots::default();
     // One fall-through chain rather than `if let ... else if let ...`: an
     // `XDG_DATA_HOME` that is set but unusable (empty or relative) must still
     // fall back to the spec's `$HOME/.local/share` default, whereas the
@@ -595,11 +708,9 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
     // .join("sounds")` resolves against ilium's working directory -- which
     // would present a checked-out repository's own `sounds/` folder as a
     // legitimate system sound theme.
-    for base in std::env::split_paths(&xdg_data_dirs).filter(|base| base.is_absolute()) {
-        directories.push(sound_directory(base.join("sounds"), "XDG sound themes"));
-    }
+    collect_xdg_sound_roots(&mut directories, &xdg_data_dirs);
 
-    directories.extend([
+    for directory in [
         sound_directory("/usr/share/gnome/sounds", "GNOME sounds"),
         sound_directory("/usr/share/kde4/apps/kdeui/sounds", "KDE sounds"),
         sound_directory("/usr/share/plasma/desktoptheme", "Plasma sounds"),
@@ -610,16 +721,20 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
             "/usr/share/deepin/deepin-sound-theme/stereo",
             "Deepin sounds",
         ),
-    ]);
+    ] {
+        directories.push(directory);
+    }
     directories
 }
 
 #[cfg(target_os = "macos")]
-fn platform_sound_directories() -> Vec<SoundDirectory> {
-    let mut directories = vec![
-        sound_directory("/System/Library/Sounds", "macOS system sounds"),
-        sound_directory("/Library/Sounds", "Shared macOS sounds"),
-    ];
+fn platform_sound_directories() -> SoundRoots {
+    let mut directories = SoundRoots::default();
+    directories.push(sound_directory(
+        "/System/Library/Sounds",
+        "macOS system sounds",
+    ));
+    directories.push(sound_directory("/Library/Sounds", "Shared macOS sounds"));
     if let Some(home) = absolute_directory(std::env::var_os("HOME")) {
         directories.push(sound_directory(home.join("Library/Sounds"), "User sounds"));
     }
@@ -627,8 +742,8 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_sound_directories() -> Vec<SoundDirectory> {
-    let mut directories = Vec::new();
+fn platform_sound_directories() -> SoundRoots {
+    let mut directories = SoundRoots::default();
     if let Some(windows) = absolute_directory(std::env::var_os("WINDIR"))
         .or_else(|| absolute_directory(std::env::var_os("SystemRoot")))
     {
@@ -657,8 +772,8 @@ fn platform_sound_directories() -> Vec<SoundDirectory> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn platform_sound_directories() -> Vec<SoundDirectory> {
-    Vec::new()
+fn platform_sound_directories() -> SoundRoots {
+    SoundRoots::default()
 }
 
 fn sound_directory(path: impl Into<PathBuf>, origin: &str) -> SoundDirectory {
@@ -1063,6 +1178,283 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn discovery_entry_budget_counts_unsupported_files_and_nested_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        for name in ["first.txt", "second.txt", "third.txt"] {
+            std::fs::write(nested.join(name), []).unwrap();
+        }
+        let directory = sound_directory(root.path(), "Fixture");
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 2,
+            remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        collect_sounds(
+            &directory,
+            &directory.path,
+            0,
+            &mut sounds,
+            &mut HashSet::new(),
+            &mut traversal,
+        );
+        assert!(sounds.is_empty());
+        assert_eq!(traversal.remaining_entries, 0);
+        assert!(traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_entry_budget_is_shared_across_roots() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        std::fs::write(first.path().join("first.wav"), []).unwrap();
+        std::fs::write(second.path().join("second.wav"), []).unwrap();
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 1,
+            remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        let mut seen_paths = HashSet::new();
+        for root in [first.path(), second.path()] {
+            let directory = sound_directory(root, "Fixture");
+            collect_sounds(
+                &directory,
+                &directory.path,
+                0,
+                &mut sounds,
+                &mut seen_paths,
+                &mut traversal,
+            );
+        }
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(sounds[0].path, first.path().join("first.wav"));
+        assert!(traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_entry_budget_exactly_complete_tree_is_not_truncated() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("only.wav"), []).unwrap();
+        let directory = sound_directory(root.path(), "Fixture");
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 1,
+            remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        collect_sounds(
+            &directory,
+            &directory.path,
+            0,
+            &mut sounds,
+            &mut HashSet::new(),
+            &mut traversal,
+        );
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(traversal.remaining_entries, 0);
+        assert!(!traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_text_budget_rejects_before_retaining_sound_or_identity() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("sound.wav"), []).unwrap();
+        let directory = sound_directory(root.path(), "Fixture");
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 10,
+            remaining_text_bytes: 1,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        let mut identities = HashSet::new();
+        collect_sounds(
+            &directory,
+            &directory.path,
+            0,
+            &mut sounds,
+            &mut identities,
+            &mut traversal,
+        );
+        assert!(sounds.is_empty());
+        assert!(identities.is_empty());
+        assert_eq!(traversal.remaining_text_bytes, 1);
+        assert!(traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_text_budget_charges_actual_capacities_and_not_duplicates() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("sound.wav"), []).unwrap();
+        let directory = sound_directory(root.path(), "Fixture");
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 10,
+            remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        let mut identities = HashSet::new();
+        for _ in 0..2 {
+            collect_sounds(
+                &directory,
+                &directory.path,
+                0,
+                &mut sounds,
+                &mut identities,
+                &mut traversal,
+            );
+        }
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(identities.len(), 1);
+        let sound = &sounds[0];
+        let retained = sound.path.capacity()
+            + sound.display_name.capacity()
+            + sound.collection.capacity()
+            + identities.iter().next().unwrap().capacity();
+        assert_eq!(
+            traversal.remaining_text_bytes,
+            MAX_DISCOVERY_TEXT_BYTES - retained
+        );
+        assert!(!traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_text_exhaustion_does_not_refuse_duplicate_or_unsupported_entries() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("sound.WAV"), []).unwrap();
+        let directory = sound_directory(root.path(), "Fixture");
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 10,
+            remaining_text_bytes: MAX_DISCOVERY_TEXT_BYTES,
+            was_truncated: false,
+        };
+        let mut sounds = Vec::new();
+        let mut identities = HashSet::new();
+        collect_sounds(
+            &directory,
+            &directory.path,
+            0,
+            &mut sounds,
+            &mut identities,
+            &mut traversal,
+        );
+        traversal.remaining_text_bytes = 0;
+        std::fs::write(root.path().join("unsupported.txt"), []).unwrap();
+        collect_sounds(
+            &directory,
+            &directory.path,
+            0,
+            &mut sounds,
+            &mut identities,
+            &mut traversal,
+        );
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(identities.len(), 1);
+        assert!(!traversal.was_truncated);
+    }
+
+    #[test]
+    fn discovery_text_budget_exact_capacity_and_overflow_are_truthful() {
+        let mut traversal = DiscoveryTraversal {
+            remaining_entries: 1,
+            remaining_text_bytes: 5,
+            was_truncated: false,
+        };
+        assert!(traversal.retain_text(Some(5)));
+        assert!(!traversal.was_truncated);
+        assert!(!traversal.retain_text(None));
+        assert!(traversal.was_truncated);
+        assert_eq!(traversal.remaining_text_bytes, 0);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn sound_roots_xdg_oversized_list_is_refused_without_component_retention() {
+        let mut roots = SoundRoots::default();
+        assert!(roots.push(sound_directory("/user/sounds", "User sounds")));
+        let bytes = roots.text_bytes;
+        collect_xdg_sound_roots(
+            &mut roots,
+            OsStr::new(&"/".repeat(MAX_SOUND_ROOT_TEXT_BYTES + 1)),
+        );
+        assert!(roots.was_truncated);
+        assert_eq!(roots.directories.len(), 1);
+        assert_eq!(roots.text_bytes, bytes);
+        assert!(roots.push(sound_directory("/builtin/sounds", "Built-in sounds")));
+        assert_eq!(roots.directories.len(), 2);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn sound_roots_xdg_preserves_order_and_ignores_invalid_components() {
+        let mut roots = SoundRoots::default();
+        collect_xdg_sound_roots(&mut roots, OsStr::new("/first:relative::/second"));
+        assert!(!roots.was_truncated);
+        assert_eq!(roots.directories.len(), 2);
+        assert_eq!(roots.directories[0].path, PathBuf::from("/first/sounds"));
+        assert_eq!(roots.directories[1].path, PathBuf::from("/second/sounds"));
+    }
+
+    #[test]
+    fn sound_roots_count_limit_keeps_original_prefix_and_reports_refusal() {
+        let mut roots = SoundRoots::default();
+        for index in 0..MAX_SOUND_ROOTS {
+            assert!(roots.push(sound_directory(format!("/fixture/{index}"), "Fixture")));
+        }
+        assert!(!roots.was_truncated);
+        let bytes = roots.text_bytes;
+        assert!(!roots.push(sound_directory("/refused", "Fixture")));
+        assert!(roots.was_truncated);
+        assert_eq!(roots.directories.len(), MAX_SOUND_ROOTS);
+        assert_eq!(roots.directories[0].path, PathBuf::from("/fixture/0"));
+        assert_eq!(roots.text_bytes, bytes);
+    }
+
+    #[test]
+    fn sound_roots_byte_limit_counts_spare_capacity_before_insertion() {
+        let mut roots = SoundRoots::default();
+        let mut path = PathBuf::with_capacity(MAX_SOUND_ROOT_TEXT_BYTES + 1);
+        path.push("/fixture");
+        assert!(!roots.push(SoundDirectory {
+            path,
+            origin: "Fixture".into()
+        }));
+        assert!(roots.was_truncated);
+        assert!(roots.directories.is_empty());
+        assert_eq!(roots.text_bytes, 0);
+        assert!(roots.push(sound_directory("/small", "Fixture")));
+        assert_eq!(roots.directories.len(), 1);
+        assert!(roots.was_truncated);
+    }
+
+    #[test]
+    fn sound_roots_capacity_arithmetic_overflow_refuses_without_losing_prefix() {
+        let mut roots = SoundRoots::default();
+        assert!(roots.push(sound_directory("/original", "Fixture")));
+        roots.text_bytes = usize::MAX;
+        assert!(!roots.push(sound_directory("/refused", "Fixture")));
+        assert_eq!(roots.directories.len(), 1);
+        assert_eq!(roots.directories[0].path, PathBuf::from("/original"));
+        assert!(roots.was_truncated);
+    }
+
+    #[test]
+    fn sound_roots_refusal_still_scans_accepted_roots() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("sound.wav");
+        std::fs::write(&path, []).unwrap();
+        let mut roots = SoundRoots::default();
+        assert!(roots.push(sound_directory(root.path(), "Fixture")));
+        roots.was_truncated = true;
+        let discovery = discover_sound_roots(roots);
+        assert!(discovery.was_truncated);
+        assert_eq!(discovery.sounds.len(), 1);
+        assert_eq!(discovery.sounds[0].path, path);
     }
 
     #[test]

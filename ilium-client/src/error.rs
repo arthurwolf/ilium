@@ -2,6 +2,44 @@
 
 use std::path::PathBuf;
 
+/// Final execution custody must survive an earlier terminal/service failure.
+#[derive(Debug)]
+pub struct ExecutionShutdownFailure {
+    shutdown: std::io::Error,
+    previous: Option<ClientError>,
+}
+impl ExecutionShutdownFailure {
+    pub fn shutdown(&self) -> &std::io::Error {
+        &self.shutdown
+    }
+    pub fn previous(&self) -> Option<&ClientError> {
+        self.previous.as_ref()
+    }
+}
+impl std::fmt::Display for ExecutionShutdownFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.shutdown.fmt(formatter)?;
+        if let Some(previous) = &self.previous {
+            write!(formatter, "; earlier client failure: {previous}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for ExecutionShutdownFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.shutdown)
+    }
+}
+pub(crate) fn preserve_execution_shutdown_error(
+    shutdown: std::io::Error,
+    previous: Option<ClientError>,
+) -> ClientError {
+    ClientError::TerminalSetup(std::io::Error::other(ExecutionShutdownFailure {
+        shutdown,
+        previous,
+    }))
+}
+
 pub use crate::terminal_input_owner::{
     InputEvent, InputFailure, InputRetirement, InputRetirementDeadline, InputShutdownReport,
     InputStartError,

@@ -1294,6 +1294,51 @@ pub enum ContextMenuAction {
 }
 
 impl ContextMenuAction {
+    pub const fn menu_order(self) -> (u8, u8) {
+        match self {
+            Self::FocusPane | Self::ShowSplitView => (0, 0),
+            Self::ToggleGroup => (0, 1),
+            Self::CreateBoardFromMarkdown => (0, 2),
+            Self::AskForUpdate => (1, 0),
+            Self::QueuePrompt => (1, 1),
+            Self::SchedulePaneInput => (1, 2),
+            Self::ClearPromptQueue => (1, 3),
+            Self::Freeze | Self::Unfreeze => (1, 4),
+            Self::ConvertTo(_) => (1, 5),
+            Self::NewTerminal => (2, 0),
+            Self::NewEditor => (2, 1),
+            Self::NewAgent(_) => (2, 2),
+            Self::NewGroup => (2, 3),
+            Self::NewSplitView => (2, 4),
+            Self::NewFolder => (2, 5),
+            Self::AddChatroom => (2, 6),
+            Self::Worktree => (3, 0),
+            Self::ManageWorktrees => (3, 1),
+            Self::ChangeProjectFolder => (3, 2),
+            Self::SetBookmark { .. } => (4, 0),
+            Self::SetNodeLockedClosed { .. } => (4, 1),
+            Self::Rename => (4, 2),
+            Self::MoveUp => (4, 3),
+            Self::MoveDown => (4, 4),
+            Self::Search => (5, 0),
+            Self::OrderBy => (5, 1),
+            Self::Settings => (5, 2),
+            Self::Restart => (5, 3),
+            Self::Close => (6, 0),
+        }
+    }
+
+    pub const fn menu_group(self) -> u8 {
+        self.menu_order().0
+    }
+
+    fn ordered(mut actions: Vec<Self>) -> Vec<Self> {
+        // Stable sort retains BuiltinAgentProvider::ALL and other generated
+        // order within a rank, with no change to action payloads.
+        actions.sort_by_key(|action| action.menu_order());
+        actions
+    }
+
     pub const fn has_submenu(self) -> bool {
         matches!(self, Self::OrderBy | Self::NewAgent(_) | Self::Worktree)
     }
@@ -1340,17 +1385,17 @@ impl ContextMenuAction {
             Self::Search => "Search workspace…".to_string(),
             Self::FocusPane => "Focus pane".to_string(),
             Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
-            Self::SchedulePaneInput => "Hit key(s) X time from now".to_string(),
+            Self::SchedulePaneInput => "Schedule keystrokes…".to_string(),
             Self::QueuePrompt => "Queue prompt…".to_string(),
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
-            Self::AskForUpdate => "Ask for update".to_string(),
-            Self::ConvertTo(provider) => format!("Convert to {}", provider.label()),
+            Self::AskForUpdate => "Ask for status update".to_string(),
+            Self::ConvertTo(provider) => format!("Convert session to {}", provider.label()),
             Self::Freeze => "Freeze agent".to_string(),
             Self::Unfreeze => "Unfreeze agent".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
             Self::ToggleGroup => "Expand / collapse".to_string(),
             Self::NewTerminal => "New terminal here".to_string(),
-            Self::NewAgent(provider) => format!("New {} agent  ▸", provider.label()),
+            Self::NewAgent(provider) => format!("New {} agent", provider.label()),
             Self::NewEditor => "New editor here".to_string(),
             Self::NewGroup => "New group\u{2026}".to_string(),
             Self::NewSplitView => "New split view\u{2026}".to_string(),
@@ -1369,14 +1414,14 @@ impl ContextMenuAction {
             Self::SetNodeLockedClosed {
                 locked_closed: false,
             } => "Unlock".to_string(),
-            Self::Rename => "Rename".to_string(),
+            Self::Rename => "Rename…".to_string(),
             Self::MoveUp => "Move up".to_string(),
             Self::MoveDown => "Move down".to_string(),
             Self::Close => "Close".to_string(),
-            Self::OrderBy => "Order by  ▸".to_string(),
-            Self::Worktree => "Worktree  ▸".to_string(),
+            Self::OrderBy => "Order by".to_string(),
+            Self::Worktree => "Worktree".to_string(),
             Self::ManageWorktrees => "Manage worktrees…".to_string(),
-            Self::Restart => "Restart".to_string(),
+            Self::Restart => "Restart client".to_string(),
             Self::Settings => "Settings\u{2026}".to_string(),
         }
     }
@@ -1404,6 +1449,19 @@ pub enum SubmenuItemAction {
     RemoveWorktree,
 }
 
+impl SubmenuItemAction {
+    pub(crate) const fn menu_group(self) -> u8 {
+        match self {
+            Self::SetTreeOrder(TreeOrder::AgeAscending | TreeOrder::AgeDescending) => 1,
+            Self::SetTreeOrder(TreeOrder::NameAscending | TreeOrder::NameDescending) => 2,
+            Self::SetTreeOrder(TreeOrder::CostDescending) => 3,
+            Self::CopyWorktreeBranch | Self::CopyWorktreePath => 1,
+            Self::RemoveWorktree => 2,
+            _ => 0,
+        }
+    }
+}
+
 pub struct SubmenuItem {
     pub action: SubmenuItemAction,
     pub label: String,
@@ -1417,6 +1475,23 @@ pub struct Submenu {
     pub area: Rect,
     pub items: Vec<SubmenuItem>,
     pub selected_index: usize,
+    pub(crate) row_offset: usize,
+}
+
+impl Submenu {
+    pub(crate) fn layout(&self) -> crate::context_menu_layout::MenuLayout {
+        let groups: Vec<_> = self
+            .items
+            .iter()
+            .map(|item| item.action.menu_group())
+            .collect();
+        crate::context_menu_layout::MenuLayout::with_offset(
+            &groups,
+            self.selected_index,
+            self.area.height.saturating_sub(2),
+            self.row_offset,
+        )
+    }
 }
 
 /// State for the Sol/Astra/Luna reasoning-strength submenu opened from the
@@ -1472,6 +1547,7 @@ pub struct ContextMenu {
     pub area: Rect,
     pub actions: Vec<ContextMenuAction>,
     pub selected_index: usize,
+    pub(crate) row_offset: usize,
     pub submenu: Option<Submenu>,
     /// Updated from the correlated repository-facts response while this menu
     /// remains open. Until then, worktree actions fail closed.
@@ -1482,6 +1558,20 @@ pub struct ContextMenu {
 }
 
 impl ContextMenu {
+    pub(crate) fn layout(&self) -> crate::context_menu_layout::MenuLayout {
+        let groups: Vec<_> = self
+            .actions
+            .iter()
+            .map(|action| action.menu_group())
+            .collect();
+        crate::context_menu_layout::MenuLayout::with_offset(
+            &groups,
+            self.selected_index,
+            self.area.height.saturating_sub(2),
+            self.row_offset,
+        )
+    }
+
     pub fn set_worktree_unavailable_reason(&mut self, reason: Option<String>) {
         self.worktree_unavailable_reason = reason;
         if let Some(submenu) = self.submenu.as_mut() {
@@ -2008,8 +2098,8 @@ pub struct App {
     pub keybindings: Vec<KeyBinding>,
     /// Live card-preview settings shared by every board pane in this client.
     pub kanban_board_settings: KanbanBoardSettings,
-    /// Live user-global sound choices and the system catalog discovered once
-    /// before the terminal enters raw mode.
+    /// Live user-global sound choices and the catalogue discovered once on
+    /// the shared I/O bank before the interactive loop starts.
     pub sound_settings: ilium_sound::SoundSettings,
     pub notification_settings: ilium_sound::NotificationSettings,
     pub sound_discovery: ilium_sound::SoundDiscovery,
@@ -2274,6 +2364,8 @@ pub struct App {
     pending_pane_focuses: Vec<PendingPaneFocus>,
     pub markdown_picker: ratatui_image::picker::Picker,
     pub document_preparation: Option<crate::document_preparation::DocumentPreparation>,
+    pub(crate) text_trigger_preview: Option<crate::text_trigger_dialog::TextTriggerPreview>,
+    pub(crate) paste_retirement: Option<ilium_execution::RetirementHandle>,
     pub(crate) source_window_preparation:
         Option<crate::source_window_preparation::SourceWindowPreparation>,
     pub(crate) source_window_syntax: Option<crate::source_window_syntax::SourceWindowSyntax>,
@@ -2297,6 +2389,9 @@ pub struct App {
     pub(crate) startup_progress_path: Option<PathBuf>,
     pub(crate) startup_progress: crate::filesystem::startup::StartupReader,
     pub(crate) pending_native_paste: Option<crate::terminal_input::NativePaste>,
+    /// Character-oriented paste is replayed in bounded input-loop turns while
+    /// retaining its admitted original envelope and storage lease.
+    pub(crate) pending_key_paste: Option<crate::paste_cursor::PasteReplay>,
     native_paste_failure: Option<crate::terminal_input_owner::InputFailure>,
     pub(crate) terminal_context_preparation:
         Option<crate::terminal_context_preparation::TerminalContextPreparation>,
@@ -2474,6 +2569,8 @@ pub struct App {
         Option<(std::sync::Arc<()>, Vec<ilium_voice::VoiceToolOutput>)>,
     // Last source owner for bounded pending PTT vectors and temporary restoration.
     pending_voice_interaction_allocation: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+    // Last field: discovery and both device-name vectors must drop before credit.
+    pub(crate) startup_audio_retention: Option<ilium_execution::Retention>,
 }
 
 pub(crate) struct PendingEditorOpen {
@@ -2639,6 +2736,7 @@ impl App {
             sound_settings: ilium_sound::SoundSettings::default(),
             notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
+            startup_audio_retention: None,
             inference_settings: InferenceSettings::default(),
             restructure_budget_autosave_deadline: None,
             inference_settings_save_error: None,
@@ -2773,6 +2871,8 @@ impl App {
             // support and supplies the Picker from the real entry point.
             markdown_picker: ratatui_image::picker::Picker::halfblocks(),
             document_preparation: None,
+            text_trigger_preview: None,
+            paste_retirement: None,
             source_window_preparation: None,
             source_window_syntax: None,
             source_window_client: None,
@@ -2810,6 +2910,7 @@ impl App {
             startup_progress_path: None,
             startup_progress: crate::filesystem::startup::StartupReader::default(),
             pending_native_paste: None,
+            pending_key_paste: None,
             native_paste_failure: None,
             terminal_context_preparation: None,
             pending_terminal_context: None,
@@ -3322,12 +3423,24 @@ impl App {
     /// deliberately supports arbitrary nesting rather than a settings-only
     /// return flag or a freshly reconstructed parent screen.
     pub(crate) fn pop_modal(&mut self) {
+        // Input handlers move the active mode out; their Esc path cancels explicitly.
+        let closing_trigger = match &self.mode {
+            Mode::TextTriggerDialog(state) => Some(state.identity().to_owned()),
+            _ => None,
+        };
+        if let Some(draft_id) = closing_trigger.as_deref() {
+            self.cancel_text_trigger_preview(draft_id);
+        }
         self.mode = self.modal_stack.pop().unwrap_or(Mode::Normal);
+        let _ = self.reconcile_text_trigger_preview();
     }
 
     /// Finishes a nested interaction whose successful action exits the whole
     /// flow, such as creating a board from a file-picker action menu.
     pub(crate) fn close_modal_flow(&mut self) {
+        if let Some(preview) = &mut self.text_trigger_preview {
+            preview.cancel_all();
+        }
         self.modal_stack.clear();
         self.mode = Mode::Normal;
     }
@@ -6661,6 +6774,105 @@ impl App {
         )
     }
 
+    pub(crate) fn configure_text_trigger_preview(
+        &mut self,
+        client: ilium_execution::Client,
+    ) -> std::sync::Arc<tokio::sync::Notify> {
+        debug_assert!(
+            self.text_trigger_preview.is_none(),
+            "text trigger preview is configured once at client startup"
+        );
+
+        let preview = crate::text_trigger_dialog::TextTriggerPreview::new(client);
+
+        let notification = preview.notification();
+
+        self.text_trigger_preview = Some(preview);
+
+        notification
+    }
+
+    pub(crate) fn configure_paste_retirement(
+        &mut self,
+        retirement: ilium_execution::RetirementHandle,
+    ) {
+        debug_assert!(
+            self.paste_retirement.is_none(),
+            "paste retirement is configured once at client startup"
+        );
+        self.paste_retirement = Some(retirement);
+    }
+
+    fn text_trigger_dialog_mut(
+        &mut self,
+    ) -> Option<&mut crate::text_trigger_dialog::TextTriggerDialogState> {
+        if let Mode::TextTriggerDialog(state) = &mut self.mode {
+            return Some(state);
+        }
+
+        self.modal_stack
+            .iter_mut()
+            .rev()
+            .find_map(|mode| match mode {
+                Mode::TextTriggerDialog(state) => Some(state.as_mut()),
+                _ => None,
+            })
+    }
+
+    pub(crate) fn reconcile_text_trigger_preview(&mut self) -> bool {
+        let Some(mut preview) = self.text_trigger_preview.take() else {
+            let Some(state) = self.text_trigger_dialog_mut() else {
+                return false;
+            };
+
+            return state.preview_unavailable_current(
+                crate::text_trigger_dialog::TextTriggerPreviewIssue::Unconfigured,
+            );
+        };
+
+        let changed = match self.text_trigger_dialog_mut() {
+            Some(state) => preview.request(state),
+            None => preview.collect(),
+        };
+
+        self.text_trigger_preview = Some(preview);
+
+        changed
+    }
+
+    pub(crate) fn text_trigger_preview_retry_delay(&self, now: Instant) -> Option<Duration> {
+        self.text_trigger_preview
+            .as_ref()
+            .and_then(|preview| preview.retry_delay(now))
+    }
+
+    pub(crate) fn cancel_text_trigger_preview(&mut self, draft_id: &str) {
+        if let Some(preview) = &mut self.text_trigger_preview {
+            preview.cancel_draft(draft_id);
+        }
+    }
+
+    pub(crate) fn close_text_trigger_preview(&mut self) {
+        fn release(mode: &mut Mode) {
+            if let Mode::TextTriggerDialog(state) = mode {
+                state.release_preview();
+            }
+        }
+        release(&mut self.mode);
+        for mode in &mut self.modal_stack {
+            release(mode);
+        }
+        if let Some(preview) = &mut self.text_trigger_preview {
+            preview.close();
+        }
+    }
+
+    pub(crate) fn collect_closed_text_trigger_preview(&mut self) {
+        if let Some(preview) = &mut self.text_trigger_preview {
+            preview.collect();
+        }
+    }
+
     pub fn open_text_trigger_dialog(&mut self, index: Option<usize>) {
         let existing = index.and_then(|index| {
             self.text_trigger_settings
@@ -6675,6 +6887,7 @@ impl App {
         self.push_modal(Mode::TextTriggerDialog(Box::new(
             crate::text_trigger_dialog::TextTriggerDialogState::new(existing),
         )));
+        let _ = self.reconcile_text_trigger_preview();
     }
 
     pub fn commit_text_trigger(
@@ -7500,7 +7713,7 @@ impl App {
 
     /// Asks the server-owned sound actor to play once. Preview uses the same
     /// backend and selected path as real transition alerts.
-    pub fn settings_preview_sound(&mut self) {
+    pub fn settings_preview_sound(&mut self) -> bool {
         if self.sound_settings.source == ilium_sound::SoundSourceKind::SoundFile
             && !self
                 .sound_settings
@@ -7510,23 +7723,35 @@ impl App {
         {
             self.status_message =
                 Some("Cannot preview: select an available sound file first".to_string());
-            return;
+            return false;
         }
         if self.sound_settings.source == ilium_sound::SoundSourceKind::Muted {
             self.status_message = Some("Sound is muted".to_string());
-            return;
+            return false;
         }
-        self.queue_request(ClientRequest::PreviewSoundSettings {
-            settings: self.sound_settings.clone(),
-        });
-        self.status_message = Some("Playing sound preview".to_string());
+        self.request_sound_preview(self.sound_settings.clone(), "Sound preview requested")
+    }
+
+    /// Success means outbound admission, before server validation or playback.
+    pub(crate) fn request_sound_preview(
+        &mut self,
+        settings: ilium_sound::SoundSettings,
+        requested_status: &str,
+    ) -> bool {
+        if !self.queue_request(ClientRequest::PreviewSoundSettings { settings }) {
+            return false;
+        }
+        self.status_message = Some(requested_status.to_owned());
+        true
     }
 
     pub fn settings_adjust_sound_row(&mut self, row: SoundRow, direction: i32) {
         match row {
             SoundRow::Source => self.settings_toggle_sound_source(),
             SoundRow::File => self.settings_adjust_sound_file(direction),
-            SoundRow::Preview => self.settings_preview_sound(),
+            SoundRow::Preview => {
+                self.settings_preview_sound();
+            }
             SoundRow::NotifyEnabled => {
                 let mut notifications = self.notification_settings;
                 notifications.enabled = !notifications.enabled;
@@ -8169,16 +8394,32 @@ impl App {
                 .flatten();
             PluginPanelModel::with_active(catalogue.view(), &self.animation_settings.plugin, active)
         } else {
+            let preparation_status = self
+                .plugin_catalogue_preparation
+                .as_ref()
+                .and_then(|owner| owner.status.clone());
+            let status = preparation_status
+                .clone()
+                .unwrap_or_else(|| "Open Plugin to discover animation packages".into());
+            let issue_details = preparation_status
+                .filter(|status| !status.starts_with("Loading animation packages"))
+                .map(|status| vec![format!("Animation catalogue: {status}")])
+                .unwrap_or_default();
             PluginPanelModel {
                 rows: vec![PluginPanelRow::Status],
-                labels: vec![self
-                    .plugin_catalogue_preparation
-                    .as_ref()
-                    .and_then(|owner| owner.status.clone())
-                    .unwrap_or_else(|| "Open Plugin to discover animation packages".into())],
-                issue_details: Vec::new(),
+                labels: vec![status],
+                issue_details,
             }
         };
+        if !model.issue_details.is_empty()
+            && !model.rows.iter().any(|row| *row == PluginPanelRow::Issues)
+        {
+            model.rows.push(PluginPanelRow::Issues);
+            model.labels.push(format!(
+                "{} package/runtime issue(s)",
+                model.issue_details.len()
+            ));
+        }
         let native = self.animation_row_model();
         for (index, row) in native.rows().iter().enumerate() {
             if let crate::animation_rows::AnimationRow::Common(id) = row {
@@ -9189,6 +9430,16 @@ impl App {
                     return;
                 };
                 self.send_staged_terminal_keystrokes(pane_id, stages);
+                if action == AgentToolbarAction::Compact && self.remote_compaction_settings.enabled
+                {
+                    // Remote compaction is on but this pane cannot use it yet
+                    // (session or transcript not resolved, or another dialog
+                    // is open): say why the native command ran instead.
+                    self.status_message = Some(
+                        "Remote compaction unavailable for this pane; sent the native /compact"
+                            .into(),
+                    );
+                }
             }
         }
     }
@@ -12737,8 +12988,21 @@ impl App {
         if actions.is_empty() {
             return;
         }
-        let width = 36.min(self.layout.screen_area.width.max(1));
-        let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let label_width = actions
+            .iter()
+            .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
+            .max()
+            .unwrap_or(0);
+        let width = u16::try_from(label_width.saturating_add(10))
+            .unwrap_or(u16::MAX)
+            .max(36)
+            .min(self.layout.screen_area.width.max(1));
+        let groups: Vec<_> = actions.iter().map(|action| action.menu_group()).collect();
+        let height = u16::try_from(crate::context_menu_layout::MenuLayout::desired_height(
+            &groups,
+        ))
+        .unwrap_or(u16::MAX)
+        .min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
         let area = Rect::new(column.min(max_x), row.min(max_y), width, height);
@@ -12747,6 +13011,7 @@ impl App {
             area,
             actions,
             selected_index: 0,
+            row_offset: 0,
             submenu: None,
             worktree_unavailable_reason: Some("Checking Git repository…".to_string()),
             unavailable_retention: None,
@@ -13314,8 +13579,7 @@ impl App {
             .filter(|selection| selection.pane_id == pane_id && !selection.is_empty());
         let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
         let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
-        // Preserve the existing agent-debug entry point and its first-row
-        // activation contract when the user has explicitly enabled it. The
+        // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
         if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
@@ -13426,6 +13690,7 @@ impl App {
             ),
             actions: Vec::new(),
             selected_index: 0,
+            row_offset: 0,
             preparation_generation: generation,
             _preparation_hold: None,
         });
@@ -13594,18 +13859,30 @@ impl App {
             extra.push(TerminalContextAction::OpenExternally(target));
             blueprint.actions.splice(insert..insert, extra);
         }
+        blueprint
+            .actions
+            .sort_by_key(TerminalContextAction::menu_order);
         let width = blueprint
             .actions
             .iter()
             .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
             .max()
             .unwrap_or(0)
-            .saturating_add(3);
+            .saturating_add(10);
         let width = u16::try_from(width)
             .unwrap_or(u16::MAX)
             .max(38)
             .min(blueprint.screen_area.width.max(1));
-        let height = (blueprint.actions.len() as u16 + 2).min(blueprint.screen_area.height.max(1));
+        let groups: Vec<_> = blueprint
+            .actions
+            .iter()
+            .map(TerminalContextAction::menu_group)
+            .collect();
+        let height = u16::try_from(crate::context_menu_layout::MenuLayout::desired_height(
+            &groups,
+        ))
+        .unwrap_or(u16::MAX)
+        .min(blueprint.screen_area.height.max(1));
         self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
             pane_id: blueprint.key.pane_id,
             source_line_text: text.source_line_text,
@@ -13626,6 +13903,7 @@ impl App {
             ),
             actions: blueprint.actions,
             selected_index: 0,
+            row_offset: 0,
             preparation_generation: blueprint.key.generation,
             _preparation_hold: Some(hold),
         });
@@ -13685,8 +13963,7 @@ impl App {
         });
         let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
         let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
-        // Preserve the existing agent-debug entry point and its first-row
-        // activation contract when the user has explicitly enabled it. The
+        // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
         if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
             actions.push(TerminalContextAction::ShowAgentDebugLog);
@@ -13755,17 +14032,26 @@ impl App {
             actions.push(TerminalContextAction::OpenExternally(open_target));
         }
         actions.extend(screen_transfer_actions);
+        actions.sort_by_key(TerminalContextAction::menu_order);
         let label_width = actions
             .iter()
             .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
             .max()
             .unwrap_or(0)
-            .saturating_add(3);
+            .saturating_add(10);
         let width = u16::try_from(label_width)
             .unwrap_or(u16::MAX)
             .max(38)
             .min(self.layout.screen_area.width.max(1));
-        let height = (actions.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let groups: Vec<_> = actions
+            .iter()
+            .map(TerminalContextAction::menu_group)
+            .collect();
+        let height = u16::try_from(crate::context_menu_layout::MenuLayout::desired_height(
+            &groups,
+        ))
+        .unwrap_or(u16::MAX)
+        .min(self.layout.screen_area.height.max(1));
         let max_x = self.layout.screen_area.right().saturating_sub(width);
         let max_y = self.layout.screen_area.bottom().saturating_sub(height);
         self.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
@@ -13779,6 +14065,7 @@ impl App {
             area: Rect::new(column.min(max_x), row.min(max_y), width, height),
             actions,
             selected_index: 0,
+            row_offset: 0,
         });
     }
 
@@ -14198,7 +14485,16 @@ impl App {
                     .iter()
                     .map(|tree_order| SubmenuItem {
                         action: SubmenuItemAction::SetTreeOrder(*tree_order),
-                        label: tree_order.label().to_string(),
+                        label: match tree_order {
+                            TreeOrder::Manual => "Manual order",
+                            TreeOrder::Type => "Item type",
+                            TreeOrder::AgeAscending => "Newest first",
+                            TreeOrder::AgeDescending => "Oldest first",
+                            TreeOrder::NameAscending => "Name (A–Z)",
+                            TreeOrder::NameDescending => "Name (Z–A)",
+                            TreeOrder::CostDescending => "Cost (highest first)",
+                        }
+                        .to_string(),
                         disabled_reason: None,
                         disabled_reason_retention: None,
                     })
@@ -14288,13 +14584,38 @@ impl App {
             }
             _ => return,
         };
-        let submenu_width = 32.min(self.layout.screen_area.width.max(1));
-        let submenu_height = (items.len() as u16 + 2).min(self.layout.screen_area.height.max(1));
+        let mut items = items;
+        if parent == ContextMenuAction::Worktree {
+            items.sort_by_key(|item| match item.action {
+                SubmenuItemAction::OpenWorktreeFolder => 0,
+                SubmenuItemAction::NewTerminalInWorktree => 1,
+                SubmenuItemAction::CopyWorktreeBranch => 2,
+                SubmenuItemAction::CopyWorktreePath => 3,
+                SubmenuItemAction::RemoveWorktree => 4,
+                _ => 0,
+            });
+        }
+        let label_width = items
+            .iter()
+            .map(|item| unicode_width::UnicodeWidthStr::width(item.label.as_str()))
+            .max()
+            .unwrap_or(0);
+        let submenu_width = u16::try_from(label_width.saturating_add(10))
+            .unwrap_or(u16::MAX)
+            .max(32)
+            .min(self.layout.screen_area.width.max(1));
+        let groups: Vec<_> = items.iter().map(|item| item.action.menu_group()).collect();
+        let submenu_height = u16::try_from(crate::context_menu_layout::MenuLayout::desired_height(
+            &groups,
+        ))
+        .unwrap_or(u16::MAX)
+        .min(self.layout.screen_area.height.max(1));
         let parent_row = menu
             .actions
             .iter()
             .position(|action| *action == parent)
-            .unwrap_or(0) as u16;
+            .unwrap_or(0);
+        let parent_row = menu.layout().row_for_action(parent_row).unwrap_or(0);
         let preferred_x = menu.area.right();
         let x = if preferred_x.saturating_add(submenu_width) <= self.layout.screen_area.right() {
             preferred_x
@@ -14312,6 +14633,7 @@ impl App {
             area: Rect::new(x, preferred_y.min(max_y), submenu_width, submenu_height),
             items,
             selected_index,
+            row_offset: 0,
         });
         menu.hover_candidate = None;
     }
@@ -14708,7 +15030,7 @@ impl App {
                 actions.push(ContextMenuAction::AskForUpdate);
             }
             actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
-            return actions;
+            return ContextMenuAction::ordered(actions);
         }
         let mut actions = vec![
             ContextMenuAction::NewTerminal,
@@ -14789,12 +15111,12 @@ impl App {
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
             Some(node) if node.is_folder() => self.insert_lock_actions(&mut actions, target, 0),
             Some(_) => {
-                return ContextMenuAction::GLOBAL_ACTIONS.to_vec();
+                return ContextMenuAction::ordered(ContextMenuAction::GLOBAL_ACTIONS.to_vec());
             }
             // A stale/unrecognized target (e.g. a race with a concurrent
             // structural change) still gets a menu -- just the one action
             // that never depends on the target actually existing.
-            None => return ContextMenuAction::GLOBAL_ACTIONS.to_vec(),
+            None => return ContextMenuAction::ordered(ContextMenuAction::GLOBAL_ACTIONS.to_vec()),
         }
         if self.tree.pane_workspace(target).is_some() {
             actions.insert(1.min(actions.len()), ContextMenuAction::Worktree);
@@ -14812,7 +15134,7 @@ impl App {
             ContextMenuAction::Close,
         ]);
         actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
-        actions
+        ContextMenuAction::ordered(actions)
     }
 
     /// Executes one context-menu command, then leaves the popup unless the
@@ -18349,6 +18671,102 @@ mod tests {
             .client(crate::ipc_preparation::request_limits())
             .unwrap();
         (execution, client)
+    }
+
+    #[test]
+    fn sound_preview_refusal_retry_reports_only_admitted_request() {
+        let (mut execution, client) = native_paste_bank();
+        let mut app = app();
+        app.outbound_admission = Some(client.clone());
+        let holds: Vec<_> = (0..32)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+        app.settings_preview_sound();
+        let refused = app.status_message.clone();
+        let empty_after_refusal = app.outbox.is_empty();
+        drop(holds);
+        app.settings_preview_sound();
+        let accepted = app.status_message.clone();
+        let exact_request = app.outbox.len() == 1
+            && matches!(app.outbox[0].view(), ClientRequest::PreviewSoundSettings { settings }
+                if settings.source == ilium_sound::SoundSourceKind::SystemBeep);
+        app.outbox.clear();
+        app.outbound_admission = None;
+        drop(client);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(joined.shutdown_complete);
+        assert!(empty_after_refusal);
+        assert!(
+            refused
+                .as_deref()
+                .is_some_and(|status| status.contains("Request rejected before admission")),
+            "sound preview must preserve actual admission refusal"
+        );
+        assert_eq!(accepted.as_deref(), Some("Sound preview requested"));
+        assert!(exact_request);
+    }
+
+    #[test]
+    fn sound_preview_muted_does_not_publish_a_request() {
+        let mut app = app();
+        app.sound_settings.source = ilium_sound::SoundSourceKind::Muted;
+        app.settings_preview_sound();
+        assert!(app.outbox.is_empty());
+        assert_eq!(app.status_message.as_deref(), Some("Sound is muted"));
+    }
+
+    #[test]
+    fn sound_preview_design_publishers_preserve_refusal_and_selected_source() {
+        let (mut execution, client) = native_paste_bank();
+        let mut app = app();
+        let original = app.sound_settings.clone();
+        app.outbound_admission = None;
+        let refused = app.request_sound_preview(original.clone(), "must not overwrite refusal");
+        let refusal_status = app.status_message.clone();
+        app.outbound_admission = Some(client);
+        for source in [
+            ilium_sound::SoundSourceKind::BundledChirping,
+            ilium_sound::SoundSourceKind::Generated,
+        ] {
+            let mut settings = original.clone();
+            settings.source = source;
+            assert!(app.request_sound_preview(settings, "Design preview requested"));
+        }
+        let preserved = app.sound_settings == original;
+        let sources: Vec<_> = app
+            .outbox
+            .iter()
+            .map(|request| match request.view() {
+                ClientRequest::PreviewSoundSettings { settings } => settings.source,
+                _ => panic!("preview original only"),
+            })
+            .collect();
+        let status = app.status_message.clone();
+        app.outbox.clear();
+        app.outbound_admission = None;
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert!(!refused);
+        assert!(refusal_status
+            .as_deref()
+            .is_some_and(|status| status.contains("Request rejected before admission")));
+        assert!(preserved);
+        assert_eq!(
+            sources,
+            [
+                ilium_sound::SoundSourceKind::BundledChirping,
+                ilium_sound::SoundSourceKind::Generated
+            ]
+        );
+        assert_eq!(status.as_deref(), Some("Design preview requested"));
     }
 
     fn native_paste_app(client: ilium_execution::Client) -> (App, NodeId) {
@@ -22829,14 +23247,14 @@ mod tests {
         assert_eq!(
             menu.actions,
             vec![
-                TerminalContextAction::ShowAgentDebugLog,
-                TerminalContextAction::ToggleAgentToolbar {
-                    currently_visible: true,
-                },
                 TerminalContextAction::CopyLineToClipboard,
                 TerminalContextAction::CopyVisibleTerminalToClipboard,
                 TerminalContextAction::CopyFullTerminalHistoryToClipboard,
                 TerminalContextAction::PasteClipboard,
+                TerminalContextAction::ToggleAgentToolbar {
+                    currently_visible: true,
+                },
+                TerminalContextAction::ShowAgentDebugLog,
             ]
         );
     }
@@ -27230,5 +27648,119 @@ mod light_copy_recovery_contract_tests {
             assert!(Instant::now() < deadline);
         }
         app.light_copy_recovery.clear(); // Explicit failed shutdown receipt; whole source retires on CPU.
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_receipt_tests {
+    use super::*;
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::app::Mode;
+    use crate::text_trigger_dialog::TextTriggerFocus;
+
+    fn app(directory: &std::path::Path) -> App {
+        let mut app = App::new("synthetic-text-trigger".into(), directory.to_path_buf());
+
+        app.config_dir = Some(directory.to_path_buf());
+
+        app
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn acknowledged_exact_text_trigger_save_still_closes_only_its_dialog() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let mut app = app(directory.path());
+
+        app.open_text_trigger_dialog(None);
+
+        let Mode::TextTriggerDialog(state) = &mut app.mode else {
+            panic!("text trigger dialog");
+        };
+
+        state.regexp = crate::text_prompt::TextPromptState::new("^saved$");
+
+        state.message = crate::text_prompt::TextPromptState::new("reply");
+
+        state.sample = ratatui_textarea::TextArea::from(vec!["saved".to_owned()]);
+
+        state.mark_preview_dirty();
+        state.focus = TextTriggerFocus::Save;
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(
+            matches!(app.mode, Mode::TextTriggerDialog(_)),
+            "Save must wait for durable receipt"
+        );
+
+        app.settle_filesystem_for_test();
+        let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
+        assert_eq!(persisted.triggers.len(), 1);
+        assert_eq!(persisted.triggers[0].regexp, "^saved$");
+
+        assert_eq!(persisted.triggers[0].message, "reply");
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "matching durable receipt must close the exact dialog"
+        );
+    }
+
+    #[test]
+    fn edit_after_save_preserves_new_draft_and_fences_old_durable_dismissal() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let mut app = app(directory.path());
+
+        app.open_text_trigger_dialog(None);
+
+        let Mode::TextTriggerDialog(state) = &mut app.mode else {
+            panic!("text trigger dialog");
+        };
+
+        state.regexp = crate::text_prompt::TextPromptState::new("^saved$");
+
+        state.message = crate::text_prompt::TextPromptState::new("original");
+
+        state.mark_preview_dirty();
+        state.focus = TextTriggerFocus::Save;
+
+        press(&mut app, KeyCode::Enter);
+
+        let Mode::TextTriggerDialog(state) = &mut app.mode else {
+            panic!("saving text trigger dialog");
+        };
+
+        state.focus = TextTriggerFocus::Message;
+
+        press(&mut app, KeyCode::Char('x'));
+
+        app.settle_filesystem_for_test();
+        let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
+        assert_eq!(persisted.triggers.len(), 1);
+        assert_eq!(persisted.triggers[0].regexp, "^saved$");
+
+        assert_eq!(persisted.triggers[0].message, "original");
+        let Mode::TextTriggerDialog(state) = &app.mode else {
+            panic!("older durable receipt incorrectly dismissed newer draft");
+        };
+
+        assert_eq!(state.message.buf, "originalx");
+
+        assert!(
+            state.save_error.is_none(),
+            "successful older write must not become a save failure"
+        );
+
+        assert!(
+            state.preview_revision() > 0,
+            "semantic edit must also fence preview publication"
+        );
     }
 }

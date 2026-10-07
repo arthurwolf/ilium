@@ -24,6 +24,10 @@ use tokio::task::JoinHandle;
 /// relying on capacity alone.
 const CHANNEL_CAPACITY: usize = 256;
 
+#[cfg(test)]
+#[path = "shutdown_requests_tests.rs"]
+mod shutdown_requests_tests;
+
 /// Charged decoded ownership. Map moves the original allocations and keeps
 /// storage through consumers; allocating clones needs separate admission.
 #[derive(Debug)]
@@ -102,7 +106,66 @@ pub struct RequestSender {
     sender: mpsc::Sender<RequestCommand>,
     admission: ilium_execution::Client,
 }
+/// Reserve the FIFO slot before moving any admitted request out of its owner.
+pub(crate) struct RequestPublicationPermit<'a> {
+    permit: mpsc::Permit<'a, RequestCommand>,
+}
+impl RequestPublicationPermit<'_> {
+    pub(crate) fn publish(self, request: crate::ipc_preparation::AdmittedRequest) {
+        self.permit.send(RequestCommand::Request(Box::new(request)));
+    }
+    pub(crate) fn publish_flush(self) -> RequestFlushReceipt {
+        let (sent, received) = oneshot::channel();
+        self.permit.send(RequestCommand::Flush(sent));
+        RequestFlushReceipt {
+            received,
+            acknowledged: false,
+            failure: None,
+        }
+    }
+}
+/// Keep the actual flush receiver across cancellation; never replay its prefix.
+pub(crate) struct RequestFlushReceipt {
+    received: oneshot::Receiver<()>,
+    acknowledged: bool,
+    failure: Option<oneshot::error::RecvError>,
+}
+impl RequestFlushReceipt {
+    pub(crate) async fn observe(&mut self) -> Result<(), RequestPublicationClosed> {
+        if self.acknowledged {
+            return Ok(());
+        }
+        if self.failure.is_some() {
+            return Err(RequestPublicationClosed);
+        }
+        match (&mut self.received).await {
+            Ok(()) => {
+                self.acknowledged = true;
+                Ok(())
+            }
+            Err(error) => {
+                self.failure = Some(error);
+                Err(RequestPublicationClosed)
+            }
+        }
+    }
+    pub(crate) fn acknowledged(&self) -> bool {
+        self.acknowledged
+    }
+    pub(crate) fn failure(&self) -> Option<&oneshot::error::RecvError> {
+        self.failure.as_ref()
+    }
+}
 impl RequestSender {
+    pub(crate) async fn reserve_publication(
+        &self,
+    ) -> Result<RequestPublicationPermit<'_>, RequestPublicationClosed> {
+        self.sender
+            .reserve()
+            .await
+            .map(|permit| RequestPublicationPermit { permit })
+            .map_err(|_| RequestPublicationClosed)
+    }
     pub async fn send(&self, request: ClientRequest) -> Result<(), Box<RequestSendError>> {
         let mut original = request;
         loop {

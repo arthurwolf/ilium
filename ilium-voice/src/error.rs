@@ -16,6 +16,11 @@ pub enum VoiceError {
         direction: &'static str,
         source: cpal::Error,
     },
+    #[error("failed to prepare {direction} audio device catalogue: {reason}")]
+    AudioDeviceCatalogue {
+        direction: &'static str,
+        reason: &'static str,
+    },
     #[error("failed to read {direction} audio configuration: {source}")]
     AudioConfiguration {
         direction: &'static str,

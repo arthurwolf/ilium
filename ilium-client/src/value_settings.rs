@@ -8,6 +8,7 @@ use crate::value_number::{NumberSpec, NumberValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsNumber {
+    Remote(crate::remote_compaction_settings::RemoteCompactionRow),
     Panel(PanelNumber),
     Ui(UiNumber),
     TerminalScrollback,
@@ -24,6 +25,7 @@ pub enum SettingsNumber {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiNumber {
+    AutoFreezeAfter,
     LastPromptLines,
     ProgressLines,
     CompletedProgressHideAfter,
@@ -31,6 +33,7 @@ pub enum UiNumber {
 impl UiNumber {
     fn scalar(self) -> ScalarNumber {
         match self {
+            Self::AutoFreezeAfter => ScalarNumber::AutoFreezeAfter,
             Self::LastPromptLines => ScalarNumber::LastPromptLines,
             Self::ProgressLines => ScalarNumber::ProgressLines,
             Self::CompletedProgressHideAfter => ScalarNumber::CompletedProgressHideAfter,
@@ -41,6 +44,11 @@ impl UiNumber {
 impl SettingsNumber {
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
         match tab {
+            SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::rows(app)
+                .get(row)
+                .copied()
+                .filter(|row| row.is_debounced())
+                .map(Self::Remote),
             SettingsTab::Inference
                 if crate::settings_ui::inference_rows(&app.inference_settings).get(row)
                     == Some(&crate::app::InferenceRow::Field(
@@ -80,6 +88,9 @@ impl SettingsNumber {
                     }
                     Some(AppearanceRow::ProgressMonitorMaxLines) => {
                         Some(Self::Ui(UiNumber::ProgressLines))
+                    }
+                    Some(AppearanceRow::AutoFreezeAfter) => {
+                        Some(Self::Ui(UiNumber::AutoFreezeAfter))
                     }
                     _ => None,
                 }
@@ -134,6 +145,7 @@ impl SettingsNumber {
 
     pub fn title(self) -> &'static str {
         match self {
+            Self::Remote(row) => row.label(),
             Self::WorkingPollSeconds => "Working poll interval (s; 0 = 500 ms minimum)",
             Self::IdlePollSeconds => "Idle poll interval (s; 0 = 500 ms minimum)",
             Self::InferenceTokenBudget => "Restructure prompt tokens",
@@ -144,6 +156,7 @@ impl SettingsNumber {
             Self::Panel(PanelNumber::FocusedWidth) => "Focused panel width",
             Self::Panel(PanelNumber::MinimumTerminalWidth) => "Minimum terminal width",
             Self::Ui(UiNumber::LastPromptLines) => "Last prompt lines",
+            Self::Ui(UiNumber::AutoFreezeAfter) => "Auto-freeze delay (s)",
             Self::Ui(UiNumber::ProgressLines) => "Progress footer lines",
             Self::Ui(UiNumber::CompletedProgressHideAfter) => {
                 "Hide completed progress after (s; 0 = never)"
@@ -159,6 +172,55 @@ impl SettingsNumber {
 
     pub fn snapshot(self, app: &App) -> (NumberSpec, String) {
         match self {
+            Self::Remote(row) => {
+                use crate::remote_compaction_settings::*;
+                let settings = &app.remote_compaction_settings;
+                let (minimum, maximum, value) = match row {
+                    RemoteCompactionRow::Threshold => (
+                        THRESHOLD_PERCENT_RANGE.0 as i128,
+                        THRESHOLD_PERCENT_RANGE.1 as i128,
+                        settings.threshold_percent as i128,
+                    ),
+                    RemoteCompactionRow::PauseTimeout => (
+                        PAUSE_TIMEOUT_RANGE.0 as i128,
+                        PAUSE_TIMEOUT_RANGE.1 as i128,
+                        settings.pause_timeout_seconds as i128,
+                    ),
+                    RemoteCompactionRow::Cooldown => (
+                        COOLDOWN_MINUTES_RANGE.0 as i128,
+                        COOLDOWN_MINUTES_RANGE.1 as i128,
+                        settings.cooldown_minutes as i128,
+                    ),
+                    RemoteCompactionRow::TailTokens => (
+                        TAIL_TOKENS_RANGE.0 as i128,
+                        TAIL_TOKENS_RANGE.1 as i128,
+                        settings.tail_tokens as i128,
+                    ),
+                    RemoteCompactionRow::ProtectedToolTokens => (
+                        PROTECTED_TOOL_TOKENS_RANGE.0 as i128,
+                        PROTECTED_TOOL_TOKENS_RANGE.1 as i128,
+                        settings.protected_recent_tool_tokens as i128,
+                    ),
+                    RemoteCompactionRow::ToolResultChars => (
+                        TOOL_RESULT_CHARS_RANGE.0 as i128,
+                        TOOL_RESULT_CHARS_RANGE.1 as i128,
+                        settings.tool_result_chars as i128,
+                    ),
+                    RemoteCompactionRow::SummarizerContextTokens => (
+                        SUMMARIZER_CONTEXT_RANGE.0 as i128,
+                        SUMMARIZER_CONTEXT_RANGE.1 as i128,
+                        settings.summarizer_context_tokens as i128,
+                    ),
+                    RemoteCompactionRow::KeepBackups => (
+                        KEEP_BACKUPS_RANGE.0 as i128,
+                        KEEP_BACKUPS_RANGE.1 as i128,
+                        settings.keep_backups as i128,
+                    ),
+                    _ => unreachable!("Only numeric remote rows are bound"),
+                };
+                (NumberSpec::Integer { minimum, maximum }, value.to_string())
+            }
+
             Self::WorkingPollSeconds => (
                 ScalarNumber::WorkingPollSeconds.spec(),
                 app.agent_detection_settings
@@ -194,6 +256,9 @@ impl SettingsNumber {
             Self::Ui(field) => (
                 field.scalar().spec(),
                 match field {
+                    UiNumber::AutoFreezeAfter => {
+                        app.ui_settings.auto_freeze_after_seconds.to_string()
+                    }
                     UiNumber::LastPromptLines => app.ui_settings.last_prompt_max_lines.to_string(),
                     UiNumber::ProgressLines => app.ui_settings.progress_max_lines.to_string(),
                     UiNumber::CompletedProgressHideAfter => app
@@ -227,6 +292,35 @@ impl SettingsNumber {
 
     pub fn stepped(self, app: &App, direction: i32) -> Result<String, String> {
         let (spec, text) = self.snapshot(app);
+        if self == Self::Ui(UiNumber::AutoFreezeAfter) {
+            let current = app.ui_settings.auto_freeze_after_seconds;
+            let next = if direction < 0 {
+                current.saturating_sub(900).max(1)
+            } else {
+                current.saturating_add(900).min(i64::MAX as u64)
+            };
+            return Ok(next.to_string());
+        }
+        if let Self::Remote(row) = self {
+            let mut updated = app.remote_compaction_settings.clone();
+            updated.adjust(row, direction);
+            use crate::remote_compaction_settings::RemoteCompactionRow;
+            return Ok(match row {
+                RemoteCompactionRow::Threshold => updated.threshold_percent.to_string(),
+                RemoteCompactionRow::PauseTimeout => updated.pause_timeout_seconds.to_string(),
+                RemoteCompactionRow::Cooldown => updated.cooldown_minutes.to_string(),
+                RemoteCompactionRow::TailTokens => updated.tail_tokens.to_string(),
+                RemoteCompactionRow::ProtectedToolTokens => {
+                    updated.protected_recent_tool_tokens.to_string()
+                }
+                RemoteCompactionRow::ToolResultChars => updated.tool_result_chars.to_string(),
+                RemoteCompactionRow::SummarizerContextTokens => {
+                    updated.summarizer_context_tokens.to_string()
+                }
+                RemoteCompactionRow::KeepBackups => updated.keep_backups.to_string(),
+                _ => return Err("Not a numeric remote setting".into()),
+            });
+        }
         if self == Self::EditorAutosaveDelay {
             spec.parse(&text)?;
             return Ok(app
@@ -242,6 +336,7 @@ impl SettingsNumber {
             Self::TerminalScrollback => 4,
             Self::TerminalEngineMemory => 256,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
+            Self::Ui(UiNumber::AutoFreezeAfter) => 15 * 60,
             _ => 1,
         };
         match spec.stepped(spec.parse(&text)?, NumberValue::Integer(step), direction)? {
@@ -450,6 +545,11 @@ impl App {
     }
 
     pub(crate) fn step_settings_number(&mut self, field: SettingsNumber, direction: i32) {
+        if let SettingsNumber::Remote(row) = field {
+            // Preserve remote settings' existing 600 ms numeric save debounce.
+            self.settings_adjust_remote_compaction_row(row, direction);
+            return;
+        }
         let result = (|| {
             let text = field.stepped(self, direction)?;
             let directory = self
@@ -502,6 +602,32 @@ impl App {
         }
         // Construct and validate from current settings, preserving concurrent fields.
         let change = match field {
+            SettingsNumber::Remote(row) => {
+                use crate::remote_compaction_settings::RemoteCompactionRow;
+                let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
+                    return Err("Enter a whole number".into());
+                };
+                let mut settings = self.remote_compaction_settings.clone();
+                match row {
+                    RemoteCompactionRow::Threshold => settings.threshold_percent = value as _,
+                    RemoteCompactionRow::PauseTimeout => {
+                        settings.pause_timeout_seconds = value as _
+                    }
+                    RemoteCompactionRow::Cooldown => settings.cooldown_minutes = value as _,
+                    RemoteCompactionRow::TailTokens => settings.tail_tokens = value as _,
+                    RemoteCompactionRow::ProtectedToolTokens => {
+                        settings.protected_recent_tool_tokens = value as _
+                    }
+                    RemoteCompactionRow::ToolResultChars => settings.tool_result_chars = value as _,
+                    RemoteCompactionRow::SummarizerContextTokens => {
+                        settings.summarizer_context_tokens = value as _
+                    }
+                    RemoteCompactionRow::KeepBackups => settings.keep_backups = value as _,
+                    _ => return Err("Not a numeric remote setting".into()),
+                }
+                ConfigurationChange::RemoteCompaction(settings)
+            }
+
             SettingsNumber::WorkingPollSeconds | SettingsNumber::IdlePollSeconds => {
                 return Err("Server number was not dispatched".into());
             }
@@ -531,6 +657,7 @@ impl App {
                 let mut settings = self.ui_settings.clone();
                 let value = field.scalar().parse(text)?;
                 match field {
+                    UiNumber::AutoFreezeAfter => settings.auto_freeze_after_seconds = value,
                     UiNumber::LastPromptLines => {
                         settings.last_prompt_max_lines =
                             u8::try_from(value).map_err(|_| "Line count exceeds storage range")?
@@ -584,6 +711,15 @@ impl App {
         // Admission precedes local runtime changes. The same immutable values
         // are supplied to the writer and applied to existing consumers.
         match change {
+            ConfigurationChange::RemoteCompaction(settings) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::RemoteCompaction(settings.clone()),
+                    intent,
+                )?;
+                self.apply_remote_compaction_settings(settings);
+            }
+
             ConfigurationChange::Voice(settings) => {
                 self.enqueue_configuration(
                     directory,
@@ -654,6 +790,109 @@ mod tests {
     use super::*;
     use crate::app::SettingsState;
     use crate::value_dialog::{DialogOutcome, ValueDialogState};
+
+    #[test]
+    fn auto_freeze_delay_supports_exact_seconds_and_original_arrow_steps() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("freeze-number".into(), directory.path().into());
+        let field = SettingsNumber::Ui(UiNumber::AutoFreezeAfter);
+        let (spec, _) = field.snapshot(&app);
+        assert!(spec.parse("1").is_ok());
+        assert!(spec.parse("901").is_ok());
+        assert!(spec.parse("0").is_err());
+        assert!(spec.parse("1.5").is_err());
+        assert!(spec.parse(&(i128::from(i64::MAX) + 1).to_string()).is_err());
+        app.ui_settings.auto_freeze_after_seconds = 901;
+        assert_eq!(field.stepped(&app, -1).unwrap(), "1");
+        assert_eq!(field.stepped(&app, 1).unwrap(), "1801");
+        let rows = AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode);
+        let row = rows
+            .iter()
+            .position(|row| *row == AppearanceRow::AutoFreezeAfter)
+            .unwrap();
+        assert_eq!(
+            SettingsNumber::at(&app, SettingsTab::Appearance, row),
+            Some(field)
+        );
+        let original = app.ui_settings.clone();
+        app.save_settings_number(field, "137", directory.path().into(), None)
+            .unwrap();
+        assert_eq!(app.ui_settings.auto_freeze_after_seconds, 137);
+        app.settle_filesystem_for_test();
+        let saved = crate::config::load(directory.path()).unwrap().ui;
+        assert_eq!(saved.auto_freeze_after_seconds, 137);
+        assert_eq!(saved.auto_freeze_enabled, original.auto_freeze_enabled);
+        assert_eq!(saved.last_prompt_max_lines, original.last_prompt_max_lines);
+        let attempts = app.configuration_admission.attempts;
+        assert!(app
+            .save_settings_number(field, "0", directory.path().into(), None)
+            .is_err());
+        assert_eq!(app.configuration_admission.attempts, attempts);
+        assert_eq!(app.ui_settings.auto_freeze_after_seconds, 137);
+    }
+
+    #[test]
+    fn remote_numbers_validate_bounds_and_preserve_original_ladders() {
+        use crate::remote_compaction_settings::RemoteCompactionRow as Row;
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("remote-number".into(), directory.path().into());
+        for row in [
+            Row::Threshold,
+            Row::PauseTimeout,
+            Row::Cooldown,
+            Row::TailTokens,
+            Row::ProtectedToolTokens,
+            Row::ToolResultChars,
+            Row::SummarizerContextTokens,
+            Row::KeepBackups,
+        ] {
+            let field = SettingsNumber::Remote(row);
+            let (spec, current) = field.snapshot(&app);
+            let NumberSpec::Integer { minimum, maximum } = spec else {
+                panic!("Remote settings require whole numbers");
+            };
+            assert!(spec.parse(&minimum.to_string()).is_ok());
+            assert!(spec.parse(&maximum.to_string()).is_ok());
+            assert!(spec.parse(&(minimum - 1).to_string()).is_err());
+            assert!(spec.parse(&(maximum + 1).to_string()).is_err());
+            assert!(spec.parse("1.5").is_err());
+            assert!(spec.parse(&current).is_ok());
+            for direction in [-1, 1] {
+                let actual = field.stepped(&app, direction).unwrap();
+                let original = app.remote_compaction_settings.clone();
+                app.remote_compaction_settings.adjust(row, direction);
+                let expected = field.snapshot(&app).1;
+                app.remote_compaction_settings = original;
+                assert_eq!(actual, expected, "{row:?}, direction {direction}");
+            }
+            let original = app.remote_compaction_settings.clone();
+            app.save_settings_number(field, &minimum.to_string(), directory.path().into(), None)
+                .unwrap();
+            assert_eq!(field.snapshot(&app).1, minimum.to_string());
+            app.settle_filesystem_for_test();
+            let saved = crate::config::load(directory.path())
+                .unwrap()
+                .remote_compaction;
+            assert_eq!(saved.enabled, original.enabled);
+            app.remote_compaction_settings = saved;
+            assert_eq!(
+                field.snapshot(&app).1,
+                minimum.to_string(),
+                "{row:?} reload"
+            );
+            let attempts = app.configuration_admission.attempts;
+            assert!(app
+                .save_settings_number(
+                    field,
+                    &(maximum + 1).to_string(),
+                    directory.path().into(),
+                    None
+                )
+                .is_err());
+            assert_eq!(app.configuration_admission.attempts, attempts);
+            assert_eq!(field.snapshot(&app).1, minimum.to_string());
+        }
+    }
 
     #[test]
     fn exact_voice_volume_reconciles_once_and_notification_limits_do_not_wrap() {

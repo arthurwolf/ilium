@@ -939,10 +939,7 @@ fn available_devices(is_input: bool) -> Result<Vec<String>, VoiceError> {
         host.output_devices()
     }
     .map_err(|source| VoiceError::EnumerateAudioDevices { direction, source })?;
-    let mut names = devices.map(|device| device.to_string()).collect::<Vec<_>>();
-    names.sort_unstable();
-    names.dedup();
-    Ok(names)
+    crate::device_catalogue::collect_device_names(devices, direction)
 }
 
 fn find_device(
@@ -967,16 +964,12 @@ fn find_device(
     }
     .map_err(|source| VoiceError::EnumerateAudioDevices { direction, source })?;
 
-    devices
-        .map(|device| {
-            let name = device.to_string();
-            (device, name)
-        })
-        .find_map(|(device, name)| (name == requested_name).then_some(device))
-        .ok_or_else(|| VoiceError::NamedAudioDeviceNotFound {
+    crate::device_catalogue::find_named_device(devices, requested_name, direction)?.ok_or_else(
+        || VoiceError::NamedAudioDeviceNotFound {
             direction,
             name: requested_name.to_owned(),
-        })
+        },
+    )
 }
 
 fn build_input_stream(

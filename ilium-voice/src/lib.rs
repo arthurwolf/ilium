@@ -7,6 +7,7 @@
 mod audio;
 mod audio_preparation;
 mod config;
+mod device_catalogue;
 mod error;
 mod openai;
 mod tool;

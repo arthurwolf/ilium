@@ -25,11 +25,11 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use ilium::session;
 use ilium_ipc::{
-    normalize_voice_sentences, ClientRequest, ServerEvent, VoiceTextAccepted, VoiceTextPhase,
-    VoiceTextRejection, VoiceTextRejectionCode,
+    ClientRequest, ServerEvent, VoiceTextAccepted, VoiceTextPhase, VoiceTextRejection,
+    VoiceTextRejectionCode, normalize_voice_sentences,
 };
 
-use crate::{json_string, next_progress_request_id, pane_identity_from_env, CliError};
+use crate::{CliError, json_string, next_progress_request_id, pane_identity_from_env};
 
 /// The token that reads sentences from standard input instead.
 const STDIN_TOKEN: &str = "-";
@@ -173,7 +173,7 @@ async fn run_say(args: &SayArgs, cwd: &Path, request_id: u64) -> Result<(), SayF
                     return Some(ilium_client::connection::Received::with_retention(
                         result,
                         _event_retention,
-                    ))
+                    ));
                 }
                 // Only the correlated answer matters; the attach handshake
                 // and unrelated broadcasts are not this command's business.
@@ -223,8 +223,7 @@ async fn run_say(args: &SayArgs, cwd: &Path, request_id: u64) -> Result<(), SayF
 
 /// A server built before this command existed neither understands the
 /// request nor answers it.
-const STALE_SERVER_HINT: &str =
-    "an Ilium server started before `ilium voice say` existed cannot answer it; restart Ilium to load the current server";
+const STALE_SERVER_HINT: &str = "an Ilium server started before `ilium voice say` existed cannot answer it; restart Ilium to load the current server";
 
 /// Positional sentences in order, with each `-` replaced by the non-empty
 /// lines of `stdin`. Every sentence is trimmed and bounds-checked with the
@@ -273,7 +272,9 @@ fn resolve_target(session_name: &str, cwd: &Path) -> Result<SayTarget, SayFailur
         return Err(SayFailure::new(
             "session-not-running",
             format!("session {session_name:?} is not running for this project"),
-            Some("start Ilium in this project with `ilium` (voice runs inside its interactive client), or pass --cwd/--session-name"),
+            Some(
+                "start Ilium in this project with `ilium` (voice runs inside its interactive client), or pass --cwd/--session-name",
+            ),
         ));
     }
     Ok(SayTarget {

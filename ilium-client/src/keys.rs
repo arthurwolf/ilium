@@ -82,6 +82,12 @@ pub fn handle_event(app: &mut App, event: Event) {
         return;
     }
 
+    handle_event_after_intercept(app, event);
+}
+
+/// Continues the ordinary key route after an outer owner already gave
+/// protected input interceptors their one original-event opportunity.
+pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     if matches!(&event, Event::Key(key) if is_press(key) && key.code == KeyCode::Esc)
         && app
             .agent_popover
@@ -109,21 +115,7 @@ pub fn handle_event(app: &mut App, event: Event) {
     // replayed through its existing key contract so enabling the host mode
     // cannot silently disable paste in names, paths, searches, or editors.
     if let Event::Paste(pasted) = &event {
-        let has_native_paste_handler = matches!(
-            &app.mode,
-            Mode::Normal
-                | Mode::LeaderPending
-                | Mode::NavigationLeaderPending
-                | Mode::SchedulePaneInput(_)
-                | Mode::QueuePrompt(_)
-                | Mode::CreateAgentWorkspace(_)
-                | Mode::WorktreeManager(_)
-                | Mode::AgentSetupPathPrompt(_, _)
-                | Mode::AnimationTextPrompt(_, _)
-                | Mode::LocationPicker(_)
-                | Mode::AgentSetupPrompt(_)
-        );
-        if !has_native_paste_handler {
+        if requires_key_paste_replay(app) {
             replay_pasted_text_as_keys(app, pasted);
             return;
         }
@@ -295,6 +287,26 @@ pub fn handle_event(app: &mut App, event: Event) {
     }
 }
 
+/// Modes outside this set inherit the same character-oriented paste behavior
+/// as ordinary keys. The interactive owner uses this predicate to schedule
+/// that work over bounded turns while retaining the admitted input envelope.
+pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
+    !matches!(
+        &app.mode,
+        Mode::Normal
+            | Mode::LeaderPending
+            | Mode::NavigationLeaderPending
+            | Mode::SchedulePaneInput(_)
+            | Mode::QueuePrompt(_)
+            | Mode::CreateAgentWorkspace(_)
+            | Mode::WorktreeManager(_)
+            | Mode::AgentSetupPathPrompt(_, _)
+            | Mode::AnimationTextPrompt(_, _)
+            | Mode::LocationPicker(_)
+            | Mode::AgentSetupPrompt(_)
+    )
+}
+
 fn handle_smart_copy_event(app: &mut App, event: &Event) {
     app.mode = Mode::SmartCopy;
     if let Some(light_key) = app.smart_copy_light_key() {
@@ -328,6 +340,7 @@ fn handle_terminal_pane_context_menu_event(
     mut menu: crate::terminal_context_menu::TerminalPaneContextMenu,
     event: &Event,
 ) {
+    menu.row_offset = menu.layout().row_offset;
     let Event::Key(key) = event else {
         app.mode = Mode::TerminalPaneContextMenu(menu);
         return;
@@ -338,6 +351,14 @@ fn handle_terminal_pane_context_menu_event(
     }
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => app.mode = Mode::Normal,
+        KeyCode::Home | KeyCode::End => {
+            menu.selected_index = if key.code == KeyCode::Home {
+                0
+            } else {
+                menu.actions.len().saturating_sub(1)
+            };
+            app.mode = Mode::TerminalPaneContextMenu(menu);
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             menu.selected_index = menu.selected_index.saturating_sub(1);
             app.mode = Mode::TerminalPaneContextMenu(menu);
@@ -466,20 +487,9 @@ fn handle_voice_shortcut(app: &mut App, event: &Event) -> bool {
 /// CRLF is one Enter, while bare CR/LF and Tab retain the same key semantics
 /// they had before the host terminal started reporting atomic paste events.
 fn replay_pasted_text_as_keys(app: &mut App, pasted: &str) {
-    let mut characters = pasted.chars().peekable();
-    while let Some(character) = characters.next() {
-        let code = match character {
-            '\r' => {
-                if characters.peek() == Some(&'\n') {
-                    characters.next();
-                }
-                KeyCode::Enter
-            }
-            '\n' => KeyCode::Enter,
-            '\t' => KeyCode::Tab,
-            character => KeyCode::Char(character),
-        };
-        handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    let mut cursor = crate::paste_cursor::PasteCursor::default();
+    while let Some(key) = cursor.next_key(pasted) {
+        handle_event(app, Event::Key(key));
     }
 }
 
@@ -1526,7 +1536,10 @@ fn handle_text_trigger_dialog_event(
         return;
     }
     match key.code {
-        KeyCode::Esc => app.pop_modal(),
+        KeyCode::Esc => {
+            app.cancel_text_trigger_preview(state.identity());
+            app.pop_modal();
+        }
         KeyCode::Tab => {
             state.focus = state.focus.next();
             app.mode = Mode::TextTriggerDialog(state);
@@ -1576,11 +1589,19 @@ fn handle_text_trigger_dialog_event(
             // editable while saving; a later edit fences the dismissal.
         }
         _ if state.focus == TextTriggerFocus::Regexp => {
+            let previous_len = state.regexp.buf.len();
             let _ = crate::text_prompt::handle_key(&mut state.regexp, key.code);
+            if state.regexp.buf.len() != previous_len {
+                state.mark_preview_dirty();
+            }
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ if state.focus == TextTriggerFocus::Message => {
+            let previous_len = state.message.buf.len();
             let _ = crate::text_prompt::handle_key(&mut state.message, key.code);
+            if state.message.buf.len() != previous_len {
+                state.mark_preview_dirty();
+            }
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ if state.focus == TextTriggerFocus::Delay => {
@@ -1602,7 +1623,14 @@ fn handle_text_trigger_dialog_event(
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ if state.focus == TextTriggerFocus::Sample => {
+            let changes_preview = matches!(
+                key.code,
+                KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace | KeyCode::Delete
+            );
             state.sample.input(*key);
+            if changes_preview {
+                state.mark_preview_dirty();
+            }
             app.mode = Mode::TextTriggerDialog(state);
         }
         _ => app.mode = Mode::TextTriggerDialog(state),
@@ -1760,6 +1788,10 @@ fn handle_create_split_members_event(
 /// While `Mode::ContextMenu(menu)` is active: `Up`/`Down` move the
 /// selection, `Enter` performs the selected action, `Esc` cancels.
 fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, event: &Event) {
+    menu.row_offset = menu.layout().row_offset;
+    if let Some(submenu) = menu.submenu.as_mut() {
+        submenu.row_offset = submenu.layout().row_offset;
+    }
     let Event::Key(key) = event else {
         app.mode = Mode::ContextMenu(menu);
         return;
@@ -1771,6 +1803,21 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
 
     if let Some(submenu) = menu.submenu.as_mut() {
         match key.code {
+            KeyCode::Home | KeyCode::End => {
+                submenu.selected_index = if key.code == KeyCode::Home {
+                    0
+                } else {
+                    submenu.items.len().saturating_sub(1)
+                };
+                if let Some(reason) = submenu
+                    .items
+                    .get(submenu.selected_index)
+                    .and_then(|item| item.disabled_reason.as_ref())
+                {
+                    app.status_message = Some(reason.clone());
+                }
+                app.mode = Mode::ContextMenu(menu);
+            }
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                 menu.submenu = None;
                 app.mode = Mode::ContextMenu(menu);
@@ -1815,6 +1862,15 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
 
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Home | KeyCode::End => {
+            menu.selected_index = if key.code == KeyCode::Home {
+                0
+            } else {
+                menu.actions.len().saturating_sub(1)
+            };
+            menu.hover_candidate = None;
+            app.mode = Mode::ContextMenu(menu);
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             menu.selected_index = menu.selected_index.saturating_sub(1);
             app.mode = Mode::ContextMenu(menu);
@@ -1824,20 +1880,29 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
                 (menu.selected_index + 1).min(menu.actions.len().saturating_sub(1));
             app.mode = Mode::ContextMenu(menu);
         }
-        KeyCode::Right | KeyCode::Char('l') if menu.actions[menu.selected_index].has_submenu() => {
+        KeyCode::Right | KeyCode::Char('l')
+            if menu
+                .actions
+                .get(menu.selected_index)
+                .is_some_and(|action| action.has_submenu()) =>
+        {
             let parent = menu.actions[menu.selected_index];
             app.open_context_submenu(&mut menu, parent);
             app.mode = Mode::ContextMenu(menu);
         }
         KeyCode::Enter => {
-            if menu.actions[menu.selected_index].has_submenu() {
-                let parent = menu.actions[menu.selected_index];
+            let Some(action) = menu.actions.get(menu.selected_index).copied() else {
+                app.mode = Mode::ContextMenu(menu);
+                return;
+            };
+            if action.has_submenu() {
+                let parent = action;
                 app.open_context_submenu(&mut menu, parent);
                 app.mode = Mode::ContextMenu(menu);
                 return;
             }
             app.select_node(menu.target);
-            app.execute_context_action(menu.actions[menu.selected_index], menu.target);
+            app.execute_context_action(action, menu.target);
         }
         _ => app.mode = Mode::ContextMenu(menu),
     }

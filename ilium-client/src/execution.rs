@@ -45,7 +45,8 @@ pub(crate) fn process_quota() -> QuotaGroup {
                     // decoder128 + encoder128 MiB retain dedicated headroom.
                     input_bytes: 768 * MIB,
                     result_bytes: 768 * MIB,
-                    worker_threads: PROCESS_WORKER_THREADS,
+                    worker_threads: PROCESS_WORKER_THREADS
+                        + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
                     // Shared ceiling for selected charged owners; retiring native
                     // helpers must retain and compete for their original debit.
                     // This is a declaration ceiling, not measured process RSS.
@@ -158,6 +159,14 @@ pub struct ClientExecution {
     general: Client,
     location_search: Client,
 }
+
+#[path = "execution_shutdown.rs"]
+mod execution_shutdown;
+pub use execution_shutdown::ClientExecutionShutdownError;
+
+#[cfg(test)]
+#[path = "execution_shutdown_tests.rs"]
+mod execution_shutdown_tests;
 
 /// Initialized identities and the actual partial bank survive every refusal.
 #[derive(Default)]
@@ -446,6 +455,11 @@ impl ClientExecution {
     pub fn client(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
         self.general.child(limits)
     }
+    /// Shares the execution bank's bounded CPU disposal owner with adapters
+    /// that retain admitted input after interactive processing completes.
+    pub fn retirement(&self) -> ilium_execution::RetirementHandle {
+        self.execution.retirement()
+    }
     /// Codec jobs share the existing CPU queue but retain their independent
     /// process-wide decoder/encoder envelopes. Do not nest either under the
     /// general client's 512 MiB aggregate or create another physical bank.
@@ -512,30 +526,8 @@ impl ClientExecution {
     }
     /// The fixed banks do computation; this single tracked blocking task only
     /// observes their actual joins. A deadline never claims a hung worker exited.
-    pub async fn shutdown(mut self) -> Result<(), std::io::Error> {
-        self.execution.request_shutdown(ShutdownMode::Cancel);
-        let observation = tokio::task::spawn_blocking(move || {
-            self.execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-        });
-        let report = observation
-            .await
-            .map_err(std::io::Error::other)?
-            .map_err(|e| std::io::Error::other(format!("execution shutdown: {e:?}")))?;
-        if report.remaining_workers != 0 {
-            return Err(std::io::Error::other(format!(
-                "execution shutdown deadline: {} workers still owned",
-                report.remaining_workers
-            )));
-        }
-        if !report.shutdown_complete {
-            let cpu = &report.health.lanes[0];
-            return Err(std::io::Error::other(format!(
-                "execution shutdown incomplete: {} retirement originals live, {} in recovery custody; admitted work remains",
-                cpu.retirement_live, cpu.retirement_recovery_pending
-            )));
-        }
-        Ok(())
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        execution_shutdown::shutdown(self, Instant::now() + Duration::from_secs(5)).await
     }
 }
 /// Conservative peak declaration includes library temporary allocations;

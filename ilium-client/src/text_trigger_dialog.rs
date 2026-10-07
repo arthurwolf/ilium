@@ -5,6 +5,80 @@ use ilium_ipc::{TextTrigger, TextTriggerTarget};
 
 use crate::modal;
 use crate::text_prompt::TextPromptState;
+mod preview;
+pub(crate) use preview::{limits as preview_limits, TextTriggerPreview};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TextTriggerPreviewIssue {
+    Unconfigured,
+    CaptureLimit,
+    OutputLimit,
+    CpuRequired,
+    Cancelled,
+    Shutdown,
+    WorkerPanicked,
+    ReceiptLost,
+    Admission(ilium_execution::RejectReason),
+    Publication(ilium_execution::RejectReason),
+}
+
+impl TextTriggerPreviewIssue {
+    pub(crate) const fn message(self) -> &'static str {
+        match self {
+            Self::Unconfigured => "Preview worker is unavailable in this client.",
+            Self::CaptureLimit => "Preview draft exceeds the bounded capture limit.",
+            Self::OutputLimit => "Preview output exceeds the bounded result limit.",
+            Self::CpuRequired => "Preview work did not execute on the CPU bank.",
+            Self::Cancelled => "Preview work was cancelled before completion.",
+            Self::Shutdown => "Preview execution is shutting down.",
+            Self::WorkerPanicked => "Preview worker panicked; the draft was retained.",
+            Self::ReceiptLost => "Preview completion was lost; the draft was retained.",
+            Self::Admission(reason) => preview_rejection_message(reason),
+            Self::Publication(reason) => preview_publication_message(reason),
+        }
+    }
+}
+
+const fn preview_rejection_message(reason: ilium_execution::RejectReason) -> &'static str {
+    use ilium_execution::RejectReason;
+    match reason {
+        RejectReason::Busy => "Preview admission is temporarily busy.",
+        RejectReason::Closed => "Preview execution is closed.",
+        RejectReason::QueueFull => "Preview CPU queue is full.",
+        RejectReason::ServiceBankFull => "Preview admission reached an unavailable service bank.",
+        RejectReason::ClientLimit => "Preview client admission limit was reached.",
+        RejectReason::JobLimit => "Preview job admission limit was reached.",
+        RejectReason::ServiceLimit => "Preview admission reached an unavailable service limit.",
+        RejectReason::InputBytes => "Preview input-byte admission limit was reached.",
+        RejectReason::ResultBytes => "Preview result-byte admission limit was reached.",
+        RejectReason::WorkerLimit => "Preview worker admission limit was reached.",
+        RejectReason::WorkerBytes => "Preview retirement storage admission limit was reached.",
+        RejectReason::InvalidCost => "Preview resource declaration is invalid.",
+        RejectReason::AccountingPoisoned => "Preview resource accounting is unavailable.",
+    }
+}
+
+const fn preview_publication_message(reason: ilium_execution::RejectReason) -> &'static str {
+    use ilium_execution::RejectReason;
+    match reason {
+        RejectReason::Closed => "Preview execution closed before publication.",
+        RejectReason::QueueFull => "Preview publication queue refused the reserved job.",
+        _ => preview_rejection_message(reason),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TextTriggerPreviewPhase {
+    Pending,
+    Ready,
+    Unavailable(TextTriggerPreviewIssue),
+}
+
+#[derive(Debug, Clone)]
+struct TextTriggerPreviewPresentation {
+    revision: u64,
+    text: ilium_execution::RetiringArc<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextTriggerFocus {
@@ -58,6 +132,9 @@ pub struct TextTriggerDialogState {
     pub sample: TextArea<'static>,
     pub enabled: bool,
     pub focus: TextTriggerFocus,
+    preview_revision: u64,
+    preview_phase: TextTriggerPreviewPhase,
+    preview: Option<TextTriggerPreviewPresentation>,
 }
 
 impl TextTriggerDialogState {
@@ -85,10 +162,109 @@ impl TextTriggerDialogState {
             ),
             enabled: trigger.enabled,
             focus: TextTriggerFocus::Regexp,
+            preview_revision: 0,
+            preview_phase: TextTriggerPreviewPhase::Pending,
+            preview: None,
         }
     }
     pub fn identity(&self) -> &str {
         &self.draft_id
+    }
+
+    pub(crate) fn preview_revision(&self) -> u64 {
+        self.preview_revision
+    }
+
+    pub(crate) fn preview_is_current(&self) -> bool {
+        matches!(self.preview_phase, TextTriggerPreviewPhase::Ready)
+            && self
+                .preview
+                .as_ref()
+                .is_some_and(|preview| preview.revision == self.preview_revision)
+    }
+
+    pub(crate) fn preview_issue(&self) -> Option<TextTriggerPreviewIssue> {
+        match self.preview_phase {
+            TextTriggerPreviewPhase::Unavailable(issue) => Some(issue),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn preview_text(&self) -> Option<&str> {
+        self.preview.as_ref().map(|preview| preview.text.as_str())
+    }
+
+    pub(crate) fn preview_display(&self) -> (&str, &'static str) {
+        match (self.preview_phase, self.preview_text()) {
+            (TextTriggerPreviewPhase::Ready, Some(text)) => (text, "LIVE PREVIEW"),
+            (TextTriggerPreviewPhase::Pending, Some(text)) => (text, "LIVE PREVIEW · updating…"),
+            (TextTriggerPreviewPhase::Pending, None) => {
+                ("Preparing preview…", "LIVE PREVIEW · preparing…")
+            }
+            (TextTriggerPreviewPhase::Unavailable(_), Some(text)) => {
+                (text, "LIVE PREVIEW · previous result; unavailable")
+            }
+            (TextTriggerPreviewPhase::Unavailable(issue), None) => {
+                (issue.message(), "LIVE PREVIEW · unavailable")
+            }
+            (TextTriggerPreviewPhase::Ready, None) => {
+                ("Preparing preview…", "LIVE PREVIEW · preparing…")
+            }
+        }
+    }
+
+    pub(crate) fn mark_preview_dirty(&mut self) {
+        self.preview_revision = self
+            .preview_revision
+            .checked_add(1)
+            .expect("text trigger preview revision overflow");
+        self.preview_phase = TextTriggerPreviewPhase::Pending;
+    }
+
+    pub(crate) fn mark_preview_pending(&mut self) -> bool {
+        if matches!(self.preview_phase, TextTriggerPreviewPhase::Pending) {
+            return false;
+        }
+        self.preview_phase = TextTriggerPreviewPhase::Pending;
+        true
+    }
+
+    pub(crate) fn install_preview(
+        &mut self,
+        revision: u64,
+        text: ilium_execution::RetiringArc<String>,
+    ) -> bool {
+        if revision != self.preview_revision {
+            return false;
+        }
+        self.preview = Some(TextTriggerPreviewPresentation { revision, text });
+        self.preview_phase = TextTriggerPreviewPhase::Ready;
+        true
+    }
+
+    pub(crate) fn preview_unavailable(
+        &mut self,
+        revision: u64,
+        issue: TextTriggerPreviewIssue,
+    ) -> bool {
+        if revision != self.preview_revision {
+            return false;
+        }
+        let next = TextTriggerPreviewPhase::Unavailable(issue);
+        if self.preview_phase == next {
+            return false;
+        }
+        self.preview_phase = next;
+        true
+    }
+
+    pub(crate) fn preview_unavailable_current(&mut self, issue: TextTriggerPreviewIssue) -> bool {
+        self.preview_unavailable(self.preview_revision, issue)
+    }
+
+    pub(crate) fn release_preview(&mut self) {
+        self.preview = None;
+        self.preview_phase = TextTriggerPreviewPhase::Pending;
     }
 
     pub fn sample_text(&self) -> String {

@@ -690,10 +690,7 @@ fn push_control(
     };
     let is_number = matches!(
         row,
-        CostRow::HistoryDays
-            | CostRow::Budget
-            | CostRow::SparklineWindow
-            | CostRow::SparklineCells
+        CostRow::HistoryDays | CostRow::Budget | CostRow::SparklineWindow | CostRow::SparklineCells
     );
     let shown = if is_number {
         format!("− {} + *", param_value(row, app))
@@ -907,10 +904,7 @@ pub fn hit_with_button(
     let index = all_rows.iter().position(|row| *row == span.row)?;
     let is_number = matches!(
         span.row,
-        CostRow::HistoryDays
-            | CostRow::Budget
-            | CostRow::SparklineWindow
-            | CostRow::SparklineCells
+        CostRow::HistoryDays | CostRow::Budget | CostRow::SparklineWindow | CostRow::SparklineCells
     );
     let is_choice = matches!(
         span.row,
@@ -1107,7 +1101,14 @@ mod tests {
         );
 
         let visibility = span_of(CostRow::Visibility(CostDisplay::Meter));
-        let click = hit(area, 0, Position::new(3, visibility.first_line), &app).unwrap();
+        assert!(hit(area, 0, Position::new(3, visibility.first_line), &app).is_none());
+        let click = hit(
+            area,
+            0,
+            Position::new(visibility.control_x, visibility.control_line),
+            &app,
+        )
+        .unwrap();
         assert_eq!(click.row, CostRow::Visibility(CostDisplay::Meter));
 
         let window = span_of(CostRow::SparklineWindow);
@@ -1193,7 +1194,10 @@ mod tests {
 
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&super::view(&app, 0, 110));
-        assert!(page.contains("− 10% + *"), "budget is a share of the window");
+        assert!(
+            page.contains("− 10% + *"),
+            "budget is a share of the window"
+        );
         assert!(page.contains("quota_budget_percent"));
     }
 
