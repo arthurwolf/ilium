@@ -5,6 +5,7 @@ use crate::app::{
 use crate::config::{
     AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity, TreeOrder,
 };
+use crate::remote_compaction_settings::TechniqueTarget;
 use crate::theme::ColorScheme;
 use crate::value_dialog::{ChoiceDialogState, ChoiceOption, DialogOutcome, ValueDialogState};
 
@@ -40,6 +41,7 @@ pub enum SettingsChoice {
     GitClosePolicy,
     SessionRecovery,
     SmartCopyModifier,
+    RemoteTechnique(TechniqueTarget),
 }
 
 fn sound_file_id(path: &std::path::Path) -> String {
@@ -141,7 +143,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 33] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -172,6 +174,9 @@ impl SettingsChoice {
         Self::GitClosePolicy,
         Self::SessionRecovery,
         Self::SmartCopyModifier,
+        Self::RemoteTechnique(TechniqueTarget::Claude),
+        Self::RemoteTechnique(TechniqueTarget::Codex),
+        Self::RemoteTechnique(TechniqueTarget::Other),
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -183,6 +188,18 @@ impl SettingsChoice {
                 Some(crate::app::GitRow::DefaultClosePolicy) => Some(Self::GitClosePolicy),
                 _ => None,
             },
+            SettingsTab::RemoteCompaction => {
+                match crate::remote_compaction_settings::RemoteCompactionRow::rows(
+                    &app.remote_compaction_settings,
+                )
+                .get(row)
+                {
+                    Some(crate::remote_compaction_settings::RemoteCompactionRow::Technique(
+                        target,
+                    )) => Some(Self::RemoteTechnique(*target)),
+                    _ => None,
+                }
+            }
             SettingsTab::Session
                 if crate::app::SessionRow::ALL.get(row)
                     == Some(&crate::app::SessionRow::RecoveryPolicy) =>
@@ -295,6 +312,9 @@ impl SettingsChoice {
             Self::Motion => "Motion level",
             Self::SidebarDensity => "Sidebar density",
             Self::AttentionIndicator => "Attention running indicator",
+            Self::RemoteTechnique(TechniqueTarget::Claude) => "Claude technique",
+            Self::RemoteTechnique(TechniqueTarget::Codex) => "Codex technique",
+            Self::RemoteTechnique(TechniqueTarget::Other) => "Other agents technique",
         }
     }
 
@@ -484,6 +504,11 @@ impl SettingsChoice {
             Self::AttentionIndicator => catalog(
                 &crate::agent_monitoring::AttentionRunningIndicator::ALL,
                 app.ui_settings.attention_running_indicator,
+                |value| value.label().into(),
+            ),
+            Self::RemoteTechnique(target) => catalog(
+                &ilium_remote_compaction::Technique::ALL,
+                app.remote_compaction_settings.technique(target),
                 |value| value.label().into(),
             ),
         }
@@ -738,6 +763,7 @@ impl App {
         let mut voice = self.voice_settings.clone();
         let mut sound = self.sound_settings.clone();
         let mut resets = self.reset_planning_settings.clone();
+        let mut remote_compaction = self.remote_compaction_settings.clone();
         match field {
             SettingsChoice::GitDefaultWhere => {
                 select!(crate::config::GitDefaultWhere::ALL, git.default_where)
@@ -867,6 +893,11 @@ impl App {
                     ui.attention_running_indicator
                 );
             }
+            SettingsChoice::RemoteTechnique(target) => {
+                let value = ilium_remote_compaction::Technique::from_id(id)
+                    .ok_or("This technique is no longer available")?;
+                *remote_compaction.technique_mut(target) = value;
+            }
         }
         let intent = token.map_or(
             ConfigurationIntent::Plain {
@@ -922,6 +953,14 @@ impl App {
                     intent,
                 )?;
                 self.apply_voice_runtime_settings(voice);
+            }
+            SettingsChoice::RemoteTechnique(_) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::RemoteCompaction(remote_compaction.clone()),
+                    intent,
+                )?;
+                self.apply_remote_compaction_settings(remote_compaction);
             }
             SettingsChoice::TerminalDirectory | SettingsChoice::SmartCopyModifier => {
                 self.enqueue_configuration(
@@ -1281,6 +1320,9 @@ mod tests {
             crate::config::GitClosePolicy::ALL.len(),
             crate::config::SessionRecoveryPolicy::ALL.len(),
             crate::config::SmartCopyLightKey::ALL.len(),
+            ilium_remote_compaction::Technique::ALL.len(),
+            ilium_remote_compaction::Technique::ALL.len(),
+            ilium_remote_compaction::Technique::ALL.len(),
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {

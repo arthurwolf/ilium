@@ -29,9 +29,6 @@ use crate::theme;
 const INSET: u16 = 2;
 /// Width of the label column of a control line.
 const LABEL_WIDTH: u16 = 30;
-/// Columns of the `‹` zone that decrements; the rest of the control
-/// increments.
-const DECREMENT_ZONE: u16 = 2;
 /// Indent of descriptions under a card or option.
 const BODY_INDENT: u16 = 6;
 
@@ -41,7 +38,7 @@ pub struct RowSpan {
     pub row: CostRow,
     pub first_line: u16,
     pub last_line: u16,
-    /// Line carrying the `‹ value ›` control, for parameter rows.
+    /// Line carrying the selector/number control, for parameter rows.
     pub control_line: u16,
     /// Column (relative to the content area) where the control starts.
     pub control_x: u16,
@@ -618,7 +615,10 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
                 if option.enabled { Style::new() } else { dim() },
             ),
             Span::raw(" ".repeat(padding)),
-            Span::styled(format!("‹ {} ›", option.visibility.label()), control_style),
+            Span::styled(
+                format!("← {} + →", option.visibility.label()),
+                control_style,
+            ),
         ]));
         spans_out.push(RowSpan {
             row: visibility_row,
@@ -688,10 +688,22 @@ fn push_control(
     } else {
         Style::new()
     };
+    let is_number = matches!(
+        row,
+        CostRow::HistoryDays
+            | CostRow::Budget
+            | CostRow::SparklineWindow
+            | CostRow::SparklineCells
+    );
+    let shown = if is_number {
+        format!("− {} + *", param_value(row, app))
+    } else {
+        format!("← {} + →", param_value(row, app))
+    };
     lines.push(Line::from(vec![
         Span::styled(label, label_style),
         Span::raw(" ".repeat(padding)),
-        Span::styled(format!("‹ {} ›", param_value(row, app)), control_style),
+        Span::styled(shown, control_style),
     ]));
     for text in wrap(
         &param_description(row, app),
@@ -865,6 +877,22 @@ pub fn scroll_for_selection(
 
 /// Resolves a click at `position` to the row it landed on.
 pub fn hit(content_area: Rect, scroll: u16, position: Position, app: &App) -> Option<CostHit> {
+    hit_with_button(
+        content_area,
+        scroll,
+        position,
+        crate::value_control::PointerButton::Left,
+        app,
+    )
+}
+
+pub fn hit_with_button(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    button: crate::value_control::PointerButton,
+    app: &App,
+) -> Option<CostHit> {
     if !content_area.contains(position) {
         return None;
     }
@@ -877,22 +905,29 @@ pub fn hit(content_area: Rect, scroll: u16, position: Position, app: &App) -> Op
         .iter()
         .find(|span| (span.first_line..=span.last_line).contains(&virtual_line))?;
     let index = all_rows.iter().position(|row| *row == span.row)?;
-    let is_stepper = matches!(
+    let is_number = matches!(
         span.row,
-        CostRow::FixedPreset
-            | CostRow::HistoryDays
+        CostRow::HistoryDays
             | CostRow::Budget
-            | CostRow::BurnPreset
             | CostRow::SparklineWindow
             | CostRow::SparklineCells
     );
-    let direction = if is_stepper {
-        // Only the `‹ value ›` control steps; the label and description lines
+    let is_choice = matches!(
+        span.row,
+        CostRow::FixedPreset | CostRow::BurnPreset | CostRow::Visibility(_)
+    );
+    let direction = if is_number || is_choice {
+        // Only the painted control steps; the label and description lines
         // of a stepper are inert so a stray click never changes a value.
         if virtual_line != span.control_line || virtual_x < span.control_x {
             return None;
         }
-        if virtual_x < span.control_x + DECREMENT_ZONE {
+        if virtual_x == span.control_x {
+            -1
+        } else if is_choice
+            && button == crate::value_control::PointerButton::Right
+            && virtual_x > span.control_x
+        {
             -1
         } else {
             1
@@ -1033,10 +1068,10 @@ mod tests {
         }
         assert!(page.contains("[x] Five-cell meter"));
         assert!(page.contains("[ ] Level glyph"));
-        assert!(page.contains("‹ Only when hovering the entry ›"));
+        assert!(page.contains("← Only when hovering the entry + →"));
         assert!(page.contains("Sparkline window"));
         assert!(
-            page.contains("‹ 6 h ›"),
+            page.contains("− 6 h + *"),
             "default window is six hours: {page}"
         );
     }
@@ -1114,7 +1149,7 @@ mod tests {
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&view(&app, 0, 110));
         assert!(page.contains("Budget per agent"));
-        assert!(page.contains("‹ $10 ›"));
+        assert!(page.contains("− $10 + *"));
         assert!(!page.contains("History window"));
     }
 
@@ -1145,7 +1180,7 @@ mod tests {
         let view = view(&app, 0, 110);
         let page = text(&view);
         assert!(page.contains("◉ Plan quota"));
-        assert!(page.contains("‹ Short window ›"));
+        assert!(page.contains("← Short window + →"));
         assert!(page.contains("<1.0%"), "fixed-band ladder is in percent");
         assert!(!page.contains("<$1.00"));
         assert!(page.contains("Claude Code transcripts carry no quota"));
@@ -1158,7 +1193,7 @@ mod tests {
 
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&super::view(&app, 0, 110));
-        assert!(page.contains("‹ 10% ›"), "budget is a share of the window");
+        assert!(page.contains("− 10% + *"), "budget is a share of the window");
         assert!(page.contains("quota_budget_percent"));
     }
 

@@ -19,7 +19,7 @@ use ilium_compaction_analysis::optimize::{
     PointQuality, Recommendation,
 };
 use ilium_compaction_analysis::price::PriceWeights;
-use ilium_compaction_analysis::replay::{simulate, ReworkSource, SimConfig};
+use ilium_compaction_analysis::replay::{simulate, ReworkModel, ReworkSource, SimConfig};
 use ilium_compaction_analysis::semantics::{
     claude_offset_observations, codex_ratio_observations, measure_claude_offset,
     measure_codex_ratio, AgentSemantics, ParameterSource,
@@ -418,6 +418,10 @@ pub struct CompactionReport {
     pub rework: Vec<ReworkRow>,
     /// Where the rework figure comes from and how large it is.
     pub rework_note: String,
+    /// `ReworkModel::describe()` of the model the simulation used: measured
+    /// vs research prior, compaction count, interval, and the noisy 50/50
+    /// blend when it applies. Set even when no recommendation exists.
+    pub rework_model_text: String,
     pub comparison: Vec<ComparisonRow>,
     /// Extrapolation, priors, unpriced models, truncation, price caveat.
     pub warnings: Vec<String>,
@@ -453,7 +457,11 @@ impl CompactionReport {
         let defaults = semantics.cli_defaults(window_tokens);
         let current_trigger = current_setting.map(|value| semantics.setting_to_trigger(value));
 
-        let mut config = SimConfig::for_agent(agent);
+        // Rework is measured on the corpus (main sessions, >= 30 compactions)
+        // or falls back to the research prior; measured once here and shared
+        // with the optimizer so both use the same figure.
+        let mut config = SimConfig::for_corpus(agent, traces, Some(&lookup));
+        let rework_model_text = config.rework.describe();
         config.triggers = default_grid(agent, &semantics);
         let mut extras = vec![defaults.trigger_tokens];
         extras.extend(current_trigger);
@@ -479,6 +487,7 @@ impl CompactionReport {
             per_model_note: String::new(),
             rework: Vec::new(),
             rework_note: String::new(),
+            rework_model_text,
             comparison: Vec::new(),
             warnings: Vec::new(),
         };
@@ -825,6 +834,7 @@ impl CompactionReport {
         }
         let _ = writeln!(text, "{}", self.per_model_note);
         let _ = writeln!(text, "{}", self.rework_note);
+        let _ = writeln!(text, "Rework model: {}", self.rework_model_text);
         for row in &self.rework {
             let _ = writeln!(
                 text,
@@ -883,7 +893,7 @@ fn run_optimizer(
 ) -> Result<OptimizerRun, AnalysisError> {
     // The support population is the one the replayed optimum covers.
     let observed = ObservedCompactions::main_sessions_only(traces, agent);
-    let optimize_config = OptimizeConfig::for_agent(agent);
+    let optimize_config = OptimizeConfig::for_agent(agent).with_rework(config.rework);
     let mut table = simulate(agent, traces, config, Some(lookup))?;
     let mut recommendation = optimize(&table, &observed, semantics, &optimize_config)?;
     let mut widened_grid = None;
@@ -1285,11 +1295,21 @@ fn rework_note(recommendation: &Recommendation) -> String {
         ReworkSource::Prior => {
             "a default measured on one research corpus, not on these logs (it is replaced by a measurement once your logs hold about 30 compactions)"
         }
-        ReworkSource::Measured => "measured on these logs",
+        ReworkSource::Measured => return measured_rework_note(rework),
     };
     format!(
         "Rework per compaction: {} weighted tokens, {origin}. Rows show the optimum at 0.5x, 1x and 2x of it.",
         humanize_tokens(rework.effective_tokens())
+    )
+}
+
+/// Note of a measured (possibly noisy-blended) rework figure, using the
+/// crate's own description of its provenance.
+fn measured_rework_note(rework: &ReworkModel) -> String {
+    format!(
+        "Rework per compaction: {} weighted tokens; {}. Rows show the optimum at 0.5x, 1x and 2x of it.",
+        humanize_tokens(rework.effective_tokens()),
+        rework.describe()
     )
 }
 

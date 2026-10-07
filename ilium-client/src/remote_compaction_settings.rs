@@ -176,7 +176,7 @@ impl RemoteCompactionSettings {
         }
     }
 
-    fn technique_mut(&mut self, target: TechniqueTarget) -> &mut Technique {
+    pub(crate) fn technique_mut(&mut self, target: TechniqueTarget) -> &mut Technique {
         match target {
             TechniqueTarget::Claude => &mut self.claude_technique,
             TechniqueTarget::Codex => &mut self.codex_technique,

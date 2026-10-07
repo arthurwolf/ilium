@@ -24,8 +24,6 @@ use crate::theme;
 const INSET: u16 = 2;
 /// Width of the label column of a control line.
 const LABEL_WIDTH: u16 = 30;
-/// Columns of the `‹` zone that decrements; the rest of the control increments.
-const DECREMENT_ZONE: u16 = 2;
 /// Indent of descriptions under a row.
 const BODY_INDENT: u16 = 6;
 /// The narrowest box the banner draws; narrower areas are clipped by ratatui.
@@ -39,7 +37,7 @@ pub struct RowSpan {
     pub row: RemoteCompactionRow,
     pub first_line: u16,
     pub last_line: u16,
-    /// Line carrying the `‹ value ›` control (or the banner's close button).
+    /// Line carrying the selector/number control (or the banner's close button).
     pub control_line: u16,
     /// Column, relative to the content area, where that control starts.
     pub control_x: u16,
@@ -59,6 +57,8 @@ pub enum HitAction {
     /// `-1`/`1` for the halves of a stepper, `0` for a toggle, the banner's
     /// close button or the prompt editor.
     Adjust(i32),
+    /// Open the full catalog for a named technique selector.
+    OpenChoice(TechniqueTarget),
 }
 
 /// A click, resolved to the row it landed on.
@@ -231,7 +231,7 @@ fn format_minutes(minutes: u64) -> String {
     }
 }
 
-/// The `‹ value ›` text of a stepper or select row, or the plain value of an
+/// The control text of a stepper or select row, or the plain value of an
 /// editor / read-only row.
 fn row_value(row: RemoteCompactionRow, app: &App) -> String {
     let settings = &app.remote_compaction_settings;
@@ -450,10 +450,12 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                 );
                 let value = row_value(row, app);
                 let shown = if is_stepped {
-                    format!("‹ {value} ›")
-                } else {
-                    value
-                };
+                    if row.kind() == RemoteCompactionRowKind::Select {
+                        format!("← {value} + →")
+                    } else {
+                        format!("− {value} + *")
+                    }
+                } else { value };
                 let control_style = if selected {
                     selected_style
                 } else if row.kind() == RemoteCompactionRowKind::ReadOnly {
@@ -551,6 +553,23 @@ pub fn hit(
     position: Position,
     app: &App,
 ) -> Option<RemoteCompactionHit> {
+    hit_with_button(
+        content_area,
+        scroll,
+        position,
+        crate::value_control::PointerButton::Left,
+        app,
+    )
+}
+
+/// Resolves a click while preserving the button used on a selector's value.
+pub fn hit_with_button(
+    content_area: Rect,
+    scroll: u16,
+    position: Position,
+    button: crate::value_control::PointerButton,
+    app: &App,
+) -> Option<RemoteCompactionHit> {
     if !content_area.contains(position) {
         return None;
     }
@@ -576,14 +595,36 @@ pub fn hit(
         RemoteCompactionRowKind::Toggle | RemoteCompactionRowKind::Editor => HitAction::Adjust(0),
         RemoteCompactionRowKind::ReadOnly => HitAction::Select,
         RemoteCompactionRowKind::Stepper | RemoteCompactionRowKind::Select => {
-            // Only the `‹ value ›` control steps; the label and description
-            // lines are inert so a stray click never changes a value.
+            // Only the painted control steps; the label and description lines
+            // are inert so a stray click never changes a value.  Clicking the
+            // value itself follows the shared control convention: left moves
+            // forward and right moves backward.
             if virtual_line != span.control_line || virtual_x < span.control_x {
                 HitAction::Select
-            } else if virtual_x < span.control_x + DECREMENT_ZONE {
-                HitAction::Adjust(-1)
             } else {
-                HitAction::Adjust(1)
+                let value = row_value(span.row, app);
+                let value_start = span.control_x + 2;
+                let value_end = value_start + UnicodeWidthStr::width(value.as_str()) as u16;
+                let value_hit = (value_start..value_end).contains(&virtual_x);
+                if span.row.kind() == RemoteCompactionRowKind::Select
+                    && virtual_x == value_end + 1
+                {
+                    if let RemoteCompactionRow::Technique(target) = span.row {
+                        HitAction::OpenChoice(target)
+                    } else {
+                        HitAction::Select
+                    }
+                } else if span.row.kind() == RemoteCompactionRowKind::Select && value_hit {
+                    match button {
+                        crate::value_control::PointerButton::Left => HitAction::Adjust(1),
+                        crate::value_control::PointerButton::Right => HitAction::Adjust(-1),
+                        crate::value_control::PointerButton::Other => HitAction::Select,
+                    }
+                } else if virtual_x == span.control_x {
+                    HitAction::Adjust(-1)
+                } else {
+                    HitAction::Adjust(1)
+                }
             }
         }
     };
@@ -640,8 +681,10 @@ mod tests {
 
     #[test]
     fn banner_text_names_the_configured_provider_and_model() {
-        let mut inference = ilium_inference::InferenceSettings::default();
-        inference.selected_provider = ilium_inference::InferenceProviderKind::Anthropic;
+        let mut inference = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::Anthropic,
+            ..Default::default()
+        };
         inference.anthropic.model = "claude-test-model".to_owned();
         let banner = privacy_banner_text(&inference);
         assert!(banner.contains("Anthropic / claude-test-model"), "{banner}");
@@ -693,12 +736,12 @@ mod tests {
         }
         assert!(page.contains("[ ] Remote compaction"));
         assert!(page.contains("[x] Redact secrets"));
-        assert!(page.contains("‹ 65% ›"));
-        assert!(page.contains("‹ Claude Code ›"));
-        assert!(page.contains("‹ Codex ›"));
+        assert!(page.contains("− 65% + *"));
+        assert!(page.contains("← Claude Code + →"));
+        assert!(page.contains("← Codex + →"));
         assert!(page.contains("the real upstream prompt"));
-        assert!(page.contains("‹ 20k tokens ›"));
-        assert!(page.contains("‹ 2 min ›"));
+        assert!(page.contains("− 20k tokens + *"));
+        assert!(page.contains("− 2 min + *"));
         assert!(page.contains("Kilo Gateway / "));
         assert!(page.contains("Change it there"));
     }
@@ -819,7 +862,7 @@ mod tests {
             HitAction::Adjust(-1)
         );
         assert_eq!(
-            at(threshold.control_x + DECREMENT_ZONE, threshold.control_line),
+            at(threshold.control_x + 2, threshold.control_line),
             HitAction::Adjust(1)
         );
         assert_eq!(

@@ -438,6 +438,20 @@ fn a_cache_of_another_layout_or_agent_is_ignored() {
     let (_, counters) = scan(AgentKind::ClaudeCode, home.path(), Some(&cache));
     assert_eq!(counters.files_parsed(), 2);
 
+    // The previous trace format (1) predates the current one (2): rescan.
+    assert_eq!(ilium_compaction_analysis::TRACE_FORMAT_VERSION, 2);
+    let text = std::fs::read_to_string(&cache).unwrap();
+    let previous_format = text.replacen(
+        "\"trace_format_version\":2",
+        "\"trace_format_version\":1",
+        1,
+    );
+    assert_ne!(text, previous_format);
+    std::fs::write(&cache, previous_format).unwrap();
+    let (_, counters) = scan(AgentKind::ClaudeCode, home.path(), Some(&cache));
+    assert_eq!(counters.files_parsed(), 2);
+    assert_eq!(counters.files_from_cache(), 0);
+
     // Garbage.
     std::fs::write(&cache, b"not json at all").unwrap();
     let (_, counters) = scan(AgentKind::ClaudeCode, home.path(), Some(&cache));

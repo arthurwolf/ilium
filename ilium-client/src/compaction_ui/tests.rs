@@ -296,6 +296,7 @@ pub(crate) fn fixture_report() -> CompactionReport {
             },
         ],
         rework_note: "Rework per compaction: 40k weighted tokens, a default measured on one research corpus, not on these logs. Rows show the optimum at 0.5x, 1x and 2x of it.".to_owned(),
+        rework_model_text: "rework is a research prior (40000 weighted tokens), not measured on these logs".to_owned(),
         comparison: vec![
             comparison_row(
                 ComparisonKind::CliDefault,

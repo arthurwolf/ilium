@@ -856,3 +856,52 @@ fn the_plain_argmin_pick_has_no_alternative() {
     assert_eq!(card.pick_rule, PickRule::PlainArgmin);
     assert!(card.extrapolated_alternative.is_none());
 }
+
+#[test]
+fn a_small_corpus_reports_the_research_prior_as_its_rework_model() {
+    let traces = corpus(AgentKind::ClaudeCode, 6);
+    let report = report_of(AgentKind::ClaudeCode, &traces);
+    assert!(
+        report.rework_model_text.contains("research prior"),
+        "{}",
+        report.rework_model_text
+    );
+    assert!(report
+        .rework_model_text
+        .contains("not measured on these logs"));
+    assert!(report
+        .to_plain_text()
+        .contains(&format!("Rework model: {}", report.rework_model_text)));
+}
+
+#[test]
+fn a_corpus_with_enough_compactions_measures_its_rework() {
+    let traces = corpus_of(AgentKind::ClaudeCode, Process::claude(), 60);
+    let main_compactions: usize = traces
+        .iter()
+        .filter(|trace| !trace.is_subagent)
+        .map(|trace| trace.compactions.len())
+        .sum();
+    assert!(main_compactions >= 30, "{main_compactions}");
+    let report = report_of(AgentKind::ClaudeCode, &traces);
+    assert!(
+        report.rework_model_text.contains("measured from"),
+        "{}",
+        report.rework_model_text
+    );
+    assert!(!report.rework_model_text.contains("research prior"));
+    // The note carries the same provenance and the report still completes.
+    assert!(
+        report.rework_note.contains("measured from"),
+        "{}",
+        report.rework_note
+    );
+    assert!(report.has_recommendation());
+}
+
+#[test]
+fn the_model_text_is_set_even_when_nothing_can_be_replayed() {
+    let report = report_of(AgentKind::Codex, &[]);
+    assert!(!report.has_recommendation());
+    assert!(report.rework_model_text.contains("research prior"));
+}
