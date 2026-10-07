@@ -56,6 +56,18 @@ impl Raster {
             return false;
         }
         let index = y * self.width + x;
+        if intensity == 1.0 && owner == 0 && self.dots[index] <= 1.0 {
+            // Wind and other opaque unresolved layers use this common case.
+            // It has the same ownership result as the general comparison:
+            // an existing owner is cleared because the two opaque dots tie.
+            if self.dots[index] < 1.0 {
+                self.dots[index] = 1.0;
+            }
+            if self.owner_ids[index] != 0 {
+                self.owner_ids[index] = 0;
+            }
+            return true;
+        }
         let intensity = intensity.clamp(0.0, 1.0);
         if intensity > self.dots[index] {
             self.dots[index] = intensity;
@@ -64,6 +76,21 @@ impl Raster {
             self.owner_ids[index] = 0;
         }
         true
+    }
+
+    /// Paints an opaque unresolved dot after the caller has proved the
+    /// coordinates are inside this raster. Wind uses this path for its dense
+    /// particle loop; the debug assertion keeps that caller contract visible
+    /// without paying the generic validation cost in release builds.
+    pub(crate) fn opaque_dot_in_bounds(&mut self, x: usize, y: usize) {
+        debug_assert!(x < self.width && y < self.height);
+        let index = y * self.width + x;
+        if self.dots[index] < 1.0 {
+            self.dots[index] = 1.0;
+        }
+        if self.owner_ids[index] != 0 {
+            self.owner_ids[index] = 0;
+        }
     }
 
     pub fn aspect(&self) -> f32 {
@@ -276,5 +303,21 @@ mod painted_owner_tests {
         assert!(raster.owned_dot(0, 0, 0.9, 7));
         raster.resize(2, 4);
         assert!(raster.owner_ids.iter().all(|owner| *owner == 0));
+    }
+
+    #[test]
+    fn opaque_in_bounds_matches_an_opaque_unresolved_write() {
+        let mut expected = Raster::default();
+        expected.resize(4, 4);
+        expected.owned_dot(1, 2, 0.8, 7);
+        expected.owned_dot(1, 2, 1.0, 0);
+
+        let mut actual = Raster::default();
+        actual.resize(4, 4);
+        actual.owned_dot(1, 2, 0.8, 7);
+        actual.opaque_dot_in_bounds(1, 2);
+
+        assert_eq!(actual.dots, expected.dots);
+        assert_eq!(actual.owner_ids, expected.owner_ids);
     }
 }

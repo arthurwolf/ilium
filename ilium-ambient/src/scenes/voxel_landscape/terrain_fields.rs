@@ -234,9 +234,9 @@ impl TerrainFields {
         } else {
             0.0
         };
-        // This stateless field stage has one connected water plane. Independently
-        // deriving perched water from each column leaves exposed floating water
-        // at banks. Elevated lakes and rivers need a later drainage topology.
+        // This stateless field stage has one connected water plane. Preserve
+        // the authored valley depth here; surface generation fills the water
+        // column up to that plane so banks never acquire a floating slab.
         let river_level = SURFACE_SEA_LEVEL;
         let bed = uncarved_height.min(river_level - 3);
         let height = (f64::from(uncarved_height)

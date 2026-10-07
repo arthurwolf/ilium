@@ -1525,6 +1525,14 @@ mod tests {
             AnimationKind::Video => &["scene_seconds", "seed", "slowed_percent"],
             AnimationKind::Wikipedia => &["wiki_zoom"],
             AnimationKind::Wind => &["gravity_strength", "merge_threshold", "rotation_speed"],
+            AnimationKind::Growth => &[
+                "density",
+                "growth_rate",
+                "pattern",
+                "color_mode",
+                "reserve_edge",
+                "reseed_seconds",
+            ],
             _ => &[],
         };
         let visible_ids: HashSet<_> = variants

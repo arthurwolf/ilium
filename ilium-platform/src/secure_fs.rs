@@ -95,7 +95,7 @@ pub fn replace_file_durably(source: &Path, destination: &Path) -> io::Result<()>
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
-            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
         };
         let wide = |path: &Path| -> io::Result<Vec<u16>> {
             let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();

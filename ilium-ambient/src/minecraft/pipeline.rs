@@ -26,7 +26,10 @@ impl Default for Limits {
         Self {
             maps: 4,
             map_attempts: 8,
-            windows: windows::Limits::default(),
+            windows: windows::Limits {
+                spread_candidates: 4,
+                ..windows::Limits::default()
+            },
             loading: loader::Limits::default(),
             preparation: preparation::Limits::default(),
         }

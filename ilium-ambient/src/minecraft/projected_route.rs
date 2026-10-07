@@ -9,15 +9,26 @@ use super::{
     tours::{self, Plan, PreparedMap, ProjectedDisplay},
 };
 use crate::voxel_landscape::{
-    VoxelLandscapeSettings,
     assets::{
         budget::{ByteBudget, Cancel, Reservation},
         error::AssetError,
         identity::{Digest256, ResourceId},
         models::ModelCompiler,
     },
+    VoxelLandscapeSettings,
 };
 use std::{collections::BTreeSet, path::Path, sync::Arc};
+
+const DISPLAY_WORK_BASE: u64 = 1_000_000;
+const DISPLAY_WORK_PER_CHUNK: u64 = 100_000;
+
+/// The display binding compares every retained planner chunk with its
+/// projected counterpart.  Keep that finite work admission proportional to
+/// the bounded retained map instead of rejecting otherwise valid large saves
+/// once the old fixed sixteen-million ceiling is crossed.
+fn display_work_limit(chunk_count: usize) -> u64 {
+    DISPLAY_WORK_BASE.saturating_add((chunk_count as u64).saturating_mul(DISPLAY_WORK_PER_CHUNK))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -128,6 +139,19 @@ pub fn prepare_pinned(
     prepare_source(input, Some((source, native_jar)))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::display_work_limit;
+
+    #[test]
+    fn display_work_admission_scales_with_retained_map_chunks() {
+        assert_eq!(display_work_limit(0), 1_000_000);
+        assert_eq!(display_work_limit(160), 17_000_000);
+        assert_eq!(display_work_limit(384), 39_400_000);
+        assert!(display_work_limit(384) > display_work_limit(160));
+    }
+}
+
 fn prepare_source(
     input: Inputs<'_>,
     source: Option<(
@@ -171,7 +195,10 @@ fn prepare_source(
         )?,
     };
     let map = qualified.map;
-    let mut source_budget = tours::Budget::new(16_000_000, input.cancelled);
+    let mut source_budget = tours::Budget::new(
+        display_work_limit(input.initial_map.loaded().chunks.len()),
+        input.cancelled,
+    );
     let display = Arc::new(ProjectedDisplay::bind(
         input.plan,
         Arc::clone(&map),

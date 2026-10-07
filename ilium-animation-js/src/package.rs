@@ -384,6 +384,36 @@ mod tests {
         );
     }
     #[test]
+    fn loaded_package_owns_module_bytes_after_archive_buffer_changes() {
+        let source = b"export const value = 7;";
+        let asset = b"asset";
+        let meta = serde_json::to_vec(&serde_json::json!({
+            "api_version": 1,
+            "id": "test",
+            "name": "Test",
+            "version": "1.0.0",
+            "entry": "entry.mjs",
+            "modes": ["live"],
+            "files": [
+                {"path": "entry.mjs", "bytes": source.len(), "sha256": format!("{:x}", Sha256::digest(source))},
+                {"path": "assets/marker.bin", "bytes": asset.len(), "sha256": format!("{:x}", Sha256::digest(asset))}
+            ],
+            "assets": [
+                {"path": "assets/marker.bin", "bytes": asset.len(), "sha256": format!("{:x}", Sha256::digest(asset))}
+            ]
+        }))
+        .unwrap();
+        let mut archive = archive(&[
+            ("manifest.json", &meta),
+            ("entry.mjs", source),
+            ("assets/marker.bin", asset),
+        ]);
+        let package = Package::from_bytes(&archive, PackageLimits::default()).unwrap();
+        archive.fill(0);
+        assert_eq!(package.entry_source().unwrap().as_bytes(), source);
+        assert_eq!(package.asset("assets/marker.bin").unwrap(), b"asset");
+    }
+    #[test]
     fn rejects_tampered_module() {
         let meta = metadata(b"good");
         assert!(matches!(

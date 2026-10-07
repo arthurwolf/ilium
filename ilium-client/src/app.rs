@@ -2159,6 +2159,7 @@ pub struct App {
     /// Settings -> Animations: the row with disabled options the pointer
     /// rests on (see `animation_hover`).
     pub(crate) animation_hover: Option<crate::animation_hover::AnimationHover>,
+    pub(crate) plugin_issue_hover: Option<crate::animation_hover::AnimationHover>,
     next_workspace_request_id: u64,
     active_workspace_dialog_query: Option<(u64, NodeId)>,
     active_workspace_menu_query: Option<(u64, NodeId)>,
@@ -2727,6 +2728,7 @@ impl App {
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
+            plugin_issue_hover: None,
             next_workspace_request_id: 1,
             active_workspace_dialog_query: None,
             active_workspace_menu_query: None,
@@ -4589,24 +4591,26 @@ impl App {
     }
 
     pub(crate) fn frozen_unfreeze_button(&self, viewport: PaneViewport) -> Option<Rect> {
-        self.frozen_screens.contains_key(&viewport.pane_id).then(|| {
-            let area = viewport.content_area;
-            let height = area.height.min(7);
-            let width = area.width.min(52);
-            let dialog = Rect {
-                x: area.x + area.width.saturating_sub(width) / 2,
-                y: area.y + area.height.saturating_sub(height) / 2,
-                width,
-                height,
-            };
-            let button_width = dialog.width.min(22);
-            Rect {
-                x: dialog.x + dialog.width.saturating_sub(button_width) / 2,
-                y: dialog.y + dialog.height.saturating_sub(2),
-                width: button_width,
-                height: 1,
-            }
-        })
+        self.frozen_screens
+            .contains_key(&viewport.pane_id)
+            .then(|| {
+                let area = viewport.content_area;
+                let height = area.height.min(7);
+                let width = area.width.min(52);
+                let dialog = Rect {
+                    x: area.x + area.width.saturating_sub(width) / 2,
+                    y: area.y + area.height.saturating_sub(height) / 2,
+                    width,
+                    height,
+                };
+                let button_width = dialog.width.min(22);
+                Rect {
+                    x: dialog.x + dialog.width.saturating_sub(button_width) / 2,
+                    y: dialog.y + dialog.height.saturating_sub(2),
+                    width: button_width,
+                    height: 1,
+                }
+            })
     }
 
     /// Whether `pane_id` is a terminal agent that has finished its current
@@ -8172,6 +8176,7 @@ impl App {
                     .as_ref()
                     .and_then(|owner| owner.status.clone())
                     .unwrap_or_else(|| "Open Plugin to discover animation packages".into())],
+                issue_details: Vec::new(),
             }
         };
         let native = self.animation_row_model();
@@ -8184,6 +8189,25 @@ impl App {
                     model.rows.push(PluginPanelRow::Common(index));
                     model.labels.push(format!("{}: {}", view.label, view.value));
                 }
+            }
+        }
+        if let Some(error) = self.animation_frame.status() {
+            let detail: String = error
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(512)
+                .collect();
+            model.issue_details.push(format!("Runtime: {detail}"));
+            if let Some(index) = model
+                .rows
+                .iter()
+                .position(|row| *row == PluginPanelRow::Issues)
+            {
+                model.labels[index] =
+                    format!("{} package/runtime issue(s)", model.issue_details.len());
+            } else {
+                model.rows.push(PluginPanelRow::Issues);
+                model.labels.push("1 package/runtime issue(s)".into());
             }
         }
         model
@@ -8220,7 +8244,7 @@ impl App {
             self.settings_select_plugin(&package_id);
             return;
         }
-        if matches!(row, PluginPanelRow::Status) {
+        if matches!(row, PluginPanelRow::Status | PluginPanelRow::Issues) {
             return;
         }
         if matches!(row, PluginPanelRow::Permissions) {
@@ -14902,9 +14926,10 @@ impl App {
     }
 
     fn frozen_screen_path(&self, pane_id: NodeId) -> Option<PathBuf> {
-        self.config_dir
-            .as_ref()
-            .map(|dir| dir.join("frozen-screens").join(format!("{}.bin", pane_id.0)))
+        self.config_dir.as_ref().map(|dir| {
+            dir.join("frozen-screens")
+                .join(format!("{}.bin", pane_id.0))
+        })
     }
 
     fn persist_frozen_screen(&self, pane_id: NodeId) {
@@ -17060,9 +17085,7 @@ impl App {
         }
         if matches!(
             mouse.kind,
-            crossterm::event::MouseEventKind::Down(
-                crossterm::event::MouseButton::Left
-            )
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
         ) && self
             .frozen_unfreeze_button(viewport)
             .is_some_and(|button| button.contains(position))

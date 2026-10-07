@@ -6,6 +6,9 @@ use std::collections::BTreeSet;
 pub struct Limits {
     pub radius_chunks: u8,
     pub candidates: usize,
+    /// Number of output slots reserved for the farthest complete windows.
+    /// This keeps large saved worlds from collapsing to spawn-local evidence.
+    pub spread_candidates: usize,
     pub work_units: usize,
 }
 impl Default for Limits {
@@ -13,11 +16,12 @@ impl Default for Limits {
         Self {
             radius_chunks: 5,
             candidates: 8,
+            spread_candidates: 0,
             work_units: 1_000_000,
         }
     }
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub center: [i32; 2],
     pub requested: BTreeSet<[i32; 2]>,
@@ -25,8 +29,9 @@ pub struct Candidate {
 }
 #[derive(Debug, Default)]
 pub struct Search {
-    /// Nearest retained candidates from the examined prefix, capped by Limits.
-    /// Selection is not a decode, a coverage result, or evidence of novelty.
+    /// Candidates retained from the examined prefix, optionally interleaving
+    /// the nearest and farthest complete windows. Selection is not a decode,
+    /// a coverage result, or evidence of novelty.
     pub candidates: Vec<Candidate>,
     pub work_used: usize,
     /// Complete header footprints considered after recent/anchor exclusions.
@@ -63,6 +68,7 @@ pub fn search(
     if limits.radius_chunks > 5
         || limits.candidates == 0
         || limits.candidates > 16
+        || limits.spread_candidates > limits.candidates
         || limits.work_units == 0
         || limits.work_units > 8_000_000
         || allocated.len() > 262_144
@@ -77,12 +83,15 @@ pub fn search(
         cancelled,
     };
     let mut result = Search::default();
+    let mut nearest = Vec::new();
+    let mut farthest = Vec::new();
     let side = i64::from(limits.radius_chunks) * 2 + 1;
     let first = candidate(allocated, anchor, recent, limits.radius_chunks, &mut work)?;
     let anchor_admitted = first.is_some();
     if let Some(first) = first {
         result.header_complete += 1;
-        result.candidates.push(first);
+        retain_nearest(&mut nearest, first.clone(), anchor, limits.candidates);
+        retain_farthest(&mut farthest, first, anchor, limits.spread_candidates);
     }
     for &center in allocated {
         if !work.step()? {
@@ -98,11 +107,8 @@ pub fn search(
             candidate(allocated, center, recent, limits.radius_chunks, &mut work)?
         {
             result.header_complete += 1;
-            result.candidates.push(candidate);
-            result
-                .candidates
-                .sort_by_key(|c| (distance(c.center, anchor), c.center));
-            result.candidates.truncate(limits.candidates);
+            retain_nearest(&mut nearest, candidate.clone(), anchor, limits.candidates);
+            retain_farthest(&mut farthest, candidate, anchor, limits.spread_candidates);
         }
         if work.exhausted {
             break;
@@ -113,7 +119,70 @@ pub fn search(
     }
     result.work_used = work.used;
     result.scan_complete = !work.exhausted;
+    result.candidates = interleave(nearest, farthest, limits.candidates);
     Ok(result)
+}
+
+fn retain_nearest(
+    candidates: &mut Vec<Candidate>,
+    candidate: Candidate,
+    anchor: [i32; 2],
+    limit: usize,
+) {
+    if limit == 0 {
+        return;
+    }
+    candidates.push(candidate);
+    candidates.sort_by_key(|candidate| (distance(candidate.center, anchor), candidate.center));
+    candidates.truncate(limit);
+}
+
+fn retain_farthest(
+    candidates: &mut Vec<Candidate>,
+    candidate: Candidate,
+    anchor: [i32; 2],
+    limit: usize,
+) {
+    if limit == 0 {
+        return;
+    }
+    candidates.push(candidate);
+    candidates.sort_by_key(|candidate| {
+        (
+            std::cmp::Reverse(distance(candidate.center, anchor)),
+            candidate.center,
+        )
+    });
+    candidates.truncate(limit);
+}
+
+fn interleave(nearest: Vec<Candidate>, farthest: Vec<Candidate>, limit: usize) -> Vec<Candidate> {
+    let mut output = Vec::with_capacity(limit);
+    let mut nearest = nearest.into_iter();
+    let mut farthest = farthest.into_iter();
+    while output.len() < limit {
+        let mut progressed = false;
+        if let Some(candidate) = nearest.next() {
+            output.push(candidate);
+            progressed = true;
+        }
+        if output.len() == limit {
+            break;
+        }
+        if let Some(candidate) = farthest.next() {
+            if output
+                .iter()
+                .all(|selected| selected.center != candidate.center)
+            {
+                output.push(candidate);
+            }
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+    output
 }
 
 fn distance(left: [i32; 2], right: [i32; 2]) -> i64 {

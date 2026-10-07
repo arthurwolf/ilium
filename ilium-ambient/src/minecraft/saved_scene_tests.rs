@@ -137,16 +137,12 @@ fn route_survey_orders_short_novel_before_longer_repeated_and_stays_finite() {
     assert_eq!(tiers[0], (Choice::NovelAppearance, 1024.0, 1));
     assert_eq!(tiers[5], (Choice::NovelAppearance, 64.0, 1));
     assert_eq!(tiers[6], (Choice::RepeatedAppearance, 256.0, 1));
-    assert!(
-        tiers[..6]
-            .iter()
-            .all(|(choice, _, _)| *choice == Choice::NovelAppearance)
-    );
-    assert!(
-        tiers[6..10]
-            .iter()
-            .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance)
-    );
+    assert!(tiers[..6]
+        .iter()
+        .all(|(choice, _, _)| *choice == Choice::NovelAppearance));
+    assert!(tiers[6..10]
+        .iter()
+        .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance));
 }
 
 #[test]

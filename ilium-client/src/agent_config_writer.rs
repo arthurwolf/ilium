@@ -1078,9 +1078,31 @@ fn parse_json_setting(text: &str, key: &str) -> Result<Option<u64>, String> {
     }
 }
 
+/// TOML parse errors render the offending source line, which can hold a secret
+/// elsewhere in the file; report only the message and the line number.
+fn toml_error_text(
+    prefix: &str,
+    text: &str,
+    message: &str,
+    span: Option<std::ops::Range<usize>>,
+) -> String {
+    match span {
+        Some(span) => {
+            let start = span.start.min(text.len());
+            let line = text.as_bytes()[..start]
+                .iter()
+                .filter(|b| **b == b'\n')
+                .count()
+                + 1;
+            format!("{prefix}: {message} (line {line})")
+        }
+        None => format!("{prefix}: {message}"),
+    }
+}
+
 fn parse_toml_setting(text: &str, key: &str) -> Result<Option<u64>, String> {
-    let document =
-        toml_edit::Document::parse(text).map_err(|error| format!("invalid TOML: {error}"))?;
+    let document = toml_edit::Document::parse(text)
+        .map_err(|error| toml_error_text("invalid TOML", text, error.message(), error.span()))?;
     match document.as_table().get(key) {
         None => Ok(None),
         Some(item) => match item.as_value().and_then(toml_edit::Value::as_integer) {
@@ -1179,9 +1201,14 @@ fn verify_toml_otherwise_equal(
             expected.remove(key);
         }
     }
-    let actual = edited
-        .parse::<toml::Table>()
-        .map_err(|error| format!("edit check: the edited TOML does not parse: {error}"))?;
+    let actual = edited.parse::<toml::Table>().map_err(|error| {
+        toml_error_text(
+            "edit check: the edited TOML does not parse",
+            edited,
+            error.message(),
+            error.span(),
+        )
+    })?;
     if expected != actual {
         return Err("edit check: the edit changed something besides the target key".into());
     }
@@ -1205,8 +1232,8 @@ fn line_ending(text: &str) -> &'static str {
 // --- TOML ------------------------------------------------------------------
 
 fn edit_toml_text(text: &str, key: &str, change: KeyChange) -> Result<String, String> {
-    let document =
-        toml_edit::Document::parse(text).map_err(|error| format!("invalid TOML: {error}"))?;
+    let document = toml_edit::Document::parse(text)
+        .map_err(|error| toml_error_text("invalid TOML", text, error.message(), error.span()))?;
     let root = document.as_table();
     match (root.get_key_value(key), change) {
         (Some((_, item)), KeyChange::Set(value)) => {
@@ -1781,6 +1808,15 @@ mod tests {
             unterminated,
             "a = 1\nmodel_auto_compact_token_limit = 250000"
         );
+    }
+
+    #[test]
+    fn toml_parse_errors_never_echo_source_lines() {
+        let text = "a = 1\nSECRET_KEY = \"sk-SECRET123\" oops\n";
+        let error = parse_toml_setting(text, "model_auto_compact_token_limit").unwrap_err();
+        assert!(error.starts_with("invalid TOML"), "{error}");
+        assert!(!error.contains("SECRET"), "{error}");
+        assert!(error.contains("line 2"), "{error}");
     }
 
     #[test]

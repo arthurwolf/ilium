@@ -212,6 +212,45 @@ impl App {
         self.animation_hover = Some(hover);
         true
     }
+
+    pub fn set_plugin_issue_hover(&mut self, row: Option<usize>, now: Instant) {
+        self.plugin_issue_hover = match (row, self.plugin_issue_hover) {
+            (Some(row), Some(hover)) if hover.row == row => Some(hover),
+            (Some(row), _) => Some(AnimationHover {
+                row,
+                since: now,
+                is_shown: false,
+            }),
+            (None, _) => None,
+        };
+    }
+
+    pub fn clear_plugin_issue_hover(&mut self) {
+        self.plugin_issue_hover = None;
+    }
+
+    pub fn tick_plugin_issue_hover(&mut self, now: Instant) -> bool {
+        let Some(mut hover) = self.plugin_issue_hover else {
+            return false;
+        };
+        let is_on_screen = matches!(
+            &self.mode,
+            Mode::Settings(state)
+                if state.tab == SettingsTab::Animations
+                    && !state.animation_fullscreen
+                    && state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Plugin
+        );
+        if !is_on_screen {
+            self.plugin_issue_hover = None;
+            return hover.is_shown;
+        }
+        if hover.is_shown || now.saturating_duration_since(hover.since) < HOVER_DELAY {
+            return false;
+        }
+        hover.is_shown = true;
+        self.plugin_issue_hover = Some(hover);
+        true
+    }
 }
 
 #[cfg(test)]

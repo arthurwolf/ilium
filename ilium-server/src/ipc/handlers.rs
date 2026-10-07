@@ -400,7 +400,10 @@ pub async fn handle_request(
             handle_terminate_pane_process(state, pane_id, direct_tx).await;
             false
         }
-        ClientRequest::FreezePane { pane_id, resume_command } => {
+        ClientRequest::FreezePane {
+            pane_id,
+            resume_command,
+        } => {
             handle_freeze_pane(state, pane_id, resume_command, direct_tx).await;
             false
         }

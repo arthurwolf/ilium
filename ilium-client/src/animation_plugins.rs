@@ -960,6 +960,7 @@ pub enum PluginPanelRow {
     /// Index into the same native RowModel; only Common rows are projected.
     Common(usize),
     Permissions,
+    Issues,
     Status,
 }
 
@@ -967,6 +968,7 @@ pub enum PluginPanelRow {
 pub struct PluginPanelModel {
     pub rows: Vec<PluginPanelRow>,
     pub labels: Vec<String>,
+    pub issue_details: Vec<String>,
 }
 
 impl PluginPanelModel {
@@ -982,6 +984,17 @@ impl PluginPanelModel {
         let mut model = Self {
             rows: Vec::new(),
             labels: Vec::new(),
+            issue_details: catalogue
+                .issues
+                .iter()
+                .map(|issue| {
+                    format!(
+                        "{}: {}",
+                        issue.path.display(),
+                        display_text(&issue.message, 512)
+                    )
+                })
+                .collect(),
         };
         for entry in &catalogue.entries {
             let active = active_package_id == Some(entry.manifest.id.as_str());
@@ -1044,7 +1057,7 @@ impl PluginPanelModel {
             model.labels.push("No animation packages installed".into());
         }
         if !catalogue.issues.is_empty() {
-            model.rows.push(PluginPanelRow::Status);
+            model.rows.push(PluginPanelRow::Issues);
             model.labels.push(format!(
                 "{} package inspection issue(s)",
                 catalogue.issues.len()
@@ -1131,6 +1144,54 @@ pub fn draw_plugin_panel(
     }
 }
 
+pub fn draw_plugin_issue_popover(
+    frame: &mut Frame<'_>,
+    content_area: Rect,
+    app: &crate::app::App,
+    model: &PluginPanelModel,
+    state: &PluginPanelState,
+) {
+    let Some(hover) = app.plugin_issue_hover.filter(|hover| hover.is_shown) else {
+        return;
+    };
+    let Some(row) = model
+        .rows
+        .iter()
+        .position(|row| *row == PluginPanelRow::Issues)
+    else {
+        return;
+    };
+    if hover.row != row {
+        return;
+    }
+    let area = crate::animation_settings_ui::plugin_panel_area(content_area);
+    let Some(anchor) = plugin_row_rect(area, state.scroll, row) else {
+        return;
+    };
+    let body = model.issue_details.join("\n\n");
+    let Some(geometry) = crate::animation_hover::popover_geometry(
+        content_area,
+        crate::animation_settings_ui::layout(content_area).panel,
+        anchor.y,
+        &body,
+    ) else {
+        return;
+    };
+    let ink = crate::animation_settings_ui::control_ink(app);
+    frame.render_widget(ratatui::widgets::Clear, geometry.rectangle);
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(geometry.lines.join("\n"))
+            .style(ink)
+            .block(
+                ratatui::widgets::Block::default()
+                    .borders(ratatui::widgets::Borders::ALL)
+                    .title(" Package inspection details ")
+                    .style(ink),
+            ),
+        geometry.rectangle,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1176,6 +1237,26 @@ mod tests {
         );
         schema["properties"]["mode"]["enum"] = json!(["snake"]);
         assert!(apply_choice(&schema, &json!({}), "mode", &life.id).is_err());
+    }
+
+    #[test]
+    fn plugin_panel_retains_catalogue_issue_details_for_hover_report() {
+        let catalogue = PluginCatalogue {
+            entries: Vec::new(),
+            issues: vec![CatalogueIssue {
+                path: PathBuf::from("/tmp/broken.iliumanim"),
+                message: "manifest is missing entry.mjs".into(),
+            }],
+        };
+        let model = PluginPanelModel::new(&catalogue, &PluginPreferences::default());
+        assert!(model
+            .rows
+            .iter()
+            .any(|row| matches!(row, PluginPanelRow::Issues)));
+        assert_eq!(
+            model.issue_details,
+            vec!["/tmp/broken.iliumanim: manifest is missing entry.mjs"]
+        );
     }
 
     #[test]

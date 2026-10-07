@@ -15,7 +15,6 @@ use super::{
     tours::PreparedMap,
 };
 use crate::voxel_landscape::{
-    VoxelLandscapeSettings,
     assets::{
         bank::TextureBank,
         block_state::BlockState,
@@ -32,6 +31,7 @@ use crate::voxel_landscape::{
         AlphaMode, BoundModel, BoundQuad, FaceMaterial, MaterialTable, MeshRegion, PreparedMesh,
         TextureRenderRule,
     },
+    VoxelLandscapeSettings,
 };
 use sha2::{Digest, Sha256};
 use std::{

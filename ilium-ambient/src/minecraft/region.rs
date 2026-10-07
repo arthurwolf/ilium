@@ -2,7 +2,7 @@
 //! Two equal observations detect changes; they are NOT an atomic filesystem
 //! snapshot or a hostile-path/no-follow security boundary. Kernel I/O can block.
 use super::nbt::{self, Compound, Document, Tag};
-use flate2::{Decompress, FlushDecompress, Status, bufread::GzDecoder};
+use flate2::{bufread::GzDecoder, Decompress, FlushDecompress, Status};
 use ilium_platform::animation_files::{FileIdentity, PinnedDirectory, PinnedFile};
 use std::{
     fs::{self, File, Metadata},

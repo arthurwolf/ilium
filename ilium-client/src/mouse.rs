@@ -2324,6 +2324,23 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         if state.animation_source_tab == AnimationSourceTab::Plugin {
             let model = app.plugin_panel_model();
             let area = crate::animation_settings_ui::plugin_panel_area(layout.content_area);
+            if matches!(mouse.kind, MouseEventKind::Moved) {
+                let issue_row = model
+                    .rows
+                    .iter()
+                    .position(|row| *row == crate::animation_plugins::PluginPanelRow::Issues)
+                    .filter(|row| {
+                        crate::animation_plugins::plugin_row_at(
+                            area,
+                            state.plugin_panel.scroll,
+                            model.rows.len(),
+                            position,
+                        ) == Some(*row)
+                    });
+                app.set_plugin_issue_hover(issue_row, Instant::now());
+            } else {
+                app.clear_plugin_issue_hover();
+            }
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
                     if let Some(row) = crate::animation_plugins::plugin_row_at(
@@ -3037,9 +3054,22 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                 }
             } else if state.tab == crate::app::SettingsTab::Cost {
-                if let Some(hit) =
-                    crate::cost_settings_ui::hit(layout.content_area, state.scroll, position, app)
-                {
+                let pointer_button = match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Right) => {
+                        crate::value_control::PointerButton::Right
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        crate::value_control::PointerButton::Left
+                    }
+                    _ => crate::value_control::PointerButton::Other,
+                };
+                if let Some(hit) = crate::cost_settings_ui::hit_with_button(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    pointer_button,
+                    app,
+                ) {
                     state.selected_row = hit.index;
                     app.mode = Mode::Settings(state);
                     if app.cost_settings.number_spec(hit.row).is_none()
@@ -3052,18 +3082,36 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             } else if state.tab == crate::app::SettingsTab::Optimization {
                 app.optimization_click(&mut state, layout.content_area, position);
             } else if state.tab == crate::app::SettingsTab::RemoteCompaction {
-                if let Some(hit) = crate::remote_compaction_settings_ui::hit(
+                let pointer_button = match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Right) => {
+                        crate::value_control::PointerButton::Right
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        crate::value_control::PointerButton::Left
+                    }
+                    _ => crate::value_control::PointerButton::Other,
+                };
+                if let Some(hit) = crate::remote_compaction_settings_ui::hit_with_button(
                     layout.content_area,
                     state.scroll,
                     position,
+                    pointer_button,
                     app,
                 ) {
                     state.selected_row = hit.index;
-                    app.mode = Mode::Settings(state);
                     if let crate::remote_compaction_settings_ui::HitAction::Adjust(direction) =
                         hit.action
                     {
+                        app.mode = Mode::Settings(state);
                         app.settings_adjust_remote_compaction_row(hit.row, direction);
+                    } else if let crate::remote_compaction_settings_ui::HitAction::OpenChoice(
+                        target,
+                    ) = hit.action
+                    {
+                        app.mode = Mode::Settings(state);
+                        app.begin_settings_choice_dialog(
+                            crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
+                        );
                     }
                     return;
                 }

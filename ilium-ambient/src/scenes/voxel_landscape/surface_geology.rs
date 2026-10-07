@@ -88,6 +88,8 @@ pub fn terrain_materials(
         }
         Desert | Beach => ("minecraft:sand", "minecraft:sandstone"),
         SnowyBeach => ("minecraft:snow_block", "minecraft:sand"),
+        River => ("minecraft:sand", "minecraft:gravel"),
+        FrozenRiver => ("minecraft:snow_block", "minecraft:gravel"),
         StonyShore | StonyPeaks | WindsweptGravellyHills => ("minecraft:stone", "minecraft:stone"),
         FrozenPeaks => ("minecraft:snow_block", "minecraft:packed_ice"),
         JaggedPeaks => ("minecraft:snow_block", "minecraft:stone"),
@@ -157,10 +159,16 @@ pub fn terrain_materials(
     // Mega-conifer biomes retain their tree-owned podzol decorator exclusively.
     if matches!(
         biome,
-        Forest | DappledForest | OldGrowthBirchForest | WindsweptForest | Taiga
+        Forest
+            | DappledForest
+            | OldGrowthBirchForest
+            | OldGrowthPineTaiga
+            | OldGrowthSpruceTaiga
+            | WindsweptForest
+            | Taiga
     ) {
         let patch = noise(0x736f_696c_5f6d_6f73, 48);
-        if biome == Taiga && patch > 0.45 {
+        if matches!(biome, Taiga | OldGrowthPineTaiga | OldGrowthSpruceTaiga) && patch > 0.45 {
             result.top = "minecraft:podzol";
         } else if patch < -0.45 {
             result.top = "minecraft:coarse_dirt";
@@ -376,6 +384,18 @@ pub fn freezes_surface(biome: SurfaceBiome, seed: u64, position: [i32; 2]) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn river_banks_use_surface_sand_or_snow_over_gravel() {
+        let warm = terrain_materials(71839, SurfaceBiome::River, [12, -9], 64);
+        assert_eq!(warm.top, "minecraft:sand");
+        assert_eq!(warm.at(63), "minecraft:gravel");
+
+        let frozen = terrain_materials(71839, SurfaceBiome::FrozenRiver, [12, -9], 64);
+        assert_eq!(frozen.top, "minecraft:snow_block");
+        assert_eq!(frozen.at(63), "minecraft:gravel");
+    }
+
     #[test]
     fn cold_rivers_freeze_but_warm_rivers_keep_water() {
         let mut frozen = 0;

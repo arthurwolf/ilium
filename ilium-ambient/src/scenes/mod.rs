@@ -7,6 +7,7 @@ pub mod dither_water;
 pub mod dithered_waves;
 pub mod dithr_patterns;
 pub mod fbm_clouds;
+pub mod growth;
 pub mod hex_expedition;
 pub mod images;
 pub mod machine_screen;

@@ -26,7 +26,7 @@ use ilium_animation_js::{
     clip_chunk_store::ClipChunkStore,
     clock::AnimationClock,
     engine::HostRequest,
-    engine::{ArraySpec, CreateState, TypedArrayKind},
+    engine::{ArraySpec, CreateState, EngineLimits, TypedArrayKind},
     helper::HelperLimits,
     http::SystemDns,
     manifest::AnimationMode,
@@ -43,6 +43,7 @@ use ilium_animation_js::{
     native_http_host::{HttpEvent, HttpObservation, NativeHttpHost},
     native_image_host::NativeImageHost,
     native_media::MediaLimits,
+    native_presentation_host::NativePresentationHost,
     native_source_host::{
         NativeSourceFeedHost, NativeSourceHost, PreparedFeedRegistration, ProjectedFeedDescriptor,
         SourceActorEnvironment, SourceActorLimits, SourceCadence, SourceCall, SourceCompletion,
@@ -51,6 +52,7 @@ use ilium_animation_js::{
     native_storage::SelectedStorage,
     native_task_host::NativeTaskHost,
     native_video_host::NativeVideoHost,
+    native_world_host::NativeWorldHost,
     permissions::{Capability, Ceiling, Invalidation, Selection},
     replay::{
         ClipSpec, ClipSpecification, FrozenEvidence, FrozenInputs, Playback, PlaybackMode,
@@ -114,6 +116,17 @@ struct Presentation {
     inputs: NativeFrameInputs,
     audio: AudioOwner,
     tasks: NativeTaskHost,
+    live_mode: bool,
+    /// Live world and terminal-receipt services are created lazily only when
+    /// the package actually requests their API.  Keeping them out of the
+    /// normal presentation path avoids opening world/storage state for the
+    /// many packages that only draw pixels.
+    world: Option<NativeWorldHost>,
+    world_resources: ilium_ambient::resources::AmbientResources,
+    world_epoch: u64,
+    world_limits: EngineLimits,
+    saved_context: Option<ilium_animation_js::native_world_host::NativeSavedContext>,
+    presentation: Option<NativePresentationHost>,
     creation: CreateState,
     unhandled: Option<HostRequest>,
     undispatched: Vec<HostRequest>,
@@ -1149,6 +1162,14 @@ fn presentation_finite_work_drained(presentation: &Presentation) -> bool {
         && presentation.video.finite_work_drained()
         && presentation.audio.is_drained()
         && presentation.tasks.is_drained()
+        && presentation
+            .world
+            .as_ref()
+            .is_none_or(NativeWorldHost::is_drained)
+        && presentation
+            .presentation
+            .as_ref()
+            .is_none_or(NativePresentationHost::is_drained)
 }
 fn presentation_is_drained(presentation: &Presentation) -> bool {
     presentation_finite_work_drained(presentation) && presentation.images.is_drained()
@@ -1163,6 +1184,12 @@ fn revoke_presentation(presentation: &mut Presentation) {
     presentation.assets.revoke();
     presentation.video.revoke();
     presentation.drawing.revoke();
+    if let Some(world) = presentation.world.as_mut() {
+        world.revoke();
+    }
+    if let Some(receipts) = presentation.presentation.as_mut() {
+        receipts.revoke();
+    }
     presentation.surface.abort();
 }
 fn release_presentation_after_helper_retirement(
@@ -1477,8 +1504,20 @@ pub(super) struct PluginBackend {
     actor_wake: Arc<dyn Fn() + Send + Sync>,
     ui_ready: Arc<tokio::sync::Notify>,
     selection_revision: Option<u64>,
+    saved_runtime: Option<Arc<ilium_ambient::minecraft::saved_runtime::SavedRuntime>>,
 }
 impl PluginBackend {
+    /// Bind the worker's existing saved-world authority before any package
+    /// activation.  A package can request a saved world later, but it can
+    /// never supply a replacement runtime or history namespace.
+    pub(super) fn set_saved_runtime(
+        &mut self,
+        runtime: Arc<ilium_ambient::minecraft::saved_runtime::SavedRuntime>,
+    ) {
+        if self.saved_runtime.is_none() && self.workflow.is_none() {
+            self.saved_runtime = Some(runtime);
+        }
+    }
     pub(super) fn new(
         quota: QuotaGroup,
         resources: ilium_ambient::resources::AmbientResources,
@@ -1497,6 +1536,7 @@ impl PluginBackend {
             actor_wake,
             ui_ready,
             selection_revision: None,
+            saved_runtime: None,
         }
     }
     /// Authority is blocked synchronously. Original owners stay retained until
@@ -1957,6 +1997,23 @@ impl PluginBackend {
                     creation,
                     Arc::clone(&self.actor_wake),
                 )?);
+                if let (Some(presentation), Some(runtime)) =
+                    (workflow.presentation.as_mut(), self.saved_runtime.as_ref())
+                {
+                    let normalized = workflow.request.settings.ambient.normalized();
+                    presentation.saved_context =
+                        Some(ilium_animation_js::native_world_host::NativeSavedContext {
+                            settings: normalized.voxel_landscape,
+                            environment: ilium_ambient::SceneEnv {
+                                resources: self.resources.clone(),
+                                location: normalized.location,
+                                cache_dir: ilium_ambient::source::default_cache_dir(),
+                                gpu: ilium_gpu::runner(),
+                                saved_runtime: Arc::clone(runtime),
+                                palette: workflow.request.settings.appearance.scene_palette(),
+                            },
+                        });
+                }
             }
             let presentation = workflow
                 .presentation
@@ -2369,6 +2426,12 @@ impl PluginBackend {
             .assets
             .on_completion_wake(instance)
             .map_err(|error| error.to_string());
+        let worlds = presentation
+            .world
+            .as_mut()
+            .map(|host| host.on_completion_wake(instance))
+            .transpose()
+            .map_err(|error| error.to_string());
         let video = presentation
             .video
             .on_completion_wake(instance)
@@ -2380,6 +2443,7 @@ impl PluginBackend {
         compute?;
         http?;
         assets?;
+        worlds?;
         video?;
         sources?;
         audio?;
@@ -2743,6 +2807,21 @@ impl PluginBackend {
         presentation.render(instance, request, sequence, stop)
     }
 }
+/// Convert script-authored error diagnostics into the bounded runtime error
+/// channel used for rejected frames. Warnings and progress remain informational.
+fn status_error_message(status: &serde_json::Value) -> Option<String> {
+    let records = status.get("records")?.as_array()?;
+    let messages = records
+        .iter()
+        .filter_map(|record| {
+            (record.get("level").and_then(serde_json::Value::as_str) == Some("error"))
+                .then(|| record.get("message").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    (!messages.is_empty()).then(|| messages.join("; ").chars().take(240).collect())
+}
+
 /// Observations are native outcomes, not authority. Lost/cleanup uncertainty
 /// remains retained by NativeHttpHost and prevents physical replacement.
 fn observe_http_events(events: Vec<HttpEvent>) -> Result<(), String> {
@@ -2867,6 +2946,11 @@ impl Presentation {
             NativeFrameInputs::new(instance, quota.clone()).map_err(|error| error.to_string())?;
         let tasks = NativeTaskHost::new(quota.clone(), instance.engine_limits().clone())
             .map_err(|error| error.to_string())?;
+        let world_epoch = instance
+            .frame_authority()
+            .ok_or_else(|| "Accepted native authority missing for world service".to_owned())?
+            .authorization_epoch;
+        let world_limits = instance.engine_limits().clone();
         // Opening the audio job is the last fallible step. On success the
         // original receipt and reserved physical-close slot enter Presentation.
         let audio = AudioOwner::new(instance, selected_audio, &resources, quota, live_mode)?;
@@ -2883,6 +2967,13 @@ impl Presentation {
             inputs,
             audio,
             tasks,
+            live_mode,
+            world: None,
+            world_resources: resources,
+            world_epoch,
+            world_limits,
+            saved_context: None,
+            presentation: None,
             creation,
             unhandled: None,
             undispatched: Vec::new(),
@@ -2989,6 +3080,84 @@ impl Presentation {
                         return Err(error);
                     }
                 };
+                // World operations own their own selected-world registry and
+                // frame/source custody.  Route them before the generic asset
+                // and media adapters so a world frame can borrow the original
+                // draw/asset owners without being mistaken for an image call.
+                if request.method.starts_with("worlds.") {
+                    if !self.live_mode
+                        || (self.world.is_none()
+                            && !matches!(request.method.as_str(), "worlds.open" | "worlds.list"))
+                    {
+                        self.unhandled = Some(request);
+                        self.undispatched = requests.collect();
+                        return Err("Native world owner is not admitted for this request".into());
+                    }
+                    if self.world.is_none() {
+                        let world = NativeWorldHost::new(
+                            self.world_resources.clone(),
+                            self.sources.client.quota_group(),
+                            self.world_epoch,
+                            self.world_limits.clone(),
+                            AnimationMode::Live,
+                        )
+                        .map_err(|error| error.to_string())?;
+                        let mut world = world;
+                        if let Some(context) = self.saved_context.clone() {
+                            world
+                                .set_saved_context(context)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        self.world = Some(world);
+                    }
+                    let world = self.world.as_mut().ok_or_else(|| {
+                        "Native world service is available only in live mode".to_owned()
+                    })?;
+                    let request = world
+                        .dispatch(instance, request, &mut self.drawing, Some(&mut self.assets))
+                        .map_err(|error| error.to_string())?;
+                    if let Some(request) = request {
+                        self.unhandled = Some(request);
+                        self.undispatched = requests.collect();
+                        return Err("Native world adapter left an unhandled request".into());
+                    }
+                    continue;
+                }
+                // Presentation is a separate, lazy receipt subscription.  It
+                // must never be opened merely because a package has a world
+                // capability or because a frame is being rendered.
+                if request.method.starts_with("presentation.") {
+                    if !self.live_mode {
+                        return Err(
+                            "Native presentation subscriptions require live animation mode".into(),
+                        );
+                    }
+                    if self.presentation.is_none() && request.method != "presentation.subscribe" {
+                        self.unhandled = Some(request);
+                        self.undispatched = requests.collect();
+                        return Err("Native presentation subscription is not open".into());
+                    }
+                    if self.presentation.is_none() {
+                        let limits = instance.engine_limits().clone();
+                        let quota = self.sources.client.quota_group();
+                        let receipts = NativePresentationHost::new(instance, quota, limits)
+                            .map_err(|error| error.to_string())?;
+                        self.presentation = Some(receipts);
+                    }
+                    let receipts = self
+                        .presentation
+                        .as_mut()
+                        .ok_or("Native presentation owner missing")?;
+                    let request = receipts
+                        .dispatch(instance, request)
+                        .map_err(|error| error.to_string())?;
+                    if let Some(request) = request {
+                        self.unhandled = Some(request);
+                        self.undispatched = requests.collect();
+                        return Err("Native presentation adapter left an unhandled request".into());
+                    }
+                    continue;
+                }
                 let compute = self
                     .compute
                     .dispatch(instance, request)
@@ -3142,6 +3311,18 @@ impl Presentation {
             .tasks
             .snapshots(instance)
             .map_err(|error| error.to_string())?;
+        let presentation_status = self
+            .presentation
+            .as_ref()
+            .map(|host| host.snapshots(instance))
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        let world_status = self
+            .world
+            .as_mut()
+            .map(|host| host.snapshots(instance))
+            .transpose()
+            .map_err(|error| error.to_string())?;
         let video_position = Duration::try_from_secs_f64(clock.time).map_err(|_| {
             "Native Video playback position is outside the finite clip bound".to_owned()
         })?;
@@ -3153,6 +3334,16 @@ impl Presentation {
             .wire_bytes()
             .checked_add(source_status.wire_bytes())
             .and_then(|bytes| bytes.checked_add(task_status.wire_bytes()))
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    presentation_status
+                        .as_ref()
+                        .map_or(0, |value| value.wire_bytes()),
+                )
+            })
+            .and_then(|bytes| {
+                bytes.checked_add(world_status.as_ref().map_or(0, |value| value.wire_bytes()))
+            })
             .and_then(|bytes| bytes.checked_add(video_status.wire_bytes()))
             .and_then(|bytes| bytes.checked_add(64 * 1024))
             .ok_or_else(|| "Native service seed size overflow".to_owned())?;
@@ -3183,6 +3374,26 @@ impl Presentation {
                 .iter()
                 .cloned(),
         );
+        if let Some(status) = &presentation_status {
+            services.extend(
+                status
+                    .metadata()
+                    .as_array()
+                    .ok_or_else(|| "Native presentation snapshot schema".to_owned())?
+                    .iter()
+                    .cloned(),
+            );
+        }
+        if let Some(status) = &world_status {
+            services.extend(
+                status
+                    .metadata()
+                    .as_array()
+                    .ok_or_else(|| "Native world snapshot schema".to_owned())?
+                    .iter()
+                    .cloned(),
+            );
+        }
         services.extend(
             video_status
                 .metadata()
@@ -3231,6 +3442,12 @@ impl Presentation {
         // The trusted seed hook has now applied each native closed task
         // observation. Failed seeds retain the terminal records for retry.
         self.tasks.acknowledge_seeded_snapshots();
+        if let Some(presentation) = self.presentation.as_mut() {
+            presentation.acknowledge_seeded_snapshots();
+        }
+        if let Some(world) = self.world.as_mut() {
+            world.acknowledge_seeded_snapshots();
+        }
         self.video
             .acknowledge_seeded_snapshots(&mut self.drawing)
             .map_err(|error| error.to_string())?;
@@ -3260,6 +3477,14 @@ impl Presentation {
             .render(&context, &arrays)
             .map_err(|error| error.to_string())?;
         let (mut output, _retained_storage) = retained.into_parts();
+        if let Some(status) = instance.take_status().map_err(|error| error.to_string())? {
+            if let Some(message) = status_error_message(&status) {
+                instance
+                    .accept_frame(false)
+                    .map_err(|error| error.to_string())?;
+                return Err(format!("Plugin runtime error: {message}"));
+            }
+        }
         let frame_metadata = FrameMeta::parse(
             &serde_json::to_vec(&output.metadata).map_err(|error| error.to_string())?,
         )
@@ -3473,6 +3698,14 @@ impl Presentation {
             .render(&context, &arrays)
             .map_err(|error| error.to_string())?;
         let (mut output, _retained_storage) = retained.into_parts();
+        if let Some(status) = instance.take_status().map_err(|error| error.to_string())? {
+            if let Some(message) = status_error_message(&status) {
+                instance
+                    .accept_frame(false)
+                    .map_err(|error| error.to_string())?;
+                return Err(format!("Plugin runtime error: {message}"));
+            }
+        }
         let frame_metadata = FrameMeta::parse(
             &serde_json::to_vec(&output.metadata).map_err(|error| error.to_string())?,
         )
@@ -4261,6 +4494,22 @@ mod tests {
             ),
         }])
         .is_ok()); // observation alone never sets Ready/is_drained
+    }
+    #[test]
+    fn script_error_status_becomes_bounded_runtime_message() {
+        let status = json!({
+            "records": [
+                {"kind":"log", "level":"warning", "message":"ignored"},
+                {"kind":"log", "level":"error", "message":"draw failed"},
+                {"kind":"log", "level":"error", "message":"asset missing"}
+            ],
+            "dropped": 0
+        });
+        assert_eq!(
+            status_error_message(&status).as_deref(),
+            Some("draw failed; asset missing")
+        );
+        assert!(status_error_message(&json!({"records":[],"dropped":0})).is_none());
     }
 }
 

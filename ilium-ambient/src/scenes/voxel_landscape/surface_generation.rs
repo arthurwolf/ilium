@@ -439,6 +439,40 @@ fn tree_infill_enabled(biome: SurfaceBiome) -> bool {
     )
 }
 
+/// Keep foliage from swallowing authored landmarks. Structure admission is
+/// global, so this check uses only the global XY footprint and remains stable
+/// when the camera window is split or shifted. Trunks still use the exact-cell
+/// collision check below; the wider halo applies only to crown cells because
+/// those are what obscure roofs, paths, and village silhouettes.
+fn tree_canopy_overlaps_structure_clearance(
+    anchor: [i32; 3],
+    states: &[tree_forms::TreeVoxelState],
+    profile: &tree_profiles::TreeProfile,
+    structure_xy: &BTreeSet<[i32; 2]>,
+) -> bool {
+    let radius = match profile.shape {
+        TreeShape::Dense
+        | TreeShape::GiantJungle
+        | TreeShape::GiantPine
+        | TreeShape::GiantSpruce => 3,
+        _ => 2,
+    };
+    states
+        .iter()
+        .filter(|cell| {
+            profile
+                .crowns
+                .iter()
+                .any(|crown| crown.id == cell.resource_id)
+        })
+        .any(|cell| {
+            let x = anchor[0] + i32::from(cell.position[0]);
+            let y = anchor[1] + i32::from(cell.position[1]);
+            (-radius..=radius)
+                .any(|dx| (-radius..=radius).any(|dy| structure_xy.contains(&[x + dx, y + dy])))
+        })
+}
+
 fn tree_configuration(biome: SurfaceBiome, entropy: u64) -> Option<&'static str> {
     // The supplemental surface tree is not an ordinary biome tree-table entry.
     // Rare woodland indicators are authored; no underground cave is inferred.
@@ -493,6 +527,7 @@ fn flora_selection_weight(biome: SurfaceBiome, id: &str) -> u64 {
             | WoodedBadlands
     );
     let flower_rich = matches!(biome, FlowerForest | Meadow | SunflowerPlains);
+    let riparian = matches!(biome, River | FrozenRiver | Swamp | MangroveSwamp);
     match id {
         "minecraft:short_grass" => 12,
         "minecraft:tall_grass" | "minecraft:large_fern" => 4,
@@ -517,7 +552,13 @@ fn flora_selection_weight(biome: SurfaceBiome, id: &str) -> u64 {
         "minecraft:cactus" => u64::from(arid) * 4 + 1,
         "minecraft:cactus_flower" => u64::from(arid) * 2 + 1,
         "minecraft:bamboo" => 6,
-        "minecraft:sugar_cane" | "minecraft:lily_pad" => 4,
+        "minecraft:sugar_cane" | "minecraft:lily_pad" => {
+            if riparian {
+                8
+            } else {
+                4
+            }
+        }
         "minecraft:pumpkin" | "minecraft:melon" => 2,
         "minecraft:sweet_berry_bush" => 3,
         "minecraft:brown_mushroom" | "minecraft:red_mushroom" => {
@@ -1611,7 +1652,7 @@ fn prepare_with_tree_configuration(
         blocks:BTreeMap::new(), fluids:BTreeMap::new(), trees:Vec::new(), flora:Vec::new(),
         structures:Vec::new(),entities:Vec::new(), source_limitations:vec![
             "Terrain/biome selector is authored Ilium homage, not native multi-noise bands",
-            "Flora attempts use authored sparse density; exact Java count/noise algorithms remain pending",
+            "Flora attempts use a denser authored surface distribution; exact Java count/noise algorithms remain pending",
             "Dry grass uses one-cell soil-or-sand admission; the unchanged cactus-flower selection slot constructs a whole two-cell age0 cactus plus crown with side clearance; native substrate tags, flower frequency and growth timing are not reproduced",
             "Surface azalea indicators use rare authored woodland selection; no underground cave/root network is generated",
             "Ice spire silhouettes and cold surface openings are authored; native feature processors are not reproduced",
@@ -1671,20 +1712,30 @@ fn prepare_with_tree_configuration(
                 );
             }
             if let Some(level) = sample.water_level {
+                // River beds need a continuous column so banks connect to the
+                // authored water plane. Wetland roots retain their original
+                // shallow-surface semantics: filling every cell below the
+                // surface would incorrectly waterlog dry mangrove roots.
+                let continuous_river =
+                    matches!(biome, SurfaceBiome::River | SurfaceBiome::FrozenRiver);
                 if i32::from(level) > ground + 1 {
-                    let position = [x, y, i32::from(level) - 1];
-                    if surface_geology::freezes_surface(biome, seed, [x, y]) {
-                        world.blocks.insert(
-                            position,
-                            SurfaceBlock {
-                                state: plain("minecraft:ice")?,
-                                owner: SourceOwner::Terrain { biome },
-                            },
-                        );
-                    } else {
-                        world
-                            .fluids
-                            .insert(position, FluidCell::new(0, water_tint(biome))?);
+                    let top = i32::from(level) - 1;
+                    let tint = water_tint(biome);
+                    let freezes = surface_geology::freezes_surface(biome, seed, [x, y]);
+                    let first = if continuous_river { ground + 1 } else { top };
+                    for z in first..=top {
+                        let position = [x, y, z];
+                        if freezes && z == top {
+                            world.blocks.insert(
+                                position,
+                                SurfaceBlock {
+                                    state: plain("minecraft:ice")?,
+                                    owner: SourceOwner::Terrain { biome },
+                                },
+                            );
+                        } else {
+                            world.fluids.insert(position, FluidCell::new(0, tint)?);
+                        }
                     }
                 }
             }
@@ -2081,6 +2132,10 @@ fn prepare_with_tree_configuration(
             }
         }
     }
+    let structure_xy: BTreeSet<[i32; 2]> = structure_positions
+        .iter()
+        .map(|position| [position[0], position[1]])
+        .collect();
     // Capture only off-window cactus side probes. The existing tree halo covers
     // them: current forms reach at most41 cells horizontally (fallen length40
     // plus the stump gap), and an attached block adds at most one more cell.
@@ -2158,6 +2213,9 @@ fn prepare_with_tree_configuration(
                 add_global(anchor, cell.position)
                     .is_ok_and(|position| structure_positions.contains(&position))
             }) {
+                continue;
+            }
+            if tree_canopy_overlaps_structure_clearance(anchor, &states, profile, &structure_xy) {
                 continue;
             }
             let mut projected = 0;
@@ -2299,7 +2357,11 @@ fn prepare_with_tree_configuration(
             let x = gx * 4 + 2;
             let y = gy * 4 + 2;
             let hash = hash2(seed ^ 0x0066_6c6f_7261, i64::from(gx), i64::from(gy));
-            if hash % 100 >= (settings.vegetation_percent.min(100) as u64) * 55 / 100 {
+            // Keep the four-cell ownership grid and its deterministic anchor,
+            // but admit more candidates so full-scene views carry the visible
+            // grass, flowers, reeds and biome-specific ground cover expected
+            // from a Minecraft-like surface.
+            if hash % 100 >= (settings.vegetation_percent.min(100) as u64) * 72 / 100 {
                 continue;
             }
             let (sample, biome) = sample_ground(&fields, &settings, x, y);
@@ -2644,6 +2706,29 @@ pub fn prepare_viewport(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_canopy_clearance_rejects_foliage_near_structures_but_keeps_distant_trees() {
+        let profile = tree_profiles::profile("minecraft:oak").unwrap();
+        let states = [tree_forms::TreeVoxelState {
+            position: [0, 0, 4],
+            resource_id: "minecraft:oak_leaves",
+            properties: Vec::new(),
+        }];
+        assert!(tree_canopy_overlaps_structure_clearance(
+            [100, 200, 64],
+            &states,
+            profile,
+            &BTreeSet::from([[102, 200]]),
+        ));
+        assert!(!tree_canopy_overlaps_structure_clearance(
+            [100, 200, 64],
+            &states,
+            profile,
+            &BTreeSet::from([[104, 200]]),
+        ));
+    }
+
     #[test]
     fn natural_riverbank_litter_stays_above_water_and_keeps_dry_patches() {
         let settings = VoxelLandscapeSettings {
@@ -2664,6 +2749,20 @@ mod tests {
             world.fluids.contains_key(&[-15202, -16479, 62]),
             "original collision water must remain present"
         );
+        for (position, _) in &world.fluids {
+            let ground = i32::from(world.columns[&[position[0], position[1]]].height) - 1;
+            for z in (ground + 1)..=position[2] {
+                assert!(
+                    world.fluids.contains_key(&[position[0], position[1], z])
+                        || world.blocks.contains_key(&[position[0], position[1], z]),
+                    "water column has a gap at [{}, {}, {}] below {:?}",
+                    position[0],
+                    position[1],
+                    z,
+                    position
+                );
+            }
+        }
         let mut dry_litter = 0;
         for (position, block) in &world.blocks {
             if !matches!(block.owner, SourceOwner::TreeDecoration { .. }) {

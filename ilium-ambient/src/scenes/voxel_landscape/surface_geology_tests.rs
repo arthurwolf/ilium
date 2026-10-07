@@ -294,6 +294,8 @@ fn signed_material_queries_keep_strata_and_unrelated_palettes() {
                         | SurfaceBiome::Forest
                         | SurfaceBiome::DappledForest
                         | SurfaceBiome::OldGrowthBirchForest
+                        | SurfaceBiome::OldGrowthPineTaiga
+                        | SurfaceBiome::OldGrowthSpruceTaiga
                         | SurfaceBiome::WindsweptForest
                         | SurfaceBiome::Taiga
                 ) {
@@ -301,6 +303,8 @@ fn signed_material_queries_keep_strata_and_unrelated_palettes() {
                 }
                 let (top, below) = match biome {
                     SurfaceBiome::Desert | SurfaceBiome::Beach => ("sand", "sandstone"),
+                    SurfaceBiome::River => ("sand", "gravel"),
+                    SurfaceBiome::FrozenRiver => ("snow_block", "gravel"),
                     SurfaceBiome::SnowyBeach => ("snow_block", "sand"),
                     SurfaceBiome::StonyShore => ("stone", "stone"),
                     SurfaceBiome::FrozenPeaks => ("snow_block", "packed_ice"),

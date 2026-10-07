@@ -1,7 +1,6 @@
 //! Worker-only, digest-pinned installed Java assets beneath exact selected overrides.
 //! No download, extraction, class execution, or generated model is admitted.
 use crate::voxel_landscape::{
-    VoxelLandscapeSettings,
     assets::{
         animation::{ExplicitFrame, MissingAnimation, PixelRect},
         archive::{DuplicateMember, ZipSource},
@@ -17,7 +16,7 @@ use crate::voxel_landscape::{
         review::{AssetPhase, FullPackReview, PackScope, SourceEdition},
         source::{AssetSource, SourceBytes, SourceLimits},
     },
-    pack_sources,
+    pack_sources, VoxelLandscapeSettings,
 };
 use ilium_platform::secure_fs::NoFollowDirectory;
 use std::{

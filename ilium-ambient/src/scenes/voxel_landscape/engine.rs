@@ -52,6 +52,17 @@ struct Response {
     result: Result<PreparedResult>,
 }
 
+/// Pick the other accepted Faithful profile for explicit missing-image
+/// fallback. Private diagnostic profiles are not guaranteed to be installed
+/// or compatible with the selected target format.
+fn reviewed_fallback_profile(selected: usize) -> usize {
+    if selected == 9 {
+        8
+    } else {
+        9
+    }
+}
+
 pub struct VoxelLandscapeScene {
     settings: VoxelLandscapeSettings,
     requests: Arc<Mutex<Option<Request>>>,
@@ -110,26 +121,18 @@ impl VoxelLandscapeScene {
                 let result =
                     super::pack_registry::resolve_registered(&worker_settings, &cache_dir, cancel)
                         .and_then(|resolved| {
-                            let fallback = if resolved.pack_profile == 2 {
-                                None
-                            } else {
-                                let candidate = VoxelLandscapeSettings {
-                                    pack_profile: 2,
-                                    ..Default::default()
-                                };
-                                match super::pack_registry::resolve_registered(
-                                    &candidate, &cache_dir, cancel,
-                                ) {
-                                    Ok(settings) => Some(settings),
-                                    Err(AssetError::Cancelled) => {
-                                        return Err(AssetError::Cancelled)
-                                    }
-                                    Err(error) => {
-                                        tracing::warn!(
-                                            "reviewed fauna fallback unavailable: {error}"
-                                        );
-                                        None
-                                    }
+                            let candidate = VoxelLandscapeSettings {
+                                pack_profile: reviewed_fallback_profile(resolved.pack_profile),
+                                ..Default::default()
+                            };
+                            let fallback = match super::pack_registry::resolve_registered(
+                                &candidate, &cache_dir, cancel,
+                            ) {
+                                Ok(settings) => Some(settings),
+                                Err(AssetError::Cancelled) => return Err(AssetError::Cancelled),
+                                Err(error) => {
+                                    tracing::warn!("reviewed image fallback unavailable: {error}");
+                                    None
                                 }
                             };
                             if request.stream {
@@ -575,6 +578,16 @@ pub fn render_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_fallback_uses_the_other_faithful_profile() {
+        assert_eq!(reviewed_fallback_profile(0), 9);
+        assert_eq!(reviewed_fallback_profile(3), 9);
+        assert_eq!(reviewed_fallback_profile(8), 9);
+        assert_eq!(reviewed_fallback_profile(9), 8);
+        assert_eq!(reviewed_fallback_profile(10), 9);
+    }
+
     #[test]
     fn follows_palette_natively_and_stores_updates() {
         let mut env = SceneEnv::for_test(

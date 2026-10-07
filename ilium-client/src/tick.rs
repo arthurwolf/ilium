@@ -47,6 +47,7 @@ pub fn on_tick(
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
     let animation_hover_changed = app.tick_animation_hover(now);
+    let plugin_issue_hover_changed = app.tick_plugin_issue_hover(now);
     let location_picker_changed = app.tick_location_picker();
     let smart_copy_light_changed = app.tick_smart_copy_light(now);
     let auto_freeze_changed = app.tick_auto_freeze(now);
@@ -70,6 +71,7 @@ pub fn on_tick(
         || context_menu_hover_changed
         || agent_popover_changed
         || animation_hover_changed
+        || plugin_issue_hover_changed
         || location_picker_changed
         || smart_copy_light_changed
         || auto_freeze_changed

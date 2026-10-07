@@ -8,7 +8,7 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::mem::size_of;
 
-pub const RULE_REVISION: u16 = 3;
+pub const RULE_REVISION: u16 = 4;
 const BAND: i32 = 24;
 const TILE_CELLS: usize = 256;
 const MAX_CORE_TILES: usize = 256;
@@ -35,8 +35,16 @@ pub enum Category {
     PrismarineMasonry,
     /// Paired door or bed within connected observed construction; no provenance claim.
     DwellingLikeConstruction,
+    /// Jungle-coloured rooted canopy and soil; block pattern only.
+    JungleCanopyLike,
+    /// Snow-covered rooted spruce canopy; block pattern only.
+    SpruceSnowfieldLike,
+    /// Connected sandstone with chiseled accents; block pattern only.
+    DesertTempleLike,
+    /// Water-adjacent prismarine with sea-lantern accents; block pattern only.
+    OceanMonumentLike,
 }
-const CATEGORIES: [Category; 11] = [
+const CATEGORIES: [Category; 15] = [
     Category::OpenGrassland,
     Category::RootedWoodland,
     Category::SnowySurface,
@@ -48,6 +56,10 @@ const CATEGORIES: [Category; 11] = [
     Category::WeatheredMasonry,
     Category::OrnamentalSandstone,
     Category::PrismarineMasonry,
+    Category::JungleCanopyLike,
+    Category::SpruceSnowfieldLike,
+    Category::DesertTempleLike,
+    Category::OceanMonumentLike,
 ];
 impl Category {
     pub fn kind(self) -> Kind {
@@ -55,7 +67,9 @@ impl Category {
             Self::WeatheredMasonry
             | Self::OrnamentalSandstone
             | Self::PrismarineMasonry
-            | Self::DwellingLikeConstruction => Kind::Structure,
+            | Self::DwellingLikeConstruction
+            | Self::DesertTempleLike
+            | Self::OceanMonumentLike => Kind::Structure,
             _ => Kind::Biome,
         }
     }
@@ -73,6 +87,10 @@ impl Category {
             Self::OrnamentalSandstone => (8, 4),
             Self::PrismarineMasonry => (8, 2),
             Self::DwellingLikeConstruction => (8, 1),
+            Self::JungleCanopyLike => (32, 3),
+            Self::SpruceSnowfieldLike => (64, 3),
+            Self::DesertTempleLike => (8, 3),
+            Self::OceanMonumentLike => (8, 2),
         }
     }
 }
@@ -583,6 +601,17 @@ fn member(category: Category, cell: Column<'_>) -> bool {
         Category::OrnamentalSandstone => family(cell.role) == 2,
         Category::PrismarineMasonry => family(cell.role) == 3,
         Category::DwellingLikeConstruction => false,
+        Category::JungleCanopyLike => {
+            dry && soil(cell.role) && (cell.canopy_species == 4 || cell.trunk_species == 4)
+        }
+        Category::SpruceSnowfieldLike => {
+            (cell.snow.is_some() || cell.canopy_species == 3 || cell.trunk_species == 3)
+                && (cell.snow.is_some() || cell.trunk_species == 3)
+        }
+        Category::DesertTempleLike => {
+            cell.wall_depth >= 3 && matches!(cell.role, Role::Sandstone(1 | 2))
+        }
+        Category::OceanMonumentLike => family(cell.role) == 3 && cell.water.is_some(),
     }
 }
 fn signals<'a>(
@@ -631,6 +660,24 @@ fn signals<'a>(
             select(cell.role == Role::Prismarine(2)),
         ),
         Category::DwellingLikeConstruction => (None, None),
+        Category::JungleCanopyLike => (
+            cell.canopy.filter(|_| cell.canopy_species == 4),
+            cell.trunk
+                .filter(|_| cell.trunk_species == 4 && cell.rooted),
+        ),
+        Category::SpruceSnowfieldLike => (
+            cell.snow,
+            cell.trunk
+                .filter(|_| cell.trunk_species == 3 && cell.rooted),
+        ),
+        Category::DesertTempleLike => (
+            select(matches!(cell.role, Role::Sandstone(1 | 2))),
+            select(cell.role == Role::Sandstone(2)),
+        ),
+        Category::OceanMonumentLike => (
+            select(family(cell.role) == 3),
+            select(cell.role == Role::Prismarine(2)),
+        ),
     }
 }
 fn rooted_canopy(

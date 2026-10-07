@@ -2903,6 +2903,17 @@ impl PackageInstance {
         self.helper.render_retained(context, arrays)
     }
 
+    /// Drain the bounded diagnostics emitted by the most recent render. The
+    /// helper copied these records into the parent before returning the frame;
+    /// reading them here performs no guest call and grants no capability.
+    pub fn take_status(&mut self) -> Result<Option<Value>> {
+        self.live_helper_authority()?;
+        Ok(self
+            .helper
+            .take_status()
+            .map(|status| status.into_parts().0))
+    }
+
     /// Native typed copy/ACK under original broker guard, never a JS seed hook.
     pub fn prepare_frame_seed(
         &mut self,

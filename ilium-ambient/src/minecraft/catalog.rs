@@ -111,11 +111,9 @@ pub fn metadata(document: &nbt::Document) -> Result<Metadata, Error> {
     let spawn = ["SpawnX", "SpawnY", "SpawnZ"].map(|field| nbt::get(data, field));
     let spawn_position = match spawn {
         [None, None, None] => None,
-        [
-            Some(nbt::Tag::Int(x)),
-            Some(nbt::Tag::Int(y)),
-            Some(nbt::Tag::Int(z)),
-        ] => Some([*x, *y, *z]),
+        [Some(nbt::Tag::Int(x)), Some(nbt::Tag::Int(y)), Some(nbt::Tag::Int(z))] => {
+            Some([*x, *y, *z])
+        }
         _ => return Err(Error::Invalid("partial or non-Int spawn position")),
     };
     // Canonical Java serialization writes a Long. Its native codec can coerce
@@ -385,7 +383,7 @@ mod tests {
 
     #[test]
     fn reads_real_gzip_nbt_without_writing_and_rejects_truncation() {
-        use flate2::{Compression, write::GzEncoder};
+        use flate2::{write::GzEncoder, Compression};
         use std::io::Write;
         let mut bytes = vec![10, 0, 0, 10, 0, 4];
         bytes.extend(b"Data");

@@ -32,6 +32,15 @@ fn defaults_are_inside_their_ranges() {
 }
 
 #[test]
+fn high_dot_count_is_supported_for_dense_particle_workloads() {
+    let settings = WindSettings {
+        dot_count: 50_000,
+        ..Default::default()
+    };
+    assert_eq!(settings.normalized().dot_count, 50_000);
+}
+
+#[test]
 fn normalization_clamps_every_number() {
     let wild = WindSettings {
         dot_count: 0,
@@ -164,6 +173,42 @@ fn wind_carries_dots_in_its_direction() {
         average > 1.0,
         "dots should drift right, average vx {average}"
     );
+}
+
+#[test]
+fn coarse_wind_field_stays_finite_and_samples_inside_the_screen() {
+    let settings = WindSettings {
+        gusts: 100,
+        ..quiet()
+    };
+    let mut sim = Sim::new(&settings);
+    sim.set_mask(&OccupancyMask::empty(80, 24));
+    sim.update_wind_field(0.7, 1.25);
+    for &(x, y) in &[(0.0, 0.0), (13.0, 4.0), (79.9, 23.9), (40.0, 12.0)] {
+        let force = sim.wind_force_at(x, y);
+        assert!(force.0.is_finite() && force.1.is_finite());
+        let scaled = sim.wind_force_at_scaled(x, y, 15.0 / 80.0, 7.0 / 24.0);
+        assert!((force.0 - scaled.0).abs() < 0.0001);
+        assert!((force.1 - scaled.1).abs() < 0.0001);
+    }
+}
+
+#[test]
+fn zero_diffusion_deactivates_cached_repulsion() {
+    let mask = OccupancyMask::empty(80, 24);
+    let mut active = quiet();
+    active.diffusion = 100;
+    let mut sim = Sim::new(&active);
+    sim.set_mask(&mask);
+    sim.park_all_for_test(20.0, 10.0);
+    sim.advance(0.0);
+    sim.advance(1.0 / 30.0);
+    assert!(sim.dots().iter().any(|dot| dot.vx != 0.0 || dot.vy != 0.0));
+
+    sim.reconfigure(&quiet());
+    sim.park_all_for_test(20.0, 10.0);
+    sim.advance(2.0 / 30.0);
+    assert!(sim.dots().iter().all(|dot| dot.vx == 0.0 && dot.vy == 0.0));
 }
 
 #[test]

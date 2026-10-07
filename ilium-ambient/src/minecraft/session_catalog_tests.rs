@@ -372,12 +372,10 @@ fn genuine_synthetic_saved_chunk_is_prepared_without_cloning_or_world_writes() {
     let chunk = &result.maps[0].loaded().chunks[&[0, 0]];
     assert_eq!(Arc::strong_count(chunk), 1);
     assert!(!result.maps[0].targets().is_empty());
-    assert!(
-        result.maps[0]
-            .targets()
-            .iter()
-            .all(|target| target.source == result.maps[0].source())
-    );
+    assert!(result.maps[0]
+        .targets()
+        .iter()
+        .all(|target| target.source == result.maps[0].source()));
     assert_eq!(
         result.snapshot.history(),
         History::default(),
@@ -640,15 +638,13 @@ fn valid_metadata_without_region_is_reported_per_map_and_preserves_qualified_pee
         .map;
     assert_eq!(result.maps[0].source().map, qualified_id);
     assert_eq!(result.reports.len(), 2);
-    assert!(
-        result
-            .reports
-            .iter()
-            .find(|report| report.directory == fresh)
-            .unwrap()
-            .error
-            .is_some()
-    );
+    assert!(result
+        .reports
+        .iter()
+        .find(|report| report.directory == fresh)
+        .unwrap()
+        .error
+        .is_some());
     assert!(
         !fresh.join("region").exists(),
         "service never creates unexplored terrain"
@@ -907,18 +903,16 @@ fn pinned_selected_child_replacement_refuses_before_history_rebinding() {
     .unwrap();
     std::fs::rename(&selected, fixture.workspace.join("original-retained-world")).unwrap();
     save(&label, "chosen original", 200, true);
-    assert!(
-        prepare_selected_pinned(
-            &label,
-            root,
-            (&selected, retained.identity()),
-            &storage,
-            2,
-            limits(),
-            &|| false
-        )
-        .is_err()
-    );
+    assert!(prepare_selected_pinned(
+        &label,
+        root,
+        (&selected, retained.identity()),
+        &storage,
+        2,
+        limits(),
+        &|| false
+    )
+    .is_err());
     assert_eq!(
         Repository::new(storage).unwrap().load(&|| false).unwrap(),
         initial.snapshot

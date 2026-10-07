@@ -122,6 +122,16 @@ fn palette() -> Vec<BlockState> {
         ("terracotta", vec![]),
         ("orange_terracotta", vec![]),
         ("yellow_terracotta", vec![]),
+        ("jungle_log", vec![("axis", "y")]),
+        (
+            "jungle_leaves",
+            vec![("distance", "1"), ("persistent", "false")],
+        ),
+        ("spruce_log", vec![("axis", "y")]),
+        (
+            "spruce_leaves",
+            vec![("distance", "1"), ("persistent", "false")],
+        ),
     ]
     .into_iter()
     .map(|(name, properties)| state(&format!("minecraft:{name}"), &properties))
@@ -553,6 +563,43 @@ fn scene(category: Category, x: i32, y: i32, z: i32) -> usize {
                 return if !planted && (x + z) % 3 == 0 { 45 } else { 43 };
             }
         }
+        JungleCanopyLike => {
+            // Keep the four canopy patches connected while retaining four
+            // spatial sectors for the category's corroborating trunk signal.
+            let roots = [(3, 3), (8, 3), (3, 8), (8, 8)];
+            if (69..=70).contains(&y)
+                && roots
+                    .iter()
+                    .any(|&(a, b)| (x - a).abs() <= 2 && (z - b).abs() <= 2)
+            {
+                return 48;
+            }
+            if (65..=68).contains(&y) && roots.contains(&(x, z)) {
+                return 47;
+            }
+            if y == 64 {
+                return 1;
+            }
+        }
+        SpruceSnowfieldLike => {
+            let roots = [(3, 3), (11, 3), (3, 11), (11, 11)];
+            if (69..=70).contains(&y)
+                && roots
+                    .iter()
+                    .any(|&(a, b)| (x - a).abs() <= 2 && (z - b).abs() <= 2)
+            {
+                return 50;
+            }
+            if (65..=68).contains(&y) && roots.contains(&(x, z)) {
+                return 49;
+            }
+            if y == 65 {
+                return 8;
+            }
+            if y == 64 {
+                return 1;
+            }
+        }
         VegetatedShore => {
             if y == 65 && [1, 5].contains(&x) && z % 4 == 2 {
                 return 12;
@@ -569,9 +616,13 @@ fn scene(category: Category, x: i32, y: i32, z: i32) -> usize {
                 return if z % 4 == 0 { 10 } else { 9 };
             }
         }
-        WeatheredMasonry | OrnamentalSandstone | PrismarineMasonry => {
+        WeatheredMasonry | OrnamentalSandstone | DesertTempleLike | PrismarineMasonry
+        | OceanMonumentLike => {
             let built = (4..=11).contains(&x) && (4..=11).contains(&z);
-            if built && category == PrismarineMasonry && (65..=67).contains(&y) {
+            if built
+                && matches!(category, PrismarineMasonry | OceanMonumentLike)
+                && (65..=67).contains(&y)
+            {
                 return 11;
             }
             if built && (62..=64).contains(&y) {
@@ -588,6 +639,13 @@ fn scene(category: Category, x: i32, y: i32, z: i32) -> usize {
                         1 => 17,
                         _ => 16,
                     },
+                    DesertTempleLike => {
+                        if x % 2 == 0 {
+                            18
+                        } else {
+                            17
+                        }
+                    }
                     _ => {
                         if [(4, 4), (11, 11)].contains(&(x, z)) {
                             21
@@ -619,7 +677,7 @@ fn all_categories_have_spatially_supported_positive_controls() {
             .targets
             .iter()
             .find(|target| target.key.category == category)
-            .unwrap();
+            .unwrap_or_else(|| panic!("missing positive control for {category:?}"));
         assert!(target.support.columns >= 32);
         assert_eq!(target.key.anchor, target.anchor.block.position);
         assert_eq!(target.key.tile, [-1, -2]);
@@ -658,6 +716,40 @@ fn all_categories_have_spatially_supported_positive_controls() {
             assert_eq!(target.confidence, Confidence::Corroborated);
         }
     }
+}
+
+#[test]
+fn specific_patterns_do_not_promote_generic_surfaces_or_masonry() {
+    let woodland = [decoded(3218, [0, 0], &palette(), |x, y, z| {
+        scene(Category::RootedWoodland, x, y, z)
+    })];
+    let woodland_report = survey(&woodland, bounds([0, 0]));
+    assert!(!has(&woodland_report, Category::JungleCanopyLike));
+    assert!(!has(&woodland_report, Category::SpruceSnowfieldLike));
+
+    let sandstone = [decoded(3218, [0, 0], &palette(), |x, y, _z| {
+        if (4..=11).contains(&x) && y == 64 {
+            17
+        } else {
+            0
+        }
+    })];
+    assert!(!has(
+        &survey(&sandstone, bounds([0, 0])),
+        Category::DesertTempleLike
+    ));
+
+    let prismarine = [decoded(3218, [0, 0], &palette(), |x, y, z| {
+        if (4..=11).contains(&x) && (4..=11).contains(&z) && y == 64 {
+            20
+        } else {
+            0
+        }
+    })];
+    assert!(!has(
+        &survey(&prismarine, bounds([0, 0])),
+        Category::OceanMonumentLike
+    ));
 }
 
 #[test]

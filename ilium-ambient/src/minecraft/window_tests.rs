@@ -100,6 +100,11 @@ fn invalid_limits_and_unaddressable_candidates_never_overflow() {
             ..Limits::default()
         },
         Limits {
+            candidates: 2,
+            spread_candidates: 3,
+            ..Limits::default()
+        },
+        Limits {
             work_units: 0,
             ..Limits::default()
         },
@@ -148,6 +153,34 @@ fn output_limit_is_distinct_from_scan_completion_and_header_count() {
         vec![[3, 0], [2, 0]]
     );
     assert!(result.candidates.iter().all(|c| c.requested.len() == 1));
+}
+
+#[test]
+fn spatial_spread_interleaves_farthest_complete_windows() {
+    let allocated = BTreeSet::from([[0, 0], [22, 0], [44, 0], [66, 0]]);
+    let result = search(
+        &allocated,
+        [0, 0],
+        &[],
+        Limits {
+            radius_chunks: 0,
+            candidates: 4,
+            spread_candidates: 2,
+            ..Limits::default()
+        },
+        &|| false,
+    )
+    .unwrap();
+    assert!(result.scan_complete);
+    assert_eq!(result.header_complete, 4);
+    assert_eq!(
+        result
+            .candidates
+            .iter()
+            .map(|candidate| candidate.center)
+            .collect::<Vec<_>>(),
+        vec![[0, 0], [66, 0], [22, 0], [44, 0]]
+    );
 }
 
 #[test]

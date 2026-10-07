@@ -6,8 +6,8 @@ use std::{
     fs::File,
     io::{self, Write},
     sync::{
-        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 #[cfg(not(target_os = "linux"))]

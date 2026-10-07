@@ -506,6 +506,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             &app.animation_row_model(),
             crate::animation_settings_ui::Scrolls::of(state),
         );
+        if state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Plugin {
+            let model = app.plugin_panel_model();
+            crate::animation_plugins::draw_plugin_issue_popover(
+                frame,
+                layout.content_area,
+                app,
+                &model,
+                &state.plugin_panel,
+            );
+        }
     }
 }
 
@@ -4383,6 +4393,9 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
         SettingsTab::Api => crate::app::ApiRow::ALL.len(),
+        SettingsTab::RemoteCompaction => {
+            crate::remote_compaction_settings_ui::rows(app).len()
+        }
         _ => 0,
     }
 }

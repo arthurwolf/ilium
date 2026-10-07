@@ -91,6 +91,7 @@ pub enum AnimationKind {
     OpenStreetMap,
     Carpet,
     Wind,
+    Growth,
     Semantic,
     Aurora,
     Pollen,
@@ -112,7 +113,7 @@ pub enum AnimationKind {
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 60] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -154,6 +155,7 @@ impl AnimationKind {
         Self::OpenStreetMap,
         Self::Carpet,
         Self::Wind,
+        Self::Growth,
         Self::Semantic,
         Self::Aurora,
         Self::Pollen,
@@ -183,6 +185,7 @@ impl AnimationKind {
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
             Self::Carpet => Some(AmbientKind::Carpet),
             Self::Wind => Some(AmbientKind::Wind),
+            Self::Growth => Some(AmbientKind::Growth),
             Self::Aurora => Some(AmbientKind::Aurora),
             Self::Pollen => Some(AmbientKind::Pollen),
             Self::Fireflies => Some(AmbientKind::Fireflies),

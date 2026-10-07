@@ -993,6 +993,7 @@ fn run(
         actor_wake,
         Arc::clone(&shared.ready),
     );
+    plugin.set_saved_runtime(frame.host().saved_runtime());
     let mut cache = AnimationLoopCache::new(resources);
     #[cfg(test)]
     let mut finite_probe_receipt: Option<Receipt<RealFiniteWakeProbe>> = None;

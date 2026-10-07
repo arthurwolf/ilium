@@ -332,6 +332,18 @@ impl FloraPlacement {
                                 return Err(AdmissionError::Unknown(neighbour));
                             }
                             water |= cell == HabitatCell::Water;
+                            if !water {
+                                // Generated rivers keep their visible water
+                                // surface one cell above the bank soil. Treat
+                                // that shallow vertical edge like the same-
+                                // level water used by ordinary pond fixtures.
+                                let upper = offset(neighbour, [0, 0, 1])?;
+                                let upper_cell = context(upper);
+                                if upper_cell == HabitatCell::Unknown {
+                                    return Err(AdmissionError::Unknown(upper));
+                                }
+                                water |= upper_cell == HabitatCell::Water;
+                            }
                         }
                         matches!(support, HabitatCell::Soil | HabitatCell::Sand) && water
                     }
@@ -442,6 +454,16 @@ mod tests {
                 soil(p)
             }),
             Ok(4)
+        );
+        let mut raised_edge = FloraPlacement::new(16).unwrap();
+        assert_eq!(
+            raised_edge.admit(plant(), |p| if p == [1, 0, 1] {
+                HabitatCell::Water
+            } else {
+                soil(p)
+            }),
+            Ok(4),
+            "a river surface one cell above its bank still admits reeds"
         );
     }
 

@@ -69,6 +69,13 @@ fn mock_window(context: &MapContext) -> preparation::PreparedWindow {
 }
 
 #[test]
+fn production_defaults_reserve_spatially_spread_window_candidates() {
+    let limits = Limits::default();
+    assert_eq!(limits.windows.candidates, 8);
+    assert_eq!(limits.windows.spread_candidates, 4);
+}
+
+#[test]
 fn recent_ranking_is_independent_of_catalog_order_and_failed_maps_fall_through() {
     let catalog = catalog();
     let bindings = bindings(&catalog);

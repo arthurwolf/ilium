@@ -9,7 +9,7 @@ use crate::{
 };
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::animation_files::{
-    DirectoryEntry, FileIdentity, PinnedDirectory, PinnedFile, WriteMode, validate_leaf,
+    validate_leaf, DirectoryEntry, FileIdentity, PinnedDirectory, PinnedFile, WriteMode,
 };
 use ilium_platform::secure_fs::NoFollowDirectory;
 #[cfg(target_os = "linux")]
@@ -20,8 +20,8 @@ use std::{
     io,
     path::{Component, Path, PathBuf},
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };

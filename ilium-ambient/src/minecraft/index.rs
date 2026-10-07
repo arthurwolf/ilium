@@ -255,12 +255,10 @@ mod tests {
         std::fs::write(directory.path().join("r.+1.0.mca"), b"bad").unwrap();
         std::fs::write(directory.path().join("r.01.0.mca"), b"bad").unwrap();
         std::fs::create_dir(directory.path().join("r.1.0.mca")).unwrap();
-        assert!(
-            allocated_chunks(directory.path(), &|| false)
-                .unwrap()
-                .chunks
-                .is_empty()
-        );
+        assert!(allocated_chunks(directory.path(), &|| false)
+            .unwrap()
+            .chunks
+            .is_empty());
         let empty = tempfile::tempdir().unwrap();
         assert!(matches!(
             allocated_chunks(empty.path(), &|| true),

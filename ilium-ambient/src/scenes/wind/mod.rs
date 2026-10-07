@@ -78,6 +78,22 @@ impl WindScene {
         let tier = usize::from(count / threshold);
         (tier > 0).then(|| MERGED_GLYPHS[(tier - 1).min(MERGED_GLYPHS.len() - 1)])
     }
+
+    fn draw_dot(frame: &mut Frame<'_>, dot: &sim::Dot) {
+        let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
+        if column < 0
+            || row < 0
+            || column >= i32::from(frame.width)
+            || row >= i32::from(frame.height)
+        {
+            return;
+        }
+        let fractional_x = dot.x - column as f32;
+        let fractional_y = dot.y - row as f32;
+        let sub_x = (column as usize) * 2 + ((fractional_x * 2.0) as usize).min(1);
+        let sub_y = (row as usize) * 4 + ((fractional_y * 4.0) as usize).min(3);
+        frame.raster.opaque_dot_in_bounds(sub_x, sub_y);
+    }
 }
 
 impl Scene for WindScene {
@@ -101,29 +117,37 @@ impl Scene for WindScene {
                 .set_mask(&OccupancyMask::empty(frame.width, frame.height));
         }
         self.sim.advance(frame.time.as_secs_f32());
-        let counts = self.counts(frame.width, frame.height);
         self.glyph_width = frame.width;
         self.glyph_height = frame.height;
-        self.glyphs = counts
-            .iter()
-            .map(|count| self.merged_glyph(*count))
-            .collect();
-        for dot in self.sim.dots() {
-            let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
-            if column < 0
-                || row < 0
-                || column >= i32::from(frame.width)
-                || row >= i32::from(frame.height)
-            {
-                continue;
+        if self.settings.merge_dots {
+            let counts = self.counts(frame.width, frame.height);
+            self.glyphs = counts
+                .iter()
+                .map(|count| self.merged_glyph(*count))
+                .collect();
+        } else {
+            self.glyphs.clear();
+        }
+        if self.settings.merge_dots {
+            for dot in self.sim.dots() {
+                let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
+                if column < 0
+                    || row < 0
+                    || column >= i32::from(frame.width)
+                    || row >= i32::from(frame.height)
+                {
+                    continue;
+                }
+                let index = row as usize * usize::from(frame.width) + column as usize;
+                if self.glyphs[index].is_some() {
+                    continue;
+                }
+                Self::draw_dot(frame, dot);
             }
-            let index = row as usize * usize::from(frame.width) + column as usize;
-            if self.glyphs[index].is_some() {
-                continue;
+        } else {
+            for dot in self.sim.dots() {
+                Self::draw_dot(frame, dot);
             }
-            let sub_x = (column as usize) * 2 + (((dot.x - dot.x.floor()) * 2.0) as usize).min(1);
-            let sub_y = (row as usize) * 4 + (((dot.y - dot.y.floor()) * 4.0) as usize).min(3);
-            frame.raster.owned_dot(sub_x, sub_y, 1.0, 0);
         }
     }
 

@@ -54,7 +54,7 @@ impl ChoiceEnum for EdgeMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindSettings {
-    /// Number of dots, 10..=20000. Default 2000.
+    /// Number of dots, 10..=50000. Default 2000.
     pub dot_count: u32,
     /// Average dot weight, 1..=100. Light dots follow the wind, heavy dots
     /// resist it and fall faster. Default 30.
@@ -142,7 +142,7 @@ impl Default for WindSettings {
     }
 }
 
-const DOT_COUNT: (u32, u32) = (10, 20000);
+const DOT_COUNT: (u32, u32) = (10, 50000);
 const DOT_WEIGHT: (u32, u32) = (1, 100);
 const WEIGHT_VARIATION: (u32, u32) = (0, 100);
 const DRAG: (u32, u32) = (1, 100);

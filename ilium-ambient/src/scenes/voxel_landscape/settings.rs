@@ -252,7 +252,7 @@ impl SceneSettings for VoxelLandscapeSettings {
                 self.pack_addon_path = path.to_owned();
             }
             "pack_path" => {
-                let path = control::text(&value).ok_or("Expected a local path")?.trim();
+                let path = control::text(&value).ok_or("Expected a local path")?;
                 if path.len() > 4096 || path.chars().any(char::is_control) {
                     return Err("Pack path is too long or contains controls".into());
                 }
@@ -482,6 +482,16 @@ mod pack_selection_tests {
             .set_control("pack_profile", ControlValue::Index(8))
             .unwrap();
         assert_eq!(settings.pack_path, "/private/faithful.zip");
+    }
+
+    #[test]
+    fn authored_pack_path_preserves_significant_edge_spaces() {
+        let mut settings = VoxelLandscapeSettings::default();
+        let authored = " /private/pack with spaces.zip ";
+        settings
+            .set_control("pack_path", ControlValue::Text(authored.into()))
+            .unwrap();
+        assert_eq!(settings.pack_path, authored);
     }
 }
 

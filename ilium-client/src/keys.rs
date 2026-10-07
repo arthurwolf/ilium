@@ -3434,6 +3434,15 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
+                if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
+                    if let RemoteCompactionRow::Technique(target) = row {
+                        app.mode = Mode::Settings(state);
+                        app.begin_settings_choice_dialog(
+                            crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
+                        );
+                        return;
+                    }
+                }
                 // A stray arrow never closes the privacy box for good; only
                 // Enter, Space, x and Delete do.
                 let is_stray_banner_arrow =

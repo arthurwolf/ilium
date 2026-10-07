@@ -1,7 +1,7 @@
 use super::error::{AssetError, Result};
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
 };
 
 const MIB: u64 = 1024 * 1024;

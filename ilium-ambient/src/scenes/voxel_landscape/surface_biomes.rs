@@ -380,7 +380,7 @@ pub static SURFACE_BIOME_DESCRIPTORS: [SurfaceBiomeDescriptor; 43] = [
         bedrock_surface_water_rgb: [50, 165, 152],
         bedrock_id: "minecraft:desert",
         natural_tree_configuration_ids: &[],
-        surface_block_ids: &["minecraft:brown_mushroom", "minecraft:cactus", "minecraft:cactus_flower", "minecraft:dandelion", "minecraft:dead_bush", "minecraft:glow_lichen", "minecraft:lava", "minecraft:poppy", "minecraft:pumpkin", "minecraft:red_mushroom", "minecraft:short_dry_grass", "minecraft:short_grass", "minecraft:stone", "minecraft:sugar_cane", "minecraft:suspicious_sand", "minecraft:tall_dry_grass", "minecraft:water"],
+        surface_block_ids: &["minecraft:brown_mushroom", "minecraft:cactus", "minecraft:cactus_flower", "minecraft:dandelion", "minecraft:dead_bush", "minecraft:glow_lichen", "minecraft:lava", "minecraft:poppy", "minecraft:pumpkin", "minecraft:red_mushroom", "minecraft:sand", "minecraft:sandstone", "minecraft:short_dry_grass", "minecraft:short_grass", "minecraft:stone", "minecraft:sugar_cane", "minecraft:suspicious_sand", "minecraft:tall_dry_grass", "minecraft:water"],
         biome_table_fauna_ids: &["minecraft:camel", "minecraft:creeper", "minecraft:enderman", "minecraft:husk", "minecraft:parched", "minecraft:rabbit", "minecraft:skeleton", "minecraft:slime", "minecraft:spider", "minecraft:witch", "minecraft:zombie", "minecraft:zombie_villager"],
         water_biome_table_fauna_ids: &[],
         surface_structure_variant_ids: &["minecraft:desert_pyramid", "minecraft:desert_well", "minecraft:pillager_outpost", "minecraft:ruined_portal_desert", "minecraft:village_desert"],
@@ -1226,6 +1226,9 @@ mod tests {
             .descriptor()
             .surface_block_ids
             .contains(&"minecraft:bamboo"));
+        let desert = SurfaceBiome::Desert.descriptor();
+        assert!(desert.surface_block_ids.contains(&"minecraft:sand"));
+        assert!(desert.surface_block_ids.contains(&"minecraft:sandstone"));
         assert!(SurfaceBiome::Jungle
             .descriptor()
             .surface_block_ids

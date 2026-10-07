@@ -54,6 +54,7 @@ pub use scenes::galactic_empires::GalacticEmpiresSettings;
 pub use scenes::topographic_maps::TopographicMapsSettings;
 
 pub use scenes::carpet::CarpetSettings;
+pub use scenes::growth::{GrowthColorMode, GrowthPattern, GrowthSettings};
 pub use scenes::openstreetmap::address_search as openstreetmap_address_search;
 pub use scenes::openstreetmap::{
     AddressProvider, AddressSearchSettings, GeometryMap, OpenStreetMapSettings, SourceElement,

@@ -40,6 +40,7 @@ use crate::scenes::{
     dithr_patterns::{DithrPatternsScene, DithrPatternsSettings},
     fbm_clouds::{FbmCloudsScene, FbmCloudsSettings},
     galactic_empires::{GalacticEmpiresScene, GalacticEmpiresSettings},
+    growth::{GrowthScene, GrowthSettings},
     hex_expedition::{HexExpeditionScene, HexExpeditionSettings},
     images::{ImagesScene, ImagesSettings},
     machine_screen::{MachineScreenScene, MachineScreenSettings},
@@ -90,6 +91,7 @@ pub enum AmbientKind {
     OpenStreetMap,
     Carpet,
     Wind,
+    Growth,
     Aurora,
     Pollen,
     Fireflies,
@@ -110,7 +112,7 @@ pub enum AmbientKind {
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::Pipes,
         Self::Stars,
         Self::NightLights,
@@ -141,6 +143,7 @@ impl AmbientKind {
         Self::OpenStreetMap,
         Self::Carpet,
         Self::Wind,
+        Self::Growth,
         Self::Aurora,
         Self::Pollen,
         Self::Fireflies,
@@ -182,6 +185,7 @@ impl AmbientKind {
             Self::OpenStreetMap => "OpenStreetMap",
             Self::Carpet => "Carpet",
             Self::Wind => "Wind",
+            Self::Growth => "Growth",
             Self::Pipes => "3D pipes",
             Self::Stars => "Stars overhead",
             Self::SolarSystem => "Solar system",
@@ -235,6 +239,7 @@ impl AmbientKind {
             Self::Wind => {
                 "Dots blown by a fixed or rotating wind through the empty parts of your screen; scrolling and new text push them around."
             }
+            Self::Growth => "A fungal colony grows from seeded points, branches into the screen, and is cleaned by the pointer and foreground text.",
             Self::Carpet => {
                 "Isometric hatch lines lift over hidden moving spheres and tubes: mouse hunters, Snake, Life, legal chess, Lichess TV, a DVD ball, planets and civil clocks."
             }
@@ -384,6 +389,7 @@ pub struct AmbientSettings {
     pub vector_td: VectorTdSettings,
     pub voxel_landscape: VoxelLandscapeSettings,
     pub wind: WindSettings,
+    pub growth: GrowthSettings,
     pub aurora: AuroraSettings,
     pub pollen: PollenSettings,
     pub fireflies: FirefliesSettings,
@@ -437,6 +443,7 @@ impl AmbientSettings {
             vector_td: self.vector_td.normalized(),
             voxel_landscape: self.voxel_landscape.normalized(),
             wind: self.wind.normalized(),
+            growth: self.growth.normalized(),
             aurora: self.aurora.normalized(),
             pollen: self.pollen.normalized(),
             fireflies: self.fireflies.normalized(),
@@ -489,6 +496,7 @@ impl AmbientSettings {
             AmbientKind::VectorTd => self.vector_td.controls(),
             AmbientKind::VoxelLandscape => self.voxel_landscape.controls(),
             AmbientKind::Wind => self.wind.controls(),
+            AmbientKind::Growth => self.growth.controls(),
             AmbientKind::Aurora => self.aurora.controls(),
             AmbientKind::Pollen => self.pollen.controls(),
             AmbientKind::Fireflies => self.fireflies.controls(),
@@ -546,6 +554,7 @@ impl AmbientSettings {
             AmbientKind::VectorTd => self.vector_td.set_control(id, value),
             AmbientKind::VoxelLandscape => self.voxel_landscape.set_control(id, value),
             AmbientKind::Wind => self.wind.set_control(id, value),
+            AmbientKind::Growth => self.growth.set_control(id, value),
             AmbientKind::Aurora => self.aurora.set_control(id, value),
             AmbientKind::Pollen => self.pollen.set_control(id, value),
             AmbientKind::Fireflies => self.fireflies.set_control(id, value),
@@ -585,6 +594,7 @@ impl AmbientSettings {
             AmbientKind::OpenStreetMap => serde_json::to_string(&normalized.openstreetmap),
             AmbientKind::Carpet => serde_json::to_string(&normalized.carpet),
             AmbientKind::Wind => serde_json::to_string(&normalized.wind),
+            AmbientKind::Growth => serde_json::to_string(&normalized.growth),
             AmbientKind::Aurora => serde_json::to_string(&normalized.aurora),
             AmbientKind::Pollen => serde_json::to_string(&normalized.pollen),
             AmbientKind::Fireflies => serde_json::to_string(&normalized.fireflies),
@@ -667,6 +677,7 @@ impl AmbientSettings {
             AmbientKind::Chess => Box::new(ChessScene::new(&settings.chess, env)),
             AmbientKind::Carpet => Box::new(CarpetScene::new(&settings.carpet, env)),
             AmbientKind::Wind => Box::new(WindScene::new(&settings.wind, env)),
+            AmbientKind::Growth => Box::new(GrowthScene::new(&settings.growth, env)),
             AmbientKind::Aurora => Box::new(AuroraScene::new(&settings.aurora, env)),
             AmbientKind::Pollen => Box::new(PollenScene::new(&settings.pollen, env)),
             AmbientKind::Fireflies => Box::new(FirefliesScene::new(&settings.fireflies, env)),

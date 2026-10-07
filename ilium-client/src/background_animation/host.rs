@@ -86,6 +86,14 @@ impl AmbientHost {
         self.resources.as_ref()
     }
 
+    /// Shared saved-world history/runtime authority used by both native
+    /// scenes and an admitted live animation package.  The returned Arc is
+    /// the existing host-owned runtime; callers cannot construct a substitute
+    /// world history namespace from JavaScript metadata.
+    pub fn saved_runtime(&self) -> Arc<SavedRuntime> {
+        Arc::clone(&self.saved_runtime)
+    }
+
     /// Hands the shared look's palette to the hosted scene. A change never
     /// rebuilds the scene; it moves the generation on so the next frame is
     /// rendered again with the new colours.

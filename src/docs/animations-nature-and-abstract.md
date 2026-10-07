@@ -12,6 +12,7 @@ This guide documents the quiet, mostly procedural animations: water and shore sc
 - [Dithered scenes](#dithered-scenes): Dithered water, Atlantic dusk, Dithered fBm clouds, Dithered waves, Dithr patterns
 - [Machines and clocks](#machines-and-clocks): Cube clock, Box machine, Machine screen
 - [Wind](#wind)
+- [Growth](#growth)
 - [Carpet](#carpet)
 - [Notes on the Lily pads scene](#notes-on-the-lily-pads-scene)
 - [Troubleshooting](#troubleshooting)
@@ -587,6 +588,21 @@ Wind reacts to your terminals. When a cell gains a character, Wind works out whe
 | Merge at | `merge_threshold` | 2 to 12 dots, step 1 | 3 | How many dots in one cell make the larger dot. Shown only while Merge dots is on. |
 | Random seed | `seed` | 0 to 9999, step 1 | 1 | Selects the starting positions and weights of the dots. |
 | Frame rate | `frame_rate` | 5 to 30 fps, step 1 | 20 | Redraws per second. Higher is smoother and uses more processor time. |
+
+## Growth
+
+Shown as **Growth** (`growth`). A seeded fungal colony expands through the empty cells of the terminal. Branching hyphae, rings, veined mats, and fast carpets are selectable morphologies. The outside edge can remain as a reserved source; pointer movement erases nearby growth, new characters erase growth beneath them, and scrolling transfers part of the colony in the scroll direction. The colony reseeds periodically so long sessions do not settle permanently.
+
+| Control | Id | Range or options | Default | Meaning |
+|---|---|---|---:|---|
+| Growth pattern | `pattern` | Branching hyphae, Concentric rings, Veined mat, Fast carpet | Branching hyphae | Selects the colony morphology. |
+| Color mode | `color_mode` | Monochrome, Palette hues | Monochrome | Uses one tone or the active palette. |
+| Density | `density` | 1 to 100% | 55% | Amount of empty space the colony tends to fill. |
+| Growth rate | `growth_rate` | 1 to 100% | 45% | Speed of tip extension. |
+| Reseed interval | `reseed_seconds` | 1 to 3600 seconds | 60 s | Adds fresh seeds after the interval. |
+| Reserve edge | `reserve_edge` | On or off | On | Keeps an outside rim available as a source. |
+| Mouse erases | `mouse_erase` | On or off | On | Clears growth around the pointer. |
+| Scroll erase / push | `scroll_erase`, `scroll_push` | 0 to 100% | 50%, 55% | Controls how scrolling clears and displaces the colony. |
 
 ## Carpet
 
