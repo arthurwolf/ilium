@@ -343,6 +343,27 @@ class WorkflowTests(unittest.TestCase):
         for pattern in ('candidate/*.deb', 'candidate/*.rpm', 'candidate/*.AppImage', 'candidate/*.flatpak', 'candidate/*.snap', 'candidate/linux-packages-*.json'):
             self.assertIn(pattern, subjects)
 
+    def test_linux_x86_64_release_runs_and_retains_the_disposable_vm_gate(self):
+        job = self.workflow['jobs']['linux-packages']
+        vm = next(step for step in job['steps'] if step.get('name') == 'Install and run Linux packages in a disposable x86_64 Ubuntu VM')
+        self.assertEqual(vm['if'], "matrix.arch == 'x86_64'")
+        self.assertIn('vm_smoke.py --packages linux-packages', vm['run'])
+        self.assertIn('--arch x86_64', vm['run'])
+        self.assertIn('--accelerator tcg', vm['run'])
+        self.assertIn('--audit-report native-linux/native-audit.json', vm['run'])
+        self.assertIn('--workspace Cargo.toml', vm['run'])
+        self.assertIn('--manifest release/targets.toml', vm['run'])
+        self.assertIn('set -o pipefail', vm['run'])
+        self.assertIn('tee package-vm.jsonl', vm['run'])
+        prerequisites = next(step['run'] for step in job['steps'] if step.get('name') == 'Packaging toolchain')
+        for tool in ('qemu-system-x86', 'qemu-utils', 'cloud-image-utils', 'openssh-client'):
+            self.assertIn(tool, prerequisites)
+        diagnostics = next(step['with']['path'] for step in job['steps'] if step.get('with', {}).get('name') == 'diagnostics-linux-packages-${{ matrix.arch }}')
+        for path in ('package-smoke-vm/', 'package-vm.jsonl'):
+            self.assertIn(path, diagnostics)
+        self.assertNotIn('package-vm-work', diagnostics,
+                         'the sparse guest overlay and downloaded base image must stay out of retained artifacts')
+
     def test_macos_packages_use_both_native_rows_and_complete_smoke_contract(self):
         targets = [row for row in release_tool.load_targets(ROOT / 'release/targets.toml') if row['os'] == 'macos']
         job = self.workflow['jobs']['macos-packages']
@@ -427,7 +448,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(words[-3:], ['|', 'tee', '$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl'])  # Retain the inspector's exact JSONL outside release assets.
         diagnostics = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'diagnostics-linux-packages-${{ matrix.arch }}')  # Locate the existing diagnostics upload.
         self.assertEqual(diagnostics.get('if'), 'always()')  # Failed native checks must still upload available diagnostics.
-        self.assertEqual(set(diagnostics['with']['path'].splitlines()), {'${{ runner.temp }}/package-smoke-inspect/', '${{ runner.temp }}/package-smoke/', '${{ runner.temp }}/package-smoke-host/'})  # Preserve every smoke mode's evidence directory.
+        self.assertEqual(set(diagnostics['with']['path'].splitlines()), {'${{ runner.temp }}/package-smoke-inspect/', '${{ runner.temp }}/package-smoke/', '${{ runner.temp }}/package-smoke-host/', '${{ runner.temp }}/package-smoke-vm/', 'package-vm.jsonl'})  # Preserve every smoke mode's evidence directory without the large guest image/overlay.
         artifact = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'linux-packages-${{ matrix.arch }}')  # Keep successful package upload separate from diagnostics.
         self.assertEqual(artifact['with']['path'], 'linux-packages/')  # Extra acceptance files must not change the pipeline's exact asset inventory.
         self.assertNotIn('if', artifact)  # Package upload retains the normal prior-step-success condition.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Linux package host smoke inside a disposable qemu/KVM Ubuntu virtual machine.
+"""Run the Linux package host smoke inside a disposable QEMU Ubuntu virtual machine.
 
 Snap needs snapd with systemd and root, Flatpak a real sandbox, and the AppImage a
 real FUSE mount, so these formats cannot be tested in a container and must never
@@ -8,7 +8,7 @@ of a SHA256-verified Ubuntu cloud image, copies the packages and smoke scripts i
 runs `smoke_linux_packages.py host` over SSH, copies the logs back and powers the
 machine off. The base image is never modified. Stdout is JSONL.
 
-    vm_smoke.py --packages DIR --arch x86_64 --work DIR --log DIR [--image FILE]
+    vm_smoke.py --packages DIR --audit-report FILE --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work DIR --log DIR [--image FILE] [--accelerator kvm|tcg]
 """
 from __future__ import annotations
 
@@ -25,8 +25,11 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
-IMAGE_URL = 'https://cloud-images.ubuntu.com/releases/24.04/release/'
-IMAGE_NAME = 'ubuntu-24.04-server-cloudimg-amd64.img'
+sys.path.insert(0, str(ROOT / 'release/scripts'))
+import smoke_installed_animation as animation_gate
+
+IMAGE_URL = 'https://cloud-images.ubuntu.com/releases/22.04/release/'
+IMAGE_NAME = 'ubuntu-22.04-server-cloudimg-amd64.img'
 SSH_OPTIONS = ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=5']
 USER_DATA = '''#cloud-config
 users:
@@ -36,7 +39,7 @@ users:
     ssh_authorized_keys:
       - {key}
 package_update: true
-packages: [python3, flatpak, squashfs-tools, libfuse2t64, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
+packages: [python3, flatpak, squashfs-tools, libfuse2, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
 runcmd:
   - [touch, /var/lib/cloud/instance/ilium-ready]
 '''
@@ -150,6 +153,9 @@ def stop_owned_vm(process, port, key):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--packages', type=Path, required=True)
+    parser.add_argument('--audit-report', type=Path, required=True)
+    parser.add_argument('--workspace', type=Path, required=True)
+    parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--arch', default='x86_64', choices=['x86_64'])
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
@@ -157,6 +163,7 @@ def main(argv=None):
     parser.add_argument('--formats', default='deb,appimage,snap,flatpak')
     parser.add_argument('--memory', default='6G')
     parser.add_argument('--cpus', default='4')
+    parser.add_argument('--accelerator', choices=['kvm', 'tcg'], default='kvm')
     arguments = parser.parse_args(argv)
     try:  # Reject unusable coverage before creating work or contacting the image server.
         requested, inspected = format_plan(arguments.formats)  # Plan mandatory host coverage and applicable offline coverage together.
@@ -174,7 +181,8 @@ def main(argv=None):
     run(['cloud-localds', work / 'seed.img', work / 'user-data', work / 'meta-data'], check=True)
     run(['qemu-img', 'create', '-q', '-f', 'qcow2', '-F', 'qcow2' if base.suffix == '.qcow2' else 'qcow2', '-b', base, work / 'overlay.qcow2', '30G'], check=True)
     port = 20000 + secrets.randbelow(20000)
-    command = ['qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', arguments.cpus, '-m', arguments.memory, '-display', 'none',
+    acceleration = ['-enable-kvm', '-cpu', 'host'] if arguments.accelerator == 'kvm' else ['-accel', 'tcg,thread=multi', '-cpu', 'max']
+    command = ['qemu-system-x86_64', *acceleration, '-smp', arguments.cpus, '-m', arguments.memory, '-display', 'none',
                '-drive', 'file=%s,if=virtio' % (work / 'overlay.qcow2'), '-drive', 'file=%s,if=virtio,format=raw' % (work / 'seed.img'),
                '-nic', 'user,hostfwd=tcp:127.0.0.1:%d-:22' % port]
     qemu_log = (log / 'vm-qemu.log').open('x')
@@ -200,7 +208,9 @@ def main(argv=None):
             emit('error', message='virtual machine never finished cloud-init')
             return 1
         emit('progress', stage='ready', os=ssh(port, key, '. /etc/os-release && echo "$PRETTY_NAME $(uname -r)"').stdout.strip())
-        uploads = ((ROOT / 'release/scripts', 'repo/release/scripts'), (ROOT / 'release/packaging', 'repo/release/packaging'), (arguments.packages.resolve(), 'packages'), (ROOT / 'LICENSE', 'repo/LICENSE'), (ROOT / 'Cargo.toml', 'repo/Cargo.toml'))  # Every required source and package input must reach the guest.
+        animation_sources = tuple((ROOT / name, 'repo/' + name) for name in animation_gate.SOURCE_FILES
+                                  if not name.startswith('release/scripts/'))  # The smoke hashes each Rust source and Cargo.lock against native audit evidence.
+        uploads = ((ROOT / 'release/scripts', 'repo/release/scripts'), (ROOT / 'release/packaging', 'repo/release/packaging'), (arguments.packages.resolve(), 'packages'), (ROOT / 'LICENSE', 'repo/LICENSE'), (arguments.workspace.resolve(), 'repo/Cargo.toml'), (arguments.manifest.resolve(), 'repo/release/targets.toml'), (arguments.audit_report.resolve(), 'repo/native-linux/native-audit.json'), *animation_sources)  # Transfer every required smoke, provenance and package input.
         manifest = {}
         for index, (source, target) in enumerate(uploads):  # Preserve transfer evidence separately from smoke output.
             manifest.update(upload_manifest(source, target))
@@ -242,6 +252,7 @@ def main(argv=None):
             guest_command = ['python3', '/home/tester/repo/release/scripts/smoke_linux_packages.py', subcommand, '--arch', arguments.arch, '--packages', '/home/tester/packages', '--formats', ','.join(formats)]  # Build explicit guest argv without shell interpolation.
             if subcommand == 'host':  # Host logs and private Flatpak selection retain their public caller contracts.
                 guest_command += ['--log', '/home/tester/log-host']  # Preserve the guest diagnostics destination.
+                guest_command += ['--audit-report', '/home/tester/repo/native-linux/native-audit.json', '--workspace', '/home/tester/repo/Cargo.toml', '--manifest', '/home/tester/repo/release/targets.toml']  # Satisfy the real host parser with transferred audit and source inputs.
                 if 'flatpak' in requested:  # Lifecycle isolates HOME/XDG, so keep installation lookup stable.
                     guest_command += ['--flatpak-user-dir', '/home/tester/flatpak-install']  # Preserve the primary's explicit private directory.
             result = capture_command(lambda: ssh(port, key, shlex.join(guest_command)))  # A guest timeout remains failed while allowing log collection.

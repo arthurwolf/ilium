@@ -7,12 +7,27 @@ import shlex  # Assert actual guest argv rather than command substrings.
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'release/packaging/linux'))
 import vm_smoke
+sys.path.insert(0, str(ROOT / 'release/scripts'))
+import smoke_linux_packages
+
+
+def fixture_input_arguments(root):
+    workspace = root / 'repo/Cargo.toml'
+    manifest = root / 'repo/release/targets.toml'
+    audit_report = root / 'native-linux/native-audit.json'
+    for path, content in ((workspace, '[workspace]\n'), (manifest, 'fixture manifest\n'),
+                          (audit_report, '{"fixture": true}\n')):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+    return ['--workspace', str(workspace), '--manifest', str(manifest),
+            '--audit-report', str(audit_report)]
 
 
 class ProcessOwnershipTests(unittest.TestCase):
@@ -57,6 +72,7 @@ class ProcessOwnershipTests(unittest.TestCase):
             root = Path(temporary)
             (root / 'packages').mkdir()
             (root / 'packages/fixture.deb').write_bytes(b'labelled synthetic package')
+            acceptance_inputs = fixture_input_arguments(root)
             def ssh_result(port, key, command, timeout=3600):
                 words = shlex.split(command)
                 if words[:2] == ['python3', '-c']:
@@ -69,7 +85,7 @@ class ProcessOwnershipTests(unittest.TestCase):
                  patch.object(vm_smoke.time, 'sleep'), \
                  patch.object(vm_smoke.subprocess, 'Popen', return_value=process) as spawn, \
                  patch.object(vm_smoke, 'emit'):
-                result = vm_smoke.main(['--packages', str(root / 'packages'),
+                result = vm_smoke.main(['--packages', str(root / 'packages'), *acceptance_inputs,
                                         '--work', str(root / 'work'), '--log', str(root / 'log')])
             self.assertEqual(result, 0)
             self.assertNotIn(['kill', '424242'], commands,
@@ -85,7 +101,16 @@ class ProcessOwnershipTests(unittest.TestCase):
 
 
 class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with safe mocked transports and an owned synthetic child.
-    def run_vm(self, formats=None, statuses=None, upload_failure=None, diagnostics_failure=False, prepare_failure=False, host_timeout=False, readiness_timeouts=0, destination_exists=False, hash_mismatch=False):  # Keep all fixture state in temporary data.
+    def test_vm_guest_matches_declared_x86_64_linux_baseline(self):
+        targets = tomllib.loads((ROOT / 'release/targets.toml').read_text(encoding='utf-8'))['target']
+        target = next(row for row in targets if row['os'] == 'linux' and row['arch'] == 'x86_64')
+        baseline = target['minimum_tested_os'].removeprefix('ubuntu-')
+        self.assertEqual(vm_smoke.IMAGE_NAME, f'ubuntu-{baseline}-server-cloudimg-amd64.img')
+        self.assertIn(f'/releases/{baseline}/release/', vm_smoke.IMAGE_URL)
+        self.assertIn('libfuse2', vm_smoke.USER_DATA)
+        self.assertNotIn('libfuse2t64', vm_smoke.USER_DATA)
+
+    def run_vm(self, formats=None, statuses=None, upload_failure=None, diagnostics_failure=False, prepare_failure=False, host_timeout=False, readiness_timeouts=0, destination_exists=False, hash_mismatch=False, accelerator=None):  # Keep all fixture state in temporary data.
         statuses = statuses or {}  # Unspecified required stages complete successfully.
         commands, guest_commands, events = [], [], []  # Retain observable adapter calls and JSONL emissions.
         process = Mock(pid=424242)  # Model only the child returned by this test's Popen adapter.
@@ -126,11 +151,14 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
             root = Path(temporary)  # Own the fixture's keys, logs and cloud-init input.
             (root / 'packages with spaces').mkdir()
             (root / 'packages with spaces/fixture.deb').write_bytes(b'labelled synthetic package')
-            arguments = ['--packages', str(root / 'packages with spaces'), '--work', str(root / 'work'), '--log', str(root / 'log')]  # Include whitespace in a local source argument.
+            arguments = ['--packages', str(root / 'packages with spaces'), *fixture_input_arguments(root), '--work', str(root / 'work'), '--log', str(root / 'log')]  # Include whitespace and every required acceptance input.
             if formats is not None:  # Exercise default formatting when the option is absent.
                 arguments += ['--formats', formats]  # Pass caller spelling without fixture normalization.
+            if accelerator is not None:  # Exercise both hosted-runner and hardware-accelerated launch modes.
+                arguments += ['--accelerator', accelerator]  # Keep the requested emulator mode explicit.
             with patch.object(vm_smoke, 'verified_image', return_value='fixture-hash'), patch.object(vm_smoke, 'run', side_effect=run), patch.object(vm_smoke, 'ssh', side_effect=ssh), patch.object(vm_smoke.time, 'sleep'), patch.object(vm_smoke.subprocess, 'Popen', return_value=process), patch.object(vm_smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})), redirect_stdout(io.StringIO()):  # Mock every native or network boundary.
                 result = vm_smoke.main(arguments)  # Execute the production main path and real owned-child teardown.
+                self.last_qemu_command = [str(part) for part in vm_smoke.subprocess.Popen.call_args.args[0]]  # Retain the actual mocked guest process argv.
             logs = {path.name: path.read_text(encoding='utf-8') for path in (root / 'log').iterdir() if path.is_file()}  # Retain evidence before deleting fixture data.
         process.wait.assert_called()  # Every completed fixture run must reap its retained child.
         process.terminate.assert_not_called()  # Graceful synthetic shutdown must not trigger signals.
@@ -176,6 +204,28 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
         package_upload = next(command for command in commands if command[0] == 'scp' and command[-1].endswith(':packages'))  # Inspect the real local argv.
         self.assertTrue(package_upload[-2].endswith('packages with spaces'))  # Whitespace stays within one SCP source argument.
 
+    def test_guest_host_command_satisfies_the_real_package_smoke_parser(self):
+        _result, guest, _commands, logs, _events = self.run_vm()
+        host_command = next(argv for argv in guest if argv[2] == 'host')
+        arguments = smoke_linux_packages.parser().parse_args(host_command[2:])
+        self.assertEqual(arguments.audit_report, Path('/home/tester/repo/native-linux/native-audit.json'))
+        self.assertEqual(arguments.workspace, Path('/home/tester/repo/Cargo.toml'))
+        self.assertEqual(arguments.manifest, Path('/home/tester/repo/release/targets.toml'))
+        uploaded = json.loads(logs['vm-inputs-manifest.json'])
+        self.assertIn('/home/tester/repo/native-linux/native-audit.json', uploaded)
+        self.assertIn('/home/tester/repo/Cargo.toml', uploaded)
+        self.assertIn('/home/tester/repo/release/targets.toml', uploaded)
+        for source in smoke_linux_packages.animation_gate.SOURCE_FILES:
+            self.assertIn('/home/tester/repo/' + source, uploaded)
+
+    def test_software_acceleration_uses_a_real_qemu_guest_without_kvm_requirements(self):
+        result, _guest, _commands, _logs, _events = self.run_vm(accelerator='tcg')
+        self.assertEqual(result, 0)
+        qemu = self.last_qemu_command
+        self.assertEqual(qemu[qemu.index('-accel') + 1], 'tcg,thread=multi')
+        self.assertEqual(qemu[qemu.index('-cpu') + 1], 'max')
+        self.assertNotIn('-enable-kvm', qemu)
+
     def test_reordered_subset_preserves_host_request_order(self):  # Inspection filtering must not rewrite mandatory host coverage.
         result, guest, _commands, _logs, _events = self.run_vm('flatpak,deb')  # Exercise a nondefault mixed request.
         self.assertEqual(result, 0)  # Both requested formats qualified in the synthetic lane.
@@ -201,7 +251,11 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
                 self.assertEqual(events[-1]['state'], 'failed')  # The final emitted VM result agrees with the exit status.
 
     def test_every_required_upload_failure_stops_before_smoke(self):  # Metadata uploads are as mandatory as package and source copies.
-        for target in ('repo/release/scripts', 'repo/release/packaging', 'packages', 'repo/LICENSE', 'repo/Cargo.toml'):  # Exercise all five actual upload destinations.
+        targets = ('repo/release/scripts', 'repo/release/packaging', 'packages', 'repo/LICENSE',
+                   'repo/Cargo.toml', 'repo/release/targets.toml', 'repo/native-linux/native-audit.json')
+        animation_sources = tuple('repo/' + source for source in smoke_linux_packages.animation_gate.SOURCE_FILES
+                                  if not source.startswith('release/scripts/'))
+        for target in (*targets, *animation_sources):  # Every audited source member is an independently required upload.
             with self.subTest(target=target):  # A previous copy success must not hide the next failure.
                 result, guest, _commands, logs, _events = self.run_vm(upload_failure=target)  # Force one precise SCP failure.
                 self.assertEqual(result, 1)  # Missing inputs cannot qualify the VM.

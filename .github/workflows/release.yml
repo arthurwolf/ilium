@@ -169,7 +169,7 @@ jobs:
     - source
     - native
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: read
     strategy:
@@ -197,7 +197,7 @@ jobs:
     - name: Packaging toolchain
       run: |
         sudo apt-get update
-        sudo apt-get install -y bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 # Supply the helper launcher and package inspectors.
+        sudo apt-get install -y bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 qemu-system-x86 qemu-utils cloud-image-utils openssh-client # Supply native package inspectors and the disposable guest tools.
         command -v snap >/dev/null # Require the runner's existing Snap tooling before building or installing.
         command -v docker >/dev/null # Require native distribution-container coverage on this runner.
     - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
@@ -218,6 +218,12 @@ jobs:
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-host"
         python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+    - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
+      if: matrix.arch == 'x86_64'
+      run: |
+        set -o pipefail
+        mkdir -p "$RUNNER_TEMP/package-smoke-vm"
+        python release/packaging/linux/vm_smoke.py --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
     - name: Seal native Linux animation evidence
       run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "${{ matrix.rust_target }}" --tag "${{ needs.source.outputs.tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -235,6 +241,8 @@ jobs:
           ${{ runner.temp }}/package-smoke-inspect/
           ${{ runner.temp }}/package-smoke/
           ${{ runner.temp }}/package-smoke-host/
+          ${{ runner.temp }}/package-smoke-vm/
+          package-vm.jsonl
         if-no-files-found: warn
         retention-days: 30
   macos-packages:

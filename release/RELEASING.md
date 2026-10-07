@@ -287,9 +287,12 @@ output, and removal/absence readbacks. The workflow uploads inspection, containe
 and host diagnostics even when a gate fails. Those logs stay outside the exact
 five-packages-plus-receipt artifact inventory for each architecture.
 
-For additional x86_64 VM acceptance, use the supplied QEMU/KVM helper from an
-x86_64 Linux host with KVM, QEMU image/system tools, `cloud-localds` and SSH/SCP.
-It verifies the Ubuntu 24.04 amd64 image digest, boots a disposable overlay and
+For additional x86_64 VM acceptance, use the supplied QEMU helper from an
+x86_64 Linux host with QEMU image/system tools, `cloud-localds` and SSH/SCP.
+It defaults to KVM on hosts with hardware acceleration; `--accelerator tcg` runs
+the same guest under QEMU software emulation when nested KVM is unavailable.
+It verifies the Ubuntu 22.04 amd64 image digest, matching the declared x86_64
+Linux release baseline, boots a disposable overlay and
 runs the supported inspection subset plus every requested host format. Before
 copying an input, it requires the guest destination to be absent, including dangling
 symlinks. It then hashes every transferred source and package file inside the guest
@@ -304,12 +307,14 @@ above and a fresh `vm-work` path:
 python release/packaging/linux/vm_smoke.py --packages "$package_directory" --arch x86_64 --work "$verification_directory/vm-work" --log "$verification_directory/vm-log" --formats deb,appimage,snap,flatpak | tee "$verification_directory/vm.jsonl" # Run only on an x86_64 KVM host and preserve the real VM result under pipefail.
 ```
 
+The release workflow runs this guest gate for the x86_64 package row using QEMU
+TCG, so hosted-runner nested-KVM availability is not assumed. The VM result and
+guest transfer/smoke logs are retained in the Linux diagnostics artifact; the
+large downloaded base image and copy-on-write overlay stay outside that artifact.
 The supplied VM helper supports x86_64 only and does not run RPM host acceptance;
 RPM remains covered in the native distribution containers. An ARM64 VM requires
 its own native guest execution and retained evidence; x86_64 emulation or successful
-cross-architecture inspection does not substitute for it. The workflow invokes
-host smoke directly on both disposable native runners, rather than invoking the
-QEMU helper.
+cross-architecture inspection does not substitute for it.
 
 Passing portable fixtures establishes the gate's rejection behavior. Passing these
 native commands qualifies their exact supplied candidate bytes and environments;
