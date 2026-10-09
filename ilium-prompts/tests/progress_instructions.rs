@@ -48,3 +48,45 @@ fn lifecycle_rules_survive_the_rewrite() {
         assert!(text.contains(required), "missing {required}");
     }
 }
+
+#[test]
+fn agents_are_told_to_block_with_the_wait_commands_instead_of_polling() {
+    let text = instructions();
+    for required in [
+        "ilium progress set --command '<probe>' --interval-seconds <n> --wait",
+        "ilium progress wait <monitor_id>",
+        "--timeout-seconds",
+        "never start a second one",
+        "takes precedence over any general rule about sleep loops",
+        "MUST use `--wait`",
+    ] {
+        assert!(text.contains(required), "missing {required}");
+    }
+}
+
+#[test]
+fn every_wait_exit_status_is_named() {
+    let text = instructions();
+    for required in [
+        "0 done",
+        "3 task error",
+        "4 monitor failed",
+        "5 monitor replaced or cleared",
+        "6 `--timeout-seconds` elapsed",
+    ] {
+        assert!(text.contains(required), "missing {required}");
+    }
+}
+
+#[test]
+fn replacing_a_running_monitor_is_explained() {
+    let text = instructions();
+    for required in [
+        "`monitor-active`",
+        "`--replace`",
+        "one probe",
+        "may-also-arrive",
+    ] {
+        assert!(text.contains(required), "missing {required}");
+    }
+}

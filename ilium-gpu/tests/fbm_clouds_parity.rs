@@ -44,14 +44,19 @@ struct Metrics {
     dot_count: usize,
 }
 
-fn wait_for_probe() -> Option<std::sync::Arc<dyn ilium_ambient::gpu::GpuRunner>> {
-    ilium_gpu::start_probe();
+fn wait_for_probe(
+    resources: ilium_ambient::resources::AmbientResources,
+) -> Option<(
+    std::sync::Arc<dyn ilium_ambient::gpu::GpuRunner>,
+    ilium_gpu::GpuProbeOwner,
+)> {
+    let probe_owner = ilium_gpu::start_probe(resources)?;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match gpu_availability() {
             GpuAvailability::Ready { adapter } => {
                 println!("parity adapter: {adapter}");
-                return ilium_gpu::runner();
+                return ilium_gpu::runner().map(|runner| (runner, probe_owner));
             }
             GpuAvailability::Unavailable(reason)
                 if reason != ilium_ambient::gpu::GpuUnavailable::Checking =>
@@ -239,7 +244,8 @@ fn cases() -> Vec<Case> {
 
 #[test]
 fn gpu_fbm_clouds_match_the_software_scene() {
-    let Some(runner) = wait_for_probe() else {
+    let resources = ambient_fixture::ResourcesFixture::new().unwrap();
+    let Some((runner, _probe_owner)) = wait_for_probe(resources.resources.clone()) else {
         return;
     };
     let mut worst_fraction = 0.0f64;
@@ -346,7 +352,8 @@ fn ascii_of(rendered: &Rendered, brightness: f32) -> Vec<String> {
 #[test]
 #[ignore = "prints a picture for a human to compare"]
 fn ascii_side_by_side_software_and_gpu() {
-    let Some(runner) = wait_for_probe() else {
+    let resources = ambient_fixture::ResourcesFixture::new().unwrap();
+    let Some((runner, _probe_owner)) = wait_for_probe(resources.resources.clone()) else {
         return;
     };
     let case = Case {

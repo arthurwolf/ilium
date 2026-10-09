@@ -10,9 +10,9 @@ repository.workspace = true
 base64 = "0.22.1"
 cpal = "0.18.1"
 futures-util = "0.3.33"
-ilium-execution = { version = "0.1.0", path = "../ilium-execution" }
-ilium-logging = { version = "0.1.0", path = "../ilium-logging" }
-ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
+ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
+ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
+ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
 rustls = { version = "0.23.41", default-features = false, features = ["ring", "std"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive", "rc"] }

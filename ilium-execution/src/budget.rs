@@ -441,6 +441,11 @@ pub struct StorageAdmission {
     _debit: Debit,
 }
 impl StorageAdmission {
+    /// Number of resident worker bytes covered by this lease.
+    pub fn resident_bytes(&self) -> usize {
+        self._debit.amount[WORKER_BYTES]
+    }
+
     /// Whether this held allocation debits the exact supplied native root.
     /// Matching limits do not establish provenance. Inspecting never changes usage.
     pub fn shares_root(&self, quota: &QuotaGroup) -> bool {

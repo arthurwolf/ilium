@@ -53,6 +53,8 @@ pub enum VoiceError {
     Transport(#[source] tokio_tungstenite::tungstenite::Error),
     #[error("Realtime protocol payload was invalid: {0}")]
     Protocol(#[from] serde_json::Error),
+    #[error("Realtime provider event has {bytes} bytes; the limit is {limit}")]
+    ProviderEventTooLarge { bytes: usize, limit: usize },
     #[error("OpenAI rejected the Realtime session configuration: {0}")]
     SessionConfigurationRejected(String),
     #[error("OpenAI did not acknowledge the Realtime session configuration in time")]

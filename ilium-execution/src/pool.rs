@@ -1171,6 +1171,64 @@ mod retirement_failure_tests {
     use super::*;
     use crate::budget::{JobCost, QuotaLimits};
 
+    #[test]
+    fn disabled_lane_is_a_permanent_capability_refusal_not_queue_pressure() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 4,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: 1,
+            worker_bytes: 1024 * 1024,
+        });
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 4,
+                    priority: None,
+                    resident_bytes_per_thread: 4096,
+                },
+                io: disabled,
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 4,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .unwrap();
+
+        let refusal = client.try_reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: 1,
+                result_bytes: 1,
+            },
+        );
+
+        assert!(matches!(refusal, Err(RejectReason::InvalidCost)));
+
+        drop(client);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+    }
+
     struct DropSpy {
         quota: QuotaGroup,
         notice: std::sync::mpsc::Sender<(std::thread::ThreadId, usize)>,

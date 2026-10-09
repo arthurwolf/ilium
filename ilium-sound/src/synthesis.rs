@@ -13,6 +13,7 @@ pub const SAMPLE_RATE: u32 = 44_100;
 pub const MAX_DURATION_MS: u16 = 3_000;
 pub const MAX_PCM_SAMPLES: usize = SAMPLE_RATE as usize * MAX_DURATION_MS as usize / 1_000;
 pub const MAX_PREVIEW_COLUMNS: usize = 240;
+const CANCELLATION_POLL_SAMPLES: usize = 1_024;
 const MAX_AMPLITUDE: f64 = 0.8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -108,6 +109,13 @@ pub struct WaveformColumn {
 /// Returns mono signed 16-bit PCM. At 44.1 kHz the normalized duration is at
 /// most 132,300 samples (264,600 bytes), regardless of untrusted config input.
 pub fn render_pcm(design: &SoundDesign) -> Vec<i16> {
+    render_pcm_cancellable(design, || false).expect("unconditionally accepted synthesis")
+}
+
+fn render_pcm_cancellable(
+    design: &SoundDesign,
+    mut should_cancel: impl FnMut() -> bool,
+) -> Option<Vec<i16>> {
     let design = design.normalized();
     let frame_count = SAMPLE_RATE as usize * usize::from(design.duration_ms) / 1_000;
     let mut samples = Vec::with_capacity(frame_count);
@@ -122,6 +130,9 @@ pub fn render_pcm(design: &SoundDesign) -> Vec<i16> {
     let volume = MAX_AMPLITUDE * f64::from(design.volume_percent) / 100.0;
 
     for index in 0..frame_count {
+        if index & (CANCELLATION_POLL_SAMPLES - 1) == 0 && should_cancel() {
+            return None;
+        }
         let progress = index as f64 / (frame_count - 1) as f64;
         let time_seconds = index as f64 / f64::from(SAMPLE_RATE);
         let pitch_hz = f64::from(design.pitch_hz)
@@ -149,7 +160,7 @@ pub fn render_pcm(design: &SoundDesign) -> Vec<i16> {
         phase = (phase + pitch_hz / f64::from(SAMPLE_RATE)).fract();
         harmony_phase = (harmony_phase + pitch_hz * harmony_ratio / f64::from(SAMPLE_RATE)).fract();
     }
-    samples
+    Some(samples)
 }
 
 /// Encodes the same PCM as a standard 44-byte mono PCM RIFF/WAVE stream.
@@ -179,23 +190,36 @@ pub fn render_wav(design: &SoundDesign) -> Vec<u8> {
 /// waveform. A zero-width viewport returns no columns; hostile widths cap at
 /// 240 so resizing cannot allocate an unbounded preview.
 pub fn waveform_preview(design: &SoundDesign, columns: usize) -> Vec<WaveformColumn> {
+    try_waveform_preview(design, columns, || false)
+        .expect("unconditionally accepted waveform preview")
+}
+
+/// Computes a preview while checking cancellation every 1,024 PCM samples.
+/// Cancellation drops partial synthesis and never publishes partial columns.
+pub fn try_waveform_preview(
+    design: &SoundDesign,
+    columns: usize,
+    should_cancel: impl FnMut() -> bool,
+) -> Option<Vec<WaveformColumn>> {
     let columns = columns.min(MAX_PREVIEW_COLUMNS);
     if columns == 0 {
-        return Vec::new();
+        return Some(Vec::new());
     }
-    let pcm = render_pcm(design);
+    let pcm = render_pcm_cancellable(design, should_cancel)?;
     let columns = columns.min(pcm.len());
-    (0..columns)
-        .map(|index| {
-            let start = index * pcm.len() / columns;
-            let end = (index + 1) * pcm.len() / columns;
-            let segment = &pcm[start..end];
-            WaveformColumn {
-                min: *segment.iter().min().unwrap_or(&0),
-                max: *segment.iter().max().unwrap_or(&0),
-            }
-        })
-        .collect()
+    Some(
+        (0..columns)
+            .map(|index| {
+                let start = index * pcm.len() / columns;
+                let end = (index + 1) * pcm.len() / columns;
+                let segment = &pcm[start..end];
+                WaveformColumn {
+                    min: *segment.iter().min().unwrap_or(&0),
+                    max: *segment.iter().max().unwrap_or(&0),
+                }
+            })
+            .collect(),
+    )
 }
 
 fn wave_at(waveform: Waveform, phase: f64) -> f64 {
@@ -404,6 +428,39 @@ mod tests {
             waveform_preview(&design, usize::MAX).len(),
             MAX_PREVIEW_COLUMNS
         );
+    }
+
+    #[test]
+    fn preview_render_stops_when_cancellation_arrives_during_synthesis() {
+        let mut checks = 0;
+        let result = try_waveform_preview(&SoundDesign::default(), 17, || {
+            checks += 1;
+            checks == 3
+        });
+
+        assert!(
+            result.is_none(),
+            "cancelled synthesis must not publish columns"
+        );
+        assert_eq!(checks, 3, "cancellation should stop further sample work");
+    }
+
+    #[test]
+    fn cancellable_preview_matches_the_existing_waveform_renderer() {
+        let design = SoundDesign::default();
+        let pcm = render_pcm(&design);
+        let expected = (0..17)
+            .map(|index| {
+                let start = index * pcm.len() / 17;
+                let end = (index + 1) * pcm.len() / 17;
+                let samples = &pcm[start..end];
+                WaveformColumn {
+                    min: *samples.iter().min().expect("nonempty preview interval"),
+                    max: *samples.iter().max().expect("nonempty preview interval"),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(try_waveform_preview(&design, 17, || false), Some(expected));
     }
 
     #[test]

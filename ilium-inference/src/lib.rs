@@ -59,6 +59,11 @@ impl InferenceProviderKind {
         Self::Anthropic,
         Self::OpenRouter,
     ];
+    /// True when the model catalog is scoped to one endpoint and API key, so
+    /// discovery results must be invalidated when either changes.
+    pub const fn has_keyed_model_catalog(self) -> bool {
+        matches!(self, Self::OpenAi | Self::Anthropic)
+    }
     pub const fn label(self) -> &'static str {
         match self {
             Self::KiloGateway => "Kilo Gateway",
@@ -810,20 +815,39 @@ fn openai_chat_payload(
 /// Completion URL construction is deliberately not changed here, preserving
 /// existing custom-compatible and OpenRouter completion behavior.
 fn openai_model_catalog_url(base_url: &str) -> Result<url::Url, InferenceError> {
+    api_model_catalog_url(base_url, DEFAULT_OPENAI_URL, "/models", "OpenAI-compatible")
+}
+
+/// Anthropic's base URL is the host only; the catalog lives under `/v1`.
+/// `limit=1000` is the documented maximum page size, so one request covers
+/// the catalog without following `after_id` pagination.
+fn anthropic_model_catalog_url(base_url: &str) -> Result<url::Url, InferenceError> {
+    let mut url =
+        api_model_catalog_url(base_url, DEFAULT_ANTHROPIC_URL, "/v1/models", "Anthropic")?;
+    url.set_query(Some("limit=1000"));
+    Ok(url)
+}
+
+fn api_model_catalog_url(
+    base_url: &str,
+    default_base_url: &str,
+    catalog_path_suffix: &str,
+    provider_label: &str,
+) -> Result<url::Url, InferenceError> {
     let invalid_url = || {
-        InferenceError::Configuration(
-            "OpenAI-compatible API URL must be an absolute HTTP or HTTPS URL".to_string(),
-        )
+        InferenceError::Configuration(format!(
+            "{provider_label} API URL must be an absolute HTTP or HTTPS URL"
+        ))
     };
 
-    let mut url = url::Url::parse(resolve_base_url(base_url, DEFAULT_OPENAI_URL))
-        .map_err(|_| invalid_url())?;
+    let mut url =
+        url::Url::parse(resolve_base_url(base_url, default_base_url)).map_err(|_| invalid_url())?;
 
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err(invalid_url());
     }
 
-    let path = format!("{}/models", url.path().trim_end_matches('/'));
+    let path = format!("{}{catalog_path_suffix}", url.path().trim_end_matches('/'));
     url.set_path(&path);
     url.set_fragment(None);
     Ok(url)
@@ -845,32 +869,46 @@ pub fn model_catalog_endpoint(settings: &InferenceSettings) -> Option<String> {
             &settings.ollama.base_url,
             "api/tags",
         ))),
-        InferenceProviderKind::OpenAi => {
-            let mut url = match openai_model_catalog_url(&settings.openai.base_url) {
-                Ok(url) => url,
-                Err(_) => return Some("<invalid OpenAI-compatible API URL>".to_string()),
-            };
-
-            let had_query = url.query().is_some();
-            let _ = url.set_username("");
-            let _ = url.set_password(None);
-            url.set_query(None);
-            url.set_fragment(None);
-
-            let mut display = url.to_string();
-            if had_query {
-                display.push_str("?<redacted>");
-            }
-
-            // Also suppress a literal configured key accidentally placed in a
-            // custom URL path. Never put the key itself into presentation state.
-            if !settings.openai.api_key.is_empty() {
-                display = display.replace(&settings.openai.api_key, "<redacted>");
-            }
-            Some(display)
-        }
-        InferenceProviderKind::Anthropic | InferenceProviderKind::OpenRouter => None,
+        InferenceProviderKind::OpenAi => Some(redacted_catalog_display(
+            openai_model_catalog_url(&settings.openai.base_url),
+            &settings.openai.api_key,
+            "<invalid OpenAI-compatible API URL>",
+        )),
+        InferenceProviderKind::Anthropic => Some(redacted_catalog_display(
+            anthropic_model_catalog_url(&settings.anthropic.base_url),
+            &settings.anthropic.api_key,
+            "<invalid Anthropic API URL>",
+        )),
+        InferenceProviderKind::OpenRouter => None,
     }
+}
+
+fn redacted_catalog_display(
+    url: Result<url::Url, InferenceError>,
+    api_key: &str,
+    invalid_display: &str,
+) -> String {
+    let Ok(mut url) = url else {
+        return invalid_display.to_string();
+    };
+
+    let had_query = url.query().is_some();
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+
+    let mut display = url.to_string();
+    if had_query {
+        display.push_str("?<redacted>");
+    }
+
+    // Also suppress a literal configured key accidentally placed in a custom
+    // URL path. Never put the key itself into presentation state.
+    if !api_key.is_empty() {
+        display = display.replace(api_key, "<redacted>");
+    }
+    display
 }
 
 /// Extract exact IDs, not guessed chat capabilities or output limits.
@@ -943,33 +981,64 @@ fn list_openai_models(settings: &ApiKeyProviderSettings) -> Result<Vec<String>, 
     )?;
 
     let url = openai_model_catalog_url(&settings.base_url)?;
-    let authorization = format!("Bearer {}", settings.api_key);
-    let mut response = agent()
-        .get(url.as_str())
-        .header("Authorization", &authorization)
-        .call()
-        .map_err(|_| {
-            InferenceError::Transport(
-                "OpenAI-compatible model discovery request failed; check the endpoint and connection"
-                    .to_string(),
-            )
-        })?;
+    list_authenticated_models(
+        "OpenAI-compatible",
+        &url,
+        &[("Authorization", format!("Bearer {}", settings.api_key))],
+        &settings.api_key,
+    )
+}
+
+fn list_anthropic_models(settings: &ApiKeyProviderSettings) -> Result<Vec<String>, InferenceError> {
+    require(
+        &settings.api_key,
+        "Enter an API key before loading Anthropic models",
+    )?;
+
+    let url = anthropic_model_catalog_url(&settings.base_url)?;
+    list_authenticated_models(
+        "Anthropic",
+        &url,
+        &[
+            ("x-api-key", settings.api_key.clone()),
+            ("anthropic-version", "2023-06-01".to_string()),
+        ],
+        &settings.api_key,
+    )
+}
+
+/// Performs one authenticated GET and validates the returned catalog. Both
+/// OpenAI-compatible and Anthropic catalogs are `{"data":[{"id":...}]}`.
+fn list_authenticated_models(
+    provider_label: &str,
+    url: &url::Url,
+    auth_headers: &[(&str, String)],
+    api_key: &str,
+) -> Result<Vec<String>, InferenceError> {
+    let mut request = agent().get(url.as_str());
+    for (name, value) in auth_headers {
+        request = request.header(*name, value.as_str());
+    }
+    let mut response = request.call().map_err(|_| {
+        InferenceError::Transport(format!(
+            "{provider_label} model discovery request failed; check the endpoint and connection"
+        ))
+    })?;
 
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         // Do not read, render, or log an authentication-error body: an endpoint
         // can reflect the supplied credential in either text or JSON.
         let message = match status {
-            401 => "Authentication failed; check the OpenAI-compatible API key",
-            403 => "Model discovery access denied; check the key and project permissions",
-            404 => "Model catalog endpoint not found; check the API base URL",
-            429 => "Model discovery was rate limited; retry later",
-            _ => "Model discovery request failed; response body withheld",
+            401 => format!("Authentication failed; check the {provider_label} API key"),
+            403 => {
+                "Model discovery access denied; check the key and project permissions".to_string()
+            }
+            404 => "Model catalog endpoint not found; check the API base URL".to_string(),
+            429 => "Model discovery was rate limited; retry later".to_string(),
+            _ => "Model discovery request failed; response body withheld".to_string(),
         };
-        return Err(InferenceError::Http {
-            status,
-            message: message.to_string(),
-        });
+        return Err(InferenceError::Http { status, message });
     }
 
     let body = response
@@ -990,10 +1059,7 @@ fn list_openai_models(settings: &ApiKeyProviderSettings) -> Result<Vec<String>, 
 
     // Successful bodies are untrusted too. DiagnosticProvider logs returned
     // model IDs, so reject credential reflection before returning the list.
-    if models
-        .iter()
-        .any(|model| model.contains(settings.api_key.as_str()))
-    {
+    if models.iter().any(|model| model.contains(api_key)) {
         return Err(InferenceError::InvalidResponse(
             "Model catalog reflected credential material; response withheld".to_string(),
         ));
@@ -1118,6 +1184,9 @@ impl InferenceProvider for AnthropicProvider {
     fn selected_model(&self) -> Option<&str> {
         Some(&self.0.model)
     }
+    fn list_models(&self) -> Result<Vec<String>, InferenceError> {
+        list_anthropic_models(&self.0)
+    }
     fn complete(&self, request: &InferenceRequest) -> Result<InferenceResponse, InferenceError> {
         require(
             &self.0.api_key,
@@ -1136,7 +1205,7 @@ impl InferenceProvider for AnthropicProvider {
                 ("x-api-key", self.0.api_key.as_str().to_string()),
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
-            serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0}),
+            anthropic_messages_payload(&self.0.model, request, false),
             request.timeout,
         )?;
         anthropic_response_text(&response)
@@ -1157,7 +1226,7 @@ impl InferenceProvider for AnthropicProvider {
                 ("x-api-key", self.0.api_key.clone()),
                 ("anthropic-version", "2023-06-01".to_string()),
             ],
-            serde_json::json!({"model":self.0.model,"system":request.system_prompt,"max_tokens":request.max_tokens,"messages":[{"role":"user","content":request.user_prompt}],"temperature":0.0,"stream":true}),
+            anthropic_messages_payload(&self.0.model, request, true),
             request.timeout,
             StreamProtocol::AnthropicSse,
             on_event,
@@ -1501,6 +1570,25 @@ fn openai_compatible_response_text(
         )));
     }
     response_text(value, &["choices", "0", "message", "content"])
+}
+
+/// Builds a Messages API request. `temperature` is deliberately absent:
+/// claude-haiku-5-5 rejects it with a 400 error, so the provider default applies.
+fn anthropic_messages_payload(
+    model: &str,
+    request: &InferenceRequest,
+    stream: bool,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "model": model,
+        "system": request.system_prompt,
+        "max_tokens": request.max_tokens,
+        "messages": [{"role": "user", "content": request.user_prompt}]
+    });
+    if stream {
+        body["stream"] = serde_json::Value::Bool(true);
+    }
+    body
 }
 
 fn anthropic_response_text(value: &serde_json::Value) -> Result<InferenceResponse, InferenceError> {
@@ -1878,6 +1966,64 @@ mod tests {
 
         settings.selected_provider = InferenceProviderKind::OpenRouter;
         assert_eq!(model_catalog_endpoint(&settings), None);
+    }
+
+    #[test]
+    fn anthropic_payloads_omit_temperature_for_both_paths() {
+        let request = InferenceRequest {
+            system_prompt: "Return JSON only.".to_string(),
+            user_prompt: "user fixture".to_string(),
+            max_tokens: 512,
+            timeout: None,
+        };
+
+        for stream in [false, true] {
+            let body = anthropic_messages_payload("claude-haiku-5-5", &request, stream);
+            assert!(body.get("temperature").is_none(), "stream={stream}");
+            assert_eq!(body["model"], "claude-haiku-5-5");
+            assert_eq!(body["system"], "Return JSON only.");
+            assert_eq!(body["max_tokens"], 512);
+            assert_eq!(body["messages"][0]["content"], "user fixture");
+            assert_eq!(body.get("stream").is_some(), stream);
+        }
+    }
+
+    #[test]
+    fn anthropic_catalog_endpoint_is_v1_models_and_redacted() {
+        let mut settings = InferenceSettings {
+            selected_provider: InferenceProviderKind::Anthropic,
+            ..InferenceSettings::default()
+        };
+        assert_eq!(
+            model_catalog_endpoint(&settings).as_deref(),
+            Some("https://api.anthropic.com/v1/models?<redacted>")
+        );
+
+        settings.anthropic.base_url = "https://alice:password@proxy.example/anthropic".to_string();
+        settings.anthropic.api_key = OPENAI_CATALOG_FIXTURE_KEY.to_string();
+        let endpoint = model_catalog_endpoint(&settings).unwrap();
+        assert_eq!(
+            endpoint,
+            "https://proxy.example/anthropic/v1/models?<redacted>"
+        );
+        assert!(!endpoint.contains("alice") && !endpoint.contains("password"));
+    }
+
+    #[test]
+    fn anthropic_catalog_parses_as_shared_model_list() {
+        let response = serde_json::json!({
+            "data": [
+                {"type": "model", "id": "claude-haiku-5-5", "display_name": "Haiku"},
+                {"type": "model", "id": "claude-sonnet-5-5"}
+            ],
+            "has_more": false,
+            "first_id": "claude-haiku-5-5",
+            "last_id": "claude-sonnet-5-5"
+        });
+        assert_eq!(
+            parse_openai_model_catalog(&response).unwrap(),
+            ["claude-haiku-5-5", "claude-sonnet-5-5"]
+        );
     }
 
     #[test]

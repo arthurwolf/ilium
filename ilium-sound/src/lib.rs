@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod synthesis;
 pub use synthesis::{
-    render_pcm, render_wav, waveform_preview, SoundDesign, Waveform, WaveformColumn,
+    render_pcm, render_wav, try_waveform_preview, waveform_preview, SoundDesign, Waveform,
+    WaveformColumn,
 };
 
 /// The attributed GNOME chirping sample is embedded so detached playback
@@ -553,6 +554,13 @@ fn play_wav_bytes(bytes: &[u8]) -> Result<(), SoundError> {
     let path = directory.path().join("sound.wav");
     std::fs::write(&path, bytes).map_err(SoundError::TemporaryWav)?;
     play_file(&path)
+}
+
+/// Plays a previously rendered WAV without performing synthesis on the
+/// playback thread. Callers should obtain bytes from [`render_wav`] so the
+/// duration and allocation remain within the generated-sound limits.
+pub fn play_prepared_wav(bytes: &[u8]) -> Result<(), SoundError> {
+    play_wav_bytes(bytes)
 }
 
 fn collect_sounds(

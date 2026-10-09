@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{header, HeaderValue};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -29,6 +30,9 @@ const SESSION_RENEWAL_INTERVAL: Duration = Duration::from_secs(55 * 60);
 const SESSION_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(15);
 const SOCKET_CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_REMEMBERED_TOOL_CALLS: usize = 1_024;
+/// Bound both a provider message and the expanded JSON value built from it.
+/// Audio deltas are separately limited to 256 KiB of PCM before encoding.
+const MAX_PROVIDER_EVENT_BYTES: usize = 8 * 1024 * 1024;
 
 type RealtimeSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -747,7 +751,13 @@ async fn connect(config: &VoiceRuntimeConfig) -> Result<RealtimeSocket, VoiceErr
     request
         .headers_mut()
         .insert(header::AUTHORIZATION, authorization);
-    let (socket, response) = match tokio_tungstenite::connect_async(request).await {
+    let (socket, response) = match tokio_tungstenite::connect_async_with_config(
+        request,
+        Some(realtime_socket_config()),
+        false,
+    )
+    .await
+    {
         Ok(result) => result,
         Err(error) => {
             let diagnostic_error = diagnostic_websocket_connect_error(&error);
@@ -770,6 +780,13 @@ async fn connect(config: &VoiceRuntimeConfig) -> Result<RealtimeSocket, VoiceErr
         "HTTP WebSocket upgrade completed"
     );
     Ok(socket)
+}
+
+fn realtime_socket_config() -> WebSocketConfig {
+    let mut config = WebSocketConfig::default();
+    config.max_message_size = Some(MAX_PROVIDER_EVENT_BYTES);
+    config.max_frame_size = Some(MAX_PROVIDER_EVENT_BYTES);
+    config
 }
 
 fn diagnostic_websocket_connect_error(error: &tokio_tungstenite::tungstenite::Error) -> Value {
@@ -1038,6 +1055,12 @@ async fn send_event(
 /// replaced with byte/character counts so diagnostics retain sequencing and
 /// correlation metadata without producing multi-gigabyte text logs.
 fn parse_provider_event(text: &str) -> Result<Value, VoiceError> {
+    if text.len() > MAX_PROVIDER_EVENT_BYTES {
+        return Err(VoiceError::ProviderEventTooLarge {
+            bytes: text.len(),
+            limit: MAX_PROVIDER_EVENT_BYTES,
+        });
+    }
     let event: Value = serde_json::from_str(text).map_err(|error| {
         tracing::error!(
             raw_provider_text_bytes = text.len(),
@@ -1127,6 +1150,30 @@ mod tests {
 
     use super::*;
     use crate::{ReasoningEffort, VadEagerness, VoiceModel, VoiceName};
+
+    #[test]
+    fn provider_event_json_expansion_has_a_hard_input_limit() {
+        let padding = "x".repeat(MAX_PROVIDER_EVENT_BYTES);
+        let text = format!("{{\"type\":\"test\",\"padding\":\"{padding}\"}}");
+        assert!(matches!(
+            parse_provider_event(&text),
+            Err(VoiceError::ProviderEventTooLarge { bytes, limit })
+                if bytes == text.len() && limit == MAX_PROVIDER_EVENT_BYTES
+        ));
+    }
+
+    #[test]
+    fn provider_event_parser_accepts_messages_within_the_transport_limit() {
+        let event = parse_provider_event(r#"{"type":"test"}"#).unwrap();
+        assert_eq!(event["type"], "test");
+    }
+
+    #[test]
+    fn realtime_transport_caps_both_frames_and_reassembled_messages() {
+        let config = realtime_socket_config();
+        assert_eq!(config.max_message_size, Some(MAX_PROVIDER_EVENT_BYTES));
+        assert_eq!(config.max_frame_size, Some(MAX_PROVIDER_EVENT_BYTES));
+    }
 
     #[tokio::test]
     async fn connected_actor_shutdown_cancels_actual_full_audio_admission_and_joins_dsp() {
