@@ -174,7 +174,7 @@ impl Job for EditorWrite {
             EditorWriteSnapshot::FrozenScreen { bytes, .. } => {
                 Self::frozen_screen_cost(self.path.capacity(), bytes.capacity())?
             }
-        }
+        };
         let writer_thread = std::thread::current().id();
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;

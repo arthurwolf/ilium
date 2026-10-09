@@ -564,6 +564,10 @@ fn editor_snapshot_is_captured_on_cpu_and_durably_read_back_before_ack() {
 fn completion_kind(completion: &super::editors::EditorCompletion) -> &'static str {
     match completion {
         super::editors::EditorCompletion::FrozenScreenSaved { .. } => "frozen screen saved",
+        super::editors::EditorCompletion::FrozenScreenLoaded { .. } => "frozen screen loaded",
+        super::editors::EditorCompletion::FrozenScreenLoadFailed { .. } => {
+            "frozen screen load failed"
+        }
         super::editors::EditorCompletion::Loaded { .. } => "loaded",
         super::editors::EditorCompletion::LoadLost { .. } => "load lost",
         super::editors::EditorCompletion::Saved { .. } => "saved",

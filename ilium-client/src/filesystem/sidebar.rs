@@ -75,10 +75,20 @@ fn visit_directory_entries(
     directory: &std::path::Path,
     mut visit: impl FnMut(std::fs::DirEntry) -> Result<(), String>,
 ) -> Result<(), String> {
-    for entry in entries.into_iter().filter_map(Result::ok) {
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", directory.display()))?;
         visit(entry)?;
     }
     Ok(())
+}
+
+fn classify_directory_entry(
+    file_type: std::io::Result<std::fs::FileType>,
+    path: &std::path::Path,
+) -> Result<bool, String> {
+    file_type
+        .map(|kind| kind.is_dir())
+        .map_err(|error| format!("{}: {error}", path.display()))
 }
 
 impl Job for SidebarRead {
@@ -114,7 +124,7 @@ impl Job for SidebarRead {
                         return Ok(());
                     }
                     let path = entry.path();
-                    let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+                    let is_directory = classify_directory_entry(entry.file_type(), &path)?;
                     let mut identifier_path = ancestor.clone();
                     let id = crate::tree_ui::virtual_folder_node_id(root, &path);
                     identifier_path.push(id);
@@ -303,6 +313,18 @@ mod capacity_tests {
             opened,
         };
         assert!(request.checked().is_err());
+    }
+
+    #[test]
+    fn a_file_type_error_rejects_directory_entry_classification() {
+        let path = std::path::Path::new("/sidebar/inaccessible-entry");
+        let error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected");
+
+        let result = classify_directory_entry(Err(error), path);
+
+        let message = result.expect_err("failed metadata must not become a regular file");
+        assert!(message.contains(&path.display().to_string()));
+        assert!(message.contains("injected"));
     }
 
     #[test]
