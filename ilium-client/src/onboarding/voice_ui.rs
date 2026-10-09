@@ -751,7 +751,8 @@ mod tests {
         let settings = VoiceSettings::default();
         let state = VoiceDemoState {
             assistant_transcript: "A long transcript keeps the reading panel scrollable. "
-                .repeat(48),
+                .repeat(48)
+                .into(),
             ..VoiceDemoState::default()
         };
         let ui = VoiceUiState::default();

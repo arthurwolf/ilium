@@ -139,6 +139,11 @@ impl Worker {
         Arc::clone(&self.stop)
     }
 
+    /// Observe physical worker exit without consuming the cancellation owner.
+    pub fn join_observer(&self) -> Option<ilium_platform::owned_worker::WorkerTicket> {
+        self.owner.as_ref().map(OwnedWorker::ticket)
+    }
+
     /// Request cancellation without waiting, while returning a ticket that
     /// lets the lifecycle owner prove the original OS thread actually exited.
     pub fn request_stop(mut self) -> Option<WorkerRetirement> {

@@ -4553,6 +4553,7 @@ mod tests {
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            attention_progress_reports: false,
             agent_tree_model_icons: true,
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::Spinner,

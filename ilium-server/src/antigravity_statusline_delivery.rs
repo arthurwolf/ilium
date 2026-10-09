@@ -128,13 +128,13 @@ pub(crate) async fn update_running_panes(
     let (completion_tx, mut completion_rx) =
         tokio::sync::mpsc::channel::<Result<(), String>>(expected_completions.max(1));
     for (pane_id, input, agent_generation, process) in pending {
-        let state = Arc::clone(state);
+        let task_state = Arc::clone(state);
         let command = command.clone();
         let action = action.clone();
         let completion_tx = completion_tx.clone();
         let task = tokio::spawn(async move {
             let result = deliver_when_ready(
-                &state,
+                &task_state,
                 pane_id,
                 generation,
                 agent_generation,
@@ -273,10 +273,11 @@ async fn deliver_when_ready(
                             "Antigravity pane closed before status-line delivery".to_owned()
                         );
                     };
+                    let input_cancel_generation = *runtime.agent_input_cancel.borrow();
                     AgentInputInvocation {
                         generation: runtime.agent_generation,
                         process: runtime.agent_process_key.clone(),
-                        input_cancel_generation: *runtime.agent_input_cancel.borrow(),
+                        input_cancel_generation,
                     }
                 };
                 handlers::write_key_input_unlocked_with_screen_marker(

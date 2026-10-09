@@ -113,7 +113,7 @@ fn digest_installed_file(path: &Path) -> Result<String> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{digest:x}"))
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 struct AdmittedArchive {
@@ -243,23 +243,23 @@ mod archive_admission_tests {
 
     #[test]
     fn installed_archive_admission_precedes_read_and_covers_buffer_lifetime() {
-        let quota = quota(4);
+        let small_quota = quota(4);
         let reads = Arc::new(AtomicUsize::new(0));
-        let result = read_admitted_archive(ReadCounter(Arc::clone(&reads)), 4, &quota);
+        let result = read_admitted_archive(ReadCounter(Arc::clone(&reads)), 4, &small_quota);
         assert!(
             result.is_err(),
             "size-plus-one reservation should exceed quota"
         );
         assert_eq!(reads.load(Ordering::SeqCst), 0);
-        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert_eq!(small_quota.snapshot().worker_bytes, 0);
 
-        let quota = quota(5);
-        let admitted = read_admitted_archive(io::Cursor::new(b"pack"), 4, &quota)
+        let exact_quota = quota(5);
+        let admitted = read_admitted_archive(io::Cursor::new(b"pack"), 4, &exact_quota)
             .expect("archive read is admitted");
         assert_eq!(admitted.bytes.as_slice(), b"pack");
-        assert_eq!(quota.snapshot().worker_bytes, 5);
+        assert_eq!(exact_quota.snapshot().worker_bytes, 5);
         drop(admitted);
-        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert_eq!(exact_quota.snapshot().worker_bytes, 0);
     }
 
     #[test]

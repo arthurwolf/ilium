@@ -344,6 +344,7 @@ impl RemoteCompactionJob {
             Self::Compact {
                 request,
                 inference_settings,
+                ..
             } => COMPACTION_WORKING_BYTES
                 .saturating_add(request.transcript_path.as_os_str().len())
                 .saturating_add(request.session_id.len())
@@ -590,11 +591,14 @@ mod tests {
             "a completed transcript rewrite remains successful even if a final progress event was dropped"
         );
         assert_eq!(
-            annotate_progress_overflow(Err("compaction cancelled".to_string()), true),
+            annotate_progress_overflow::<()>(Err("compaction cancelled".to_string()), true),
             Err("Remote compaction stopped because its UI event queue was full".to_string())
         );
         assert_eq!(
-            annotate_progress_overflow(Err("transcript verification failed".to_string()), true),
+            annotate_progress_overflow::<()>(
+                Err("transcript verification failed".to_string()),
+                true
+            ),
             Err("transcript verification failed".to_string()),
             "progress overload must not hide the actual domain failure"
         );

@@ -1009,8 +1009,10 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Inference => {
-            let warning =
-                inference_warning_line_count(&app.inference_settings, area.width.saturating_sub(1));
+            let warning = inference_warning_line_count(
+                &app.inference_settings,
+                layout.content_area.width.saturating_sub(1),
+            ) as u16;
             let test_log_offset = inference_operation_log_lines(
                 &app.inference_settings,
                 &app.inference_test_state,
@@ -7063,6 +7065,11 @@ mod tests {
                     "{tab:?} must render its semantic icon {}: {row:?}",
                     tab_icon(*tab)
                 );
+                assert_ne!(
+                    buffer[(4, y)].symbol(),
+                    " ",
+                    "{tab:?} label must begin in the same cell column after its icon"
+                );
                 assert_eq!(
                     tab_at_for_active(area, Position::new(4, y), active),
                     Some(*tab)
@@ -7088,6 +7095,10 @@ mod tests {
             .map(|x| buffer[(x, area.bottom() - 1)].symbol())
             .collect();
         assert!(last_row.contains("Setup"));
+        assert!(
+            last_row.contains(tab_icon(SettingsTab::Setup)),
+            "the active tab's semantic icon must remain visible beside its label"
+        );
         assert_eq!(
             tab_at_for_active(
                 area,
@@ -8602,7 +8613,7 @@ mod tests {
             assert!(view
                 .row_lines
                 .iter()
-                .all(|(_, line)| *line < view.lines.len()));
+                .all(|(_, line)| usize::from(*line) < view.lines.len()));
         }
     }
 

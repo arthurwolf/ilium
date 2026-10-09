@@ -5732,7 +5732,7 @@ mod text_trigger_mouse_tests {
             overflowing_sizes += 1;
             assert_eq!(
                 target,
-                SettingsTab::ALL.last().copied(),
+                SettingsTab::ALL.last().copied().unwrap(),
                 "the bottom navigation track targets the final tab at {width}x{height}"
             );
             app.mode = Mode::Settings(state);
@@ -5797,7 +5797,10 @@ mod text_trigger_mouse_tests {
             layout.content_scrollbar_area.x,
             layout.content_scrollbar_area.y + 1,
         );
-        app.mode = Mode::Settings(initial.clone());
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        });
         handle_mouse_event(
             &mut app,
             MouseEvent {
@@ -5813,7 +5816,10 @@ mod text_trigger_mouse_tests {
         assert_eq!(after_wheel.scroll, 3);
 
         let bottom = layout.content_scrollbar_area.bottom() - 1;
-        app.mode = Mode::Settings(initial);
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        });
         handle_mouse_event(
             &mut app,
             MouseEvent {

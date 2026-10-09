@@ -470,7 +470,8 @@ pub fn render(
                 .into_iter()
                 .map(|line| {
                     Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
-                }),
+                })
+                .collect::<Vec<_>>(),
         ),
         layout.hint_area,
     );

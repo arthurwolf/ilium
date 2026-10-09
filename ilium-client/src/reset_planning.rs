@@ -980,7 +980,7 @@ mod tests {
         assert!(fetch.await.expect_err("future was aborted").is_cancelled());
         execution.request_shutdown(ShutdownMode::Cancel);
         let report = execution
-            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
             .expect("cancelled fetch physically exits on its owner bank");
         assert_eq!(report.remaining_workers, 0);
     }

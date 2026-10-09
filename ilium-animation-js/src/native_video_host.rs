@@ -14,7 +14,7 @@ use crate::{
     native_storage::{RetainedBytes, SelectedStorage, StorageCancellation},
     native_video::{
         BrokerVideoResource, NativeVideo, VerifiedVideoInput, VideoDecoderFactory, VideoGeometry,
-        VideoLimits, VideoPhase, VideoPixelFormat, VideoStatus,
+        VideoInfo, VideoLimits, VideoPhase, VideoPixelFormat, VideoStatus,
     },
     native_video_decoder::{FfmpegDecoderFactory, FfmpegLimits},
     permissions::{HttpMethod, OperationNeed},

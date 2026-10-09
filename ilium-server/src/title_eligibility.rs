@@ -323,7 +323,7 @@ pub(crate) async fn collect_title_evidence(
         };
         let job_home = home_dir.clone();
         let result = execution
-            .run_reserved(reservation, move |context| {
+            .run_reserved(reservation, move |context: ilium_execution::JobContext| {
                 let mut collected = Vec::with_capacity(batch.len());
                 for candidate in batch {
                     if context.stop_requested() {

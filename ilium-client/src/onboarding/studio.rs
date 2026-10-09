@@ -244,12 +244,23 @@ impl SoundControl {
     }
 }
 
-#[derive(Debug)]
 pub struct SoundStudio {
     pub(crate) identity: std::sync::Arc<()>,
     preview_revision: u64,
     pub draft: SoundSettings,
     preview: Option<Retained<Vec<WaveformColumn>>>,
+}
+
+impl std::fmt::Debug for SoundStudio {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SoundStudio")
+            .field("identity", &self.identity)
+            .field("preview_revision", &self.preview_revision)
+            .field("draft", &self.draft)
+            .field("has_preview", &self.preview.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug)]

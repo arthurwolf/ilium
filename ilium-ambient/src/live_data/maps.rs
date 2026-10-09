@@ -1,7 +1,7 @@
 //! Public observed geography: cached coastlines and truthful live markers.
 use super::{
     fetch,
-    fleet_cache::{FleetFeed, FleetMeta, FleetSource, FleetView}, // Shared source cache and custody.
+    fleet_cache::{FleetBatch, FleetFeed, FleetMeta, FleetSource, FleetView}, // Shared source cache and custody.
     fleet_layer::FleetLayer, // Scene-owned preparation orchestration.
     map,
     map_markers::{marker_center, MarkerKey}, // Reuse reviewed pure geometry.
@@ -394,6 +394,28 @@ impl LiveMapScene {
                     .set_data(Arc::clone(data), snapshot.state.received_ms);
             }
         } // Batch owner carries the retained-storage charge into marker preparation.
+    }
+    #[cfg(test)]
+    fn accept_positions(&mut self, snapshot: Arc<Snapshot<Vec<Position>>>) {
+        // Keep snapshot-shaped fixtures readable while exercising the current fleet transition.
+        if snapshot.data.is_none() && snapshot.state.received_ms.is_none() {
+            if let Some(error) = &snapshot.state.error {
+                self.state.failed(error.clone());
+            }
+            return;
+        }
+        let data = snapshot.data.as_ref().map(|positions| {
+            Arc::new(FleetBatch {
+                positions: Arc::clone(positions),
+                meta: FleetMeta::default(),
+                _storage: None,
+            })
+        });
+        self.accept_fleet(Arc::new(FleetView {
+            data,
+            state: snapshot.state.clone(),
+            generation: 0,
+        }));
     }
     fn accept_quakes(&mut self, snapshot: Arc<Snapshot<Vec<Earthquake>>>) {
         // A newly started poller has not received anything yet. Preserve the

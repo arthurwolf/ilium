@@ -596,6 +596,7 @@ impl SpectrumScene {
         scene
     }
 
+    #[cfg(test)]
     fn with_factory(settings: &SpectrumSettings, factory: SourceFactory) -> Self {
         Self::with_factory_and_resources(settings, factory, crate::resources::test_resources())
     }

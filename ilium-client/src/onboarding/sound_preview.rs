@@ -253,7 +253,7 @@ impl SoundStudioPreview {
         self.failure.take().and_then(|(failed, issue)| {
             self.desired
                 .as_ref()
-                .filter(|desired| same_key(failed, desired))
+                .filter(|desired| same_key(&failed, desired))
                 .map(|_| issue)
         })
     }
