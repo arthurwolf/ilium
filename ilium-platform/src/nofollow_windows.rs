@@ -42,16 +42,18 @@ use windows_sys::Wdk::Storage::FileSystem::{
 };
 use windows_sys::Win32::Foundation::{
     RtlNtStatusToDosError, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
-    HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+    HANDLE, INVALID_HANDLE_VALUE, NTSTATUS, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FileDispositionInfo, FileDispositionInfoEx, FileIdInfo, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE,
+    FileDispositionInfo, FileDispositionInfoEx, FileIdInfo, FileRenameInfo,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, ReOpenFile,
+    SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE,
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-    FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO, FILE_DISPOSITION_INFO_EX,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-    FILE_GENERIC_WRITE, FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_DELETE_CHILD, FILE_DISPOSITION_FLAG_DELETE,
+    FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    FILE_DISPOSITION_INFO, FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_ID_INFO,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
@@ -119,6 +121,54 @@ impl NoFollowDirectory {
         Ok(Self { file })
     }
 
+    /// Opens the physical parent from this already pinned directory handle.
+    /// The fixed `..` component never comes from a path label or caller input.
+    pub(crate) fn open_parent_directory(&self) -> io::Result<Self> {
+        let name = [u16::from(b'.'), u16::from(b'.')];
+        let byte_length =
+            u16::try_from(std::mem::size_of_val(&name)).map_err(|_| invalid_name())?;
+        let object_name = UNICODE_STRING {
+            Length: byte_length,
+            MaximumLength: byte_length,
+            Buffer: name.as_ptr().cast_mut(),
+        };
+        let attributes = OBJECT_ATTRIBUTES {
+            Length: std::mem::size_of::<OBJECT_ATTRIBUTES>() as u32,
+            RootDirectory: self.file.as_raw_handle() as HANDLE,
+            ObjectName: &object_name,
+            Attributes: OBJ_CASE_INSENSITIVE,
+            SecurityDescriptor: std::ptr::null(),
+            SecurityQualityOfService: std::ptr::null(),
+        };
+        let mut handle: HANDLE = std::ptr::null_mut();
+        let mut status_block = IO_STATUS_BLOCK::default();
+        // SAFETY: the relative name is the fixed two-character parent entry;
+        // the parent handle and all pointed-to structures remain alive through
+        // NtCreateFile, which returns a new owned handle on success.
+        let status = unsafe {
+            NtCreateFile(
+                &mut handle,
+                DIRECTORY_ACCESS,
+                &attributes,
+                &mut status_block,
+                std::ptr::null(),
+                FILE_ATTRIBUTE_NORMAL,
+                SHARE_ALL,
+                FILE_OPEN,
+                FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(nt_status_error(status));
+        }
+        // SAFETY: successful NtCreateFile transferred one fresh handle here.
+        let file = unsafe { File::from_raw_handle(handle as RawHandle) };
+        require_plain_entry(&file, true)?;
+        Ok(Self { file })
+    }
+
     /// Create a child directory, returning whether this call created it.
     /// Callers should record a newly created path before opening the child,
     /// since opening can itself fail after mkdir succeeds.
@@ -154,6 +204,17 @@ impl NoFollowDirectory {
         )
     }
 
+    /// Creates a regular file with the delete right required to rename its
+    /// already-open handle into another name under a pinned directory.
+    pub(crate) fn create_regular_for_rename(&self, name: &OsStr) -> io::Result<File> {
+        self.open_relative(
+            name,
+            CREATE_FILE_ACCESS | DELETE,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE,
+        )
+    }
+
     /// Remove a regular child only when it still names the supplied open file.
     ///
     /// Unlike the Unix compare-then-unlink, the identity check and the delete
@@ -170,6 +231,91 @@ impl NoFollowDirectory {
             return Err(io::Error::other("regular child changed before removal"));
         }
         mark_for_deletion(&child)
+    }
+
+    /// Atomically renames a plain file to one child name relative to this
+    /// pinned directory. `replace_existing = false` preserves create-new
+    /// semantics; the kernel rejects an occupied destination.
+    pub(crate) fn rename_regular(
+        &self,
+        source: &File,
+        name: &OsStr,
+        replace_existing: bool,
+    ) -> io::Result<()> {
+        require_plain_entry(source, false)?;
+        let destination_directory = self.reopen_child_mutation_handle()?;
+        let name = checked_entry_name(name)?;
+        let name_bytes = name
+            .len()
+            .checked_mul(std::mem::size_of::<u16>())
+            .and_then(|length| u32::try_from(length).ok())
+            .ok_or_else(invalid_name)?;
+        let mut nul_terminated_name = name;
+        nul_terminated_name.push(0);
+        let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+        let required_bytes = name_offset
+            .checked_add(nul_terminated_name.len() * std::mem::size_of::<u16>())
+            .ok_or_else(invalid_name)?;
+        let allocation_bytes = required_bytes.max(std::mem::size_of::<FILE_RENAME_INFO>());
+        let mut buffer = vec![0_u64; allocation_bytes.div_ceil(std::mem::size_of::<u64>())];
+        let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        // SAFETY: the u64-backed allocation has FILE_RENAME_INFO alignment and
+        // enough bytes for the fixed record plus the complete NUL-terminated
+        // UTF-16 leaf. All fields remain live through SetFileInformationByHandle.
+        unsafe {
+            std::ptr::write(
+                information,
+                FILE_RENAME_INFO {
+                    Anonymous: windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO_0 {
+                        ReplaceIfExists: replace_existing,
+                    },
+                    RootDirectory: destination_directory.as_raw_handle() as HANDLE,
+                    FileNameLength: name_bytes,
+                    FileName: [0],
+                },
+            );
+            std::ptr::copy_nonoverlapping(
+                nul_terminated_name.as_ptr(),
+                information.cast::<u8>().add(name_offset).cast::<u16>(),
+                nul_terminated_name.len(),
+            );
+        }
+        // SAFETY: the handle is a pinned plain file and the buffer matches
+        // FILE_RENAME_INFO with a directory-relative, validated single leaf.
+        let succeeded = unsafe {
+            SetFileInformationByHandle(
+                source.as_raw_handle() as HANDLE,
+                FileRenameInfo,
+                information.cast(),
+                allocation_bytes as u32,
+            )
+        };
+        if succeeded == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn reopen_child_mutation_handle(&self) -> io::Result<File> {
+        let handle = unsafe {
+            ReOpenFile(
+                self.file.as_raw_handle() as HANDLE,
+                DIRECTORY_ACCESS | FILE_ADD_FILE | FILE_DELETE_CHILD,
+                SHARE_ALL,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let directory = unsafe { File::from_raw_handle(handle as RawHandle) };
+        require_plain_entry(&directory, true)?;
+        if file_identity(&directory)? != file_identity(&self.file)? {
+            return Err(io::Error::other(
+                "pinned directory changed while reopening mutation handle",
+            ));
+        }
+        Ok(directory)
     }
 
     /// `(volume, file)` folded into two words for the generation fence.
@@ -314,6 +460,48 @@ fn file_identity(file: &File) -> io::Result<FileIdentity> {
         volume: u64::from(classic.dwVolumeSerialNumber),
         file_id,
     })
+}
+
+pub(crate) fn file_generation(file: &File) -> io::Result<(u64, u64)> {
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("file generation requires a regular file"));
+    }
+    let identity = file_identity(file)?;
+    let (low, high) = identity.file_id.split_at(8);
+    let low = u64::from_le_bytes(low.try_into().expect("split at eight bytes"));
+    let high = u64::from_le_bytes(high.try_into().expect("remaining eight bytes"));
+    Ok((identity.volume, low ^ high.rotate_left(32)))
+}
+
+/// Reopens this already pinned regular file as a distinct read handle. The
+/// returned handle has its own file pointer, so `seek_read` cannot alter the
+/// selected handle's position. Identity is checked across the reopen.
+pub(crate) fn reopen_regular_for_read(file: &File) -> io::Result<File> {
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("read handle is not a regular file"));
+    }
+    let expected = file_generation(file)?;
+    // SAFETY: `file` is a live handle to an already validated regular file.
+    // ReOpenFile returns a new owned handle to that same filesystem object.
+    let handle = unsafe {
+        ReOpenFile(
+            file.as_raw_handle() as HANDLE,
+            FILE_GENERIC_READ,
+            SHARE_ALL,
+            0,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: success returned a new handle owned by this process.
+    let reopened = unsafe { File::from_raw_handle(handle as RawHandle) };
+    if file_generation(&reopened)? != expected {
+        return Err(io::Error::other(
+            "selected file changed during read-handle reopen",
+        ));
+    }
+    Ok(reopened)
 }
 
 /// Unlinks the file `file` names, immediately and even if read-only.

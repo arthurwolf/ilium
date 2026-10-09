@@ -1,11 +1,12 @@
 //! Process-wide, dynamically switchable file diagnostics for ilium.
 //!
-//! The detached server owns one timestamped path for its complete lifetime;
-//! every attached client receives that same path from the CLI and appends to
-//! it. A single tracing subscriber per process routes existing and new
-//! `tracing` events through this boundary. Disabling logging closes the file
-//! at its ordered acknowledgement boundary and turns writes into a sink.
-//! File I/O is performed by one bounded process-owned OS thread.
+//! The detached server owns one timestamped path for its complete lifetime.
+//! Attached clients forward bounded event frames to the server, which admits
+//! them to the one ordered file-writer queue. A single tracing subscriber per
+//! process routes existing and new `tracing` events through this boundary.
+//! Disabling logging closes the file at its ordered acknowledgement boundary
+//! and turns writes into a sink. File I/O is performed by one bounded
+//! process-owned OS thread.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,9 @@ use ilium_platform::owned_worker::WorkerTicket;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 
+mod relay;
 mod service;
+pub use relay::{LogRelayEndpoint, LogRelayServer};
 pub use service::{
     logger_control_bytes, logger_storage_bytes, LoggingHealth, LoggingReceipt, LoggingShutdown,
     LoggingShutdownDeadline, LoggingShutdownReport, LOGGER_STACK_BYTES, MAX_EVENT_BYTES,
@@ -140,24 +143,47 @@ pub enum LoggingError {
     },
     #[error("failed to install the process tracing subscriber: {0}")]
     InstallSubscriber(String),
+    #[error("log relay failed: {0}")]
+    Relay(String),
 }
 
-/// Process owner; the file itself is exclusively owned by the service thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LogDestination {
+    LocalFile,
+    Relay(LogRelayEndpoint),
+}
+
+/// Process owner; the local file or relay stream is exclusively owned by the service thread.
 struct LoggerState {
     quota: QuotaGroup,
     path: PathBuf,
+    destination: LogDestination,
+    process_role: &'static str,
     enabled: Arc<AtomicBool>,
     service: service::Service,
 }
 impl LoggerState {
-    fn new_admitted(path: &Path, quota: &QuotaGroup) -> Result<Self, LoggingError> {
+    fn new_admitted(
+        path: &Path,
+        destination: LogDestination,
+        process_role: &'static str,
+        quota: &QuotaGroup,
+    ) -> Result<Self, LoggingError> {
         let admission = service::Service::prepare(quota, path)?;
         let path = path.to_owned();
         let enabled = Arc::new(AtomicBool::new(false));
-        let service = admission.start(path.clone(), Arc::clone(&enabled), None, || {})?;
+        let service = admission.start(
+            path.clone(),
+            destination.clone(),
+            Arc::clone(&enabled),
+            None,
+            || {},
+        )?;
         Ok(Self {
             quota: quota.clone(),
             path,
+            destination,
+            process_role,
             enabled,
             service,
         })
@@ -165,7 +191,7 @@ impl LoggerState {
     #[cfg(test)]
     fn new(path: PathBuf) -> Result<Self, LoggingError> {
         let quota = service::fixture_quota(&path)?;
-        Self::new_admitted(&path, &quota)
+        Self::new_admitted(&path, LogDestination::LocalFile, "test", &quota)
     }
     // Startup/off-loop only; the same deadline covers control admission and
     // its acknowledgement. Interactive callers retain and poll receipts.
@@ -288,6 +314,40 @@ pub fn initialize(
     process_role: &'static str,
     quota: &QuotaGroup,
 ) -> Result<(), LoggingError> {
+    initialize_with_destination(
+        path,
+        LogDestination::LocalFile,
+        enabled,
+        process_role,
+        quota,
+    )
+}
+
+/// Installs this process's tracing subscriber and forwards events to the
+/// detached server's single diagnostics-file writer for this session.
+pub fn initialize_forwarded(
+    path: impl AsRef<Path>,
+    enabled: bool,
+    process_role: &'static str,
+    quota: &QuotaGroup,
+) -> Result<(), LoggingError> {
+    let path = path.as_ref();
+    initialize_with_destination(
+        path,
+        LogDestination::Relay(LogRelayEndpoint::for_log_path(path)),
+        enabled,
+        process_role,
+        quota,
+    )
+}
+
+fn initialize_with_destination(
+    path: impl AsRef<Path>,
+    destination: LogDestination,
+    enabled: bool,
+    process_role: &'static str,
+    quota: &QuotaGroup,
+) -> Result<(), LoggingError> {
     let path = path.as_ref();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut attempt = loop {
@@ -306,6 +366,9 @@ pub fn initialize(
         if state.path.as_path() != path {
             return Err(LoggingError::AlreadyInitialized);
         }
+        if state.destination != destination {
+            return Err(LoggingError::AlreadyInitialized);
+        }
         if !state.quota.shares_root(quota) {
             return Err(LoggingError::DifferentQuota);
         }
@@ -319,7 +382,12 @@ pub fn initialize(
         return Ok(());
     }
 
-    let state = Arc::new(LoggerState::new_admitted(path, quota)?);
+    let state = Arc::new(LoggerState::new_admitted(
+        path,
+        destination,
+        process_role,
+        quota,
+    )?);
     attempt.failed_worker = Some(RetiringLogger {
         ticket: state.service.ticket(),
         quota: quota.clone(),
@@ -447,6 +515,16 @@ pub fn is_enabled() -> bool {
 /// Returns the exact file selected for this server lifetime.
 pub fn log_path() -> Option<&'static Path> {
     PROCESS_LOGGER.get().map(|logger| logger.path.as_path())
+}
+
+/// Starts the session's single log-ingress owner. Must run inside the server's
+/// already-admitted async runtime before it publishes readiness to clients.
+pub async fn start_log_relay(log_path: &Path) -> Result<LogRelayServer, LoggingError> {
+    let state = PROCESS_LOGGER
+        .get()
+        .cloned()
+        .ok_or(LoggingError::NotInitialized)?;
+    LogRelayServer::start(state, LogRelayEndpoint::for_log_path(log_path)).await
 }
 
 /// Removes URL user-info, every query value, and any fragment before an

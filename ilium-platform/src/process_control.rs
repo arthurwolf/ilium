@@ -24,6 +24,9 @@ use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::time::Instant;
 
+#[cfg(target_os = "linux")]
+const MAX_PROC_SNAPSHOT_PROCESSES: usize = 32_768;
+
 /// Observe an exclusively owned direct child without releasing its numeric identity.
 /// The caller must not poll Child::wait/try_wait until process-group signalling is done.
 #[cfg(target_os = "linux")]
@@ -51,14 +54,8 @@ pub fn wait_for_group_exit(process_id: u32, timeout: Duration) -> io::Result<()>
     let process_id = checked_process_id(process_id)?;
     let deadline = Instant::now() + timeout;
     loop {
-        // SAFETY: signal zero performs an existence/permission probe only.
-        let result = unsafe { libc::kill(-process_id, 0) };
-        if result != 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                return Ok(());
-            }
-            return Err(error);
+        if !process_group_exists(process_id as u32)? {
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -68,6 +65,22 @@ pub fn wait_for_group_exit(process_id: u32, timeout: Duration) -> io::Result<()>
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// Check whether a process group still has members without waiting or signalling it.
+#[cfg(target_os = "linux")]
+pub fn process_group_exists(process_id: u32) -> io::Result<bool> {
+    let process_id = checked_process_id(process_id)?;
+    // SAFETY: signal zero performs an existence/permission probe only.
+    let result = unsafe { libc::kill(-process_id, 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(false);
+    }
+    Err(error)
 }
 
 /// An advisory cross-process lease shared by cooperating Ilium workspace operations.
@@ -156,6 +169,8 @@ pub struct PtyProcessIdentity {
     #[cfg(target_os = "linux")]
     start_ticks: u64,
     #[cfg(target_os = "linux")]
+    session_id: u32,
+    #[cfg(target_os = "linux")]
     pidfd: std::os::fd::OwnedFd,
 }
 
@@ -183,6 +198,7 @@ pub fn capture_pty_process(process_id: u32) -> io::Result<PtyProcessIdentity> {
     Ok(PtyProcessIdentity {
         process_id,
         start_ticks: identity.start_ticks,
+        session_id: identity.session_id,
         pidfd,
     })
 }
@@ -212,22 +228,41 @@ pub fn terminate_pty_process_tree(
         ));
     }
     let deadline = Instant::now() + timeout;
-    let current_root = read_linux_process(root.process_id)?;
-    if current_root.start_ticks != root.start_ticks
-        || matches!(current_root.state, 'Z' | 'X')
-        || !linux_pidfd_is_live(&root.pidfd)?
+    let current_root = match read_linux_process(root.process_id) {
+        Ok(current) if current.start_ticks != root.start_ticks => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "PTY leader identity is no longer current",
+            ));
+        }
+        Ok(current) if current.session_id != root.session_id => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "PTY leader session identity changed",
+            ));
+        }
+        Ok(current) => Some(current),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let root_is_live = match current_root {
+        Some(current) if !matches!(current.state, 'Z' | 'X') => linux_pidfd_is_live(&root.pidfd)?,
+        Some(_) => false,
+        None if !linux_pidfd_is_live(&root.pidfd)? => false,
+        None => {
+            return Err(io::Error::other(
+                "PTY leader is missing from procfs while its captured pidfd remains live",
+            ));
+        }
+    };
+    let mut targets = linux_pty_lineage(root, deadline)?;
+    if root_is_live
+        && !targets.iter().any(|process| {
+            process.process_id == root.process_id
+                && process.start_ticks == root.start_ticks
+                && !matches!(process.state, 'Z' | 'X')
+        })
     {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "PTY leader identity is no longer live",
-        ));
-    }
-    let mut targets = linux_pty_lineage(root.process_id)?;
-    if !targets.iter().any(|process| {
-        process.process_id == root.process_id
-            && process.start_ticks == root.start_ticks
-            && !matches!(process.state, 'Z' | 'X')
-    }) {
         return Err(io::Error::other("PTY leader was not in procfs snapshot"));
     }
     // Capture descendants before signalling the leader. Once it exits they
@@ -254,21 +289,19 @@ pub fn terminate_pty_process_tree(
         }
         if !any_target_live {
             // Surviving session members may have forked during the first scan.
-            let remaining = linux_pty_lineage(root.process_id)?;
-            if remaining.iter().all(|process| process.state == 'Z') {
+            let remaining = linux_pty_lineage(root, deadline)?;
+            if remaining
+                .iter()
+                .all(|process| matches!(process.state, 'Z' | 'X'))
+            {
                 return Ok(PtyTerminationProof {
                     signalled_processes,
                 });
             }
-            if !linux_identity_is_live(LinuxProcess {
-                start_ticks: root.start_ticks,
-                ..current_root
-            })? {
-                return Err(io::Error::other(
-                    "PTY leader exited before all descendants were captured",
-                ));
-            }
-            for target in remaining.iter().filter(|process| process.state != 'Z') {
+            for target in remaining
+                .iter()
+                .filter(|process| !matches!(process.state, 'Z' | 'X'))
+            {
                 if signal_linux_identity(*target, libc::SIGKILL)? {
                     signalled_processes += 1;
                 }
@@ -301,6 +334,17 @@ pub fn terminate_pty_process_tree(
 /// deletion gate, not a best-effort status display.
 #[cfg(target_os = "linux")]
 pub fn processes_using_directory(root: &Path) -> io::Result<Vec<u32>> {
+    processes_using_directory_bounded(root, usize::MAX)
+}
+
+/// Lists same-user processes below `root`, refusing once the result would
+/// exceed `maximum_users`. Destructive callers use this to reserve a known
+/// upper bound for the retained process evidence before scanning.
+#[cfg(target_os = "linux")]
+pub fn processes_using_directory_bounded(
+    root: &Path,
+    maximum_users: usize,
+) -> io::Result<Vec<u32>> {
     use std::os::unix::fs::MetadataExt;
     let root = std::fs::canonicalize(root)?;
     let own_uid = unsafe { libc::geteuid() };
@@ -329,9 +373,8 @@ pub fn processes_using_directory(root: &Path) -> io::Result<Vec<u32>> {
         if metadata.uid() != own_uid {
             continue;
         }
-        match std::fs::read_link(entry.path().join("cwd")) {
-            Ok(cwd) if cwd.starts_with(&root) => users.push(process_id),
-            Ok(_) => {}
+        let cwd_matches = match std::fs::read_link(entry.path().join("cwd")) {
+            Ok(cwd) => cwd.starts_with(&root),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 // A vanished proc entry is normal; an existing live process
                 // with an unreadable cwd is not proof that the path is free.
@@ -345,6 +388,7 @@ pub fn processes_using_directory(root: &Path) -> io::Result<Vec<u32>> {
                     }
                     Err(error) => return Err(error),
                 }
+                false
             }
             Err(error) => {
                 return Err(io::Error::new(
@@ -352,9 +396,10 @@ pub fn processes_using_directory(root: &Path) -> io::Result<Vec<u32>> {
                     format!("cannot inspect cwd of process {process_id}: {error}"),
                 ))
             }
-        }
-        if linux_process_has_worktree_fd(process_id, &root, deadline)? {
-            users.push(process_id);
+        };
+        let has_worktree_fd = linux_process_has_worktree_fd(process_id, &root, deadline)?;
+        if cwd_matches || has_worktree_fd {
+            push_bounded_process_user(&mut users, process_id, maximum_users)?;
         }
     }
     users.sort_unstable();
@@ -362,11 +407,48 @@ pub fn processes_using_directory(root: &Path) -> io::Result<Vec<u32>> {
     Ok(users)
 }
 
+#[cfg(target_os = "linux")]
+fn push_bounded_process_user(
+    users: &mut Vec<u32>,
+    process_id: u32,
+    maximum_users: usize,
+) -> io::Result<()> {
+    push_bounded_item(users, process_id, maximum_users, "process-use result")
+}
+
+#[cfg(target_os = "linux")]
+fn push_bounded_item<T>(
+    items: &mut Vec<T>,
+    item: T,
+    maximum_items: usize,
+    description: &str,
+) -> io::Result<()> {
+    if items.len() >= maximum_items {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!("{description} exceeds its admitted limit"),
+        ));
+    }
+    items.push(item);
+    Ok(())
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn processes_using_directory(_root: &Path) -> io::Result<Vec<u32>> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "process cwd proof requires Linux procfs",
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn processes_using_directory_bounded(
+    _root: &Path,
+    _maximum_users: usize,
+) -> io::Result<Vec<u32>> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "worktree process inspection requires Linux procfs",
     ))
 }
 
@@ -459,9 +541,21 @@ fn parse_linux_stat(process_id: u32, stat: &str) -> io::Result<LinuxProcess> {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_pty_lineage(root_process_id: u32) -> io::Result<Vec<LinuxProcess>> {
+/// Resolves a bounded `/proc` snapshot before signalling any captured process.
+/// Overload or deadline expiry refuses termination rather than acting on a
+/// partial process graph.
+fn linux_pty_lineage(
+    root: &PtyProcessIdentity,
+    deadline: Instant,
+) -> io::Result<Vec<LinuxProcess>> {
     let mut processes = Vec::new();
     for entry in std::fs::read_dir("/proc")? {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "PTY process snapshot exceeded its deadline",
+            ));
+        }
         let entry = entry?;
         let Some(process_id) = entry
             .file_name()
@@ -471,7 +565,12 @@ fn linux_pty_lineage(root_process_id: u32) -> io::Result<Vec<LinuxProcess>> {
             continue;
         };
         match read_linux_process(process_id) {
-            Ok(process) => processes.push(process),
+            Ok(process) => push_bounded_item(
+                &mut processes,
+                process,
+                MAX_PROC_SNAPSHOT_PROCESSES,
+                "PTY process snapshot",
+            )?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return Err(error),
             Err(error) => return Err(error),
@@ -479,19 +578,40 @@ fn linux_pty_lineage(root_process_id: u32) -> io::Result<Vec<LinuxProcess>> {
     }
     let mut selected: std::collections::HashSet<u32> = processes
         .iter()
-        .filter(|process| process.session_id == root_process_id)
+        .filter(|process| {
+            process.session_id == root.session_id
+                || (process.process_id == root.process_id
+                    && process.start_ticks == root.start_ticks)
+        })
         .map(|process| process.process_id)
         .collect();
-    selected.insert(root_process_id);
-    loop {
-        let old_size = selected.len();
-        for process in &processes {
-            if selected.contains(&process.parent_id) {
-                selected.insert(process.process_id);
-            }
+    let mut children = std::collections::HashMap::<u32, Vec<u32>>::new();
+    for process in &processes {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "PTY process lineage exceeded its deadline",
+            ));
         }
-        if selected.len() == old_size {
-            break;
+        children
+            .entry(process.parent_id)
+            .or_default()
+            .push(process.process_id);
+    }
+    let mut frontier = selected.iter().copied().collect::<Vec<_>>();
+    while let Some(parent_id) = frontier.pop() {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "PTY process lineage exceeded its deadline",
+            ));
+        }
+        if let Some(child_processes) = children.get(&parent_id) {
+            for child_process_id in child_processes {
+                if selected.insert(*child_process_id) {
+                    frontier.push(*child_process_id);
+                }
+            }
         }
     }
     Ok(processes
@@ -1111,6 +1231,78 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    struct ProcessIdentityGuard(LinuxProcess);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for ProcessIdentityGuard {
+        fn drop(&mut self) {
+            if linux_identity_is_live(self.0).unwrap_or(false) {
+                let _ = signal_linux_identity(self.0, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pty_descendants_are_stopped_after_the_captured_leader_exits() {
+        use std::io::BufRead;
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 60 & printf '%s\\n' \"$!\"; wait")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        // SAFETY: setsid is the only operation in this pre-exec hook, and it
+        // prepares the isolated process session whose surviving child is tested.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+        let mut leader = command.spawn().expect("spawn isolated session leader");
+        let leader_id = leader.id();
+        let identity = capture_pty_process(leader_id).expect("capture session leader");
+        let mut output = String::new();
+        std::io::BufReader::new(leader.stdout.take().expect("captured stdout"))
+            .read_line(&mut output)
+            .expect("read descendant process ID");
+        let descendant_id = output
+            .trim()
+            .parse::<u32>()
+            .expect("shell prints its sleep child ID");
+        let descendant = read_linux_process(descendant_id).expect("read surviving child identity");
+        let descendant_guard = ProcessIdentityGuard(descendant);
+        assert_eq!(descendant.session_id, leader_id);
+
+        leader.kill().expect("stop only the session leader");
+        leader.wait().expect("reap session leader");
+
+        let proof = terminate_pty_process_tree(&identity, Duration::from_secs(2))
+            .expect("terminate descendants after the captured leader exits");
+        assert!(proof.signalled_processes >= 1);
+        assert!(!linux_identity_is_live(descendant_guard.0).expect("check child liveness"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_use_evidence_refuses_results_over_the_admitted_limit() {
+        let mut users = Vec::new();
+        push_bounded_process_user(&mut users, 11, 1).expect("first process fits");
+
+        let error = push_bounded_process_user(&mut users, 12, 1)
+            .expect_err("second process exceeds the reserved result bound");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(users, [11]);
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn directory_use_scan_has_component_boundary() {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -1312,5 +1504,22 @@ mod tests {
         guard.terminate().unwrap();
         assert_eq!(child.wait().unwrap().code(), Some(17));
         wait_for_group_exit(process_id, Duration::from_secs(3)).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_group_existence_probe_observes_without_waiting() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 30"]);
+        prepare_process_tree(&mut command);
+        let mut child = command.spawn().unwrap();
+        let process_id = child.id();
+        let mut guard = ProcessTreeGuard::attach(process_id).unwrap();
+
+        assert!(process_group_exists(process_id).unwrap());
+        guard.terminate().unwrap();
+        child.wait().unwrap();
+        wait_for_group_exit(process_id, Duration::from_secs(3)).unwrap();
+        assert!(!process_group_exists(process_id).unwrap());
     }
 }

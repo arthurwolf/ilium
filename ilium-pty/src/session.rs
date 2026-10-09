@@ -337,6 +337,27 @@ pub struct PtyOutputReplay {
     pub is_complete: bool,
 }
 
+/// Exact size and sequence of a replay before its bytes are copied. A caller
+/// can reserve byte capacity using this value, then call
+/// [`PtySession::output_replay_if_unchanged`] to avoid cloning stale history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PtyOutputReplayEstimate {
+    pub through_sequence: u64,
+    pub first_sequence: Option<u64>,
+    pub byte_len: usize,
+    pub is_complete: bool,
+}
+
+/// Size and sequence for a replay or contiguous output delta before copying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PtyOutputRecoveryEstimate {
+    Delta {
+        through_sequence: u64,
+        byte_len: usize,
+    },
+    Replay(PtyOutputReplayEstimate),
+}
+
 /// Minimal repair for one downstream consumer that last received
 /// `after_sequence`. A retained contiguous tail can be appended directly;
 /// only a consumer older than the journal's retained window needs a reset
@@ -391,6 +412,15 @@ impl OutputJournal {
         chunk
     }
 
+    fn replay_estimate(&self) -> PtyOutputReplayEstimate {
+        PtyOutputReplayEstimate {
+            through_sequence: self.next_sequence,
+            first_sequence: self.chunks.front().map(|chunk| chunk.sequence),
+            byte_len: self.retained_bytes + usize::from(!self.is_complete) * 3,
+            is_complete: self.is_complete,
+        }
+    }
+
     fn replay(&self) -> PtyOutputReplay {
         // A retained tail can begin halfway through an escape sequence or
         // depend on a mode established before the byte cap. Reset the client
@@ -410,6 +440,105 @@ impl OutputJournal {
             bytes,
             is_complete: self.is_complete,
         }
+    }
+
+    /// Copies the largest retained replay prefix that ends at a PTY read
+    /// boundary and fits within `max_bytes`. A truncated journal includes its
+    /// parser reset in that budget so a consumer can safely render the tail.
+    fn replay_prefix(&self, max_bytes: usize) -> Option<PtyOutputReplay> {
+        self.replay_prefix_through(max_bytes, self.next_sequence)
+    }
+
+    fn replay_prefix_through(
+        &self,
+        max_bytes: usize,
+        through_sequence: u64,
+    ) -> Option<PtyOutputReplay> {
+        if through_sequence > self.next_sequence {
+            return None;
+        }
+        let reset_prefix = (!self.is_complete).then_some(b"\x1bc".as_slice());
+        let reset_len = reset_prefix.map_or(0, <[u8]>::len);
+        if max_bytes < reset_len {
+            return None;
+        }
+
+        let mut bytes = Vec::with_capacity(max_bytes.min(self.retained_bytes + reset_len));
+        if let Some(prefix) = reset_prefix {
+            bytes.extend_from_slice(prefix);
+        }
+
+        let mut last_sequence = None;
+        for chunk in self
+            .chunks
+            .iter()
+            .take_while(|chunk| chunk.sequence <= through_sequence)
+        {
+            if bytes.len().saturating_add(chunk.bytes.len()) > max_bytes {
+                break;
+            }
+            bytes.extend_from_slice(&chunk.bytes);
+            last_sequence = Some(chunk.sequence);
+        }
+
+        last_sequence.map(|through_sequence| PtyOutputReplay {
+            through_sequence,
+            bytes,
+            is_complete: self.is_complete,
+        })
+    }
+
+    fn replay_if_unchanged(&self, expected: PtyOutputReplayEstimate) -> Option<PtyOutputReplay> {
+        (self.replay_estimate() == expected).then(|| self.replay())
+    }
+
+    fn replay_through_if_retained(
+        &self,
+        expected: PtyOutputReplayEstimate,
+    ) -> Option<PtyOutputReplay> {
+        if expected.through_sequence > self.next_sequence
+            || (expected.is_complete && !self.is_complete)
+        {
+            return None;
+        }
+        if let (Some(expected_first), Some(current_first)) = (
+            expected.first_sequence,
+            self.chunks.front().map(|chunk| chunk.sequence),
+        ) {
+            if current_first > expected_first {
+                return None;
+            }
+        } else if expected.first_sequence.is_some() {
+            return None;
+        }
+
+        let retained_bytes: usize = self
+            .chunks
+            .iter()
+            .take_while(|chunk| chunk.sequence <= expected.through_sequence)
+            .map(|chunk| chunk.bytes.len())
+            .sum();
+        let reset_prefix = (!expected.is_complete).then_some(b"\x1bc".as_slice());
+        let expected_len = retained_bytes + reset_prefix.map_or(0, |prefix| prefix.len());
+        if expected_len != expected.byte_len {
+            return None;
+        }
+        let mut bytes = Vec::with_capacity(expected_len);
+        if let Some(prefix) = reset_prefix {
+            bytes.extend_from_slice(prefix);
+        }
+        for chunk in self
+            .chunks
+            .iter()
+            .take_while(|chunk| chunk.sequence <= expected.through_sequence)
+        {
+            bytes.extend_from_slice(&chunk.bytes);
+        }
+        Some(PtyOutputReplay {
+            through_sequence: expected.through_sequence,
+            bytes,
+            is_complete: expected.is_complete,
+        })
     }
 
     /// Returns only output newer than `after_sequence` when every missing
@@ -447,6 +576,130 @@ impl OutputJournal {
             sequence: self.next_sequence,
             bytes: Arc::from(bytes),
         }))
+    }
+
+    /// Returns one bounded replay or contiguous delta without splitting a
+    /// PTY read. Repeated calls from the returned sequence drain the same
+    /// retained journal progressively instead of building one large frame.
+    fn recovery_prefix_after(
+        &self,
+        after_sequence: u64,
+        max_bytes: usize,
+    ) -> Option<PtyOutputRecovery> {
+        self.recovery_prefix_through(after_sequence, self.next_sequence, max_bytes)
+    }
+
+    fn recovery_prefix_through(
+        &self,
+        after_sequence: u64,
+        through_sequence: u64,
+        max_bytes: usize,
+    ) -> Option<PtyOutputRecovery> {
+        if through_sequence > self.next_sequence || through_sequence <= after_sequence {
+            return None;
+        }
+        if after_sequence >= self.next_sequence || max_bytes == 0 {
+            return None;
+        }
+
+        let first_retained_sequence = self
+            .chunks
+            .front()
+            .map(|chunk| chunk.sequence)
+            .unwrap_or_else(|| self.next_sequence.saturating_add(1));
+        if after_sequence.saturating_add(1) < first_retained_sequence {
+            return self
+                .replay_prefix_through(max_bytes, through_sequence)
+                .map(PtyOutputRecovery::Replay);
+        }
+
+        let mut bytes = Vec::with_capacity(max_bytes.min(self.retained_bytes));
+        let mut last_sequence = None;
+        for chunk in self
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.sequence > after_sequence && chunk.sequence <= through_sequence)
+        {
+            if bytes.len().saturating_add(chunk.bytes.len()) > max_bytes {
+                break;
+            }
+            bytes.extend_from_slice(&chunk.bytes);
+            last_sequence = Some(chunk.sequence);
+        }
+
+        last_sequence.map(|sequence| {
+            PtyOutputRecovery::Delta(PtyOutputChunk {
+                sequence,
+                bytes: Arc::from(bytes),
+            })
+        })
+    }
+
+    fn recovery_estimate_after(&self, after_sequence: u64) -> Option<PtyOutputRecoveryEstimate> {
+        if after_sequence >= self.next_sequence {
+            return None;
+        }
+        let first_retained_sequence = self
+            .chunks
+            .front()
+            .map(|chunk| chunk.sequence)
+            .unwrap_or_else(|| self.next_sequence.saturating_add(1));
+        if after_sequence.saturating_add(1) < first_retained_sequence {
+            return Some(PtyOutputRecoveryEstimate::Replay(self.replay_estimate()));
+        }
+        let byte_len = self
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.sequence > after_sequence)
+            .map(|chunk| chunk.bytes.len())
+            .sum();
+        Some(PtyOutputRecoveryEstimate::Delta {
+            through_sequence: self.next_sequence,
+            byte_len,
+        })
+    }
+
+    fn recovery_if_unchanged(
+        &self,
+        after_sequence: u64,
+        expected: PtyOutputRecoveryEstimate,
+    ) -> Option<PtyOutputRecovery> {
+        match expected {
+            PtyOutputRecoveryEstimate::Replay(replay) => self
+                .replay_through_if_retained(replay)
+                .map(PtyOutputRecovery::Replay),
+            PtyOutputRecoveryEstimate::Delta {
+                through_sequence,
+                byte_len,
+            } => {
+                if through_sequence > self.next_sequence || through_sequence <= after_sequence {
+                    return None;
+                }
+                let first_retained_sequence = self
+                    .chunks
+                    .front()
+                    .map(|chunk| chunk.sequence)
+                    .unwrap_or_else(|| self.next_sequence.saturating_add(1));
+                if after_sequence.saturating_add(1) < first_retained_sequence {
+                    return None;
+                }
+                let chunks = self.chunks.iter().filter(|chunk| {
+                    chunk.sequence > after_sequence && chunk.sequence <= through_sequence
+                });
+                let actual_bytes: usize = chunks.clone().map(|chunk| chunk.bytes.len()).sum();
+                if actual_bytes != byte_len {
+                    return None;
+                }
+                let mut bytes = Vec::with_capacity(byte_len);
+                for chunk in chunks {
+                    bytes.extend_from_slice(&chunk.bytes);
+                }
+                Some(PtyOutputRecovery::Delta(PtyOutputChunk {
+                    sequence: through_sequence,
+                    bytes: Arc::from(bytes),
+                }))
+            }
+        }
     }
 }
 
@@ -954,6 +1207,60 @@ impl PtySession {
         self.output_journal.lock().unwrap().replay()
     }
 
+    /// Reads replay size and sequence without copying retained output bytes.
+    /// Reserve against `byte_len` before requesting the corresponding replay.
+    pub fn output_replay_estimate(&self) -> PtyOutputReplayEstimate {
+        self.output_journal.lock().unwrap().replay_estimate()
+    }
+
+    /// Copies replay bytes only while the journal still matches a prior
+    /// estimate. `None` means new PTY output arrived; release the old
+    /// reservation and estimate again before retrying.
+    pub fn output_replay_if_unchanged(
+        &self,
+        expected: PtyOutputReplayEstimate,
+    ) -> Option<PtyOutputReplay> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .replay_if_unchanged(expected)
+    }
+
+    /// Copies the estimated replay prefix if its bytes remain retained. New
+    /// output after the estimate does not force a retry or delay presentation.
+    pub fn output_replay_through_if_retained(
+        &self,
+        expected: PtyOutputReplayEstimate,
+    ) -> Option<PtyOutputReplay> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .replay_through_if_retained(expected)
+    }
+
+    /// Estimates a lag-recovery delta or full replay without copying bytes.
+    pub fn output_recovery_estimate_after(
+        &self,
+        after_sequence: u64,
+    ) -> Option<PtyOutputRecoveryEstimate> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .recovery_estimate_after(after_sequence)
+    }
+
+    /// Copies recovery bytes only if they still match a previous estimate.
+    pub fn output_recovery_if_unchanged(
+        &self,
+        after_sequence: u64,
+        expected: PtyOutputRecoveryEstimate,
+    ) -> Option<PtyOutputRecovery> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .recovery_if_unchanged(after_sequence, expected)
+    }
+
     /// Returns the smallest safe repair for a downstream parser known to
     /// contain every journal chunk through `after_sequence`.
     pub fn output_recovery_after(&self, after_sequence: u64) -> Option<PtyOutputRecovery> {
@@ -961,6 +1268,34 @@ impl PtySession {
             .lock()
             .unwrap()
             .recovery_after(after_sequence)
+    }
+
+    /// Returns one bounded recovery frame from the current journal. The
+    /// caller may request the next prefix from its sequence watermark.
+    pub fn output_recovery_prefix_after(
+        &self,
+        after_sequence: u64,
+        max_bytes: usize,
+    ) -> Option<PtyOutputRecovery> {
+        self.output_journal
+            .lock()
+            .unwrap()
+            .recovery_prefix_after(after_sequence, max_bytes)
+    }
+
+    /// Returns one bounded recovery frame no later than a captured sequence
+    /// watermark, allowing callers to yield fairly across several panes.
+    pub fn output_recovery_prefix_through(
+        &self,
+        after_sequence: u64,
+        through_sequence: u64,
+        max_bytes: usize,
+    ) -> Option<PtyOutputRecovery> {
+        self.output_journal.lock().unwrap().recovery_prefix_through(
+            after_sequence,
+            through_sequence,
+            max_bytes,
+        )
     }
 
     /// Terminates the spawned child process. A no-op returning `Ok(())` if
@@ -1145,6 +1480,140 @@ mod tests {
             }))
         );
         assert_eq!(journal.recovery_after(3), None);
+    }
+
+    #[test]
+    fn replay_estimate_fences_copy_when_new_output_arrives() {
+        let mut journal = journal();
+        journal.append(b"first");
+        let estimate = journal.replay_estimate();
+        assert_eq!(estimate.through_sequence, 1);
+        assert_eq!(estimate.byte_len, b"first".len());
+        assert_eq!(
+            journal.replay_if_unchanged(estimate).unwrap().bytes,
+            b"first"
+        );
+
+        journal.append(b"-later");
+        assert_ne!(journal.replay_estimate(), estimate);
+        assert!(journal.replay_if_unchanged(estimate).is_none());
+        assert_eq!(
+            journal.replay_through_if_retained(estimate).unwrap().bytes,
+            b"first"
+        );
+
+        let current = journal.replay_estimate();
+        assert_eq!(current.through_sequence, 2);
+        assert_eq!(current.byte_len, b"first-later".len());
+        let replay = journal.replay_if_unchanged(current).unwrap();
+        assert_eq!(replay.through_sequence, current.through_sequence);
+        assert_eq!(replay.bytes.len(), current.byte_len);
+        assert_eq!(replay.bytes, b"first-later");
+    }
+
+    #[test]
+    fn replay_prefix_is_bounded_at_sequence_boundaries_and_keeps_reset() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+
+        assert!(journal.replay_prefix(4).is_none());
+        let prefix = journal.replay_prefix(5).unwrap();
+        assert_eq!(prefix.through_sequence, 1);
+        assert_eq!(prefix.bytes, b"first");
+        assert!(prefix.is_complete);
+
+        journal.is_complete = false;
+        assert!(journal.replay_prefix(7).is_none());
+        let truncated_prefix = journal.replay_prefix(8).unwrap();
+        assert_eq!(truncated_prefix.through_sequence, 1);
+        assert_eq!(truncated_prefix.bytes, b"\x1bcfirst");
+        assert!(!truncated_prefix.is_complete);
+    }
+
+    #[test]
+    fn recovery_prefix_after_bounds_replay_and_contiguous_delta() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+
+        let PtyOutputRecovery::Replay(replay) = journal.recovery_prefix_after(0, 5).unwrap() else {
+            panic!("a consumer behind the journal must receive a replay prefix");
+        };
+        assert_eq!(replay.through_sequence, 1);
+        assert_eq!(replay.bytes, b"first");
+
+        let PtyOutputRecovery::Delta(delta) = journal.recovery_prefix_after(1, 7).unwrap() else {
+            panic!("a current consumer must receive a contiguous delta");
+        };
+        assert_eq!(delta.sequence, 2);
+        assert_eq!(delta.bytes.as_ref(), b"-second");
+        assert!(journal.recovery_prefix_after(1, 6).is_none());
+
+        let PtyOutputRecovery::Delta(watermarked) =
+            journal.recovery_prefix_through(0, 1, 64).unwrap()
+        else {
+            panic!("a prefix must not pass its captured sequence watermark");
+        };
+        assert_eq!(watermarked.sequence, 1);
+        assert_eq!(watermarked.bytes.as_ref(), b"first");
+    }
+
+    #[test]
+    fn truncated_replay_prefix_continues_with_contiguous_delta() {
+        let mut journal = journal();
+        journal.append(b"first");
+        journal.append(b"-second");
+        journal.is_complete = false;
+
+        let PtyOutputRecovery::Replay(replay) = journal.recovery_prefix_after(0, 8).unwrap() else {
+            panic!("a consumer behind a truncated journal must receive a replay prefix");
+        };
+        assert_eq!(replay.through_sequence, 1);
+        assert_eq!(replay.bytes, b"\x1bcfirst");
+        assert!(!replay.is_complete);
+
+        let PtyOutputRecovery::Delta(delta) = journal
+            .recovery_prefix_after(replay.through_sequence, 8)
+            .unwrap()
+        else {
+            panic!("after applying the reset-bearing prefix, the next frame must be a delta");
+        };
+        assert_eq!(delta.sequence, 2);
+        assert_eq!(delta.bytes.as_ref(), b"-second");
+    }
+
+    #[test]
+    fn recovery_estimate_copies_only_the_reserved_delta_prefix() {
+        let mut journal = journal();
+        journal.append(b"first");
+        let estimate = journal.recovery_estimate_after(0).unwrap();
+        assert_eq!(
+            estimate,
+            PtyOutputRecoveryEstimate::Delta {
+                through_sequence: 1,
+                byte_len: 5,
+            }
+        );
+
+        journal.append(b"-later");
+        assert_eq!(
+            journal.recovery_if_unchanged(0, estimate),
+            Some(PtyOutputRecovery::Delta(PtyOutputChunk {
+                sequence: 1,
+                bytes: Arc::from(b"first".as_slice()),
+            }))
+        );
+    }
+
+    #[test]
+    fn recovery_estimate_refuses_a_delta_evicted_before_copy() {
+        let mut journal = journal();
+        journal.append(b"first");
+        let estimate = journal.recovery_estimate_after(0).unwrap();
+        let removed = journal.chunks.pop_front().unwrap();
+        journal.retained_bytes -= removed.bytes.len();
+        assert!(journal.recovery_if_unchanged(0, estimate).is_none());
     }
 
     #[test]

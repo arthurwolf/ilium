@@ -240,7 +240,102 @@ impl SandboxCancel {
 struct LinuxCgroup {
     path: PathBuf,
     directory: std::fs::File,
+    remove_on_drop: bool,
 }
+
+/// Prepare the exclusively owned, freshly started animation controller service.
+/// The caller must create a unique `Delegate=yes` service with this exact name
+/// and invoke this before launching helpers. Never call from the application or
+/// an existing user service: only this service's empty parent is modified.
+/// The service manager removes its controller subgroup after process retirement.
+#[cfg(target_os = "linux")]
+pub fn prepare_owned_helper_service(unit: &str) -> io::Result<()> {
+    use std::os::unix::{fs::MetadataExt, fs::OpenOptionsExt};
+
+    let identity = unit
+        .strip_prefix("ilium-animation-delegate-")
+        .and_then(|value| value.strip_suffix(".service"));
+    if !identity.is_some_and(|value| {
+        value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "animation delegation requires a fresh 128-bit service identity",
+        ));
+    }
+    let path = LinuxCgroup::current_cgroup()?;
+    if path.file_name() != Some(std::ffi::OsStr::new(unit)) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "animation controller is not in its exact owned service",
+        ));
+    }
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&path)?;
+    // SAFETY: identity reads do not alter process or service state.
+    let (uid, pid) = unsafe { (libc::geteuid(), libc::getpid()) };
+    if directory.metadata()?.uid() != uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "animation service directory is not delegated to this user",
+        ));
+    }
+    let parent = LinuxCgroup {
+        path,
+        directory,
+        remove_on_drop: false,
+    };
+    if parent.read("cgroup.procs")?.trim() != pid.to_string() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "animation service must contain only its trusted controller process",
+        ));
+    }
+    let available = parent.read("cgroup.controllers")?;
+    if !["cpu", "memory", "pids"]
+        .iter()
+        .all(|required| available.split_whitespace().any(|name| name == *required))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "animation service lacks delegated cpu, memory or pids controllers",
+        ));
+    }
+    let controller_path = parent.path.join("controller");
+    // Exclusive creation refuses a pre-existing subgroup instead of adopting it.
+    std::fs::create_dir(&controller_path)?;
+    let controller = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&controller_path)?;
+    let controller = LinuxCgroup {
+        path: controller_path,
+        directory: controller,
+        remove_on_drop: false,
+    };
+    controller.write("cgroup.procs", pid.to_string().as_bytes())?;
+    if !parent.read("cgroup.procs")?.trim().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "animation service parent is not empty after controller migration",
+        ));
+    }
+    parent.write("cgroup.subtree_control", b"+cpu +memory +pids")?;
+    let enabled = parent.read("cgroup.subtree_control")?;
+    if !["cpu", "memory", "pids"]
+        .iter()
+        .all(|required| enabled.split_whitespace().any(|name| name == *required))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "animation service controllers did not become enabled",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 impl LinuxCgroup {
     fn open(&self, name: &str, flags: libc::c_int) -> io::Result<std::fs::File> {
@@ -421,7 +516,11 @@ impl LinuxCgroup {
                 return Err(error);
             }
         };
-        let group = Self { path, directory };
+        let group = Self {
+            path,
+            directory,
+            remove_on_drop: true,
+        };
         group.write("memory.max", limits.memory_bytes.to_string().as_bytes())?;
         group.write("memory.swap.max", b"0")?;
         group.write("memory.oom.group", b"1")?;
@@ -475,7 +574,9 @@ mod cgroup_path_tests {
 impl Drop for LinuxCgroup {
     fn drop(&mut self) {
         // Exact newly created domain only; no recursive deletion or parent edit.
-        let _ = std::fs::remove_dir(&self.path);
+        if self.remove_on_drop {
+            let _ = std::fs::remove_dir(&self.path);
+        }
     }
 }
 

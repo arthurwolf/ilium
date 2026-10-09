@@ -1,5 +1,6 @@
 //! One ordered file owner. Admission never waits for queue space or filesystem I/O.
 //! The short queue mutex protects bookkeeping only.
+use crate::LogDestination;
 use crate::LoggingError;
 use ilium_execution::{
     reserve_admitted_worker, QuotaGroup, RejectReason, StorageAdmission, WorkerAdmission,
@@ -409,6 +410,7 @@ impl ServiceAdmission {
     pub(crate) fn start(
         self,
         path: PathBuf,
+        destination: LogDestination,
         enabled: Arc<AtomicBool>,
         initial_file: Option<Box<dyn Write + Send>>,
         before_run: impl FnOnce() + Send + 'static,
@@ -446,7 +448,7 @@ impl ServiceAdmission {
                 move |stop| {
                     let _exit = ExitGuard(Arc::clone(&body));
                     before_run();
-                    run(path, body, stop, initial_file);
+                    run(path, destination, body, stop, initial_file);
                 },
             )
             .map_err(LoggingError::Io)?;
@@ -484,7 +486,13 @@ impl Service {
         before_run: impl FnOnce() + Send + 'static,
     ) -> Result<Self, LoggingError> {
         let quota = fixture_quota(&path)?;
-        Self::prepare(&quota, &path)?.start(path, enabled, initial_file, before_run)
+        Self::prepare(&quota, &path)?.start(
+            path,
+            LogDestination::LocalFile,
+            enabled,
+            initial_file,
+            before_run,
+        )
     }
     pub(crate) fn ticket(&self) -> WorkerTicket {
         self._worker.ticket()
@@ -505,7 +513,10 @@ impl Service {
     pub fn dropped(&self) {
         self.shared.dropped.fetch_add(1, Ordering::Relaxed);
     }
-    pub fn event(&self, bytes: Vec<u8>) {
+    pub fn failed(&self) {
+        self.shared.failures.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn event(&self, bytes: Vec<u8>) -> bool {
         // This mutex protects only bounded queue bookkeeping, never file I/O.
         // Contention alone must not discard ordinary diagnostics.
         let mut queue = self
@@ -517,11 +528,12 @@ impl Service {
             queue.commands.push_back(Command::Event(bytes));
             self.shared.pending.fetch_add(1, Ordering::Relaxed);
             self.shared.changed.notify_one();
-            return;
+            return true;
         }
         drop(queue);
         self.release(bytes.capacity());
         self.dropped();
+        false
     }
     fn control(
         &self,
@@ -632,6 +644,20 @@ fn open(path: &Path, storage: &LoggingStorage) -> Result<File, LoggingError> {
         source: retain_io(source, storage),
     })
 }
+fn open_destination(
+    path: &Path,
+    destination: &LogDestination,
+    storage: &LoggingStorage,
+) -> Result<Box<dyn Write + Send>, LoggingError> {
+    match destination {
+        LogDestination::LocalFile => {
+            open(path, storage).map(|file| Box::new(file) as Box<dyn Write + Send>)
+        }
+        LogDestination::Relay(endpoint) => crate::relay::RelayWriter::new(endpoint.clone())
+            .map(|writer| Box::new(writer) as Box<dyn Write + Send>)
+            .map_err(|error| LoggingError::Relay(error.to_string())),
+    }
+}
 fn flush(
     file: &mut Option<Box<dyn Write + Send>>,
     failed: &mut bool,
@@ -698,6 +724,7 @@ impl Drop for ActiveEvent<'_> {
 }
 fn run(
     path: PathBuf,
+    destination: LogDestination,
     shared: Arc<Shared>,
     stop: StopToken,
     mut file: Option<Box<dyn Write + Send>>,
@@ -751,8 +778,8 @@ fn run(
                     if file.is_some() {
                         Ok(())
                     } else {
-                        open(&path, &sender.storage).map(|opened| {
-                            file = Some(Box::new(opened));
+                        open_destination(&path, &destination, &sender.storage).map(|opened| {
+                            file = Some(opened);
                             failed = false;
                         })
                     }

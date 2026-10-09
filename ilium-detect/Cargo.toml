@@ -7,11 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ilium-core = { version = "0.1.0", path = "../ilium-core" }
+ilium-core = { version = "0.1.1", path = "../ilium-core" }
 sysinfo = "0.39.6"
 unicode-width = "0.2.2"
 
 [dev-dependencies]
-ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
-ilium-test-fixtures = { version = "0.1.0", path = "../ilium-test-fixtures" }
+ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
+ilium-test-fixtures = { version = "0.1.1", path = "../ilium-test-fixtures" }
 tempfile = "3.27.0"

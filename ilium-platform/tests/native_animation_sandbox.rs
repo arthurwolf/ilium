@@ -184,3 +184,55 @@ fn kernel_oom_kills_a_real_physical_allocation() {
         "allocator left descendants: {usage:?}"
     );
 }
+
+/// The release runner supplies a checksum-verified matching helper binary and
+/// invokes this case inside an ordinary Delegate=no user service. Preparing a
+/// delegated ancestor before this test would conceal the installed-launch gap.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a disposable ordinary user service and a verified matching helper binary"]
+fn ordinary_service_launches_helper_without_manual_delegation() {
+    use ilium_platform::animation_sandbox::{spawn_helper, SandboxLimits};
+    use sha2::{Digest, Sha256};
+    use std::path::PathBuf;
+
+    let executable = PathBuf::from(
+        std::env::var_os("ILIUM_NATIVE_HELPER_TEST_BINARY")
+            .expect("native release runner must supply its matching compiled helper"),
+    );
+    assert!(executable.is_absolute(), "helper path must be absolute");
+    let expected = std::env::var("ILIUM_NATIVE_HELPER_TEST_SHA256")
+        .expect("native release runner must bind the compiled helper checksum");
+    assert_eq!(expected.len(), 64, "helper checksum must be SHA-256");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(std::fs::read(&executable).unwrap())),
+        expected,
+        "native helper differs from the qualified build artifact"
+    );
+
+    let limits = SandboxLimits::default();
+    // Deliberately do not call prepare_owned_helper_service. This is the normal
+    // entry point used by installed animation packages, including fresh users.
+    let mut child = spawn_helper(&executable, limits).expect(
+        "AUTOMATIC_STARTUP_REQUIRED: establish an owned resource domain without manual setup",
+    );
+    let cancel = child.cancel_handle();
+    let usage = cancel
+        .resource_usage()
+        .expect("read the exact admitted domain");
+    assert_eq!(usage.maximum_tasks, limits.maximum_tasks);
+    assert_eq!(usage.maximum_memory_bytes, limits.memory_bytes);
+    child
+        .shutdown()
+        .expect("retire the helper and every owned descendant");
+    assert_eq!(
+        cancel
+            .resource_usage()
+            .expect("retain terminal domain evidence")
+            .current_tasks,
+        0,
+        "automatic launch left tasks after retirement"
+    );
+    // This case proves admission/retirement only. The separate native helper
+    // protocol and seal gates prove V8 initialization and package execution.
+}

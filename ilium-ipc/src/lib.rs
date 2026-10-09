@@ -33,11 +33,12 @@ pub use ilium_agent_debug::{
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
 pub use protocol::{
-    AgentDetectionSettings, AgentDetectionSettingsError, ClientRequest, CustomAgentSignature,
-    DetectionReason, MouseButton, MouseEventKind, MouseModifiers, NewPaneKind,
-    NewPaneWorkingDirectory, PaneDetectionEvidence, PaneTitleObservation, ProgressMonitorAccepted,
-    ProgressMonitorPreflight, ProgressMonitorRejection, ProgressMonitorRejectionCode,
-    ProgressMonitorStatus, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
+    AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
+    ClientRequest, CustomAgentSignature, DetectionReason, MouseButton, MouseEventKind,
+    MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
+    PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
+    ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
+    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
     WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
     WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
@@ -193,6 +194,11 @@ mod tests {
                     command_line: "codex".to_string(),
                     initial_input: "/goal inspect this line".to_string(),
                 },
+                working_directory: NewPaneWorkingDirectory::ProjectRoot,
+            },
+            ClientRequest::NewPane {
+                parent_group: NodeId(1),
+                kind: NewPaneKind::CommandClosingOnExit("sleep 1".to_string()),
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
@@ -459,6 +465,7 @@ mod tests {
             ClientRequest::DiscardTerminalDelivery {
                 pane_ids: vec![NodeId(2)],
             },
+            ClientRequest::UnfreezePane { pane_id: NodeId(2) },
             ClientRequest::SetNodeExpanded {
                 node_id: NodeId(2),
                 expanded: true,
@@ -491,6 +498,11 @@ mod tests {
                 request_id: 43,
                 pane_id: NodeId(2),
                 expected_monitor_id: Some(7),
+            },
+            ClientRequest::WaitPaneProgressMonitor {
+                request_id: 44,
+                pane_id: NodeId(2),
+                monitor_id: 7,
             },
             ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
             ClientRequest::RegisterVoiceTextReceiver,
@@ -755,6 +767,7 @@ mod tests {
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: Some(PathBuf::from("/home/user/.claude/projects/p/95fd.jsonl")),
             },
             ServerEvent::PaneSessionIdCleared {
                 pane_id: NodeId(2),
@@ -855,6 +868,26 @@ mod tests {
                 request_id: 43,
                 pane_id: NodeId(2),
                 result: Ok(Some(7)),
+            },
+            ServerEvent::ProgressWaitCompleted {
+                request_id: 44,
+                pane_id: NodeId(2),
+                result: Ok(ProgressWaitOutcome {
+                    monitor_id: 7,
+                    end: ProgressWaitEnd::Settled,
+                    progress: Some(sample_progress()),
+                    composer_notice_suppressed: true,
+                }),
+            },
+            ServerEvent::ProgressWaitCompleted {
+                request_id: 45,
+                pane_id: NodeId(2),
+                result: Ok(ProgressWaitOutcome {
+                    monitor_id: 7,
+                    end: ProgressWaitEnd::Superseded,
+                    progress: None,
+                    composer_notice_suppressed: false,
+                }),
             },
             ServerEvent::VoiceTextOffered {
                 request_id: 50,
@@ -1074,6 +1107,7 @@ mod tests {
                 pane_id: NodeId(2),
                 reasons: vec!["worktree has uncommitted changes".to_string()],
             },
+            ServerEvent::SoundPreviewCompleted { succeeded: true },
         ]
     }
 
@@ -1273,6 +1307,21 @@ mod tests {
                 can_offer: false
             }),
             variant_index(&prune_event) + 1
+        );
+
+        let previous_event_tail = variant_index(&ServerEvent::ProgressWaitCompleted {
+            request_id: 73,
+            pane_id: NodeId(2),
+            result: Ok(ProgressWaitOutcome {
+                monitor_id: 1,
+                end: ProgressWaitEnd::Settled,
+                progress: None,
+                composer_notice_suppressed: false,
+            }),
+        });
+        assert_eq!(
+            variant_index(&ServerEvent::SoundPreviewCompleted { succeeded: true }),
+            previous_event_tail + 1
         );
     }
 

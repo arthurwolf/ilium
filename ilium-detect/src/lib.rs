@@ -448,9 +448,10 @@ pub fn is_agent_prompt_ready(class: &AgentClass, screen_text: &str) -> bool {
 /// advances it. It is not sufficient by itself because a user can move a dirty
 /// draft back to the first cell. Codex renders placeholder text dim and
 /// user-authored text normally, so every visible placeholder cell must also be
-/// present in `dimmed_cells`. Rows and columns are zero-based, matching
-/// `vt100::Screen::cursor_position`. Other providers retain their existing
-/// text-only contracts.
+/// present in `dimmed_cells`. Antigravity exposes an empty composer as `>`;
+/// its cursor must be immediately after that reserved prefix. Rows and columns
+/// are zero-based, matching `vt100::Screen::cursor_position`. Claude and other
+/// providers retain their text-only contracts.
 pub fn is_agent_prompt_ready_at_cursor(
     class: &AgentClass,
     screen_text: &str,
@@ -458,6 +459,23 @@ pub fn is_agent_prompt_ready_at_cursor(
     cursor_column: u16,
     dimmed_cells: &[(u16, u16)],
 ) -> bool {
+    if matches!(class, AgentClass::Antigravity) {
+        let Some(composer_line) = screen_text.lines().nth(usize::from(cursor_row)) else {
+            return false;
+        };
+        let leading_spaces = composer_line.len() - composer_line.trim_start_matches(' ').len();
+        let expected_cursor_column = leading_spaces
+            .checked_add(2)
+            .and_then(|column| u16::try_from(column).ok());
+        let composer_is_empty = composer_line[leading_spaces..].trim_end() == ">"
+            && expected_cursor_column == Some(cursor_column)
+            && !looks_like_selection_prompt(screen_text);
+        return composer_is_empty
+            && !matches!(
+                classify_activity_for_agent(class, screen_text),
+                AgentTurn::Working | AgentTurn::WaitingSubagents | AgentTurn::WaitingApproval
+            );
+    }
     if !matches!(class, AgentClass::Codex) {
         return is_agent_prompt_ready(class, screen_text);
     }
@@ -2823,6 +2841,61 @@ mod tests {
         assert!(!is_agent_prompt_ready(
             &AgentClass::Other("opencode".to_owned()),
             "Type a message"
+        ));
+    }
+
+    #[test]
+    fn antigravity_prompt_readiness_requires_the_empty_composer_cursor() {
+        let empty_composer = "Welcome to Antigravity\n>\n";
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            empty_composer,
+            1,
+            2,
+            &[],
+        ));
+        assert!(is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            "Welcome to Antigravity\n  >\n",
+            1,
+            4,
+            &[],
+        ));
+
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            "> draft text\n",
+            0,
+            12,
+            &[],
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            "> draft text\n",
+            0,
+            2,
+            &[],
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            empty_composer,
+            0,
+            1,
+            &[],
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            empty_composer,
+            1,
+            3,
+            &[],
+        ));
+        assert!(!is_agent_prompt_ready_at_cursor(
+            &AgentClass::Antigravity,
+            "Welcome to Antigravity\n>\nEnter to select · Esc to cancel\n",
+            1,
+            2,
+            &[],
         ));
     }
 

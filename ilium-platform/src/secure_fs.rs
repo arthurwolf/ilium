@@ -40,6 +40,35 @@ pub fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
     Ok(file)
 }
 
+/// Identifies the generation of an already-open file handle. Callers must
+/// open the path first and derive this identity from that same handle so a
+/// replacement between path lookup and identity capture cannot be mistaken
+/// for the original file.
+#[cfg(unix)]
+pub fn file_generation(file: &std::fs::File) -> io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::other("file generation requires a regular file"));
+    }
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+/// Windows counterpart using the open handle's volume and stable file ID.
+#[cfg(windows)]
+pub fn file_generation(file: &std::fs::File) -> io::Result<(u64, u64)> {
+    crate::nofollow_windows::file_generation(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn file_generation(_file: &std::fs::File) -> io::Result<(u64, u64)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "file generation verification is unavailable",
+    ))
+}
+
 /// Flushes the directory entry after publishing a file by rename. The file
 /// itself must already have been flushed. An unsupported directory flush is
 /// an error, never a successful durability acknowledgement.

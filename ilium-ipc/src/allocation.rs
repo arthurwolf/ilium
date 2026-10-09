@@ -193,6 +193,20 @@ impl HeapBytes for ProgressMonitorAccepted {
             .saturating_add(progress.heap_bytes())
     }
 }
+impl HeapBytes for ProgressWaitOutcome {
+    fn heap_bytes(&self) -> usize {
+        let ProgressWaitOutcome {
+            monitor_id,
+            end: _,
+            progress,
+            composer_notice_suppressed,
+        } = self;
+        0usize
+            .saturating_add(monitor_id.heap_bytes())
+            .saturating_add(progress.heap_bytes())
+            .saturating_add(composer_notice_suppressed.heap_bytes())
+    }
+}
 impl HeapBytes for ProgressMonitorStatus {
     fn heap_bytes(&self) -> usize {
         let ProgressMonitorStatus { pane_id, progress } = self;
@@ -535,11 +549,13 @@ impl HeapBytes for ServerEvent {
                 session_id,
                 process_id,
                 title_generation,
+                transcript_path,
             } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(session_id.heap_bytes())
                 .saturating_add(process_id.heap_bytes())
-                .saturating_add(title_generation.heap_bytes()),
+                .saturating_add(title_generation.heap_bytes())
+                .saturating_add(transcript_path.heap_bytes()),
             Self::PaneSessionIdCleared {
                 pane_id,
                 title_generation,
@@ -658,6 +674,14 @@ impl HeapBytes for ServerEvent {
                 .saturating_add(request_id.heap_bytes())
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(result.heap_bytes()),
+            Self::ProgressWaitCompleted {
+                request_id,
+                pane_id,
+                result,
+            } => 0usize
+                .saturating_add(request_id.heap_bytes())
+                .saturating_add(pane_id.heap_bytes())
+                .saturating_add(result.heap_bytes()),
             Self::VoiceTextOffered {
                 request_id,
                 sentences,
@@ -758,6 +782,12 @@ impl HeapBytes for ServerEvent {
             Self::PaneFrozen { pane_id, result } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(result.heap_bytes()),
+            Self::AntigravityStatuslineCompleted { result, .. } => {
+                0usize.saturating_add(result.heap_bytes())
+            }
+            Self::SoundPreviewCompleted { succeeded } => {
+                0usize.saturating_add(succeeded.heap_bytes())
+            }
         }
     }
 }
@@ -1000,6 +1030,16 @@ mod tests {
                 message: String::with_capacity(8192),
             }),
         };
+        assert_eq!(event.retained_bytes(), size_of::<ServerEvent>() + 8192);
+    }
+
+    #[test]
+    fn antigravity_statusline_completion_counts_unused_result_capacity() {
+        let event = ServerEvent::AntigravityStatuslineCompleted {
+            generation: 19,
+            result: Err(String::with_capacity(8192)),
+        };
+
         assert_eq!(event.retained_bytes(), size_of::<ServerEvent>() + 8192);
     }
 }

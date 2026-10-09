@@ -1,5 +1,5 @@
 use ilium_core::NodeId;
-use ilium_ipc::{ClientRequest, ServerEvent};
+use ilium_ipc::{AntigravityStatuslineAction, ClientRequest, ServerEvent};
 
 fn round_trip<T>(value: &T) -> T
 where
@@ -23,6 +23,57 @@ fn terminate_and_replace_requests_round_trip_with_stable_names() {
 }
 
 #[test]
+fn unfreeze_request_round_trips_at_the_append_only_request_tail() {
+    let previous = ClientRequest::DiscardTerminalDelivery {
+        pane_ids: vec![NodeId(4)],
+    };
+    let unfreeze = ClientRequest::UnfreezePane { pane_id: NodeId(4) };
+    assert_eq!(round_trip(&unfreeze), unfreeze);
+    assert_eq!(unfreeze.diagnostic_name(), "unfreeze_pane");
+
+    let previous_index = bincode::serialize(&previous).expect("serialize")[..4].to_vec();
+    let unfreeze_index = bincode::serialize(&unfreeze).expect("serialize")[..4].to_vec();
+    let previous_value = u32::from_le_bytes(previous_index.try_into().expect("4 bytes"));
+    let unfreeze_value = u32::from_le_bytes(unfreeze_index.try_into().expect("4 bytes"));
+    assert_eq!(unfreeze_value, previous_value + 1);
+}
+
+#[test]
+fn antigravity_statusline_actions_round_trip_after_the_existing_request_tail() {
+    let unfreeze = ClientRequest::UnfreezePane { pane_id: NodeId(4) };
+    let enable = ClientRequest::UpdateAntigravityStatusline {
+        generation: 7,
+        action: AntigravityStatuslineAction::SetCommand {
+            command: "/usr/bin/ilium __antigravity-model-statusline".to_owned(),
+        },
+    };
+    let delete = ClientRequest::UpdateAntigravityStatusline {
+        generation: 8,
+        action: AntigravityStatuslineAction::DeleteCommand,
+    };
+    let cancel = ClientRequest::UpdateAntigravityStatusline {
+        generation: 9,
+        action: AntigravityStatuslineAction::CancelPending,
+    };
+    let disable = ClientRequest::UpdateAntigravityStatusline {
+        generation: 10,
+        action: AntigravityStatuslineAction::DisableCommand,
+    };
+
+    assert_eq!(round_trip(&enable), enable);
+    assert_eq!(round_trip(&delete), delete);
+    assert_eq!(round_trip(&cancel), cancel);
+    assert_eq!(round_trip(&disable), disable);
+    assert_eq!(enable.diagnostic_name(), "update_antigravity_statusline");
+
+    let unfreeze_index = bincode::serialize(&unfreeze).expect("serialize")[..4].to_vec();
+    let update_index = bincode::serialize(&enable).expect("serialize")[..4].to_vec();
+    let unfreeze_value = u32::from_le_bytes(unfreeze_index.try_into().expect("4 bytes"));
+    let update_value = u32::from_le_bytes(update_index.try_into().expect("4 bytes"));
+    assert_eq!(update_value, unfreeze_value + 1);
+}
+
+#[test]
 fn pane_process_terminated_round_trips_success_and_failure() {
     for result in [Ok(()), Err("process tree still alive".to_string())] {
         let event = ServerEvent::PaneProcessTerminated {
@@ -31,6 +82,32 @@ fn pane_process_terminated_round_trips_success_and_failure() {
         };
         assert_eq!(round_trip(&event), event);
     }
+}
+
+#[test]
+fn antigravity_statusline_completion_round_trips_at_the_append_only_event_tail() {
+    let previous = ServerEvent::PaneResizeRejected {
+        pane_id: NodeId(5),
+        rows: 24,
+        cols: 80,
+        message: "resize refused".to_owned(),
+    };
+    let completed = ServerEvent::AntigravityStatuslineCompleted {
+        generation: 19,
+        result: Ok(()),
+    };
+    let failed = ServerEvent::AntigravityStatuslineCompleted {
+        generation: 20,
+        result: Err("composer changed before delivery".to_owned()),
+    };
+
+    assert_eq!(round_trip(&completed), completed);
+    assert_eq!(round_trip(&failed), failed);
+    let previous_index = bincode::serialize(&previous).expect("serialize")[..4].to_vec();
+    let completed_index = bincode::serialize(&completed).expect("serialize")[..4].to_vec();
+    let previous_value = u32::from_le_bytes(previous_index.try_into().expect("4 bytes"));
+    let completed_value = u32::from_le_bytes(completed_index.try_into().expect("4 bytes"));
+    assert_eq!(completed_value, previous_value + 1);
 }
 
 #[test]

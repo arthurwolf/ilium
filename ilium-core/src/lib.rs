@@ -494,6 +494,17 @@ impl BuiltinAgentProvider {
             .find(|provider| provider.command_line() == command_line)
     }
 
+    /// Returns the provider's user-choice session picker for a frozen pane
+    /// that predates persisted session IDs. Providers without a safe picker
+    /// remain frozen rather than resuming an unrelated recent conversation.
+    pub const fn resume_picker_command(self) -> Option<&'static str> {
+        match self {
+            Self::Claude => Some("claude --resume"),
+            Self::Codex => Some("codex resume"),
+            Self::Antigravity => None,
+        }
+    }
+
     pub const fn type_sort_rank(self) -> u8 {
         match self {
             Self::Claude => 3,
@@ -6204,6 +6215,22 @@ mod tests {
         assert_eq!(
             BuiltinAgentProvider::resume_binding(&format!("agy --conversation {session_id}")),
             Some((provider, session_id.to_string()))
+        );
+    }
+
+    #[test]
+    fn legacy_frozen_provider_commands_only_resume_through_user_choice_pickers() {
+        assert_eq!(
+            BuiltinAgentProvider::Claude.resume_picker_command(),
+            Some("claude --resume")
+        );
+        assert_eq!(
+            BuiltinAgentProvider::Codex.resume_picker_command(),
+            Some("codex resume")
+        );
+        assert_eq!(
+            BuiltinAgentProvider::Antigravity.resume_picker_command(),
+            None
         );
     }
 

@@ -7,12 +7,15 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ilium-execution = { version = "0.1.0", path = "../ilium-execution" }
-ilium-platform = { version = "0.1.0", path = "../ilium-platform" }
+ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
+ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
+ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tokio = { version = "1", features = ["macros", "rt", "time"] }

@@ -1,5 +1,5 @@
-//! Handle-relative animation storage. Linux atomic replacement swaps a directory
-//! entry for a fresh 0600 inode; it does not preserve metadata or promise inode CAS.
+//! Handle-relative animation storage. Unix atomic replacement swaps a directory
+//! entry for a fresh inode; it does not preserve metadata or promise inode CAS.
 use crate::secure_fs::NoFollowDirectory;
 use std::{
     ffi::OsStr,
@@ -10,11 +10,11 @@ use std::{
         Arc, Mutex,
     },
 };
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn unsupported() -> io::Error {
     io::Error::new(
         io::ErrorKind::Unsupported,
-        "animation atomic storage is qualified only on Linux",
+        "animation storage operation is unsupported on this platform",
     )
 }
 pub fn validate_leaf(name: &str) -> io::Result<()> {
@@ -48,22 +48,70 @@ pub struct FileIdentity {
     pub device: u64,
     pub inode: u64,
 }
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn identity(file: &File) -> io::Result<FileIdentity> {
     use std::os::unix::fs::MetadataExt;
+
     let metadata = file.metadata()?;
     Ok(FileIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
     })
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn identity(file: &File) -> io::Result<FileIdentity> {
+    let (device, inode) = crate::secure_fs::file_generation(file)?;
+    Ok(FileIdentity { device, inode })
+}
+#[cfg(not(any(unix, windows)))]
 fn identity(_file: &File) -> io::Result<FileIdentity> {
     Err(unsupported())
 }
 pub struct PinnedFile {
     file: File,
     identity: FileIdentity,
+    #[cfg(windows)]
+    read_file: Mutex<File>,
+}
+#[cfg(all(test, any(unix, windows)))]
+mod pinned_file_tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom};
+
+    #[test]
+    fn positional_reads_preserve_the_shared_file_offset() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("selected.bin");
+        std::fs::write(&path, b"abcdef").unwrap();
+        let mut sequential = File::open(path).unwrap();
+        sequential.seek(SeekFrom::Start(1)).unwrap();
+        let pinned = PinnedFile::from_host(sequential.try_clone().unwrap()).unwrap();
+
+        let mut positional = [0; 2];
+        assert_eq!(pinned.read_at(&mut positional, 3).unwrap(), 2);
+        assert_eq!(&positional, b"de");
+        assert_eq!(pinned.identity(), identity(&pinned.file).unwrap());
+
+        let mut next = [0; 1];
+        sequential.read_exact(&mut next).unwrap();
+        assert_eq!(&next, b"b");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn positional_reads_work_from_handle_relative_windows_open() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("selected.bin");
+        std::fs::write(&path, b"abcdef").unwrap();
+        let directory = NoFollowDirectory::open_root(fixture.path()).unwrap();
+        let file =
+            PinnedFile::from_host(directory.open_regular(OsStr::new("selected.bin")).unwrap())
+                .unwrap();
+
+        let mut bytes = [0; 2];
+        assert_eq!(file.read_at(&mut bytes, 3).unwrap(), 2);
+        assert_eq!(&bytes, b"de");
+    }
 }
 impl PinnedFile {
     pub fn from_host(file: File) -> io::Result<Self> {
@@ -71,7 +119,14 @@ impl PinnedFile {
             return Err(io::Error::other("selected handle is not a regular file"));
         }
         let identity = identity(&file)?;
-        Ok(Self { file, identity })
+        #[cfg(windows)]
+        let read_file = Mutex::new(crate::nofollow_windows::reopen_regular_for_read(&file)?);
+        Ok(Self {
+            file,
+            identity,
+            #[cfg(windows)]
+            read_file,
+        })
     }
     pub fn identity(&self) -> FileIdentity {
         self.identity
@@ -105,9 +160,9 @@ impl PinnedFile {
         self.file.sync_all()
     }
 
-    /// Positional reads preserve the shared selected handle's file offset.
+    /// Reads from a specific offset without changing the selected handle's file offset.
     pub fn read_at(&self, out: &mut [u8], offset: u64) -> io::Result<usize> {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             use std::os::unix::fs::FileExt;
             if identity(&self.file)? != self.identity {
@@ -115,13 +170,117 @@ impl PinnedFile {
             }
             self.file.read_at(out, offset)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            if identity(&self.file)? != self.identity {
+                return Err(io::Error::other("selected file changed"));
+            }
+            let read_file = self
+                .read_file
+                .lock()
+                .map_err(|_| io::Error::other("selected read handle lock poisoned"))?;
+            if identity(&read_file)? != self.identity {
+                return Err(io::Error::other("selected read handle identity changed"));
+            }
+            let bytes_read = read_file.seek_read(out, offset)?;
+            if identity(&self.file)? != self.identity || identity(&read_file)? != self.identity {
+                return Err(io::Error::other(
+                    "selected file changed during positional read",
+                ));
+            }
+            Ok(bytes_read)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (out, offset);
             Err(unsupported())
         }
     }
 }
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos", windows)))]
+mod pinned_directory_supported_platform_tests {
+    use super::*;
+
+    #[test]
+    fn pinned_saved_catalog_lists_handle_relative_entries_and_progress() {
+        let fixture = tempfile::tempdir().unwrap();
+        std::fs::write(fixture.path().join("r.0.0.mca"), b"region").unwrap();
+        std::fs::create_dir(fixture.path().join("nested")).unwrap();
+        let root = Arc::new(NoFollowDirectory::open_root(fixture.path()).unwrap());
+        let pinned = PinnedDirectory::from_host(root).unwrap();
+        let mut updates = Vec::new();
+
+        let entries = pinned
+            .list_saved_catalog_with_progress(16, &mut |completed, total| {
+                updates.push((completed, total));
+            })
+            .unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.bytes, entry.is_directory))
+                .collect::<Vec<_>>(),
+            [("nested", 0, true), ("r.0.0.mca", 6, false)]
+        );
+        assert_eq!(updates.first(), Some(&(0, None)));
+        assert_eq!(updates.last(), Some(&(2, Some(2))));
+        assert!(pinned.child("nested", false).is_ok());
+        assert_eq!(
+            pinned.ancestor_identities(128).unwrap()[0],
+            pinned.identity()
+        );
+    }
+
+    #[test]
+    fn pinned_atomic_publication_is_create_new_and_replace_safe() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = Arc::new(
+            PinnedDirectory::from_host(Arc::new(
+                NoFollowDirectory::open_root(fixture.path()).unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        let mut first = root
+            .begin_atomic("history.json", WriteMode::CreateNew)
+            .unwrap();
+        first.write(b"first", 64).unwrap();
+        first.prepare_durable().unwrap();
+        assert_eq!(first.publish_entry().unwrap(), first.identity);
+        first.durable_ack().unwrap();
+        assert_eq!(
+            std::fs::read(fixture.path().join("history.json")).unwrap(),
+            b"first"
+        );
+
+        let mut duplicate = root
+            .begin_atomic("history.json", WriteMode::CreateNew)
+            .unwrap();
+        duplicate.write(b"duplicate", 64).unwrap();
+        duplicate.prepare_durable().unwrap();
+        assert!(duplicate.publish_entry().is_err());
+        assert!(!duplicate.was_published());
+        drop(duplicate);
+        assert_eq!(root.list(8).unwrap().len(), 1);
+
+        let mut replacement = root
+            .begin_atomic("history.json", WriteMode::ReplaceEntry)
+            .unwrap();
+        replacement.write(b"replacement", 64).unwrap();
+        replacement.prepare_durable().unwrap();
+        assert_eq!(replacement.publish_entry().unwrap(), replacement.identity);
+        replacement.durable_ack().unwrap();
+        assert_eq!(
+            std::fs::read(fixture.path().join("history.json")).unwrap(),
+            b"replacement"
+        );
+    }
+}
+
 pub struct PinnedDirectory {
     root: Arc<NoFollowDirectory>,
     identity: FileIdentity,
@@ -129,7 +288,7 @@ pub struct PinnedDirectory {
 }
 impl PinnedDirectory {
     pub fn from_host(root: Arc<NoFollowDirectory>) -> io::Result<Self> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let identity = identity(&root.try_clone_file()?)?;
             Ok(Self {
@@ -138,7 +297,16 @@ impl PinnedDirectory {
                 mutations: Mutex::new(()),
             })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            let (device, inode) = root.generation()?;
+            Ok(Self {
+                root,
+                identity: FileIdentity { device, inode },
+                mutations: Mutex::new(()),
+            })
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = root;
             Err(unsupported())
@@ -162,7 +330,7 @@ impl PinnedDirectory {
                 "ancestor bound",
             ));
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::{AsRawFd, FromRawFd};
             let mut current = self.root.try_clone_file()?;
@@ -180,7 +348,7 @@ impl PinnedDirectory {
                     libc::openat(
                         current.as_raw_fd(),
                         parent_name.as_ptr(),
-                        libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
                     )
                 };
                 if descriptor < 0 {
@@ -197,7 +365,28 @@ impl PinnedDirectory {
                 current = parent;
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            let mut current = Arc::clone(&self.root);
+            let mut ancestors = Vec::with_capacity(maximum);
+            loop {
+                let (device, inode) = current.generation()?;
+                let current_identity = FileIdentity { device, inode };
+                if ancestors.contains(&current_identity) {
+                    return Err(io::Error::other("directory ancestry cycle"));
+                }
+                ancestors.push(current_identity);
+                let parent = current.open_parent_directory()?;
+                if parent.generation()? == (device, inode) {
+                    return Ok(ancestors);
+                }
+                if ancestors.len() == maximum {
+                    return Err(io::Error::other("directory ancestry exceeds bound"));
+                }
+                current = Arc::new(parent);
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Err(unsupported())
         }
@@ -220,11 +409,15 @@ impl PinnedDirectory {
                 "directory entry limit",
             ));
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            linux_list(self, maximum)
+            unix_list(self, maximum)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            windows_list(self, maximum)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             Err(unsupported())
         }
@@ -233,25 +426,39 @@ impl PinnedDirectory {
     /// complete scene account before a worker reads this descriptor. Ordinary
     /// selected-resource callers retain the 1,024-entry `list` ceiling.
     pub fn list_saved_catalog(&self, maximum: usize) -> io::Result<Vec<DirectoryEntry>> {
+        self.list_saved_catalog_with_progress(maximum, &mut |_, _| {})
+    }
+    /// Lists a saved-world catalog while reporting how many directory entries
+    /// have been inspected. Totals stay unknown until the directory reaches EOF.
+    pub fn list_saved_catalog_with_progress(
+        &self,
+        maximum: usize,
+        progress: &mut dyn FnMut(usize, Option<usize>),
+    ) -> io::Result<Vec<DirectoryEntry>> {
         if maximum == 0 || maximum > 16_384 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "saved catalog directory entry limit",
             ));
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            linux_list(self, maximum)
+            unix_list_with_progress(self, maximum, progress)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
         {
+            windows_list_with_progress(self, maximum, progress)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        {
+            let _ = progress;
             Err(unsupported())
         }
     }
     /// Cooperative whole-namespace mutation lease, nonblocking. A fresh open
     /// description ensures clones of the same root do not bypass flock conflicts.
     pub fn try_exclusive_lease(&self) -> io::Result<DirectoryMutationLease> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::{AsRawFd, FromRawFd};
             let root = self.root.try_clone_file()?;
@@ -273,7 +480,7 @@ impl PinnedDirectory {
             }
             Ok(DirectoryMutationLease { _file: file })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             Err(unsupported())
         }
@@ -281,7 +488,7 @@ impl PinnedDirectory {
     /// Readers retain a shared inode lease so root-budget eviction cannot
     /// remove chunks while a playback window can still fault them in.
     pub fn try_shared_lease(&self) -> io::Result<DirectoryMutationLease> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::{AsRawFd, FromRawFd};
             let root = self.root.try_clone_file()?;
@@ -302,7 +509,7 @@ impl PinnedDirectory {
             }
             Ok(DirectoryMutationLease { _file: file })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             Err(unsupported())
         }
@@ -320,7 +527,7 @@ impl PinnedDirectory {
     /// selected one. The caller holds the parent namespace mutation lease.
     pub fn remove_empty_child(&self, leaf: &str, expected: FileIdentity) -> io::Result<()> {
         validate_leaf(leaf)?;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::AsRawFd;
             let root = self.root.try_clone_file()?;
@@ -349,7 +556,7 @@ impl PinnedDirectory {
             }
             self.sync()
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             let _ = expected;
             Err(unsupported())
@@ -360,7 +567,7 @@ impl PinnedDirectory {
     }
     pub fn begin_atomic(self: &Arc<Self>, leaf: &str, mode: WriteMode) -> io::Result<AtomicFile> {
         validate_leaf(leaf)?;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
         {
             static NEXT: AtomicU64 = AtomicU64::new(1);
             let sequence = loop {
@@ -382,7 +589,12 @@ impl PinnedDirectory {
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>();
             let temporary = format!(".ilium-stage-{sequence}-{suffix}");
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             let file = self.root.create_regular(OsStr::new(&temporary))?;
+            #[cfg(windows)]
+            let file = self
+                .root
+                .create_regular_for_rename(OsStr::new(&temporary))?;
             let identity = identity(&file)?;
             Ok(AtomicFile {
                 root: Arc::clone(self),
@@ -396,7 +608,7 @@ impl PinnedDirectory {
                 bytes: 0,
             })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = mode;
             Err(unsupported())
@@ -493,7 +705,7 @@ impl AtomicFile {
     /// External directory mutators are not serialized by our process mutex: there
     /// is no atomic compare-inode rename guarantee. Caller must accept that policy.
     pub fn publish_entry(&mut self) -> io::Result<FileIdentity> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::fd::AsRawFd;
             let _guard = self
@@ -518,14 +730,30 @@ impl AtomicFile {
                     Err(error) => return Err(error),
                 }
             }
-            let flags = if matches!(self.mode, WriteMode::CreateNew) {
-                libc::RENAME_NOREPLACE
-            } else {
-                0
-            };
             // SAFETY: descriptors are pinned directories, CString leaves live through call.
+            #[cfg(target_os = "linux")]
             let result = unsafe {
+                let flags = if matches!(self.mode, WriteMode::CreateNew) {
+                    libc::RENAME_NOREPLACE
+                } else {
+                    0
+                };
                 libc::renameat2(
+                    root.as_raw_fd(),
+                    source.as_ptr(),
+                    root.as_raw_fd(),
+                    target.as_ptr(),
+                    flags,
+                )
+            };
+            #[cfg(target_os = "macos")]
+            let result = unsafe {
+                let flags = if matches!(self.mode, WriteMode::CreateNew) {
+                    libc::RENAME_EXCL
+                } else {
+                    0
+                };
+                libc::renameatx_np(
                     root.as_raw_fd(),
                     source.as_ptr(),
                     root.as_raw_fd(),
@@ -544,7 +772,40 @@ impl AtomicFile {
             }
             Ok(self.identity)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            let _guard = self
+                .root
+                .mutations
+                .lock()
+                .map_err(|_| io::Error::other("directory mutation guard poisoned"))?;
+            if self.published
+                || self.aborted
+                || self.root.open_file(&self.temporary)?.identity() != self.identity
+            {
+                return Err(io::Error::other("atomic source identity changed"));
+            }
+            if matches!(self.mode, WriteMode::ReplaceEntry) {
+                match self.root.open_file(&self.leaf) {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            self.root.root.rename_regular(
+                &self.file,
+                OsStr::new(&self.leaf),
+                matches!(self.mode, WriteMode::ReplaceEntry),
+            )?;
+            self.published = true;
+            if self.root.open_file(&self.leaf)?.identity() != self.identity {
+                return Err(io::Error::other(
+                    "published entry identity changed; effect may have occurred",
+                ));
+            }
+            Ok(self.identity)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Err(unsupported())
         }
@@ -566,8 +827,17 @@ impl Drop for AtomicFile {
         }
     }
 }
-#[cfg(target_os = "linux")]
-fn linux_list(directory: &PinnedDirectory, maximum: usize) -> io::Result<Vec<DirectoryEntry>> {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn unix_list(directory: &PinnedDirectory, maximum: usize) -> io::Result<Vec<DirectoryEntry>> {
+    unix_list_with_progress(directory, maximum, &mut |_, _| {})
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn unix_list_with_progress(
+    directory: &PinnedDirectory,
+    maximum: usize,
+    progress: &mut dyn FnMut(usize, Option<usize>),
+) -> io::Result<Vec<DirectoryEntry>> {
     use std::{
         ffi::{CStr, CString},
         os::fd::AsRawFd,
@@ -606,9 +876,17 @@ fn linux_list(directory: &PinnedDirectory, maximum: usize) -> io::Result<Vec<Dir
     let stream = Stream(stream);
     let mut entries = Vec::new();
     let mut scanned = 0;
+    progress(0, None);
     loop {
         // SAFETY: only this owner uses DIR; errno reset distinguishes EOF/error.
-        unsafe { *libc::__errno_location() = 0 };
+        #[cfg(target_os = "linux")]
+        unsafe {
+            *libc::__errno_location() = 0
+        };
+        #[cfg(target_os = "macos")]
+        unsafe {
+            *libc::__error() = 0
+        };
         let entry = unsafe { libc::readdir(stream.0) };
         if entry.is_null() {
             let error = io::Error::last_os_error();
@@ -653,12 +931,168 @@ fn linux_list(directory: &PinnedDirectory, maximum: usize) -> io::Result<Vec<Dir
             bytes: stat.st_size.max(0) as u64,
             is_directory: kind == libc::S_IFDIR,
         });
+        if scanned % 64 == 0 {
+            progress(scanned, None);
+        }
     }
+    progress(scanned, Some(scanned));
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(entries)
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(windows)]
+fn windows_list(directory: &PinnedDirectory, maximum: usize) -> io::Result<Vec<DirectoryEntry>> {
+    windows_list_with_progress(directory, maximum, &mut |_, _| {})
+}
+
+#[cfg(windows)]
+fn windows_list_with_progress(
+    directory: &PinnedDirectory,
+    maximum: usize,
+    progress: &mut dyn FnMut(usize, Option<usize>),
+) -> io::Result<Vec<DirectoryEntry>> {
+    use std::{os::windows::io::AsRawHandle, slice};
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_NO_MORE_FILES},
+        Storage::FileSystem::{
+            FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
+            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ID_BOTH_DIR_INFO,
+        },
+    };
+
+    const BUFFER_BYTES: usize = 64 * 1024;
+    let root = directory.root.try_clone_file()?;
+    let mut buffer = vec![0_u64; BUFFER_BYTES / std::mem::size_of::<u64>()];
+    let mut entries = Vec::new();
+    let mut scanned = 0;
+    let mut restart = true;
+    progress(0, None);
+    loop {
+        let information_class = if restart {
+            FileIdBothDirectoryRestartInfo
+        } else {
+            FileIdBothDirectoryInfo
+        };
+        // SAFETY: `buffer` is writable and eight-byte aligned, the handle is a
+        // pinned directory with list access, and the information class selects
+        // the matching variable-length FILE_ID_BOTH_DIR_INFO records.
+        let succeeded = unsafe {
+            GetFileInformationByHandleEx(
+                root.as_raw_handle() as _,
+                information_class,
+                buffer.as_mut_ptr().cast(),
+                BUFFER_BYTES as u32,
+            )
+        };
+        if succeeded == 0 {
+            let error = unsafe { GetLastError() };
+            if error == ERROR_NO_MORE_FILES {
+                break;
+            }
+            return Err(io::Error::from_raw_os_error(error as i32));
+        }
+        restart = false;
+        let mut offset = 0_usize;
+        loop {
+            let header_end = offset
+                .checked_add(std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>())
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "directory record overflow")
+                })?;
+            if header_end > BUFFER_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "directory record exceeds buffer",
+                ));
+            }
+            // SAFETY: the bounds check above leaves room for the fixed record;
+            // read_unaligned accepts the API's byte-offset record alignment.
+            let information = unsafe {
+                buffer
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(offset)
+                    .cast::<FILE_ID_BOTH_DIR_INFO>()
+                    .read_unaligned()
+            };
+            let name_bytes = information.FileNameLength as usize;
+            let name_offset = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
+            let name_end = offset
+                .checked_add(name_offset)
+                .and_then(|start| start.checked_add(name_bytes))
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "directory name overflow")
+                })?;
+            if name_bytes % 2 != 0 || name_end > BUFFER_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid directory entry name length",
+                ));
+            }
+            // SAFETY: the byte range is within the returned buffer and the
+            // byte length was checked to contain whole UTF-16 code units.
+            let name_units = unsafe {
+                slice::from_raw_parts(
+                    buffer
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(offset + name_offset)
+                        .cast::<u16>(),
+                    name_bytes / 2,
+                )
+            };
+            let name = String::from_utf16(name_units).map_err(io::Error::other)?;
+            if !matches!(name.as_str(), "." | "..") {
+                scanned += 1;
+                if scanned > maximum {
+                    return Err(io::Error::other("directory scan exceeds entry bound"));
+                }
+                validate_leaf(&name)?;
+                if information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return Err(io::Error::other(
+                        "directory contains unsupported link/special entry",
+                    ));
+                }
+                if information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+                    && information.EndOfFile < 0
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "directory entry has a negative file size",
+                    ));
+                }
+                entries.push(DirectoryEntry {
+                    name,
+                    bytes: information.EndOfFile.max(0) as u64,
+                    is_directory: information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0,
+                });
+                if scanned % 64 == 0 {
+                    progress(scanned, None);
+                }
+            }
+            let next = information.NextEntryOffset as usize;
+            if next == 0 {
+                break;
+            }
+            if next % 8 != 0
+                || offset
+                    .checked_add(next)
+                    .is_none_or(|next| next >= BUFFER_BYTES)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid next directory record offset",
+                ));
+            }
+            offset += next;
+        }
+    }
+    progress(scanned, Some(scanned));
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(entries)
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
     #[test]
@@ -735,6 +1169,51 @@ mod tests {
         assert!(root.list(2).is_err());
         assert_eq!(root.list(3).unwrap().len(), 3);
         assert_eq!(root.list(3).unwrap().len(), 3);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn saved_catalog_reports_directory_entries_while_scanning() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(fixture.path()).unwrap(),
+        ))
+        .unwrap();
+        for entry in 0..130 {
+            std::fs::write(fixture.path().join(format!("entry-{entry}")), b"x").unwrap();
+        }
+        let mut updates = Vec::new();
+
+        let entries = root
+            .list_saved_catalog_with_progress(256, &mut |completed, total| {
+                updates.push((completed, total));
+            })
+            .unwrap();
+
+        assert_eq!(entries.len(), 130);
+        assert_eq!(
+            updates,
+            [(0, None), (64, None), (128, None), (130, Some(130))]
+        );
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn pinned_directory_identity_accepts_directory_handles() {
+        use std::os::unix::fs::MetadataExt;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let expected = std::fs::metadata(fixture.path()).unwrap();
+        let root = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(fixture.path()).unwrap(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            root.identity(),
+            FileIdentity {
+                device: expected.dev(),
+                inode: expected.ino(),
+            }
+        );
     }
     #[test]
     fn namespace_mutation_lease_serializes_independent_root_views() {

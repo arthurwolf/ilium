@@ -79,6 +79,11 @@ pub enum NewPaneKind {
         command_line: String,
         initial_input: String,
     },
+    /// Spawn a specific command line like [`NewPaneKind::Command`], and have
+    /// the server close the pane (after a short minimum lifetime) once the
+    /// command has exited. Used by `ilium new-pane` unless `--keep-open` is
+    /// given. Appended so existing bincode variant indexes remain stable.
+    CommandClosingOnExit(String),
 }
 
 /// Server-side starting-directory strategy for a newly spawned terminal.
@@ -185,6 +190,31 @@ pub struct ProgressMonitorPreflight {
 pub struct ProgressMonitorAccepted {
     pub monitor_id: u64,
     pub progress: PaneProgress,
+}
+
+/// Why a `WaitPaneProgressMonitor` request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressWaitEnd {
+    /// The task reported done/error, or the monitor itself failed.
+    Settled,
+    /// A newer `set` replaced the waited monitor.
+    Superseded,
+    /// The monitor was cleared, or monitoring was switched off.
+    Cleared,
+}
+
+/// Result of one held progress wait.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressWaitOutcome {
+    pub monitor_id: u64,
+    pub end: ProgressWaitEnd,
+    /// Final monitor state for `Settled`; `None` otherwise.
+    pub progress: Option<PaneProgress>,
+    /// `true` when this reply replaces the composer notification. `false`
+    /// means a notification was already typed (or may still be), so the agent
+    /// should treat it as a duplicate of this reply.
+    pub composer_notice_suppressed: bool,
 }
 
 /// Correlated machine-readable status returned by `ilium progress status`.
@@ -410,6 +440,17 @@ pub struct WorkspacePruneResult {
     pub metadata_present: Option<bool>,
     pub branch_outcome: WorkspacePruneBranchOutcome,
     pub reasons: Vec<String>,
+}
+
+/// An explicit Antigravity status-line action. Cancellation is distinct from
+/// deletion so a disabled setting can invalidate stale work without writing
+/// `/statusline delete` into a live pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AntigravityStatuslineAction {
+    SetCommand { command: String },
+    DeleteCommand,
+    CancelPending,
+    DisableCommand,
 }
 
 /// Requests sent from `ilium-client` to `ilium-server`. Everything here
@@ -932,6 +973,27 @@ pub enum ClientRequest {
     DiscardTerminalDelivery {
         pane_ids: Vec<NodeId>,
     },
+    /// Resumes a terminal pane from its server-persisted frozen origin.
+    /// Preserve this historical position; new request variants are appended after it.
+    UnfreezePane {
+        pane_id: NodeId,
+    },
+    /// Applies or cancels Antigravity status-line work for already-open panes.
+    /// Appended to preserve every existing bincode request discriminant.
+    UpdateAntigravityStatusline {
+        generation: u64,
+        action: AntigravityStatuslineAction,
+    },
+    /// Held open by `ilium progress wait` until monitor `monitor_id` settles,
+    /// is replaced, or is cleared. While the waiter's connection is alive the
+    /// server returns the outcome here instead of typing it into the agent's
+    /// composer. The correlated reply is [`ServerEvent::ProgressWaitCompleted`].
+    /// Appended to preserve every existing bincode request discriminant.
+    WaitPaneProgressMonitor {
+        request_id: u64,
+        pane_id: NodeId,
+        monitor_id: u64,
+    },
 }
 
 impl ClientRequest {
@@ -993,6 +1055,7 @@ impl ClientRequest {
             Self::SetPaneProgressMonitor { .. } => "set_pane_progress_monitor",
             Self::GetPaneProgressMonitorStatus { .. } => "get_pane_progress_monitor_status",
             Self::ClearPaneProgressMonitor { .. } => "clear_pane_progress_monitor",
+            Self::WaitPaneProgressMonitor { .. } => "wait_pane_progress_monitor",
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
             Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SubmitTerminalText { .. } => "submit_terminal_text",
@@ -1006,6 +1069,8 @@ impl ClientRequest {
             Self::TerminatePaneProcess { .. } => "terminate_pane_process",
             Self::ReplacePaneWithCommand { .. } => "replace_pane_with_command",
             Self::FreezePane { .. } => "freeze_pane",
+            Self::UnfreezePane { .. } => "unfreeze_pane",
+            Self::UpdateAntigravityStatusline { .. } => "update_antigravity_statusline",
             Self::QueryRepoFacts { .. } => "query_repo_facts",
             Self::CreateAgentInWorkspace { .. } => "create_agent_in_workspace",
             Self::RefreshPaneGitStatus { .. } => "refresh_pane_git_status",
@@ -1119,6 +1184,11 @@ pub enum ServerEvent {
         /// inconsistent restored runtime; normal discovery always supplies it.
         process_id: Option<u32>,
         title_generation: u64,
+        /// Absolute transcript path the server verified for `session_id`, when
+        /// discovery reached it through an exact-PID descriptor. Clients treat
+        /// it as a hint and re-verify it before use; `None` means the client
+        /// must find the transcript itself.
+        transcript_path: Option<PathBuf>,
     },
     /// The previously resolved ID no longer belongs to the detected agent
     /// process (the agent exited or its class changed). Clients must discard
@@ -1389,4 +1459,23 @@ pub enum ServerEvent {
         cols: u16,
         message: String,
     },
+    /// Reports whether the requesting client's Antigravity status-line action
+    /// was processed by every eligible live pane; disabling clients use this
+    /// fence before restoring the saved settings JSON.
+    /// Appended to preserve existing bincode discriminants.
+    AntigravityStatuslineCompleted {
+        generation: u64,
+        result: Result<(), String>,
+    },
+    /// Correlated reply to `WaitPaneProgressMonitor`, sent once the waited
+    /// monitor settles, is replaced, or is cleared.
+    /// Appended to preserve existing bincode discriminants.
+    ProgressWaitCompleted {
+        request_id: u64,
+        pane_id: NodeId,
+        result: Result<ProgressWaitOutcome, ProgressMonitorRejection>,
+    },
+    /// Result of a requested Sound Studio preview after server-owned playback.
+    /// Appended to preserve existing bincode discriminants.
+    SoundPreviewCompleted { succeeded: bool },
 }

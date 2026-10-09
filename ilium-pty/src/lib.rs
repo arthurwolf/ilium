@@ -39,6 +39,7 @@ pub use error::PtyError;
 pub use owner::{OwnerLimits, OwnerStatus, PtyInput, QueueLoad, ShutdownReport};
 pub use screen_reader::ScreenReader;
 pub use session::{
-    PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputRecovery, PtyOutputReplay,
-    PtySession, PtySessionIdentity, PtyShellObserver, PtyTerminationHandle, ScreenSnapshot,
+    PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputRecovery,
+    PtyOutputRecoveryEstimate, PtyOutputReplay, PtyOutputReplayEstimate, PtySession,
+    PtySessionIdentity, PtyShellObserver, PtyTerminationHandle, ScreenSnapshot,
 };
