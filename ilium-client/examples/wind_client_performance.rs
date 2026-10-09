@@ -75,6 +75,7 @@ struct Options {
     occupied: bool,
     merge_dots: bool,
     pointer: Option<[f32; 2]>,
+    paired_pointer: bool,
     capture_dir: Option<PathBuf>,
     capture_subdir: Option<PathBuf>,
 }
@@ -130,6 +131,20 @@ fn parse_pointer_position(value: &str) -> Result<[f32; 2]> {
     Ok(position)
 }
 
+fn pointer_workloads(
+    paired_pointer: bool,
+    pointer: Option<[f32; 2]>,
+) -> Result<Vec<(&'static str, Option<[f32; 2]>)>> {
+    if paired_pointer && pointer.is_some() {
+        return Err("--paired-pointer cannot be combined with --pointer".into());
+    }
+    if paired_pointer {
+        Ok(vec![("no-pointer", None), ("pointer", Some([0.5, 0.5]))])
+    } else {
+        Ok(vec![("single", pointer)])
+    }
+}
+
 fn checksum(frame: &AnimationFrame, width: u16, height: u16) -> u64 {
     let mut checksum = 0xcbf2_9ce4_8422_2325_u64;
     for row in 0..height {
@@ -139,6 +154,19 @@ fn checksum(frame: &AnimationFrame, width: u16, height: u16) -> u64 {
         }
     }
     checksum
+}
+
+fn wind_glyph_bits(glyph: char) -> Option<u8> {
+    match glyph {
+        ' ' => Some(0),
+        '\u{2800}'..='\u{28ff}' => Some((glyph as u32 - 0x2800) as u8),
+        // Merged-dot density glyphs are represented at Braille-cell resolution
+        // for benchmark captures; the terminal renderer retains the real glyph.
+        '\u{2022}' => Some(0b0011_0110),
+        '\u{25cf}' => Some(0b1111_1111),
+        '\u{25c9}' => Some(0b1100_1001),
+        _ => None,
+    }
 }
 
 fn save_braille_png(
@@ -152,13 +180,8 @@ fn save_braille_png(
     for row in 0..height {
         for column in 0..width {
             let glyph = frame.glyph(column, row);
-            let bits = if glyph == ' ' {
-                0
-            } else if ('\u{2800}'..='\u{28ff}').contains(&glyph) {
-                (glyph as u32 - 0x2800) as u8
-            } else {
-                return Err(format!("unexpected non-Braille Wind glyph: {glyph:?}").into());
-            };
+            let bits = wind_glyph_bits(glyph)
+                .ok_or_else(|| format!("unexpected Wind capture glyph: {glyph:?}"))?;
             for (dot_row, bit_row) in BITS.iter().enumerate() {
                 for (dot_column, bit) in bit_row.iter().enumerate() {
                     if bits & *bit != 0 {
@@ -187,6 +210,7 @@ fn parse_options() -> Result<Option<Options>> {
         occupied: true,
         merge_dots: false,
         pointer: None,
+        paired_pointer: false,
         capture_dir: None,
         capture_subdir: None,
     };
@@ -197,7 +221,7 @@ fn parse_options() -> Result<Option<Options>> {
                 "{}",
                 json!({
                     "type": "help",
-                    "usage": "wind_client_performance [--width N] [--height N] [--fps N] [--warmup N] [--frames N] [--dots 10|20000|50000] [--occupied|--no-occupied] [--merge-dots] [--pointer X,Y] [--capture-dir ABS|--capture-subdir REL]",
+                    "usage": "wind_client_performance [--width N] [--height N] [--fps N] [--warmup N] [--frames N] [--dots 10|20000|50000] [--occupied|--no-occupied] [--merge-dots] [--pointer X,Y|--paired-pointer] [--capture-dir ABS|--capture-subdir REL]",
                     "defaults": {"width":160,"height":50,"fps":30,"warmup":120,"frames":3000,"dots":[20000,50000],"occupied":true,"merge_dots":false},
                     "note": "--dots 10 is a sparse baseline for fixed scene and raster-packing cost; it is not a target workload"
                 })
@@ -208,6 +232,7 @@ fn parse_options() -> Result<Option<Options>> {
             "--occupied" => options.occupied = true,
             "--no-occupied" => options.occupied = false,
             "--merge-dots" => options.merge_dots = true,
+            "--paired-pointer" => options.paired_pointer = true,
             _ => {
                 let value = arguments.next().ok_or("flag requires a value")?;
                 match flag.as_str() {
@@ -251,13 +276,10 @@ fn parse_options() -> Result<Option<Options>> {
     {
         return Err("capture directory must be an absolute path".into());
     }
-    let captures_requested = options.capture_dir.is_some() || options.capture_subdir.is_some();
-    if captures_requested && options.merge_dots {
-        return Err("PNG capture currently requires merge_dots=false".into());
-    }
     if options.capture_dir.is_some() && options.capture_subdir.is_some() {
         return Err("choose only one capture directory option".into());
     }
+    pointer_workloads(options.paired_pointer, options.pointer)?;
     Ok(Some(options))
 }
 
@@ -359,7 +381,21 @@ fn run() -> Result<()> {
         .dots
         .map_or_else(|| vec![20_000, 50_000], |dots| vec![dots]);
     for dot_count in dots {
-        measure(&options, dot_count, &fixture.resources)?;
+        for (label, pointer) in pointer_workloads(options.paired_pointer, options.pointer)? {
+            let mut workload = options.clone();
+            workload.pointer = pointer;
+            workload.paired_pointer = false;
+            if options.paired_pointer {
+                workload.capture_dir = options
+                    .capture_dir
+                    .as_ref()
+                    .map(|directory| directory.join(label));
+                if let Some(directory) = &workload.capture_dir {
+                    fs::create_dir_all(directory)?;
+                }
+            }
+            measure(&workload, dot_count, &fixture.resources)?;
+        }
     }
     Ok(())
 }
@@ -373,7 +409,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_source_files, parse_pointer_position, validate_capture_subdirectory};
+    use super::{
+        hash_source_files, parse_pointer_position, pointer_workloads,
+        validate_capture_subdirectory, wind_glyph_bits,
+    };
     use std::fs;
     use std::path::Path;
 
@@ -398,6 +437,19 @@ mod tests {
     }
 
     #[test]
+    fn paired_pointer_workload_runs_unforced_and_center_forced_cases() {
+        assert_eq!(
+            pointer_workloads(true, None).unwrap(),
+            vec![("no-pointer", None), ("pointer", Some([0.5, 0.5]))]
+        );
+        assert!(pointer_workloads(true, Some([0.25, 0.75])).is_err());
+        assert_eq!(
+            pointer_workloads(false, Some([0.25, 0.75])).unwrap(),
+            vec![("single", Some([0.25, 0.75]))]
+        );
+    }
+
+    #[test]
     fn accepts_only_relative_capture_subdirectories_without_parent_traversal() {
         assert!(validate_capture_subdirectory(Path::new("wind-captures/run-1")).is_ok());
         for path in ["", ".", "../outside", "wind/../../outside", "/tmp/captures"] {
@@ -406,6 +458,15 @@ mod tests {
                 "accepted unsafe capture subdirectory {path:?}"
             );
         }
+    }
+
+    #[test]
+    fn maps_merged_wind_density_glyphs_to_capture_pixels() {
+        assert_eq!(wind_glyph_bits('•'), Some(0b0011_0110));
+        assert_eq!(wind_glyph_bits('●'), Some(0b1111_1111));
+        assert_eq!(wind_glyph_bits('◉'), Some(0b1100_1001));
+        assert_eq!(wind_glyph_bits(' '), Some(0));
+        assert_eq!(wind_glyph_bits('x'), None);
     }
 
     #[test]

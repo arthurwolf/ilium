@@ -34,7 +34,7 @@ const GRAVITY: f32 = 50.0;
 const PUSH_SPEED: f32 = 36.0;
 /// Local pointer field, measured in cell widths so it looks circular on screen.
 pub(super) const MOUSE_RADIUS: f32 = 6.0;
-const MOUSE_FORCE: f32 = 180.0;
+pub(super) const MOUSE_FORCE: f32 = 180.0;
 /// Reach of the dot-to-dot repulsion, measured in cell widths.
 const DIFFUSION_RADIUS: f32 = 3.0;
 /// Repulsion acceleration between two touching dots at 100% diffusion.
@@ -54,12 +54,11 @@ const EJECT_LINE: i32 = 4;
 /// Field spacing for ordinary gust simulation. Keep finer spacing where the
 /// dense-particle fast path is not eligible, including stronger wind settings.
 const WIND_FIELD_MAX_SPACING: usize = 2;
-/// Dense-path field spacing. Across five terminal resolutions, exploratory
-/// sampling found <0.81% local force error at the default wind/gust settings;
-/// trajectory error still needs production validation. Particle interpolation
-/// research motivates checking accumulated paths, not only local force error:
-/// https://doi.org/10.1103/PhysRevE.87.043307
-const CELL_WIND_FIELD_SPACING: usize = 4;
+/// Keep dense-path gust samples at the normal spacing: a coarser local-force
+/// approximation accumulated into visibly large long-run particle drift.
+/// Particle interpolation research motivates checking accumulated paths, not
+/// only local force error: https://doi.org/10.1103/PhysRevE.87.043307
+const CELL_WIND_FIELD_SPACING: usize = 2;
 /// Bound cache memory for pathological terminal dimensions.
 const WIND_FIELD_MAX_DIMENSION: usize = 512;
 /// Use screen-cell gust samples only at high dot counts and near the default
@@ -131,6 +130,11 @@ pub struct Sim {
     wind_field_rows: usize,
     /// One gust sample per terminal cell for the high-population fast path.
     wind_cell_field: Vec<[f32; 2]>,
+    /// Horizontal interpolation at each screen column for every coarse field row.
+    wind_cell_horizontal_samples: Vec<[f32; 2]>,
+    /// Reused bilinear sample coordinates for each terminal column and row.
+    wind_cell_x_samples: Vec<(usize, f32)>,
+    wind_cell_y_samples: Vec<(usize, f32)>,
     /// Runtime-dispatched scratch state for the dense wrapped gust path.
     simd_state: super::simd::State,
     #[cfg(test)]
@@ -159,6 +163,72 @@ impl Iterator for RenderPositions<'_> {
         match self {
             Self::Soa(positions) => positions.size_hint(),
             Self::Dots(dots) => dots.size_hint(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod render_position_dispatch_benchmark {
+    use super::{Dot, RenderPositions};
+    use std::time::Instant;
+
+    fn checksum(positions: impl Iterator<Item = (f32, f32)>) -> f64 {
+        positions.fold(0.0, |sum, (x, y)| sum + f64::from(x) + f64::from(y))
+    }
+
+    fn measure<I, F>(mut positions: F) -> (u128, f64)
+    where
+        I: Iterator<Item = (f32, f32)>,
+        F: FnMut() -> I,
+    {
+        const FRAMES: usize = 500;
+        let started = Instant::now();
+        let mut result = 0.0;
+        for _ in 0..FRAMES {
+            result += checksum(std::hint::black_box(positions()));
+        }
+        (started.elapsed().as_nanos(), std::hint::black_box(result))
+    }
+
+    #[test]
+    #[ignore = "manual optimized-build benchmark for the per-dot position iterator branch"]
+    fn compare_enum_dispatch_with_concrete_position_iterators() {
+        const FRAMES: usize = 500;
+        for count in [20_000, 50_000] {
+            let x = (0..count)
+                .map(|i| (i % 160) as f32 + 0.25)
+                .collect::<Vec<_>>();
+            let y = (0..count)
+                .map(|i| (i % 50) as f32 + 0.5)
+                .collect::<Vec<_>>();
+            let dots = (0..count)
+                .map(|i| Dot {
+                    x: x[i],
+                    y: y[i],
+                    vx: 0.0,
+                    vy: 0.0,
+                    weight_roll: 0.0,
+                })
+                .collect::<Vec<_>>();
+
+            let enum_soa = || RenderPositions::Soa(x.iter().zip(&y));
+            let direct_soa = || x.iter().copied().zip(y.iter().copied());
+            let enum_aos = || RenderPositions::Dots(dots.iter());
+            let direct_aos = || dots.iter().map(|dot| (dot.x, dot.y));
+            let expected_soa = checksum(direct_soa());
+            let expected_aos = checksum(direct_aos());
+            assert_eq!(checksum(enum_soa()), expected_soa);
+            assert_eq!(checksum(enum_aos()), expected_aos);
+
+            let (enum_soa_ns, enum_soa_sum) = measure(enum_soa);
+            let (direct_soa_ns, direct_soa_sum) = measure(direct_soa);
+            let (enum_aos_ns, enum_aos_sum) = measure(enum_aos);
+            let (direct_aos_ns, direct_aos_sum) = measure(direct_aos);
+            assert_eq!(enum_soa_sum, direct_soa_sum);
+            assert_eq!(enum_aos_sum, direct_aos_sum);
+            println!(
+                "{{\"type\":\"measurement\",\"dots\":{count},\"frames\":{FRAMES},\"enum_soa_ns\":{enum_soa_ns},\"direct_soa_ns\":{direct_soa_ns},\"enum_aos_ns\":{enum_aos_ns},\"direct_aos_ns\":{direct_aos_ns}}}"
+            );
         }
     }
 }
@@ -199,6 +269,9 @@ impl Sim {
             wind_field_columns: 2,
             wind_field_rows: 2,
             wind_cell_field: Vec::new(),
+            wind_cell_horizontal_samples: Vec::new(),
+            wind_cell_x_samples: Vec::new(),
+            wind_cell_y_samples: Vec::new(),
             simd_state: super::simd::State::default(),
             #[cfg(test)]
             last_simd_path: None,
@@ -405,7 +478,7 @@ impl Sim {
         (direction.cos() * strength, direction.sin() * strength)
     }
 
-    pub(super) fn update_wind_field(&mut self, angle: f32, time: f32) {
+    pub(super) fn update_wind_field(&mut self, angle: f32, time: f32) -> bool {
         let width = f32::from(self.mask.width().max(1));
         let height = f32::from(self.mask.height().max(1));
         for row in 0..self.wind_field_rows {
@@ -416,9 +489,9 @@ impl Sim {
                     self.wind_at(angle, x, y, time);
             }
         }
-        if self.uses_cell_wind_field() {
-            self.update_wind_cell_field();
-        }
+        self.uses_cell_wind_field()
+            .then(|| self.update_wind_cell_field())
+            .unwrap_or(false)
     }
 
     fn uses_cell_wind_field(&self) -> bool {
@@ -442,22 +515,74 @@ impl Sim {
             self.wind_field_rows = rows;
             self.wind_field.resize(columns * rows, (0.0, 0.0));
         }
+        self.configure_wind_cell_axis_samples();
     }
 
-    fn update_wind_cell_field(&mut self) {
+    fn configure_wind_cell_axis_samples(&mut self) {
+        if !self.uses_cell_wind_field() {
+            self.wind_cell_x_samples.clear();
+            self.wind_cell_y_samples.clear();
+            return;
+        }
+        let width = usize::from(self.mask.width());
+        let height = usize::from(self.mask.height());
+        let scale_x = (self.wind_field_columns - 1) as f32 / width.max(1) as f32;
+        let scale_y = (self.wind_field_rows - 1) as f32 / height.max(1) as f32;
+        self.wind_cell_x_samples.resize(width, (0, 0.0));
+        self.wind_cell_y_samples.resize(height, (0, 0.0));
+        for (column, sample) in self.wind_cell_x_samples.iter_mut().enumerate() {
+            let grid_x = (column as f32 + 0.5) * scale_x;
+            let left = grid_x as usize;
+            *sample = (left, grid_x - left as f32);
+        }
+        for (row, sample) in self.wind_cell_y_samples.iter_mut().enumerate() {
+            let grid_y = (row as f32 + 0.5) * scale_y;
+            let top = grid_y as usize;
+            *sample = (top, grid_y - top as f32);
+        }
+    }
+
+    fn update_wind_cell_field(&mut self) -> bool {
         let width = usize::from(self.mask.width());
         let height = usize::from(self.mask.height());
         self.wind_cell_field.resize(width * height, [0.0; 2]);
-        let scale_x = (self.wind_field_columns - 1) as f32 / width.max(1) as f32;
-        let scale_y = (self.wind_field_rows - 1) as f32 / height.max(1) as f32;
-        for row in 0..height {
+        let field_columns = self.wind_field_columns;
+        let field_rows = self.wind_field_rows;
+        self.wind_cell_horizontal_samples
+            .resize(field_rows * width, [0.0; 2]);
+
+        // Each screen row reuses the same horizontal interpolation for a
+        // given coarse field row and screen column. Materialize it once, then
+        // keep the original operation order for the vertical interpolation.
+        for field_row in 0..field_rows {
+            let field_offset = field_row * field_columns;
+            let sample_offset = field_row * width;
             for column in 0..width {
-                let x = column as f32 + 0.5;
-                let y = row as f32 + 0.5;
-                let (force_x, force_y) = self.wind_force_at_in_bounds(x, y, scale_x, scale_y);
+                let (left, tx) = self.wind_cell_x_samples[column];
+                let left_force = self.wind_field[field_offset + left];
+                let right_force = self.wind_field[field_offset + left + 1];
+                self.wind_cell_horizontal_samples[sample_offset + column] = [
+                    left_force.0 + (right_force.0 - left_force.0) * tx,
+                    left_force.1 + (right_force.1 - left_force.1) * tx,
+                ];
+            }
+        }
+
+        let mut all_finite = true;
+        for row in 0..height {
+            let (top, ty) = self.wind_cell_y_samples[row];
+            let top_offset = top * width;
+            let bottom_offset = (top + 1) * width;
+            for column in 0..width {
+                let top_force = self.wind_cell_horizontal_samples[top_offset + column];
+                let bottom_force = self.wind_cell_horizontal_samples[bottom_offset + column];
+                let force_x = top_force[0] + (bottom_force[0] - top_force[0]) * ty;
+                let force_y = top_force[1] + (bottom_force[1] - top_force[1]) * ty;
+                all_finite &= force_x.is_finite() && force_y.is_finite();
                 self.wind_cell_field[row * width + column] = [force_x, force_y];
             }
         }
+        all_finite
     }
 
     #[cfg(test)]
@@ -1123,9 +1248,7 @@ impl Sim {
         self.disperse(dt);
         let angle = self.wind_angle(time);
         let gusts_enabled = self.settings.gusts > 0;
-        if gusts_enabled {
-            self.update_wind_field(angle, time);
-        }
+        let cell_wind_field_finite = gusts_enabled && self.update_wind_field(angle, time);
         let drag = self.settings.drag as f32 / 100.0 * DRAG_COEFFICIENT;
         let gravity = if self.settings.gravity_enabled {
             self.settings.gravity_strength as f32 / 100.0 * GRAVITY
@@ -1150,12 +1273,14 @@ impl Sim {
         let repulsion_active = self.repulsion_active;
         if gusts_enabled && !repulsion_active && self.settings.dispersion == 0 {
             let (scale_x, scale_y) = wind_scale.expect("gusted wind must have cached scales");
-            // Particle-in-cell measurements show SIMD crossover depends on
-            // workload density. Keep this route restricted to dense gust
-            // scenes and retain scalar fallback; Wind's cell-sorting variant
-            // was slower in the matched 20k/50k release experiment.
+            // Smilei's sorted PIC kernels show SIMD crossover depends on local
+            // particles-per-cell; that does not set Wind's threshold because
+            // its operators and gathered gust field differ. Keep SIMD limited
+            // to dense gust scenes and retain scalar fallback; Wind's own
+            // cell-binning variant was slower in matched 20k/50k experiments.
             // https://arxiv.org/abs/1810.03949
             if self.settings.edge_mode == EdgeMode::Wrap && self.uses_cell_wind_field() {
+                self.simd_state.cell_wind_field_finite = cell_wind_field_finite;
                 let width = usize::from(self.mask.width());
                 let height = usize::from(self.mask.height());
                 // The kernel does not consult blocked cells when collisions
@@ -1455,7 +1580,7 @@ mod gust_field_accuracy_tests {
                                 let exact = sim.wind_at(angle, x, y, time);
                                 let cached = sim.wind_force_at(x, y);
                                 maximum_error = maximum_error
-                                    .max((exact.0 - cached[0]).hypot(exact.1 - cached[1]));
+                                    .max((exact.0 - cached.0).hypot(exact.1 - cached.1));
                             }
                         }
                     }
@@ -1473,9 +1598,176 @@ mod gust_field_accuracy_tests {
 }
 
 #[cfg(test)]
-mod cell_wind_field_tests {
+mod wind_trig_experiment_tests {
     use super::super::settings::WindSettings;
     use super::{Sim, WIND_FORCE};
+    use crate::scene::OccupancyMask;
+    use std::time::Instant;
+
+    fn add_sines(sin_left: f32, cos_left: f32, sin_right: f32, cos_right: f32) -> f32 {
+        sin_left * cos_right + cos_left * sin_right
+    }
+
+    fn reference_wind_field(sim: &Sim, angle: f32, time: f32, field: &mut [(f32, f32)]) {
+        for row in 0..sim.wind_field_rows {
+            let y =
+                row as f32 * f32::from(sim.mask.height().max(1)) / (sim.wind_field_rows - 1) as f32;
+            for column in 0..sim.wind_field_columns {
+                let x = column as f32 * f32::from(sim.mask.width().max(1))
+                    / (sim.wind_field_columns - 1) as f32;
+                field[row * sim.wind_field_columns + column] = sim.wind_at(angle, x, y, time);
+            }
+        }
+    }
+
+    fn factored_wind_field(
+        sim: &Sim,
+        angle: f32,
+        time: f32,
+        field: &mut Vec<(f32, f32)>,
+        x_angles: &mut Vec<[(f32, f32); 3]>,
+    ) {
+        let width = f32::from(sim.mask.width().max(1));
+        let height = f32::from(sim.mask.height().max(1));
+        let gust = sim.settings.gusts as f32 / 100.0;
+        let base_strength = sim.settings.wind_strength as f32 / 100.0 * WIND_FORCE;
+        field.resize(sim.wind_field.len(), (0.0, 0.0));
+        if x_angles.len() != sim.wind_field_columns {
+            x_angles.clear();
+            for column in 0..sim.wind_field_columns {
+                let x = column as f32 * width / (sim.wind_field_columns - 1) as f32;
+                x_angles.push([
+                    (0.21 * x).sin_cos(),
+                    (0.05 * x).sin_cos(),
+                    (0.11 * x).sin_cos(),
+                ]);
+            }
+        }
+
+        for row in 0..sim.wind_field_rows {
+            let y = row as f32 * height / (sim.wind_field_rows - 1) as f32;
+            let (inner_y_sin, _) = (0.13 * y + 0.5 * time).sin_cos();
+            let (swell_y_sin, swell_y_cos) = (0.9 * time + inner_y_sin).sin_cos();
+            let (swell2_y_sin, swell2_y_cos) = (0.17 * y - 0.6 * time).sin_cos();
+            let (veer_y_sin, veer_y_cos) = (-0.11 * y + 0.7 * time).sin_cos();
+
+            for column in 0..sim.wind_field_columns {
+                let [(swell_x_sin, swell_x_cos), (swell2_x_sin, swell2_x_cos), (veer_x_sin, veer_x_cos)] =
+                    x_angles[column];
+                let swell = (add_sines(swell_x_sin, swell_x_cos, swell_y_sin, swell_y_cos)
+                    + add_sines(swell2_x_sin, swell2_x_cos, swell2_y_sin, swell2_y_cos))
+                    * 0.5;
+                let strength = base_strength * (1.0 + gust * 0.8 * swell);
+                let veer = gust * 0.5 * add_sines(veer_x_sin, veer_x_cos, veer_y_sin, veer_y_cos);
+                let (direction_sin, direction_cos) = (angle + veer).sin_cos();
+                field[row * sim.wind_field_columns + column] =
+                    (direction_cos * strength, direction_sin * strength);
+            }
+        }
+    }
+
+    fn median(samples: &mut [u128]) -> u128 {
+        samples.sort_unstable();
+        samples[samples.len() / 2]
+    }
+
+    #[test]
+    fn factored_gust_field_tracks_the_reference_at_tested_times() {
+        let settings = WindSettings {
+            dot_count: 20_000,
+            gusts: 100,
+            wind_strength: 100,
+            ..WindSettings::default()
+        };
+        let mut sim = Sim::new(&settings);
+        sim.set_mask(&OccupancyMask::empty(160, 50));
+        let mut reference = vec![(0.0, 0.0); sim.wind_field.len()];
+        let mut candidate = Vec::with_capacity(sim.wind_field.len());
+        let mut x_angles = Vec::with_capacity(sim.wind_field_columns);
+        for time in [0.0, 0.7, 1.4, 2.3, 9.0] {
+            let angle = sim.wind_angle(time);
+            reference_wind_field(&sim, angle, time, &mut reference);
+            factored_wind_field(&sim, angle, time, &mut candidate, &mut x_angles);
+            assert_eq!(candidate.len(), reference.len());
+            let maximum_error = candidate
+                .iter()
+                .zip(&reference)
+                .map(|(actual, expected)| (actual.0 - expected.0).hypot(actual.1 - expected.1))
+                .fold(0.0_f32, f32::max);
+            assert!(maximum_error < 0.0001, "force error {maximum_error}");
+        }
+    }
+
+    #[test]
+    #[ignore = "release microbenchmark for separable trigonometry in the gust-field builder"]
+    fn compare_factored_gust_field_build_cost() {
+        const FRAMES: usize = 500;
+        const SAMPLES: usize = 7;
+        let settings = WindSettings {
+            dot_count: 20_000,
+            gusts: 30,
+            wind_strength: 100,
+            ..WindSettings::default()
+        };
+        let mut sim = Sim::new(&settings);
+        sim.set_mask(&OccupancyMask::empty(160, 50));
+        let mut field = vec![(0.0, 0.0); sim.wind_field.len()];
+        let mut x_angles = Vec::with_capacity(sim.wind_field_columns);
+        let mut reference_samples = Vec::with_capacity(SAMPLES);
+        let mut factored_samples = Vec::with_capacity(SAMPLES);
+        for sample in 0..SAMPLES {
+            let paths = if sample % 2 == 0 {
+                [("reference", false), ("factored", true)]
+            } else {
+                [("factored", true), ("reference", false)]
+            };
+            for (name, factored) in paths {
+                let started = Instant::now();
+                let mut checksum = 0.0_f64;
+                for frame in 0..FRAMES {
+                    let time = frame as f32 / 30.0;
+                    let angle = sim.wind_angle(time);
+                    if factored {
+                        factored_wind_field(&sim, angle, time, &mut field, &mut x_angles);
+                    } else {
+                        reference_wind_field(&sim, angle, time, &mut field);
+                    }
+                    checksum += field
+                        .iter()
+                        .map(|force| f64::from(force.0 + force.1))
+                        .sum::<f64>();
+                    std::hint::black_box(&field);
+                }
+                let elapsed_ns = started.elapsed().as_nanos();
+                if factored {
+                    factored_samples.push(elapsed_ns);
+                } else {
+                    reference_samples.push(elapsed_ns);
+                }
+                println!(
+                    "{{\"type\":\"sample\",\"path\":\"{name}\",\"sample\":{sample},\"dots\":{},\"field_samples\":{},\"frames\":{FRAMES},\"elapsed_ns\":{elapsed_ns},\"checksum\":{checksum}}}",
+                    settings.dot_count,
+                    sim.wind_field.len(),
+                );
+            }
+        }
+        let reference_median = median(&mut reference_samples);
+        let factored_median = median(&mut factored_samples);
+        println!(
+            "{{\"type\":\"summary\",\"dots\":{},\"frames_per_sample\":{FRAMES},\"samples\":{SAMPLES},\"reference_median_ns\":{reference_median},\"factored_median_ns\":{factored_median},\"speedup\":{:.6}}}",
+            settings.dot_count,
+            reference_median as f64 / factored_median as f64,
+        );
+    }
+}
+
+#[cfg(test)]
+mod cell_wind_field_tests {
+    use super::super::settings::WindSettings;
+    use super::{
+        wind_field_dimension, Sim, ASPECT, CELL_WIND_FIELD_SPACING, WIND_FIELD_MAX_SPACING,
+        WIND_FORCE,
+    };
     use crate::scene::OccupancyMask;
 
     #[test]
@@ -1487,7 +1779,8 @@ mod cell_wind_field_tests {
             dot_count: 20_000,
             ..WindSettings::default()
         };
-        let dense = Sim::new(&dense_settings);
+        let mut dense = Sim::new(&dense_settings);
+        dense.set_mask(&OccupancyMask::empty(160, 50));
         assert!(dense.uses_cell_wind_field());
 
         let stronger_wind = WindSettings {
@@ -1531,6 +1824,20 @@ mod cell_wind_field_tests {
     }
 
     #[test]
+    fn cell_field_generation_reports_non_finite_forces_for_scalar_fallback() {
+        let mut sim = Sim::new(&WindSettings {
+            dot_count: 20_000,
+            ..WindSettings::default()
+        });
+        sim.set_mask(&OccupancyMask::empty(160, 50));
+
+        let normal_angle = sim.wind_angle(0.0);
+        assert!(sim.update_wind_field(normal_angle, 0.0));
+        let invalid_angle = sim.wind_angle(f32::NAN);
+        assert!(!sim.update_wind_field(invalid_angle, f32::NAN));
+    }
+
+    #[test]
     fn cell_cached_default_gust_force_stays_within_one_point_five_percent() {
         let settings = WindSettings {
             dot_count: 50_000,
@@ -1539,7 +1846,15 @@ mod cell_wind_field_tests {
         let mut sim = Sim::new(&settings);
         let mut maximum_error = 0.0_f32;
 
-        for (width, height) in [(80, 24), (120, 40), (160, 50), (240, 80), (320, 100)] {
+        for (width, height) in [
+            (80, 24),
+            (81, 25),
+            (82, 26),
+            (120, 40),
+            (160, 50),
+            (240, 80),
+            (320, 100),
+        ] {
             sim.set_mask(&OccupancyMask::empty(width, height));
             let expected = (
                 usize::from(width).div_ceil(CELL_WIND_FIELD_SPACING) + 1,
@@ -1549,9 +1864,20 @@ mod cell_wind_field_tests {
             for time in [0.0, 1.4, 4.7] {
                 let angle = sim.wind_angle(time);
                 sim.update_wind_field(angle, time);
+                assert_eq!(
+                    sim.wind_cell_horizontal_samples.len(),
+                    expected.1 * usize::from(width)
+                );
                 for row in 0..usize::from(height) {
                     for column in 0..usize::from(width) {
                         let cached = sim.wind_cell_field[row * usize::from(width) + column];
+                        let exact_center = sim.wind_force_at_in_bounds(
+                            column as f32 + 0.5,
+                            row as f32 + 0.5,
+                            (sim.wind_field_columns - 1) as f32 / f32::from(width),
+                            (sim.wind_field_rows - 1) as f32 / f32::from(height),
+                        );
+                        assert_eq!(cached, [exact_center.0, exact_center.1]);
                         for sub_y in [0.1, 0.5, 0.9] {
                             for sub_x in [0.1, 0.5, 0.9] {
                                 let exact = sim.wind_force_at_in_bounds(

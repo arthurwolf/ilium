@@ -30,8 +30,13 @@ use sim::Sim;
 
 /// Glyph for dots piled to the merge threshold, and to twice and thrice it.
 const MERGED_GLYPHS: [char; 3] = ['\u{2022}', '\u{25cf}', '\u{25c9}'];
-/// Skip bitset setup when the population is sparse relative to the raster.
-const RASTER_DEDUP_MIN_DENSITY_DIVISOR: usize = 16;
+/// Measured bitset crossover for the 160x50 Wind raster: about 16k dots.
+const RASTER_DEDUP_MIN_DENSITY_DIVISOR: usize = 4;
+
+#[inline]
+fn should_deduplicate_raster(dot_count: usize, raster_pixel_count: usize) -> bool {
+    dot_count >= raster_pixel_count / RASTER_DEDUP_MIN_DENSITY_DIVISOR
+}
 
 pub struct WindScene {
     settings: WindSettings,
@@ -49,10 +54,11 @@ pub struct WindScene {
 }
 
 impl WindScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
-    // current palette and MUST follow it: scenes with natural colours shift them
-    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // PALETTE (future user-authored JavaScript animation extension contract):
+    // `env.palette` is the shared look's current palette. If that extension API
+    // exposes this scene interface, its constructor receives the current palette
+    // and must follow it: scenes with natural colours shift them onto it
+    // (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Wind draws plain dots in the shared
     // dot colour, so the host's global look already applies to it.
     pub fn new(settings: &WindSettings, _env: &SceneEnv) -> Self {
@@ -197,11 +203,17 @@ impl WindScene {
         let raster_width = frame.raster.width;
 
         for (x, y) in positions {
-            let Some((column, row)) = Self::in_bounds_cell(x, y, frame.width, frame.height) else {
+            if !x.is_finite()
+                || !y.is_finite()
+                || x < 0.0
+                || y < 0.0
+                || x >= f32::from(frame.width)
+                || y >= f32::from(frame.height)
+            {
                 continue;
-            };
-            // `in_bounds_cell` rejects negative and non-finite coordinates.
-            // Power-of-two scaling is exact over the supported raster extent.
+            }
+            // Finite in-range checks replace cell flooring here; power-of-two
+            // scaling then selects the same subpixel bins directly.
             let sub_x = (x * 2.0) as usize;
             let sub_y = (y * 4.0) as usize;
             let index = sub_y * raster_width + sub_x;
@@ -257,9 +269,10 @@ impl Scene for WindScene {
             );
         } else {
             self.glyphs.clear();
-            if self.sim.render_positions().size_hint().0
-                >= frame.raster.dots.len() / RASTER_DEDUP_MIN_DENSITY_DIVISOR
-            {
+            if should_deduplicate_raster(
+                self.sim.render_positions().size_hint().0,
+                frame.raster.dots.len(),
+            ) {
                 Self::draw_positions_deduplicated(
                     frame,
                     self.sim.render_positions(),
@@ -320,6 +333,20 @@ mod raster_dedup_tests {
     }
 
     #[test]
+    fn deduplication_starts_near_the_measured_density_crossover() {
+        let raster_pixels = 160 * 50 * 8;
+        let crossover = raster_pixels / 4;
+        assert!(!super::should_deduplicate_raster(
+            crossover - 1,
+            raster_pixels
+        ));
+        assert!(super::should_deduplicate_raster(crossover, raster_pixels));
+        assert!(!super::should_deduplicate_raster(10_000, raster_pixels));
+        assert!(super::should_deduplicate_raster(20_000, raster_pixels));
+        assert!(super::should_deduplicate_raster(50_000, raster_pixels));
+    }
+
+    #[test]
     fn deduplicated_raster_writes_match_per_dot_painting() {
         let dots = [
             sim::Dot {
@@ -353,6 +380,34 @@ mod raster_dedup_tests {
             sim::Dot {
                 x: -0.1,
                 y: 1.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 4.0,
+                y: 1.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 1.0,
+                y: 3.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: f32::NAN,
+                y: 1.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 1.0,
+                y: f32::INFINITY,
                 vx: 0.0,
                 vy: 0.0,
                 weight_roll: 0.0,

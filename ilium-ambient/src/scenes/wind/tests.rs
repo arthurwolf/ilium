@@ -77,10 +77,12 @@ fn direct_subpixel_scaling_preserves_legacy_raster_mapping() {
             };
             let column = dot.x.floor() as i32;
             let row = dot.y.floor() as i32;
-            let legacy_index = row as usize * frame.raster.width
+            let sub_x = (((dot.x - column as f32) * 2.0) as usize).min(1);
+            let sub_y = (((dot.y - row as f32) * 4.0) as usize).min(3);
+            let legacy_index = row as usize * 4 * frame.raster.width
                 + column as usize * 2
-                + (((dot.x - column as f32) * 2.0) as usize).min(1)
-                + ((((dot.y - row as f32) * 4.0) as usize).min(3)) * frame.raster.width;
+                + sub_x
+                + sub_y * frame.raster.width;
 
             WindScene::draw_dot(&mut frame, &dot);
 
