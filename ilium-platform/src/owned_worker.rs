@@ -12,7 +12,9 @@ use std::sync::{Arc, Condvar, Mutex}; // Serialize retryable initialization of t
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub const MAX_OWNED_WORKERS: usize = 1024;
+/// Sized for 512 PTY panes (five or six workers each) plus the execution
+/// banks; the registry is preallocated, so this is a fixed, small table.
+pub const MAX_OWNED_WORKERS: usize = 4096;
 const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Default)]

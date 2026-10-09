@@ -8,12 +8,23 @@ use std::{io, sync::Arc};
 use tokio::sync::Notify;
 
 const MIB: usize = 1024 * 1024;
+// Keep a small part of the process worker-byte ceiling available for the
+// currently visible terminal's bounded recovery frame, even when general
+// event and worker storage is saturated.
+const VISIBLE_RECOVERY_BYTES: usize = 64 * MIB;
+// Sized for the many-agent target of 512 panes: each Unix PTY session declares
+// five (Windows: six) 2 MiB worker stacks, virtual reservations that are
+// mostly never touched.
+const PROCESS_WORKER_BYTES: usize = 7168 * MIB;
+/// Many-agent design target: panes one server must admit.
+#[cfg(test)]
+const TARGET_PTY_SESSIONS: usize = 512;
 // Distinct tenants reserve output headroom even while request handlers wait
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
 const ADMISSION_WAIT_REPORT: std::time::Duration = std::time::Duration::from_secs(2);
 const GENERAL_INPUT_BYTES: usize = 512 * MIB;
-const GENERAL_RESULT_BYTES: usize = 128 * MIB;
+pub(crate) const GENERAL_RESULT_BYTES: usize = 128 * MIB;
 const PROCESS_INPUT_BYTES: usize = GENERAL_INPUT_BYTES + 4 * 128 * MIB + 2 * 128 * MIB;
 const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 192 * MIB;
 
@@ -23,6 +34,7 @@ const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 1
 /// permanent owner of the process supervisor.
 pub struct ServerResources {
     quota: QuotaGroup,
+    visible_recovery_quota: QuotaGroup,
     completed: Arc<Notify>,
 }
 
@@ -37,12 +49,33 @@ impl ServerResources {
                 service_jobs: 0,
                 input_bytes: PROCESS_INPUT_BYTES,
                 result_bytes: PROCESS_RESULT_BYTES,
-                worker_threads: 16,
-                worker_bytes: 512 * MIB,
+                // Keep room for at least 512 Unix PTY sessions (five 2 MiB
+                // workers each), the two 32 MiB CPU workers, and concurrent
+                // replay/output storage. The former 1024-thread / 2 GiB limits
+                // refused new panes at about 195, below the 200+ agent target.
+                worker_threads: ilium_platform::owned_worker::MAX_OWNED_WORKERS,
+                worker_bytes: PROCESS_WORKER_BYTES - VISIBLE_RECOVERY_BYTES,
             },
             move || admission_wake.notify_waiters(),
         );
-        Self { quota, completed }
+        let recovery_wake = Arc::clone(&completed);
+        let visible_recovery_quota = QuotaGroup::new_with_admission_wake(
+            QuotaLimits {
+                clients: 0,
+                jobs: 0,
+                service_jobs: 0,
+                input_bytes: 0,
+                result_bytes: 0,
+                worker_threads: 0,
+                worker_bytes: VISIBLE_RECOVERY_BYTES,
+            },
+            move || recovery_wake.notify_waiters(),
+        );
+        Self {
+            quota,
+            visible_recovery_quota,
+            completed,
+        }
     }
 
     pub fn quota_group(&self) -> QuotaGroup {
@@ -81,6 +114,7 @@ pub(crate) struct ServerExecution {
     // cancellation without synchronously joining blocked native callbacks.
     _owner: Execution,
     pub(crate) client: ExecutionClient,
+    pub(crate) visible_recovery: ExecutionClient,
     pub(crate) decoder: ExecutionClient,
     pub(crate) encoder: ExecutionClient,
 }
@@ -138,7 +172,11 @@ impl ServerExecution {
     }
 
     pub(crate) fn start_with_resources(resources: ServerResources) -> io::Result<Self> {
-        let ServerResources { quota, completed } = resources;
+        let ServerResources {
+            quota,
+            visible_recovery_quota,
+            completed,
+        } = resources;
         let lane = |threads, resident_bytes_per_thread| LaneConfig {
             threads,
             queue_slots: if threads == 0 { 0 } else { 80 },
@@ -188,6 +226,11 @@ impl ServerExecution {
         };
         let decoder = codec(4)?;
         let encoder = codec(2)?;
+        let visible_recovery = ExecutionClient {
+            foundation: foundation.clone(),
+            quota: visible_recovery_quota,
+            completed: Arc::clone(&completed),
+        };
         Ok(Self {
             _owner: owner,
             client: ExecutionClient {
@@ -195,6 +238,7 @@ impl ServerExecution {
                 quota,
                 completed,
             },
+            visible_recovery,
             decoder,
             encoder,
         })
@@ -224,6 +268,10 @@ impl<J: Job> Drop for CancellableReceipt<J> {
     }
 }
 impl ExecutionClient {
+    pub(crate) fn quota_group(&self) -> QuotaGroup {
+        self.quota.clone()
+    }
+
     pub(crate) fn completion_notification(&self) -> Arc<Notify> {
         Arc::clone(&self.completed)
     }
@@ -414,6 +462,60 @@ pub(crate) fn test_codec_client(is_decoder: bool) -> ExecutionClient {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn process_worker_budget_admits_the_target_pty_count_with_replay_headroom() {
+        let resources = ServerResources::new();
+        let quota = resources.quota_group();
+        assert_eq!(
+            quota.snapshot().limits.worker_bytes
+                + resources
+                    .visible_recovery_quota
+                    .snapshot()
+                    .limits
+                    .worker_bytes,
+            PROCESS_WORKER_BYTES,
+            "the reserved visible-recovery share stays inside the process ceiling"
+        );
+        let _cpu_workers = quota
+            .reserve_external_worker(2, 64 * MIB)
+            .expect("the two CPU workers fit the process quota");
+        let pty_workers_per_session = if cfg!(windows) { 6 } else { 5 };
+        let _pty_workers = quota
+            .reserve_external_worker(
+                TARGET_PTY_SESSIONS * pty_workers_per_session,
+                TARGET_PTY_SESSIONS * pty_workers_per_session * 2 * MIB,
+            )
+            .expect("the target PTY session count fits the process quota");
+        let replay_headroom = quota
+            .reserve_external_storage(256 * MIB)
+            .expect("the target PTY session count retains replay/output headroom");
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            64 * MIB + TARGET_PTY_SESSIONS * pty_workers_per_session * 2 * MIB + 256 * MIB
+        );
+        drop(replay_headroom);
+    }
+
+    #[test]
+    fn visible_recovery_share_covers_all_connection_frame_limits() {
+        let execution = ServerExecution::start().expect("execution");
+        let frame_admission = 2 * 256 * 1024 + 16 * 1024;
+        let reservations = (0..64)
+            .map(|_| {
+                execution
+                    .visible_recovery
+                    .try_reserve_storage(frame_admission)
+                    .expect("one max-sized recovery frame per accepted connection")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            execution.visible_recovery.quota.snapshot().worker_bytes,
+            64 * frame_admission
+        );
+        drop(reservations);
+        execution.request_shutdown();
+    }
 
     #[tokio::test]
     async fn storage_waiters_wake_on_release_and_shutdown_without_blocking_cpu() {

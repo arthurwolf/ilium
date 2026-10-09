@@ -3022,6 +3022,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "crossterm",
+ "ilium-execution",
  "ilium-platform",
  "portable-pty",
  "thiserror 2.0.18",

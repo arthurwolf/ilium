@@ -6,8 +6,10 @@ use crate::delivery::{
     ShutdownReason,
 };
 use crossterm::event::MouseEvent;
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
-use ilium_platform::pty_io::{ReadMessage, WriteFailureKind, OUTPUT_CHUNK_BYTES};
+use ilium_platform::owned_worker::{
+    OwnedWorker, StopToken, WorkerKind, WorkerReservation, reserve_owned_worker,
+};
+use ilium_platform::pty_io::{OUTPUT_CHUNK_BYTES, ReadMessage, WriteFailureKind};
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
@@ -94,6 +96,7 @@ struct State {
     next_id: u64,
     load: QueueLoad,
     closed: Option<ShutdownReason>,
+    wake_generation: u64,
 }
 
 pub(crate) struct Queue {
@@ -118,6 +121,7 @@ impl Queue {
                     output_bytes: 0,
                 },
                 closed: None,
+                wake_generation: 0,
             }),
             changed: Condvar::new(),
         })
@@ -131,9 +135,18 @@ impl Queue {
     /// deadline worker completes them as proven zero delivery even when the
     /// state owner is held at an earlier reply or native control operation.
     pub(crate) fn start_expiry_worker(self: &Arc<Self>) -> std::io::Result<OwnedWorker> {
+        let reservation = reserve_owned_worker(None, ())?;
+        self.start_expiry_worker_reserved(reservation)
+    }
+
+    /// Starts the deadline worker with the session's pre-child reservation.
+    pub(crate) fn start_expiry_worker_reserved<C: Send + 'static>(
+        self: &Arc<Self>,
+        reservation: WorkerReservation<C>,
+    ) -> std::io::Result<OwnedWorker> {
         let queue = Arc::clone(self);
         let wake_queue = Arc::clone(self);
-        spawn_owned(
+        reservation.spawn(
             "ilium-pty-queued-deadlines",
             WorkerKind::Cooperative,
             self.stop.child(),
@@ -161,7 +174,7 @@ impl Queue {
             }
             state.entries = retained;
             if !expired.is_empty() {
-                self.changed.notify_all();
+                Self::notify_changed(&self.changed, &mut state);
             }
             drop(state);
             for entry in expired {
@@ -220,8 +233,15 @@ impl Queue {
     }
 
     pub(crate) fn wake(&self) {
-        let _guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        self.changed.notify_all();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Self::notify_changed(&self.changed, &mut state);
+    }
+
+    pub(crate) fn wake_generation(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .wake_generation
     }
 
     pub(crate) fn submit(
@@ -277,7 +297,7 @@ impl Queue {
         });
         state.load.commands += 1;
         state.load.command_bytes += charge;
-        self.changed.notify_all();
+        Self::notify_changed(&self.changed, &mut state);
         let queue = Arc::clone(self);
         Ok(DeliveryReceipt::new(id, completion, stop, move || {
             queue.wake()
@@ -336,7 +356,7 @@ impl Queue {
         });
         state.load.output_chunks += 1;
         state.load.output_bytes += charge;
-        self.changed.notify_all();
+        Self::notify_changed(&self.changed, &mut state);
         true
     }
 
@@ -391,12 +411,20 @@ impl Queue {
         })
     }
 
-    pub(crate) fn wait_during_write(&self) {
+    pub(crate) fn wait_during_write(&self, generation: u64, timeout: Duration) -> bool {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if timeout.is_zero()
+            || state.wake_generation != generation
+            || state.closed.is_some()
+            || self.stop.is_stopped()
+        {
+            return false;
+        }
         let _waited = self
             .changed
-            .wait_timeout(state, Duration::from_millis(1))
+            .wait_timeout(state, timeout)
             .unwrap_or_else(|error| error.into_inner());
+        true
     }
 
     pub(crate) fn close(&self, reason: ShutdownReason) {
@@ -412,7 +440,12 @@ impl Queue {
                 )));
             }
         }
-        self.changed.notify_all();
+        Self::notify_changed(&self.changed, &mut state);
+    }
+
+    fn notify_changed(changed: &Condvar, state: &mut State) {
+        state.wake_generation = state.wake_generation.wrapping_add(1);
+        changed.notify_all();
     }
 
     fn uncharge(load: &mut QueueLoad, command: bool, bytes: usize) {
@@ -452,7 +485,7 @@ impl WorkItem {
         if !self.released.replace(true) {
             let mut state = self.queue.state.lock().unwrap_or_else(|e| e.into_inner());
             Queue::uncharge(&mut state.load, self.kind.is_some(), self.charge);
-            self.queue.changed.notify_all();
+            Queue::notify_changed(&self.queue.changed, &mut state);
         }
     }
 }
@@ -476,5 +509,23 @@ impl Drop for WorkItem {
             };
             completion.finish(Err(DeliveryError::new(Some(self.id), failure)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_wait_observes_output_queued_after_owner_check() {
+        let queue = Queue::new(OwnerLimits::default());
+        let generation = queue.wake_generation();
+        assert!(queue.take_output_while_writing().is_none());
+        assert!(queue.output(
+            ReadMessage::Data(Arc::from(b"pending output".as_slice())),
+            &queue.stop,
+        ));
+
+        assert!(!queue.wait_during_write(generation, Duration::from_secs(5)));
     }
 }

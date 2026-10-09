@@ -1,5 +1,5 @@
 use super::*;
-use crate::owned_worker::{spawn_owned, WorkerKind};
+use crate::owned_worker::{spawn_owned, WorkerKind, WorkerReservation};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
@@ -11,12 +11,13 @@ const CANCELLATION_GRACE: Duration = Duration::from_millis(100);
 pub(super) struct Reader(Box<dyn Read + Send>);
 
 impl Reader {
-    pub(super) fn spawn(
+    pub(super) fn spawn_reserved<C: Send + 'static>(
         mut self,
         stop: StopToken,
         mut sink: impl FnMut(ReadMessage, &StopToken) -> bool + Send + 'static,
+        reservation: WorkerReservation<C>,
     ) -> io::Result<OwnedWorker> {
-        spawn_owned(
+        reservation.spawn(
             "ilium-conpty-read",
             WorkerKind::SynchronousIo,
             stop,
@@ -52,9 +53,10 @@ impl ShellProbe {
     }
 }
 
-pub(super) fn open(
+pub(super) fn open<C: Send + 'static>(
     master: &(dyn MasterPty + Send),
     stop: StopToken,
+    reservation: Option<WorkerReservation<C>>,
 ) -> io::Result<(Reader, Box<dyn PtyWriter>, ShellProbe)> {
     let reader = master
         .try_clone_reader()
@@ -64,7 +66,11 @@ pub(super) fn open(
         .map_err(|error| io::Error::other(error.to_string()))?;
     Ok((
         Reader(reader),
-        Box::new(PumpWriter::spawn(writer, stop.child())?),
+        Box::new(PumpWriter::spawn_reserved(
+            writer,
+            stop.child(),
+            reservation,
+        )?),
         ShellProbe,
     ))
 }
@@ -87,33 +93,51 @@ struct PumpWriter {
 }
 
 impl PumpWriter {
-    fn spawn(mut writer: Box<dyn Write + Send>, stop: StopToken) -> io::Result<Self> {
+    fn spawn(writer: Box<dyn Write + Send>, stop: StopToken) -> io::Result<Self> {
+        Self::spawn_reserved(writer, stop, None::<WorkerReservation<()>>)
+    }
+
+    fn spawn_reserved<C: Send + 'static>(
+        mut writer: Box<dyn Write + Send>,
+        stop: StopToken,
+        reservation: Option<WorkerReservation<C>>,
+    ) -> io::Result<Self> {
         // One writer, one in-flight request. No write is queued behind an
         // unacknowledged request and no pump holds a parser/control handle.
         let (requests, incoming) = mpsc::sync_channel::<WriteJob>(1);
         let retained = Arc::new(std::sync::Mutex::new(None));
         let park_writer = Arc::clone(&retained);
-        let pump = spawn_owned(
-            "ilium-conpty-write",
-            WorkerKind::SynchronousIo,
-            stop,
-            || {},
-            move |pump_stop| {
-                while !pump_stop.is_stopped() {
-                    let job = match incoming.recv_timeout(CHECK_INTERVAL) {
-                        Ok(job) => job,
-                        Err(RecvTimeoutError::Timeout) => continue,
-                        Err(RecvTimeoutError::Disconnected) => break,
-                    };
-                    let result = deliver(&mut *writer, &job, &pump_stop);
-                    // Capacity one and exactly one result; never a stalled send.
-                    let _ = job.complete.try_send(result);
-                }
-                *park_writer
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(writer);
-            },
-        )?;
+        let body = move |pump_stop| {
+            while !pump_stop.is_stopped() {
+                let job = match incoming.recv_timeout(CHECK_INTERVAL) {
+                    Ok(job) => job,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+                let result = deliver(&mut *writer, &job, &pump_stop);
+                // Capacity one and exactly one result; never a stalled send.
+                let _ = job.complete.try_send(result);
+            }
+            *park_writer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(writer);
+        };
+        let pump = match reservation {
+            Some(reservation) => reservation.spawn(
+                "ilium-conpty-write",
+                WorkerKind::SynchronousIo,
+                stop,
+                || {},
+                body,
+            )?,
+            None => spawn_owned(
+                "ilium-conpty-write",
+                WorkerKind::SynchronousIo,
+                stop,
+                || {},
+                body,
+            )?,
+        };
         Ok(Self {
             requests,
             pump,
@@ -273,7 +297,7 @@ fn deliver(
                     return Ok(WriteSuccess {
                         written,
                         reusable: !pump_stop.is_stopped(),
-                    })
+                    });
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -285,7 +309,7 @@ fn deliver(
                         WriteFailureKind::Io(error.into()),
                         written,
                         false,
-                    ))
+                    ));
                 }
             }
         }
@@ -297,7 +321,7 @@ fn deliver(
                     ),
                     written,
                     false,
-                ))
+                ));
             }
             Ok(n) => {
                 written += n;
@@ -312,7 +336,7 @@ fn deliver(
                     WriteFailureKind::Io(error.into()),
                     written,
                     false,
-                ))
+                ));
             }
         }
     }

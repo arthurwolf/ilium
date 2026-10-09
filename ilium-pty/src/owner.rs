@@ -2,15 +2,14 @@
 //! and resize has a single queue position. A chunk's replies finish WRITING
 //! before this owner dequeues the next event. No parser lock is held for writes.
 
+use crate::admission::PtyOwnerReservations;
 use crate::delivery::{
     Delivery, DeliveryError, DeliveryFailure, DeliveryReceipt, OperationKind, ShutdownReason,
 };
 use crate::owner_queue::{Event, Queue, WorkItem};
 use crate::query::TerminalQueryResponder;
 use crossterm::event::MouseEvent;
-use ilium_platform::owned_worker::{
-    spawn_owned, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
-};
+use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket};
 use ilium_platform::pty_io::{
     self, AsyncWriter, PtyControl, ReadMessage, ShellProbe, TransportParts, WriteProgress,
 };
@@ -135,6 +134,7 @@ impl PtyOwner {
         master: Box<dyn MasterPty + Send>,
         terminal: TerminalState,
         limits: OwnerLimits,
+        reservations: PtyOwnerReservations,
         setup_failure: impl FnOnce() + Send + 'static,
     ) -> io::Result<(Self, ShellProbe)> {
         let mut setup_failure: Option<Box<dyn FnOnce() + Send>> = Some(Box::new(setup_failure));
@@ -143,13 +143,14 @@ impl PtyOwner {
             return Err(error);
         }
         let queue = Queue::new(limits);
-        let prepared = match pty_io::prepare(&*master, queue.stop.clone()) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                setup_failure.take().unwrap()();
-                return Err(error);
-            }
-        };
+        let prepared =
+            match pty_io::prepare(&*master, queue.stop.clone(), reservations.native_writer) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    setup_failure.take().unwrap()();
+                    return Err(error);
+                }
+            };
         let TransportParts {
             control,
             writer,
@@ -158,13 +159,22 @@ impl PtyOwner {
         } = prepared.attach_master(master);
         // Declared after control/writer so setup cleanup runs before their drop.
         let mut failure = CleanupOnFailure(setup_failure);
-        let expiry_worker = queue.start_expiry_worker()?;
-        let writer = AsyncWriter::spawn(writer, queue.stop.child(), || failure.run())?;
+        let expiry_worker = queue.start_expiry_worker_reserved(reservations.expiry)?;
+        let writer_wake_queue = Arc::clone(&queue);
+        let writer = AsyncWriter::spawn_reserved_with_completion_wake(
+            writer,
+            queue.stop.child(),
+            || failure.run(),
+            move || writer_wake_queue.wake(),
+            reservations.writer,
+        )?;
         let writer_tickets = writer.tickets();
         let output_queue = Arc::clone(&queue);
-        let reader_worker = match reader.spawn(queue.stop.child(), move |message, stop| {
-            output_queue.output(message, stop)
-        }) {
+        let reader_worker = match reader.spawn_reserved(
+            queue.stop.child(),
+            move |message, stop| output_queue.output(message, stop),
+            reservations.reader,
+        ) {
             Ok(worker) => worker,
             Err(error) => {
                 failure.run();
@@ -178,7 +188,7 @@ impl PtyOwner {
         let actor_queue = Arc::clone(&queue);
         let wake_queue = Arc::clone(&queue);
         let actor_status = status.clone();
-        let owner_worker = match spawn_owned(
+        let owner_worker = match reservations.owner.spawn(
             "ilium-pty-owner",
             WorkerKind::Cooperative,
             StopToken::default(),
@@ -361,13 +371,17 @@ impl Engine {
                     // One partial input/reply owns the writer exclusively.
                     // Parse only output that precedes the next queued command;
                     // a resize ahead of output remains an absolute barrier.
+                    let wake_generation = self.queue.wake_generation();
                     if let Some(output) = self.queue.take_output_while_writing() {
                         if let Some((reason, error)) = self.execute(output) {
                             guard.stop(reason, error);
                             break;
                         }
                     } else {
-                        self.queue.wait_during_write();
+                        self.queue.wait_during_write(
+                            wake_generation,
+                            self.writer.next_poll_delay().unwrap_or(Duration::ZERO),
+                        );
                     }
                     continue;
                 }
@@ -410,7 +424,11 @@ impl Engine {
         while self.active.is_some() {
             let _ = self.poll_active();
             if self.active.is_some() {
-                self.queue.wait_during_write();
+                let wake_generation = self.queue.wake_generation();
+                self.queue.wait_during_write(
+                    wake_generation,
+                    self.writer.next_poll_delay().unwrap_or(Duration::ZERO),
+                );
             }
         }
         // A failed stream is quarantined, not silently retried and not killed.

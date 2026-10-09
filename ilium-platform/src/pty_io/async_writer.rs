@@ -3,14 +3,23 @@
 //! The pump never owns a parser, geometry control, child, or server state.
 
 use super::{PtyWriter, WriteFailure, WriteFailureKind, WriteSuccess};
-use crate::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind, WorkerTicket};
+use crate::owned_worker::{
+    OwnedWorker, StopToken, WorkerKind, WorkerReservation, WorkerTicket, reserve_owned_worker,
+};
 use std::io;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const CHECK_INTERVAL: Duration = Duration::from_millis(10);
 const CANCELLATION_GRACE: Duration = Duration::from_millis(100);
+
+/// The pump blocks on this channel. Cancellation sends `Wake` so an idle pump
+/// never needs a timed poll: with hundreds of panes a 10 ms receive timeout
+/// was tens of thousands of empty wake-ups a second.
+enum PumpMessage {
+    Write(WriteJob),
+    Wake,
+}
 
 struct WriteJob {
     bytes: Arc<[u8]>,
@@ -36,7 +45,7 @@ pub enum WriteProgress {
 /// At most one owned write is in flight. A timeout never drops the worker's
 /// JoinHandle; its ticket stays with the bounded supervisor until exit.
 pub struct AsyncWriter {
-    requests: SyncSender<WriteJob>,
+    requests: SyncSender<PumpMessage>,
     worker: OwnedWorker,
     native_ticket: Option<WorkerTicket>,
     active: Option<ActiveWrite>,
@@ -54,15 +63,51 @@ impl AsyncWriter {
         stop: StopToken,
         on_setup_failure: impl FnOnce(),
     ) -> io::Result<Self> {
+        let reservation = reserve_owned_worker(None, ())?;
+        Self::spawn_reserved(native, stop, on_setup_failure, reservation)
+    }
+
+    /// Start the writer under a caller's physical-resource custody lease.
+    /// The lease remains in the process-owned registry until the native thread
+    /// has joined, even when the writer is quarantined during shutdown.
+    pub fn spawn_reserved<C: Send + 'static>(
+        native: Box<dyn PtyWriter>,
+        stop: StopToken,
+        on_setup_failure: impl FnOnce(),
+        reservation: WorkerReservation<C>,
+    ) -> io::Result<Self> {
+        Self::spawn_reserved_with_completion_wake(
+            native,
+            stop,
+            on_setup_failure,
+            || {},
+            reservation,
+        )
+    }
+
+    /// As `spawn_reserved`, with a nonblocking wake after each write receipt is
+    /// published. Stateful owners can sleep until either this wake or the
+    /// active operation's deadline instead of polling its receipt channel.
+    pub fn spawn_reserved_with_completion_wake<C: Send + 'static>(
+        native: Box<dyn PtyWriter>,
+        stop: StopToken,
+        on_setup_failure: impl FnOnce(),
+        on_completion: impl Fn() + Send + 'static,
+        reservation: WorkerReservation<C>,
+    ) -> io::Result<Self> {
         let native_ticket = native.worker_ticket();
         let native_slot = Arc::new(Mutex::new(Some(native)));
         let worker_slot = Arc::clone(&native_slot);
-        let (requests, incoming) = mpsc::sync_channel::<WriteJob>(1);
-        let worker_result = spawn_owned(
+        let (requests, incoming) = mpsc::sync_channel::<PumpMessage>(1);
+        let cancellation_wake = requests.clone();
+        let worker_result = reservation.spawn(
             "ilium-pty-write-dispatch",
             WorkerKind::Cooperative,
             stop,
-            || {},
+            // A full slot already holds a job, which wakes the pump anyway.
+            move || {
+                let _ = cancellation_wake.try_send(PumpMessage::Wake);
+            },
             move |worker_stop| {
                 let mut native = worker_slot
                     .lock()
@@ -70,13 +115,14 @@ impl AsyncWriter {
                     .take()
                     .expect("native writer has one transport owner");
                 while !worker_stop.is_stopped() {
-                    let job = match incoming.recv_timeout(CHECK_INTERVAL) {
-                        Ok(job) => job,
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    let job = match incoming.recv() {
+                        Ok(PumpMessage::Write(job)) => job,
+                        Ok(PumpMessage::Wake) => continue,
+                        Err(mpsc::RecvError) => break,
                     };
                     let result = native.write_until(job.bytes, job.deadline, job.stop);
                     let _ = job.complete.try_send(result);
+                    on_completion();
                 }
                 // Cancellation retires transport work, not the PTY lifetime.
                 // In particular a ConPTY writer drop can signal EOF to a child.
@@ -109,6 +155,19 @@ impl AsyncWriter {
         tickets
     }
 
+    /// Time until the next required owner poll: the write deadline before
+    /// cancellation, then the end of the bounded cancellation grace period.
+    /// Completion itself wakes the owner independently of this timer.
+    pub fn next_poll_delay(&self) -> Option<Duration> {
+        self.active.as_ref().map(|active| {
+            let deadline = active
+                .cancellation_started
+                .map(|started| started + CANCELLATION_GRACE)
+                .unwrap_or(active.deadline);
+            deadline.saturating_duration_since(Instant::now())
+        })
+    }
+
     pub fn begin(
         &mut self,
         bytes: Arc<[u8]>,
@@ -136,7 +195,7 @@ impl AsyncWriter {
             stop: stop.clone(),
             complete,
         };
-        match self.requests.try_send(job) {
+        match self.requests.try_send(PumpMessage::Write(job)) {
             Ok(()) => {
                 self.active = Some(ActiveWrite {
                     response,
@@ -258,6 +317,54 @@ mod tests {
         fn drop(&mut self) {
             self.dropped.store(true, Ordering::Release);
         }
+    }
+
+    struct ImmediateWriter;
+    impl PtyWriter for ImmediateWriter {
+        fn write_until(
+            &mut self,
+            bytes: Arc<[u8]>,
+            _: Instant,
+            _: StopToken,
+        ) -> Result<WriteSuccess, WriteFailure> {
+            Ok(WriteSuccess {
+                written: bytes.len(),
+                reusable: true,
+            })
+        }
+    }
+
+    #[test]
+    fn completed_write_wakes_owner_after_publishing_the_receipt() {
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
+        let mut writer = AsyncWriter::spawn_reserved_with_completion_wake(
+            Box::new(ImmediateWriter),
+            StopToken::default(),
+            || {},
+            move || {
+                let _ = wake_sender.try_send(());
+            },
+            reserve_owned_worker(None, ()).unwrap(),
+        )
+        .unwrap();
+        writer
+            .begin(
+                Arc::from(b"receipt".as_slice()),
+                Instant::now() + Duration::from_secs(2),
+                StopToken::default(),
+            )
+            .unwrap();
+
+        assert!(writer.next_poll_delay().is_some());
+        wake_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("write completion must wake the owner");
+        match writer.poll() {
+            WriteProgress::Finished(Ok(success)) => assert_eq!(success.written, 7),
+            WriteProgress::Finished(Err(error)) => panic!("write failed: {error:?}"),
+            WriteProgress::Pending => panic!("owner woke before the write receipt was ready"),
+        }
+        assert!(writer.next_poll_delay().is_none());
     }
 
     #[test]

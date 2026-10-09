@@ -4,7 +4,9 @@
 //! nonblocking master duplicate. Windows takes the opaque portable writer and
 //! cancels synchronous I/O through its owned THREAD handle, not a writer handle.
 
-use crate::owned_worker::{OwnedWorker, StopToken, WorkerTicket};
+use crate::owned_worker::{
+    reserve_owned_worker, OwnedWorker, StopToken, WorkerReservation, WorkerTicket,
+};
 use portable_pty::{MasterPty, PtySize};
 use std::io;
 use std::sync::Arc;
@@ -139,13 +141,24 @@ impl OutputReader {
         stop: StopToken,
         sink: impl FnMut(ReadMessage, &StopToken) -> bool + Send + 'static,
     ) -> io::Result<OwnedWorker> {
+        let reservation = reserve_owned_worker(None, ())?;
+        self.spawn_reserved(stop, sink, reservation)
+    }
+
+    /// Starts the output pump under a caller's physical-resource custody.
+    pub fn spawn_reserved<C: Send + 'static>(
+        self,
+        stop: StopToken,
+        sink: impl FnMut(ReadMessage, &StopToken) -> bool + Send + 'static,
+        reservation: WorkerReservation<C>,
+    ) -> io::Result<OwnedWorker> {
         #[cfg(any(unix, windows))]
         {
-            self.inner.spawn(stop, sink)
+            self.inner.spawn_reserved(stop, sink, reservation)
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = (self, stop, sink);
+            let _ = (self, stop, sink, reservation);
             Err(unsupported())
         }
     }
@@ -199,10 +212,14 @@ impl PreparedTransport {
     }
 }
 
-pub fn prepare(master: &(dyn MasterPty + Send), stop: StopToken) -> io::Result<PreparedTransport> {
+pub fn prepare<C: Send + 'static>(
+    master: &(dyn MasterPty + Send),
+    stop: StopToken,
+    native_writer_reservation: Option<WorkerReservation<C>>,
+) -> io::Result<PreparedTransport> {
     #[cfg(any(unix, windows))]
     {
-        let (reader, writer, shell_probe) = native::open(master, stop)?;
+        let (reader, writer, shell_probe) = native::open(master, stop, native_writer_reservation)?;
         Ok(PreparedTransport {
             writer,
             reader: OutputReader { inner: reader },
@@ -211,7 +228,7 @@ pub fn prepare(master: &(dyn MasterPty + Send), stop: StopToken) -> io::Result<P
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (master, stop);
+        let _ = (master, stop, native_writer_reservation);
         Err(unsupported())
     }
 }

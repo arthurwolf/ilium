@@ -1,6 +1,6 @@
 use super::*;
 use ilium_platform::pty_io::{IoFailure, PtyWriter, WriteFailure, WriteFailureKind, WriteSuccess};
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Trace {
@@ -248,10 +248,11 @@ impl Harness {
         }
     }
     fn output(&self, bytes: &[u8]) {
-        assert!(self
-            .input
-            .queue
-            .output(ReadMessage::Data(Arc::from(bytes)), &self.input.queue.stop));
+        assert!(
+            self.input
+                .queue
+                .output(ReadMessage::Data(Arc::from(bytes)), &self.input.queue.stop)
+        );
     }
     fn fence(&self) {
         self.input.write(b"fence").unwrap().wait_blocking().unwrap();
@@ -401,6 +402,36 @@ fn stalled_input_keeps_parser_readable_and_times_out_without_false_success() {
     );
     assert!(harness.written().is_empty());
     harness.fence(); // a proven zero-byte timeout on a reusable writer is recoverable
+}
+
+#[test]
+fn newly_queued_output_advances_while_an_input_write_is_pending() {
+    let (writer_gate, release) = gate();
+    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), None);
+    let input = harness.input.write(b"blocked input").unwrap();
+    release
+        .started
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+
+    harness.output(b"visible during write");
+    eventually(|| {
+        harness
+            .parser
+            .read()
+            .unwrap()
+            .screen()
+            .contents()
+            .contains("visible during write")
+    });
+    assert!(
+        harness.written().is_empty(),
+        "the native write is still gated"
+    );
+    assert_eq!(harness.published.lock().unwrap().len(), 1);
+
+    release.release.send(()).unwrap();
+    assert_eq!(input.wait_blocking().unwrap().bytes_written, 13);
 }
 
 #[test]
@@ -985,10 +1016,12 @@ fn terminal_failure_settles_active_input(message: ReadMessage) {
         .started
         .recv_timeout(Duration::from_secs(2))
         .unwrap();
-    assert!(harness
-        .input
-        .queue
-        .output(message, &harness.input.queue.stop));
+    assert!(
+        harness
+            .input
+            .queue
+            .output(message, &harness.input.queue.stop)
+    );
     eventually(|| matches!(harness.input.status(), OwnerStatus::Stopped { .. }));
     let deadline = Instant::now() + Duration::from_millis(300);
     while observer.result().is_none() && Instant::now() < deadline {
@@ -1157,11 +1190,13 @@ fn resize_epoch_fences_same_size_resizes_without_rejecting_output_or_rollback() 
     ));
     assert_eq!(current(), ((64, 80), 3));
     let writer = harness.parser.write().unwrap();
-    assert!(harness
-        .screen_reader
-        .clone()
-        .try_with_screen_and_resize_epoch(|_, _| ())
-        .is_none());
+    assert!(
+        harness
+            .screen_reader
+            .clone()
+            .try_with_screen_and_resize_epoch(|_, _| ())
+            .is_none()
+    );
     drop(writer);
     harness.output(b"more output");
     harness.fence();

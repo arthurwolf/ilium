@@ -22,6 +22,7 @@
 //! detection concerns, so they belong behind the same boundary as the pty
 //! itself.
 
+mod admission;
 mod delivery;
 mod error;
 mod mouse;

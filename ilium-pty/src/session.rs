@@ -14,11 +14,12 @@ use crossterm::event::MouseEvent;
 use portable_pty::{native_pty_system, Child, CommandBuilder, ExitStatus, PtySize};
 use tokio::sync::{broadcast, watch};
 
+use crate::admission::PtyWorkerReservations;
 use crate::error::PtyError;
 use crate::owner::{OwnerLimits, PtyInput, PtyOwner, TerminalState};
 use crate::query::TerminalQueryResponder;
 use crate::screen_reader::ScreenReader;
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
+use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind};
 use ilium_platform::pty_io::ShellProbe;
 
 /// Terminal identity exported to every application running behind Ilium's
@@ -725,12 +726,68 @@ fn clamp_pty_dimension(requested: u16) -> u16 {
 
 /// Child reaping is independent of PTY output, since a descendant may keep
 /// its inherited slave fd open after the direct child exits.
+///
+/// The reaper starts at the short interval (short-lived commands are reaped
+/// promptly) and backs off to the idle interval for long-running children:
+/// with hundreds of panes a fixed 50 ms poll alone cost thousands of wake-ups
+/// and wait syscalls a second. Exit observation does not depend on this
+/// cadence (`child_exit` queries the child itself), and cancellation wakes the
+/// reaper immediately.
 const CHILD_REAP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+const CHILD_REAP_IDLE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A wake-up the reaper sleeps on, so cancellation does not wait a full
+/// (backed-off) poll interval.
+#[derive(Default)]
+struct ReaperWake {
+    is_woken: Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+impl ReaperWake {
+    fn wake(&self) {
+        *self
+            .is_woken
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = true;
+        self.changed.notify_all();
+    }
+
+    fn sleep(&self, timeout: std::time::Duration) {
+        let is_woken = self
+            .is_woken
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let (mut is_woken, _) = self
+            .changed
+            .wait_timeout_while(is_woken, timeout, |is_woken| !*is_woken)
+            .unwrap_or_else(|error| error.into_inner());
+        *is_woken = false;
+    }
+}
 
 impl PtySession {
     /// Spawns `command` behind a new pty and starts the transport pumps and
     /// the sole state owner that feeds its output into `vt100::Parser`.
     pub fn spawn(command: PtyCommand) -> Result<Self, PtyError> {
+        Self::spawn_with_optional_quota(command, None)
+    }
+
+    /// Spawns a PTY whose persistent OS workers share this process quota.
+    /// Worker charges remain held until the native threads are physically joined.
+    pub fn spawn_with_quota(
+        command: PtyCommand,
+        quota: ilium_execution::QuotaGroup,
+    ) -> Result<Self, PtyError> {
+        Self::spawn_with_optional_quota(command, Some(quota))
+    }
+
+    fn spawn_with_optional_quota(
+        command: PtyCommand,
+        quota: Option<ilium_execution::QuotaGroup>,
+    ) -> Result<Self, PtyError> {
+        let reservations = PtyWorkerReservations::new(quota.as_ref())
+            .map_err(|error| PtyError::Io(error.into()))?;
         // Clamped once, up front, so the OS pty size and the `vt100`
         // parser's initial size can never diverge (see
         // `MINIMUM_PTY_DIMENSION`).
@@ -784,13 +841,16 @@ impl PtySession {
         let child_exit = Arc::new(Mutex::new(None));
         let reaper_exit = Arc::clone(&child_exit);
         let reaper_child = Arc::clone(&child);
-        let child_reaper = match spawn_owned(
+        let reaper_wake = Arc::new(ReaperWake::default());
+        let cancellation_wake = Arc::clone(&reaper_wake);
+        let child_reaper = match reservations.child_reaper.spawn(
             "ilium-pty-child-reaper",
             WorkerKind::Cooperative,
             StopToken::default(),
-            || {},
+            move || cancellation_wake.wake(),
             move |stop| {
                 let mut termination_requested = false;
+                let mut poll_interval = CHILD_REAP_POLL_INTERVAL;
                 loop {
                     let exited = {
                         let mut child = reaper_child
@@ -818,7 +878,13 @@ impl PtySession {
                     if exited {
                         break;
                     }
-                    std::thread::sleep(CHILD_REAP_POLL_INTERVAL);
+                    if stop.is_stopped() {
+                        poll_interval = CHILD_REAP_POLL_INTERVAL;
+                    }
+                    reaper_wake.sleep(poll_interval);
+                    poll_interval = poll_interval
+                        .saturating_mul(2)
+                        .min(CHILD_REAP_IDLE_POLL_INTERVAL);
                 }
             },
         ) {
@@ -864,8 +930,12 @@ impl PtySession {
         };
         let cleanup_child = Arc::clone(&child);
         let cleanup_exit = Arc::clone(&child_exit);
-        let (owner, shell_probe) =
-            PtyOwner::spawn(pair.master, terminal, OwnerLimits::default(), move || {
+        let (owner, shell_probe) = PtyOwner::spawn(
+            pair.master,
+            terminal,
+            OwnerLimits::default(),
+            reservations.owner,
+            move || {
                 let mut child = cleanup_child
                     .lock()
                     .unwrap_or_else(|error| error.into_inner());
@@ -878,8 +948,9 @@ impl PtySession {
                         }
                     }
                 }
-            })
-            .map_err(|error| PtyError::Io(error.into()))?;
+            },
+        )
+        .map_err(|error| PtyError::Io(error.into()))?;
 
         Ok(Self {
             #[cfg(test)]
@@ -1336,6 +1407,73 @@ mod owner_regression_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn admitted_pty_workers_remain_charged_until_native_shutdown_joins() {
+        let worker_count = 5;
+        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: worker_count,
+            worker_bytes: worker_count * 2 * 1024 * 1024,
+        });
+        let mut session = PtySession::spawn_with_quota(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+            quota.clone(),
+        )
+        .expect("start quota-admitted PTY");
+
+        assert_eq!(quota.snapshot().worker_threads, worker_count);
+        let report = session
+            .shutdown_blocking(std::time::Duration::from_secs(3))
+            .expect("bounded shutdown");
+        assert!(report.pending.is_empty(), "workers remain: {report:?}");
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_worker_overload_refuses_before_starting_the_child() {
+        let worker_count = 5;
+        let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: worker_count - 1,
+            worker_bytes: worker_count * 2 * 1024 * 1024,
+        });
+        let marker = std::env::temp_dir().join(format!(
+            "ilium-pty-admission-{}-{}.marker",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        ));
+
+        let result = PtySession::spawn_with_quota(
+            PtyCommand::new("/usr/bin/touch", std::env::temp_dir(), 24, 80)
+                .arg(marker.to_string_lossy().into_owned()),
+            quota.clone(),
+        );
+
+        assert!(result.is_err(), "undersized worker quota must refuse PTY");
+        assert!(
+            !marker.exists(),
+            "refusal must precede child process launch"
+        );
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
 
     #[cfg(unix)]
     #[test]

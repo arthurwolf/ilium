@@ -1286,6 +1286,7 @@ pub fn spawn_terminal_session(
     origin: &TerminalOrigin,
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
+    quota: &ilium_execution::QuotaGroup,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin);
@@ -1309,7 +1310,7 @@ pub fn spawn_terminal_session(
         );
     }
     Ok(SpawnedTerminalSession {
-        session: PtySession::spawn(command)?,
+        session: PtySession::spawn_with_quota(command, quota.clone())?,
         session_id: launch_plan.session_id,
     })
 }

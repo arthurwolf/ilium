@@ -1,6 +1,9 @@
 //! Explicit release qualification, using real server delivery and PTY rendering.
 use super::*;
 
+// Qualification covers the user's 100+ pane load. The server's shared
+// 2 GiB worker budget admits 128 Unix PTYs (five 2 MiB workers each), the two
+// 32 MiB CPU workers, and leaves replay/output headroom.
 const PANE_COUNT: usize = 128;
 const BURST_LINES: usize = 1024;
 const BURST_LINE_WIDTH: usize = 256;

@@ -1,6 +1,6 @@
 use super::*;
 use crate::interruptible_reader::{InterruptibleRead, InterruptibleReader, ReaderInterrupt};
-use crate::owned_worker::{spawn_owned, WorkerKind};
+use crate::owned_worker::{WorkerKind, WorkerReservation};
 use std::fs::File;
 use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
@@ -14,13 +14,14 @@ pub(super) struct Reader {
 }
 
 impl Reader {
-    pub(super) fn spawn(
+    pub(super) fn spawn_reserved<C: Send + 'static>(
         mut self,
         stop: StopToken,
         mut sink: impl FnMut(ReadMessage, &StopToken) -> bool + Send + 'static,
+        reservation: WorkerReservation<C>,
     ) -> io::Result<OwnedWorker> {
         let interrupt = self.interrupt.clone();
-        spawn_owned(
+        reservation.spawn(
             "ilium-pty-read",
             WorkerKind::Cooperative,
             stop,
@@ -46,7 +47,7 @@ impl Reader {
                                 io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
                             ) =>
                         {
-                            continue
+                            continue;
                         }
                         Err(error) => ReadMessage::Error(error.into()),
                     };
@@ -73,10 +74,12 @@ impl ShellProbe {
     }
 }
 
-pub(super) fn open(
+pub(super) fn open<C: Send + 'static>(
     master: &(dyn MasterPty + Send),
     _stop: StopToken,
+    reservation: Option<WorkerReservation<C>>,
 ) -> io::Result<(Reader, Box<dyn PtyWriter>, ShellProbe)> {
+    drop(reservation);
     let fd = master.as_raw_fd().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::Unsupported,
@@ -207,7 +210,7 @@ impl PtyWriter for NonblockingWriter {
                         ),
                         written,
                         false,
-                    ))
+                    ));
                 }
                 Ok(n) => written += n,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -226,7 +229,7 @@ impl PtyWriter for NonblockingWriter {
                         WriteFailureKind::Io(error.into()),
                         written,
                         false,
-                    ))
+                    ));
                 }
             }
         }
