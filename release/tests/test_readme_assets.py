@@ -1,6 +1,7 @@
 """Keep the root README's download links aligned with release outputs."""
 
 from pathlib import Path
+import hashlib
 import re
 import sys
 import unittest
@@ -40,6 +41,32 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
             "README direct download links differ from the release asset inventory; "
             f"missing={sorted(expected - actual)}, unexpected={sorted(actual - expected)}",
         )
+
+    def test_official_archives_match_rust_and_packaging_inventory(self):
+        source = (PROJECT_ROOT / "ilium-animation-js/src/release.rs").read_text()
+        table = source.split("pub const PACKAGES:", 1)[1].split("];", 1)[0]
+        rows = re.findall(
+            r'\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([0-9a-f]{64})"\s*,?\s*\)',
+            table,
+        )
+        inventory = {filename: digest for _identifier, filename, digest in rows}
+        self.assertEqual(len(rows), len(inventory), "duplicate Rust release package")
+        self.assertEqual(inventory, release_tool.APPROVED_PACKAGES)
+        for filename, digest in inventory.items():
+            with self.subTest(package=filename):
+                archive = PROJECT_ROOT / "ilium-animation-js/assets/packages" / filename
+                self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), digest)
+
+    def test_both_installers_pin_current_official_archives(self):
+        for installer in ("install.sh", "install.ps1"):
+            lines = (PROJECT_ROOT / "release" / installer).read_text().splitlines()
+            for filename, expected in release_tool.APPROVED_PACKAGES.items():
+                with self.subTest(installer=installer, package=filename):
+                    digests = [digest for line in lines if filename in line
+                               for digest in re.findall(r"[0-9a-f]{64}", line)]
+                    self.assertGreaterEqual(len(digests), 2,
+                                            "install and existing-install checks need release pins")
+                    self.assertEqual(set(digests), {expected})
 
     def test_quick_start_commands_match_public_installer_contract(self):
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")

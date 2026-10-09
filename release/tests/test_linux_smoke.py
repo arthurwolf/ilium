@@ -1,4 +1,6 @@
 """Portable acceptance regressions; native commands are replaced by fixture adapters."""  # These tests never install a package.
+from contextlib import ExitStack  # Restore all independent native adapters.
+from copy import deepcopy  # Mutate retained evidence without changing its positive baseline.
 import builtins  # Simulate a platform without the POSIX account module.
 import hashlib  # Build independent expected member digests.
 import json  # Build exact synthetic installed JSONL output.
@@ -17,6 +19,9 @@ root = Path(__file__).resolve().parents[2]  # Resolve this checkout's source rat
 sys.path.insert(0, str(root / 'release/scripts'))  # Use the actual smoke and builder modules.
 import smoke_linux_packages as smoke  # This import must itself remain portable.
 import release_tool  # Bind official package fixture bytes.
+import validate_animation_smoke as animation_seal  # Exercise independent release evidence consumption.
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # Support discovery and direct module execution.
+from container_fixture_support import fixture_record, probe_stdout, linux_record_path  # Explicitly synthetic process and kernel records.
 
 
 def audited_tree(directory, package_format='snap'):  # Create independent nonexecutable audited fixture members.
@@ -36,7 +41,9 @@ def audited_tree(directory, package_format='snap'):  # Create independent nonexe
 
 class linux_smoke_tests(unittest.TestCase):  # All tests in this class run without POSIX-only modules or tools.
     def test_container_animation_requires_both_installed_render_receipts(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:  # Restore Linux receipt-path adapters after this portable fixture.
+            for module in (smoke, animation_seal, smoke.container_fixture):  # Keep Linux namespace semantics separate from real source-runner files.
+                stack.enter_context(patch.object(module, 'Path', side_effect=linux_record_path))  # No actual kernel path is opened through this adapter.
             directory = Path(temporary)
             _tree, fixture = audited_tree(temporary, 'deb')
             package = directory / smoke.packages.package_name('x86_64', 'rpm')
@@ -68,15 +75,122 @@ class linux_smoke_tests(unittest.TestCase):  # All tests in this class run witho
             output = ''.join(json.dumps(row) + '\n' for row in rows)
             result = subprocess.CompletedProcess([], 0, 'ILIUM_ANIMATION_BEGIN\n' + output +
                                                  'ILIUM_ANIMATION_END\n', '')
-            accepted = smoke.container_animation(command, fixture, result, 'rpm-test', 'rpm',
-                                                 'fedora:41', directory)
+            fixture_sources = {name: smoke.packages.sha(root / name) for name in smoke.container_fixture.source_files}  # Bind the reviewed host and guest controllers.
+            completed_fixture = fixture_record('rpm', 'fedora:41', 'x86_64', fixture_sources, result.stdout)  # Supply complete fixture evidence without bypassing its validator.
+            accepted = smoke.container_animation(command, fixture, result, 'rpm-test', 'rpm',  # Keep the original real installed-render parser active.
+                                                 'fedora:41', directory, completed_fixture)  # Require fixture completion as well as the original animation assertions.
             self.assertEqual(json.loads(Path(accepted['path']).read_text())['renders'], renders)
             for changed in (result.stdout.replace(files['ilium-animation-helper'], '0' * 64),
                             result.stdout.replace('ILIUM_ANIMATION_END\n', '')):
                 with self.assertRaises(release_tool.ReleaseError):
                     smoke.container_animation(command, fixture,
                                               subprocess.CompletedProcess([], 0, changed, ''),
-                                              'rpm-rejected', 'rpm', 'fedora:41', directory)
+                                              'rpm-rejected', 'rpm', 'fedora:41', directory,  # Preserve the original rejection cases.
+                                              fixture_record('rpm', 'fedora:41', 'x86_64', fixture_sources, changed))  # Match stream hashes so the intended parser/path assertion causes rejection.
+            source = {name: smoke.packages.sha(root / name) for name in (*smoke.animation_gate.SOURCE_FILES, *smoke.container_fixture.source_files)}  # Seal actual checkout source identities.
+            def check_seal(value):  # Exercise independent consumption of the complete retained proof.
+                animation_seal.linux_container_proof(value, 'rpm', 'fedora:41', {'files': files}, audit, source, 'x86_64', fixture['packages'], fixture['source_archive_sha256'], fixture['tag'])  # No validation function is mocked.
+            native = json.loads(Path(accepted['path']).read_text())  # Read the exact proof written by production code.
+            check_seal(native)  # Establish a complete positive path before every mutation.
+            mutations = [(('guest', 'user_manager_retired'), False), (('guest', 'case_exit_code'), 9), (('guest', 'namespace', 'controllers'), ['cpu', 'memory']), (('guest', 'namespace', 'caller_delegate'), True), (('guest', 'delegation', 'owner_uid'), 0), (('guest', 'delegation', 'limited_child_reaped'), False), (('guest', 'delegation', 'limits', 'pids.max'), '17'), (('guest', 'delegation', 'limits', 'memory.max'), '402653185'), (('host_admission', 'visible_cgroup_root'), '/sys/fs/cgroup'), (('host_admission', 'pidfd_live_at_admission'), False), (('runtime', 'Result'), 'timeout'), (('cleanup', 'cgroup_absent'), False), (('cleanup', 'docker_removed'), False), (('source_files', smoke.container_fixture.source_files[0]), '0' * 64)]  # Keep a passed outer state while invalidating one required fact.
+            for keys, value in mutations:  # Each malformed record must fail at both consumers.
+                changed = deepcopy(native)  # Do not alter the admitted positive baseline.
+                cursor = changed['fixture']  # Mutate only fixture evidence, leaving both actual render records intact.
+                for key in keys[:-1]:  # Select the exact independently required observation.
+                    cursor = cursor[key]  # No production validator is used to construct expected outcomes.
+                cursor[keys[-1]] = value  # Preserve all unrelated successful evidence.
+                with self.subTest(fixture_field=keys), self.assertRaises((ValueError, release_tool.ReleaseError)):  # A passed state word never overrides the missing fact.
+                    smoke.container_animation(command, fixture, result, 'forged', 'rpm', 'fedora:41', directory, changed['fixture'])  # Run actual immediate admission.
+                with self.assertRaises((ValueError, release_tool.ReleaseError)):  # Sealing must independently refuse the same forged evidence.
+                    check_seal(changed)  # Never rely on the producer's earlier verdict.
+            changed = deepcopy(native)  # Isolate cross-binding of fixture and render bytes.
+            changed['fixture']['animation_stdout_sha256'] = '0' * 64  # Keep the ordinary proof digest correct but detach its fixture.
+            with self.assertRaises(release_tool.ReleaseError):  # This guard belongs to the independent seal.
+                check_seal(changed)  # A capability receipt cannot be paired with another run's renders.
+            for index in (1, 2):  # Corrupt beach and carpet independently.
+                for field, value in (('rendered_frames', 1), ('physical_retirement', False), ('archive_sha256', '0' * 64), ('helper_sha256', '0' * 64), ('worker_threads_after', 2), ('worker_bytes_after', 2048)):  # Preserve every installed-animation acceptance assertion.
+                    changed_rows = deepcopy(rows)  # Start with four complete positive records.
+                    changed_rows[index][field] = value  # Change only one real render observation.
+                    changed_output = 'ILIUM_ANIMATION_BEGIN\n' + ''.join(json.dumps(row) + '\n' for row in changed_rows) + 'ILIUM_ANIMATION_END\n'  # Supply complete, correctly delimited JSONL.
+                    changed_record = fixture_record('rpm', 'fedora:41', 'x86_64', fixture_sources, changed_output)  # Rebind stream hashes so rejection must reach the render assertions.
+                    with self.subTest(package=index, field=field), self.assertRaises(release_tool.ReleaseError):  # Hash mismatch alone must not satisfy this regression.
+                        smoke.container_animation(command, fixture, subprocess.CompletedProcess([], 0, changed_output, ''), 'bad-render', 'rpm', 'fedora:41', directory, changed_record)  # Parse actual modified records.
+            for changed_rows in ([rows[0], rows[-1]], rows[:-1], rows + [rows[-1]]):  # Reject missing renders, missing terminal completion and duplicate records.
+                changed_output = 'ILIUM_ANIMATION_BEGIN\n' + ''.join(json.dumps(row) + '\n' for row in changed_rows) + 'ILIUM_ANIMATION_END\n'  # Markers cannot hide incomplete execution.
+                with self.assertRaises(release_tool.ReleaseError):  # An otherwise valid fixture remains insufficient.
+                    smoke.container_animation(command, fixture, subprocess.CompletedProcess([], 0, changed_output, ''), 'incomplete-render', 'rpm', 'fedora:41', directory, fixture_record('rpm', 'fedora:41', 'x86_64', fixture_sources, changed_output))  # Require the actual four-record contract.
+
+    def test_every_distribution_lane_retains_animation_and_sticky_failure(self):  # Exercise real CLI aggregation and seal parsing around only native adapters.
+        expected = [('deb', 'ubuntu:22.04'), ('deb', 'ubuntu:24.04'), ('deb', 'debian:12'), ('rpm', 'fedora:41'), ('rpm', 'opensuse/leap:15.6'), ('appimage', 'ubuntu:24.04')]  # Independently freeze the original six lanes and their order.
+        for arch in ('x86_64', 'aarch64'):  # Neither architecture may silently lose a distribution.
+            for failing in range(-1, 6):  # Pair full success with one failed runtime in each retained lane.
+                with self.subTest(arch=arch, failing=failing), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:  # All files and replaced adapters belong to this case.
+                    directory, receipt = audited_tree(temporary, 'deb')  # Preserve real fixture-byte hashing.
+                    receipt.update(tag='v0.1.0', source_archive_sha256='a' * 64, packages={})  # Provide complete package identity at the audited-input boundary.
+                    for kind in ('deb', 'rpm', 'appimage'):  # Retain every requested package kind.
+                        artifact = directory / smoke.packages.package_name(arch, kind)  # Use the real public artifact naming contract.
+                        artifact.write_bytes(('synthetic ' + kind).encode())  # No executable package is ever installed.
+                        receipt['packages'][artifact.name] = smoke.packages.sha(artifact)  # Verify real bytes during production proof creation.
+                    audit = directory / 'audit.json'  # Own the audit input read by the proof writer.
+                    audit.write_text('{}\n', encoding='utf-8')  # External audit validation is represented by its adapter below.
+                    daemon = directory / 'docker'  # Supply a harmless prerequisite placeholder.
+                    daemon.touch()  # The subprocess adapter never executes this file.
+                    log = directory / 'log'  # Retain actual per-lane JSON proof files.
+                    log.mkdir()  # Production proof writes require the CLI log destination.
+                    calls, events = [], []  # Observe actual dispatch and terminal results.
+                    for module in (smoke, animation_seal, smoke.container_fixture):  # Model Linux proof paths even when source tests run on Windows.
+                        stack.enter_context(patch.object(module, 'Path', side_effect=linux_record_path))  # Keep real source and audit filesystem operations unchanged.
+                    def execute(image, kind, architecture, packages, inputs, logs, label, script, package_name, runner, sources):  # Model only the native container boundary.
+                        calls.append((kind, image))  # Keep the exact run order for comparison with the independent matrix.
+                        self.assertEqual(architecture, arch)  # No emulated or substituted architecture may reach the adapter.
+                        self.assertTrue((inputs / 'lifecycle.sh').is_file())  # Require the complete original lifecycle input to be forwarded.
+                        if kind in ('deb', 'rpm'):  # All five FHS lanes must retain the full installed body.
+                            self.assertIn(smoke.installed_body(receipt['version']), script)  # Cover versions, audit checks, installed animations and lifecycle forwarding together.
+                        output = probe_stdout(receipt['package_files'], release_tool.APPROVED_PACKAGES, kind)  # Only fake process output; the real parser still validates every render.
+                        record = fixture_record(kind, image, arch, sources, output)  # Model independently supplied kernel/manager evidence.
+                        return subprocess.CompletedProcess(['synthetic-container'], 9 if len(calls) - 1 == failing else 0, output, ''), record  # Successful-looking evidence cannot erase a failed command.
+                    stack.enter_context(patch.object(smoke.container_fixture, 'docker', [str(daemon), '--host=unix:///var/run/docker.sock']))  # Keep explicit daemon selection without requiring Docker.
+                    stack.enter_context(patch.object(smoke.container_fixture, 'run_fixture', side_effect=execute))  # No live container is created.
+                    stack.enter_context(patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, arch + '\n', '')))  # Replace the read-only native daemon query.
+                    stack.enter_context(patch.object(smoke.platform, 'system', return_value='Linux'))  # Supply a declared synthetic native identity.
+                    stack.enter_context(patch.object(smoke.platform, 'machine', return_value=arch))  # Exercise both architecture guards.
+                    stack.enter_context(patch.object(smoke, 'load_receipt', return_value=receipt))  # Preserve the actual subsequent artifact hash checks.
+                    stack.enter_context(patch.object(release_tool, 'selected_target', return_value={'arch': arch, 'os': 'linux'}))  # Replace manifest admission only.
+                    stack.enter_context(patch.object(release_tool, 'audit_receipt', return_value={'files': receipt['package_files']}))  # Keep audit/package inventory comparison active.
+                    stack.enter_context(patch.object(smoke, 'package_reference', return_value={}))  # Existing tests independently cover real archive and installed-layout admission.
+                    stack.enter_context(patch.object(smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})))  # Capture real terminal schemas and the real summary.
+                    status = smoke.main(['containers', '--arch', arch, '--packages', str(directory), '--formats', 'deb,rpm,appimage', '--log', str(log), '--audit-report', str(audit), '--workspace', str(root / 'Cargo.toml'), '--manifest', str(root / 'release/targets.toml')])  # Exercise the actual public entry point.
+                    self.assertEqual(calls, expected)  # One failure must not prevent any later distribution from running.
+                    self.assertEqual(status, int(failing >= 0))  # The CLI status must preserve a failed required lane.
+                    self.assertEqual(len(events), 7)  # Retain exactly six terminal records and one summary.
+                    self.assertEqual([(row['format'], row['environment']) for row in events[:-1]], expected)  # Reporting cannot shrink or relabel the matrix.
+                    self.assertEqual([index for index, row in enumerate(events[:-1]) if row['state'] == 'failed'], [] if failing < 0 else [failing])  # No false pass or cascading fake failure.
+                    self.assertEqual(events[-1]['failed'], int(failing >= 0))  # Summary aggregation remains authoritative.
+                    self.assertEqual(events[-2]['execution'], 'extract-and-run')  # This lane never claims a FUSE mount.
+                    self.assertEqual(sum(path.name.endswith('-installed-animation.json') for path in log.iterdir()), 6 - int(failing >= 0))  # Each successful lane must write its actual parsed render proof.
+                    if failing >= 0:  # The independent seal requires complete success and is checked below for the positive set.
+                        continue  # Never treat the synthetic failed matrix as native evidence.
+                    proofs = {path.name.removesuffix('-installed-animation.json'): json.loads(path.read_text()) for path in log.glob('*-installed-animation.json')}  # Read actual production postimages.
+                    source = {name: smoke.packages.sha(root / name) for name in (*smoke.animation_gate.SOURCE_FILES, *smoke.container_fixture.source_files)}  # Bind the current source revision.
+                    def check_events(rows):  # Use the independent terminal-evidence consumer unchanged.
+                        animation_seal.linux_events(rows, command='containers', formats=expected, target={'arch': arch}, package_files=receipt['packages'], archive_sha256=receipt['source_archive_sha256'], audit_sha256=smoke.packages.sha(audit), source=source, tag=receipt['tag'], proofs=proofs)  # Require both fixture and installed-animation content identities.
+                    check_events(events)  # A complete six-lane synthetic set establishes the positive parser path.
+                    for mutation in ('missing', 'duplicate', 'fixture-digest', 'fuse-substitution', 'failed-summary'):  # Each altered acceptance claim must be rejected.
+                        changed = deepcopy(events)  # Preserve the positive source of comparison.
+                        if mutation == 'missing':  # A subset must never qualify the full required matrix.
+                            changed.pop(0)  # Leave the summary falsely claiming success.
+                        elif mutation == 'duplicate':  # A duplicate cannot fill a missing lane.
+                            changed[1] = deepcopy(changed[0])  # Retain the same total number of terminal records.
+                        elif mutation == 'fixture-digest':  # Renders cannot detach from their completed runtime.
+                            changed[0]['fixture_sha256'] = '0' * 64  # Keep the installed-animation content hash correct.
+                        elif mutation == 'fuse-substitution':  # FUSE and extraction have independent obligations.
+                            changed[-2]['execution'] = 'fuse'  # Relabeling must not create host acceptance.
+                        else:  # A failed summary cannot be hidden by successful individual rows.
+                            changed[-1]['state'] = 'failed'  # Keep all six rows unchanged.
+                        with self.subTest(mutation=mutation), self.assertRaises(release_tool.ReleaseError):  # No version-only or coverage-only acceptance.
+                            check_events(changed)  # Evaluate actual retained evidence contracts.
+
+
     def test_complete_module_import_and_inspect_parser_without_pwd(self):  # Reproduce the Windows import boundary even on Linux.
         original_import = builtins.__import__  # Delegate every unrelated import normally.
         attempts = []  # Detect any attempted POSIX acquisition at module load.

@@ -21,6 +21,7 @@ import subprocess
 import sys
 import uuid
 import tarfile
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -59,6 +60,32 @@ def sha(path):
         while block := source.read(1024 * 1024):
             value.update(block)
     return value.hexdigest()
+
+
+def retain_native_sandbox_artifact(cargo_log, output_directory):
+    """Retain compilation evidence; executing native resource tests is separate."""
+    artifacts = []
+    for line in Path(cargo_log).read_text(encoding='utf-8').splitlines():
+        if not line.startswith('{'):
+            continue
+        record = json.loads(line)
+        target = record.get('target', {})
+        if (record.get('reason') == 'compiler-artifact' and
+                target.get('name') == 'native_animation_sandbox' and
+                target.get('kind') == ['test'] and record.get('executable')):
+            artifacts.append(Path(record['executable']))
+    require(len(artifacts) == 1, 'missing unique native sandbox test artifact')
+    binary = artifacts[0]
+    require(binary.is_absolute() and binary.is_file() and not binary.is_symlink()
+            and binary.stat().st_size > 0, 'native sandbox test artifact is not a regular executable')
+    output_directory = Path(output_directory)
+    output_directory.mkdir(parents=True, exist_ok=False)
+    retained = output_directory / 'native-sandbox-test-binary'
+    shutil.copy2(binary, retained)
+    digest = sha(binary)
+    require(sha(retained) == digest, 'retained native sandbox test bytes differ')
+    return {'schema': 1, 'filename': retained.name, 'sha256': digest,
+            'executed': False, 'state': 'compiled-not-qualified'}
 
 
 def write_json(path, value):
@@ -203,7 +230,11 @@ def logged(command, root, log, environment=None, timeout=10_800):
 
 
 def configure_workspace_test_environment(environment, target, work, cargo_target):
-    environment['RUST_TEST_THREADS'] = '1'
+    # Cargo owns the parallel job budget; nested native builders must not
+    # multiply it or inherit a runner's unbounded host defaults.
+    environment.update(CARGO_BUILD_JOBS='16', CMAKE_BUILD_PARALLEL_LEVEL='1',
+                       NUM_JOBS='1', MAKEFLAGS='-j1', OMP_NUM_THREADS='1',
+                       RAYON_NUM_THREADS='1', RUST_TEST_THREADS='1')
     executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'
     helper_executable = 'ilium-animation-helper.exe' if target['os'] == 'windows' else 'ilium-animation-helper'
     candidate = cargo_target / target['rust_target'] / 'release' / executable
@@ -217,6 +248,25 @@ def configure_workspace_test_environment(environment, target, work, cargo_target
     else:
         environment.pop('ILIUM_NAMING_EVIDENCE_DIR', None)
     return environment
+
+
+def configure_rust_toolchain_environment(environment, work):
+    rustup_home = Path(work) / 'rustup-home'
+    rustup_home.mkdir(mode=0o700)
+    environment['RUSTUP_HOME'] = str(rustup_home)
+    return environment
+
+
+def rustup_install_command():
+    toolchain = tomllib.loads((ROOT / 'rust-toolchain.toml').read_text(encoding='utf-8'))['toolchain']
+    command = [
+        'rustup', 'toolchain', 'install', toolchain['channel'],
+        '--profile', 'minimal',
+    ]
+    for component in toolchain.get('components', []):
+        command.extend(('--component', component))
+    command.append('--no-self-update')
+    return command
 
 
 def native(arguments):
@@ -234,6 +284,8 @@ def native(arguments):
         os.nice(10)
     environment = dict(os.environ)
     environment.update(CARGO_INCREMENTAL='0')
+    configure_rust_toolchain_environment(environment, work)
+    logged(rustup_install_command(), root, work / 'rustup-install.log', environment)
     # Ambient ORT overrides cannot select an unreviewed runtime. Intel source
     # builds and the shared-runtime adapter supply their own exact settings.
     for key in ('ORT_LIB_LOCATION', 'ORT_LIB_PATH', 'ORT_PREFER_DYNAMIC_LINK'):
@@ -277,7 +329,7 @@ def native(arguments):
         helper = 'build_intel_ort.py' if target['os'] == 'macos' else 'build_windows_ort.py'
         output_name = 'intel-ort' if target['os'] == 'macos' else 'windows-ort'
         ort_output = work / output_name
-        logged([sys.executable, root / 'release/scripts' / helper, '--source-register', root / 'release/ort-source.json', '--source-archive', ort_archive, '--output-root', ort_output, '--output', ort_output / 'receipt.json', '--cargo-environment-output', ort_output / 'environment.json', '--cargo-workspace', arguments.workspace.resolve(), '--cargo-target-dir', cargo_target, '--cargo-home', cargo_home, '--runner-identity', target['runner'], '--parallel', str(max(1, min(os.cpu_count() or 1, 4)))], root, work / (output_name + '.log'))
+        logged([sys.executable, root / 'release/scripts' / helper, '--source-register', root / 'release/ort-source.json', '--source-archive', ort_archive, '--output-root', ort_output, '--output', ort_output / 'receipt.json', '--cargo-environment-output', ort_output / 'environment.json', '--cargo-workspace', arguments.workspace.resolve(), '--cargo-target-dir', cargo_target, '--cargo-home', cargo_home, '--runner-identity', target['runner'], '--parallel', str(max(1, min(os.cpu_count() or 1, 4)))], root, work / (output_name + '.log'), environment)
         environment.update(release_tool.read_json(ort_output / 'environment.json'))
         if target['os'] == 'windows':
             environment['PATH'] = environment['ORT_LIB_LOCATION'] + os.pathsep + environment['PATH']
@@ -344,6 +396,11 @@ def native(arguments):
         if record.get('reason') == 'compiler-artifact' and record.get('target', {}).get('name') == 'pty_tui_smoke' and record.get('executable'):
             harnesses.append(Path(record['executable']))
     require(len(harnesses) == 1 and harnesses[0].is_file(), 'missing unique native PTY harness')
+    sandbox_log = work / 'sandbox-harness-build.jsonl'
+    if target['os'] == 'linux':
+        logged(['cargo', 'test', '--locked', '--target', arguments.target,
+                '--package', 'ilium-platform', '--test', 'native_animation_sandbox',
+                '--no-run', '--message-format=json'], root, sandbox_log, environment)
     command = [sys.executable, root / 'release/scripts/native_candidate.py', '--manifest', arguments.manifest.resolve(), '--workspace', arguments.workspace.resolve(), '--tag', arguments.tag, '--target', arguments.target, '--runner-identity', arguments.runner_identity, '--build-directory', cargo_target / arguments.target / 'release', '--output-directory', arguments.output.resolve(), '--dependency-inventory', inventory, '--ort-source-archive', ort_archive, '--model-directory', model_directory]
     if target['ort_strategy'] == 'pinned-source-build':
         if target['os'] == 'macos':
@@ -370,6 +427,12 @@ def native(arguments):
     harness_directory.mkdir()
     shutil.copyfile(harnesses[0], harness_directory / harness_name)
     audit = release_tool.read_json(output / 'native-audit.json')
+    if target['os'] == 'linux':
+        sandbox_receipt = retain_native_sandbox_artifact(sandbox_log, output / 'evidence/sandbox')
+        sandbox_receipt.update(target=arguments.target, tag=arguments.tag,
+                               source_sha256=sha(root / 'ilium-platform/tests/native_animation_sandbox.rs'),
+                               helper_sha256=audit['files']['ilium-animation-helper'])
+        write_json(output / 'evidence/native-sandbox-artifact.json', sandbox_receipt)
     runtimes = release_tool.read_json(output / 'runtime-inventory.json')['files']
     runtime_names = {item['name'] for item in runtimes}
     for name in runtime_names:
@@ -599,10 +662,14 @@ def aggregate(arguments):
         marker = packages_directory / marker_name
         require(marker.is_file() and not marker.is_symlink(),
                 'Linux installed animation marker is missing or aliased')
+        sandbox_artifact = artifacts / ('native-' + row['rust_target']) / 'evidence/native-sandbox-artifact.json'
         animation_smoke.validate(release_tool.read_json(marker), target=row, tag=arguments.tag,
                                  audit_path=output / 'audits' / (row['rust_target'] + '.json'),
                                  source_root=root, packages=packages_directory,
-                                 archive_sha256=archives[row['archive']])
+                                 archive_sha256=archives[row['archive']],
+                                 sandbox_artifact_path=sandbox_artifact)
+        shutil.copyfile(sandbox_artifact, output / 'audits' /
+                        (row['rust_target'] + '-native-sandbox-artifact.json'))
         package_animation_smoke[row['rust_target']] = sha(marker)
         shutil.copyfile(marker, output / 'audits' / marker_name)
     for name in sorted(linux_package_hashes):
@@ -653,6 +720,8 @@ def candidate_data(directory, manifest, workspace):
             {row['rust_target'] for row in package_rows},
             'candidate Linux/Windows installed animation evidence differs')
     expected_audits = {row['rust_target'] + '.json' for row in targets} | {
+        row['rust_target'] + '-native-sandbox-artifact.json'
+        for row in targets if row['os'] == 'linux'} | {
         animation_smoke.WINDOWS_NAME, *(animation_smoke.LINUX_NAME.format(arch=row['arch'])
                                         for row in targets if row['os'] == 'linux')}
     require({path.name for path in (directory / 'audits').iterdir()} == expected_audits,
@@ -680,7 +749,9 @@ def candidate_data(directory, manifest, workspace):
                                      tag=metadata['tag'], audit_path=audit_path,
                                      source_root=Path(workspace).resolve().parent,
                                      packages=directory,
-                                     archive_sha256=metadata['archives'][target['archive']])
+                                     archive_sha256=metadata['archives'][target['archive']],
+                                     sandbox_artifact_path=directory / 'audits' /
+                                     (target['rust_target'] + '-native-sandbox-artifact.json'))
         release_tool.verify_content(release_tool.read_archive(archive, target, audit), audit, version)
         release_tool.validate_checksums(directory / 'SHA256SUMS', targets, archive)
         if target['os'] == 'windows':
@@ -1328,15 +1399,25 @@ def missing_response(url):
         return content, headers
 
 
-def verify_absent_installers(origin):
+def verify_absent_installers(origin, *, allow_unconfigured=False):
     for route in ('/install.sh', '/install.ps1', '/manifest.json'):
-        missing_response(origin.rstrip('/') + route)
+        try:
+            missing_response(origin.rstrip('/') + route)
+        except HTTPFailure as error:
+            # Only an authoritatively empty channel may have no origin yet.
+            # Continue checking every route: another installer may be live.
+            if not allow_unconfigured or not 400 <= error.status < 600:
+                raise
 
 
 def verify_baseline_bytes(baseline):
     prior = baseline['previous_production']
     if prior is None:
-        verify_absent_installers('https://' + pages.HOST)
+        allow_unconfigured = baseline['previous_latest'] is None
+        if allow_unconfigured:
+            assert_latest(baseline)
+            assert_production(baseline)
+        verify_absent_installers('https://' + pages.HOST, allow_unconfigured=allow_unconfigured)
         return
     for name, digest in prior['files'].items():
         if name == '404.html':
@@ -1356,10 +1437,7 @@ def capture_baseline(arguments):
     _prefix, project = pages_project()
     production = project.get('canonical_deployment')
     if production is None:
-        try:
-            verify_absent_installers('https://' + pages.HOST)
-        except HTTPFailure as error:
-            require(latest is None and 400 <= error.status < 600, 'unconfigured public channel returned an unexpected error')
+        verify_absent_installers('https://' + pages.HOST, allow_unconfigured=latest is None)
     if production is not None:
         require(production.get('environment') == 'production' and production.get('latest_stage', {}).get('status') == 'success', 'previous Pages deployment is not a successful production rollback target')
     output.mkdir(parents=True)

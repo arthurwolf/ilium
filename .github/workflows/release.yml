@@ -197,7 +197,7 @@ jobs:
     - name: Packaging toolchain
       run: |
         sudo apt-get update
-        sudo apt-get install -y bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 qemu-system-x86 qemu-utils cloud-image-utils openssh-client # Supply native package inspectors and the disposable guest tools.
+        sudo apt-get install -y systemd-container ffmpeg bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 qemu-system-x86 qemu-utils cloud-image-utils openssh-client # Supply native package inspectors and the disposable guest tools.
         command -v snap >/dev/null # Require the runner's existing Snap tooling before building or installing.
         command -v docker >/dev/null # Require native distribution-container coverage on this runner.
     - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
@@ -208,24 +208,26 @@ jobs:
         set -o pipefail # A failed required format must fail this workflow step.
         mkdir -p "$RUNNER_TEMP/package-smoke-inspect" # Keep diagnostics outside the exact package artifact inventory.
         python release/scripts/smoke_linux_packages.py inspect --arch "${{ matrix.arch }}" --packages linux-packages --formats deb,rpm,appimage,snap | tee "$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl" # Require every supported offline format explicitly.
-    - name: Install and run deb, rpm and AppImage in distribution containers
+    - name: Install and run all six distribution-container lanes with owned systemd fixtures # Preserve every installed animation and lifecycle gate.
       run: |
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke"
-        python release/scripts/smoke_linux_packages.py containers --arch "${{ matrix.arch }}" --packages linux-packages --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke/containers-results.jsonl"
+        sudo -n env PYTHONDONTWRITEBYTECODE=1 "$(command -v python)" release/scripts/smoke_linux_packages.py containers --arch "${{ matrix.arch }}" --packages linux-packages --formats deb,rpm,appimage --log "$RUNNER_TEMP/package-smoke" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke/containers-results.jsonl"
     - name: Install and run Snap, Flatpak, deb and the AppImage FUSE mount on the disposable runner
       run: |
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-host"
         python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+    - name: Execute every declared native Linux sandbox case # Keep this step bound to the runner and matching Rust test source.
+      run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
     - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
       if: matrix.arch == 'x86_64'
       run: |
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-vm"
-        python release/packaging/linux/vm_smoke.py --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
+        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
     - name: Seal native Linux animation evidence
-      run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "${{ matrix.rust_target }}" --tag "${{ needs.source.outputs.tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host"
+      run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "${{ matrix.rust_target }}" --tag "${{ needs.source.outputs.tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host" --native-sandbox-receipt "$RUNNER_TEMP/native-sandbox/native-sandbox-tests.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: linux-packages-${{ matrix.arch }}
@@ -243,6 +245,7 @@ jobs:
           ${{ runner.temp }}/package-smoke-host/
           ${{ runner.temp }}/package-smoke-vm/
           package-vm.jsonl
+          ${{ runner.temp }}/native-sandbox/
         if-no-files-found: warn
         retention-days: 30
   macos-packages:
@@ -991,6 +994,60 @@ jobs:
         path: final-channel-readback.json
         if-no-files-found: error
         retention-days: 30
+    if: github.event_name == 'push'
+  ghcr-package:
+    needs:
+    - complete
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+      with:
+        version: 1.3.1
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: qualified-candidate
+        path: candidate
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: final-qualification
+        path: final-evidence
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: publication-receipt
+        path: published
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: completed-public-qualification
+        path: completed
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: final-channel-readback
+        path: final-channel
+    - name: Publish and anonymously verify the exact qualified release asset bundle
+      run: |
+        set -o pipefail
+        mkdir -p ghcr-evidence
+        python release/scripts/publish_ghcr.py --candidate candidate --final-qualification final-evidence/final-qualification.json --publication-receipt published/publication-receipt.json --completed-qualification completed/completed-public-qualification.json --channel-readback final-channel/final-channel-readback.json --output ghcr-evidence/ghcr-receipt.json --intent ghcr-evidence/ghcr-intent.json | tee ghcr-evidence/publisher.jsonl
+      env:
+        GHCR_TOKEN: ${{ github.token }}
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: ghcr-publication-receipt
+        path: ghcr-evidence/
+        if-no-files-found: error
+        retention-days: 30
+      if: always()
     if: github.event_name == 'push'
   baseline:
     needs:

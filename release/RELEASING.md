@@ -7,6 +7,58 @@ third-party notices and any audited runtime libraries. The client resolves its s
 archives from the same version directory. Package checks never execute downloaded bytes before
 their checksum and member inventory have passed.
 
+## GitHub Packages release bundle
+
+The `ghcr-package` job distributes the accepted release assets as one OCI asset
+bundle at `ghcr.io/arthurwolf/ilium-release:<release-tag>`. The bundle contains
+installers and native archives; it is retrieved with ORAS rather than run as a
+container. Direct Release downloads remain available for individual platforms.
+
+This job depends on `complete`, after all five public installations and the final
+Release/Pages readback. Manual dispatch never publishes. Its dedicated token has
+package write permission; the other jobs retain their existing permissions. The
+publisher binds every payload hash to the immutable Release receipt, including
+installers outside the native archive `SHA256SUMS` inventory.
+
+Matching existing versions are verified without another push; a conflicting
+version fails without replacement. Success additionally requires an anonymous
+full registry pull with exact file hashes and GitHub metadata proving public
+visibility and linkage to `arthurwolf/ilium`. The metadata API uses the scoped
+workflow credential; anonymous download verification uses an empty registry
+credential configuration. Neither source annotations nor an authenticated push
+alone prove public availability. A newly created private package must have its
+visibility and repository access reconciled before the same version can pass.
+
+### First publication and visibility recovery
+
+GitHub creates a new Container registry package as private. Linking the package
+to a public repository inherits access permissions, not public visibility.
+See [GitHub package visibility](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+After the qualified tagged workflow creates `ilium-release`, the release owner
+opens the exact [Ilium package page](https://github.com/users/arthurwolf/packages/container/package/ilium-release)
+and selects **Package settings**,
+confirms the owner is `arthurwolf`, the package is `ilium-release`, and the linked
+repository is `arthurwolf/ilium`, then changes that package's visibility to
+Public. Preserve repository access inheritance; do not change other packages.
+This is part of first-publication work, not a substitute for the native gates.
+Do not upload a placeholder package to create the settings page.
+
+If anonymous verification fails after the upload, retain the failed job's
+`ghcr-publication-receipt` artifact, especially `ghcr-intent.json` and
+`publisher.jsonl`. Change visibility only for the verified qualified package,
+then rerun the failed package job on the **same tagged workflow run**. Do not
+move the tag, replace its digest, or dispatch a new workflow: dispatch is
+nonpublishing. The publisher verifies an existing matching version without
+another push and rejects conflicting bytes. Completion requires the successful
+receipt's exact manifest digest, public metadata, and anonymous full-pull hashes;
+a visible Package entry by itself does not establish usable distribution.
+
+The `ghcr-publication-receipt` Actions artifact retains publication/readback
+evidence. A passing job must identify the Package page and immutable manifest
+digest. These contracts do not claim that a package is already publicly
+available; actual tagged workflow execution and public readback remain required.
+
 ## Source checks
 
 Run from the repository root with Python 3.11 or newer:
@@ -181,6 +233,25 @@ and a successful version command are not evidence of native animation confinemen
 An unavailable prerequisite must fail the installed animation gate; no installer
 changes host cgroup ownership or controller configuration.
 
+Each Linux architecture also executes the retained native sandbox test artifact
+through `native_sandbox_runner.py` before package evidence is sealed. The four
+exact cases cover descendant retirement, task limits, physical memory limits,
+and ordinary service helper startup with `Delegate=no`. Receipts bind the test,
+helper and Rust source hashes, require one executed passing test per case, and
+require fresh owned services to be retired. Seal readback compares the copied
+artifact metadata and digest with the retained regular artifact file. Aggregation
+retains separate `audits/<rust-target>-native-sandbox-artifact.json` files for the
+two Linux architectures; candidate readback inventories these files and checks
+their bytes against each sealed marker before release or registry publication. The
+x86_64 minimum-system VM receives the matching candidate runtime and artifact
+and repeats these cases as its disposable unprivileged user. Cloud-init installs
+Bubblewrap explicitly before the guest readiness marker, so the sandbox gate
+does not depend on a package installation happening later. These checks
+supplement the installed package animation/V8 gates; they do not replace them.
+Source integration is implemented; native execution and complete candidate
+qualification of this integration remain required before publication.
+
+
 Flatpak cannot create the helper's required nested namespaces inside its own
 sandbox. The initial CLI instead reads `[Instance] app-path` in `/.flatpak-info`,
 which Flatpak documents as the host path of the *running* `/app` deployment,
@@ -273,7 +344,8 @@ python release/scripts/smoke_linux_packages.py inspect --arch "$architecture" --
 mkdir -p "$verification_directory/containers" "$verification_directory/host" # Retain the exact complete terminal result streams for sealing.
 python release/scripts/smoke_linux_packages.py containers --arch "$architecture" --packages "$package_directory" --formats deb,rpm,appimage --log "$verification_directory/containers" --audit-report "$native_audit" --workspace "$(pwd)/Cargo.toml" --manifest "$(pwd)/release/targets.toml" | tee "$verification_directory/containers/containers-results.jsonl" # Require six installed helper sessions in native distribution containers.
 python release/scripts/smoke_linux_packages.py host --arch "$architecture" --packages "$package_directory" --formats snap,flatpak,deb,appimage --log "$verification_directory/host" --flatpak-user-dir "$verification_directory/flatpak-install" --audit-report "$native_audit" --workspace "$(pwd)/Cargo.toml" --manifest "$(pwd)/release/targets.toml" | tee "$verification_directory/host/host-results.jsonl" # Require four real host-format transactions with fixed Flatpak identity.
-python release/scripts/validate_animation_smoke.py --workspace "$(pwd)/Cargo.toml" --manifest "$(pwd)/release/targets.toml" --target "$architecture-unknown-linux-gnu" --tag "$release_tag" --audit "$native_audit" --archive "$native_archive" --packages "$package_directory" --container-log "$verification_directory/containers" --host-log "$verification_directory/host" # Seal all ten native animation proofs into the existing package artifact set.
+python release/scripts/native_sandbox_runner.py --artifact-directory "$native_directory/evidence" --helper "$native_directory/candidate/ilium-animation-helper" --workspace "$(pwd)/Cargo.toml" --output "$verification_directory/native-sandbox" # Execute all four exact ordinary-service cases against the retained candidate.
+python release/scripts/validate_animation_smoke.py --workspace "$(pwd)/Cargo.toml" --manifest "$(pwd)/release/targets.toml" --target "$architecture-unknown-linux-gnu" --tag "$release_tag" --audit "$native_audit" --archive "$native_archive" --packages "$package_directory" --container-log "$verification_directory/containers" --host-log "$verification_directory/host" --native-sandbox-receipt "$verification_directory/native-sandbox/native-sandbox-tests.json" # Seal the sandbox execution receipt and all ten native animation proofs into the existing package artifact set.
 printf '%s\n' "$verification_directory" # Retain this directory with the candidate's source and receipt hashes.
 ```
 
@@ -521,6 +593,23 @@ or deployment before another write. Recovery must stop on a channel owned by
 another run. Runner cancellation can interrupt recovery; retain enough evidence
 to resume it rather than claiming that an automatic recovery job guarantees
 restoration.
+
+## First GitHub Packages publication
+
+A newly published GHCR package defaults to private. Linking the package to the
+public Ilium repository grants inherited access permissions, but does not make
+the package publicly visible. See [GitHub container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+and [package visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+After the first qualified upload creates `ilium-release`, the release operator
+must use its GitHub Package settings to select Public visibility. Preserve the
+uploaded version and the retained `ghcr-intent.json`; do not replace the version
+or weaken anonymous verification to make the workflow green. Then rerun the
+failed `ghcr-package` job on the same qualified tag. The publisher reconciles
+existing layers against the release asset hashes before pulling by immutable
+digest with an empty authentication configuration. Completion requires both
+anonymous retrieval and public package metadata linked to `arthurwolf/ilium`.
+A successful authenticated push alone is not public package delivery.
 
 ## Evidence and documentation
 

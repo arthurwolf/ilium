@@ -11,14 +11,18 @@ from pathlib import Path, PureWindowsPath
 import platform
 
 import release_tool
+import native_sandbox_runner as sandbox
 import smoke_installed_animation as animation
+import linux_container_fixture as container_fixture  # Validate the retained distribution fixture independently.
 
 WINDOWS_NAME = 'windows-animation-smoke.json'
 LINUX_NAME = 'linux-animation-smoke-{arch}.json'
 SOURCE_FILES = (*animation.SOURCE_FILES,
                 'release/scripts/validate_animation_smoke.py',
                 'release/scripts/smoke_windows_installers.py',
-                'release/scripts/smoke_linux_packages.py')
+                'release/scripts/smoke_linux_packages.py',
+                'release/scripts/native_sandbox_runner.py',
+                'ilium-platform/tests/native_animation_sandbox.rs')
 HOST_FORMATS = ('deb', 'snap', 'flatpak', 'appimage')
 
 
@@ -40,8 +44,88 @@ def content_sha(value):
                                      ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
-def source_hashes(root):
-    return {name: sha(Path(root) / name) for name in SOURCE_FILES}
+def validate_retained_sandbox_artifact(path, artifact, digest):
+    path = Path(path)
+    require(path.is_file() and not path.is_symlink(),
+            'retained native sandbox artifact must be a regular file')
+    require(path.stat().st_size <= 64_000 and sha(path) == digest and
+            release_tool.read_json(path) == artifact,
+            'native sandbox marker differs from retained artifact bytes')
+
+
+def validate_native_sandbox_receipt(receipt, artifact, artifact_sha256, target, tag):
+    require(isinstance(receipt, dict) and isinstance(artifact, dict),
+            'native sandbox evidence must be objects')
+    machine = {'x86_64-unknown-linux-gnu': 'x86_64',
+               'aarch64-unknown-linux-gnu': 'aarch64'}.get(target)
+    require(machine is not None and artifact.get('schema') == 1 and
+            artifact.get('state') == 'compiled-not-qualified' and
+            artifact.get('executed') is False and
+            artifact.get('filename') == 'native-sandbox-test-binary' and
+            artifact.get('target') == target and artifact.get('tag') == tag,
+            'native sandbox artifact identity differs')
+    require(receipt.get('schema') == 1 and receipt.get('state') == 'passed' and
+            receipt.get('scope') == 'native-linux-sandbox-tests' and
+            receipt.get('publication_allowed') is False and
+            receipt.get('inputs_stable') is True and
+            type(receipt.get('uid')) is int and receipt['uid'] > 0 and
+            receipt.get('system') == 'Linux' and receipt.get('machine') == machine and
+            receipt.get('target') == target and receipt.get('tag') == tag and
+            receipt.get('artifact_receipt_sha256') == artifact_sha256,
+            'native sandbox execution identity differs')
+    for key, artifact_key in [('binary_sha256', 'sha256'),
+                              ('helper_sha256', 'helper_sha256'),
+                              ('source_sha256', 'source_sha256')]:
+        digest = artifact.get(artifact_key)
+        require(isinstance(digest, str) and len(digest) == 64 and
+                all(char in '0123456789abcdef' for char in digest) and
+                receipt.get(key) == digest, 'native sandbox input digest differs')
+    cases = receipt.get('cases')
+    require(isinstance(cases, dict) and set(cases) == set(sandbox.CASES),
+            'native sandbox case coverage differs')
+    units = set()
+    for case, row in cases.items():
+        require(isinstance(row, dict) and row.get('state') == 'passed' and
+                row.get('exit_code') == 0 and row.get('delegate') is False and
+                row.get('unit_retired') is True and row.get('unit_fresh') is True and
+                row.get('cleanup_error') is None,
+                'native sandbox case did not physically retire')
+        unit = row.get('unit', '')
+        require(isinstance(unit, str) and unit.endswith('.service') and unit not in units,
+                'native sandbox service identity differs')
+        units.add(unit)
+        command = row.get('command')
+        require(isinstance(command, list) and len(command) > 8 and
+                all(isinstance(value, str) for value in command),
+                'native sandbox command is absent')
+        helper_prefix = '--setenv=ILIUM_NATIVE_HELPER_TEST_BINARY='
+        require(command[1].startswith(helper_prefix) and
+                Path(command[1][len(helper_prefix):]).is_absolute(),
+                'native sandbox helper path is absent')
+        expected = sandbox.test_command(Path(command[-6]), case, unit[:-8])
+        expected[1:1] = [command[1],
+                        '--setenv=ILIUM_NATIVE_HELPER_TEST_SHA256=' + artifact['helper_sha256']]
+        require(command == expected, 'native sandbox command differs')
+        stdout, stderr = row.get('stdout'), row.get('stderr')
+        require(isinstance(stdout, str) and isinstance(stderr, str) and
+                len(stdout.encode()) + len(stderr.encode()) <= 8_000_000 and
+                sandbox.case_passed(case, row['exit_code'], stdout) and
+                row.get('log_sha256') == hashlib.sha256((stdout + stderr).encode()).hexdigest(),
+                'native sandbox execution log differs')
+        try:
+            admitted = sandbox.cgroup_identity(stdout, unit[:-8])
+        except (ValueError, TypeError) as error:
+            raise release_tool.ReleaseError('native sandbox cgroup admission differs') from error
+        kernel = row.get('kernel_retirement')
+        require(isinstance(kernel, dict) and kernel.get('absent') is True and
+                all(kernel.get(key) == value for key, value in admitted.items()) and
+                kernel.get('manager_control_group') in ('', admitted['path']),
+                'native sandbox kernel retirement evidence differs')
+
+
+def source_hashes(root, *, include_container_fixture=False):  # Preserve the existing Windows source authority by default.
+    names = (*SOURCE_FILES, *container_fixture.source_files) if include_container_fixture else SOURCE_FILES  # Add fixture provenance only to Linux markers.
+    return {name: sha(Path(root) / name) for name in names}  # Bind every applicable complete source file.
 
 
 def bounded_jsonl(path, limit=8_000_000):
@@ -142,9 +226,10 @@ def linux_container_proof(proof, kind, image, audit, audit_path, source, arch,
                                                           'ilium-animation-helper',
                                                           *release_tool.APPROVED_PACKAGES)},
             'Linux container animation provenance differs')
+    container_fixture.validate_record(proof.get("fixture"), kind, image, arch, {name: source[name] for name in container_fixture.source_files})  # Require completed startup, owned namespaces and verified retirement.
     output = proof.get('stdout')
     require(isinstance(output, str) and proof.get('stdout_sha256') ==
-            hashlib.sha256(output.encode()).hexdigest(),
+            hashlib.sha256(output.encode()).hexdigest() == proof['fixture']['animation_stdout_sha256'],  # Bind the renders to this exact completed fixture.
             'Linux container animation output digest differs')
     catalogue, renders = animation.parse_probe_output(output)
     require(proof.get('catalogue') == catalogue and proof.get('renders') == renders and
@@ -232,6 +317,7 @@ def linux_events(rows, *, command, formats, target, package_files,
             animation_result = row.get('animation')
             require(isinstance(animation_result, dict) and
                     animation_result.get('content_sha256') == content_sha(proofs[label]) and
+                    row.get('fixture_sha256') == content_sha(proofs[label].get('fixture')) and
                     row.get('execution') == ('extract-and-run' if kind == 'appimage'
                                              else 'native-container'),
                     'Linux container result lacks its completed animation proof')
@@ -265,12 +351,14 @@ def linux_host_proof(proof, kind, target, audit, source, tag):
             'Linux host proof did not use the required installed launcher')
 
 
-def validate(marker, *, target, tag, audit_path, source_root, packages, archive_sha256):
+def validate(marker, *, target, tag, audit_path, source_root, packages, archive_sha256,
+             sandbox_artifact_path=None):
     common = {'schema', 'state', 'publication_allowed', 'target', 'tag',
               'archive_sha256', 'native_audit_sha256', 'source_files',
               'package_files', 'native_identity'}
     detail = ({'journal', 'proofs'} if target['os'] == 'windows' else
-              {'containers', 'host', 'container_events', 'host_events', 'appimage_fuse'})
+              {'containers', 'host', 'container_events', 'host_events', 'appimage_fuse',
+               'native_sandbox', 'native_sandbox_artifact', 'native_sandbox_artifact_sha256'})
     require(isinstance(marker, dict) and set(marker) == common | detail,
             'native package animation marker schema differs')
     require(marker.get('schema') == 1 and marker.get('state') == 'passed' and
@@ -278,7 +366,7 @@ def validate(marker, *, target, tag, audit_path, source_root, packages, archive_
             marker.get('target') == target['rust_target'] and marker.get('tag') == tag and
             marker.get('archive_sha256') == archive_sha256 and
             marker.get('native_audit_sha256') == sha(audit_path) and
-            marker.get('source_files') == source_hashes(source_root) and
+            marker.get('source_files') == source_hashes(source_root, include_container_fixture=target['os'] == 'linux') and
             marker.get('native_identity') == {'system': {'linux': 'Linux', 'windows': 'Windows'}[target['os']],
                                               'machine': target['arch']},
             'native package animation marker identity differs')
@@ -306,6 +394,18 @@ def validate(marker, *, target, tag, audit_path, source_root, packages, archive_
                                                        marker['source_files']),
                 'Windows animation smoke journal differs')
     else:
+        artifact = marker.get('native_sandbox_artifact')
+        validate_retained_sandbox_artifact(
+            (Path(sandbox_artifact_path) if sandbox_artifact_path is not None else
+             Path(audit_path).parent / 'evidence/native-sandbox-artifact.json'), artifact,
+            marker.get('native_sandbox_artifact_sha256'))
+        require(isinstance(artifact, dict) and
+                artifact.get('helper_sha256') == audit['files']['ilium-animation-helper'] and
+                artifact.get('source_sha256') == marker['source_files']['ilium-platform/tests/native_animation_sandbox.rs'],
+                'native sandbox artifact differs from audited helper or source')
+        validate_native_sandbox_receipt(marker.get('native_sandbox'), artifact,
+                                        marker.get('native_sandbox_artifact_sha256'),
+                                        target['rust_target'], tag)
         containers = marker.get('containers')
         host = marker.get('host')
         require(isinstance(containers, dict) and set(containers) == set(linux_container_labels()) and
@@ -352,7 +452,7 @@ def seal(arguments):
               'target': target['rust_target'], 'tag': arguments.tag,
               'archive_sha256': sha(arguments.archive),
               'native_audit_sha256': sha(audit_path),
-              'source_files': source_hashes(source_root),
+              'source_files': source_hashes(source_root, include_container_fixture=target['os'] == 'linux'),
               'package_files': {name: sha(arguments.packages / name) for name in package_names},
               'native_identity': {'system': platform.system(), 'machine': target['arch']}}
     if target['os'] == 'windows':
@@ -367,6 +467,12 @@ def seal(arguments):
                                           marker['source_files'])
         name = WINDOWS_NAME
     else:
+        require(arguments.native_sandbox_receipt is not None,
+                'Linux package sealing requires executed native sandbox evidence')
+        artifact_path = audit_path.parent / 'evidence/native-sandbox-artifact.json'
+        marker['native_sandbox'] = release_tool.read_json(arguments.native_sandbox_receipt)
+        marker['native_sandbox_artifact'] = release_tool.read_json(artifact_path)
+        marker['native_sandbox_artifact_sha256'] = sha(artifact_path)
         labels = linux_container_labels()
         marker['containers'] = {label: release_tool.read_json(
             arguments.container_log / (label + '-installed-animation.json'))
@@ -404,7 +510,7 @@ def seal(arguments):
 def main():
     parser = release_tool.JsonArgumentParser(description=__doc__, allow_abbrev=False)
     for name in ('workspace', 'manifest', 'audit', 'archive', 'packages',
-                 'windows-journal', 'container-log', 'host-log'):
+                 'windows-journal', 'container-log', 'host-log', 'native-sandbox-receipt'):
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--target', required=True)
     parser.add_argument('--tag', required=True)

@@ -4,7 +4,7 @@
 `inspect` never executes package bytes: it inspects deb, rpm, AppImage and Snap
 against the build receipt, including an architecture the machine cannot run.
 Flatpak installed bytes are checked by `host`; explicit unsupported formats fail. `containers` installs the deb, rpm
-and AppImage packages in disposable docker containers of several distributions.
+and AppImage packages in systemd-nspawn containers from the same Docker distribution images.
 `host` installs on the running machine, which must be disposable (a GitHub-hosted
 runner or a virtual machine): Snap needs snapd and root, Flatpak a real sandbox,
 and the AppImage a real FUSE mount. Every install runs the same lifecycle test
@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_linux_packages as packages
 import release_tool
 import smoke_installed_animation as animation_gate
+import linux_container_fixture as container_fixture  # Provision and verify only owned distribution fixtures.
 
 ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = ROOT / 'release/packaging/linux/lifecycle.sh'
@@ -446,27 +447,34 @@ def installed_body(version):  # Share complete FHS installed behavior across deb
     ]) + '\n'  # Preserve stdout useful to the existing container report.
 
 
-def deb_script(name, version):  # Preserve the existing helper signature and all three Debian-family images.
+def deb_script(name, version, *, offline=False):  # Preserve the existing helper signature and all three Debian-family images.
     prelude = 'export DEBIAN_FRONTEND=noninteractive # Disable package-manager prompts.\nrm -f /etc/dpkg/dpkg.cfg.d/excludes # Preserve audited notices.\napt-get update -qq >/dev/null # Refresh this disposable image.'  # Retain existing working setup.
     install = 'apt-get install -y -qq %s >/dev/null # Install the exact deb.' % shlex.quote('/packages/' + name)  # Quote the receipt-bound path.
+    if offline:  # Dependency preparation already completed inside the native base image.
+        prelude = ": # Use the prepared package database without external networking."  # Keep acceptance in its private network namespace.
+        install = install.replace("apt-get install", "apt-get --no-download install")  # Require all dependencies to be locally available.
     body = "dpkg -s ilium | grep -q '^Status: install ok installed' # Verify successful registration.\nsh /smoke/package-deb.sh / # Read back every admitted package-owned leaf.\n" + installed_body(version)  # Retain the existing registration proof.
     return managed_script('deb', prelude, install, 'apt-get remove -y -qq ilium >/dev/null', body)  # Make removal and readback part of success.
 
 
-def rpm_script(image, name, version):  # Preserve Fedora and openSUSE package-manager branches.
+def rpm_script(image, name, version, *, offline=False):  # Preserve Fedora and openSUSE package-manager branches.
     path = shlex.quote('/packages/' + name)  # Quote the exact native RPM artifact.
     install = 'zypper --non-interactive --no-gpg-checks install --allow-unsigned-rpm %s >/dev/null' % path if 'suse' in image else 'dnf install -y -q --setopt=tsflags= %s' % path  # Retain existing unsigned-package test semantics.
     remove = 'zypper --non-interactive remove ilium >/dev/null' if 'suse' in image else 'dnf remove -y -q ilium'  # Preserve each manager's known removal contract.
     prelude = ': # openSUSE already provides the lifecycle tools.' if 'suse' in image else 'dnf install -y -q util-linux diffutils >/dev/null # Provide unprivileged execution and exact inventory comparison.'  # Retain existing prerequisite behavior.
+    if offline:  # The acceptance boot has only its private loopback network.
+        prelude = ': # Prerequisites are already installed in this prepared distribution.'  # Never drop installed verification.
+        install = install.replace('zypper ', 'zypper --no-refresh ').replace('dnf ', 'dnf --cacheonly ')  # Use actual native managers and their prepared metadata.
+        remove = remove.replace('zypper ', 'zypper --no-refresh ').replace('dnf ', 'dnf --cacheonly ')  # Retain removal and authoritative absence without network refresh.
     return managed_script('rpm', prelude, install, remove, 'rpm -q ilium # Verify registration.\nrpm -V ilium # Preserve RPM integrity checking.\nsh /smoke/package-rpm.sh / # Read back every admitted package-owned leaf.\n' + installed_body(version))  # Preserve RPM verification alongside exact audit hashes.
 
 
-def appimage_script(name, version):  # Keep extract-and-run as an explicitly separate container proof.
+def appimage_script(name, version, *, offline=False):  # Keep extract-and-run as an explicitly separate container proof.
     return '\n'.join([  # This mode never claims FUSE availability.
         'set -eu # Fail every extraction, behavior and cleanup gate.',  # Preserve the container shell contract.
         'export DEBIAN_FRONTEND=noninteractive # Avoid interactive apt prompts.',  # Keep native dependency installation unattended.
-        'apt-get update -qq >/dev/null # Refresh the disposable image.',  # Preserve the existing Ubuntu lane.
-        'apt-get install -y -qq libasound2t64 libssl3t64 libstdc++6 >/dev/null # Install existing runtime dependencies.',  # Do not alter the AppImage payload.
+        ': # Use the prepared distribution metadata.' if offline else 'apt-get update -qq >/dev/null # Refresh the disposable image.',  # Preserve the existing Ubuntu lane.
+        ': # Runtime dependencies were installed during image preparation.' if offline else 'apt-get install -y -qq libasound2t64 libssl3t64 libstdc++6 >/dev/null # Install existing runtime dependencies.',  # Do not alter the AppImage payload.
         'work=$(mktemp -d /tmp/ilium-appimage.XXXXXX) # Own all extraction and cache data.',  # Never use the developer\'s AppImage cache.
         'trap \'rm -rf "$work"\' EXIT # Limit fallback cleanup to the owned scope.',  # Container failure still propagates through sh -e.
         'chmod 0755 "$work" # Allow the existing unprivileged identity to enter.',  # Avoid root-only temporary-directory permissions.
@@ -493,7 +501,12 @@ def appimage_script(name, version):  # Keep extract-and-run as an explicitly sep
     ]) + '\n'  # Return the complete container smoke script.
 
 
-def container_animation(arguments, receipt, result, label, package_format, image, log):
+def container_animation(arguments, receipt, result, label, package_format, image, log, fixture_record=None):  # Require the owned fixture and real installed-render proof together.
+    source_root = Path(arguments.workspace).resolve(strict=True).parent  # Bind the fixture to the selected source workspace.
+    fixture_sources = {name: packages.sha(source_root / name) for name in container_fixture.source_files}  # Retain both complete fixture implementations.
+    require(result.returncode == 0, "failed container command cannot qualify animation")  # Never accept success-shaped stdout after a failed transaction.
+    container_fixture.validate_record(fixture_record, package_format, image, arguments.arch, fixture_sources)  # Reject missing managers, wrong namespaces and incomplete cleanup.
+    require(fixture_record["stdout_sha256"] == release_tool.digest(result.stdout.encode("utf-8")) and fixture_record["stderr_sha256"] == release_tool.digest(result.stderr.encode("utf-8")), "container streams differ from retained fixture evidence")  # Bind real output to the completed fixture.
     require(result.stdout.count('ILIUM_ANIMATION_BEGIN\n') == 1 and
             result.stdout.count('ILIUM_ANIMATION_END\n') == 1,
             'container animation proof markers are missing or ambiguous')
@@ -531,7 +544,8 @@ def container_animation(arguments, receipt, result, label, package_format, image
                                                *release_tool.APPROVED_PACKAGES)},
               'client_path': str(client_path), 'helper_path': str(helper_path),
               'stdout': output, 'stdout_sha256': release_tool.digest(output.encode('utf-8')),
-              'catalogue': catalogue, 'renders': renders}
+              'catalogue': catalogue, 'renders': renders,
+              'fixture': fixture_record}  # Seal the exact owned runtime and cleanup observations.
     path = Path(log) / (label + '-installed-animation.json')
     with path.open('x', encoding='utf-8') as file:
         json.dump(native, file, indent=2, sort_keys=True)
@@ -544,8 +558,8 @@ def container_animation(arguments, receipt, result, label, package_format, image
 def containers(arguments):  # Preserve all existing native distribution jobs with stricter requested coverage.
     formats = selected_formats(arguments)  # Reject unsupported explicit formats before launching containers.
     aliases = native_architecture(arguments.arch)  # Do not label emulation as native acceptance.
-    require(shutil.which('docker') is not None, 'docker is required')  # Missing tooling must fail the requested gate.
-    daemon = subprocess.run(['docker', 'info', '--format', '{{.Architecture}}'], capture_output=True, text=True, timeout=60)  # Read actual Docker execution architecture.
+    require(Path(container_fixture.docker[0]).is_file(), 'docker is required')  # Missing tooling must fail the requested gate.
+    daemon = subprocess.run([*container_fixture.docker, 'info', '--format', '{{.Architecture}}'], capture_output=True, text=True, timeout=60, env={'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C'})  # Query only the explicit local daemon, including this early preflight.
     require(daemon.returncode == 0 and daemon.stdout.strip() in aliases, 'Docker daemon architecture is unverified or differs')  # Exclude a foreign remote daemon.
     receipt = load_receipt(arguments.packages, arguments.arch)  # Keep exact artifact validation.
     target = release_tool.selected_target(Path(arguments.manifest),
@@ -558,6 +572,9 @@ def containers(arguments):  # Preserve all existing native distribution jobs wit
         requested_package(arguments, receipt, package_format)  # Fail an unlisted requested artifact.
     log = arguments.log.resolve()  # Preserve the caller's diagnostics destination.
     failed = 0  # Retain count-based return semantics.
+    source_root = Path(arguments.workspace).resolve(strict=True).parent  # Freeze the complete source authority before execution.
+    source_snapshot = {name: packages.sha(source_root / name) for name in (*animation_gate.SOURCE_FILES, *container_fixture.source_files, 'release/scripts/smoke_linux_packages.py')}  # Freeze the harness as well as both new fixture owners.
+    audit_snapshot = packages.sha(arguments.audit_report)  # Keep the accepted native audit stable throughout the matrix.
     with tempfile.TemporaryDirectory(prefix='ilium-smoke-') as temporary:  # Own all shared check inputs.
         smoke = Path(temporary)  # Bind the existing read-only /smoke mount.
         smoke.chmod(0o755)  # Permit the container's unprivileged user to read helpers.
@@ -570,21 +587,25 @@ def containers(arguments):  # Preserve all existing native distribution jobs wit
         (smoke / 'notice.sha256').write_text(receipt['package_files']['THIRD-PARTY.txt'] + '\n', encoding='ascii')  # Retain the independently located notice digest.
         jobs = []  # Preserve the original per-distribution test matrix.
         if 'deb' in formats:  # Enqueue all requested Debian-family environments.
-            jobs += [('deb', image, deb_script(packages.package_name(arguments.arch, 'deb'), receipt['version'])) for image in DEB_IMAGES]  # Keep Ubuntu 22.04/24.04 and Debian 12.
+            jobs += [('deb', image, deb_script(packages.package_name(arguments.arch, 'deb'), receipt['version'], offline=True)) for image in DEB_IMAGES]  # Keep Ubuntu 22.04/24.04 and Debian 12.
         if 'rpm' in formats:  # Enqueue both requested RPM-family environments.
-            jobs += [('rpm', image, rpm_script(image, packages.package_name(arguments.arch, 'rpm'), receipt['version'])) for image in RPM_IMAGES]  # Keep Fedora and openSUSE.
+            jobs += [('rpm', image, rpm_script(image, packages.package_name(arguments.arch, 'rpm'), receipt['version'], offline=True)) for image in RPM_IMAGES]  # Keep Fedora and openSUSE.
         if 'appimage' in formats:  # Enqueue the existing extraction lane.
-            jobs.append(('appimage', APPIMAGE_IMAGE, appimage_script(packages.package_name(arguments.arch, 'appimage'), receipt['version'])))  # FUSE remains a separate host requirement.
+            jobs.append(('appimage', APPIMAGE_IMAGE, appimage_script(packages.package_name(arguments.arch, 'appimage'), receipt['version'], offline=True)))  # FUSE remains a separate host requirement.
         for package_format, image, script in jobs:  # Execute and retain every configured native environment result.
             label = package_format + '-' + image.replace('/', '_').replace(':', '_')  # Preserve existing log filenames.
-            docker_arch = 'amd64' if arguments.arch == 'x86_64' else 'arm64'  # Use Docker's documented platform spellings.
-            command = ['docker', 'run', '--rm', '--platform=linux/' + docker_arch, '-v', '%s:/packages:ro' % arguments.packages.resolve(), '-v', '%s:/smoke:ro' % smoke, image, 'sh', '-ec', script]  # Retain disposable containers and read-only artifact mounts.
-            result = host_run(command, log, label)  # Preserve logs even when process startup or timeout fails.
+            fixture_record = None  # An unattempted or failed fixture can never qualify.
+            try:  # Preserve one terminal result for every requested distribution lane.
+                result, fixture_record = container_fixture.run_fixture(image, package_format, arguments.arch, arguments.packages.resolve(), smoke, log, label, script, packages.package_name(arguments.arch, package_format), host_run, {name: source_snapshot[name] for name in container_fixture.source_files})  # Run the complete transaction in an owned systemd container.
+            except smoke_errors as error:  # Retain final evidence-write or adapter failures too.
+                result = subprocess.CompletedProcess([], 1, '', 'container fixture: ' + str(error))  # Keep stdout JSONL at the reporting boundary.
+            command = result.args  # Preserve the actual fixture command in any failed result.
             animation_evidence = None
             if result.returncode == 0:
                 try:
+                    require(source_snapshot == {name: packages.sha(source_root / name) for name in source_snapshot} and audit_snapshot == packages.sha(arguments.audit_report), "container source or audit changed during execution")  # Reject mixed execution/provenance identities.
                     animation_evidence = container_animation(arguments, receipt, result, label,
-                                                             package_format, image, log)
+                                                             package_format, image, log, fixture_record)  # Validate both real installed packages after complete cleanup.
                 except smoke_errors as error:
                     result = subprocess.CompletedProcess(command, 1, result.stdout,
                                                          result.stderr + '\ninstalled animation: ' + str(error))
@@ -598,7 +619,8 @@ def containers(arguments):  # Preserve all existing native distribution jobs wit
                 'source_files': {name: packages.sha(source_root / name)
                                  for name in animation_gate.SOURCE_FILES},
                 'execution': 'extract-and-run' if package_format == 'appimage' else 'native-container',
-                'animation': animation_evidence})  # Preserve exact consumed artifact and result identity.
+                'animation': animation_evidence,
+                'fixture_sha256': container_fixture.content_sha(fixture_record) if fixture_record is not None else None})  # Preserve exact consumed artifact and result identity.
     return failed  # A single failed environment fails qualification.
 
 

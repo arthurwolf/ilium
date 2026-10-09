@@ -25,8 +25,8 @@ TARGET_FIELDS = frozenset(
      "executables", "packages", "ort_strategy", "minimum_tested_os")
 )
 APPROVED_PACKAGES = {
-    "beach-1.0.0.iliumanim": "21a195c4641ab73914ba0d7ad535ffbdff1ab116323f933f0df9cce973e33777",
-    "carpet-1.0.0.iliumanim": "05abd4bd37231f1cb7502ae037a9bb7af39043440c72b173948cd12ceb8caf8b",
+    "beach-1.0.0.iliumanim": "15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f",
+    "carpet-1.0.0.iliumanim": "5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9",
 }
 # This is an acceptance constraint, not a second generated release matrix.
 # The manifest supplies the records consumed by packaging and installers.

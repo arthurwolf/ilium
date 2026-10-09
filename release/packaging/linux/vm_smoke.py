@@ -27,6 +27,8 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'release/scripts'))
 import smoke_installed_animation as animation_gate
+import validate_animation_smoke as sandbox_gate
+import release_tool
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/releases/22.04/release/'
 IMAGE_NAME = 'ubuntu-22.04-server-cloudimg-amd64.img'
@@ -39,7 +41,7 @@ users:
     ssh_authorized_keys:
       - {key}
 package_update: true
-packages: [python3, flatpak, squashfs-tools, libfuse2, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
+packages: [python3, bubblewrap, ffmpeg, dbus-user-session, flatpak, squashfs-tools, libfuse2, fuse3, rpm, rpm2cpio, cpio, snapd] # Supply the native inspection, mount and manager prerequisites.
 runcmd:
   - [touch, /var/lib/cloud/instance/ilium-ready]
 '''
@@ -152,6 +154,7 @@ def stop_owned_vm(process, port, key):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('--native-directory', type=Path)
     parser.add_argument('--packages', type=Path, required=True)
     parser.add_argument('--audit-report', type=Path, required=True)
     parser.add_argument('--workspace', type=Path, required=True)
@@ -211,6 +214,11 @@ def main(argv=None):
         animation_sources = tuple((ROOT / name, 'repo/' + name) for name in animation_gate.SOURCE_FILES
                                   if not name.startswith('release/scripts/'))  # The smoke hashes each Rust source and Cargo.lock against native audit evidence.
         uploads = ((ROOT / 'release/scripts', 'repo/release/scripts'), (ROOT / 'release/packaging', 'repo/release/packaging'), (arguments.packages.resolve(), 'packages'), (ROOT / 'LICENSE', 'repo/LICENSE'), (arguments.workspace.resolve(), 'repo/Cargo.toml'), (arguments.manifest.resolve(), 'repo/release/targets.toml'), (arguments.audit_report.resolve(), 'repo/native-linux/native-audit.json'), *animation_sources)  # Transfer every required smoke, provenance and package input.
+        if arguments.native_directory is not None:
+            uploads += ((arguments.native_directory.resolve() / 'candidate', 'repo/native-linux/candidate'),
+                        (arguments.native_directory.resolve() / 'evidence', 'repo/native-linux/evidence'),
+                        (ROOT / 'ilium-platform/tests/native_animation_sandbox.rs',
+                         'repo/ilium-platform/tests/native_animation_sandbox.rs'))
         manifest = {}
         for index, (source, target) in enumerate(uploads):  # Preserve transfer evidence separately from smoke output.
             manifest.update(upload_manifest(source, target))
@@ -241,6 +249,32 @@ def main(argv=None):
             emit('error', message='guest uploaded input hashes differ or verification is unavailable')
             return 1
         emit('result', command='vm-inputs', state='passed', files=len(manifest))
+        if arguments.native_directory is not None:
+            command = 'loginctl enable-linger tester && systemctl start user@$(id -u tester).service'
+            prepared = capture_command(lambda: ssh(port, key, 'sudo sh -c ' + shlex.quote(command), timeout=60))
+            (log / 'vm-sandbox-user-manager.log').write_text(prepared.stdout + prepared.stderr)
+            if prepared.returncode != 0:
+                emit('error', message='VM sandbox user manager preparation failed')
+                return 1
+            argv = ['python3', '/home/tester/repo/release/scripts/native_sandbox_runner.py',
+                    '--artifact-directory', '/home/tester/repo/native-linux/evidence',
+                    '--helper', '/home/tester/repo/native-linux/candidate/ilium-animation-helper',
+                    '--workspace', '/home/tester/repo/Cargo.toml',
+                    '--output', '/home/tester/log-sandbox']
+            executed = capture_command(lambda: ssh(port, key,
+                'XDG_RUNTIME_DIR=/run/user/$(id -u) ' + shlex.join(argv), timeout=900))
+            (log / 'vm-sandbox-run.jsonl').write_text(executed.stdout + executed.stderr)
+            copied = capture_command(lambda: run(['scp', *SSH_OPTIONS, '-i', key, '-P', port,
+                '-r', 'tester@127.0.0.1:/home/tester/log-sandbox', log], timeout=120))
+            if copied.returncode != 0 or executed.returncode != 0:
+                emit('error', message='VM sandbox execution or evidence recovery failed')
+                return 1
+            artifact_path = arguments.native_directory / 'evidence/native-sandbox-artifact.json'
+            artifact = release_tool.read_json(artifact_path)
+            sandbox_gate.validate_native_sandbox_receipt(
+                release_tool.read_json(log / 'log-sandbox/native-sandbox-tests.json'),
+                artifact, sha256(artifact_path), artifact['target'], artifact['tag'])
+            emit('result', command='vm-sandbox', state='passed')
         failed = 0  # Applicable inspection and mandatory host results can now only add failures.
         for subcommand in ('inspect', 'host'):
             formats = inspected if subcommand == 'inspect' else requested  # The host always receives every validated requested format.

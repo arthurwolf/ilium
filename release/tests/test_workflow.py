@@ -65,7 +65,7 @@ def synthetic_animation_receipt(target, pair_directory, source_inputs, *,
 def synthetic_package_animation_marker(target, source, native, archive,
                                        package_directory, package_hashes, audit):
     """Inert receipt fixture; validation still reparses all nested records."""
-    source_inputs = animation_smoke.source_hashes(source)
+    source_inputs = animation_smoke.source_hashes(source, include_container_fixture=target['os'] == 'linux')
     marker = {'schema': 1, 'state': 'passed', 'publication_allowed': False,
               'target': target['rust_target'], 'tag': 'v0.1.0',
               'archive_sha256': pipeline.sha(archive),
@@ -138,6 +138,14 @@ def synthetic_package_animation_marker(target, source, native, archive,
                 'helper_path': proof['catalogue']['helper_path'],
                 'stdout': proof['stdout'], 'stdout_sha256': proof['stdout_sha256'],
                 'catalogue': proof['catalogue'], 'renders': proof['renders']}
+        from container_fixture_support import fixture_record
+        for label, (kind, image) in animation_smoke.linux_container_labels().items():
+            proof = container_proofs[label]
+            proof['fixture'] = fixture_record(
+                kind, image, target['arch'],
+                {name: source_inputs[name]
+                 for name in animation_smoke.container_fixture.source_files},
+                'ILIUM_ANIMATION_BEGIN\n' + proof['stdout'] + 'ILIUM_ANIMATION_END\n')
         roots = {'deb': '/usr/lib/ilium',
                  'snap': '/snap/ilium/12/lib/ilium',
                  'flatpak': '/app/lib/ilium',
@@ -173,6 +181,7 @@ def synthetic_package_animation_marker(target, source, native, archive,
              'package': linux_packages.package_name(target['arch'], kind),
              'package_sha256': package_hashes[linux_packages.package_name(target['arch'], kind)],
              'execution': 'extract-and-run' if kind == 'appimage' else 'native-container',
+             'fixture_sha256': animation_smoke.content_sha(container_proofs[kind + '-' + image.replace('/', '_').replace(':', '_')]['fixture']),
              'animation': {'content_sha256': animation_smoke.content_sha(
                  container_proofs[kind + '-' + image.replace('/', '_').replace(':', '_')])},
              **provenance}
@@ -212,6 +221,20 @@ def synthetic_package_animation_marker(target, source, native, archive,
                                       'state': 'passed', 'failed': 0})
         marker['appimage_fuse'] = {'fuse_mount': '/tmp/synthetic-fuse',
                                    'mount_records': [['/tmp/synthetic-fuse', 'fuse.squashfuse']]}
+        from test_native_sandbox_evidence import NativeSandboxEvidenceTests
+        sandbox, artifact, _ = NativeSandboxEvidenceTests().fixture()
+        artifact.update(target=target['rust_target'], tag='v0.1.0',
+                        helper_sha256=audit['files']['ilium-animation-helper'],
+                        source_sha256=source_inputs['ilium-platform/tests/native_animation_sandbox.rs'])
+        sandbox.update(target=target['rust_target'], tag='v0.1.0', machine=target['arch'],
+                       helper_sha256=artifact['helper_sha256'], source_sha256=artifact['source_sha256'])
+        for row in sandbox['cases'].values():
+            row['command'][2] = '--setenv=ILIUM_NATIVE_HELPER_TEST_SHA256=' + artifact['helper_sha256']
+        artifact_path = native / 'evidence/native-sandbox-artifact.json'
+        pipeline.write_json(artifact_path, artifact)
+        sandbox['artifact_receipt_sha256'] = pipeline.sha(artifact_path)
+        marker.update(native_sandbox=sandbox, native_sandbox_artifact=artifact,
+                      native_sandbox_artifact_sha256=pipeline.sha(artifact_path))
         filename = animation_smoke.LINUX_NAME.format(arch=target['arch'])
     pipeline.write_json(package_directory / filename, marker)
 
@@ -281,6 +304,28 @@ class WorkflowTests(unittest.TestCase):
                         evidence_directory = Path(environment['ILIUM_NAMING_EVIDENCE_DIR'])
                         self.assertEqual(evidence_directory, job_work / 'naming-title-evidence')
                         self.assertTrue(evidence_directory.is_dir())
+
+    def test_native_toolchain_uses_a_run_owned_rustup_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary) / 'native-work'
+            work.mkdir()
+            environment = {'RUSTUP_HOME': '/runner/shared/rustup'}
+
+            configured = pipeline.configure_rust_toolchain_environment(environment, work)
+
+            rustup_home = work / 'rustup-home'
+            self.assertEqual(configured['RUSTUP_HOME'], str(rustup_home))
+            self.assertTrue(rustup_home.is_dir())
+
+    def test_rustup_install_command_uses_the_workspace_pin_without_reinstalling_host_target(self):
+        command = pipeline.rustup_install_command()
+
+        self.assertEqual(command[:4], ['rustup', 'toolchain', 'install', '1.96.1'])
+        self.assertNotIn('--target', command)
+        self.assertEqual(command.count('--component'), 2)
+        self.assertIn('clippy', command)
+        self.assertIn('rustfmt', command)
+        self.assertIn('--no-self-update', command)
 
     def ancestors(self, name, workflow=None):
         jobs = (workflow or self.workflow)['jobs']
@@ -358,7 +403,8 @@ class WorkflowTests(unittest.TestCase):
         job = self.workflow['jobs']['linux-packages']
         vm = next(step for step in job['steps'] if step.get('name') == 'Install and run Linux packages in a disposable x86_64 Ubuntu VM')
         self.assertEqual(vm['if'], "matrix.arch == 'x86_64'")
-        self.assertIn('vm_smoke.py --packages linux-packages', vm['run'])
+        self.assertIn('--packages linux-packages', vm['run'])
+        self.assertIn('--native-directory native-linux', vm['run'])
         self.assertIn('--arch x86_64', vm['run'])
         self.assertIn('--accelerator tcg', vm['run'])
         self.assertIn('--audit-report native-linux/native-audit.json', vm['run'])
@@ -426,6 +472,11 @@ class WorkflowTests(unittest.TestCase):
         for step in self.workflow['jobs']['linux-packages']['steps']:  # Inspect only the bounded Linux packaging job.
             for line in step.get('run', '').splitlines():  # Preserve each shell command's own arguments.
                 words = shlex.split(line, comments=True)  # Ignore explanatory shell comments while respecting quoted expressions.
+                root_prefix = ['sudo', '-n', 'env', 'PYTHONDONTWRITEBYTECODE=1', '$(command -v python)', 'release/scripts/smoke_linux_packages.py']
+                if words[:6] == root_prefix:
+                    self.assertGreaterEqual(len(words), 7)
+                    self.assertEqual(words[6], 'containers')
+                    words = ['python', 'release/scripts/smoke_linux_packages.py', *words[6:]]
                 if words[:2] != ['python', 'release/scripts/smoke_linux_packages.py']:  # Skip unrelated setup and publication commands.
                     continue  # Only actual smoke invocations define native coverage.
                 self.assertGreaterEqual(len(words), 3)  # A malformed invocation must not disappear from coverage.
@@ -433,6 +484,17 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotIn(command, commands)  # Duplicate invocations cannot hide a conflicting required-format list.
                 commands[command] = words  # Retain exact flag values for every subsequent assertion.
         return commands  # Reuse this parser without inventing a second workflow matrix.
+
+    def test_root_smoke_prefix_rejects_other_modes_and_duplicate_containers(self):
+        root = 'sudo -n env PYTHONDONTWRITEBYTECODE=1 "$(command -v python)" release/scripts/smoke_linux_packages.py '
+        original = deepcopy(self.workflow)
+        for lines in (root + 'host', root + 'containers\n' + root + 'containers'):
+            with self.subTest(lines=lines):
+                self.workflow = deepcopy(original)
+                self.workflow['jobs']['linux-packages']['steps'] = [{'run': lines}]
+                with self.assertRaises(AssertionError):
+                    self.linux_smoke_commands()
+        self.workflow = original
 
     def test_linux_smoke_modes_require_exact_explicit_format_coverage(self):  # Protect required native gates from silently shrinking.
         commands = self.linux_smoke_commands()  # Read the actual YAML run commands.
@@ -459,7 +521,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(words[-3:], ['|', 'tee', '$RUNNER_TEMP/package-smoke-inspect/inspect.jsonl'])  # Retain the inspector's exact JSONL outside release assets.
         diagnostics = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'diagnostics-linux-packages-${{ matrix.arch }}')  # Locate the existing diagnostics upload.
         self.assertEqual(diagnostics.get('if'), 'always()')  # Failed native checks must still upload available diagnostics.
-        self.assertEqual(set(diagnostics['with']['path'].splitlines()), {'${{ runner.temp }}/package-smoke-inspect/', '${{ runner.temp }}/package-smoke/', '${{ runner.temp }}/package-smoke-host/', '${{ runner.temp }}/package-smoke-vm/', 'package-vm.jsonl'})  # Preserve every smoke mode's evidence directory without the large guest image/overlay.
+        self.assertEqual(set(diagnostics['with']['path'].splitlines()), {'${{ runner.temp }}/package-smoke-inspect/', '${{ runner.temp }}/package-smoke/', '${{ runner.temp }}/package-smoke-host/', '${{ runner.temp }}/package-smoke-vm/', '${{ runner.temp }}/native-sandbox/', 'package-vm.jsonl'})  # Preserve every smoke mode's evidence directory without the large guest image/overlay.
         artifact = next(step for step in job['steps'] if step.get('with', {}).get('name') == 'linux-packages-${{ matrix.arch }}')  # Keep successful package upload separate from diagnostics.
         self.assertEqual(artifact['with']['path'], 'linux-packages/')  # Extra acceptance files must not change the pipeline's exact asset inventory.
         self.assertNotIn('if', artifact)  # Package upload retains the normal prior-step-success condition.
@@ -509,6 +571,7 @@ class WorkflowTests(unittest.TestCase):
             'draft': {'attest'},
             'qualify': {'candidate-installs', 'draft'},
             'publish': {'qualify'},
+            'ghcr-package': {'complete'},
             'github-installs': {'publish'},
             'pages-preview': {'github-installs'},
             'latest': {'github-installs', 'preview-tag-qualification', 'previous-qualification', 'recovery-ready'},
@@ -522,7 +585,7 @@ class WorkflowTests(unittest.TestCase):
         }
         for job, dependencies in expected.items():
             self.assertTrue(dependencies <= self.ancestors(job), (job, dependencies))
-        for job in ('draft', 'publish', 'latest', 'pages-preview', 'pages-production', 'baseline', 'recovery-ready'):
+        for job in ('draft', 'publish', 'ghcr-package', 'latest', 'pages-preview', 'pages-production', 'baseline', 'recovery-ready'):
             self.assertIn("github.event_name == 'push'", self.workflow['jobs'][job]['if'])
         self.assertIn('workflow_dispatch', self.workflow['on'])
         self.assertEqual(self.workflow['concurrency']['cancel-in-progress'], 'false')
@@ -536,6 +599,8 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(permissions, {'contents': 'read', 'id-token': 'write', 'attestations': 'write'})
             elif name in ('draft', 'publish', 'latest', 'recover'):
                 self.assertEqual(permissions, {'contents': 'write'})
+            elif name == 'ghcr-package':
+                self.assertEqual(permissions, {'contents': 'read', 'packages': 'write'})
             else:
                 self.assertEqual(permissions, {'contents': 'read'})
             text = json.dumps(job)
@@ -584,7 +649,7 @@ class PipelineTests(unittest.TestCase):
             destination = source / filename
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / filename, destination)
-        for filename in animation_smoke.SOURCE_FILES:
+        for filename in dict.fromkeys((*animation_smoke.SOURCE_FILES, *animation_smoke.container_fixture.source_files)):
             destination = source / filename
             if not destination.exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -730,24 +795,66 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('build_windows_ort.py', (ROOT / '.github/workflows/release.yml').read_text())
         self.assertIn('${{ runner.temp }}/native-work/*/*.log', (ROOT / '.github/workflows/release.yml').read_text())
 
+    def test_macos_arm_native_setup_installs_host_toolchain_without_duplicate_target(self):
+        target = next(row for row in self.targets
+                      if row['os'] == 'macos' and row['arch'] == 'aarch64')
+        with (ROOT / 'Cargo.toml').open('rb') as source:
+            workspace_tag = 'v' + release_tool.tomllib.load(source)['workspace']['package']['version']
+        work = self.root / 'macos-arm-work'
+        arguments = SimpleNamespace(manifest=ROOT / 'release/targets.toml',
+                                    target=target['rust_target'], workspace=ROOT / 'Cargo.toml',
+                                    tag=workspace_tag, runner_identity=target['runner'],
+                                    work=work, output=self.root / 'output')
+        rustup_installation = []
+
+        class ReachedRustupInstall(Exception):
+            pass
+
+        def capture_rustup_install(command, _root, log, environment=None, timeout=10_800):
+            if Path(log).name == 'rustup-install.log':
+                rustup_installation.append((list(map(str, command)), dict(environment or {})))
+                raise ReachedRustupInstall
+
+        with patch.object(pipeline.platform, 'system', return_value='Darwin'), \
+                patch.object(pipeline.platform, 'machine', return_value='arm64'), \
+                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline, 'logged', side_effect=capture_rustup_install):
+            with self.assertRaises(ReachedRustupInstall):
+                pipeline.native(arguments)
+
+        self.assertEqual(len(rustup_installation), 1)
+        command, environment = rustup_installation[0]
+        self.assertEqual(command, pipeline.rustup_install_command())
+        self.assertNotIn('--target', command)
+        self.assertEqual(environment['RUSTUP_HOME'], str(work / 'rustup-home'))
+
     def test_windows_pester_setup_accepts_pinned_module_publisher_transition(self):
         windows_target = next(target for target in self.targets if target['os'] == 'windows')
+        with (ROOT / 'Cargo.toml').open('rb') as source:
+            workspace_tag = 'v' + release_tool.tomllib.load(source)['workspace']['package']['version']
         arguments = SimpleNamespace(manifest=ROOT / 'release/targets.toml', target=windows_target['rust_target'],
-                                    workspace=ROOT / 'Cargo.toml', tag='v0.1.0', runner_identity=windows_target['runner'],
+                                    workspace=ROOT / 'Cargo.toml', tag=workspace_tag, runner_identity=windows_target['runner'],
                                     work=self.root / 'work', output=self.root / 'output')
         captured = []
+        captured_environments = []
+        helper_environments = []
+        rustup_installations = []
 
         class ReachedPesterSetup(Exception):
             pass
 
         def capture_logged(command, root, log, environment=None, timeout=10_800):
             invocation = list(map(str, command))
+            if Path(log).name == 'rustup-install.log':
+                rustup_installations.append((invocation, dict(environment or {})))
             if any(Path(part).name == 'build_windows_ort.py' for part in invocation):
+                helper_environments.append(dict(environment or {}))
                 output = self.root / 'work/windows-ort'
                 output.mkdir(parents=True, exist_ok=True)
                 pipeline.write_json(output / 'environment.json', {'ORT_LIB_LOCATION': str(self.root)})
             if Path(log).name == 'pester-setup.log':
                 captured.append(invocation)
+                captured_environments.append(dict(environment))
                 raise ReachedPesterSetup
 
         with patch.object(pipeline.platform, 'system', return_value='Windows'), \
@@ -759,6 +866,11 @@ class PipelineTests(unittest.TestCase):
                 pipeline.native(arguments)
 
         self.assertEqual(len(captured), 1)
+        self.assertEqual(len(rustup_installations), 1)
+        self.assertEqual(rustup_installations[0][0], pipeline.rustup_install_command())
+        self.assertEqual(rustup_installations[0][1]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
+        self.assertEqual(helper_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
+        self.assertEqual(captured_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
         setup_command = captured[0]
         self.assertEqual(setup_command[:3], ['powershell.exe', '-NoProfile', '-NonInteractive'])
         setup_script = setup_command[setup_command.index('-Command') + 1]
@@ -824,6 +936,19 @@ class PipelineTests(unittest.TestCase):
                 with patch.object(pipeline, 'git_identity', return_value='a' * 40), \
                      patch.object(pipeline, 'emit'), self.assertRaises((ValueError, OSError)):
                     pipeline.aggregate(arguments)
+
+    def test_candidate_retains_architecture_bound_sandbox_artifacts_and_rejects_tamper(self):
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        for target in (row for row in self.targets if row['os'] == 'linux'):
+            source = arguments.artifacts / ('native-' + target['rust_target']) / 'evidence/native-sandbox-artifact.json'
+            retained = arguments.output / 'audits' / (target['rust_target'] + '-native-sandbox-artifact.json')
+            self.assertEqual(retained.read_bytes(), source.read_bytes())
+        pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        retained.write_bytes(retained.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'native sandbox marker differs from retained artifact bytes'):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
 
     def test_candidate_reparses_package_animation_after_coordinated_hash_change(self):
         arguments = self.create_native_fixture()
@@ -978,7 +1103,7 @@ class PipelineTests(unittest.TestCase):
                               audit=native / 'native-audit.json',
                               archive=native / target['archive'], packages=packages,
                               target=target_name, tag='v0.1.0',
-                              windows_journal=None, container_log=None, host_log=None)
+                              windows_journal=None, container_log=None, host_log=None, native_sandbox_receipt=None)
                 if target['os'] == 'windows':
                     journal = log / 'smoke.jsonl'
                     journal.write_text(''.join(json.dumps(row) + '\n' for row in marker['journal']))
@@ -1003,6 +1128,9 @@ class PipelineTests(unittest.TestCase):
                         ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
                     (host_log / 'appimage-host.log').write_text(
                         json.dumps(marker['appimage_fuse']) + '\n')
+                    sandbox_receipt = log / 'native-sandbox-tests.json'
+                    pipeline.write_json(sandbox_receipt, marker['native_sandbox'])
+                    inputs['native_sandbox_receipt'] = sandbox_receipt
                     inputs['container_log'], inputs['host_log'] = container_log, host_log
                 with patch.object(animation_smoke.platform, 'system', return_value=
                                   {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
