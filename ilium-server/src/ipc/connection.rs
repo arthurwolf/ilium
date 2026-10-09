@@ -200,7 +200,7 @@ where
     let (read_half, write_half) = tokio::io::split(stream);
     let (direct_tx, direct_rx) = DirectEventSender::channel(DIRECT_CHANNEL_CAPACITY);
     let (stream_control_tx, stream_control_rx) = mpsc::channel(STREAM_CONTROL_CHANNEL_CAPACITY);
-    let broadcast_rx = state.events.subscribe();
+    let broadcast_rx = state.events.subscribe_shared();
     // A connection subscribes to broadcasts before its Attach request is
     // handled so it cannot miss output produced during the handshake. The
     // writer must nevertheless hold those broadcasts until the complete
@@ -427,15 +427,16 @@ async fn read_requests<R>(
 /// gone), or the reader loop ends (see `read_requests`) -- at which point
 /// any broadcast already queued for this connection is drained and sent
 /// before returning.
-async fn write_replies<W>(
+async fn write_replies<W, E>(
     write_half: W,
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<ServerEvent>,
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<E>,
     mut direct_rx: DirectEventReceiver,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
     mut stream_control_rx: mpsc::Receiver<StreamControlCommand>,
     resynchronization_state: Option<Arc<ServerState>>,
 ) where
     W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>> + Clone,
 {
     // This belongs to one connection writer, not the session: it records the
     // newest terminal journal sequence successfully written to this client so
@@ -497,7 +498,7 @@ async fn write_replies<W>(
             // Draining `direct_rx` first guarantees that never happens.
             direct_event = direct_rx.recv_queued() => match direct_event {
                 Some(QueuedServerEvent { event, producer_storage }) => {
-                    (event, false, producer_storage)
+                    (Arc::new(event), false, producer_storage)
                 },
                 // The reader loop ended (Detach/KillSession/EOF/decode
                 // error): no more requests will ever be dispatched on this
@@ -615,7 +616,7 @@ async fn write_replies<W>(
                 continue;
             },
             broadcast_result = broadcast_rx.recv() => match broadcast_result {
-                Ok(event) => (event, true, None),
+                Ok(event) => (event.into(), true, None),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
                     if let Some(state) = &resynchronization_state {
@@ -713,12 +714,22 @@ async fn write_replies<W>(
     }
 }
 
-async fn normalize_broadcast_terminal_replay(
-    event: ServerEvent,
+async fn normalize_broadcast_terminal_replay<E>(
+    event: E,
     delivered_terminal_sequences: &HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
-) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
-    let ServerEvent::TerminalReplay { pane_id, .. } = event else {
+) -> Result<
+    Option<(
+        Arc<ServerEvent>,
+        Option<Arc<ilium_execution::StorageAdmission>>,
+    )>,
+    String,
+>
+where
+    E: Into<Arc<ServerEvent>>,
+{
+    let event = event.into();
+    let ServerEvent::TerminalReplay { pane_id, .. } = event.as_ref() else {
         return Ok(Some((event, None)));
     };
     let Some(state) = state else {
@@ -726,15 +737,15 @@ async fn normalize_broadcast_terminal_replay(
         // connections always receive one when they attach.
         return Ok(Some((event, None)));
     };
+    let pane_id = *pane_id;
     let after_sequence = delivered_terminal_sequences
         .get(&pane_id)
         .copied()
         .unwrap_or_default();
     match handlers::admitted_terminal_recovery_event(state, pane_id, after_sequence).await {
-        Ok(recovered) => Ok(recovered),
+        Ok(recovered) => Ok(recovered.map(|(event, storage)| (Arc::new(event), storage))),
         Err(error) => Err(format!("pane {pane_id:?}: {error}")),
     }
-    .map(|recovered| recovered.map(|(event, storage)| (event, storage)))
 }
 
 async fn write_queued_server_event<W>(
@@ -760,19 +771,20 @@ where
     .await
 }
 
-async fn write_server_event_with_storage<W>(
+async fn write_server_event_with_storage<W, E>(
     frame_writer: &mut FrameWriter<W>,
-    event: ServerEvent,
+    event: E,
     producer_storage: Option<Arc<ilium_execution::StorageAdmission>>,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
 ) -> Result<(), ilium_ipc::IpcError>
 where
     W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>>,
 {
     write_server_event_admitted(
         frame_writer,
-        event,
+        event.into(),
         producer_storage,
         delivered_terminal_sequences,
         state,
@@ -1076,7 +1088,7 @@ async fn decode_client_request<R: AsyncRead + Unpin>(
 /// original codec retention, then by the shared persistent storage guard.
 struct StoredServerEvent {
     frame: Option<ilium_ipc::EncodedFrame>,
-    event: ServerEvent,
+    event: Arc<ServerEvent>,
     storage_bytes: usize,
     #[cfg(test)]
     drop_notice: Option<encoded_storage_tests::OriginalDropNotice>,
@@ -1123,28 +1135,29 @@ impl std::error::Error for ServerEventAdmissionRefusal {}
 
 fn unadmitted_server_event(
     reason: ilium_execution::RejectReason,
-    original: ServerEvent,
+    original: Arc<ServerEvent>,
 ) -> ilium_ipc::IpcError {
     // io::Error retains this typed source. A producer can recover the exact
     // event by consuming/downcasting it; no original is replaced by a String.
     ilium_ipc::IpcError::Io(std::io::Error::other(ServerEventAdmissionRefusal {
         reason,
-        original,
+        original: Arc::try_unwrap(original).unwrap_or_else(|event| (*event).clone()),
     }))
 }
 
-async fn write_server_event<W>(
+async fn write_server_event<W, E>(
     frame_writer: &mut FrameWriter<W>,
-    mut event: ServerEvent,
+    event: E,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
 ) -> Result<(), ilium_ipc::IpcError>
 where
     W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>>,
 {
     write_server_event_admitted(
         frame_writer,
-        event,
+        event.into(),
         None,
         delivered_terminal_sequences,
         state,
@@ -1154,7 +1167,7 @@ where
 
 async fn write_server_event_admitted<W>(
     frame_writer: &mut FrameWriter<W>,
-    mut event: ServerEvent,
+    mut event: Arc<ServerEvent>,
     producer_storage: Option<Arc<ilium_execution::StorageAdmission>>,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
@@ -1164,13 +1177,13 @@ where
 {
     // Authority replacement is still raw-input preparation. Producers must arrange
     // producer custody for the displaced value and for snapshot cancellation.
-    if matches!(&event, ServerEvent::TextTriggersChanged { .. }) {
+    if matches!(event.as_ref(), ServerEvent::TextTriggersChanged { .. }) {
         let authority = state.ok_or_else(|| {
             ilium_ipc::IpcError::Io(std::io::Error::other(
                 "Text Trigger output requires server authority",
             ))
         })?;
-        event = crate::text_trigger_config::snapshot(authority).await;
+        event = Arc::new(crate::text_trigger_config::snapshot(authority).await);
     }
     let preparation = codec_client(state, false)?;
     // Acquire the empty envelope before scarce codec credit. The raw event
@@ -1205,7 +1218,7 @@ where
     stored.set_retention(reservation.retention());
     let encoded = preparation
         .run_reserved(reservation, move |_| {
-            let frame = ilium_ipc::encode_frame(&stored.event)?;
+            let frame = ilium_ipc::encode_frame(stored.event.as_ref())?;
             let storage_bytes = stored
                 .event
                 .retained_bytes()
@@ -1354,18 +1367,19 @@ fn screen_update_requires_recovery(
 /// non-contiguous frame is dropped rather than resynchronized -- the
 /// connection is ending, and applying misordered bytes is strictly worse than
 /// omitting a tail the client will never observe settle anyway.
-async fn drain_pending_broadcasts<W>(
-    broadcast_rx: &mut tokio::sync::broadcast::Receiver<ServerEvent>,
+async fn drain_pending_broadcasts<W, E>(
+    broadcast_rx: &mut tokio::sync::broadcast::Receiver<E>,
     frame_writer: &mut FrameWriter<W>,
     terminal_stream_selection: &TerminalStreamSelection,
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
 ) where
     W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>> + Clone,
 {
     loop {
         let event = match broadcast_rx.try_recv() {
-            Ok(event) => event,
+            Ok(event) => event.into(),
             Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
                 tracing::warn!(
                     "connection lagged while draining final broadcasts, skipped {skipped} event(s)"
@@ -1415,7 +1429,7 @@ mod tests {
     use ilium_ipc::read_frame;
     use tokio::io::duplex;
     use tokio::sync::{broadcast, mpsc, watch};
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     use super::*;
 
@@ -1675,12 +1689,14 @@ mod tests {
                 bytes: b"hidden-before-subscription".to_vec(),
             })
             .unwrap();
-        assert!(timeout(
-            Duration::from_millis(50),
-            read_frame::<ServerEvent, _>(&mut client_stream),
-        )
-        .await
-        .is_err());
+        assert!(
+            timeout(
+                Duration::from_millis(50),
+                read_frame::<ServerEvent, _>(&mut client_stream),
+            )
+            .await
+            .is_err()
+        );
 
         let tree_event = ServerEvent::TreeSnapshot(Tree::new());
         broadcast_tx.send(tree_event.clone()).unwrap();
@@ -1842,7 +1858,7 @@ mod tests {
             .await
             .expect("isolated writer tests have no recovery errors");
         assert!(
-            matches!(normalized, Some((event, None)) if event == replay),
+            matches!(normalized, Some((event, None)) if event.as_ref() == &replay),
             "isolated writer tests without authority retain their supplied event"
         );
         sound_task.abort();
@@ -2160,8 +2176,8 @@ mod tests {
 mod text_trigger_writer_tests {
     use super::*;
     use ilium_ipc::{TextTrigger, TextTriggerSettings};
-    use tokio::io::{duplex, AsyncReadExt};
-    use tokio::time::{timeout, Duration};
+    use tokio::io::{AsyncReadExt, duplex};
+    use tokio::time::{Duration, timeout};
     const WAIT: Duration = Duration::from_secs(5);
     struct Task<T>(tokio::task::JoinHandle<T>);
     impl<T> Drop for Task<T> {
@@ -2327,17 +2343,19 @@ mod text_trigger_writer_tests {
         let expected_count = handlers::resynchronization_events(&state, &sequences)
             .await
             .len();
-        assert!(timeout(
-            WAIT,
-            write_resynchronization(
-                &mut writer,
-                &state,
-                &mut sequences,
-                &TerminalStreamSelection::None
+        assert!(
+            timeout(
+                WAIT,
+                write_resynchronization(
+                    &mut writer,
+                    &state,
+                    &mut sequences,
+                    &TerminalStreamSelection::None
+                )
             )
-        )
-        .await
-        .unwrap());
+            .await
+            .unwrap()
+        );
         write_server_event(&mut writer, event("A"), &mut sequences, Some(&state))
             .await
             .unwrap();
@@ -2365,11 +2383,93 @@ mod text_trigger_writer_tests {
 }
 
 #[cfg(test)]
-mod text_trigger_ordering_regressions {
+mod ordered_journal_connection_regressions {
     use super::*;
-    use ilium_ipc::{read_frame, TextTrigger, TextTriggerSettings};
+    use ilium_core::NodeId;
+    use ilium_ipc::{read_frame, ServerEvent};
     use tokio::io::duplex;
     use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn ordered_journal_event_reaches_the_connection_writer() {
+        let directory = tempfile::tempdir().expect("private directory");
+        let (sound_requests, _sound_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "ordered-journal-writer".to_owned(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: false,
+        }));
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        assert!(state.events.initialize_journal(execution.quota_group()));
+
+        let (server_stream, mut client_stream) = duplex(4096);
+        let (_broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
+        let (phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
+        let (stream_control_tx, stream_control_rx) = mpsc::channel(1);
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            phase_rx,
+            stream_control_rx,
+            Some(Arc::clone(&state)),
+        ));
+
+        let (applied_tx, applied_rx) = oneshot::channel();
+        stream_control_tx
+            .send(StreamControlCommand {
+                control: StreamControl::StreamAllTerminals,
+                applied: applied_tx,
+            })
+            .await
+            .expect("writer remains open");
+        timeout(Duration::from_secs(2), applied_rx)
+            .await
+            .expect("writer starts polling")
+            .expect("writer acknowledges stream control");
+        phase_tx.send_replace(AttachPhase::Ready);
+
+        let event = ServerEvent::NodeActivityChanged {
+            node_id: NodeId(17),
+            activity_revision: 42,
+        };
+        state
+            .events
+            .try_publish_ordered(event.clone(), 64)
+            .expect("event is admitted into the ordered journal");
+        let received = timeout(
+            Duration::from_secs(2),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .expect("ordered event is delivered")
+        .expect("event frame decodes");
+        assert_eq!(received, event);
+
+        drop(direct_tx);
+        writer.await.expect("writer task joins");
+    }
+}
+
+#[cfg(test)]
+mod text_trigger_ordering_regressions {
+    use super::*;
+    use ilium_ipc::{TextTrigger, TextTriggerSettings, read_frame};
+    use tokio::io::duplex;
+    use tokio::time::{Duration, timeout};
 
     async fn assert_newer_rules_survive_queued_old_event(lag: bool, drain: bool) {
         let directory = tempfile::tempdir().expect("private directory");

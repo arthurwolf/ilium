@@ -58,6 +58,7 @@ mod voice_relay;
 mod workspace;
 mod workspace_custody;
 mod workspace_owner;
+mod workspace_prune;
 mod workspace_setup;
 mod worktree_include;
 
@@ -217,6 +218,13 @@ pub async fn run_with_resources(
     // indicate a composition-root bug, rather than silently multiplying pools.
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
+    }
+    let execution = state
+        .execution
+        .get()
+        .expect("the execution owner was set above");
+    if !state.events.initialize_journal(execution.quota_group()) {
+        return Err(std::io::Error::other("server event journal was already initialized").into());
     }
     let startup = startup_progress::Publisher::bind(&state, &options.socket_path).await;
     if let Some(phase) = &startup {
@@ -634,9 +642,17 @@ async fn restore_snapshot_data(
         let had_workspace = saved_location.is_some();
         let (kind, cwd, deferred_workspace) = match (saved_location, pane_snapshot.kind) {
             (Some((Some(saved_cwd), workspace)), pane::PaneSnapshotKind::Terminal(origin)) => {
-                match workspace::restore_target(&saved_cwd, &workspace).await {
-                    workspace::RestoreTarget::Ready(cwd) => {
-                        (pane::PaneSnapshotKind::Terminal(origin), cwd, None)
+                let target = match state.execution.get() {
+                    Some(execution) => {
+                        workspace::restore_target(&execution.client, &saved_cwd, &workspace).await
+                    }
+                    None => {
+                        workspace::RestoreTarget::Missing("execution service is unavailable".into())
+                    }
+                };
+                match target {
+                    workspace::RestoreTarget::Ready => {
+                        (pane::PaneSnapshotKind::Terminal(origin), saved_cwd, None)
                     }
                     workspace::RestoreTarget::Missing(reason) => {
                         tracing::warn!(pane_id = node_id.0, %reason, "saved worktree is unavailable; restoring a safe project-root shell");
@@ -879,8 +895,8 @@ mod restore_tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use ilium_core::{PaneContentKind, Tree, ROOT_ID};
-    use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
+    use ilium_core::{PaneContentKind, ROOT_ID, Tree};
+    use ilium_ipc::{ClientRequest, ServerEvent, read_frame, write_frame};
     use ilium_transport::SessionStream;
 
     use super::*;

@@ -79,7 +79,7 @@ async fn collect_forwarded_until_closed(
             bytes: Arc::from(b"FINAL-OWNER-BYTES".as_slice()),
         }
     };
-    let mut events = state.events.subscribe();
+    let mut events = state.events.subscribe_owned();
     let expected_bytes = chunk.bytes.to_vec();
     output_sender.send(chunk).unwrap();
     drop(output_sender);
@@ -147,7 +147,7 @@ async fn changed_owner_status_wakes_a_forwarder_with_no_output_or_keyboard_input
     let input = input_for(&state, pane_id).await;
     let (sender, receiver) = tokio::sync::watch::channel(OwnerStatus::Running);
     let (output_sender, output_receiver) = tokio::sync::broadcast::channel(4);
-    let mut events = state.events.subscribe();
+    let mut events = state.events.subscribe_owned();
     let task = tokio::spawn(forward_output_with_owner_status(
         Arc::clone(&state),
         pane_id,

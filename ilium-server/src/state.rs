@@ -9,6 +9,10 @@
 //! every call site that needs both takes `tree` first, does its
 //! `panes`-locked work, and drops both before returning.
 
+#[allow(dead_code)] // The next connection-writer slice consumes the cursor API.
+#[path = "event_journal.rs"]
+mod event_journal;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,6 +38,96 @@ use crate::sounds::PlaybackSender;
 /// `ilium_pty::PtySession`'s own broadcast channel for the identical
 /// tradeoff at the pty layer.
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
+
+/// The broadcast ring stores one immutable event allocation and gives each
+/// production writer a shared handle. Owned receivers are only used by unit
+/// tests that inspect events as values.
+pub struct ServerEvents {
+    sender: broadcast::Sender<Arc<ServerEvent>>,
+    journal: std::sync::OnceLock<event_journal::EventJournal>,
+}
+
+impl ServerEvents {
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        Self {
+            sender,
+            journal: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn initialize_journal(&self, quota: ilium_execution::QuotaGroup) -> bool {
+        self.journal
+            .set(event_journal::EventJournal::new(
+                quota,
+                event_journal::DEFAULT_MAXIMUM_ENTRIES,
+                event_journal::DEFAULT_MAXIMUM_BYTES,
+            ))
+            .is_ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_publish_ordered(
+        &self,
+        event: ServerEvent,
+        payload_bytes: usize,
+    ) -> Result<u64, event_journal::PublishFailure> {
+        match self.journal.get() {
+            Some(journal) => journal.try_publish(event, payload_bytes),
+            None => Err(event_journal::PublishFailure {
+                event,
+                refusal: event_journal::JournalRefusal::NotInitialized,
+            }),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn subscribe_ordered(
+        &self,
+    ) -> Result<event_journal::EventSubscription, event_journal::JournalRefusal> {
+        self.journal
+            .get()
+            .ok_or(event_journal::JournalRefusal::NotInitialized)?
+            .subscribe()
+    }
+
+    fn close_ordered(&self) {
+        if let Some(journal) = self.journal.get() {
+            journal.close();
+        }
+    }
+
+    pub(crate) fn publish(&self, event: ServerEvent) {
+        let _ = self.sender.send(Arc::new(event));
+    }
+
+    pub(crate) fn subscribe_shared(&self) -> broadcast::Receiver<Arc<ServerEvent>> {
+        self.sender.subscribe()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn subscribe_owned(&self) -> OwnedServerEventReceiver {
+        OwnedServerEventReceiver {
+            receiver: self.sender.subscribe(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct OwnedServerEventReceiver {
+    receiver: broadcast::Receiver<Arc<ServerEvent>>,
+}
+
+#[cfg(test)]
+impl OwnedServerEventReceiver {
+    pub(crate) async fn recv(&mut self) -> Result<ServerEvent, broadcast::error::RecvError> {
+        self.receiver.recv().await.map(|event| (*event).clone())
+    }
+
+    pub(crate) fn try_recv(&mut self) -> Result<ServerEvent, broadcast::error::TryRecvError> {
+        self.receiver.try_recv().map(|event| (*event).clone())
+    }
+}
 
 pub type PaneRegistry = HashMap<NodeId, PaneResource>;
 
@@ -251,10 +345,10 @@ pub struct ServerState {
     /// Wakes the deadline-driven detection loop when a new pane or a user
     /// interaction pulls a pane's next check earlier than its current sleep.
     pub detection_schedule_changed: Notify,
-    /// Broadcast to every currently-attached client. Connection tasks each
-    /// hold their own `subscribe()`d receiver; this crate never reads from
-    /// this sender's own channel, only sends into it.
-    pub events: broadcast::Sender<ServerEvent>,
+    /// Broadcast to attached clients through shared immutable event handles.
+    /// Production connections use `subscribe_shared`; tests can request an
+    /// owned value receiver when they need to inspect event contents.
+    pub events: ServerEvents,
     /// Aggregate of connection-local right-panel subscriptions. PTY
     /// forwarders consult this before building and broadcasting a raw-output
     /// frame; the PTY journal remains authoritative when no client displays a
@@ -370,7 +464,7 @@ impl ServerState {
     }
 
     pub fn new(options: ServerStateOptions) -> Self {
-        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        let events = ServerEvents::new();
         let (workspace_git_full_requests, workspace_git_full_receiver) = mpsc::channel(256);
         let mut tree = Tree::new();
         // A brand-new session always starts with the launch directory as its
@@ -590,6 +684,7 @@ impl ServerState {
     /// more than one `Vec` method call), so recovering the guard and
     /// proceeding to abort every handle is safe.
     pub fn abort_all_connection_tasks(&self) {
+        self.events.close_ordered();
         let tasks = self
             .connection_tasks
             .lock()
@@ -603,7 +698,7 @@ impl ServerState {
     /// currently zero attached clients, which is a normal state (no
     /// terminal attached right now), not a failure worth logging.
     pub fn broadcast(&self, event: ServerEvent) {
-        let _ = self.events.send(event);
+        self.events.publish(event);
     }
 
     /// Atomically replaces one connection's contribution to the aggregate
@@ -810,6 +905,93 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         })
+    }
+
+    #[tokio::test]
+    async fn broadcast_shares_large_event_payload_between_subscribers() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let state = test_state(&directory);
+        let mut first = state.events.subscribe_shared();
+        let mut second = state.events.subscribe_shared();
+        let bytes = vec![0x5a; 256 * 1024];
+        let expected_pointer = bytes.as_ptr();
+
+        state.broadcast(ServerEvent::ScreenUpdate {
+            pane_id: NodeId(11),
+            first_sequence: 1,
+            sequence: 1,
+            bytes,
+        });
+
+        let first_event = first.recv().await.expect("first subscriber receives event");
+        let second_event = second
+            .recv()
+            .await
+            .expect("second subscriber receives event");
+        let (first_bytes, second_bytes) = match (first_event.as_ref(), second_event.as_ref()) {
+            (
+                ServerEvent::ScreenUpdate {
+                    bytes: first_bytes, ..
+                },
+                ServerEvent::ScreenUpdate {
+                    bytes: second_bytes,
+                    ..
+                },
+            ) => (first_bytes, second_bytes),
+            _ => panic!("both subscribers receive the screen update"),
+        };
+
+        assert_eq!(first_bytes.as_ptr(), expected_pointer);
+        assert_eq!(second_bytes.as_ptr(), expected_pointer);
+        assert_eq!(first_bytes.as_ptr(), second_bytes.as_ptr());
+    }
+
+    #[tokio::test]
+    async fn slow_subscriber_preserves_prompt_after_replaceable_state_burst() {
+        let events = ServerEvents::new();
+        let mut subscriber = events.subscribe_shared();
+        let pane_id = NodeId(19);
+
+        for activity_revision in 1..=(EVENT_CHANNEL_CAPACITY as u64 + 1) {
+            events.publish(ServerEvent::NodeActivityChanged {
+                node_id: pane_id,
+                activity_revision,
+            });
+        }
+        events.publish(ServerEvent::PanePromptSubmitted {
+            pane_id,
+            source: ilium_ipc::PromptSubmissionSource::Keyboard,
+        });
+
+        let mut latest_activity_revision = None;
+        let mut prompt_seen = false;
+        for _ in 0..=EVENT_CHANNEL_CAPACITY {
+            let event = subscriber
+                .recv()
+                .await
+                .expect("slow subscriber must not lose an accepted semantic event");
+            match event.as_ref() {
+                ServerEvent::NodeActivityChanged {
+                    activity_revision, ..
+                } => latest_activity_revision = Some(*activity_revision),
+                ServerEvent::PanePromptSubmitted {
+                    pane_id: actual, ..
+                } if *actual == pane_id => {
+                    prompt_seen = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            latest_activity_revision,
+            Some(EVENT_CHANNEL_CAPACITY as u64 + 1)
+        );
+        assert!(
+            prompt_seen,
+            "prompt trigger event must remain ordered after state"
+        );
     }
 
     /// Reproduces the `KillSession` grace-period race

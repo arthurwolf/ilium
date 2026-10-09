@@ -347,7 +347,7 @@ mod durability_tests {
         let (state, _sound) = state_at(directory.path());
         state.text_trigger_settings.write().await.revision = u64::MAX;
         let before = snapshot(&state).await;
-        let mut events = state.events.subscribe();
+        let mut events = state.events.subscribe_owned();
         assert!(
             refresh_with(&state, |_| async { Ok(Some(rules("new")).into()) })
                 .await
