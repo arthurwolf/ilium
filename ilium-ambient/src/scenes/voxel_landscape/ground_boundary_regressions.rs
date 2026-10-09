@@ -65,11 +65,10 @@ fn sources_from_members(
     let pack =
         LayeredPack::fixture_ground_members(members, budget.clone(), Cancel::new(&stop)).unwrap();
     BindingSources {
-        packs: vec![pack],
+        pack_owner: BindingPackOwner::Selected(vec![pack]),
         limits: Limits::default(),
         budget: budget.clone(),
         source_sha256: None,
-        profile_id: "synthetic_ground_boundary",
         goodvibes: false,
         plasticator: false,
         exact_plasticator_campfire_source: false,
@@ -322,10 +321,14 @@ fn generated_ground_shared_collection_imports_buried_only_selected_texture() {
     );
     let requests: Vec<_> = collected.into_values().collect();
     let imports = Arc::new(
-        TextureImporter::new(&sources.packs, Limits::default(), budget.clone())
-            .unwrap()
-            .import(&requests, cancel)
-            .unwrap(),
+        TextureImporter::new(
+            sources.pack_owner.packs(),
+            Limits::default(),
+            budget.clone(),
+        )
+        .unwrap()
+        .import(&requests, cancel)
+        .unwrap(),
     );
     let surface = prepare_world_from_sources(
         make_world(),
@@ -663,7 +666,7 @@ fn generated_ground_weighted_state_geometry_and_selected_provenance_match_direct
         );
     }
     let surface = prepare_fixture(world, &sources, None, cancel).unwrap();
-    let definitions = DefinitionSources::new(&sources.packs[..1], &[], None).unwrap();
+    let definitions = DefinitionSources::new(&sources.pack_owner.packs()[..1], &[], None).unwrap();
     let mut compiler = ModelCompiler::new(&definitions, Limits::default(), budget.clone()).unwrap();
     let mut choices = BTreeSet::new();
     for position in positions {
@@ -795,7 +798,7 @@ fn generated_ground_weighted_state_geometry_and_selected_provenance_match_direct
     );
     assert_eq!(
         imported.source.as_ref().unwrap().pack,
-        sources.packs[0].review().pack
+        sources.pack_owner.packs()[0].review().pack
     );
     assert!(surface.model_substitutions.is_empty() && surface.skipped_states.is_empty());
 }
@@ -839,7 +842,7 @@ fn generated_ground_cancellation_and_revision_drop_incomplete_candidates() {
         box_model([0; 3], [16; 3], true),
         &[20, 190, 40, 0, 20, 190, 40, 255],
     );
-    sources.packs[0].fixture_cancel_on_read(Arc::clone(&stop), 6);
+    sources.pack_owner.packs()[0].fixture_cancel_on_read(Arc::clone(&stop), 6);
     let baseline = budget.used();
     let mut world = filled_world([-2, -2, 0], [5, 5, 5]);
     for z in 1..=4 {
@@ -901,7 +904,7 @@ fn generated_ground_opaque_shell_does_not_bind_every_buried_cell() {
         &[70, 180, 30, 255, 70, 180, 30, 255],
     );
     let world = filled_world([-4, -4, 0], [9, 9, 9]);
-    let definitions = DefinitionSources::new(&sources.packs[..1], &[], None).unwrap();
+    let definitions = DefinitionSources::new(&sources.pack_owner.packs()[..1], &[], None).unwrap();
     let mut compiler = ModelCompiler::new(&definitions, Limits::default(), budget.clone()).unwrap();
     let mut normalized = Vec::new();
     let mut cache = BTreeMap::new();
@@ -916,17 +919,21 @@ fn generated_ground_opaque_shell_does_not_bind_every_buried_cell() {
     }
     let request = request(
         resource("test:block/ground"),
-        &sources.packs[0].review().pack,
+        &sources.pack_owner.packs()[0].review().pack,
         &BTreeMap::new(),
         false,
         None,
         false,
     )
     .unwrap();
-    let imports = TextureImporter::new(&sources.packs, Limits::default(), budget.clone())
-        .unwrap()
-        .import(&[request], cancel)
-        .unwrap();
+    let imports = TextureImporter::new(
+        sources.pack_owner.packs(),
+        Limits::default(),
+        budget.clone(),
+    )
+    .unwrap()
+    .import(&[request], cancel)
+    .unwrap();
     let rules = BTreeMap::from([(
         resource("test:block/ground"),
         TextureRenderRule {

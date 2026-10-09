@@ -269,18 +269,20 @@ pub struct LiveMapScene {
     fleet_meta: FleetMeta, // Counts and source times of the latest RECEIVED data.
     network_enabled: bool, // Offline tests never start network subscriptions on settings edits.
     feed_retry_at: std::time::Duration, // Retry exhausted subscription admission without a frame-rate loop.
+    resources: Option<crate::resources::AmbientResources>, // Reuse host admission on subscription retries.
 }
 
 impl LiveMapScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.
-    pub fn new(kind: MapKind, settings: &MapSettings, _env: &SceneEnv) -> Self {
+    pub fn new(kind: MapKind, settings: &MapSettings, env: &SceneEnv) -> Self {
         let mut scene = Self::offline(kind, settings.normalized());
+        scene.resources = Some(env.resources.clone());
         scene.network_enabled = true; // Only the live constructor enables network subscriptions.
         scene.start_worker();
         scene
@@ -304,6 +306,7 @@ impl LiveMapScene {
             fleet: FleetLayer::default(), // No thread until positioned data needs preparation.
             fleet_meta: FleetMeta::default(), // No invented source metadata.
             network_enabled: false,       // Real constructor opts in after initialization.
+            resources: None,
             feed_retry_at: std::time::Duration::from_secs(1), // Initial failed admission can retry after one scene second.
         }
     }
@@ -313,10 +316,19 @@ impl LiveMapScene {
         let seconds = self.settings.effective_poll_seconds(self.kind);
         let result = match self.kind {
             MapKind::Earthquakes => fetch::earthquakes(seconds).map(MapWorker::Quakes),
-            MapKind::Aircraft => {
-                FleetFeed::start(FleetSource::Aircraft, seconds).map(MapWorker::Positions)
-            } // Share airborne source data and custody.
-            MapKind::Boats => FleetFeed::start(self.settings.boat_source.fleet_source(), seconds)
+            MapKind::Aircraft => self
+                .resources
+                .clone()
+                .ok_or_else(|| "Live fleet admission is unavailable".to_owned())
+                .and_then(|resources| FleetFeed::start(resources, FleetSource::Aircraft, seconds))
+                .map(MapWorker::Positions), // Share airborne source data and custody.
+            MapKind::Boats => self
+                .resources
+                .clone()
+                .ok_or_else(|| "Live fleet admission is unavailable".to_owned())
+                .and_then(|resources| {
+                    FleetFeed::start(resources, self.settings.boat_source.fleet_source(), seconds)
+                })
                 .map(MapWorker::Positions), // Default really selects the broader adapter.
         };
         match result {
@@ -368,16 +380,20 @@ impl LiveMapScene {
     } // End block.
     fn accept_fleet(&mut self, snapshot: Arc<FleetView>) {
         // This path is fed only by the selected source subscription.
+        self.state = snapshot.state.clone();
         if let Some(data) = &snapshot.data {
             self.fleet_meta = data.meta;
-        } // Preserve complete omission and timestamp metadata.
-        self.accept_positions(Arc::new(Snapshot {
-            data: snapshot
-                .data
-                .as_ref()
-                .map(|data| Arc::clone(&data.positions)),
-            state: snapshot.state.clone(),
-        })); // Small wrapper, shared raw Arc, original receipt.
+            let positions = &data.positions;
+            let same = matches!(
+                &self.data,
+                MapData::Positions(before) if Arc::ptr_eq(before, positions)
+            );
+            if !same {
+                self.data = MapData::Positions(Arc::clone(positions));
+                self.fleet
+                    .set_data(Arc::clone(data), snapshot.state.received_ms);
+            }
+        } // Batch owner carries the retained-storage charge into marker preparation.
     }
     fn accept_quakes(&mut self, snapshot: Arc<Snapshot<Vec<Earthquake>>>) {
         // A newly started poller has not received anything yet. Preserve the
@@ -394,26 +410,6 @@ impl LiveMapScene {
             let same = matches!(&self.data,MapData::Quakes(before) if Arc::ptr_eq(before,data));
             if !same {
                 self.data = MapData::Quakes(Arc::clone(data));
-            }
-        }
-    }
-    fn accept_positions(&mut self, snapshot: Arc<Snapshot<Vec<Position>>>) {
-        // A newly started poller has not received anything yet. Preserve the
-        // old source timestamps while its first replacement request runs.
-        if snapshot.data.is_none() && snapshot.state.received_ms.is_none() {
-            if let Some(error) = &snapshot.state.error {
-                self.state.failed(error.clone());
-            }
-            return;
-        }
-
-        self.state = snapshot.state.clone();
-        if let Some(data) = &snapshot.data {
-            let same = matches!(&self.data,MapData::Positions(before) if Arc::ptr_eq(before,data));
-            if !same {
-                self.data = MapData::Positions(Arc::clone(data)); // Custodian retains the final-release right for production data.
-                self.fleet
-                    .set_data(Arc::clone(data), snapshot.state.received_ms); // New raw Arc invalidates the desired preparation only.
             }
         }
     }

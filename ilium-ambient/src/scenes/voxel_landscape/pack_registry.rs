@@ -9,6 +9,7 @@ use super::{
     pack_profiles,
     settings::{PackSourceSettings, VoxelLandscapeSettings},
 };
+use crate::control::SceneSettings;
 use ilium_platform::secure_fs::NoFollowDirectory;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, ffi::OsStr, io::Read, path::Path};
@@ -26,7 +27,28 @@ pub struct InstalledPack {
 #[serde(deny_unknown_fields)]
 pub struct PackRegistry {
     pub schema: u32,
+    #[serde(deserialize_with = "deserialize_profiles")]
     pub profiles: Vec<InstalledPack>,
+}
+
+// Old registry files can contain eleven entries. Discard only retired records
+// on read; never resolve their paths, expose them as profiles, or rewrite the file.
+fn deserialize_profiles<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<InstalledPack>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut profiles = Vec::<InstalledPack>::deserialize(deserializer)?;
+    if profiles.len() > pack_profiles::FULL_PACKS.len() + pack_profiles::RETIRED_PACK_IDS.len() {
+        return Err(serde::de::Error::custom("too many installed pack records"));
+    }
+    let mut seen = BTreeSet::new();
+    if profiles.iter().any(|entry| !seen.insert(&entry.id)) {
+        return Err(serde::de::Error::custom("repeated installed pack"));
+    }
+    profiles.retain(|entry| !pack_profiles::RETIRED_PACK_IDS.contains(&entry.id.as_str()));
+    Ok(profiles)
 }
 
 impl PackRegistry {
@@ -94,6 +116,7 @@ pub fn resolve_registered(
     cancel: Cancel<'_>,
 ) -> Result<VoxelLandscapeSettings> {
     cancel.check()?;
+    let settings = settings.normalized();
     let profile = pack_profiles::profile(settings.pack_profile)?;
     if !settings.pack_path.is_empty() {
         validate_source(&settings.source_settings(), profile.id)?;
@@ -177,5 +200,134 @@ mod tests {
         }
         .selected("goodvibes")
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn entry(id: &str) -> InstalledPack {
+        let mut source = VoxelLandscapeSettings::default().source_settings();
+        source.path = format!("/packs/{id}.zip");
+        InstalledPack {
+            id: id.into(),
+            source,
+        }
+    }
+
+    #[test]
+    fn legacy_registry_projects_only_eight_retained_sources_without_editing_input() {
+        let mut profiles: Vec<_> = pack_profiles::RETIRED_PACK_IDS
+            .into_iter()
+            .map(entry)
+            .collect();
+        profiles.extend(
+            pack_profiles::FULL_PACKS
+                .iter()
+                .map(|profile| entry(profile.id)),
+        );
+        let bytes = serde_json::to_vec(&PackRegistry {
+            schema: 1,
+            profiles,
+        })
+        .unwrap();
+        let registry: PackRegistry = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(registry.profiles.len(), 8);
+        for profile in pack_profiles::FULL_PACKS {
+            assert_eq!(
+                registry.selected(profile.id).unwrap().path,
+                format!("/packs/{}.zip", profile.id)
+            );
+        }
+        for retired in pack_profiles::RETIRED_PACK_IDS {
+            assert!(registry.selected(retired).is_err());
+            assert!(!registry
+                .profiles
+                .iter()
+                .any(|profile| profile.id == retired));
+        }
+        let original: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(original["profiles"].as_array().unwrap().len(), 11);
+        let projected = serde_json::to_value(&registry).unwrap();
+        assert_eq!(projected["profiles"].as_array().unwrap().len(), 8);
+    }
+
+    #[test]
+    fn retired_registry_sources_are_inert_but_unknowns_and_duplicates_still_fail() {
+        let mut retired = entry("jicklus");
+        retired.source.path = "relative-never-opened".into();
+        let registry: PackRegistry = serde_json::from_value(
+            serde_json::to_value(PackRegistry {
+                schema: 1,
+                profiles: vec![retired, entry("goodvibes")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(registry.selected("goodvibes").is_ok());
+        for profiles in [
+            vec![entry("goodvibes"), entry("goodvibes")],
+            vec![entry("jicklus"), entry("jicklus")],
+        ] {
+            assert!(serde_json::from_value::<PackRegistry>(
+                serde_json::to_value(PackRegistry {
+                    schema: 1,
+                    profiles
+                })
+                .unwrap()
+            )
+            .is_err());
+        }
+        let registry: PackRegistry = serde_json::from_value(
+            serde_json::to_value(PackRegistry {
+                schema: 1,
+                profiles: vec![entry("goodvibes"), entry("unknown")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(registry.selected("goodvibes").is_err());
+    }
+
+    #[test]
+    fn raw_legacy_selection_migrates_before_custom_source_or_installed_lookup() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("voxel-packs");
+        std::fs::create_dir(&directory).unwrap();
+        let registry = serde_json::to_vec(&PackRegistry {
+            schema: 1,
+            profiles: vec![entry("jicklus"), entry("goodvibes")],
+        })
+        .unwrap();
+        let path = directory.join("sources.json");
+        std::fs::write(&path, &registry).unwrap();
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let legacy = VoxelLandscapeSettings {
+            pack_profile_version: 0,
+            pack_profile: 0,
+            pack_path: "/packs/private.zip".into(),
+            ..Default::default()
+        };
+        let resolved = resolve_registered(&legacy, root.path(), cancel).unwrap();
+        assert_eq!(resolved.pack_profile, 0);
+        assert_eq!(resolved.pack_profile_version, 1);
+        assert_eq!(resolved.pack_path, "/packs/goodvibes.zip");
+        assert_eq!(
+            resolved.pack_custom_sources["jicklus"].path,
+            "/packs/private.zip"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), registry);
+        let legacy = VoxelLandscapeSettings {
+            pack_profile_version: 0,
+            pack_profile: 8,
+            pack_path: "/packs/custom-faithful32.zip".into(),
+            ..Default::default()
+        };
+        let resolved = resolve_registered(&legacy, root.path(), cancel).unwrap();
+        assert_eq!(resolved.pack_profile, 5);
+        assert_eq!(resolved.pack_path, "/packs/custom-faithful32.zip");
     }
 }

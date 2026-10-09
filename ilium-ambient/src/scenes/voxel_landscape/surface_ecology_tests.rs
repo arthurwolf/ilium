@@ -462,11 +462,9 @@ fn night_flora_closed_candidate_keeps_provider_and_soil_admission() {
         candidate.cells[0].state.properties,
         [("schedule_tick", "true")]
     );
-    assert!(
-        !ENTRIES
-            .iter()
-            .any(|entry| entry.id == "minecraft:open_eyeblossom")
-    );
+    assert!(!ENTRIES
+        .iter()
+        .any(|entry| entry.id == "minecraft:open_eyeblossom"));
     for support in [HabitatCell::Sand, HabitatCell::Soil] {
         let mut placement = FloraPlacement::new(4).unwrap();
         let result = placement.admit(
@@ -571,16 +569,13 @@ fn night_flora_only_explicit_night_changes_the_natural_counterpart() {
         unrelated_flora += usize::from(matches!(expected.owner, SourceOwner::Flora { .. }));
     }
     assert!(flowers > 0 && unrelated_flora > 0);
-    assert!(
-        !night
-            .blocks
-            .values()
-            .any(|block| { block.state.id().as_str() == "minecraft:closed_eyeblossom" })
-    );
-    assert!(
-        !day.blocks
-            .values()
-            .chain(storm.blocks.values())
-            .any(|block| { block.state.id().as_str() == "minecraft:open_eyeblossom" })
-    );
+    assert!(!night
+        .blocks
+        .values()
+        .any(|block| { block.state.id().as_str() == "minecraft:closed_eyeblossom" }));
+    assert!(!day
+        .blocks
+        .values()
+        .chain(storm.blocks.values())
+        .any(|block| { block.state.id().as_str() == "minecraft:open_eyeblossom" }));
 }

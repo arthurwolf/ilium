@@ -99,6 +99,26 @@ pub fn load_candidates(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<CandidateSelection, Error> {
+    load_candidates_with_progress(
+        directory,
+        source,
+        candidates,
+        loading,
+        limits,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn load_candidates_with_progress(
+    directory: &std::path::Path,
+    source: evidence::Source,
+    candidates: &[windows::Candidate],
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<CandidateSelection, Error> {
     load_candidates_directory(
         WindowDirectory::Path(directory),
         source,
@@ -106,6 +126,7 @@ pub fn load_candidates(
         loading,
         limits,
         cancelled,
+        progress,
     )
 }
 
@@ -119,6 +140,26 @@ pub fn load_candidates_pinned(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<CandidateSelection, Error> {
+    load_candidates_pinned_with_progress(
+        directory,
+        source,
+        candidates,
+        loading,
+        limits,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn load_candidates_pinned_with_progress(
+    directory: &ilium_platform::animation_files::PinnedDirectory,
+    source: evidence::Source,
+    candidates: &[windows::Candidate],
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<CandidateSelection, Error> {
     load_candidates_directory(
         WindowDirectory::Pinned(directory),
         source,
@@ -126,6 +167,7 @@ pub fn load_candidates_pinned(
         loading,
         limits,
         cancelled,
+        progress,
     )
 }
 
@@ -136,6 +178,7 @@ fn load_candidates_directory(
     loading: loader::Limits,
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
 ) -> Result<CandidateSelection, Error> {
     if cancelled() {
         return Err(loader::Error::Cancelled.into());
@@ -165,7 +208,9 @@ fn load_candidates_directory(
         maximum_work_units,
         cancelled,
         |candidate| {
-            load_candidate_directory(directory, source, candidate, loading, limits, cancelled)
+            load_candidate_directory(
+                directory, source, candidate, loading, limits, cancelled, progress,
+            )
         },
     )
 }
@@ -456,6 +501,26 @@ pub fn load_candidate(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedWindow, Error> {
+    load_candidate_with_progress(
+        directory,
+        source,
+        candidate,
+        loading,
+        limits,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn load_candidate_with_progress(
+    directory: &std::path::Path,
+    source: evidence::Source,
+    candidate: &windows::Candidate,
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<PreparedWindow, Error> {
     load_candidate_directory(
         WindowDirectory::Path(directory),
         source,
@@ -463,6 +528,7 @@ pub fn load_candidate(
         loading,
         limits,
         cancelled,
+        progress,
     )
 }
 
@@ -476,6 +542,26 @@ pub fn load_candidate_pinned(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedWindow, Error> {
+    load_candidate_pinned_with_progress(
+        directory,
+        source,
+        candidate,
+        loading,
+        limits,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn load_candidate_pinned_with_progress(
+    directory: &ilium_platform::animation_files::PinnedDirectory,
+    source: evidence::Source,
+    candidate: &windows::Candidate,
+    loading: loader::Limits,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<PreparedWindow, Error> {
     load_candidate_directory(
         WindowDirectory::Pinned(directory),
         source,
@@ -483,6 +569,7 @@ pub fn load_candidate_pinned(
         loading,
         limits,
         cancelled,
+        progress,
     )
 }
 
@@ -493,6 +580,7 @@ fn load_candidate_directory(
     loading: loader::Limits,
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
 ) -> Result<PreparedWindow, Error> {
     if cancelled() {
         return Err(loader::Error::Cancelled.into());
@@ -545,11 +633,11 @@ fn load_candidate_directory(
     }
     let loaded = match directory {
         WindowDirectory::Path(directory) => {
-            loader::load_window(directory, requested, loading, cancelled)?
+            loader::load_window_with_progress(directory, requested, loading, cancelled, progress)?
         }
-        WindowDirectory::Pinned(directory) => {
-            loader::load_window_pinned(directory, requested, loading, cancelled)?
-        }
+        WindowDirectory::Pinned(directory) => loader::load_window_pinned_with_progress(
+            directory, requested, loading, cancelled, progress,
+        )?,
     };
     finish_window(loaded, source, candidate.bounds, 0, limits, cancelled)
 }

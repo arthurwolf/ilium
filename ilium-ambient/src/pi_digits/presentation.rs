@@ -237,10 +237,10 @@ pub struct PiScene {
     status: Option<String>,
 }
 impl PiScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
-    // current palette and MUST follow it: scenes with natural colours shift them
-    // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. Custom native Scene implementations receive the current palette
+    // and MUST follow it. Scenes with natural colours shift them onto it
+    // (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.

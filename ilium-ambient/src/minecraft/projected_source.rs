@@ -18,11 +18,14 @@ use std::{io, path::Path, sync::Arc};
 pub enum Error {
     #[error("projected saved source identity or chunk request changed")]
     Source,
-    #[error("projected source missing {missing} decoded chunks, first {first:?}")]
+    #[error(
+        "projected source missing {missing} decoded chunks; rejection samples: {rejection_summary}"
+    )]
     Unqualified {
         missing: usize,
         first: Option<[i32; 2]>,
         missing_positions: Vec<[i32; 2]>,
+        rejection_summary: String,
     },
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -89,6 +92,28 @@ pub fn qualify(
     cancel: Cancel<'_>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<QualifiedSource, Error> {
+    qualify_with_progress(
+        base,
+        bound,
+        saves_root,
+        request,
+        account,
+        cancel,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn qualify_with_progress(
+    base: &PreparedMap,
+    bound: &BoundMap,
+    saves_root: &Path,
+    request: &Request,
+    account: &ByteBudget,
+    cancel: Cancel<'_>,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<QualifiedSource, Error> {
     qualify_source(
         base,
         bound,
@@ -97,6 +122,7 @@ pub fn qualify(
         account,
         cancel,
         cancelled,
+        progress,
     )
 }
 
@@ -110,6 +136,28 @@ pub fn qualify_pinned(
     cancel: Cancel<'_>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<QualifiedSource, Error> {
+    qualify_pinned_with_progress(
+        base,
+        bound,
+        source,
+        request,
+        account,
+        cancel,
+        cancelled,
+        &mut |_| {},
+    )
+}
+
+pub fn qualify_pinned_with_progress(
+    base: &PreparedMap,
+    bound: &BoundMap,
+    source: PinnedSource<'_>,
+    request: &Request,
+    account: &ByteBudget,
+    cancel: Cancel<'_>,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
+) -> Result<QualifiedSource, Error> {
     qualify_source(
         base,
         bound,
@@ -118,6 +166,7 @@ pub fn qualify_pinned(
         account,
         cancel,
         cancelled,
+        progress,
     )
 }
 
@@ -129,6 +178,7 @@ fn qualify_source(
     account: &ByteBudget,
     cancel: Cancel<'_>,
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(loader::LoadProgress),
 ) -> Result<QualifiedSource, Error> {
     cancel.check()?;
     if base.source().map != bound.map
@@ -143,13 +193,17 @@ fn qualify_source(
         account.reserve(loader::MAX_PROJECTED_STORAGE_CHARGE as u64, cancel)?;
     let region_directory = bound.directory.join("region");
     let loaded = match source {
-        SourceDirectory::Path(_) => {
-            loader::load_projected_window(&region_directory, request.support_chunks(), cancelled)?
-        }
-        SourceDirectory::Pinned(source) => loader::load_projected_window_pinned(
+        SourceDirectory::Path(_) => loader::load_projected_window_with_progress(
+            &region_directory,
+            request.support_chunks(),
+            cancelled,
+            progress,
+        )?,
+        SourceDirectory::Pinned(source) => loader::load_projected_window_pinned_with_progress(
             source.region,
             request.support_chunks(),
             cancelled,
+            progress,
         )?,
     };
     cancel.check()?;
@@ -164,6 +218,7 @@ fn qualify_source(
             missing: missing_positions.len(),
             first: missing_positions.first().copied(),
             missing_positions,
+            rejection_summary: summarize_rejections(&loaded.issues),
         });
     }
     // Decoding holds the full ceiling. Retained map Arcs need only the loader's
@@ -175,4 +230,58 @@ fn qualify_source(
     cancel.check()?;
     source.verify(bound)?;
     Ok(QualifiedSource { map })
+}
+
+fn summarize_rejections(issues: &[loader::Issue]) -> String {
+    let samples = issues
+        .iter()
+        .take(3)
+        .map(|issue| {
+            let reason = match &issue.reason {
+                loader::Rejection::Absent => "absent",
+                loader::Rejection::ProtoChunk => "proto chunk",
+                loader::Rejection::IncompleteSections => "incomplete sections",
+                loader::Rejection::CoordinateMismatch => "coordinate mismatch",
+                loader::Rejection::Read(_) => "read error",
+            };
+            format!("{:?}={reason}", issue.position)
+        })
+        .collect::<Vec<_>>();
+    if samples.is_empty() {
+        "no rejection samples retained".to_owned()
+    } else {
+        samples.join(", ")
+    }
+}
+
+#[cfg(test)]
+mod rejection_summary_tests {
+    use super::{loader, summarize_rejections};
+
+    #[test]
+    fn rejection_summary_is_bounded_and_does_not_expose_read_paths() {
+        let issues = [
+            ([-1, 2], loader::Rejection::Absent),
+            (
+                [3, 4],
+                loader::Rejection::Read("/private/world/r.0.0.mca".into()),
+            ),
+            ([5, 6], loader::Rejection::IncompleteSections),
+            ([7, 8], loader::Rejection::ProtoChunk),
+        ]
+        .map(|(position, reason)| loader::Issue { position, reason });
+
+        let summary = summarize_rejections(&issues);
+
+        assert_eq!(summary.matches('=').count(), 3);
+        assert!(summary.contains("[-1, 2]=absent"));
+        assert!(summary.contains("[3, 4]=read error"));
+        assert!(summary.contains("[5, 6]=incomplete sections"));
+        assert!(!summary.contains("/private/world"));
+    }
+
+    #[test]
+    fn empty_rejection_summary_is_explicit() {
+        assert_eq!(summarize_rejections(&[]), "no rejection samples retained");
+    }
 }

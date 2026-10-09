@@ -1,5 +1,6 @@
 //! Scene-owned orchestration of the reviewed marker worker; no duplicate rasterizer.
 use super::{
+    fleet_cache::FleetBatch,
     map_markers::{
         MarkerError, MarkerKey, MarkerRequest, MarkerWorker, PreparedMarkers, SubmitState,
     },
@@ -11,6 +12,7 @@ pub(super) struct FleetLayer {
     // One desired request and one accepted viewport-sized result.
     worker: Option<MarkerWorker>, // Reused across source, data and settings changes.
     positions: Option<Arc<Vec<Position>>>, // Clone the Arc, never the vector.
+    owner: Option<Arc<FleetBatch>>, // Carries storage admission with every retained position Arc.
     generation: u64,              // Monotonic request generation, including A -> B -> A.
     data_generation: u64, // Changes only when the positions Arc changes or the source clears.
     desired: Option<MarkerKey>, // Complete geometry dependencies.
@@ -43,6 +45,7 @@ impl FleetLayer {
             .checked_add(1)
             .expect("data generation exhausted"); // Include source transitions in monotonic identities.
         self.positions = None;
+        self.owner = None;
         self.prepared = None;
         self.received_ms = None;
         self.rendered_received_ms = None; // Cache custody owns final raw-vector reclamation.
@@ -52,7 +55,8 @@ impl FleetLayer {
         self.prepared = None;
         self.rendered_received_ms = None;
     } // Brightness changes hide incompatible output immediately.
-    pub fn set_data(&mut self, positions: Arc<Vec<Position>>, received_ms: Option<i64>) {
+    pub fn set_data(&mut self, owner: Arc<FleetBatch>, received_ms: Option<i64>) {
+        let positions = Arc::clone(&owner.positions);
         // Called only for admitted source data.
         if self
             .positions
@@ -67,6 +71,7 @@ impl FleetLayer {
             .checked_add(1)
             .expect("data generation exhausted"); // Data identity is not a provider timestamp.
         self.positions = Some(positions);
+        self.owner = Some(owner);
         self.received_ms = received_ms; // The previous compatible prepared layer stays visible until replacement.
     } // End block.
     pub fn update(&mut self, mut key: MarkerKey, wall: Duration) {
@@ -126,6 +131,7 @@ impl FleetLayer {
             let request = MarkerRequest {
                 key,
                 positions: Arc::clone(self.positions.as_ref().expect("checked positions")),
+                _owner: self.owner.clone(),
             }; // Constant-time raw input sharing.
             match worker.try_submit_latest(&request) {
                 // No request mutex wait on the UI.
@@ -224,6 +230,13 @@ mod tests {
             Position::new("fixture".into(), 0.0, 0.0, None).unwrap()
         ])
     } // Unknown fix time is valid.
+    fn batch() -> Arc<FleetBatch> {
+        Arc::new(FleetBatch {
+            positions: input(),
+            meta: Default::default(),
+            _storage: None,
+        }) // Synthetic fixtures do not retain provider allocations.
+    } // Geometry fixture remains small and immutable.
     fn key() -> MarkerKey {
         MarkerKey {
             request_generation: 1,
@@ -244,6 +257,7 @@ mod tests {
         let request = MarkerRequest {
             key: key(),
             positions: Arc::clone(&positions),
+            _owner: None,
         }; // First data generation.
         let prepared = Arc::new(prepare_positions(&request, &|| false).unwrap()); // Actual existing geometry implementation.
         let mut layer = FleetLayer {
@@ -256,7 +270,7 @@ mod tests {
             rendered_received_ms: Some(1000),
             ..Default::default()
         }; // Seed a previously accepted layer.
-        layer.set_data(input(), Some(2000)); // New Arc, same provider and viewport.
+        layer.set_data(batch(), Some(2000)); // New Arc, same provider and viewport.
         assert!(!layer.ready());
         assert_eq!(layer.prepared().unwrap().key.data_generation, 1); // Prior compatible frame survives.
         assert!(layer.status().contains("received generation 2"));
@@ -267,7 +281,7 @@ mod tests {
         assert!(layer.prepared().is_none());
         assert!(layer.positions.is_none());
         assert!(layer.generation > before); // No cross-source reuse.
-        layer.set_data(input(), Some(3000));
+        layer.set_data(batch(), Some(3000));
         assert!(layer.generation > before + 1); // B -> A cannot reuse A's old request generation.
     } // End block.
     #[test] // Geometry identity excludes color/poll settings and includes every raster dependency.
@@ -304,7 +318,7 @@ mod tests {
             assert!(!compatible(original, changed));
         } // Each incompatible dependency blocks reuse.
         let mut layer = FleetLayer::default();
-        layer.set_data(input(), Some(1000)); // Data exists, but darkness needs no worker.
+        layer.set_data(batch(), Some(1000)); // Data exists, but darkness needs no worker.
         layer.update(
             MarkerKey {
                 marker_brightness: 0,

@@ -12,9 +12,9 @@
 //! arrives.
 
 use crate::control::{Control, ControlValue};
+use crate::resources::{AmbientResources, Stored, WorkerCost};
 use crate::scene::SceneEnv;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
-use std::thread::JoinHandle;
 
 /// Why the GPU option cannot be used. Pure data; the text helpers give the UI
 /// its strings.
@@ -139,7 +139,7 @@ pub struct GpuFrame {
 #[derive(Default)]
 struct WorkerState {
     pending: Option<GpuJob>,
-    latest: Option<GpuFrame>,
+    latest: Option<Arc<Stored<GpuFrame>>>,
     error: Option<String>,
     sequence: u64,
     shutdown: bool,
@@ -150,6 +150,11 @@ struct WorkerShared {
     wake: Condvar,
 }
 
+const MAX_GPU_PIXELS: usize = 4_000_000;
+const MAX_GPU_UNIFORM_VALUES: usize = 64;
+const GPU_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+const GPU_WORKER_RESIDENT_BYTES: usize = GPU_WORKER_STACK_BYTES;
+
 impl WorkerShared {
     fn lock(&self) -> MutexGuard<'_, WorkerState> {
         self.state
@@ -158,44 +163,64 @@ impl WorkerShared {
     }
 }
 
-/// Owns one background thread that runs jobs on a [`GpuRunner`]. `submit`
+/// Owns one admitted background worker that runs jobs on a [`GpuRunner`]. `submit`
 /// never blocks and replaces any older pending job; `latest` returns the
-/// newest finished frame. Dropping it stops and joins the thread.
+/// newest finished frame. Physical joining remains with the platform supervisor.
 pub struct GpuFrameWorker {
     shared: Arc<WorkerShared>,
-    thread: Option<JoinHandle<()>>,
+    worker: Option<crate::source::Worker>,
 }
 
 impl GpuFrameWorker {
-    pub fn new(runner: Arc<dyn GpuRunner>) -> Self {
+    pub fn new(runner: Arc<dyn GpuRunner>, resources: &AmbientResources) -> Result<Self, String> {
+        let reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: GPU_WORKER_RESIDENT_BYTES,
+            })
+            .map_err(|error| format!("GPU worker admission refused: {error:?}"))?;
         let shared = Arc::new(WorkerShared {
             state: Mutex::new(WorkerState::default()),
             wake: Condvar::new(),
         });
         let worker_shared = Arc::clone(&shared);
-        let spawned = std::thread::Builder::new()
-            .name("ilium-gpu-frames".to_owned())
-            .spawn(move || worker_loop(&worker_shared, runner.as_ref()));
-        let thread = match spawned {
-            Ok(handle) => Some(handle),
-            Err(error) => {
-                shared.lock().error = Some(format!("could not start the GPU worker: {error}"));
-                None
-            }
-        };
-        Self { shared, thread }
+        let worker_resources = resources.clone();
+        let worker = crate::source::Worker::start_admitted_with_stack(
+            "gpu-frames",
+            reservation,
+            Some(GPU_WORKER_STACK_BYTES),
+            move |stop| worker_loop(&worker_shared, runner.as_ref(), &stop, worker_resources),
+        )
+        .map_err(|error| format!("could not start the GPU worker: {error}"))?;
+        Ok(Self {
+            shared,
+            worker: Some(worker),
+        })
     }
 
     /// Queue `job`, dropping any job that has not started yet. Never blocks
     /// on the device.
     pub fn submit(&self, job: GpuJob) {
-        self.shared.lock().pending = Some(job);
+        if job.uniforms.len() > MAX_GPU_UNIFORM_VALUES {
+            self.shared.lock().error = Some(format!(
+                "GPU job exceeds the {MAX_GPU_UNIFORM_VALUES}-value uniform limit"
+            ));
+            return;
+        }
+        let replaced = {
+            let mut state = self.shared.lock();
+            if state.shutdown {
+                return;
+            }
+            state.pending.replace(job)
+        };
+        drop(replaced);
         self.shared.wake.notify_one();
     }
 
     /// The newest finished frame, or `None` until the first one arrives.
-    pub fn latest(&self) -> Option<GpuFrame> {
-        self.shared.lock().latest.clone()
+    pub fn latest(&self) -> Option<Arc<Stored<GpuFrame>>> {
+        self.shared.lock().latest.as_ref().map(Arc::clone)
     }
 
     /// The most recent failure, cleared by the next successful frame.
@@ -212,21 +237,23 @@ impl Drop for GpuFrameWorker {
             state.pending = None;
         }
         self.shared.wake.notify_all();
-        if let Some(handle) = self.thread.take() {
-            // A panicking runner already ended the thread; nothing to add.
-            if handle.join().is_err() {
-                tracing::warn!("GPU frame worker thread panicked");
-            }
-        }
+        // Worker Drop requests cancellation; its admitted physical owner stays
+        // with the bounded platform join supervisor until a blocked device call exits.
+        drop(self.worker.take());
     }
 }
 
-fn worker_loop(shared: &WorkerShared, runner: &dyn GpuRunner) {
+fn worker_loop(
+    shared: &WorkerShared,
+    runner: &dyn GpuRunner,
+    stop: &std::sync::atomic::AtomicBool,
+    resources: AmbientResources,
+) {
     loop {
         let job = {
             let mut state = shared.lock();
             loop {
-                if state.shutdown {
+                if state.shutdown || stop.load(std::sync::atomic::Ordering::Acquire) {
                     return;
                 }
                 if let Some(job) = state.pending.take() {
@@ -238,37 +265,59 @@ fn worker_loop(shared: &WorkerShared, runner: &dyn GpuRunner) {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
         };
-        let outcome = run_job(runner, &job);
+        let outcome = run_job(runner, &job, &resources);
         let mut state = shared.lock();
-        if state.shutdown {
+        if state.shutdown || stop.load(std::sync::atomic::Ordering::Acquire) {
             return;
         }
         match outcome {
-            Ok(dots) => {
+            Ok((dots, storage)) => {
                 state.sequence += 1;
                 let sequence = state.sequence;
-                state.latest = Some(GpuFrame {
-                    width: job.width,
-                    height: job.height,
-                    dots,
-                    sequence,
-                });
+                let previous = state.latest.replace(Arc::new(Stored::new(
+                    GpuFrame {
+                        width: job.width,
+                        height: job.height,
+                        dots,
+                        sequence,
+                    },
+                    storage,
+                )));
                 state.error = None;
+                drop(state);
+                drop(previous);
             }
             Err(message) => state.error = Some(message),
         }
     }
 }
 
-fn run_job(runner: &dyn GpuRunner, job: &GpuJob) -> Result<Vec<f32>, String> {
-    let length = usize::try_from(u64::from(job.width) * u64::from(job.height))
-        .map_err(|_| "GPU frame is too large".to_owned())?;
+fn run_job(
+    runner: &dyn GpuRunner,
+    job: &GpuJob,
+    resources: &AmbientResources,
+) -> Result<(Vec<f32>, Arc<ilium_execution::StorageAdmission>), String> {
+    if job.uniforms.len() > MAX_GPU_UNIFORM_VALUES {
+        return Err(format!(
+            "GPU job exceeds the {MAX_GPU_UNIFORM_VALUES}-value uniform limit"
+        ));
+    }
+    let pixels = u64::from(job.width) * u64::from(job.height);
+    if pixels > MAX_GPU_PIXELS as u64 {
+        return Err(format!(
+            "GPU frame exceeds the {MAX_GPU_PIXELS}-pixel limit"
+        ));
+    }
+    let length = usize::try_from(pixels).map_err(|_| "GPU frame is too large".to_owned())?;
     if length == 0 {
         return Err("GPU frame has no pixels".to_owned());
     }
+    let storage = resources
+        .reserve_storage(length.saturating_mul(std::mem::size_of::<f32>()))
+        .map_err(|error| format!("GPU frame storage admission refused: {error:?}"))?;
     let mut dots = vec![0.0_f32; length];
     runner.run(job, &mut dots)?;
-    Ok(dots)
+    Ok((dots, storage))
 }
 
 /// Index of the GPU option in every scene's `render_backend` row.
@@ -306,7 +355,9 @@ pub(crate) fn reject_unavailable_choice(value: &ControlValue) -> Result<(), Stri
 pub(crate) struct GpuBackend {
     requested: bool,
     runner: Option<Arc<dyn GpuRunner>>,
+    resources: AmbientResources,
     worker: Option<GpuFrameWorker>,
+    worker_error: Option<String>,
 }
 
 impl GpuBackend {
@@ -314,7 +365,9 @@ impl GpuBackend {
         Self {
             requested,
             runner: env.gpu.clone(),
+            resources: env.resources.clone(),
             worker: None,
+            worker_error: None,
         }
     }
 
@@ -327,7 +380,13 @@ impl GpuBackend {
         }
         if self.worker.is_none() && matches!(gpu_availability(), GpuAvailability::Ready { .. }) {
             if let Some(runner) = &self.runner {
-                self.worker = Some(GpuFrameWorker::new(Arc::clone(runner)));
+                match GpuFrameWorker::new(Arc::clone(runner), &self.resources) {
+                    Ok(worker) => {
+                        self.worker = Some(worker);
+                        self.worker_error = None;
+                    }
+                    Err(error) => self.worker_error = Some(error),
+                }
             }
         }
         if let Some(worker) = &self.worker {
@@ -347,14 +406,16 @@ impl GpuBackend {
                     Some(error) => format!("GPU error: {error}; using software"),
                     None => NOT_PORTED_STATUS.to_owned(),
                 }),
-                None => Some("No GPU device was provided by the host; using software".to_owned()),
+                None => Some(self.worker_error.clone().unwrap_or_else(|| {
+                    "No GPU device was provided by the host; using software".to_owned()
+                })),
             },
         }
     }
 
     /// The newest finished GPU frame, `None` until the first arrives or when
     /// the GPU is not in use.
-    pub(crate) fn latest_frame(&self) -> Option<GpuFrame> {
+    pub(crate) fn latest_frame(&self) -> Option<Arc<Stored<GpuFrame>>> {
         self.worker.as_ref().and_then(GpuFrameWorker::latest)
     }
 
@@ -368,7 +429,9 @@ impl GpuBackend {
             return Some(reason.summary());
         }
         let (Some(worker), Some(runner)) = (&self.worker, &self.runner) else {
-            return Some("No GPU device was provided by the host; using software".to_owned());
+            return Some(self.worker_error.clone().unwrap_or_else(|| {
+                "No GPU device was provided by the host; using software".to_owned()
+            }));
         };
         if let Some(error) = worker.last_error() {
             return Some(format!("GPU error: {error}; using software"));
@@ -542,6 +605,11 @@ mod tests {
         None
     }
 
+    fn admitted_worker(runner: Arc<dyn GpuRunner>) -> GpuFrameWorker {
+        GpuFrameWorker::new(runner, &crate::resources::test_resources())
+            .expect("test GPU worker admission")
+    }
+
     #[test]
     fn texts_match_the_contract() {
         assert_eq!(
@@ -605,17 +673,57 @@ mod tests {
 
     #[test]
     fn worker_delivers_a_frame_with_increasing_sequence() {
-        let worker = GpuFrameWorker::new(Arc::new(FakeRunner::new()));
+        let worker = admitted_worker(Arc::new(FakeRunner::new()));
         assert!(worker.latest().is_none());
         worker.submit(job(3, 2, 0.25));
         let first = wait_for(|| worker.latest());
         let first = first.expect("first frame");
-        assert_eq!((first.width, first.height, first.sequence), (3, 2, 1));
-        assert_eq!(first.dots, vec![0.25; 6]);
+        assert_eq!(
+            (
+                first.view().width,
+                first.view().height,
+                first.view().sequence
+            ),
+            (3, 2, 1)
+        );
+        assert_eq!(first.view().dots, vec![0.25; 6]);
+        let retained = worker.latest().expect("retained latest frame");
+        assert!(Arc::ptr_eq(&first, &retained));
         worker.submit(job(3, 2, 0.75));
-        let second = wait_for(|| worker.latest().filter(|frame| frame.sequence == 2));
-        assert_eq!(second.expect("second frame").dots, vec![0.75; 6]);
+        let second = wait_for(|| worker.latest().filter(|frame| frame.view().sequence == 2));
+        assert_eq!(second.expect("second frame").view().dots, vec![0.75; 6]);
         assert_eq!(worker.last_error(), None);
+    }
+
+    #[test]
+    fn rejects_gpu_frames_over_the_bounded_pixel_budget_before_calling_the_device() {
+        // Four million f32 pixels cap output storage at 16 MiB; one column
+        // beyond the square boundary must be refused before allocating or invoking GPU code.
+        let runner = FakeRunner::new();
+        let result = run_job(
+            &runner,
+            &job(2049, 2048, 0.25),
+            &crate::resources::test_resources(),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|error| error.contains("pixel limit")),
+            "an oversized frame must be refused explicitly"
+        );
+        assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn rejects_gpu_jobs_over_the_bounded_uniform_budget_before_calling_the_device() {
+        let runner = FakeRunner::new();
+        let mut oversized = job(1, 1, 0.25);
+        oversized.uniforms.resize(MAX_GPU_UNIFORM_VALUES + 1, 0.0);
+        let result = run_job(&runner, &oversized, &crate::resources::test_resources());
+        assert!(result
+            .as_ref()
+            .is_err_and(|error| error.contains("uniform limit")));
+        assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -625,7 +733,7 @@ mod tests {
             gate: Some(Mutex::new(gate)),
             ..FakeRunner::new()
         });
-        let worker = GpuFrameWorker::new(runner.clone());
+        let worker = admitted_worker(runner.clone());
         worker.submit(job(1, 1, 0.1));
         // Wait until the worker holds job 1 inside the (blocked) runner.
         std::thread::sleep(Duration::from_millis(50));
@@ -638,14 +746,74 @@ mod tests {
         // Release job 1 and the single surviving pending job.
         assert!(release.send(()).is_ok());
         assert!(release.send(()).is_ok());
-        let last = wait_for(|| worker.latest().filter(|frame| frame.sequence == 2));
-        assert_eq!(last.expect("newest frame").dots, vec![0.4]);
+        let last = wait_for(|| worker.latest().filter(|frame| frame.view().sequence == 2));
+        assert_eq!(last.expect("newest frame").view().dots, vec![0.4]);
         assert_eq!(runner.runs.load(Ordering::SeqCst), 2);
     }
 
     #[test]
+    fn dropping_a_scene_does_not_wait_for_a_blocked_device_call() {
+        struct BlockingRunner {
+            entered: mpsc::SyncSender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            dropped: Arc<AtomicBool>,
+        }
+        impl GpuRunner for BlockingRunner {
+            fn adapter_name(&self) -> String {
+                "Blocking fake".to_owned()
+            }
+
+            fn run(&self, _job: &GpuJob, out: &mut [f32]) -> Result<(), String> {
+                self.entered
+                    .send(())
+                    .map_err(|_| "test receiver closed".to_owned())?;
+                self.release
+                    .lock()
+                    .map_err(|_| "test gate poisoned".to_owned())?
+                    .recv()
+                    .map_err(|_| "test gate closed".to_owned())?;
+                out.fill(0.5);
+                Ok(())
+            }
+        }
+        impl Drop for BlockingRunner {
+            fn drop(&mut self) {
+                self.dropped.store(true, Ordering::Release);
+            }
+        }
+
+        let (entered, entered_rx) = mpsc::sync_channel(1);
+        let (release, release_rx) = mpsc::channel();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let worker = admitted_worker(Arc::new(BlockingRunner {
+            entered,
+            release: Mutex::new(release_rx),
+            dropped: Arc::clone(&dropped),
+        }));
+        worker.submit(job(1, 1, 0.5));
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("device call started");
+
+        let release_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            release.send(()).unwrap();
+        });
+        let started = Instant::now();
+        drop(worker);
+        let drop_elapsed = started.elapsed();
+        release_thread.join().unwrap();
+
+        assert!(
+            drop_elapsed < Duration::from_millis(100),
+            "dropping a scene waited {drop_elapsed:?} for device work"
+        );
+        assert!(wait_for(|| dropped.load(Ordering::Acquire).then_some(())).is_some());
+    }
+
+    #[test]
     fn errors_surface_and_clear_on_the_next_good_frame() {
-        let worker = GpuFrameWorker::new(Arc::new(FakeRunner {
+        let worker = admitted_worker(Arc::new(FakeRunner {
             fail: true,
             ..FakeRunner::new()
         }));
@@ -654,7 +822,7 @@ mod tests {
         assert_eq!(error.as_deref(), Some("device lost"));
         assert!(worker.latest().is_none());
 
-        let worker = GpuFrameWorker::new(Arc::new(FakeRunner::new()));
+        let worker = admitted_worker(Arc::new(FakeRunner::new()));
         worker.submit(job(0, 4, 1.0));
         let error = wait_for(|| worker.last_error());
         assert_eq!(error.as_deref(), Some("GPU frame has no pixels"));
@@ -664,10 +832,10 @@ mod tests {
     }
 
     #[test]
-    fn dropping_the_worker_stops_and_joins_the_thread() {
+    fn dropping_the_worker_requests_shutdown_and_supervisor_joins_the_thread() {
         let runner = Arc::new(FakeRunner::new());
         let dropped = Arc::clone(&runner.dropped);
-        let worker = GpuFrameWorker::new(runner.clone());
+        let worker = admitted_worker(runner.clone());
         worker.submit(job(2, 2, 1.0));
         assert!(wait_for(|| worker.latest()).is_some());
         drop(runner);
@@ -676,14 +844,14 @@ mod tests {
             "worker still owns the runner"
         );
         drop(worker);
-        // The thread held the last runner reference; joining released it.
-        assert!(dropped.load(Ordering::SeqCst));
+        // The supervisor retains the physical owner until the runner returns.
+        assert!(wait_for(|| dropped.load(Ordering::SeqCst).then_some(())).is_some());
     }
 
     #[test]
     fn dropping_an_idle_worker_does_not_hang() {
         let started = Instant::now();
-        drop(GpuFrameWorker::new(Arc::new(FakeRunner::new())));
+        drop(admitted_worker(Arc::new(FakeRunner::new())));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

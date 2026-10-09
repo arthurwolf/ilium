@@ -336,7 +336,7 @@ pub(super) fn png(
             Err(reason) => {
                 return Err(fail(format!(
                     "PNG preparation admission refused: {reason:?}"
-                )))
+                )));
             }
         };
         let Some((source, name)) = original.take() else {
@@ -399,7 +399,7 @@ pub(super) fn png(
                 };
             }
             JobPoll::Lost | JobPoll::Taken => {
-                return Err(fail("PNG preparation owner retired".to_owned()))
+                return Err(fail("PNG preparation owner retired".to_owned()));
             }
         }
     }

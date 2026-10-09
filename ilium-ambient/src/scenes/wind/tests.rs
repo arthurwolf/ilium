@@ -41,6 +41,135 @@ fn high_dot_count_is_supported_for_dense_particle_workloads() {
 }
 
 #[test]
+fn direct_subpixel_scaling_preserves_legacy_raster_mapping() {
+    let mut raster = Raster::default();
+    raster.resize(8, 12);
+    let mut cell_colors = Vec::new();
+    let mut frame = Frame {
+        raster: &mut raster,
+        cell_colors: &mut cell_colors,
+        width: 4,
+        height: 3,
+        time: Duration::ZERO,
+        wall: Duration::ZERO,
+        now: SystemTime::UNIX_EPOCH,
+    };
+    let edge_values = [
+        0.0,
+        f32::from_bits(1),
+        f32::from_bits(0x3eff_ffff),
+        0.5,
+        f32::from_bits(0x3f7f_ffff),
+        1.0,
+        f32::from_bits(0x407f_ffff),
+        2.0,
+        f32::from_bits(0x407f_ffff),
+    ];
+    for &x in &edge_values {
+        for &y in &edge_values[..7] {
+            frame.raster.dots.fill(0.0);
+            let dot = super::sim::Dot {
+                x,
+                y,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            };
+            let column = dot.x.floor() as i32;
+            let row = dot.y.floor() as i32;
+            let legacy_index = row as usize * frame.raster.width
+                + column as usize * 2
+                + (((dot.x - column as f32) * 2.0) as usize).min(1)
+                + ((((dot.y - row as f32) * 4.0) as usize).min(3)) * frame.raster.width;
+
+            WindScene::draw_dot(&mut frame, &dot);
+
+            assert_eq!(frame.raster.dots[legacy_index], 1.0, "({x}, {y})");
+            assert_eq!(
+                frame
+                    .raster
+                    .dots
+                    .iter()
+                    .filter(|&&value| value != 0.0)
+                    .count(),
+                1
+            );
+
+            let scalar_pixels = frame.raster.dots.clone();
+            frame.raster.dots.fill(0.0);
+            WindScene::draw_dots_deduplicated(&mut frame, &[dot], &mut Vec::new());
+            assert_eq!(frame.raster.dots, scalar_pixels, "dense path ({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn non_finite_positions_do_not_paint_or_clear_raster_ownership() {
+    let dots = [
+        super::sim::Dot {
+            x: f32::NAN,
+            y: 0.2,
+            vx: 0.0,
+            vy: 0.0,
+            weight_roll: 0.0,
+        },
+        super::sim::Dot {
+            x: 0.2,
+            y: f32::INFINITY,
+            vx: 0.0,
+            vy: 0.0,
+            weight_roll: 0.0,
+        },
+    ];
+    let mut raster = Raster::default();
+    raster.resize(8, 12);
+    raster.dots[0] = 0.25;
+    raster.owner_ids[0] = 17;
+    let mut cell_colors = Vec::new();
+    let mut frame = Frame {
+        raster: &mut raster,
+        cell_colors: &mut cell_colors,
+        width: 4,
+        height: 3,
+        time: Duration::ZERO,
+        wall: Duration::ZERO,
+        now: SystemTime::UNIX_EPOCH,
+    };
+
+    for dot in &dots {
+        WindScene::draw_dot(&mut frame, dot);
+    }
+    assert_eq!(frame.raster.dots[0], 0.25);
+    assert_eq!(frame.raster.owner_ids[0], 17);
+    assert_eq!(
+        frame
+            .raster
+            .dots
+            .iter()
+            .filter(|&&value| value != 0.0)
+            .count(),
+        1
+    );
+
+    frame.raster.dots.fill(0.0);
+    frame.raster.owner_ids.fill(0);
+    frame.raster.dots[0] = 0.25;
+    frame.raster.owner_ids[0] = 17;
+    WindScene::draw_dots_deduplicated(&mut frame, &dots, &mut Vec::new());
+    assert_eq!(frame.raster.dots[0], 0.25);
+    assert_eq!(frame.raster.owner_ids[0], 17);
+    assert_eq!(
+        frame
+            .raster
+            .dots
+            .iter()
+            .filter(|&&value| value != 0.0)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn normalization_clamps_every_number() {
     let wild = WindSettings {
         dot_count: 0,
@@ -475,4 +604,70 @@ fn merged_dots_become_a_larger_glyph() {
     let mut unmerged = WindScene::new(&quiet(), &env);
     render(&mut unmerged, 1, 1, 0.0);
     assert_eq!(unmerged.native_glyph(0, 0), None);
+}
+
+#[test]
+fn merged_renderer_counts_and_rasterizes_in_one_particle_pass() {
+    let mut raster = Raster::default();
+    raster.resize(6, 4);
+    let mut cell_colors = Vec::new();
+    let mut frame = Frame {
+        raster: &mut raster,
+        cell_colors: &mut cell_colors,
+        width: 3,
+        height: 1,
+        time: Duration::ZERO,
+        wall: Duration::ZERO,
+        now: SystemTime::UNIX_EPOCH,
+    };
+    let positions = [
+        (0.1, 0.1),
+        (0.6, 0.1),
+        (0.1, 0.3),
+        (1.1, 0.1),
+        (1.6, 0.3),
+        (-0.1, 0.2),
+        (3.0, 0.2),
+        (f32::NAN, 0.2),
+        (0.1, f32::INFINITY),
+    ];
+    let (mut counts, mut subpixels, mut glyphs) = (Vec::new(), Vec::new(), Vec::new());
+
+    WindScene::draw_positions_merged(
+        &mut frame,
+        positions,
+        3,
+        &mut counts,
+        &mut subpixels,
+        &mut glyphs,
+    );
+
+    assert_eq!(counts, [3, 2, 0]);
+    assert_eq!(glyphs, [Some('•'), None, None]);
+    assert_eq!(
+        frame
+            .raster
+            .dots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &pixel)| (pixel > 0.0).then_some(index))
+            .collect::<Vec<_>>(),
+        [2, 9]
+    );
+}
+
+#[test]
+fn merged_glyph_threshold_comparisons_match_tiers() {
+    for threshold in 2..=12 {
+        for count in 0..=128_u16 {
+            let tier = usize::from(count / threshold);
+            let expected = (tier > 0)
+                .then(|| super::MERGED_GLYPHS[(tier - 1).min(super::MERGED_GLYPHS.len() - 1)]);
+            assert_eq!(
+                WindScene::merged_glyph(u32::from(threshold), count),
+                expected,
+                "threshold={threshold}, count={count}"
+            );
+        }
+    }
 }

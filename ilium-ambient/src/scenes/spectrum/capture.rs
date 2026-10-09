@@ -18,22 +18,36 @@
 //! * Microphone / named devices use the helpers on Linux (Pulse/PipeWire
 //!   source names) with a `cpal` fallback, and `cpal` elsewhere.
 //!
-//! Everything blocking runs on a `source::Worker` thread owned by the scene.
-//! The worker analyses the newest window every ~16 ms and publishes an
-//! immutable `Snapshot` through a shared slot that `render` only reads with
+//! Blocking capture and analysis run on admitted `source::Worker` threads
+//! owned by the scene. The CPAL callback has a separate retained worker
+//! reservation, bounded callback size and nonblocking publication. Analysis
+//! publishes immutable snapshots through a slot that `render` only reads with
 //! `try_lock`.
 
 use super::dsp::{band_edges, Analyzer};
 use super::{BandScale, InputKind};
+use crate::resources::{AmbientResources, WorkerCost, WorkerReservation};
 use crate::source::{sleep_unless_stopped, Worker};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::io::Read;
 use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+#[cfg(any(target_os = "macos", test))]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const CAPTURE_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+const CAPTURE_WORKER_RESIDENT_BYTES: usize = 2 * 1024 * 1024;
+const HELPER_READER_RESIDENT_BYTES: usize = 4 * 1024 * 1024;
+const CPAL_CALLBACK_RESIDENT_BYTES: usize = 4 * 1024 * 1024;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const CPAL_STREAM_THREADS: usize = 2;
+#[cfg(target_os = "macos")]
+const CPAL_STREAM_THREADS: usize = 4;
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+const CPAL_STREAM_THREADS: usize = 0;
 
 /// Sample rate requested from the capture helpers.
 pub const HELPER_SAMPLE_RATE: u32 = 44_100;
@@ -347,13 +361,28 @@ fn receive_chunks(
 pub struct ProcessSource {
     child: Child,
     receiver: Option<Receiver<Chunk>>,
-    reader: Option<JoinHandle<()>>,
+    reader: Option<Worker>,
+    _helper_reservation: WorkerReservation,
     pending_end: Option<String>,
     sample_rate: u32,
 }
 
 impl ProcessSource {
-    pub fn spawn(command: &CaptureCommand) -> Result<Self, String> {
+    pub fn spawn(command: &CaptureCommand, resources: &AmbientResources) -> Result<Self, String> {
+        // Reserve both the helper process role and its blocking pipe reader
+        // before creating the child or any channels.
+        let helper_reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HELPER_READER_RESIDENT_BYTES,
+            })
+            .map_err(|error| format!("audio helper admission refused: {error:?}"))?;
+        let reader_reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HELPER_READER_RESIDENT_BYTES,
+            })
+            .map_err(|error| format!("audio pipe reader admission refused: {error:?}"))?;
         let mut child = Command::new(command.program)
             .args(&command.args)
             .stdin(Stdio::null())
@@ -371,18 +400,22 @@ impl ProcessSource {
         let (sender, receiver) = sync_channel(64);
         let decoder = PcmDecoder::new(command.format, command.channels);
         let program = command.program;
-        let reader = std::thread::Builder::new()
-            .name("ilium-ambient-spectrum-reader".to_owned())
-            .spawn(move || read_pipe(stdout, stderr, decoder, sender, program))
-            .map_err(|error| {
-                let _ = child.kill();
-                let _ = child.wait();
-                format!("cannot start reader thread: {error}")
-            })?;
+        let reader = Worker::start_admitted_with_stack(
+            "spectrum-reader",
+            reader_reservation,
+            Some(CAPTURE_WORKER_STACK_BYTES),
+            move |_| read_pipe(stdout, stderr, decoder, sender, program),
+        )
+        .map_err(|error| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot start reader thread: {error}")
+        })?;
         Ok(Self {
             child,
             receiver: Some(receiver),
             reader: Some(reader),
+            _helper_reservation: helper_reservation,
             pending_end: None,
             sample_rate: command.sample_rate,
         })
@@ -449,9 +482,12 @@ impl Drop for ProcessSource {
         let _ = self.child.wait();
         // Dropping the receiver unblocks a reader stuck on a full channel.
         self.receiver = None;
-        if let Some(reader) = self.reader.take() {
-            // The killed child closed stdout, so the reader returns promptly.
-            let _ = reader.join();
+        if let Some(reader) = self.reader.take().and_then(Worker::request_stop) {
+            // The killed child closed stdout. Observe the original reader for a
+            // bounded interval; any survivor remains in platform retirement.
+            if let Err(error) = reader.join_until(Instant::now() + Duration::from_secs(2)) {
+                tracing::warn!(%error, "spectrum helper reader remains under retirement supervision");
+            }
         }
     }
 }
@@ -459,6 +495,7 @@ impl Drop for ProcessSource {
 /// A `cpal` input stream (microphone, WASAPI loopback, macOS loopback).
 pub struct CpalSource {
     _stream: cpal::Stream,
+    _callback_reservation: Option<WorkerReservation>,
     receiver: Receiver<Chunk>,
     pending_end: Option<String>,
     sample_rate: u32,
@@ -516,23 +553,11 @@ where
         .build_input_stream(
             *config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
-                let mono: Vec<f32> = data
-                    .chunks(channels)
-                    .map(|frame| {
-                        let sum: f32 = frame
-                            .iter()
-                            .map(|sample| {
-                                let value: f32 = cpal::Sample::to_sample(*sample);
-                                if value.is_finite() {
-                                    value.clamp(-4.0, 4.0)
-                                } else {
-                                    0.0
-                                }
-                            })
-                            .sum();
-                        sum / channels as f32
-                    })
-                    .collect();
+                let mono = downmix_callback(data, channels, |sample| {
+                    let value: f32 = cpal::Sample::to_sample(*sample);
+                    value
+                });
+                let Some(mono) = mono else { return };
                 // Never block the audio thread: a full queue drops this buffer.
                 let _ = sender.try_send(Chunk::Samples(mono));
             },
@@ -544,8 +569,50 @@ where
         .map_err(|error| format!("cannot open audio stream: {error}"))
 }
 
+const MAX_CALLBACK_FRAMES: usize = 8192;
+
+fn downmix_callback<T>(
+    data: &[T],
+    channels: usize,
+    convert: impl Fn(&T) -> f32,
+) -> Option<Vec<f32>> {
+    let channels = channels.max(1);
+    if data.len().div_ceil(channels) > MAX_CALLBACK_FRAMES {
+        return None;
+    }
+    Some(
+        data.chunks(channels)
+            .map(|frame| {
+                let sum: f32 = frame
+                    .iter()
+                    .map(|sample| {
+                        let value = convert(sample);
+                        if value.is_finite() {
+                            value.clamp(-4.0, 4.0)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .sum();
+                sum / channels as f32
+            })
+            .collect(),
+    )
+}
+
 impl CpalSource {
-    pub fn open(target: &CaptureTarget) -> Result<Self, String> {
+    pub fn open(target: &CaptureTarget, resources: &AmbientResources) -> Result<Self, String> {
+        if CPAL_STREAM_THREADS == 0 {
+            return Err(
+                "audio callback thread accounting is unavailable on this platform".to_owned(),
+            );
+        }
+        let callback_reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: CPAL_STREAM_THREADS,
+                resident_bytes: CPAL_CALLBACK_RESIDENT_BYTES,
+            })
+            .map_err(|error| format!("audio callback admission refused: {error:?}"))?;
         let host = cpal::default_host();
         let (device, loopback) = find_device(&host, target)?;
         let supported = if loopback {
@@ -570,10 +637,35 @@ impl CpalSource {
             .map_err(|error| format!("cannot start audio stream: {error}"))?;
         Ok(Self {
             _stream: stream,
+            _callback_reservation: Some(callback_reservation),
             receiver,
             pending_end: None,
             sample_rate,
         })
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn retain_cpal_reservation_until_process_exit(reservation: WorkerReservation) {
+    // CoreAudio's disconnect monitors are not joinable through cpal. Keep the
+    // admission charged after stream destruction instead of claiming those
+    // opaque workers exited. The shared process quota bounds retained entries.
+    static RETIRED: OnceLock<Mutex<Vec<WorkerReservation>>> = OnceLock::new();
+    RETIRED
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(reservation);
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for CpalSource {
+    fn drop(&mut self) {
+        if let Some(reservation) = self._callback_reservation.take() {
+            // This runs before `_stream` is dropped, so the charge remains held
+            // through backend teardown and for the rest of the process lifetime.
+            retain_cpal_reservation_until_process_exit(reservation);
+        }
     }
 }
 
@@ -658,7 +750,7 @@ pub type SourceFactory = Box<dyn FnMut(usize) -> Result<Box<dyn AudioSource>, St
 
 /// Factory that walks the plans for `target`, resolved lazily on the worker
 /// (PATH lookups stay off the render thread).
-pub fn plan_factory(target: CaptureTarget) -> SourceFactory {
+pub fn plan_factory(target: CaptureTarget, resources: AmbientResources) -> SourceFactory {
     let mut plans: Vec<SourcePlan> = Vec::new();
     Box::new(move |attempt| {
         if attempt == 0 || plans.is_empty() {
@@ -666,18 +758,35 @@ pub fn plan_factory(target: CaptureTarget) -> SourceFactory {
         }
         match &plans[attempt % plans.len()] {
             SourcePlan::Process(command) => {
-                Ok(Box::new(ProcessSource::spawn(command)?) as Box<dyn AudioSource>)
+                Ok(Box::new(ProcessSource::spawn(command, &resources)?) as Box<dyn AudioSource>)
             }
-            SourcePlan::Cpal(target) => Ok(Box::new(CpalSource::open(target)?)),
+            SourcePlan::Cpal(target) => {
+                Ok(Box::new(CpalSource::open(target, &resources)?) as Box<dyn AudioSource>)
+            }
         }
     })
 }
 
 /// Spawn the capture worker. `factory` runs on the worker thread.
-pub fn spawn_capture(shared: Shared, config: AnalysisConfig, mut factory: SourceFactory) -> Worker {
-    Worker::spawn("spectrum", move |stop| {
-        capture_loop(&stop, &shared, &config, &mut factory);
-    })
+pub fn spawn_capture(
+    resources: &AmbientResources,
+    shared: Shared,
+    config: AnalysisConfig,
+    mut factory: SourceFactory,
+) -> Result<Worker, String> {
+    let reservation = resources
+        .reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: CAPTURE_WORKER_RESIDENT_BYTES,
+        })
+        .map_err(|error| format!("spectrum analysis admission refused: {error:?}"))?;
+    Worker::start_admitted_with_stack(
+        "spectrum",
+        reservation,
+        Some(CAPTURE_WORKER_STACK_BYTES),
+        move |stop| capture_loop(&stop, &shared, &config, &mut factory),
+    )
+    .map_err(|error| format!("spectrum analysis worker could not start: {error}"))
 }
 
 /// Pause between capture attempts, honouring stop within ~100 ms.
@@ -946,6 +1055,40 @@ mod tests {
     use std::time::Instant;
 
     #[test]
+    fn cpal_callback_rejects_more_than_the_bounded_frame_count() {
+        let samples = vec![0.25f32; (MAX_CALLBACK_FRAMES + 1) * 2];
+        let converted = std::cell::Cell::new(0);
+        assert!(downmix_callback(&samples, 2, |sample| {
+            converted.set(converted.get() + 1);
+            *sample
+        })
+        .is_none());
+        assert_eq!(converted.get(), 0, "reject before converting or allocating");
+    }
+
+    #[test]
+    fn retained_backend_reservation_stays_charged_until_process_exit() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot().worker_threads;
+        let reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: 1024,
+            })
+            .unwrap();
+
+        retain_cpal_reservation_until_process_exit(reservation);
+
+        assert_eq!(
+            quota.snapshot().worker_threads,
+            before + 1,
+            "unobservable backend workers remain charged until process exit"
+        );
+        assert_eq!(quota.snapshot().worker_bytes, 1024);
+    }
+
+    #[test]
     fn decoder_handles_f32_stereo_split_at_arbitrary_byte_boundaries() {
         let frames = [(0.5f32, -0.5f32), (1.0, 0.0), (0.25, 0.75), (-1.0, -1.0)];
         let mut bytes = Vec::new();
@@ -1112,13 +1255,30 @@ mod tests {
         let (source, dropped) = SineSource::new(1000.0, 0.5);
         let mut source = Some(source);
         let shared = new_shared();
+        let (thread_name_tx, thread_name_rx) = std::sync::mpsc::sync_channel(1);
         let factory: SourceFactory = Box::new(move |_| {
+            let _ = thread_name_tx.try_send(
+                std::thread::current()
+                    .name()
+                    .unwrap_or("unnamed")
+                    .to_owned(),
+            );
             source
                 .take()
                 .map(|source| Box::new(source) as Box<dyn AudioSource>)
                 .ok_or_else(|| "used twice".to_owned())
         });
-        let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
+        let worker = spawn_capture(
+            &crate::resources::test_resources(),
+            Arc::clone(&shared),
+            analysis_config(),
+            factory,
+        )
+        .unwrap();
+        assert_eq!(
+            thread_name_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "ilium-ambient-spectrum"
+        );
         assert!(wait_for(&shared, |state| state.snapshot.seq >= 3));
         {
             let state = lock(&shared);
@@ -1164,6 +1324,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn capture_worker_refuses_when_shared_physical_quota_is_full() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let mut reservations = Vec::new();
+        loop {
+            let snapshot = quota.snapshot();
+            if snapshot.worker_threads == snapshot.limits.worker_threads
+                || snapshot.worker_bytes == snapshot.limits.worker_bytes
+            {
+                break;
+            }
+            let Ok(reservation) = resources.reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: 1,
+            }) else {
+                break;
+            };
+            reservations.push(reservation);
+        }
+        let shared = new_shared();
+        let result = spawn_capture(
+            &resources,
+            shared,
+            analysis_config(),
+            Box::new(|_| panic!("refused capture must not run")),
+        );
+        assert!(matches!(result, Err(error) if error.contains("admission refused")));
+        drop(reservations);
+    }
+
     fn stereo_sine_bytes(format: PcmFormat, frequency: f64, rate: u32, frames: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
         for n in 0..frames {
@@ -1195,7 +1386,13 @@ mod tests {
                     .map(|source| Box::new(source) as Box<dyn AudioSource>)
                     .ok_or_else(|| "byte stream finished".to_owned())
             });
-            let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
+            let worker = spawn_capture(
+                &crate::resources::test_resources(),
+                Arc::clone(&shared),
+                analysis_config(),
+                factory,
+            )
+            .unwrap();
             // The stream ends after ~0.5 s: wait for that, then inspect the last snapshot.
             assert!(
                 wait_for(&shared, |state| matches!(
@@ -1242,7 +1439,13 @@ mod tests {
     fn worker_reports_failure_and_stops_promptly_during_retry_sleep() {
         let shared = new_shared();
         let factory: SourceFactory = Box::new(|_| Err("no such device".to_owned()));
-        let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
+        let worker = spawn_capture(
+            &crate::resources::test_resources(),
+            Arc::clone(&shared),
+            analysis_config(),
+            factory,
+        )
+        .unwrap();
         assert!(wait_for(&shared, |state| {
             state.status == WorkerStatus::Failed("no such device".to_owned())
         }));
@@ -1264,7 +1467,13 @@ mod tests {
                 .map(|source| Box::new(source) as Box<dyn AudioSource>)
                 .ok_or_else(|| "used twice".to_owned())
         });
-        let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
+        let worker = spawn_capture(
+            &crate::resources::test_resources(),
+            Arc::clone(&shared),
+            analysis_config(),
+            factory,
+        )
+        .unwrap();
         std::thread::sleep(Duration::from_millis(80));
         assert_eq!(lock(&shared).snapshot.seq, 0);
         let ticket = worker.join_observer().unwrap();
@@ -1289,7 +1498,13 @@ mod tests {
             recorded.lock().unwrap().push(attempt);
             Err("first plan broken".to_owned())
         });
-        let worker = spawn_capture(Arc::clone(&shared), analysis_config(), factory);
+        let worker = spawn_capture(
+            &crate::resources::test_resources(),
+            Arc::clone(&shared),
+            analysis_config(),
+            factory,
+        )
+        .unwrap();
         assert!(wait_for(&shared, |state| matches!(
             state.status,
             WorkerStatus::Failed(_)
@@ -1309,7 +1524,8 @@ mod tests {
             channels: 1,
             sample_rate: 44_100,
         };
-        let mut source = ProcessSource::spawn(&command).unwrap();
+        let mut source =
+            ProcessSource::spawn(&command, &crate::resources::test_resources()).unwrap();
         let mut samples = Vec::new();
         let mut ended = None;
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1333,11 +1549,11 @@ mod tests {
             channels: 2,
             sample_rate: 44_100,
         };
-        let source = ProcessSource::spawn(&command).unwrap();
+        let source = ProcessSource::spawn(&command, &crate::resources::test_resources()).unwrap();
         let child_id = source.child.id();
         let started = Instant::now();
         drop(source);
-        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(3));
         // The child was reaped: its /proc entry is gone.
         assert!(!std::path::Path::new(&format!("/proc/{child_id}")).exists());
     }
@@ -1351,7 +1567,9 @@ mod tests {
             channels: 2,
             sample_rate: 44_100,
         };
-        let error = ProcessSource::spawn(&command).err().unwrap();
+        let error = ProcessSource::spawn(&command, &crate::resources::test_resources())
+            .err()
+            .unwrap();
         assert!(error.contains("cannot start"));
     }
 
@@ -1375,10 +1593,12 @@ mod tests {
         for plan in &plans {
             let source: Result<Box<dyn AudioSource>, String> = match plan {
                 SourcePlan::Process(command) => {
-                    ProcessSource::spawn(command).map(|s| Box::new(s) as Box<dyn AudioSource>)
+                    ProcessSource::spawn(command, &crate::resources::test_resources())
+                        .map(|s| Box::new(s) as Box<dyn AudioSource>)
                 }
                 SourcePlan::Cpal(target) => {
-                    CpalSource::open(target).map(|s| Box::new(s) as Box<dyn AudioSource>)
+                    CpalSource::open(target, &crate::resources::test_resources())
+                        .map(|s| Box::new(s) as Box<dyn AudioSource>)
                 }
             };
             let mut source = match source {

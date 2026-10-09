@@ -87,8 +87,8 @@ pub struct FbmCloudsScene {
 }
 
 impl FbmCloudsScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
@@ -149,6 +149,7 @@ impl FbmCloudsScene {
         let Some(gpu_frame) = self.gpu.latest_frame() else {
             return false;
         };
+        let gpu_frame = gpu_frame.view();
         let is_matching = gpu_frame.width as usize == raster.width
             && gpu_frame.height as usize == raster.height
             && gpu_frame.dots.len() == raster.dots.len();

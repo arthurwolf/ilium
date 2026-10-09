@@ -4,6 +4,7 @@ use super::{
     assets::{
         budget::Cancel,
         error::{AssetError, Result},
+        identity::Digest256,
     },
     color,
     generation::{PreparedWorld, Region as LegacyRegion},
@@ -56,11 +57,36 @@ struct Response {
 /// fallback. Private diagnostic profiles are not guaranteed to be installed
 /// or compatible with the selected target format.
 fn reviewed_fallback_profile(selected: usize) -> usize {
-    if selected == 9 {
-        8
+    if selected == 6 {
+        5
     } else {
-        9
+        6
     }
+}
+
+fn resolve_generated_sources(
+    settings: &VoxelLandscapeSettings,
+    cache_dir: &std::path::Path,
+    cancel: Cancel<'_>,
+) -> Result<(VoxelLandscapeSettings, Option<VoxelLandscapeSettings>)> {
+    let settings = settings.normalized();
+    if settings.generated_texture_source == super::settings::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT {
+        return Ok((settings, None));
+    }
+    let resolved = super::pack_registry::resolve_registered(&settings, cache_dir, cancel)?;
+    let candidate = VoxelLandscapeSettings {
+        pack_profile: reviewed_fallback_profile(resolved.pack_profile),
+        ..Default::default()
+    };
+    let fallback = match super::pack_registry::resolve_registered(&candidate, cache_dir, cancel) {
+        Ok(settings) => Some(settings),
+        Err(AssetError::Cancelled) => return Err(AssetError::Cancelled),
+        Err(error) => {
+            tracing::warn!("reviewed image fallback unavailable: {error}");
+            None
+        }
+    };
+    Ok((resolved, fallback))
 }
 
 pub struct VoxelLandscapeScene {
@@ -79,9 +105,23 @@ pub struct VoxelLandscapeScene {
     error: Option<String>,
     palette: ScenePalette,
 }
+
+/// Source-bound evidence for the currently prepared generated viewport.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextureSourceReceipt {
+    pub texture_source: &'static str,
+    pub source_sha256: Option<Digest256>,
+    pub material_coverage: (usize, usize),
+    pub state_gaps: usize,
+    pub model_substitutions: usize,
+    pub compatibility_aliases: usize,
+    pub material_fallbacks: usize,
+    pub fallback_atlases: usize,
+}
+
 impl VoxelLandscapeScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. This scene follows it natively: `color::composite_selected`
@@ -118,68 +158,53 @@ impl VoxelLandscapeScene {
                     continue;
                 };
                 let cancel = Cancel::for_revision(&stop, &worker_revision, request.revision);
-                let result =
-                    super::pack_registry::resolve_registered(&worker_settings, &cache_dir, cancel)
-                        .and_then(|resolved| {
-                            let candidate = VoxelLandscapeSettings {
-                                pack_profile: reviewed_fallback_profile(resolved.pack_profile),
-                                ..Default::default()
-                            };
-                            let fallback = match super::pack_registry::resolve_registered(
-                                &candidate, &cache_dir, cancel,
-                            ) {
-                                Ok(settings) => Some(settings),
-                                Err(AssetError::Cancelled) => return Err(AssetError::Cancelled),
-                                Err(error) => {
-                                    tracing::warn!("reviewed image fallback unavailable: {error}");
-                                    None
-                                }
-                            };
-                            if request.stream {
-                                let scale = Self::scale(&worker_settings);
-                                if !stream_session.as_ref().is_some_and(|session| {
-                                    session.matches(
-                                        request.region,
-                                        scale,
-                                        request.size,
-                                        &resolved,
-                                        fallback.as_ref(),
-                                    )
-                                }) {
-                                    stream_session = None;
-                                    stream_session = Some(GeneratedViewportSession::open(
-                                        request.region,
-                                        scale,
-                                        request.size,
-                                        &resolved,
-                                        fallback.as_ref(),
-                                        budget.clone(),
-                                        cancel,
-                                    )?);
-                                }
-                                stream_session
-                                    .as_mut()
-                                    .ok_or_else(|| {
-                                        AssetError::InvalidMetadata(
-                                            "generated viewport session absent".into(),
-                                        )
-                                    })?
-                                    .render(request.camera, request.time, cancel)
-                                    .map(|streamed| PreparedResult::Streamed(Box::new(streamed)))
-                            } else {
-                                stream_session = None;
-                                surface_binding::prepare_viewport_with_fallback_in_budget(
+                let result = resolve_generated_sources(&worker_settings, &cache_dir, cancel)
+                    .and_then(|(resolved, fallback)| {
+                        if request.stream {
+                            let scale = Self::scale(&worker_settings);
+                            if !stream_session.as_ref().is_some_and(|session| {
+                                session.matches(
                                     request.region,
-                                    Self::scale(&worker_settings),
+                                    scale,
+                                    request.size,
+                                    &resolved,
+                                    fallback.as_ref(),
+                                )
+                            }) {
+                                stream_session = None;
+                                stream_session = Some(GeneratedViewportSession::open(
+                                    request.region,
+                                    scale,
                                     request.size,
                                     &resolved,
                                     fallback.as_ref(),
                                     budget.clone(),
                                     cancel,
-                                )
-                                .map(|prepared| PreparedResult::Retained(Box::new(prepared)))
+                                )?);
                             }
-                        });
+                            stream_session
+                                .as_mut()
+                                .ok_or_else(|| {
+                                    AssetError::InvalidMetadata(
+                                        "generated viewport session absent".into(),
+                                    )
+                                })?
+                                .render(request.camera, request.time, cancel)
+                                .map(|streamed| PreparedResult::Streamed(Box::new(streamed)))
+                        } else {
+                            stream_session = None;
+                            surface_binding::prepare_viewport_with_fallback_in_budget(
+                                request.region,
+                                Self::scale(&worker_settings),
+                                request.size,
+                                &resolved,
+                                fallback.as_ref(),
+                                budget.clone(),
+                                cancel,
+                            )
+                            .map(|prepared| PreparedResult::Retained(Box::new(prepared)))
+                        }
+                    });
                 if cancel.is_cancelled() {
                     continue;
                 }
@@ -228,6 +253,46 @@ impl VoxelLandscapeScene {
             palette: env.palette.clone(),
         }
     }
+
+    /// Returns provenance and material coverage only for the current request.
+    /// A stale frame never qualifies a newer camera or source selection.
+    pub fn texture_source_receipt(&self) -> Option<TextureSourceReceipt> {
+        if self.streamed_request == self.requested {
+            if let Some(streamed) = self.streamed.as_ref() {
+                return Some(TextureSourceReceipt {
+                    texture_source: self.texture_source_name(),
+                    source_sha256: streamed.source_sha256.clone(),
+                    material_coverage: streamed.material_coverage,
+                    state_gaps: streamed.state_gaps,
+                    model_substitutions: streamed.model_substitutions,
+                    compatibility_aliases: streamed.compatibility_aliases,
+                    material_fallbacks: streamed.material_fallbacks,
+                    fallback_atlases: streamed.fallback_atlases,
+                });
+            }
+        }
+        if self.prepared_request == self.requested {
+            if let Some(prepared) = self.prepared.as_ref() {
+                return Some(TextureSourceReceipt {
+                    texture_source: self.texture_source_name(),
+                    source_sha256: prepared.source_sha256.clone(),
+                    material_coverage: prepared.material_coverage(),
+                    state_gaps: prepared.skipped_states.len(),
+                    model_substitutions: prepared.model_substitutions.len(),
+                    compatibility_aliases: prepared.compatibility_aliases.len(),
+                    material_fallbacks: prepared.material_fallbacks.len(),
+                    fallback_atlases: prepared
+                        .entities
+                        .atlases
+                        .iter()
+                        .filter(|atlas| atlas.used_fallback)
+                        .count(),
+                });
+            }
+        }
+        None
+    }
+
     pub fn camera(settings: &VoxelLandscapeSettings, time: Duration) -> [f64; 3] {
         let distance = time.as_secs_f64() * f64::from(settings.pan_speed_percent) / 100.0 * 0.25;
         let direction = match settings.pan_direction {
@@ -442,10 +507,10 @@ impl Scene for VoxelLandscapeScene {
                 .and_then(|snapshot| snapshot.status.clone());
         }
         if self.prepared_request != self.requested {
-            return Some("Preparing selected full pack and surface…".into());
+            return Some(self.preparation_status());
         }
         let Some(prepared) = self.prepared.as_ref() else {
-            return Some("Preparing selected full pack and surface…".into());
+            return Some(self.preparation_status());
         };
         let (found, required) = prepared.material_coverage();
         let fauna_gaps = prepared.entities.gaps.len();
@@ -472,6 +537,31 @@ impl Scene for VoxelLandscapeScene {
         }
     }
 }
+impl VoxelLandscapeScene {
+    fn texture_source_name(&self) -> &'static str {
+        if self.settings.generated_texture_source
+            == super::settings::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT
+        {
+            "java-default-1.19.3"
+        } else {
+            "selected-pack"
+        }
+    }
+
+    fn preparation_status(&self) -> String {
+        if self.settings.generated_texture_source
+            == super::settings::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT
+        {
+            return "Preparing installed Minecraft Java 1.19.3 textures and generated surface…"
+                .into();
+        }
+        let source_name = super::pack_profiles::FULL_PACKS
+            .get(self.settings.pack_profile)
+            .map_or("selected texture pack", |profile| profile.name);
+        format!("Preparing {source_name} and generated surface…")
+    }
+}
+
 impl Drop for VoxelLandscapeScene {
     fn drop(&mut self) {
         if let Some(prepared) = self.prepared.take() {
@@ -580,12 +670,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn java_default_generation_skips_selected_pack_registry_resolution() {
+        static CANCEL: AtomicBool = AtomicBool::new(false);
+        let settings = VoxelLandscapeSettings {
+            generated_texture_source: super::super::settings::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT,
+            pack_path: "/missing/selected-pack.zip".into(),
+            ..Default::default()
+        };
+        let (resolved, fallback) = resolve_generated_sources(
+            &settings,
+            std::path::Path::new("/missing/pack-cache"),
+            Cancel::new(&CANCEL),
+        )
+        .expect("native source selection does not resolve a selected pack");
+        assert_eq!(
+            resolved.generated_texture_source,
+            settings.generated_texture_source
+        );
+        assert_eq!(resolved.pack_path, settings.pack_path);
+        assert!(fallback.is_none());
+    }
+
+    #[test]
     fn reviewed_fallback_uses_the_other_faithful_profile() {
-        assert_eq!(reviewed_fallback_profile(0), 9);
-        assert_eq!(reviewed_fallback_profile(3), 9);
-        assert_eq!(reviewed_fallback_profile(8), 9);
-        assert_eq!(reviewed_fallback_profile(9), 8);
-        assert_eq!(reviewed_fallback_profile(10), 9);
+        for (selected, profile) in super::super::pack_profiles::FULL_PACKS.iter().enumerate() {
+            let fallback = reviewed_fallback_profile(selected);
+            assert_eq!(
+                super::super::pack_profiles::FULL_PACKS[fallback].id,
+                if profile.id == "faithful64" {
+                    "faithful32"
+                } else {
+                    "faithful64"
+                }
+            );
+            assert_ne!(selected, fallback);
+        }
+    }
+
+    #[test]
+    fn generated_texture_receipt_is_unavailable_before_current_surface_preparation() {
+        let env = SceneEnv::for_test(
+            std::env::temp_dir().join("voxel-texture-receipt-test"),
+            crate::resources::test_resources(),
+        );
+        let scene = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
+        assert!(scene.texture_source_receipt().is_none());
     }
 
     #[test]

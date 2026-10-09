@@ -365,6 +365,10 @@ impl GrowthScene {
     }
 }
 impl Scene for GrowthScene {
+    fn wants_pointer(&self) -> bool {
+        true
+    }
+
     fn pointer(&mut self, pointer: Option<[f32; 2]>) {
         self.pointer = pointer
     }

@@ -4,12 +4,14 @@
 //! size and time, and a process-wide minimum spacing per host so a scene can
 //! never hammer a public service (keep the user's IP reputation clean).
 
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind};
-use std::collections::HashMap;
-use std::io::Read;
+use ilium_platform::owned_worker::{
+    reserve_owned_worker, spawn_owned, OwnedWorker, StopToken, WorkerKind,
+};
+use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const USER_AGENT: &str = concat!(
@@ -32,6 +34,30 @@ pub struct Worker {
     owner: Option<OwnedWorker>,
 }
 
+/// A nonblocking cancellation receipt for an ambient worker. The platform
+/// join ticket stays encapsulated while callers can still verify physical exit.
+#[must_use]
+pub struct WorkerRetirement(ilium_platform::owned_worker::WorkerTicket);
+
+impl WorkerRetirement {
+    pub fn is_exited(&self) -> bool {
+        self.0.exit().is_some()
+    }
+
+    pub fn join_until(self, deadline: Instant) -> Result<(), String> {
+        match self
+            .0
+            .join_until(deadline)
+            .map_err(|error| format!("{error:?}"))?
+        {
+            ilium_platform::owned_worker::WorkerExit::Joined => Ok(()),
+            ilium_platform::owned_worker::WorkerExit::Panicked => {
+                Err("ambient worker panicked".to_owned())
+            }
+        }
+    }
+}
+
 impl Worker {
     /// Start only with an already admitted host resource reservation. The wake
     /// closure is kept by platform supervision through real join and the last
@@ -41,17 +67,26 @@ impl Worker {
         reservation: crate::resources::WorkerReservation,
         task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
     ) -> std::io::Result<Self> {
+        Self::start_admitted_with_stack(name, reservation, None, task)
+    }
+
+    /// Start an admitted worker with an explicit OS-thread stack request.
+    /// The declared native stack remains attached to its physical worker ticket
+    /// until the platform supervisor has joined the thread.
+    pub fn start_admitted_with_stack(
+        name: &str,
+        reservation: crate::resources::WorkerReservation,
+        stack_bytes: Option<usize>,
+        task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
+    ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let wake_stop = Arc::clone(&stop);
-        let owner = spawn_owned(
+        let owner = reserve_owned_worker(stack_bytes, reservation.physical)?.spawn(
             &format!("ilium-ambient-{name}"),
             WorkerKind::Cooperative,
             StopToken::default(),
-            move || {
-                let _physical = &reservation.physical;
-                wake_stop.store(true, Ordering::Release);
-            },
+            move || wake_stop.store(true, Ordering::Release),
             move |_| task(thread_stop),
         )?;
         Ok(Self {
@@ -104,9 +139,17 @@ impl Worker {
         Arc::clone(&self.stop)
     }
 
-    #[cfg(test)]
-    pub(crate) fn join_observer(&self) -> Option<ilium_platform::owned_worker::WorkerTicket> {
-        self.owner.as_ref().map(OwnedWorker::ticket)
+    /// Request cancellation without waiting, while returning a ticket that
+    /// lets the lifecycle owner prove the original OS thread actually exited.
+    pub fn request_stop(mut self) -> Option<WorkerRetirement> {
+        self.stop.store(true, Ordering::Release);
+        let ticket = self
+            .owner
+            .as_ref()
+            .map(OwnedWorker::ticket)
+            .map(WorkerRetirement);
+        drop(self.owner.take());
+        ticket
     }
 }
 
@@ -150,8 +193,14 @@ pub enum FetchError {
     TooLarge(usize),
 }
 
-static LAST_REQUEST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 const MIN_HOST_SPACING: Duration = Duration::from_millis(250);
+const PROVIDER_HOST_SLOTS: u64 = 64;
+
+/// Process-safe reservation for one provider host. The lock remains held for
+/// the complete request, and the timestamp survives process restarts.
+pub(crate) struct ProviderHostLease {
+    _lock: ExclusiveFileLock,
+}
 
 fn host_of(url: &str) -> String {
     url.split("://")
@@ -161,13 +210,90 @@ fn host_of(url: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn wait_for_host_slot(
+fn host_key(host: &str) -> u64 {
+    host.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn epoch_millis() -> Result<u128, FetchError> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .map_err(|error| FetchError::Request(format!("system clock unavailable: {error}")))
+}
+
+fn read_last_request(
+    directory: &secure_fs::NoFollowDirectory,
+    name: &std::ffi::OsStr,
+) -> Result<Option<u128>, FetchError> {
+    let file = match directory.open_regular(name) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(FetchError::Request(format!(
+                "provider admission read: {error}"
+            )))
+        }
+    };
+    secure_fs::restrict_open_file_to_owner(&file)
+        .map_err(|error| FetchError::Request(format!("provider admission permissions: {error}")))?;
+    let mut bytes = Vec::with_capacity(32);
+    file.take(33)
+        .read_to_end(&mut bytes)
+        .map_err(|error| FetchError::Request(format!("provider admission read: {error}")))?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| FetchError::Request("provider admission timestamp is corrupt".into()))?;
+    let timestamp = text
+        .trim()
+        .parse::<u128>()
+        .map_err(|_| FetchError::Request("provider admission timestamp is corrupt".into()))?;
+    Ok(Some(timestamp))
+}
+
+fn write_last_request(
+    state_dir: &Path,
+    name: &std::ffi::OsStr,
+    timestamp: u128,
+) -> Result<(), FetchError> {
+    let destination = state_dir.join(name);
+    // The per-host lock makes one stable temp name safe and bounds leftovers
+    // after a process crash to one file per admission slot.
+    let temporary = state_dir.join(format!("{}.tmp", name.to_string_lossy()));
+    let result = (|| {
+        let mut file = secure_fs::private_open_options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temporary)?;
+        write!(file, "{timestamp}")?;
+        file.sync_all()?;
+        drop(file);
+        secure_fs::replace_file_durably(&temporary, &destination)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|error| FetchError::Request(format!("provider admission write: {error}")))
+}
+
+pub(crate) fn provider_host_lease(
     url: &str,
+    state_dir: &Path,
+    spacing: Duration,
     deadline: Instant,
     stop: Option<&AtomicBool>,
-) -> Result<Duration, FetchError> {
-    let table = LAST_REQUEST.get_or_init(Default::default);
+) -> Result<ProviderHostLease, FetchError> {
     let host = host_of(url);
+    if host.is_empty() {
+        return Err(FetchError::NotHttps(url.to_owned()));
+    }
+    // A fixed slot table bounds durable admission files even when a user
+    // configures arbitrarily many provider hostnames. Collisions only add
+    // conservative serialization; they never weaken the per-host spacing.
+    let key = host_key(&host) % PROVIDER_HOST_SLOTS;
+    let lock_path = state_dir.join(format!("provider-{key:016x}.lock"));
+    let state_name = std::ffi::OsString::from(format!("provider-{key:016x}.time"));
     loop {
         if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Err(FetchError::Cancelled);
@@ -177,21 +303,36 @@ fn wait_for_host_slot(
         if remaining.is_zero() {
             return Err(FetchError::Timeout);
         }
-        let wait = {
-            let mut table = table
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let ready_at = table
-                .get(&host)
-                .map_or(now, |last| *last + MIN_HOST_SPACING);
-            if ready_at <= now {
-                // Reserve only an admitted request; cancelled waiters never build a future queue.
-                table.insert(host.clone(), now);
-                return Ok(remaining);
-            }
-            ready_at.saturating_duration_since(now)
+        let Some(lock) = ExclusiveFileLock::try_acquire(&lock_path)
+            .map_err(|error| FetchError::Request(format!("provider admission lock: {error}")))?
+        else {
+            std::thread::sleep(remaining.min(Duration::from_millis(20)));
+            continue;
         };
-        std::thread::sleep(wait.min(remaining).min(Duration::from_millis(20)));
+        secure_fs::create_private_directory(state_dir).map_err(|error| {
+            FetchError::Request(format!("provider admission directory: {error}"))
+        })?;
+        let directory = secure_fs::NoFollowDirectory::open_root(state_dir).map_err(|error| {
+            FetchError::Request(format!("provider admission directory: {error}"))
+        })?;
+        let previous = read_last_request(&directory, &state_name)?;
+        let clock_now = epoch_millis()?;
+        if let Some(previous) = previous {
+            let spacing_ms = spacing.as_millis();
+            let ready_at = previous.saturating_add(spacing_ms);
+            if ready_at > clock_now {
+                let wait =
+                    Duration::from_millis((ready_at - clock_now).min(u128::from(u64::MAX)) as u64);
+                if wait >= deadline.saturating_duration_since(Instant::now()) {
+                    return Err(FetchError::Timeout);
+                }
+                std::thread::sleep(wait.min(Duration::from_millis(20)));
+                drop(lock);
+                continue;
+            }
+        }
+        write_last_request(state_dir, &state_name, clock_now)?;
+        return Ok(ProviderHostLease { _lock: lock });
     }
 }
 
@@ -220,7 +361,26 @@ fn http_get_inner(
         return Err(FetchError::NotHttps(url.to_owned()));
     }
     let deadline = Instant::now() + timeout; // Admission and body collection share one deadline.
-    let timeout = wait_for_host_slot(url, deadline, stop)?; // Only the remaining budget reaches ureq.
+    let _lease = provider_host_lease(
+        url,
+        &default_cache_dir().join("provider-admission"),
+        MIN_HOST_SPACING,
+        deadline,
+        stop,
+    )?;
+    http_get_after_admission(url, max_bytes, deadline, stop)
+}
+
+fn http_get_after_admission(
+    url: &str,
+    max_bytes: usize,
+    deadline: Instant,
+    stop: Option<&AtomicBool>,
+) -> Result<Vec<u8>, FetchError> {
+    let timeout = deadline.saturating_duration_since(Instant::now());
+    if timeout.is_zero() {
+        return Err(FetchError::Timeout);
+    }
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
@@ -419,7 +579,15 @@ pub fn http_stream_lines(
     if !url.starts_with("https://") {
         return Err(FetchError::NotHttps(url.to_owned()));
     }
-    let timeout = wait_for_host_slot(url, Instant::now() + timeout, Some(stop))?;
+    let deadline = Instant::now() + timeout;
+    let _lease = provider_host_lease(
+        url,
+        &default_cache_dir().join("provider-admission"),
+        MIN_HOST_SPACING,
+        deadline,
+        Some(stop),
+    )?;
+    let timeout = deadline.saturating_duration_since(Instant::now());
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .user_agent(USER_AGENT)
@@ -471,21 +639,53 @@ pub fn fetch_cached(
     max_bytes: usize,
     timeout: Duration,
 ) -> Result<Vec<u8>, FetchError> {
+    fetch_cached_with(
+        cache_dir,
+        url,
+        extension,
+        max_age,
+        max_bytes,
+        timeout,
+        |url, max_bytes, deadline| http_get_after_admission(url, max_bytes, deadline, None),
+    )
+}
+
+fn fetch_cached_with(
+    cache_dir: &Path,
+    url: &str,
+    extension: &str,
+    max_age: Duration,
+    max_bytes: usize,
+    timeout: Duration,
+    fetch: impl FnOnce(&str, usize, Instant) -> Result<Vec<u8>, FetchError>,
+) -> Result<Vec<u8>, FetchError> {
     let path = cache_dir.join(cache_file_name(url, extension));
-    let cached_age = std::fs::metadata(&path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok());
-    if let Some(age) = cached_age {
-        if age <= max_age {
-            match read_bounded_file(&path, max_bytes) {
-                Ok(bytes) => return Ok(bytes),
-                Err(FetchError::TooLarge(limit)) => return Err(FetchError::TooLarge(limit)),
-                Err(_) => {}
-            }
-        }
+    if let Some(bytes) = read_fresh_cache(&path, max_age, max_bytes)? {
+        return Ok(bytes);
     }
-    match http_get(url, max_bytes, timeout) {
+    let deadline = Instant::now() + timeout;
+    let _lease = match provider_host_lease(
+        url,
+        &default_cache_dir().join("provider-admission"),
+        MIN_HOST_SPACING,
+        deadline,
+        None,
+    ) {
+        Ok(lease) => lease,
+        Err(error) => {
+            return match read_bounded_file(&path, max_bytes) {
+                Ok(bytes) => Ok(bytes),
+                Err(FetchError::TooLarge(limit)) => Err(FetchError::TooLarge(limit)),
+                Err(_) => Err(error),
+            };
+        }
+    };
+    // Another process may have filled the shared cache while this request
+    // waited for the host lease. Never issue a duplicate miss in that case.
+    if let Some(bytes) = read_fresh_cache(&path, max_age, max_bytes)? {
+        return Ok(bytes);
+    }
+    match fetch(url, max_bytes, deadline) {
         Ok(bytes) => {
             if std::fs::create_dir_all(cache_dir).is_ok() {
                 let temporary = path.with_extension(format!("{extension}.tmp"));
@@ -501,6 +701,27 @@ pub fn fetch_cached(
             Err(_) => Err(error),
         },
     }
+}
+
+fn read_fresh_cache(
+    path: &Path,
+    max_age: Duration,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, FetchError> {
+    let cached_age = std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok());
+    if let Some(age) = cached_age {
+        if age <= max_age {
+            match read_bounded_file(&path, max_bytes) {
+                Ok(bytes) => return Ok(Some(bytes)),
+                Err(FetchError::TooLarge(limit)) => return Err(FetchError::TooLarge(limit)),
+                Err(_) => {}
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -574,37 +795,109 @@ mod tests {
         let stop = AtomicBool::new(true);
         let url = "https://stopped-worker.invalid/data";
         assert!(matches!(
-            http_get_stoppable(url, 10, Duration::from_secs(1), &stop),
+            provider_host_lease(
+                url,
+                Path::new("/unlikely-provider-test-location"),
+                MIN_HOST_SPACING,
+                Instant::now() + Duration::from_secs(1),
+                Some(&stop),
+            ),
             Err(FetchError::Cancelled)
         ));
-        assert!(!LAST_REQUEST
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .contains_key(&host_of(url)));
     }
 
     #[test]
     fn host_admission_obeys_timeout_without_extending_the_queue() {
         let url = "https://admission-budget.invalid/data";
-        let reserved = Instant::now() + Duration::from_secs(1);
-        LAST_REQUEST
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .insert(host_of(url), reserved);
+        let directory = tempfile::tempdir().unwrap();
+        let _first = provider_host_lease(
+            url,
+            directory.path(),
+            Duration::from_secs(1),
+            Instant::now() + Duration::from_secs(2),
+            None,
+        )
+        .unwrap();
         assert!(matches!(
-            wait_for_host_slot(url, Instant::now() + Duration::from_millis(10), None),
+            provider_host_lease(
+                url,
+                directory.path(),
+                Duration::from_secs(1),
+                Instant::now() + Duration::from_millis(10),
+                None,
+            ),
             Err(FetchError::Timeout)
         ));
-        assert_eq!(
-            LAST_REQUEST
-                .get_or_init(Default::default)
-                .lock()
-                .unwrap()
-                .get(&host_of(url)),
-            Some(&reserved)
-        );
+    }
+
+    #[test]
+    fn host_lease_spacing_expires_and_allows_the_next_request() {
+        let url = "https://lease-expiry.invalid/data";
+        let directory = tempfile::tempdir().unwrap();
+        let spacing = Duration::from_millis(35);
+        let first = provider_host_lease(
+            url,
+            directory.path(),
+            spacing,
+            Instant::now() + Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        drop(first);
+        let started = Instant::now();
+        let second = provider_host_lease(
+            url,
+            directory.path(),
+            spacing,
+            Instant::now() + Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(25));
+        drop(second);
+    }
+
+    #[test]
+    fn cached_fetch_rechecks_after_another_process_publishes_the_miss() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("shared-cache");
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let first_dir = cache.clone();
+        let first = std::thread::spawn(move || {
+            fetch_cached_with(
+                &first_dir,
+                "https://cache-race.invalid/data",
+                "json",
+                Duration::from_secs(30),
+                64,
+                Duration::from_secs(3),
+                move |_, _, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    Ok(b"shared answer".to_vec())
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let second_dir = cache.clone();
+        let second = std::thread::spawn(move || {
+            fetch_cached_with(
+                &second_dir,
+                "https://cache-race.invalid/data",
+                "json",
+                Duration::from_secs(30),
+                64,
+                Duration::from_secs(3),
+                |_, _, _| panic!("shared cache hit must suppress duplicate request"),
+            )
+        });
+        release_tx.send(()).unwrap();
+        assert_eq!(first.join().unwrap().unwrap(), b"shared answer");
+        assert_eq!(second.join().unwrap().unwrap(), b"shared answer");
+        assert!(cache
+            .join(cache_file_name("https://cache-race.invalid/data", "json"))
+            .is_file());
     }
 
     #[test]
@@ -617,14 +910,12 @@ mod tests {
             let _ = sender.send(());
         })
         .unwrap();
-        let ticket = worker.owner.as_ref().unwrap().ticket();
-        drop(worker);
-        assert_eq!(
-            ticket
-                .join_until(Instant::now() + Duration::from_secs(2))
-                .unwrap(),
-            ilium_platform::owned_worker::WorkerExit::Joined,
-        );
+        let ticket = worker
+            .request_stop()
+            .expect("a running worker has an observable join ticket");
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
         assert!(
             receiver.try_recv().is_ok(),
             "actual join follows callback completion"
@@ -641,29 +932,26 @@ mod tests {
         })
         .unwrap();
         let stop = worker.stop_flag();
-        let ticket = worker.owner.as_ref().unwrap().ticket();
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         let (dropped_tx, dropped_rx) = std::sync::mpsc::channel();
         let dropper = std::thread::spawn(move || {
-            drop(worker);
-            dropped_tx.send(()).unwrap();
+            let ticket = worker.request_stop().unwrap();
+            dropped_tx.send(ticket).unwrap();
         });
         // Always release the blocked callback, even if the nonblocking-drop
         // assertion fails, so the fixture cannot leave a hung owned worker.
-        let dropped = dropped_rx.recv_timeout(Duration::from_secs(2));
+        let ticket = dropped_rx.recv_timeout(Duration::from_secs(2));
         let was_stopped = stop.load(Ordering::Acquire);
-        let was_still_owned = ticket.exit().is_none();
+        let was_still_owned = ticket.as_ref().is_ok_and(|ticket| !ticket.is_exited());
         release_tx.send(()).unwrap();
         dropper.join().unwrap();
-        assert!(dropped.is_ok(), "scene Drop waited for a blocked callback");
+        assert!(ticket.is_ok(), "scene Drop waited for a blocked callback");
         assert!(was_stopped);
         assert!(was_still_owned, "blocked callback was reported joined");
-        assert_eq!(
-            ticket
-                .join_until(Instant::now() + Duration::from_secs(2))
-                .unwrap(),
-            ilium_platform::owned_worker::WorkerExit::Joined
-        );
+        ticket
+            .unwrap()
+            .join_until(Instant::now() + Duration::from_secs(2))
+            .unwrap();
     }
 
     #[test]

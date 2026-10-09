@@ -120,6 +120,7 @@ fn cross_tile_native_models_share_geometry_but_preserve_exact_face_owners() {
         budget: budget.clone(),
         _ids_charge: budget.reserve(8 << 20, cancel).unwrap(),
     };
+    let expected_source = session.sources.provenance().clone();
     let seed_cells = saved_binding::tests::cells("minecraft:stone", &[]);
     let template = seed_cells.map.loaded().chunks.values().next().unwrap();
     let mut loaded = loader::LoadedWindow::default();
@@ -181,6 +182,17 @@ fn cross_tile_native_models_share_geometry_but_preserve_exact_face_owners() {
         .into_tile();
     assert_eq!(first.mesh.faces.len(), 6);
     assert_eq!(second.mesh.faces.len(), 6);
+    for tile in [&first, &second] {
+        assert_eq!(tile.source_profile, expected_source.profile);
+        assert_eq!(
+            tile.native_archive_sha256,
+            expected_source.native_archive_sha256
+        );
+        assert_eq!(
+            tile.selected_archive_sha256,
+            expected_source.selected_archive_sha256
+        );
+    }
     assert!(first
         .mesh
         .faces

@@ -10,7 +10,7 @@ use super::{
     catalog,
     evidence::MapId,
     history_store::{self, BoundMap, Repository, Snapshot},
-    pipeline, region,
+    index, pipeline, region,
     tours::{self, History, PreparedMap},
 };
 use ilium_platform::{
@@ -24,7 +24,7 @@ use std::{
     sync::Arc,
 };
 
-const MAX_DIRECTORY_ENTRIES: usize = 4096;
+pub const MAX_DIRECTORY_ENTRIES: usize = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Availability {
     MissingRoot,
@@ -151,6 +151,24 @@ pub fn prepare(
     limits: pipeline::Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<SessionCatalog, Error> {
+    prepare_with_progress(
+        saves_root,
+        storage_directory,
+        generation,
+        limits,
+        cancelled,
+        &mut |_, _| {},
+    )
+}
+
+pub fn prepare_with_progress(
+    saves_root: &Path,
+    storage_directory: &Path,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+    scan_progress: &mut dyn FnMut(&Path, index::ScanProgress),
+) -> Result<SessionCatalog, Error> {
     prepare_root(
         saves_root,
         storage_directory,
@@ -158,6 +176,7 @@ pub fn prepare(
         limits,
         cancelled,
         None,
+        scan_progress,
     )
 }
 
@@ -183,6 +202,7 @@ pub fn prepare_pinned(
             selected_identity: None,
             repository: None,
         }),
+        &mut |_, _| {},
     )
 }
 
@@ -215,6 +235,7 @@ pub fn prepare_selected_pinned(
             selected_identity: Some(selected.1),
             repository: None,
         }),
+        &mut |_, _| {},
     )
 }
 
@@ -229,6 +250,28 @@ pub fn prepare_repository_pinned(
     limits: pipeline::Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<SessionCatalog, Error> {
+    prepare_repository_pinned_with_progress(
+        root_label,
+        root,
+        selected,
+        repository,
+        generation,
+        limits,
+        cancelled,
+        &mut |_, _| {},
+    )
+}
+
+pub fn prepare_repository_pinned_with_progress(
+    root_label: &Path,
+    root: Arc<ilium_platform::animation_files::PinnedDirectory>,
+    selected: Option<(&Path, ilium_platform::animation_files::FileIdentity)>,
+    repository: Repository,
+    generation: u64,
+    limits: pipeline::Limits,
+    cancelled: &dyn Fn() -> bool,
+    scan_progress: &mut dyn FnMut(&Path, index::ScanProgress),
+) -> Result<SessionCatalog, Error> {
     let storage_label = repository.label().to_owned();
     prepare_root(
         root_label,
@@ -242,6 +285,7 @@ pub fn prepare_repository_pinned(
             selected_identity: selected.map(|value| value.1),
             repository: Some(repository),
         }),
+        scan_progress,
     )
 }
 
@@ -252,6 +296,7 @@ fn prepare_root(
     limits: pipeline::Limits,
     cancelled: &dyn Fn() -> bool,
     selected_root: Option<PinnedInput<'_>>,
+    scan_progress: &mut dyn FnMut(&Path, index::ScanProgress),
 ) -> Result<SessionCatalog, Error> {
     checkpoint(cancelled)?;
     if !saves_root.is_absolute() || !storage_directory.is_absolute() || generation == 0 {
@@ -281,9 +326,22 @@ fn prepare_root(
         Some(repository) => repository,
         None => Repository::new(storage_directory.to_owned())?,
     };
+    let mut report_root_inventory = |completed, total| {
+        scan_progress(
+            saves_root,
+            index::ScanProgress {
+                stage: index::ScanStage::SavedRootEntries,
+                completed,
+                total,
+            },
+        );
+    };
     let selected = match selected_root {
         Some(input) => Some(Arc::new(prepare_pinned_catalog(
-            saves_root, input.root, cancelled,
+            saves_root,
+            input.root,
+            cancelled,
+            &mut report_root_inventory,
         )?)),
         None => None,
     };
@@ -294,7 +352,11 @@ fn prepare_root(
             directories: selected.inventory.directories.clone(),
         }),
         None => match std::fs::symlink_metadata(saves_root) {
-            Ok(_) => Some(inventory(saves_root, cancelled)?),
+            Ok(_) => Some(inventory_with_progress(
+                saves_root,
+                cancelled,
+                &mut report_root_inventory,
+            )?),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         },
@@ -466,15 +528,23 @@ fn prepare_root(
         }
     }
     let prepared = match &selected {
-        Some(selected) => pipeline::prepare_catalog_pinned(
+        Some(selected) => pipeline::prepare_catalog_pinned_with_progress(
             &metadata,
             &contexts,
             generation,
             limits,
             cancelled,
             &selected.regions,
+            scan_progress,
         ),
-        None => pipeline::prepare_catalog(&metadata, &contexts, generation, limits, cancelled),
+        None => pipeline::prepare_catalog_with_progress(
+            &metadata,
+            &contexts,
+            generation,
+            limits,
+            cancelled,
+            scan_progress,
+        ),
     }
     .map_err(Error::Pipeline)?;
     verify_source_inventory(&observed, selected.as_deref(), cancelled)?;
@@ -555,6 +625,21 @@ fn pinned_inventory(
     ),
     Error,
 > {
+    pinned_inventory_with_progress(label, root, cancelled, &mut |_, _| {})
+}
+
+fn pinned_inventory_with_progress(
+    label: &Path,
+    root: &ilium_platform::animation_files::PinnedDirectory,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, Option<usize>),
+) -> Result<
+    (
+        Inventory,
+        BTreeMap<PathBuf, Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    ),
+    Error,
+> {
     checkpoint(cancelled)?;
     if !label.is_absolute()
         || label.components().any(|component| {
@@ -572,7 +657,7 @@ fn pinned_inventory(
     let mut directories = BTreeMap::new();
     let mut children = BTreeMap::new();
     // Keep the ordinary root's 4096-entry ceiling, separate from generic 1024-entry storage listing.
-    for entry in root.list_saved_catalog(MAX_DIRECTORY_ENTRIES)? {
+    for entry in root.list_saved_catalog_with_progress(MAX_DIRECTORY_ENTRIES, progress)? {
         checkpoint(cancelled)?;
         if !entry.is_directory {
             continue;
@@ -607,8 +692,9 @@ fn prepare_pinned_catalog(
     label: &Path,
     root: Arc<ilium_platform::animation_files::PinnedDirectory>,
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, Option<usize>),
 ) -> Result<PinnedCatalog, Error> {
-    let (inventory, children) = pinned_inventory(label, &root, cancelled)?;
+    let (inventory, children) = pinned_inventory_with_progress(label, &root, cancelled, progress)?;
     let mut regions = BTreeMap::new();
     for (label, child) in &children {
         checkpoint(cancelled)?;
@@ -674,17 +760,26 @@ fn discover_pinned_metadata(
 }
 
 fn inventory(root: &Path, cancelled: &dyn Fn() -> bool) -> Result<Inventory, Error> {
+    inventory_with_progress(root, cancelled, &mut |_, _| {})
+}
+
+fn inventory_with_progress(
+    root: &Path,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, Option<usize>),
+) -> Result<Inventory, Error> {
     checkpoint(cancelled)?;
     // Open the authored final entry before canonicalization can hide a link.
     let handle = NoFollowDirectory::open_root(root)?;
     let root = paths::canonicalize(root)?;
     let generation = secure_fs::directory_generation(&root)?;
-    collect_inventory(
+    collect_inventory_with_progress(
         &root,
         &handle,
         generation,
         std::fs::read_dir(&root)?,
         cancelled,
+        progress,
     )
 }
 fn collect_inventory(
@@ -694,13 +789,30 @@ fn collect_inventory(
     entries: impl Iterator<Item = io::Result<std::fs::DirEntry>>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Inventory, Error> {
+    collect_inventory_with_progress(root, handle, generation, entries, cancelled, &mut |_, _| {})
+}
+
+fn collect_inventory_with_progress(
+    root: &Path,
+    handle: &NoFollowDirectory,
+    generation: (u64, u64),
+    entries: impl Iterator<Item = io::Result<std::fs::DirEntry>>,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, Option<usize>),
+) -> Result<Inventory, Error> {
     let mut directories = BTreeMap::new();
+    let mut completed = 0;
+    progress(0, None);
     for (number, entry) in entries.enumerate() {
         checkpoint(cancelled)?;
         if number >= MAX_DIRECTORY_ENTRIES {
             return Err(Error::Limit("saves root directory entries"));
         }
         let entry = entry?;
+        completed += 1;
+        if completed % 64 == 0 {
+            progress(completed, None);
+        }
         let kind = entry.file_type()?;
         if kind.is_symlink() {
             return Err(Error::Invalid("saves root contains a direct symbolic link"));
@@ -723,6 +835,7 @@ fn collect_inventory(
             return Err(Error::Limit("complete directory admission batch"));
         }
     }
+    progress(completed, Some(completed));
     checkpoint(cancelled)?;
     if secure_fs::directory_generation(root)? != generation {
         return Err(changed(root, None));

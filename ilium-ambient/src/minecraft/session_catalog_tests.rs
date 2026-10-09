@@ -620,6 +620,74 @@ fn entry_cap_counts_ignored_files_and_aborts_before_repository_creation() {
 }
 
 #[test]
+fn path_backed_preparation_reports_saved_root_inventory_progress() {
+    let (_temporary, root, storage) = fixture();
+    for index in 0..130 {
+        std::fs::write(root.join(format!("synthetic-file-{index}")), b"").unwrap();
+    }
+    let mut updates = Vec::new();
+
+    let result = prepare_with_progress(
+        &root,
+        &storage,
+        1,
+        limits(),
+        &|| false,
+        &mut |directory, update| {
+            if update.stage == index::ScanStage::SavedRootEntries {
+                assert_eq!(directory, root);
+                updates.push((update.completed, update.total));
+            }
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.availability, Availability::EmptyRoot);
+    assert_eq!(
+        updates,
+        [(0, None), (64, None), (128, None), (130, Some(130))]
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pinned_preparation_reports_saved_root_inventory_progress() {
+    use ilium_platform::animation_files::PinnedDirectory;
+    let (_temporary, root, storage) = fixture();
+    for index in 0..130 {
+        std::fs::write(root.join(format!("synthetic-file-{index}")), b"").unwrap();
+    }
+    let pinned = Arc::new(
+        PinnedDirectory::from_host(Arc::new(NoFollowDirectory::open_root(&root).unwrap())).unwrap(),
+    );
+    let repository = Repository::new(storage).unwrap();
+    let mut updates = Vec::new();
+
+    let result = prepare_repository_pinned_with_progress(
+        &root,
+        pinned,
+        None,
+        repository,
+        1,
+        limits(),
+        &|| false,
+        &mut |directory, update| {
+            if update.stage == index::ScanStage::SavedRootEntries {
+                assert_eq!(directory, root);
+                updates.push((update.completed, update.total));
+            }
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.availability, Availability::EmptyRoot);
+    assert_eq!(
+        updates,
+        [(0, None), (64, None), (128, None), (130, Some(130))]
+    );
+}
+
+#[test]
 fn valid_metadata_without_region_is_reported_per_map_and_preserves_qualified_peer() {
     let (_temporary, root, storage) = fixture();
     let fresh = save(&root, "fresh unexplored world", 2, false);
@@ -706,7 +774,7 @@ fn canonical_seed_remains_bound_to_prepared_map_identity_without_world_writes() 
 fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spelling() {
     use super::super::{coverage::Line, projected_source, source_footprint};
     use crate::voxel_landscape::assets::budget::{ByteBudget, Cancel};
-    use std::sync::atomic::AtomicBool;
+    use std::{cell::RefCell, sync::atomic::AtomicBool};
 
     let (_temporary, root, storage) = fixture();
     let path = save(&root, "projected source root", 100, true);
@@ -742,13 +810,38 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         .filter(|&&position| position != [0, 0])
         .copied()
         .collect::<Vec<_>>();
-    let error =
-        projected_source::qualify(base, bound, &root, &request, &account, cancel, &|| false);
+    assert!(expected_missing.len() > 3);
+    let decode_progress = RefCell::new(Vec::new());
+    let error = projected_source::qualify_with_progress(
+        base,
+        bound,
+        &root,
+        &request,
+        &account,
+        cancel,
+        &|| false,
+        &mut |update| decode_progress.borrow_mut().push(update),
+    );
+    let error_message = match error.as_ref() {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("expected incomplete decoded source"),
+    };
+    let first_absent_rejection = format!("{:?}=absent", expected_missing[0]);
+    assert!(
+        error_message.contains(&first_absent_rejection),
+        "projected-source error should explain why requested chunks were missing: {error_message}"
+    );
+    assert_eq!(
+        error_message.matches('=').count(),
+        3,
+        "projected-source diagnostics should cap rejection examples: {error_message}"
+    );
     let (missing, first, missing_positions) = match error {
         Err(projected_source::Error::Unqualified {
             missing,
             first,
             missing_positions,
+            ..
         }) => (missing, first, missing_positions),
         Err(error) => panic!("expected incomplete decoded source, got {error}"),
         Ok(_) => panic!("expected incomplete decoded source"),
@@ -756,6 +849,12 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
     assert_eq!(missing_positions, expected_missing);
     assert_eq!(missing, missing_positions.len());
     assert_eq!(first, missing_positions.first().copied());
+    let decode_progress = decode_progress.into_inner();
+    assert_eq!(decode_progress.len(), request.support_chunks().len());
+    for (index, update) in decode_progress.iter().enumerate() {
+        assert_eq!(update.completed, index + 1);
+        assert_eq!(update.total, request.support_chunks().len());
+    }
     assert_eq!(std::fs::read(path.join("level.dat")).unwrap(), metadata);
     assert_eq!(
         std::fs::read(path.join("region/r.0.0.mca")).unwrap(),

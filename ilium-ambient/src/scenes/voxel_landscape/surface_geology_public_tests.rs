@@ -249,12 +249,10 @@ fn actual_mega_conifers_replace_ground_with_owned_podzol() {
             }
             assert_eq!(p[2], i32::from(world.columns[&[p[0], p[1]]].height) - 1);
             assert_eq!(block.state.property("snowy"), Some("false"));
-            assert!(
-                world
-                    .trees
-                    .iter()
-                    .any(|r| r.anchor == *anchor && r.source == source && r.projected_cells > 0)
-            );
+            assert!(world
+                .trees
+                .iter()
+                .any(|r| r.anchor == *anchor && r.source == source && r.projected_cells > 0));
             changed += 1;
         }
         assert!(

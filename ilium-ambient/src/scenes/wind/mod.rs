@@ -19,6 +19,7 @@
 mod flow;
 mod settings;
 mod sim;
+mod simd;
 
 pub use settings::WindSettings;
 
@@ -29,12 +30,20 @@ use sim::Sim;
 
 /// Glyph for dots piled to the merge threshold, and to twice and thrice it.
 const MERGED_GLYPHS: [char; 3] = ['\u{2022}', '\u{25cf}', '\u{25c9}'];
+/// Skip bitset setup when the population is sparse relative to the raster.
+const RASTER_DEDUP_MIN_DENSITY_DIVISOR: usize = 16;
 
 pub struct WindScene {
     settings: WindSettings,
     sim: Sim,
+    /// Reused per-cell occupancy counts for merged-dot rendering.
+    dot_counts: Vec<u16>,
+    /// Eight Braille subpixels per terminal cell for the merged render pass.
+    cell_subpixels: Vec<u8>,
     /// Merged-dot glyph per cell of the last frame, row-major.
     glyphs: Vec<Option<char>>,
+    /// Reused raster-pixel occupancy for deduplicating opaque dots before writes.
+    raster_coverage: Vec<u64>,
     glyph_width: u16,
     glyph_height: u16,
 }
@@ -51,36 +60,112 @@ impl WindScene {
         Self {
             sim: Sim::new(&settings),
             settings,
+            dot_counts: Vec::new(),
+            cell_subpixels: Vec::new(),
             glyphs: Vec::new(),
+            raster_coverage: Vec::new(),
             glyph_width: 0,
             glyph_height: 0,
         }
     }
 
-    /// Dots per cell of the current population.
-    fn counts(&self, width: u16, height: u16) -> Vec<u16> {
-        let mut counts = vec![0_u16; usize::from(width) * usize::from(height)];
-        for dot in self.sim.dots() {
-            let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
-            if column >= 0 && row >= 0 && column < i32::from(width) && row < i32::from(height) {
-                let index = row as usize * usize::from(width) + column as usize;
-                counts[index] = counts[index].saturating_add(1);
-            }
+    fn merged_glyph(merge_threshold: u32, count: u16) -> Option<char> {
+        let threshold = merge_threshold as u16;
+        if count < threshold {
+            None
+        } else if count < threshold * 2 {
+            Some(MERGED_GLYPHS[0])
+        } else if count < threshold * 3 {
+            Some(MERGED_GLYPHS[1])
+        } else {
+            Some(MERGED_GLYPHS[2])
         }
-        counts
     }
 
-    fn merged_glyph(&self, count: u16) -> Option<char> {
-        if !self.settings.merge_dots {
+    #[inline]
+    fn in_bounds_cell(x: f32, y: f32, width: u16, height: u16) -> Option<(usize, usize)> {
+        if !(0.0..f32::from(width)).contains(&x) || !(0.0..f32::from(height)).contains(&y) {
             return None;
         }
-        let threshold = self.settings.merge_threshold as u16;
-        let tier = usize::from(count / threshold);
-        (tier > 0).then(|| MERGED_GLYPHS[(tier - 1).min(MERGED_GLYPHS.len() - 1)])
+        Some((x as usize, y as usize))
     }
 
+    fn draw_positions_merged(
+        frame: &mut Frame<'_>,
+        positions: impl IntoIterator<Item = (f32, f32)>,
+        merge_threshold: u32,
+        counts: &mut Vec<u16>,
+        cell_subpixels: &mut Vec<u8>,
+        glyphs: &mut Vec<Option<char>>,
+    ) {
+        let cell_width = usize::from(frame.width);
+        let cell_height = usize::from(frame.height);
+        let cell_count = cell_width * cell_height;
+        counts.resize(cell_count, 0);
+        counts.fill(0);
+        cell_subpixels.resize(cell_count, 0);
+        cell_subpixels.fill(0);
+        let raster_width = frame.raster.width;
+        let merge_threshold = merge_threshold as u16;
+
+        for (x, y) in positions {
+            let Some((column, row)) = Self::in_bounds_cell(x, y, frame.width, frame.height) else {
+                continue;
+            };
+            let cell_index = row * cell_width + column;
+            counts[cell_index] = counts[cell_index].saturating_add(1);
+            let count = counts[cell_index];
+            if count < merge_threshold {
+                let sub_x = ((x - column as f32) * 2.0) as usize;
+                let sub_y = ((y - row as f32) * 4.0) as usize;
+                let subpixel = sub_y * 2 + sub_x;
+                cell_subpixels[cell_index] |= 1 << subpixel;
+            } else if count == merge_threshold {
+                cell_subpixels[cell_index] = 0;
+            }
+        }
+
+        glyphs.resize(cell_count, None);
+        for row in 0..cell_height {
+            let row_start = row * cell_width;
+            let raster_row_start = row * 4 * raster_width;
+            for column in 0..cell_width {
+                let index = row_start + column;
+                let glyph = Self::merged_glyph(merge_threshold as u32, counts[index]);
+                glyphs[index] = glyph;
+                if glyph.is_some() {
+                    continue;
+                }
+
+                let mut pixels = cell_subpixels[index];
+                let raster_cell_start = raster_row_start + column * 2;
+                while pixels != 0 {
+                    let subpixel = pixels.trailing_zeros() as usize;
+                    let sub_x = subpixel % 2;
+                    let sub_y = subpixel / 2;
+                    let raster_index = raster_cell_start + sub_y * raster_width + sub_x;
+                    frame.raster.opaque_dot_index_in_bounds(raster_index);
+                    pixels &= pixels - 1;
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
     fn draw_dot(frame: &mut Frame<'_>, dot: &sim::Dot) {
         let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
+        Self::draw_dot_at_cell(frame, dot, column, row);
+    }
+
+    #[cfg(test)]
+    fn draw_dot_at_cell(frame: &mut Frame<'_>, dot: &sim::Dot, column: i32, row: i32) {
+        Self::draw_position_at_cell(frame, dot.x, dot.y, column, row);
+    }
+
+    fn draw_position_at_cell(frame: &mut Frame<'_>, x: f32, y: f32, column: i32, row: i32) {
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
         if column < 0
             || row < 0
             || column >= i32::from(frame.width)
@@ -88,11 +173,53 @@ impl WindScene {
         {
             return;
         }
-        let fractional_x = dot.x - column as f32;
-        let fractional_y = dot.y - row as f32;
-        let sub_x = (column as usize) * 2 + ((fractional_x * 2.0) as usize).min(1);
-        let sub_y = (row as usize) * 4 + ((fractional_y * 4.0) as usize).min(3);
+        // In-bounds coordinates are nonnegative, and the raster scales are
+        // powers of two, so direct scaling preserves the legacy subpixel bins
+        // while avoiding per-dot floor/subtraction work.
+        let sub_x = ((x * 2.0) as usize).min(usize::from(frame.raster.width) - 1);
+        let sub_y = ((y * 4.0) as usize).min(usize::from(frame.raster.height) - 1);
         frame.raster.opaque_dot_in_bounds(sub_x, sub_y);
+    }
+
+    #[cfg(test)]
+    fn draw_dots_deduplicated(frame: &mut Frame<'_>, dots: &[sim::Dot], coverage: &mut Vec<u64>) {
+        Self::draw_positions_deduplicated(frame, dots.iter().map(|dot| (dot.x, dot.y)), coverage);
+    }
+
+    fn draw_positions_deduplicated(
+        frame: &mut Frame<'_>,
+        positions: impl IntoIterator<Item = (f32, f32)>,
+        coverage: &mut Vec<u64>,
+    ) {
+        let pixel_count = frame.raster.dots.len();
+        coverage.resize(pixel_count.div_ceil(u64::BITS as usize), 0);
+        coverage.fill(0);
+        let raster_width = frame.raster.width;
+
+        for (x, y) in positions {
+            let Some((column, row)) = Self::in_bounds_cell(x, y, frame.width, frame.height) else {
+                continue;
+            };
+            // `in_bounds_cell` rejects negative and non-finite coordinates.
+            // Power-of-two scaling is exact over the supported raster extent.
+            let sub_x = (x * 2.0) as usize;
+            let sub_y = (y * 4.0) as usize;
+            let index = sub_y * raster_width + sub_x;
+            debug_assert!(index < pixel_count);
+            coverage[index / u64::BITS as usize] |= 1 << (index % u64::BITS as usize);
+        }
+
+        for (word_index, &word) in coverage.iter().enumerate() {
+            let mut remaining = word;
+            while remaining != 0 {
+                let bit = remaining.trailing_zeros() as usize;
+                let index = word_index * u64::BITS as usize + bit;
+                // The bitset already yields a valid flat raster index; avoid
+                // dividing into coordinates only to multiply them back here.
+                frame.raster.opaque_dot_index_in_bounds(index);
+                remaining &= remaining - 1;
+            }
+        }
     }
 }
 
@@ -116,37 +243,32 @@ impl Scene for WindScene {
             self.sim
                 .set_mask(&OccupancyMask::empty(frame.width, frame.height));
         }
-        self.sim.advance(frame.time.as_secs_f32());
+        self.sim.advance_for_render(frame.time.as_secs_f32());
         self.glyph_width = frame.width;
         self.glyph_height = frame.height;
         if self.settings.merge_dots {
-            let counts = self.counts(frame.width, frame.height);
-            self.glyphs = counts
-                .iter()
-                .map(|count| self.merged_glyph(*count))
-                .collect();
+            Self::draw_positions_merged(
+                frame,
+                self.sim.render_positions(),
+                self.settings.merge_threshold,
+                &mut self.dot_counts,
+                &mut self.cell_subpixels,
+                &mut self.glyphs,
+            );
         } else {
             self.glyphs.clear();
-        }
-        if self.settings.merge_dots {
-            for dot in self.sim.dots() {
-                let (column, row) = (dot.x.floor() as i32, dot.y.floor() as i32);
-                if column < 0
-                    || row < 0
-                    || column >= i32::from(frame.width)
-                    || row >= i32::from(frame.height)
-                {
-                    continue;
+            if self.sim.render_positions().size_hint().0
+                >= frame.raster.dots.len() / RASTER_DEDUP_MIN_DENSITY_DIVISOR
+            {
+                Self::draw_positions_deduplicated(
+                    frame,
+                    self.sim.render_positions(),
+                    &mut self.raster_coverage,
+                );
+            } else {
+                for (x, y) in self.sim.render_positions() {
+                    Self::draw_position_at_cell(frame, x, y, x.floor() as i32, y.floor() as i32);
                 }
-                let index = row as usize * usize::from(frame.width) + column as usize;
-                if self.glyphs[index].is_some() {
-                    continue;
-                }
-                Self::draw_dot(frame, dot);
-            }
-        } else {
-            for dot in self.sim.dots() {
-                Self::draw_dot(frame, dot);
             }
         }
     }
@@ -177,3 +299,90 @@ mod tests;
 
 #[cfg(test)]
 mod mouse_tests;
+
+#[cfg(test)]
+mod raster_dedup_tests {
+    use super::{sim, WindScene};
+    use crate::raster::Raster;
+    use crate::scene::Frame;
+    use std::time::{Duration, SystemTime};
+
+    fn frame<'a>(raster: &'a mut Raster, cell_colors: &'a mut Vec<[u8; 3]>) -> Frame<'a> {
+        Frame {
+            raster,
+            cell_colors,
+            width: 4,
+            height: 3,
+            time: Duration::ZERO,
+            wall: Duration::ZERO,
+            now: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn deduplicated_raster_writes_match_per_dot_painting() {
+        let dots = [
+            sim::Dot {
+                x: 0.1,
+                y: 0.1,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 0.2,
+                y: 0.2,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 2.99,
+                y: 1.99,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: 3.0,
+                y: 2.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+            sim::Dot {
+                x: -0.1,
+                y: 1.0,
+                vx: 0.0,
+                vy: 0.0,
+                weight_roll: 0.0,
+            },
+        ];
+        let mut expected = Raster::default();
+        expected.resize(8, 12);
+        expected.dots[0] = 0.25;
+        expected.owner_ids[0] = 17;
+        let mut actual = Raster::default();
+        actual.resize(8, 12);
+        actual.dots[0] = 0.25;
+        actual.owner_ids[0] = 17;
+        let mut expected_colors = Vec::new();
+        let mut actual_colors = Vec::new();
+        {
+            let mut frame = frame(&mut expected, &mut expected_colors);
+            for dot in &dots {
+                WindScene::draw_dot(&mut frame, dot);
+            }
+        }
+        {
+            let mut coverage = Vec::new();
+            WindScene::draw_dots_deduplicated(
+                &mut frame(&mut actual, &mut actual_colors),
+                &dots,
+                &mut coverage,
+            );
+        }
+        assert_eq!(actual.dots, expected.dots);
+        assert_eq!(actual.owner_ids, expected.owner_ids);
+    }
+}

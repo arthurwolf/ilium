@@ -80,7 +80,7 @@ pub(super) fn stream_options(settings: &VideoSettings) -> StreamOptions {
 }
 
 impl VideoScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
     // palette. This scene follows it natively: its cell colours are mapped onto the
     // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
     // `Scene::set_palette` delivers later changes (applied from the next render).

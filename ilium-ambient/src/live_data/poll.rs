@@ -7,6 +7,55 @@ use std::time::Duration;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn live_poller_charges_its_native_worker_and_retires_after_join() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let poller = Poller::start(
+            "poller-admission-regression",
+            Duration::from_secs(60),
+            Duration::from_secs(1),
+            move |stop| {
+                entered_tx.send(()).unwrap();
+                while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Ok(((), None))
+            },
+        )
+        .expect("poller starts");
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("poller begins its first fetch");
+        let ticket = poller
+            .worker
+            .as_ref()
+            .and_then(Worker::join_observer)
+            .expect("native worker ticket");
+
+        assert_eq!(
+            quota.snapshot().worker_threads,
+            before.worker_threads + 1,
+            "live polling consumes the shared process worker allowance"
+        );
+        assert!(
+            ticket.metadata().requested_stack_bytes.is_some(),
+            "polling worker requests a stack covered by its resident debit"
+        );
+
+        drop(poller);
+        assert_eq!(
+            ticket.join_until(std::time::Instant::now() + Duration::from_secs(2)),
+            Ok(ilium_platform::owned_worker::WorkerExit::Joined)
+        );
+        assert_eq!(quota.snapshot().worker_threads, before.worker_threads);
+        drop(ticket);
+    }
+
     #[test]
     fn failed_request_keeps_last_good_data_and_observation_timestamp() {
         let mut snapshot = Snapshot::<u32>::default();

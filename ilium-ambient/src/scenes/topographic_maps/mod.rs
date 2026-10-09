@@ -22,8 +22,11 @@ pub use settings::TopographicMapsSettings;
 use crate::control::SceneSettings;
 use crate::registry::AmbientSettings;
 use crate::scene::{Frame, Scene, SceneEnv};
-use crate::source::Worker;
 use crate::style::ScenePalette;
+use crate::{
+    resources::{AmbientResources, Stored, WorkerCost},
+    source::Worker,
+};
 use data::Heightfield;
 use projection::Camera;
 use settings::{BelowStyle, PaletteChoice, PanStyle, Projection, WorldId};
@@ -34,17 +37,23 @@ use std::sync::Arc;
 const DISSOLVE_SECONDS: f64 = 4.0;
 /// Dots per second the view travels at 100 % pan speed.
 const DOTS_PER_SECOND: f64 = 5.0;
+// The largest embedded heightfield is 2048x1024 f32 values. Reserve its full
+// retained allocation before decoding or generating any world.
+const MAX_HEIGHTFIELD_BYTES: usize = 2048 * 1024 * std::mem::size_of::<f32>();
+// PNG decoding holds a temporary raster alongside the f32 result. This covers
+// the measured image peak and is conservative for fictional-world generation.
+const HEIGHTFIELD_WORKER_BYTES: usize = 64 * 1024 * 1024;
 const NO_LEVEL: i32 = i32::MIN;
 
 struct Loaded {
     id: WorldId,
-    field: Arc<Heightfield>,
+    field: Arc<Stored<Heightfield>>,
     interval_m: f32,
 }
 
 struct Loading {
     id: WorldId,
-    receiver: Receiver<Result<Heightfield, String>>,
+    receiver: Receiver<Result<Stored<Heightfield>, String>>,
     _worker: Worker,
 }
 
@@ -56,6 +65,8 @@ pub struct TopographicMapsScene {
     previous: Option<(Loaded, f64)>,
     loading: Option<Loading>,
     failed: Option<(WorldId, String)>,
+    waiting_for_capacity: bool,
+    resources: AmbientResources,
     heights: Vec<f32>,
     levels: Vec<i32>,
     from_previous: Vec<bool>,
@@ -94,8 +105,8 @@ fn dot_hash(x: usize, y: usize) -> f32 {
 }
 
 impl TopographicMapsScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. This scene follows it natively: its elevation tints are
@@ -110,6 +121,8 @@ impl TopographicMapsScene {
             previous: None,
             loading: None,
             failed: None,
+            waiting_for_capacity: false,
+            resources: env.resources.clone(),
             heights: Vec::new(),
             levels: Vec::new(),
             from_previous: Vec::new(),
@@ -126,8 +139,8 @@ impl TopographicMapsScene {
         }
     }
 
-    fn wrap(&self, id: WorldId, field: Heightfield) -> Loaded {
-        let interval_m = self.interval_for(&field);
+    fn wrap(&self, id: WorldId, field: Stored<Heightfield>) -> Loaded {
+        let interval_m = self.interval_for(field.view());
         Loaded {
             id,
             field: Arc::new(field),
@@ -180,20 +193,49 @@ impl TopographicMapsScene {
             || self.loading.is_some()
             || self.failed.as_ref().is_some_and(|(id, _)| *id == desired)
         {
+            self.waiting_for_capacity = false;
             return;
         }
+        let storage = match self.resources.reserve_storage(MAX_HEIGHTFIELD_BYTES) {
+            Ok(storage) => storage,
+            Err(_) => {
+                self.waiting_for_capacity = true;
+                return;
+            }
+        };
+        let admission = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: HEIGHTFIELD_WORKER_BYTES,
+        }) {
+            Ok(admission) => admission,
+            Err(_) => {
+                self.waiting_for_capacity = true;
+                return;
+            }
+        };
         let (sender, receiver) = std::sync::mpsc::channel();
         let seed = self.settings.fictional_seed;
-        let worker = Worker::spawn("topography", move |stop| {
+        let worker_storage = Arc::clone(&storage);
+        let worker = Worker::start_admitted("topography", admission, move |stop| {
             if let Some(result) = data::load_world(desired, seed, &stop) {
+                let result = result.map(|field| Stored::new(field, worker_storage));
                 let _ = sender.send(result);
             }
         });
-        self.loading = Some(Loading {
-            id: desired,
-            receiver,
-            _worker: worker,
-        });
+        match worker {
+            Ok(worker) => {
+                self.waiting_for_capacity = false;
+                self.failed = None;
+                self.loading = Some(Loading {
+                    id: desired,
+                    receiver,
+                    _worker: worker,
+                });
+            }
+            Err(error) => {
+                self.failed = Some((desired, format!("world worker start: {error}")));
+            }
+        }
     }
 
     fn camera(&self, seconds: f64, width: usize, height: usize) -> Camera {
@@ -280,7 +322,7 @@ impl TopographicMapsScene {
                     Some((old, progress)) if dot_hash(x, y) >= progress => (old, true),
                     _ => (current, false),
                 };
-                let elevation = loaded.field.sample(longitude, latitude);
+                let elevation = loaded.field.view().sample(longitude, latitude);
                 let index = y * width + x;
                 self.heights[index] = elevation;
                 self.levels[index] = ((elevation - zero) / loaded.interval_m).floor() as i32;
@@ -401,8 +443,8 @@ impl TopographicMapsScene {
                     self.settings.palette,
                     loaded.id,
                     elevation - self.last_zero_m,
-                    loaded.field.min_m,
-                    loaded.field.max_m,
+                    loaded.field.view().min_m,
+                    loaded.field.view().max_m,
                 ));
             }
         }
@@ -458,11 +500,11 @@ impl Scene for TopographicMapsScene {
         let current_interval = self
             .current
             .as_ref()
-            .map(|loaded| self.interval_for(&loaded.field));
+            .map(|loaded| self.interval_for(loaded.field.view()));
         let previous_interval = self
             .previous
             .as_ref()
-            .map(|(loaded, _)| self.interval_for(&loaded.field));
+            .map(|(loaded, _)| self.interval_for(loaded.field.view()));
         if let (Some(loaded), Some(interval)) = (self.current.as_mut(), current_interval) {
             loaded.interval_m = interval;
         }
@@ -479,20 +521,31 @@ impl Scene for TopographicMapsScene {
             }
         }
         let Some(loaded) = self.current.as_ref() else {
-            return self
-                .loading
-                .as_ref()
-                .map(|next| format!("Loading {}…", next.id.label()));
+            return Some(self.loading.as_ref().map_or_else(
+                || {
+                    if self.waiting_for_capacity {
+                        "Waiting for worker capacity…".to_owned()
+                    } else {
+                        "Loading world…".to_owned()
+                    }
+                },
+                |next| format!("Loading {}…", next.id.label()),
+            ));
         };
         let loading = self.loading.as_ref().map_or(String::new(), |next| {
             format!(" — loading {}", next.id.label())
         });
+        let waiting = if self.waiting_for_capacity {
+            " — waiting for worker capacity"
+        } else {
+            ""
+        };
         Some(format!(
-            "{} — {} m contours, relief {:.1} to {:.1} km{loading}",
-            loaded.field.name,
+            "{} — {} m contours, relief {:.1} to {:.1} km{loading}{waiting}",
+            loaded.field.view().name,
             loaded.interval_m,
-            loaded.field.min_m / 1000.0,
-            loaded.field.max_m / 1000.0,
+            loaded.field.view().min_m / 1000.0,
+            loaded.field.view().max_m / 1000.0,
         ))
     }
 }

@@ -107,6 +107,46 @@ fn mars_has_its_big_volcano_and_deep_basin() {
 }
 
 #[test]
+fn world_loading_retries_after_shared_worker_capacity_returns() {
+    let (mut execution, resources) = crate::resources::isolated_test_resources();
+    let pressure = resources
+        .reserve_storage(2304 * 1024 * 1024)
+        .expect("fill the isolated fixture's physical allocation budget");
+    let env = SceneEnv::for_test(std::env::temp_dir(), resources);
+    let mut scene = TopographicMapsScene::new(&settings_for(WorldId::Mars), &env);
+
+    scene.advance_loading(0.0);
+    assert!(scene.loading.is_none());
+    assert!(scene.waiting_for_capacity);
+    assert!(scene.status().unwrap().contains("worker capacity"));
+
+    drop(pressure);
+    scene.advance_loading(0.0);
+    assert!(
+        scene.loading.is_some(),
+        "capacity recovery must retry the world"
+    );
+    let ticket = scene
+        .loading
+        .as_ref()
+        .unwrap()
+        ._worker
+        .join_observer()
+        .unwrap();
+    render_loaded(&mut scene, 0.0, 80, 24);
+    assert!(scene.current.is_some());
+    ticket
+        .join_until(std::time::Instant::now() + Duration::from_secs(5))
+        .unwrap();
+
+    drop(scene);
+    execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+    execution
+        .join_until_background(std::time::Instant::now() + Duration::from_secs(5))
+        .unwrap();
+}
+
+#[test]
 fn fictional_worlds_are_deterministic_and_seed_dependent() {
     let never = AtomicBool::new(false);
     for world in WorldId::FICTIONAL {

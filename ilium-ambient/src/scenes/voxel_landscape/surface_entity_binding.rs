@@ -275,7 +275,7 @@ pub fn requests(
                     pack: fallback_pack.clone(),
                     location: TextureLocation::Resource {
                         id: ResourceId::parse(&format!("minecraft:{path}"))?,
-                        alias_reason: Some(Label::new("Reviewed installed Whimscape full-pack private fauna fallback; source remains explicit, not selected-native")?),
+                    alias_reason: Some(Label::new("Reviewed alternate full-pack fauna fallback; source remains explicit, not selected-native")?),
                     },
                     schedule: ScheduleSource::AutomaticJava,
                     expected_source_sha256: None,

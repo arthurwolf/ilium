@@ -80,6 +80,47 @@ fn only_complete_saved_chunks_enter_coverage() {
 }
 
 #[test]
+fn chunk_payload_progress_reports_each_completed_attempt() {
+    let requested = [[0, 0], [1, 0], [2, 0]].into();
+    let mut updates = Vec::new();
+    let result = load_with_ceiling(
+        &requested,
+        Limits::default(),
+        [MAX_CHUNKS, MAX_STORAGE_CHARGE],
+        &|| false,
+        &mut |update| updates.push(update),
+        |position| {
+            Ok(if position[0] == 1 {
+                None
+            } else {
+                Some(decoded(position, "full", &(-4..=19).collect::<Vec<_>>()))
+            })
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.chunks.len(), 2);
+    assert_eq!(result.rejected_chunks, 1);
+    assert_eq!(
+        updates,
+        [
+            LoadProgress {
+                completed: 1,
+                total: 3,
+            },
+            LoadProgress {
+                completed: 2,
+                total: 3,
+            },
+            LoadProgress {
+                completed: 3,
+                total: 3,
+            },
+        ]
+    );
+}
+
+#[test]
 fn oversized_request_is_rejected_before_reading() {
     let calls = Cell::new(0);
     let result = load_with(
@@ -364,6 +405,7 @@ fn projected_ceiling_admits_a_larger_request_but_never_invents_missing_chunks() 
         },
         [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
         &|| false,
+        &mut |_| {},
         |_| {
             calls.set(calls.get() + 1);
             Ok(None)
@@ -389,6 +431,7 @@ fn projected_ceiling_rejects_overflow_before_any_read() {
         },
         [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
         &|| false,
+        &mut |_| {},
         |_| {
             calls.set(calls.get() + 1);
             Ok(None)

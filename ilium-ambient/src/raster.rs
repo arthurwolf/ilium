@@ -84,7 +84,14 @@ impl Raster {
     /// without paying the generic validation cost in release builds.
     pub(crate) fn opaque_dot_in_bounds(&mut self, x: usize, y: usize) {
         debug_assert!(x < self.width && y < self.height);
-        let index = y * self.width + x;
+        self.opaque_dot_index_in_bounds(y * self.width + x);
+    }
+
+    /// Paints a previously bounds-checked flat pixel index without converting
+    /// through raster coordinates. The unresolved-dot owner semantics are
+    /// identical to `opaque_dot_in_bounds`.
+    pub(crate) fn opaque_dot_index_in_bounds(&mut self, index: usize) {
+        debug_assert!(index < self.dots.len());
         if self.dots[index] < 1.0 {
             self.dots[index] = 1.0;
         }
@@ -316,6 +323,22 @@ mod painted_owner_tests {
         actual.resize(4, 4);
         actual.owned_dot(1, 2, 0.8, 7);
         actual.opaque_dot_in_bounds(1, 2);
+
+        assert_eq!(actual.dots, expected.dots);
+        assert_eq!(actual.owner_ids, expected.owner_ids);
+    }
+
+    #[test]
+    fn opaque_index_write_matches_coordinate_write_and_clears_owner() {
+        let mut expected = Raster::default();
+        expected.resize(4, 4);
+        expected.owned_dot(3, 2, 0.8, 17);
+        expected.opaque_dot_in_bounds(3, 2);
+
+        let mut actual = Raster::default();
+        actual.resize(4, 4);
+        actual.owned_dot(3, 2, 0.8, 17);
+        actual.opaque_dot_index_in_bounds(2 * 4 + 3);
 
         assert_eq!(actual.dots, expected.dots);
         assert_eq!(actual.owner_ids, expected.owner_ids);

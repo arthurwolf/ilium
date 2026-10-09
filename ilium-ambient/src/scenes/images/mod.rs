@@ -2,8 +2,9 @@
 //! shown as a slideshow with cross-fades and slow Ken-Burns motion.
 //!
 //! This replaces the client's former single "static image" background and
-//! keeps its colour math (see `adjust`). Loading, decoding and discovery run
-//! on one owned worker thread; `render` never blocks.
+//! keeps its colour math (see `adjust`). The ordered loader owns discovery and
+//! requests, local and remote reads use the finite I/O bank, and decoding uses
+//! the finite CPU bank; `render` never blocks.
 //!
 //! Data sources: only files the user names and https URLs the user (or the
 //! built-in list) names; downloads go through `source::fetch_cached`
@@ -19,12 +20,14 @@ mod decode;
 mod discover;
 mod encoded;
 mod failure;
+mod generic_prepared;
 mod list;
 mod mailbox;
 mod motion;
 mod png_layout;
 mod png_prepared;
 mod prepared;
+mod remote_fetch;
 mod render;
 mod settings;
 mod slideshow;
@@ -217,7 +220,7 @@ fn constructor_storage_bytes(
 }
 
 impl ImagesScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
     // palette. This scene follows it natively: its cell colours are mapped onto the
     // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
     // `Scene::set_palette` delivers later changes (applied from the next render).

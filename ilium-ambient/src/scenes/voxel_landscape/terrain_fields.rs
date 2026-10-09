@@ -146,9 +146,8 @@ impl TerrainFields {
         island_weight: f64,
         uncarved_height: i16,
     ) -> Option<(i16, Option<i16>)> {
-        let wetland_core = climate.humidity > 0.70
-            && climate.continentalness < 0.18
-            && mountain_height <= 32.0;
+        let wetland_core =
+            climate.humidity > 0.70 && climate.continentalness < 0.18 && mountain_height <= 32.0;
         if climate.continentalness <= 0.08
             || mountain_height >= 48.0
             || island_weight >= 0.85
@@ -288,14 +287,18 @@ impl TerrainFields {
         let uncarved_height = (f64::from(uncarved_height) + relief)
             .round()
             .clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
-        let lake = self.inland_lake_basin(
-            x,
-            z,
-            climate,
-            mountain_height,
-            island_weight,
-            uncarved_height,
-        );
+        let lake = if landform == Landform::Wetland {
+            None
+        } else {
+            self.inland_lake_basin(
+                x,
+                z,
+                climate,
+                mountain_height,
+                island_weight,
+                uncarved_height,
+            )
+        };
         let uncarved_height = lake.map_or(uncarved_height, |(height, _)| height);
         let valley_strength = if rivers && !island {
             1.0 - smoothstep(0.015, 0.075, climate.river_distance)
@@ -376,6 +379,48 @@ mod tests {
         }
         assert!(wet >= 2, "wetland core remains mostly dry: {wet} pools");
         assert!(dry >= 1, "wetland core needs above-water banks");
+    }
+
+    #[test]
+    fn blended_wetland_outside_core_does_not_become_an_elevated_lake() {
+        let terrain = TerrainFields::new(71839);
+        let (x, z) = (-1404, -1466);
+        let climate = TerrainClimate {
+            continentalness: 0.17,
+            temperature: 0.65,
+            humidity: 0.90,
+            erosion: -0.55,
+            weirdness: 0.0,
+            ridge: 0.64,
+            river_distance: 0.30,
+            detail: 0.0,
+            island: 0.0,
+        };
+        let inland = smoothstep(-0.08, 0.35, climate.continentalness);
+        let mountainous = inland * (1.0 - smoothstep(-0.55, 0.38, climate.erosion));
+        let mountain_height = 128.0 * mountainous * climate.ridge.powi(2);
+        assert!((32.0..48.0).contains(&mountain_height));
+
+        let possible_lake =
+            terrain.inland_lake_basin(x, z, climate, mountain_height, 0.0, SURFACE_SEA_LEVEL);
+        assert!(
+            matches!(possible_lake, Some((height, Some(level)))
+                if height > SURFACE_SEA_LEVEL + 3 && level > SURFACE_SEA_LEVEL),
+            "fixture must exercise the elevated-lake candidate: {possible_lake:?}"
+        );
+
+        let sample = terrain.shape(x, z, climate, false);
+        assert_eq!(sample.landform, Landform::Wetland, "{sample:?}");
+        assert!(
+            sample.uncarved_height <= SURFACE_SEA_LEVEL + 3,
+            "blended wetland shelf was raised by an inland lake: {sample:?}"
+        );
+        assert!(
+            sample
+                .water_level
+                .is_none_or(|level| level <= SURFACE_SEA_LEVEL),
+            "blended wetland acquired elevated lake water: {sample:?}"
+        );
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub struct DecodedImage {
     pub pixels: Vec<[u8; 3]>,
     // Last: original pixels remain charged through every cache/scene Arc owner.
     _pixel_storage: std::sync::Arc<ilium_execution::StorageAdmission>,
+    #[cfg(test)]
+    pub(super) decode_thread_name: String,
 }
 
 impl PartialEq for DecodedImage {
@@ -58,6 +60,10 @@ impl DecodedImage {
             height,
             pixels,
             _pixel_storage: storage,
+            decode_thread_name: std::thread::current()
+                .name()
+                .unwrap_or("unnamed")
+                .to_owned(),
         }
     }
 
@@ -107,24 +113,121 @@ pub fn decode_image(
     max_height: u32,
     resources: &crate::resources::AmbientResources,
 ) -> Result<DecodedImage, String> {
+    decode_image_cancellable(bytes, limits, max_width, max_height, resources, &|| false)
+}
+
+/// Decode while periodically observing the owning worker's cancellation flag.
+/// The bounded reader chunk makes cancellation responsive even when an image
+/// backend asks the source for one large buffer.
+pub(super) fn decode_image_cancellable(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    max_width: u32,
+    max_height: u32,
+    resources: &crate::resources::AmbientResources,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<DecodedImage, String> {
+    decode_image_cancellable_with_alloc(
+        bytes,
+        limits,
+        max_width,
+        max_height,
+        resources,
+        cancelled,
+        limits.max_pixels.saturating_mul(6).min(1 << 30),
+    )
+}
+
+pub(super) fn decode_image_cancellable_with_alloc(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    max_width: u32,
+    max_height: u32,
+    resources: &crate::resources::AmbientResources,
+    cancelled: &dyn Fn() -> bool,
+    max_alloc: u64,
+) -> Result<DecodedImage, String> {
+    check_cancelled(cancelled)?;
     if bytes.len() as u64 > limits.max_file_bytes {
         return Err(format!(
             "file is larger than {} MB",
             limits.max_file_bytes / (1024 * 1024)
         ));
     }
-    let mut reader = ImageReader::new(Cursor::new(bytes))
+    let reader = CancelCursor {
+        cursor: Cursor::new(bytes),
+        cancelled,
+    };
+    let mut reader = ImageReader::new(reader)
         .with_guessed_format()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            if cancelled() {
+                "image preparation cancelled".to_owned()
+            } else {
+                error.to_string()
+            }
+        })?;
     reader.limits({
         let mut decoder_limits = Limits::default();
         decoder_limits.max_image_width = Some(limits.max_width);
         decoder_limits.max_image_height = Some(limits.max_height);
-        decoder_limits.max_alloc = Some(limits.max_pixels.saturating_mul(6).min(1 << 30));
+        decoder_limits.max_alloc = Some(max_alloc);
         decoder_limits
     });
-    let decoder = reader.into_decoder().map_err(decoder_error)?;
-    pixels_from_decoder(decoder, limits, max_width, max_height, resources, &|| false)
+    let decoder = reader.into_decoder().map_err(|error| {
+        if cancelled() {
+            "image preparation cancelled".to_owned()
+        } else {
+            decoder_error(error)
+        }
+    })?;
+    pixels_from_decoder(decoder, limits, max_width, max_height, resources, cancelled)
+}
+
+pub(super) fn inspect_dimensions_cancellable(
+    bytes: &[u8],
+    limits: &DecodeLimits,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(u32, u32), String> {
+    check_cancelled(cancelled)?;
+    if bytes.len() as u64 > limits.max_file_bytes {
+        return Err("image exceeds encoded file limit".to_owned());
+    }
+    let reader = CancelCursor {
+        cursor: Cursor::new(bytes),
+        cancelled,
+    };
+    let dimensions = ImageReader::new(reader)
+        .with_guessed_format()
+        .map_err(|error| {
+            if cancelled() {
+                "image preparation cancelled".to_owned()
+            } else {
+                format!("not a readable image ({error})")
+            }
+        })?
+        .into_dimensions()
+        .map_err(|error| {
+            if cancelled() {
+                "image preparation cancelled".to_owned()
+            } else {
+                format!("not a readable image ({error})")
+            }
+        })?;
+    check_cancelled(cancelled)?;
+    let pixels = u64::from(dimensions.0) * u64::from(dimensions.1);
+    if dimensions.0 == 0
+        || dimensions.1 == 0
+        || dimensions.0 > limits.max_width
+        || dimensions.1 > limits.max_height
+        || pixels > limits.max_pixels
+    {
+        return Err(format!(
+            "image is too large ({} x {} pixels)",
+            dimensions.0, dimensions.1
+        ));
+    }
+    Ok(dimensions)
 }
 
 fn decoder_error(error: image::ImageError) -> String {
@@ -190,16 +293,19 @@ impl CancelCursor<'_> {
 impl Read for CancelCursor<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.check()?;
-        self.cursor.read(buffer)
+        let limit = buffer.len().min(16 * 1024);
+        self.cursor.read(&mut buffer[..limit])
     }
 }
 impl BufRead for CancelCursor<'_> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         self.check()?;
-        self.cursor.fill_buf()
+        let buffer = self.cursor.fill_buf()?;
+        let limit = buffer.len().min(16 * 1024);
+        Ok(&buffer[..limit])
     }
     fn consume(&mut self, amount: usize) {
-        self.cursor.consume(amount);
+        self.cursor.consume(amount.min(16 * 1024));
     }
 }
 impl Seek for CancelCursor<'_> {
@@ -281,6 +387,11 @@ fn pixels_from_decoder(
         height: rgba.height(),
         pixels,
         _pixel_storage: storage,
+        #[cfg(test)]
+        decode_thread_name: std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned(),
     })
 }
 
@@ -403,6 +514,31 @@ mod tests {
     }
     use super::fixtures::*;
     use super::*;
+
+    #[test]
+    fn generic_decoder_observes_cancellation_between_bounded_source_reads() {
+        let bytes = jpeg_bytes(2048, 1024, |x, y| {
+            let value = (x.wrapping_mul(37).wrapping_add(y.wrapping_mul(91)) % 256) as u8;
+            [
+                value,
+                value.wrapping_add(x as u8),
+                value.wrapping_add(y as u8),
+            ]
+        });
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let cancelled = || reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 12;
+        let error = decode_image_cancellable(
+            &bytes,
+            &DecodeLimits::default(),
+            2048,
+            1024,
+            &crate::resources::test_resources(),
+            &cancelled,
+        )
+        .expect_err("decode must stop after the source owner cancels");
+        assert_eq!(error, "image preparation cancelled");
+        assert!(reads.load(std::sync::atomic::Ordering::Relaxed) > 12);
+    }
 
     fn isolated_pixels(
         worker_bytes: usize,

@@ -92,7 +92,28 @@ pub fn prepare_catalog(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedCatalog, Error> {
-    prepare_catalog_regions(catalog, bindings, generation, limits, cancelled, None)
+    prepare_catalog_regions(
+        catalog,
+        bindings,
+        generation,
+        limits,
+        cancelled,
+        None,
+        &mut |_, _| {},
+    )
+}
+
+pub fn prepare_catalog_with_progress(
+    catalog: &catalog::Catalog,
+    bindings: &BTreeMap<PathBuf, MapContext>,
+    generation: u64,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(&std::path::Path, index::ScanProgress),
+) -> Result<PreparedCatalog, Error> {
+    prepare_catalog_regions(
+        catalog, bindings, generation, limits, cancelled, None, progress,
+    )
 }
 
 /// Catalog paths are opaque binding keys here. Every read resolves from the
@@ -105,6 +126,26 @@ pub fn prepare_catalog_pinned(
     cancelled: &dyn Fn() -> bool,
     regions: &BTreeMap<PathBuf, std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>>,
 ) -> Result<PreparedCatalog, Error> {
+    prepare_catalog_pinned_with_progress(
+        catalog,
+        bindings,
+        generation,
+        limits,
+        cancelled,
+        regions,
+        &mut |_, _| {},
+    )
+}
+
+pub fn prepare_catalog_pinned_with_progress(
+    catalog: &catalog::Catalog,
+    bindings: &BTreeMap<PathBuf, MapContext>,
+    generation: u64,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    regions: &BTreeMap<PathBuf, std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>>,
+    progress: &mut dyn FnMut(&std::path::Path, index::ScanProgress),
+) -> Result<PreparedCatalog, Error> {
     prepare_catalog_regions(
         catalog,
         bindings,
@@ -112,6 +153,7 @@ pub fn prepare_catalog_pinned(
         limits,
         cancelled,
         Some(regions),
+        progress,
     )
 }
 
@@ -124,6 +166,7 @@ fn prepare_catalog_regions(
     regions: Option<
         &BTreeMap<PathBuf, std::sync::Arc<ilium_platform::animation_files::PinnedDirectory>>,
     >,
+    progress: &mut dyn FnMut(&std::path::Path, index::ScanProgress),
 ) -> Result<PreparedCatalog, Error> {
     prepare_catalog_with(
         catalog,
@@ -152,9 +195,18 @@ fn prepare_catalog_regions(
                     ),
                     None => None,
                 };
+                let mut report_scan = |update| progress(&save.directory, update);
                 let allocation = match pinned {
-                    Some(directory) => index::allocated_chunks_pinned(directory, cancelled),
-                    None => index::allocated_chunks(&region_directory, cancelled),
+                    Some(directory) => index::allocated_chunks_pinned_with_progress(
+                        directory,
+                        cancelled,
+                        &mut report_scan,
+                    ),
+                    None => index::allocated_chunks_with_progress(
+                        &region_directory,
+                        cancelled,
+                        &mut report_scan,
+                    ),
                 }
                 .map_err(|error| (matches!(error, region::Error::Cancelled), error.to_string()))?;
                 report.allocated_chunks = allocation.chunks.len();
@@ -164,14 +216,34 @@ fn prepare_catalog_regions(
                     .spawn_position
                     .map(|[x, _, z]| [x.div_euclid(16), z.div_euclid(16)])
                     .unwrap_or([0, 0]);
-                let search = windows::search(
+                let search = windows::search_with_progress(
                     &allocation.chunks,
                     anchor,
                     &context.recent,
                     limits.windows,
                     cancelled,
+                    &mut |completed, total| {
+                        progress(
+                            &save.directory,
+                            index::ScanProgress {
+                                stage: index::ScanStage::CandidateWindows,
+                                completed,
+                                total: Some(total),
+                            },
+                        )
+                    },
                 )
                 .map_err(|error| (error == windows::Error::Cancelled, error.to_string()))?;
+                if search.scan_complete && search.work_used < limits.windows.work_units {
+                    progress(
+                        &save.directory,
+                        index::ScanProgress {
+                            stage: index::ScanStage::CandidateWindows,
+                            completed: search.work_used,
+                            total: Some(search.work_used),
+                        },
+                    );
+                }
                 report.header_candidates = search.header_complete;
                 report.scan_complete = search.scan_complete;
                 let source = evidence::Source {
@@ -179,21 +251,41 @@ fn prepare_catalog_regions(
                     generation,
                 };
                 let output = match pinned {
-                    Some(directory) => preparation::load_candidates_pinned(
+                    Some(directory) => preparation::load_candidates_pinned_with_progress(
                         directory,
                         source,
                         &search.candidates,
                         limits.loading,
                         limits.preparation,
                         cancelled,
+                        &mut |update| {
+                            progress(
+                                &save.directory,
+                                index::ScanProgress {
+                                    stage: index::ScanStage::ChunkPayloads,
+                                    completed: update.completed,
+                                    total: Some(update.total),
+                                },
+                            )
+                        },
                     ),
-                    None => preparation::load_candidates(
+                    None => preparation::load_candidates_with_progress(
                         &region_directory,
                         source,
                         &search.candidates,
                         limits.loading,
                         limits.preparation,
                         cancelled,
+                        &mut |update| {
+                            progress(
+                                &save.directory,
+                                index::ScanProgress {
+                                    stage: index::ScanStage::ChunkPayloads,
+                                    completed: update.completed,
+                                    total: Some(update.total),
+                                },
+                            )
+                        },
                     ),
                 }
                 .map_err(|error| {

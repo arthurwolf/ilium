@@ -317,7 +317,7 @@ fn village_generation_appearance_changes_preserve_the_complete_same_window_snaps
         hue_degrees: 17,
         saturation_percent: 0,
         lightness_percent: 5,
-        pack_profile: 10,
+        pack_profile: 7,
         ..settings.clone()
     };
     let second = prepare(region, &appearance, || false).unwrap();
@@ -367,12 +367,10 @@ fn village_generation_structure_zero_preserves_terrain_and_ecology_controls() {
     assert!(!disabled.blocks.values().any(|block| matches!(&block.owner,
         SourceOwner::Structure { source, .. } if source.starts_with("homage:village/"))));
     assert!(entities(&disabled, region, true).is_empty());
-    assert!(
-        !disabled
-            .structures
-            .iter()
-            .any(|record| record.source.starts_with("minecraft:village_"))
-    );
+    assert!(!disabled
+        .structures
+        .iter()
+        .any(|record| record.source.starts_with("minecraft:village_")));
     let bare_settings = VoxelLandscapeSettings {
         vegetation_percent: 0,
         ..disabled_settings
@@ -446,11 +444,9 @@ fn village_generation_full_prepared_air_conflict_outside_the_halo_rejects_the_ow
         .unwrap()
         .collect();
     assert_eq!(visible_cells.len(), 1);
-    assert!(
-        visible_cells
-            .iter()
-            .all(|(position, _)| !reserved.contains(position))
-    );
+    assert!(visible_cells
+        .iter()
+        .all(|(position, _)| !reserved.contains(position)));
     assert!(!reserved.contains(&blocked));
     reserve_village_footprint_owners(
         prepared.cells().map(|(position, _)| position),
@@ -461,12 +457,10 @@ fn village_generation_full_prepared_air_conflict_outside_the_halo_rejects_the_ow
         &|| false,
     )
     .unwrap();
-    assert!(
-        village
-            .writes
-            .keys()
-            .all(|position| reserved.contains(position))
-    );
+    assert!(village
+        .writes
+        .keys()
+        .all(|position| reserved.contains(position)));
     assert!(!reserved.contains(&visible));
     let admission = Prepared::prepare(
         &template,
@@ -564,11 +558,9 @@ fn village_generation_owner_lookup_caches_some_none_and_validates_before_reserva
     .unwrap();
     assert!(polls.get() <= 32, "cached owner was assembled again");
     assert_eq!(hash2(71839 ^ 0x0076_696c_6c61_6765, 0, 0) % 100, 83);
-    assert!(
-        villages::candidate([0, 0], &fields, &settings, || false)
-            .unwrap()
-            .is_none()
-    );
+    assert!(villages::candidate([0, 0], &fields, &settings, || false)
+        .unwrap()
+        .is_none());
     polls.set(0);
     reserve_village_footprint_owners(
         [[128, 128, 80]].into_iter(),

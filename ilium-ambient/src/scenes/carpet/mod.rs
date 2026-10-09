@@ -34,8 +34,8 @@ pub struct CarpetScene {
 }
 
 impl CarpetScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
@@ -122,6 +122,10 @@ impl CarpetScene {
 }
 
 impl Scene for CarpetScene {
+    fn wants_pointer(&self) -> bool {
+        true
+    }
+
     fn pointer(&mut self, position: Option<[f32; 2]>) {
         self.pointer = position;
     }

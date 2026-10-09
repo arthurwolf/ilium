@@ -1,7 +1,7 @@
 use super::*;
 use crate::minecraft::settings::WorldSource;
 use std::cell::RefCell;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[test]
 fn saved_scene_status_exposes_phase_elapsed_time_and_unknown_eta_while_preparing() {
@@ -43,7 +43,7 @@ fn preparation_progress_is_bounded_and_keeps_phase_counts_monotonic() {
         "Reached projected route checks",
     );
     progress.phase(2, "Scanning maps", "A stale phase update arrived");
-    for event in 0..10 {
+    for event in 0..40 {
         progress.record(&format!("test activity {event}"));
     }
 
@@ -57,16 +57,677 @@ fn preparation_progress_is_bounded_and_keeps_phase_counts_monotonic() {
         "ETA must remain honest: {report}"
     );
     assert!(
-        report.contains("test activity 2"),
+        report.contains("test activity 8"),
         "oldest retained event missing: {report}"
     );
     assert!(
-        report.contains("test activity 9"),
+        report.contains("test activity 39"),
         "latest event missing: {report}"
     );
     assert!(
-        !report.contains("test activity 1"),
+        !report.contains("test activity 7"),
         "event log exceeded its bound: {report}"
+    );
+}
+
+#[test]
+fn stale_viewport_progress_cannot_replace_the_new_request_activity() {
+    let progress = PreparationProgress::new();
+    let desired_plan = AtomicU64::new(0);
+    progress.begin_request(
+        1,
+        &desired_plan,
+        "Selecting the first viewport",
+        "First viewport requested",
+    );
+    let first_viewport = progress.for_request(1);
+
+    progress.begin_request(
+        2,
+        &desired_plan,
+        "Selecting the current viewport",
+        "Current viewport requested",
+    );
+    let current_viewport = progress.for_request(2);
+    current_viewport.record("Current viewport is scanning its saved chunks");
+
+    first_viewport.phase(3, "Stale viewport phase", "Stale viewport scan resumed");
+    first_viewport.work(
+        std::path::Path::new("/saves/Old World"),
+        "Checking route coverage",
+        9,
+        10,
+        "obsolete viewport work",
+    );
+    first_viewport.scan(
+        std::path::Path::new("/saves/Old World"),
+        ScanProgress {
+            stage: ScanStage::ChunkSlots,
+            completed: 512,
+            total: Some(1_024),
+        },
+    );
+    first_viewport.route_candidates(MAX_ROUTE_QUALIFICATIONS, MAX_ROUTE_QUALIFICATIONS);
+    first_viewport.record("Obsolete viewport replaced the current activity");
+    first_viewport.finish("Obsolete viewport incorrectly completed");
+    first_viewport.fail("Obsolete viewport incorrectly failed");
+
+    let report = progress.report();
+    assert!(
+        report.contains("Selecting the current viewport")
+            && report.contains("Current viewport is scanning its saved chunks"),
+        "the latest viewport activity should remain visible: {report}"
+    );
+    assert!(
+        !report.contains("Stale viewport")
+            && !report.contains("Old World")
+            && !report.contains("Obsolete viewport")
+            && !report.contains("Checking route coverage"),
+        "callbacks from an older viewport must be ignored: {report}"
+    );
+    assert!(
+        !report
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("overall 100%"),
+        "a stale finish callback must not mark the current viewport complete: {report}"
+    );
+}
+
+#[test]
+fn preparation_overall_progress_does_not_regress_across_scan_stages_or_maps() {
+    let progress = PreparationProgress::new();
+    progress.phase(
+        2,
+        "Building the viewport's saved-chunk inventory",
+        "Checking allocated chunks across saved maps",
+    );
+
+    let mut reports = Vec::new();
+    for (map, stage, completed, total) in [
+        ("First Save", ScanStage::SavedRootEntries, 64, None),
+        ("First Save", ScanStage::RegionHeaders, 4, Some(10)),
+        ("First Save", ScanStage::ChunkSlots, 0, Some(1_024)),
+        ("First Save", ScanStage::CandidateWindows, 300, Some(2_048)),
+        ("First Save", ScanStage::CandidateWindows, 300, Some(300)),
+        ("First Save", ScanStage::ChunkPayloads, 0, Some(12)),
+        ("Second Save", ScanStage::RegionDirectory, 0, None),
+    ] {
+        progress.scan(
+            std::path::Path::new("/saves").join(map).as_path(),
+            ScanProgress {
+                stage,
+                completed,
+                total,
+            },
+        );
+        reports.push(progress.report());
+    }
+    assert!(
+        reports[0].contains("Listing Minecraft saves-root entries")
+            && reports[0].contains("64 of at most 4096 entries")
+            && reports[0].contains("minimum estimated overall")
+            && reports[0].contains("unavailable until this directory ends"),
+        "saved-folder enumeration should be visible in the progress report: {}",
+        reports[0]
+    );
+
+    let percentages = reports
+        .iter()
+        .map(|report| {
+            report
+                .lines()
+                .next()
+                .and_then(|line| line.split_once("overall "))
+                .and_then(|(_, suffix)| suffix.split_once('%'))
+                .and_then(|(value, _)| value.parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("overall progress percentage missing: {report}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        percentages[0] > 0,
+        "measured scan work should advance overall progress: {reports:?}"
+    );
+    assert!(
+        percentages.windows(2).all(|pair| pair[1] >= pair[0]),
+        "overall progress regressed at a scan-stage or map boundary: {percentages:?}"
+    );
+    let state = progress
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let busy_report = progress.report();
+    assert!(
+        busy_report
+            .lines()
+            .next()
+            .is_some_and(|line| line.contains(&format!("overall {}%", percentages[2]))),
+        "a busy status mutex should retain the lock-free overall percentage: {busy_report}"
+    );
+    drop(state);
+}
+
+#[test]
+fn failed_preparation_does_not_keep_an_eta_for_work_that_has_stopped() {
+    let progress = PreparationProgress::new();
+    progress.work(
+        std::path::Path::new("/saves/Example"),
+        "Reading chunk payloads",
+        2,
+        10,
+        "Decoding saved chunks",
+    );
+    progress.route_candidates(3, MAX_ROUTE_QUALIFICATIONS);
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let work = state.work.as_mut().expect("current work was recorded");
+        work.rate = Some(ScanRate {
+            total: Some(10),
+            started_at: Instant::now() - Duration::from_secs(5),
+            starting_completed: 0,
+            last_completed: 2,
+        });
+    }
+    assert!(
+        progress.report().contains("on this measured stage"),
+        "running work should expose its measured stage estimate"
+    );
+
+    progress.fail("Saved-world preparation failed after the payload read");
+
+    let report = progress.report();
+    assert!(
+        report.contains("ETA: unavailable"),
+        "failed work must not retain a live ETA: {report}"
+    );
+    assert!(
+        !report.contains("on this measured stage"),
+        "failed work must not claim that the stopped stage is still progressing: {report}"
+    );
+    assert!(
+        !report.contains("route candidates remain"),
+        "failed work must not retain candidates from the stopped route: {report}"
+    );
+    assert!(
+        report.contains("Saved-world preparation failed after the payload read"),
+        "failure reason must remain in the activity history: {report}"
+    );
+}
+
+#[test]
+fn preparation_progress_restarts_for_a_new_route_selection_after_success() {
+    let progress = PreparationProgress::new();
+    progress.finish("First saved camera route passed viewport qualification");
+    assert!(!progress.is_active());
+    let finished_state = progress
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let first_started_at = finished_state.started_at;
+    assert!(
+        finished_state.finished_at.is_some(),
+        "a completed route must retain its final elapsed-time boundary"
+    );
+    drop(finished_state);
+
+    progress.phase(
+        2,
+        "Starting route selection for the current viewport",
+        "Route selection requested for 200 by 100 cells",
+    );
+
+    assert!(
+        progress.is_active(),
+        "a new viewport route request must resume visible progress"
+    );
+    let report = progress.report();
+    assert!(
+        report.contains("phase 2/6"),
+        "new route selection must not inherit the completed route's 6/6 count: {report}"
+    );
+    assert!(
+        report.contains("Starting route selection for the current viewport"),
+        "the visible phase should identify the active viewport request: {report}"
+    );
+    let state = progress
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(
+        state.started_at > first_started_at,
+        "a resumed route must start a fresh elapsed-time clock"
+    );
+    assert!(
+        state.finished_at.is_none(),
+        "an active route must not retain the previous route's finished time"
+    );
+    assert!(
+        state
+            .events
+            .iter()
+            .all(|(_, event)| !event.contains("First saved camera route")),
+        "the new route activity log must not retain the completed route's event"
+    );
+}
+
+#[test]
+fn busy_history_runtime_keeps_the_live_preparation_log_advancing() {
+    let temporary = tempfile::tempdir().unwrap();
+    let saves = temporary.path().join("saves");
+    std::fs::create_dir(&saves).unwrap();
+    let env = SceneEnv::for_test(
+        temporary.path().join("cache"),
+        crate::resources::test_resources(),
+    );
+    let runtime = Arc::clone(&env.saved_runtime);
+    let (locked_tx, locked_rx) = std::sync::mpsc::sync_channel(0);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+    let lock_runtime = Arc::clone(&runtime);
+    let lock_worker = std::thread::spawn(move || {
+        lock_runtime.with_test_lock(|| {
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+    });
+    locked_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("test should hold the saved-history runtime lock");
+
+    let saved = SavedMapsSettings {
+        source: WorldSource::SavedMaps,
+        saves_folder: saves.display().to_string(),
+    };
+    let scene = SavedScene::new(&saved, &VoxelLandscapeSettings::default(), &env);
+    std::thread::sleep(Duration::from_secs(11));
+    let report = scene
+        .status()
+        .expect("waiting saved-world preparation remains visible");
+    drop(scene);
+    release_tx.send(()).unwrap();
+    lock_worker.join().unwrap();
+
+    assert!(
+        report
+            .matches("Saved history runtime remains busy after")
+            .count()
+            >= 2,
+        "the live log should repeat a timed explanation while history remains busy: {report}"
+    );
+}
+
+#[test]
+fn preparation_eta_uses_measured_stage_work_and_never_formats_an_infinite_rate() {
+    let now = Instant::now();
+    let started_at = now.checked_sub(Duration::from_secs(5)).unwrap();
+    let scan = ScanStatus {
+        map: "Example Save".into(),
+        stage: ScanStage::ChunkSlots,
+        completed: 200,
+        total: Some(1_000),
+        stage_rates: [
+            None,
+            None,
+            None,
+            Some(ScanRate {
+                total: Some(1_000),
+                started_at,
+                starting_completed: 100,
+                last_completed: 200,
+            }),
+            None,
+            None,
+        ],
+        last_logged_fraction: 0,
+        last_logged_at: now,
+    };
+
+    assert_eq!(
+        measured_scan_eta(&scan, now),
+        Some((Duration::from_secs(40), Some(20.0)))
+    );
+
+    let completed = ScanStatus {
+        completed: 1_000,
+        ..scan
+    };
+    assert_eq!(
+        measured_scan_eta(&completed, now),
+        Some((Duration::ZERO, None))
+    );
+}
+
+#[test]
+fn preparation_report_shows_a_measured_stage_estimate_and_unestimated_later_work() {
+    let progress = PreparationProgress::new();
+    progress.work(
+        std::path::Path::new("/saves/Example Save"),
+        "Checking route coverage",
+        200,
+        1_000,
+        "Comparing candidate camera views",
+    );
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let work = state.work.as_mut().expect("current work was recorded");
+        work.rate = Some(ScanRate {
+            total: Some(1_000),
+            started_at: Instant::now() - Duration::from_secs(5),
+            starting_completed: 100,
+            last_completed: 200,
+        });
+    }
+
+    let report = progress.report();
+    assert!(
+        report.contains("ETA: about ") && report.contains("for this measured stage (20 items/s)"),
+        "report should quantify the known remaining work without implying a full ETA: {report}"
+    );
+    assert!(
+        report.contains("later stages are unestimated"),
+        "report should name uncertainty from unmeasured stages: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_labels_an_incomplete_total_eta_and_remaining_route_candidates() {
+    let progress = PreparationProgress::new();
+    progress.phase(
+        4,
+        "Decoding and projecting the selected route",
+        "Validating a saved camera route",
+    );
+    progress.route_candidates(3, MAX_ROUTE_QUALIFICATIONS);
+    progress.work(
+        std::path::Path::new("/saves/Example Save"),
+        "Decoding route chunks",
+        2,
+        10,
+        "Projecting the current candidate into the viewport",
+    );
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let work = state.work.as_mut().expect("current work was recorded");
+        work.rate = Some(ScanRate {
+            total: Some(10),
+            started_at: Instant::now() - Duration::from_secs(5),
+            starting_completed: 0,
+            last_completed: 2,
+        });
+    }
+
+    let report = progress.report();
+    assert!(
+        report.contains("Total ETA: incomplete; about 00:20 for the measured stage"),
+        "the total estimate should label the measured current-stage remainder as an estimate: {report}"
+    );
+    assert!(
+        report.contains("up to 13 route candidates remain without a measured duration"),
+        "the report should expose finite remaining route qualification work and its uncertainty: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_keeps_total_eta_unavailable_until_a_rate_is_measured() {
+    let progress = PreparationProgress::new();
+    progress.phase(
+        3,
+        "Surveying camera-route candidates",
+        "Starting the finite route survey",
+    );
+    progress.route_candidates(0, MAX_ROUTE_QUALIFICATIONS);
+
+    let report = progress.report();
+    assert!(
+        report.contains("Total ETA: unavailable until a remaining stage has a measured rate"),
+        "the total ETA must remain unavailable without an observed rate: {report}"
+    );
+    assert!(
+        report.contains("up to 16 route candidates remain"),
+        "the finite candidate ceiling should remain visible while the ETA is unavailable: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_estimates_total_eta_from_qualified_overall_progress() {
+    let progress = PreparationProgress::new();
+    let too_early_started_at = Instant::now() - Duration::from_secs(20);
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.started_at = too_early_started_at;
+        state.finished_at = Some(too_early_started_at + Duration::from_secs(20));
+    }
+    progress.overall_percent.store(25, Ordering::Relaxed);
+    assert!(
+        progress
+            .report()
+            .contains("Total ETA: unavailable until overall progress is measured"),
+        "a short sample must not produce an unstable whole-run estimate"
+    );
+
+    let started_at = Instant::now() - Duration::from_secs(120);
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.started_at = started_at;
+        state.finished_at = Some(started_at + Duration::from_secs(120));
+        state.completed_phases = 1;
+    }
+    progress.overall_percent.store(9, Ordering::Relaxed);
+    assert!(
+        progress
+            .report()
+            .contains("Total ETA: unavailable until overall progress is measured"),
+        "early weighted progress must not be extrapolated into a total estimate"
+    );
+    progress.overall_percent.store(25, Ordering::Relaxed);
+
+    let report = progress.report();
+    assert!(
+        report.contains("Total ETA: rough estimate 06:00 remaining from 25% estimated overall progress"),
+        "once enough overall work is measured, users need a provisional whole-run estimate: {report}"
+    );
+    assert!(
+        report.contains("save size and route qualification can change this estimate"),
+        "the report must explain why the whole-run estimate can move: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_estimates_remaining_route_candidates_after_one_measured_candidate() {
+    let progress = PreparationProgress::new();
+    progress.phase(
+        4,
+        "Decoding and projecting the selected route",
+        "Validating a saved camera route",
+    );
+    progress.route_candidates(0, 4);
+    let no_sample = progress.report();
+    assert!(
+        no_sample.contains("Route ETA: unavailable until one candidate completes"),
+        "route estimate must remain unavailable before a completed candidate: {no_sample}"
+    );
+
+    progress.route_candidates(1, 4);
+    {
+        let mut state = progress
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let rate = state
+            .route_candidates
+            .as_mut()
+            .and_then(|candidates| candidates.rate.as_mut())
+            .expect("one completed candidate starts the route sample");
+        rate.started_at = Instant::now() - Duration::from_secs(5);
+    }
+    progress.route_candidates(2, 4);
+    let measured = progress.report();
+    assert!(
+        measured.contains("Route ETA: about "),
+        "one completed route candidate should establish a provisional estimate: {measured}"
+    );
+    assert!(
+        measured.contains("based on 1 completed candidate"),
+        "the estimate must disclose its measured sample count: {measured}"
+    );
+    assert!(
+        measured.contains("assuming all 3 remaining candidate checks still need qualification"),
+        "the estimate must include the in-progress candidate and disclose its upper-bound assumption: {measured}"
+    );
+
+    progress.route_candidates(4, 4);
+    let final_candidate = progress.report();
+    assert!(
+        final_candidate.contains("assuming all 1 remaining candidate checks still need qualification"),
+        "the final in-progress candidate must not be reported as already complete: {final_candidate}"
+    );
+}
+
+#[test]
+fn preparation_report_names_measured_chunk_payload_decoding() {
+    let progress = PreparationProgress::new();
+    progress.scan(
+        std::path::Path::new("/saves/Example Save"),
+        ScanProgress {
+            stage: ScanStage::ChunkPayloads,
+            completed: 2,
+            total: Some(5),
+        },
+    );
+
+    let report = progress.report();
+    assert!(
+        report.contains("Decoding map chunks for Example Save: 2/5 items (40%)"),
+        "report should expose actual payload decode progress: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_names_candidate_search_work_units() {
+    let progress = PreparationProgress::new();
+    progress.scan(
+        std::path::Path::new("/saves/Example Save"),
+        ScanProgress {
+            stage: ScanStage::CandidateWindows,
+            completed: 256,
+            total: Some(1_024),
+        },
+    );
+
+    let report = progress.report();
+    assert!(
+        report.contains(
+            "Checking saved-world candidate-search work units for Example Save: 256/1024 items (25%)"
+        ),
+        "report should expose bounded candidate-search work: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_drives_the_progress_bar_from_scanned_work() {
+    let progress = PreparationProgress::new();
+    progress.scan(
+        std::path::Path::new("/saves/Example Save"),
+        ScanProgress {
+            stage: ScanStage::ChunkSlots,
+            completed: 500,
+            total: Some(1_000),
+        },
+    );
+
+    let report = progress.report();
+    assert!(
+        report.contains("overall 10% · phase 0/6"),
+        "scan work should advance the whole-preparation progress bar: {report}"
+    );
+    assert!(
+        report.contains("Indexing chunk slots for Example Save: 500/1000 items (50%)"),
+        "report should identify the current measured stage: {report}"
+    );
+}
+
+#[test]
+fn preparation_report_tracks_selected_texture_import_work() {
+    let progress = PreparationProgress::new();
+    progress.work(
+        std::path::Path::new("/saves/Example Save"),
+        "Loading selected texture assets",
+        37,
+        100,
+        "currently minecraft:block/stone",
+    );
+
+    let report = progress.report();
+    assert!(
+        report.contains("overall 6% · phase 0/6"),
+        "measured pack work should advance whole-preparation progress: {report}"
+    );
+    assert!(
+        report.contains("Loading selected texture assets for Example Save: 37/100 items (37%)"),
+        "report should identify the measured pack-import stage: {report}"
+    );
+    assert!(
+        report.contains("currently minecraft:block/stone"),
+        "report should identify the texture currently being loaded: {report}"
+    );
+    assert!(
+        report.contains("later stages are unestimated"),
+        "a stage ETA must identify work that remains unmeasured: {report}"
+    );
+}
+
+#[test]
+fn route_survey_progress_accumulates_across_candidate_passes() {
+    let progress = PreparationProgress::new();
+    let saves_root = std::path::Path::new("/home/example/.minecraft/saves");
+    progress.phase(
+        3,
+        "Surveying camera-route candidates",
+        "Starting the finite route survey",
+    );
+    progress.work(
+        saves_root,
+        "Checking route coverage",
+        30_000_000,
+        MAX_SELECTION_WORK as usize,
+        "Pass 1 of 16: comparing candidate camera views",
+    );
+    let first_pass = progress.report();
+    assert!(
+        first_pass.contains("overall 50% · phase 3/6"),
+        "route survey should include bounded work in whole-preparation progress: {first_pass}"
+    );
+
+    progress.work(
+        saves_root,
+        "Checking route coverage",
+        33_000_000,
+        MAX_SELECTION_WORK as usize,
+        "Pass 2 of 16: comparing candidate camera views",
+    );
+    let next_pass = progress.report();
+    assert!(
+        next_pass.contains("overall 51% · phase 3/6"),
+        "route survey progress should continue across candidate passes: {next_pass}"
+    );
+    assert!(
+        next_pass.contains("Pass 2 of 16"),
+        "route survey detail should identify its current bounded pass: {next_pass}"
     );
 }
 

@@ -1,16 +1,28 @@
-//! Finding images: directories, glob patterns and URL lists. Runs on the
-//! worker thread only; it does file system I/O.
+//! Finding images: directories, glob patterns and URL lists. Folder scans run
+//! as finite jobs on the shared I/O bank.
 
 use super::settings::expand_home;
+use crate::resources::AmbientResources;
+use ilium_execution::{
+    Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, RejectReason, Retained,
+};
+use ilium_platform::owned_worker::StopToken;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 pub const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
-/// Stop collecting after this many images (memory and startup bound).
+/// Upper bound on the number of image entries retained by one scan.
 pub const MAX_FILES: usize = 20_000;
 const MAX_DEPTH: usize = 24;
 const MAX_DIRECTORIES: usize = 50_000;
+const MAX_DISCOVERY_PATH_BYTES: usize = 48 * 1024 * 1024;
+const MAX_ERRORS: usize = 128;
+const MAX_ERROR_BYTES: usize = 64 * 1024;
+const DISCOVERY_RESULT_BYTES: usize = 52 * 1024 * 1024;
+const RETRY: Duration = Duration::from_millis(100);
 pub const MAX_URLS: usize = 500;
 
 pub fn is_image_path(path: &Path) -> bool {
@@ -127,67 +139,119 @@ fn match_class(pattern: &[char], candidate: Option<char>) -> Option<(bool, &[cha
 pub struct Discovery {
     pub files: Vec<PathBuf>,
     pub errors: Vec<String>,
-    /// True when `MAX_FILES` cut the scan short.
+    /// True when a file, path-byte, directory, depth, or diagnostic limit cut
+    /// the scan short.
     pub truncated: bool,
+    #[cfg(test)]
+    worker_thread_name: String,
 }
 
 struct Scan<'a> {
     stop: &'a AtomicBool,
+    job_stop: Option<StopToken>,
     files: Vec<PathBuf>,
+    path_bytes: usize,
     directories_seen: usize,
     truncated: bool,
     errors: Vec<String>,
+    error_bytes: usize,
 }
 
 impl Scan<'_> {
     fn should_stop(&self) -> bool {
         self.truncated
             || self.stop.load(Ordering::Relaxed)
+            || self.job_stop.as_ref().is_some_and(StopToken::is_stopped)
             || self.directories_seen > MAX_DIRECTORIES
     }
 
     fn add_file(&mut self, path: PathBuf) {
-        if self.files.len() >= MAX_FILES {
+        let Some(next_path_bytes) = self
+            .path_bytes
+            .checked_add(path.as_os_str().len())
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<PathBuf>()))
+        else {
+            self.truncated = true;
+            return;
+        };
+        if self.files.len() >= MAX_FILES || next_path_bytes > MAX_DISCOVERY_PATH_BYTES {
             self.truncated = true;
         } else {
+            self.path_bytes = next_path_bytes;
             self.files.push(path);
         }
     }
 
-    /// Sorted, non-hidden children of `dir` as (path, is_dir).
-    fn children(&mut self, dir: &Path, allow_hidden: bool) -> Vec<(PathBuf, bool)> {
+    fn add_error(&mut self, message: String) {
+        if self.errors.len() >= MAX_ERRORS || self.error_bytes >= MAX_ERROR_BYTES {
+            self.truncated = true;
+            return;
+        }
+        let remaining = MAX_ERROR_BYTES - self.error_bytes;
+        let mut end = message.len().min(remaining);
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.error_bytes += end;
+        self.errors.push(message[..end].to_owned());
+        if end < message.len() {
+            self.truncated = true;
+        }
+    }
+
+    /// Open one directory without collecting its entries into an unbounded
+    /// temporary vector. Recursive depth and total directory count bound live
+    /// handles while each directory is streamed entry by entry.
+    fn children(&mut self, dir: &Path) -> Option<std::fs::ReadDir> {
         self.directories_seen += 1;
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
+        if self.directories_seen > MAX_DIRECTORIES {
+            self.truncated = true;
+            return None;
+        }
+        match std::fs::read_dir(dir) {
+            Ok(entries) => Some(entries),
             Err(error) => {
-                self.errors
-                    .push(format!("Cannot read {}: {error}", dir.display()));
-                return Vec::new();
+                self.add_error(format!("Cannot read {}: {error}", dir.display()));
+                None
+            }
+        }
+    }
+
+    fn child_path(
+        &mut self,
+        entry: std::io::Result<std::fs::DirEntry>,
+        allow_hidden: bool,
+    ) -> Option<(PathBuf, bool)> {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                self.add_error(format!("Cannot read directory entry: {error}"));
+                return None;
             }
         };
-        let mut children: Vec<(PathBuf, bool)> = entries
-            .filter_map(Result::ok)
-            .filter(|entry| allow_hidden || !entry.file_name().to_string_lossy().starts_with('.'))
-            .map(|entry| {
-                let path = entry.path();
-                // `Path::is_dir` follows symlinks; depth and directory
-                // budgets bound any symlink cycle.
-                let is_dir = path.is_dir();
-                (path, is_dir)
-            })
-            .collect();
-        children.sort();
-        children
+        if !allow_hidden && entry.file_name().to_string_lossy().starts_with('.') {
+            return None;
+        }
+        let path = entry.path();
+        // Follow symlinks as before; the depth and directory budgets bound cycles.
+        let is_dir = path.is_dir();
+        Some((path, is_dir))
     }
 
     fn walk_plain(&mut self, dir: &Path, recursive: bool, depth: usize) {
         if self.should_stop() || depth > MAX_DEPTH {
             return;
         }
-        for (path, is_dir) in self.children(dir, false) {
+        let Some(children) = self.children(dir) else {
+            return;
+        };
+        for child in children {
             if self.should_stop() {
                 return;
             }
+            let Some((path, is_dir)) = self.child_path(child, false) else {
+                continue;
+            };
             if is_dir {
                 if recursive {
                     self.walk_plain(&path, true, depth + 1);
@@ -206,31 +270,39 @@ impl Scan<'_> {
             return;
         }
         let allow_hidden = segment.starts_with('.');
-        let children = self.children(dir, allow_hidden || segment == "**");
+        let Some(children) = self.children(dir) else {
+            return;
+        };
         if segment == "**" {
-            if tail.is_empty() {
-                for (path, is_dir) in &children {
-                    if !*is_dir && is_image_path(path) {
-                        self.add_file(path.clone());
-                    }
-                }
-            } else {
+            if !tail.is_empty() {
                 self.walk_glob(dir, tail, depth);
             }
-            for (path, is_dir) in children {
+            for child in children {
+                if self.should_stop() {
+                    return;
+                }
+                let Some((path, is_dir)) = self.child_path(child, true) else {
+                    continue;
+                };
                 let hidden = path
                     .file_name()
                     .is_some_and(|name| name.to_string_lossy().starts_with('.'));
+                if tail.is_empty() && !is_dir && is_image_path(&path) {
+                    self.add_file(path.clone());
+                }
                 if is_dir && !hidden {
                     self.walk_glob(&path, segments, depth + 1);
                 }
             }
             return;
         }
-        for (path, is_dir) in children {
+        for child in children {
             if self.should_stop() {
                 return;
             }
+            let Some((path, is_dir)) = self.child_path(child, allow_hidden) else {
+                continue;
+            };
             let name = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -252,14 +324,30 @@ impl Scan<'_> {
 /// Find every image named by a `;`-separated list of directories and globs.
 /// The result is sorted and free of duplicates.
 pub fn discover_images(spec: &str, recursive: bool, stop: &AtomicBool) -> Discovery {
+    discover_with_job_stop(spec, recursive, stop, None)
+}
+
+fn discover_with_job_stop(
+    spec: &str,
+    recursive: bool,
+    stop: &AtomicBool,
+    job_stop: Option<StopToken>,
+) -> Discovery {
     let mut scan = Scan {
         stop,
+        job_stop,
         files: Vec::new(),
+        path_bytes: 0,
         directories_seen: 0,
         truncated: false,
         errors: Vec::new(),
+        error_bytes: 0,
     };
-    for item in split_list(spec) {
+    for item in spec
+        .split(';')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         if scan.should_stop() {
             break;
         }
@@ -267,8 +355,7 @@ pub fn discover_images(spec: &str, recursive: bool, stop: &AtomicBool) -> Discov
         if has_glob_chars(item) {
             let (base, segments) = glob_split(&expanded);
             if !base.is_dir() {
-                scan.errors
-                    .push(format!("Folder not found: {}", base.display()));
+                scan.add_error(format!("Folder not found: {}", base.display()));
             } else if !segments.is_empty() {
                 scan.walk_glob(&base, &segments, 0);
             }
@@ -277,8 +364,7 @@ pub fn discover_images(spec: &str, recursive: bool, stop: &AtomicBool) -> Discov
         } else if expanded.is_file() && is_image_path(&expanded) {
             scan.add_file(expanded);
         } else {
-            scan.errors
-                .push(format!("Folder not found: {}", expanded.display()));
+            scan.add_error(format!("Folder not found: {}", expanded.display()));
         }
     }
     scan.files.sort();
@@ -287,6 +373,139 @@ pub fn discover_images(spec: &str, recursive: bool, stop: &AtomicBool) -> Discov
         files: scan.files,
         errors: scan.errors,
         truncated: scan.truncated,
+        #[cfg(test)]
+        worker_thread_name: std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned(),
+    }
+}
+
+struct DiscoveryJob {
+    spec: String,
+    recursive: bool,
+    stop: Arc<AtomicBool>,
+    _capture_storage: Arc<ilium_execution::StorageAdmission>,
+}
+
+impl Job for DiscoveryJob {
+    type Output = Discovery;
+    type Error = String;
+
+    fn run(self, context: JobContext) -> Result<Self::Output, Self::Error> {
+        if context.stop_requested() || self.stop.load(Ordering::Acquire) {
+            return Err("image folder scan cancelled".to_owned());
+        }
+        let discovery = discover_with_job_stop(
+            &self.spec,
+            self.recursive,
+            &self.stop,
+            Some(context.stop_token()),
+        );
+        if context.stop_requested() || self.stop.load(Ordering::Acquire) {
+            return Err("image folder scan cancelled".to_owned());
+        }
+        Ok(discovery)
+    }
+}
+
+fn retryable(reason: RejectReason) -> bool {
+    matches!(
+        reason,
+        RejectReason::Busy
+            | RejectReason::QueueFull
+            | RejectReason::JobLimit
+            | RejectReason::InputBytes
+            | RejectReason::ResultBytes
+            | RejectReason::WorkerLimit
+            | RejectReason::WorkerBytes
+    )
+}
+
+/// Run blocking directory and metadata calls on the process's admitted I/O
+/// lane. The retained receipt keeps the bounded result charged while the
+/// ordered image loader converts it into its separately admitted list.
+pub(super) fn discover_admitted(
+    spec: &str,
+    recursive: bool,
+    resources: &AmbientResources,
+    stop: &Arc<AtomicBool>,
+    capture_storage: &Arc<ilium_execution::StorageAdmission>,
+) -> Result<Retained<Discovery>, String> {
+    let input_bytes = spec
+        .len()
+        .checked_mul(32)
+        .and_then(|bytes| bytes.checked_add(2 * MAX_DISCOVERY_PATH_BYTES))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<DiscoveryJob>()))
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<JobOutcome<DiscoveryJob>>()))
+        .ok_or_else(|| "image folder scan cost overflow".to_owned())?;
+    let cost = JobCost {
+        input_bytes,
+        result_bytes: DISCOVERY_RESULT_BYTES,
+    };
+    let limits = resources.finite().usage().limits;
+    let shared_limits = resources.finite().quota_group().snapshot().limits;
+    if cost.input_bytes > limits.input_bytes
+        || cost.result_bytes > limits.result_bytes
+        || cost.input_bytes > shared_limits.input_bytes
+        || cost.result_bytes > shared_limits.result_bytes
+    {
+        return Err("image folder scan exceeds available resource capacity".to_owned());
+    }
+    let mut receipt = loop {
+        if stop.load(Ordering::Acquire) {
+            return Err("image folder scan cancelled".to_owned());
+        }
+        let admission = match resources.finite().try_reserve(Lane::Io, cost) {
+            Ok(admission) => admission,
+            Err(reason) if retryable(reason) => {
+                std::thread::sleep(RETRY);
+                continue;
+            }
+            Err(reason) => return Err(format!("image folder scan admission refused: {reason:?}")),
+        };
+        let job = DiscoveryJob {
+            spec: spec.to_owned(),
+            recursive,
+            stop: Arc::clone(stop),
+            _capture_storage: Arc::clone(capture_storage),
+        };
+        match admission.submit(job) {
+            Ok(receipt) => break receipt,
+            Err(rejected) if retryable(rejected.reason) => {
+                drop(rejected.value);
+                std::thread::sleep(RETRY);
+            }
+            Err(rejected) => {
+                return Err(format!(
+                    "image folder scan admission refused: {:?}",
+                    rejected.reason
+                ));
+            }
+        }
+    };
+    loop {
+        if stop.load(Ordering::Acquire) {
+            receipt.cancel();
+            return Err("image folder scan cancelled".to_owned());
+        }
+        match receipt.try_take() {
+            JobPoll::Pending => std::thread::sleep(RETRY),
+            JobPoll::Ready(result) => {
+                let (outcome, retention) = result.into_parts();
+                return match outcome {
+                    JobOutcome::Finished(Ok(discovery)) => Ok(retention.retain(discovery)),
+                    JobOutcome::Finished(Err(error)) => Err(error),
+                    JobOutcome::NotStarted { reason, .. } => {
+                        Err(format!("image folder scan did not start ({reason:?})"))
+                    }
+                    JobOutcome::Panicked => Err("image folder scan worker failed".to_owned()),
+                };
+            }
+            JobPoll::Lost | JobPoll::Taken => {
+                return Err("image folder scan owner retired".to_owned());
+            }
+        }
     }
 }
 
@@ -362,6 +581,60 @@ mod tests {
             touch(&root.path().join(file));
         }
         root
+    }
+
+    #[test]
+    fn folder_scan_runs_on_the_shared_io_bank() {
+        let root = fixture_tree();
+        let resources = crate::resources::test_resources();
+        let capture_storage = resources
+            .reserve_storage(4096)
+            .expect("loader capture storage");
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let found = discover_admitted(
+            &root.path().to_string_lossy(),
+            true,
+            &resources,
+            &stop,
+            &capture_storage,
+        )
+        .expect("admitted folder scan");
+
+        assert!(found
+            .view()
+            .worker_thread_name
+            .starts_with("ilium-exec-io-"));
+        assert_eq!(found.view().files.len(), 6);
+    }
+
+    #[test]
+    fn cancelled_folder_scan_is_not_admitted() {
+        let resources = crate::resources::test_resources();
+        let capture_storage = resources
+            .reserve_storage(4096)
+            .expect("loader capture storage");
+        let stop = std::sync::Arc::new(AtomicBool::new(true));
+
+        let result = discover_admitted("/unused", true, &resources, &stop, &capture_storage);
+
+        assert_eq!(result.err().as_deref(), Some("image folder scan cancelled"));
+    }
+
+    #[test]
+    fn cancelled_lane_token_stops_folder_traversal() {
+        let root = fixture_tree();
+        let owner_stop = AtomicBool::new(false);
+        let lane_stop = StopToken::default();
+        lane_stop.stop();
+
+        let found = discover_with_job_stop(
+            &root.path().to_string_lossy(),
+            true,
+            &owner_stop,
+            Some(lane_stop),
+        );
+
+        assert!(found.files.is_empty());
     }
 
     #[test]

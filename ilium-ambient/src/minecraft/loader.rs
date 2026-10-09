@@ -111,6 +111,12 @@ pub struct LoadedWindow {
     pub(crate) retained_storage_charge: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoadProgress {
+    pub completed: usize,
+    pub total: usize,
+}
+
 /// Runs blocking filesystem/decompression work; call only from the preparation
 /// worker. A rejected coordinate remains missing, never generated or air.
 pub fn load_window(
@@ -119,12 +125,23 @@ pub fn load_window(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<LoadedWindow, Error> {
+    load_window_with_progress(region_directory, requested, limits, cancelled, &mut |_| {})
+}
+
+pub fn load_window_with_progress(
+    region_directory: &Path,
+    requested: &BTreeSet<[i32; 2]>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
+) -> Result<LoadedWindow, Error> {
     load_window_with_ceiling(
         region_directory,
         requested,
         limits,
         [MAX_CHUNKS, MAX_STORAGE_CHARGE],
         cancelled,
+        progress,
     )
 }
 
@@ -138,6 +155,15 @@ pub fn load_projected_window(
     requested: &BTreeSet<[i32; 2]>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<LoadedWindow, Error> {
+    load_projected_window_with_progress(region_directory, requested, cancelled, &mut |_| {})
+}
+
+pub fn load_projected_window_with_progress(
+    region_directory: &Path,
+    requested: &BTreeSet<[i32; 2]>,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
+) -> Result<LoadedWindow, Error> {
     load_window_with_ceiling(
         region_directory,
         requested,
@@ -148,6 +174,7 @@ pub fn load_projected_window(
         },
         [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
         cancelled,
+        progress,
     )
 }
 
@@ -160,6 +187,16 @@ pub fn load_window_pinned(
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<LoadedWindow, Error> {
+    load_window_pinned_with_progress(region_directory, requested, limits, cancelled, &mut |_| {})
+}
+
+pub fn load_window_pinned_with_progress(
+    region_directory: &PinnedDirectory,
+    requested: &BTreeSet<[i32; 2]>,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
+) -> Result<LoadedWindow, Error> {
     let decode_limits = chunk::Limits {
         max_sections: MAX_SECTIONS,
         max_palette_entries: 8192,
@@ -171,6 +208,7 @@ pub fn load_window_pinned(
         limits,
         [MAX_CHUNKS, MAX_STORAGE_CHARGE],
         cancelled,
+        progress,
         |position| {
             let Some(stored) = region::read_chunk_pinned(
                 region_directory,
@@ -198,6 +236,15 @@ pub fn load_projected_window_pinned(
     requested: &BTreeSet<[i32; 2]>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<LoadedWindow, Error> {
+    load_projected_window_pinned_with_progress(region_directory, requested, cancelled, &mut |_| {})
+}
+
+pub fn load_projected_window_pinned_with_progress(
+    region_directory: &PinnedDirectory,
+    requested: &BTreeSet<[i32; 2]>,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
+) -> Result<LoadedWindow, Error> {
     let limits = Limits {
         max_chunks: MAX_PROJECTED_CHUNKS,
         max_storage_charge: MAX_PROJECTED_STORAGE_CHARGE,
@@ -214,6 +261,7 @@ pub fn load_projected_window_pinned(
         limits,
         [MAX_PROJECTED_CHUNKS, MAX_PROJECTED_STORAGE_CHARGE],
         cancelled,
+        progress,
         |position| {
             let Some(stored) = region::read_chunk_pinned(
                 region_directory,
@@ -240,6 +288,7 @@ fn load_window_with_ceiling(
     limits: Limits,
     ceiling: [usize; 2],
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
 ) -> Result<LoadedWindow, Error> {
     // The aggregate chunk count and per-chunk decoded collection limits bound
     // retained output independently of the much larger allocation inventory.
@@ -249,23 +298,30 @@ fn load_window_with_ceiling(
         max_properties: 8192,
         max_text_units: 262144,
     };
-    load_with_ceiling(requested, limits, ceiling, cancelled, |position| {
-        let Some(stored) = region::read_chunk(
-            region_directory,
-            position,
-            region::Limits::default(),
-            cancelled,
-        )?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(chunk::decode(
-            &stored.document,
-            position,
-            decode_limits,
-            cancelled,
-        )?))
-    })
+    load_with_ceiling(
+        requested,
+        limits,
+        ceiling,
+        cancelled,
+        progress,
+        |position| {
+            let Some(stored) = region::read_chunk(
+                region_directory,
+                position,
+                region::Limits::default(),
+                cancelled,
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(chunk::decode(
+                &stored.document,
+                position,
+                decode_limits,
+                cancelled,
+            )?))
+        },
+    )
 }
 
 #[cfg(test)]
@@ -280,6 +336,7 @@ pub(crate) fn load_with(
         limits,
         [MAX_CHUNKS, MAX_STORAGE_CHARGE],
         cancelled,
+        &mut |_| {},
         read,
     )
 }
@@ -289,6 +346,7 @@ fn load_with_ceiling(
     limits: Limits,
     ceiling: [usize; 2],
     cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoadProgress),
     mut read: impl FnMut([i32; 2]) -> Result<Option<chunk::DecodedChunk>, ReadError>,
 ) -> Result<LoadedWindow, Error> {
     if cancelled() {
@@ -318,7 +376,8 @@ fn load_with_ceiling(
     if storage_charge > limits.max_storage_charge {
         return Err(Error::StorageLimit);
     }
-    for &position in requested {
+    let total = requested.len();
+    for (index, &position) in requested.iter().enumerate() {
         if cancelled() {
             return Err(Error::Cancelled);
         }
@@ -356,6 +415,10 @@ fn load_with_ceiling(
                         .ok_or(Error::StorageLimit)?;
                     loaded.chunks.insert(position, Arc::new(decoded));
                     loaded.coverage.chunks.insert(position);
+                    progress(LoadProgress {
+                        completed: index + 1,
+                        total,
+                    });
                     continue;
                 }
             }
@@ -382,6 +445,10 @@ fn load_with_ceiling(
         if loaded.issues.len() < 64 {
             loaded.issues.push(Issue { position, reason });
         }
+        progress(LoadProgress {
+            completed: index + 1,
+            total,
+        });
     }
     loaded.retained_storage_charge = storage_charge;
     Ok(loaded)

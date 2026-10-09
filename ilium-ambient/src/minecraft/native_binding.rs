@@ -207,6 +207,9 @@ pub struct NativeTile {
     pub fluid: Option<FluidMesh>,
     pub imports: Arc<ImportResult>,
     pub map: Arc<PreparedMap>,
+    pub source_profile: &'static str,
+    pub native_archive_sha256: Digest256,
+    pub selected_archive_sha256: Option<Digest256>,
     pub bank_epoch: Digest256,
     pub model_epoch: Digest256,
 }
@@ -217,7 +220,14 @@ impl NativeTile {
 }
 impl PreparedNative {
     pub fn into_tile(self) -> NativeTile {
-        let PreparedNative { surface, map, .. } = self;
+        let PreparedNative {
+            surface,
+            map,
+            source_profile,
+            native_archive_sha256,
+            selected_archive_sha256,
+            ..
+        } = self;
         let PreparedSurface {
             mesh,
             fluid,
@@ -231,6 +241,9 @@ impl PreparedNative {
             fluid,
             imports,
             map,
+            source_profile,
+            native_archive_sha256,
+            selected_archive_sha256,
             bank_epoch,
             model_epoch,
         }
@@ -405,6 +418,15 @@ impl NativeSourceSession {
         ids: BTreeSet<ResourceId>,
         cancel: Cancel<'_>,
     ) -> Result<SharedNative, Error> {
+        self.import_with_progress(ids, cancel, &mut |_, _, _, _| {})
+    }
+
+    pub fn import_with_progress(
+        self,
+        ids: BTreeSet<ResourceId>,
+        cancel: Cancel<'_>,
+        progress: &mut dyn FnMut(usize, usize, &ResourceId, bool),
+    ) -> Result<SharedNative, Error> {
         cancel.check()?;
         if ids.is_empty() || ids.len() > 8192 {
             return Err(Error::Limit("selected texture identities"));
@@ -416,7 +438,7 @@ impl NativeSourceSession {
             self.sources.limits(),
             self.budget.clone(),
         )?
-        .import(requests.as_slice(), cancel)?;
+        .import_with_progress(requests.as_slice(), cancel, progress)?;
         if imports.bank.coverage().required_satisfied != ids.len()
             || ids.iter().any(|id| imports.bank.resolve(id).is_none())
             || imports.records.iter().any(|record| record.source.is_none())

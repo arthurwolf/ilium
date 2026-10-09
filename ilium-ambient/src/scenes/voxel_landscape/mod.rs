@@ -1,6 +1,6 @@
 //! Original surface world rendered through selected texture-pack models.
 mod settings;
-pub use settings::VoxelLandscapeSettings;
+pub use settings::{VoxelLandscapeSettings, GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT};
 
 /// The block world takes its look from Minecraft; no Minecraft assets ship
 /// with Ilium.
@@ -63,4 +63,4 @@ pub mod generation;
 mod wetland;
 
 pub mod engine;
-pub use engine::VoxelLandscapeScene;
+pub use engine::{TextureSourceReceipt, VoxelLandscapeScene};

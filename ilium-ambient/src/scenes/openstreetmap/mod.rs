@@ -14,6 +14,7 @@ mod transport;
 
 use crate::{
     control::SceneSettings,
+    resources::{AmbientResources, WorkerCost},
     scene::{Frame, Scene, SceneEnv},
     source::Worker,
 };
@@ -26,12 +27,19 @@ pub use settings::OpenStreetMapSettings;
 use settings::SelectionMode;
 use std::{
     collections::VecDeque,
+    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{self, Receiver},
         Arc,
     },
 };
+
+// A bounded extract may still expand while JSON is parsed and geometry is
+// assembled. Keep a conservative peak charge for that temporary work, and a
+// separate retained charge for each immutable map in the two-entry cache.
+const OSM_WORKER_BYTES: usize = 256 * 1024 * 1024;
+const OSM_RETAINED_BYTES: usize = 128 * 1024 * 1024;
 
 // At most two OSM workers exist, including detached cancellation cleanup.
 // A timed HTTP read may finish after a settings change; admission stays bounded.
@@ -54,8 +62,20 @@ impl Drop for Admission {
 }
 struct Loading {
     request: MapRequest,
-    receiver: Receiver<Result<LoadedMap, String>>,
+    receiver: Receiver<Result<RetainedMap, String>>,
     worker: Option<Worker>,
+}
+
+struct RetainedMap {
+    loaded: LoadedMap,
+    _storage: Arc<ilium_execution::StorageAdmission>,
+}
+impl Deref for RetainedMap {
+    type Target = LoadedMap;
+
+    fn deref(&self) -> &Self::Target {
+        &self.loaded
+    }
 }
 impl Drop for Loading {
     fn drop(&mut self) {
@@ -66,11 +86,12 @@ impl Drop for Loading {
 }
 pub struct OpenStreetMapScene {
     settings: OpenStreetMapSettings,
+    resources: AmbientResources,
     seed: u64,
-    current: Option<Arc<LoadedMap>>,
+    current: Option<Arc<RetainedMap>>,
     // Labels are presentation state: changing one must not clone or reload geometry.
     current_label: Option<String>,
-    cache: VecDeque<Arc<LoadedMap>>,
+    cache: VecDeque<Arc<RetainedMap>>,
     loading: Option<Loading>,
     failure: Option<(MapRequest, String)>,
     source_error: Option<String>,
@@ -83,16 +104,17 @@ pub struct OpenStreetMapScene {
     height: u16,
 }
 impl OpenStreetMapScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.
-    pub fn new(settings: &OpenStreetMapSettings, _env: &SceneEnv) -> Self {
+    pub fn new(settings: &OpenStreetMapSettings, env: &SceneEnv) -> Self {
         Self {
             settings: settings.normalized(),
+            resources: env.resources.clone(),
             seed: std::hash::BuildHasher::hash_one(
                 &std::collections::hash_map::RandomState::new(),
                 0x4f534d5f544f5552u64,
@@ -224,13 +246,28 @@ impl OpenStreetMapScene {
         let Some(admission) = Admission::acquire() else {
             return;
         };
+        let storage = match self.resources.reserve_storage(OSM_RETAINED_BYTES) {
+            Ok(storage) => storage,
+            Err(_) => return,
+        };
+        let worker_admission = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: OSM_WORKER_BYTES,
+        }) {
+            Ok(admission) => admission,
+            Err(_) => return,
+        };
         let (sender, receiver) = mpsc::channel();
         let request = desired.clone();
-        let worker = Worker::try_spawn("openstreetmap", move |stop| {
+        let worker_storage = Arc::clone(&storage);
+        let worker = Worker::start_admitted("openstreetmap", worker_admission, move |stop| {
             let _admission = admission;
             let loaded = loader::load_map(request, &stop, transport::fetch).map(|mut loaded| {
                 loaded.label = label;
-                loaded
+                RetainedMap {
+                    loaded,
+                    _storage: worker_storage,
+                }
             });
             if !stop.load(Ordering::Relaxed) {
                 let _ = sender.send(loaded);
@@ -437,6 +474,54 @@ mod tests {
         drop(second);
     }
     #[test]
+    fn shared_capacity_refusal_retries_an_osm_load() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
+        let pressure = resources
+            .reserve_storage(2304 * 1024 * 1024)
+            .expect("fill the isolated fixture's physical allocation budget");
+        let mut scene = OpenStreetMapScene::new(
+            &OpenStreetMapSettings::default(),
+            &SceneEnv::for_test(std::env::temp_dir(), resources),
+        );
+        scene.request(MapRequest::Catalogue(0), "Paris".into());
+        assert!(scene.loading.is_none());
+        assert!(scene
+            .status()
+            .unwrap()
+            .contains("Waiting for OSM worker slot"));
+
+        drop(pressure);
+        scene.request(MapRequest::Catalogue(0), "Paris".into());
+        assert!(
+            scene.loading.is_some(),
+            "capacity recovery must retry the map"
+        );
+        let ticket = scene
+            .loading
+            .as_ref()
+            .unwrap()
+            .worker
+            .as_ref()
+            .unwrap()
+            .join_observer()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while scene.current.is_none() && Instant::now() < deadline {
+            scene.receive();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(scene.current.is_some(), "offline map worker should publish");
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        drop(scene);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+    #[test]
     fn real_offline_worker_loads_without_network_and_style_retains_geometry() {
         let _lock = TEST_LOCK.lock().unwrap();
         let settings = OpenStreetMapSettings::default();
@@ -485,6 +570,12 @@ mod tests {
             |_, _| panic!("unexpected network"),
         )
         .unwrap();
+        let old = RetainedMap {
+            loaded: old,
+            _storage: crate::resources::test_resources()
+                .reserve_storage(1)
+                .unwrap(),
+        };
         sender.send(Ok(old)).unwrap();
         scene.loading = Some(Loading {
             request: MapRequest::Catalogue(0),
@@ -512,18 +603,23 @@ mod selection_lifecycle_tests {
     use crate::raster::Raster;
     use std::time::{Duration, SystemTime};
 
-    fn fake_map(request: MapRequest, label: &str) -> Arc<LoadedMap> {
-        Arc::new(LoadedMap {
-            request,
-            label: label.into(),
-            map: GeometryMap {
-                features: Vec::new(),
-                sources: Vec::new(),
-                timestamp: None,
-                incomplete_rings: 0,
-                orphan_holes: 0,
-                geometry_budget_exhausted: false,
+    fn fake_map(request: MapRequest, label: &str) -> Arc<RetainedMap> {
+        Arc::new(RetainedMap {
+            loaded: LoadedMap {
+                request,
+                label: label.into(),
+                map: GeometryMap {
+                    features: Vec::new(),
+                    sources: Vec::new(),
+                    timestamp: None,
+                    incomplete_rings: 0,
+                    orphan_holes: 0,
+                    geometry_budget_exhausted: false,
+                },
             },
+            _storage: crate::resources::test_resources()
+                .reserve_storage(1)
+                .unwrap(),
         })
     }
     fn render_at(scene: &mut OpenStreetMapScene, wall: f64, time: f64) {

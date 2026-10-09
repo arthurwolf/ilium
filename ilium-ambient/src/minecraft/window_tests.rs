@@ -85,6 +85,94 @@ fn exhausted_work_does_not_claim_absent_terrain_and_cancellation_discards_prefix
 }
 
 #[test]
+fn reports_bounded_candidate_search_progress_and_final_budget() {
+    let allocated: BTreeSet<_> = (0..=40)
+        .flat_map(|x| (0..=40).map(move |z| [x, z]))
+        .collect();
+    let mut progress = Vec::new();
+    let result = search_with_progress(
+        &allocated,
+        [0, 0],
+        &[],
+        Limits {
+            radius_chunks: 0,
+            work_units: 2_048,
+            ..Limits::default()
+        },
+        &|| false,
+        &mut |used, total| progress.push((used, total)),
+    )
+    .unwrap();
+
+    assert!(!result.scan_complete);
+    assert_eq!(result.work_used, 2_048);
+    assert_eq!(progress.first(), Some(&(0, 2_048)));
+    assert_eq!(progress.last(), Some(&(2_048, 2_048)));
+    assert!(
+        progress.len() >= 3,
+        "progress should report during a long search"
+    );
+    assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    assert!(progress.iter().all(|&(_, total)| total == 2_048));
+}
+
+#[test]
+fn early_completion_reports_actual_work_without_filling_the_budget() {
+    let allocated = BTreeSet::from([[0, 0]]);
+    let mut progress = Vec::new();
+    let result = search_with_progress(
+        &allocated,
+        [0, 0],
+        &[],
+        Limits {
+            radius_chunks: 0,
+            work_units: 2_048,
+            ..Limits::default()
+        },
+        &|| false,
+        &mut |used, total| progress.push((used, total)),
+    )
+    .unwrap();
+
+    assert!(result.scan_complete);
+    assert!(result.work_used < 2_048);
+    assert_eq!(progress.first(), Some(&(0, 2_048)));
+    assert_eq!(progress.last(), Some(&(result.work_used, 2_048)));
+    assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+}
+
+#[test]
+fn cancelled_candidate_search_does_not_report_budget_completion() {
+    let allocated: BTreeSet<_> = (0..=40)
+        .flat_map(|x| (0..=40).map(move |z| [x, z]))
+        .collect();
+    let cancellation_requested = std::cell::Cell::new(false);
+    let mut progress = Vec::new();
+    let result = search_with_progress(
+        &allocated,
+        [0, 0],
+        &[],
+        Limits {
+            radius_chunks: 0,
+            work_units: 2_048,
+            ..Limits::default()
+        },
+        &|| cancellation_requested.get(),
+        &mut |used, total| {
+            progress.push((used, total));
+            if used > 0 {
+                cancellation_requested.set(true);
+            }
+        },
+    );
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(progress.len() >= 2);
+    assert!(progress.iter().all(|&(_, total)| total == 2_048));
+    assert_ne!(progress.last(), Some(&(2_048, 2_048)));
+}
+
+#[test]
 fn invalid_limits_and_unaddressable_candidates_never_overflow() {
     for limits in [
         Limits {

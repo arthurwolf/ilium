@@ -186,7 +186,8 @@ mod character_occupancy_tests {
 /// palette it was constructed with (`SceneEnv::palette`) and later changes
 /// (`Scene::set_palette`). A scene that wants finer control (palette-aware
 /// colour choices instead of a brightness remap) reads `SceneEnv::palette`
-/// itself and may override `set_palette`; plugins will do exactly that.
+/// itself and may override `set_palette`; custom scene implementations can
+/// do exactly that.
 pub struct PaletteScene {
     inner: Box<dyn Scene>,
     palette: ScenePalette,
@@ -204,6 +205,10 @@ impl Scene for PaletteScene {
         self.inner.saved_world_source()
     }
 
+    fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
+        self.inner.saved_world_frame_evidence()
+    }
+
     fn readiness(&mut self) -> SceneReadiness {
         self.inner.readiness()
     }
@@ -214,6 +219,10 @@ impl Scene for PaletteScene {
 
     fn pointer(&mut self, position: Option<[f32; 2]>) {
         self.inner.pointer(position);
+    }
+
+    fn wants_pointer(&self) -> bool {
+        self.inner.wants_pointer()
     }
 
     fn render(&mut self, frame: &mut Frame<'_>) {
@@ -345,6 +354,29 @@ pub enum SceneReadiness {
     Unavailable(String),
 }
 
+/// Source and required-material evidence tied to the most recently painted
+/// saved-world frame. This qualifies provenance and coverage only; it does not
+/// claim that the image is visually recognizable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SavedWorldFrameEvidence {
+    pub bank_epoch: crate::voxel_landscape::assets::identity::Digest256,
+    pub source_profile: &'static str,
+    pub native_archive_sha256: crate::voxel_landscape::assets::identity::Digest256,
+    pub selected_archive_sha256: Option<crate::voxel_landscape::assets::identity::Digest256>,
+    pub required_materials: usize,
+    pub required_materials_satisfied: usize,
+    pub visible_pixels: usize,
+}
+
+impl SavedWorldFrameEvidence {
+    /// Require actual visible output and complete, non-empty material coverage.
+    pub fn is_qualified(&self) -> bool {
+        self.visible_pixels > 0
+            && self.required_materials > 0
+            && self.required_materials_satisfied == self.required_materials
+    }
+}
+
 /// Borrow the selected native source under its original lifetime. This is a
 /// Rust host boundary, never a script-supplied source or capability.
 #[derive(Clone, Copy)]
@@ -373,6 +405,11 @@ pub trait Scene: Send {
         None
     }
 
+    /// Evidence for the most recently painted frame from a pinned saved world.
+    fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
+        None
+    }
+
     /// Poll already owned preparation state without I/O, blocking or starting
     /// work. A ready source may still be preparing its first viewport.
     fn readiness(&mut self) -> SceneReadiness {
@@ -388,6 +425,12 @@ pub trait Scene: Send {
     /// Latest pointer position in normalized screen coordinates. Optional input
     /// does not consume terminal/UI mouse events and must never block.
     fn pointer(&mut self, _position: Option<[f32; 2]>) {}
+
+    /// Whether pointer changes can affect this scene's rendered frame.
+    /// Pointer-insensitive scenes keep the default to avoid needless rerenders.
+    fn wants_pointer(&self) -> bool {
+        false
+    }
 
     fn render(&mut self, frame: &mut Frame<'_>);
 
@@ -541,6 +584,77 @@ mod palette_scene_tests {
         assert_eq!(scene.readiness(), SceneReadiness::Ready);
         assert!(scene.has_prepared_frame());
         assert!(scene.saved_world_source().is_none());
+        assert!(!scene.wants_pointer());
+    }
+
+    #[test]
+    fn palette_wrapper_preserves_pointer_sensitivity() {
+        struct PointerAware;
+        impl Scene for PointerAware {
+            fn render(&mut self, _frame: &mut Frame<'_>) {}
+
+            fn wants_pointer(&self) -> bool {
+                true
+            }
+        }
+
+        let scene = PaletteScene::new(Box::new(PointerAware), ScenePalette::default());
+        assert!(scene.wants_pointer());
+    }
+
+    #[test]
+    fn palette_wrapper_preserves_saved_frame_asset_and_coverage_receipt() {
+        struct EvidenceScene;
+        impl Scene for EvidenceScene {
+            fn render(&mut self, _frame: &mut Frame<'_>) {}
+
+            fn saved_world_frame_evidence(&self) -> Option<SavedWorldFrameEvidence> {
+                Some(SavedWorldFrameEvidence {
+                    bank_epoch: crate::voxel_landscape::assets::identity::Digest256::of(b"bank"),
+                    source_profile: "test-profile",
+                    native_archive_sha256: crate::voxel_landscape::assets::identity::Digest256::of(
+                        b"native",
+                    ),
+                    selected_archive_sha256: None,
+                    required_materials: 2,
+                    required_materials_satisfied: 2,
+                    visible_pixels: 7,
+                })
+            }
+        }
+
+        let mut scene = PaletteScene::new(Box::new(EvidenceScene), ScenePalette::default());
+        let evidence = scene
+            .saved_world_frame_evidence()
+            .expect("saved frame should retain its render evidence");
+        assert_eq!(evidence.source_profile, "test-profile");
+        assert!(evidence.is_qualified());
+
+        let untextured = SavedWorldFrameEvidence {
+            required_materials: 0,
+            required_materials_satisfied: 0,
+            ..evidence
+        };
+        assert!(!untextured.is_qualified(), "0/0 is not full coverage");
+
+        let partial = SavedWorldFrameEvidence {
+            required_materials: 3,
+            required_materials_satisfied: 2,
+            ..evidence
+        };
+        assert!(
+            !partial.is_qualified(),
+            "partial material coverage is not qualified"
+        );
+
+        let blank = SavedWorldFrameEvidence {
+            visible_pixels: 0,
+            ..evidence
+        };
+        assert!(
+            !blank.is_qualified(),
+            "a blank raster is not a rendered scene"
+        );
     }
 
     #[test]

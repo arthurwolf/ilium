@@ -33,6 +33,7 @@ use super::{
     },
     surface_raster::{self, RasterFrame, RasterLimits},
 };
+use crate::control::SceneSettings;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -174,6 +175,8 @@ pub struct StreamedViewport {
     pub source_sha256: Option<Digest256>,
     pub tile_count: usize,
     pub material_coverage: (usize, usize),
+    pub state_gaps: usize,
+    pub model_substitutions: usize,
     pub compatibility_aliases: usize,
     pub material_fallbacks: usize,
     pub fallback_atlases: usize,
@@ -596,15 +599,12 @@ fn exposed(world: &SurfaceWorld, position: [i32; 3]) -> bool {
         })
 }
 
-fn geometry_recovery_allowed(error: &AssetError, generated: bool, profile: &str) -> bool {
-    // Preserve the existing reviewed Jicklus exception for supplied worlds.
-    // Broader authored recovery is only for generated homage geometry.
-    (generated
+fn geometry_recovery_allowed(error: &AssetError, generated: bool) -> bool {
+    generated
         && matches!(
             error,
             AssetError::Unsupported(_) | AssetError::InvalidMetadata(_)
-        ))
-        || matches!(error, AssetError::Unsupported(detail) if profile == "jicklus" && detail == "metadata field z")
+        )
 }
 fn uses_generated_material_geometry(id: &ResourceId, supplied: bool) -> bool {
     !supplied && super::surface_state_geometry::is_remaining_generated_material(id.as_str())
@@ -766,11 +766,10 @@ fn blocks_fluid_cell(block: &surface_generation::SurfaceBlock, generated: bool) 
 /// All generated viewport tiles retain this one mounted source and byte account.
 /// The bank is imported only after the collection pass has seen every tile.
 struct BindingSources {
-    packs: Vec<LayeredPack>,
+    pack_owner: BindingPackOwner,
     limits: Limits,
     budget: ByteBudget,
     source_sha256: Option<Digest256>,
-    profile_id: &'static str,
     goodvibes: bool,
     plasticator: bool,
     exact_plasticator_campfire_source: bool,
@@ -778,6 +777,20 @@ struct BindingSources {
     fallback_aliases: BTreeMap<ResourceId, Vec<AssetPath>>,
     fallback_goodvibes: bool,
     fallback_unavailable: bool,
+}
+
+enum BindingPackOwner {
+    Selected(Vec<LayeredPack>),
+    InstalledNative(crate::minecraft::native_assets::NativeSources),
+}
+
+impl BindingPackOwner {
+    fn packs(&self) -> &[LayeredPack] {
+        match self {
+            Self::Selected(packs) => packs,
+            Self::InstalledNative(sources) => sources.packs(),
+        }
+    }
 }
 
 impl BindingSources {
@@ -788,8 +801,42 @@ impl BindingSources {
         cancel: Cancel<'_>,
     ) -> Result<Self> {
         cancel.check()?;
+        let settings = settings.normalized();
+        let reviewed_fallback = reviewed_fallback.map(SceneSettings::normalized);
+        let reviewed_fallback = reviewed_fallback.as_ref();
         let limits = Limits::default();
-        let mounted = pack_sources::mount_selected(settings, budget.clone(), cancel)?;
+        if settings.generated_texture_source
+            == super::settings::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT
+        {
+            let path = crate::minecraft::native_assets::jar_path("")
+                .map_err(|error| AssetError::Unsupported(error.to_string()))?;
+            let native = crate::minecraft::native_assets::NativeSources::open(
+                &path,
+                None,
+                limits,
+                budget.clone(),
+                cancel,
+            )
+            .map_err(|error| match error {
+                crate::minecraft::native_assets::Error::Asset(error) => error,
+                error => AssetError::Unsupported(error.to_string()),
+            })?;
+            let source_sha256 = Some(native.provenance().native_archive_sha256.clone());
+            return Ok(Self {
+                pack_owner: BindingPackOwner::InstalledNative(native),
+                limits,
+                budget,
+                source_sha256,
+                goodvibes: false,
+                plasticator: false,
+                exact_plasticator_campfire_source: false,
+                aliases: BTreeMap::new(),
+                fallback_aliases: BTreeMap::new(),
+                fallback_goodvibes: false,
+                fallback_unavailable: false,
+            });
+        }
+        let mounted = pack_sources::mount_selected(&settings, budget.clone(), cancel)?;
         let source_sha256 = mounted.source_sha256;
         let profile = pack_profiles::profile(settings.pack_profile)?;
         let goodvibes = profile.id == "goodvibes";
@@ -846,11 +893,10 @@ impl BindingSources {
             packs.push(fallback.pack);
         }
         Ok(Self {
-            packs,
+            pack_owner: BindingPackOwner::Selected(packs),
             limits,
             budget,
             source_sha256,
-            profile_id: profile.id,
             goodvibes,
             plasticator,
             exact_plasticator_campfire_source,
@@ -1155,13 +1201,12 @@ fn prepare_world_from_sources(
     let source_sha256 = sources.source_sha256;
     let goodvibes = sources.goodvibes;
     let plasticator = sources.plasticator;
-    let profile_id = sources.profile_id;
     let exact_plasticator_campfire_source = sources.exact_plasticator_campfire_source;
     let aliases = &sources.aliases;
     let fallback_aliases = &sources.fallback_aliases;
     let fallback_goodvibes = sources.fallback_goodvibes;
     let fallback_unavailable = sources.fallback_unavailable;
-    let packs = &sources.packs;
+    let packs = sources.pack_owner.packs();
     let review = packs[0].review();
     let fallback_pack = packs.get(1).map(|pack| pack.review().pack.clone());
     let selected_is_bedrock = review.edition == super::assets::review::SourceEdition::Bedrock;
@@ -1277,7 +1322,7 @@ fn prepare_world_from_sources(
             ) => return Err(error),
             Err(error)
                 if !generated_material
-                    && geometry_recovery_allowed(&error, supplied_tints.is_none(), profile_id) =>
+                    && geometry_recovery_allowed(&error, supplied_tints.is_none()) =>
             {
                 // Retain the selected definition failure; images still follow
                 // the explicit selected-first request and origin contract.
@@ -1772,8 +1817,12 @@ impl GeneratedViewportSession {
         }
         let requests: Vec<_> = requests.into_values().collect();
         let imports = Arc::new(
-            TextureImporter::new(&sources.packs, sources.limits, sources.budget.clone())?
-                .import(&requests, cancel)?,
+            TextureImporter::new(
+                sources.pack_owner.packs(),
+                sources.limits,
+                sources.budget.clone(),
+            )?
+            .import(&requests, cancel)?,
         );
         Ok(Self {
             sources,
@@ -2054,6 +2103,8 @@ impl GeneratedViewportSession {
             source_sha256: sources.source_sha256,
             tile_count: tiles.len(),
             material_coverage,
+            state_gaps,
+            model_substitutions,
             compatibility_aliases,
             material_fallbacks,
             fallback_atlases,
@@ -2127,7 +2178,7 @@ mod streamed_viewport_witness {
         let cancel = Cancel::new(&stop);
         let fallback = super::super::pack_registry::resolve_registered(
             &VoxelLandscapeSettings {
-                pack_profile: 2,
+                pack_profile: 6,
                 ..Default::default()
             },
             Path::new(&root),
@@ -2695,15 +2746,11 @@ mod supplied_tests {
     fn generated_geometry_recovery_preserves_resource_failures_and_saved_policy() {
         let unsupported = AssetError::Unsupported("metadata field z".into());
         let malformed = AssetError::InvalidMetadata("duplicate source JSON key".into());
-        assert!(geometry_recovery_allowed(&unsupported, true, "textureless"));
-        assert!(geometry_recovery_allowed(&malformed, true, "jicklus"));
-        assert!(!geometry_recovery_allowed(&malformed, false, "jicklus"));
-        assert!(!geometry_recovery_allowed(
-            &unsupported,
-            false,
-            "textureless"
-        ));
-        assert!(geometry_recovery_allowed(&unsupported, false, "jicklus"));
+        assert!(geometry_recovery_allowed(&unsupported, true));
+        assert!(geometry_recovery_allowed(&malformed, true));
+        assert!(!geometry_recovery_allowed(&malformed, false));
+        assert!(!geometry_recovery_allowed(&unsupported, false));
+        assert!(!geometry_recovery_allowed(&unsupported, false));
         for error in [
             AssetError::Cancelled,
             AssetError::Allocation,
@@ -2713,7 +2760,7 @@ mod supplied_tests {
                 limit: 1,
             },
         ] {
-            assert!(!geometry_recovery_allowed(&error, true, "jicklus"));
+            assert!(!geometry_recovery_allowed(&error, true));
         }
     }
 
@@ -2974,7 +3021,7 @@ mod supplied_tests {
     }
 
     #[test]
-    fn supplied_cells_keep_prior_compatibility_definition_if_jicklus_recovery_is_needed() {
+    fn supplied_cells_keep_prior_compatibility_definition() {
         let stop = AtomicBool::new(false);
         let cancel = Cancel::new(&stop);
         let budget = ByteBudget::new(16 << 20).unwrap();

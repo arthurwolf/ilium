@@ -12,6 +12,7 @@ use super::{
     pack_profiles::{self, PackSourceKind},
     settings::VoxelLandscapeSettings,
 };
+use crate::control::SceneSettings;
 use ilium_platform::secure_fs::NoFollowDirectory;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
@@ -118,6 +119,7 @@ fn mount_with_origin(
     cancel: Cancel<'_>,
 ) -> Result<MountedPack> {
     cancel.check()?;
+    let settings = settings.normalized();
     let profile = *pack_profiles::profile(settings.pack_profile)?;
     if settings.pack_path.is_empty() {
         return Err(AssetError::InvalidPath(
@@ -245,5 +247,29 @@ mod immutable_source_tests {
         drop(live);
         drop(frozen);
         assert_eq!(budget.used(), 0);
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn retired_path_is_cleared_before_mount_attempts_io() {
+        let settings = VoxelLandscapeSettings {
+            pack_profile_version: 0,
+            pack_profile: 2,
+            pack_path: "/never-open-retired-pack.zip".into(),
+            ..Default::default()
+        };
+        let stop = AtomicBool::new(false);
+        let result = mount_selected(
+            &settings,
+            ByteBudget::new(64 << 20).unwrap(),
+            Cancel::new(&stop),
+        );
+        assert!(matches!(result, Err(AssetError::InvalidPath(message))
+            if message == "choose a local full-pack file or folder"));
     }
 }

@@ -20,6 +20,7 @@ pub use capture::{
 pub use dsp::Fft as AudioFft;
 
 use crate::control::{self, Control, ControlValue, SceneSettings};
+use crate::resources::AmbientResources;
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
 use crate::style::ScenePalette;
@@ -551,7 +552,7 @@ pub struct SpectrumScene {
     settings: SpectrumSettings,
     shared: Shared,
     // Dropped with the scene: stops the capture thread and its helper process.
-    _worker: Worker,
+    _worker: Option<Worker>,
     groups: BandGroups,
     dynamics: Dynamics,
     scaler: LevelScaler,
@@ -577,7 +578,7 @@ pub struct SpectrumScene {
 }
 
 impl SpectrumScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
     // palette. This scene follows it natively: its cell colours are mapped onto the
     // palette by brightness (`ScenePalette::recolor`) as each frame is produced, and
     // `Scene::set_palette` delivers later changes (applied from the next render).
@@ -585,12 +586,25 @@ impl SpectrumScene {
     pub fn new(settings: &SpectrumSettings, env: &SceneEnv) -> Self {
         let settings = settings.normalized();
         let target = CaptureTarget::from_settings(settings.input, &settings.device_name);
-        let mut scene = Self::with_factory(&settings, plan_factory(target));
+        let resources = env.resources.clone();
+        let mut scene = Self::with_factory_and_resources(
+            &settings,
+            plan_factory(target, resources.clone()),
+            resources,
+        );
         scene.palette = env.palette.clone();
         scene
     }
 
     fn with_factory(settings: &SpectrumSettings, factory: SourceFactory) -> Self {
+        Self::with_factory_and_resources(settings, factory, crate::resources::test_resources())
+    }
+
+    fn with_factory_and_resources(
+        settings: &SpectrumSettings,
+        factory: SourceFactory,
+        resources: AmbientResources,
+    ) -> Self {
         let settings = settings.normalized();
         let shared = new_shared();
         let config = AnalysisConfig {
@@ -601,7 +615,16 @@ impl SpectrumScene {
             max_hz: settings.max_frequency as f32,
             tilt_db_per_octave: settings.tilt as f32,
         };
-        let worker = spawn_capture(Arc::clone(&shared), config, factory);
+        let worker = match spawn_capture(&resources, Arc::clone(&shared), config, factory) {
+            Ok(worker) => Some(worker),
+            Err(error) => {
+                shared
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .status = WorkerStatus::Failed(error);
+                None
+            }
+        };
         let edges = band_edges(
             settings.band_scale,
             settings.bands as usize,
@@ -1399,7 +1422,12 @@ mod tests {
     #[test]
     fn dropping_the_scene_stops_capture_promptly() {
         let (scene, dropped) = live_scene(&SpectrumSettings::default(), 1000.0, 0.4);
-        let ticket = scene._worker.join_observer().unwrap();
+        let ticket = scene
+            ._worker
+            .as_ref()
+            .expect("capture worker admitted")
+            .join_observer()
+            .unwrap();
         let started = Instant::now();
         drop(scene);
         assert!(

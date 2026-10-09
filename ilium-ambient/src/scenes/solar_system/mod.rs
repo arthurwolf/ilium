@@ -33,8 +33,8 @@ pub struct SolarSystemScene {
     palette: ScenePalette,
 }
 impl SolarSystemScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it, and `Scene::set_palette` delivers later
     // changes. This scene follows it natively: the sun, planet and backdrop colours
     // are mapped onto the palette by brightness at draw time, so `PaletteScene`

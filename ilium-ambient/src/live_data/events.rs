@@ -1,5 +1,6 @@
 //! Numeric Wikipedia edit aggregates; article titles and editor identities are never retained.
 use super::{model::Observation, poll::Snapshot, series::DataSeries};
+use crate::resources::{AmbientResources, WorkerCost};
 use crate::source::{http_stream_lines, sleep_unless_stopped, Worker};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::{atomic::Ordering, Arc, Mutex};
@@ -182,11 +183,24 @@ pub struct WikiFeed {
 }
 
 impl WikiFeed {
-    pub fn start(metric: WikiMetric, publish_seconds: u64) -> Result<Self, String> {
+    pub fn start(
+        resources: &AmbientResources,
+        metric: WikiMetric,
+        publish_seconds: u64,
+    ) -> Result<Self, String> {
+        // Reserve before allocating feed state or starting the long-lived
+        // blocking stream. Worker::start_admitted retains this credit through
+        // physical thread retirement, even after the feed is dropped.
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: 8 * 1024 * 1024,
+            })
+            .map_err(|error| format!("Wikipedia stream worker admission unavailable: {error:?}"))?;
         let interval = Duration::from_secs(publish_seconds.clamp(5, 60));
         let snapshot = Arc::new(Mutex::new(Arc::new(Snapshot::default())));
         let worker_snapshot = Arc::clone(&snapshot);
-        let worker = Worker::try_spawn("wikipedia-events", move |stop| {
+        let worker = Worker::start_admitted("wikipedia-events", admission, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             );
@@ -291,6 +305,29 @@ impl Drop for WikiFeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feed_refuses_before_starting_when_shared_worker_admission_is_full() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let blocker = resources
+            .reserve_worker(WorkerCost {
+                threads: 16,
+                resident_bytes: 1,
+            })
+            .unwrap();
+
+        let error = match WikiFeed::start(&resources, WikiMetric::EditRate, 5) {
+            Ok(_feed) => panic!("Wikipedia feed started without worker admission"),
+            Err(error) => error,
+        };
+        assert!(error.contains("admission unavailable"));
+        assert_eq!(quota.snapshot().worker_threads, 16);
+
+        drop(blocker);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+    }
+
     fn line(id: &str, second: i64, bot: bool) -> Vec<u8> {
         format!("data: {{\"meta\":{{\"id\":\"{id}\",\"domain\":\"en.wikipedia.org\"}},\"type\":\"edit\",\"server_name\":\"en.wikipedia.org\",\"timestamp\":{second},\"bot\":{bot}}}\n").into_bytes()
     }

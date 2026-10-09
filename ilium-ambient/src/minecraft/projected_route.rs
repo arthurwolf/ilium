@@ -4,6 +4,7 @@
 //! only tile cores emit. All tiles share one selected-pack texture bank.
 use super::{
     history_store::BoundMap,
+    loader,
     native_binding::{self, NativeSourceSession, NativeTile},
     projected_source, saved_binding, source_footprint, sparse_cells,
     tours::{self, Plan, PreparedMap, ProjectedDisplay},
@@ -73,6 +74,10 @@ pub struct Inputs<'a> {
     pub cancelled: &'a dyn Fn() -> bool,
     /// Reports concrete stages and bounded chunk counts to the preparation UI.
     pub progress: &'a dyn Fn(&str),
+    /// Reports each completed projected source-chunk decode to the preparation UI.
+    pub decode_progress: &'a dyn Fn(usize, usize),
+    /// Reports bounded model, texture, and rendered-tile preparation work.
+    pub work_progress: &'a dyn Fn(&str, usize, usize, &str),
 }
 
 pub struct PreparedRoute {
@@ -177,8 +182,10 @@ fn prepare_source(
         input.account,
         input.cancel,
     )?);
+    let mut report_decode_progress =
+        |update: loader::LoadProgress| (input.decode_progress)(update.completed, update.total);
     let qualified = match source {
-        Some((source, _)) => projected_source::qualify_pinned(
+        Some((source, _)) => projected_source::qualify_pinned_with_progress(
             input.initial_map,
             input.bound,
             source,
@@ -186,8 +193,9 @@ fn prepare_source(
             input.account,
             input.cancel,
             input.cancelled,
+            &mut report_decode_progress,
         )?,
-        None => projected_source::qualify(
+        None => projected_source::qualify_with_progress(
             input.initial_map,
             input.bound,
             input.saves_root,
@@ -195,6 +203,7 @@ fn prepare_source(
             input.account,
             input.cancel,
             input.cancelled,
+            &mut report_decode_progress,
         )?,
     };
     let map = qualified.map;
@@ -235,6 +244,12 @@ fn prepare_source(
     }
     let mut ids = BTreeSet::<ResourceId>::new();
     let render_chunks = request.render_chunks();
+    (input.work_progress)(
+        "Collecting viewport model requirements",
+        0,
+        render_chunks.len(),
+        "starting bounded viewport chunk scan",
+    );
     for (index, &chunk) in render_chunks.iter().enumerate() {
         input.cancel.check()?;
         (input.progress)(&format!(
@@ -254,7 +269,15 @@ fn prepare_source(
             input.cancel,
         ) {
             Ok(tile) => tile,
-            Err(sparse_cells::Error::Empty) => continue,
+            Err(sparse_cells::Error::Empty) => {
+                (input.work_progress)(
+                    "Collecting viewport model requirements",
+                    index + 1,
+                    render_chunks.len(),
+                    "empty viewport chunk skipped",
+                );
+                continue;
+            }
             Err(error) => return Err(error.into()),
         };
         let binding = saved_binding::prepare_accounted(
@@ -271,6 +294,12 @@ fn prepare_source(
             &mut compiler,
             input.cancel,
         )?;
+        (input.work_progress)(
+            "Collecting viewport model requirements",
+            index + 1,
+            render_chunks.len(),
+            &format!("{} unique texture models", ids.len()),
+        );
     }
     // Release every retained parsed selector/base model before the importer
     // reserves decoded selected textures in the same finite scene account.
@@ -279,7 +308,18 @@ fn prepare_source(
         "Loading selected texture-pack assets for {} required models",
         ids.len()
     ));
-    let shared = session.import(ids, input.cancel)?;
+    let mut report_import_progress = |completed, total, resource: &ResourceId, loading| {
+        (input.work_progress)(
+            "Loading selected texture assets",
+            completed,
+            total,
+            &format!(
+                "{} {resource}",
+                if loading { "currently" } else { "loaded" }
+            ),
+        );
+    };
+    let shared = session.import_with_progress(ids, input.cancel, &mut report_import_progress)?;
     let bank_epoch = shared.bank_epoch();
     let definitions = shared.definitions()?;
     let mut compiler = ModelCompiler::new(&definitions, shared.limits(), input.account.clone())?;
@@ -301,6 +341,12 @@ fn prepare_source(
     {
         return Err(Error::Limit);
     }
+    (input.work_progress)(
+        "Building projected viewport tiles",
+        0,
+        render_chunks.len(),
+        "starting bounded tile raster preparation",
+    );
     for (index, &chunk) in render_chunks.iter().enumerate() {
         input.cancel.check()?;
         (input.progress)(&format!(
@@ -320,7 +366,15 @@ fn prepare_source(
             input.cancel,
         ) {
             Ok(tile) => tile,
-            Err(sparse_cells::Error::Empty) => continue,
+            Err(sparse_cells::Error::Empty) => {
+                (input.work_progress)(
+                    "Building projected viewport tiles",
+                    index + 1,
+                    render_chunks.len(),
+                    "empty viewport chunk skipped",
+                );
+                continue;
+            }
             Err(error) => return Err(error.into()),
         };
         let binding = saved_binding::prepare_accounted(
@@ -350,6 +404,12 @@ fn prepare_source(
             return Err(Error::Source);
         }
         tiles.push(native_tile);
+        (input.work_progress)(
+            "Building projected viewport tiles",
+            index + 1,
+            render_chunks.len(),
+            &format!("tile {},{} ready", chunk[0], chunk[1]),
+        );
     }
     drop(compiler);
     if tiles.is_empty()

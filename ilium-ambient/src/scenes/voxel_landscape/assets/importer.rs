@@ -121,6 +121,15 @@ impl<'a> TextureImporter<'a> {
         })
     }
     pub fn import(&self, requests: &[TextureRequest], cancel: Cancel<'_>) -> Result<ImportResult> {
+        self.import_with_progress(requests, cancel, &mut |_, _, _, _| {})
+    }
+
+    pub fn import_with_progress(
+        &self,
+        requests: &[TextureRequest],
+        cancel: Cancel<'_>,
+        progress: &mut dyn FnMut(usize, usize, &ResourceId, bool),
+    ) -> Result<ImportResult> {
         cancel.check()?;
         if requests.len() > self.limits.requirements {
             return Err(metadata::invalid("texture request count limit"));
@@ -151,8 +160,9 @@ impl<'a> TextureImporter<'a> {
         let mut bedrock_cache = BTreeMap::<ResourceId, BedrockIndex>::new();
         let mut seen = BTreeSet::new();
         let mut records = Vec::new();
-        for request in requests {
+        for (index, request) in requests.iter().enumerate() {
             cancel.check()?;
+            progress(index, requests.len(), &request.requirement.id, true);
             if !seen.insert(request.requirement.id.clone()) {
                 return Err(AssetError::Duplicate(request.requirement.id.to_string()));
             }
@@ -190,6 +200,7 @@ impl<'a> TextureImporter<'a> {
                 } // Preserve the explicit failure instead of treating it as absence.
             }
             records.push(record);
+            progress(index + 1, requests.len(), &request.requirement.id, false);
         }
         let requirements = requests
             .iter()

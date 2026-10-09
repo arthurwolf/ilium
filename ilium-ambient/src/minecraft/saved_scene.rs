@@ -6,6 +6,7 @@ use super::{
     evidence::{Confidence, MapId},
     history_store::{BoundMap, Repository},
     history_writer::Writer,
+    index::{ScanProgress, ScanStage},
     native_assets,
     paint_owners::FrameOwners,
     pipeline, projected_route,
@@ -35,7 +36,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender},
         Arc, Mutex, TryLockError,
     },
@@ -44,71 +45,444 @@ use std::{
 
 const SCENE_ACCOUNT: u64 = 1024 * 1024 * 1024;
 const PREPARATION_PROGRESS_PHASES: usize = 6;
-const MAX_PREPARATION_EVENTS: usize = 8;
+const PREPARATION_SCAN_STAGES: usize = 6;
+const MAX_PREPARATION_EVENTS: usize = 32;
 const MAX_PREPARATION_EVENT_CHARS: usize = 160;
+const MAX_ROUTE_QUALIFICATIONS: usize = 16;
+const MAX_SELECTION_WORK: u64 = PLANNER_WORK * MAX_ROUTE_QUALIFICATIONS as u64;
+const PREPARATION_BUSY_ACTIVITY_INTERVAL: Duration = Duration::from_secs(3);
+const MIN_OVERALL_ETA_SAMPLE: Duration = Duration::from_secs(60);
+const MIN_OVERALL_ETA_PROGRESS_PERCENT: usize = 10;
 
 #[derive(Clone)]
 struct PreparationProgress {
-    started_at: Instant,
     state: Arc<Mutex<PreparationProgressState>>,
+    overall_percent: Arc<AtomicUsize>,
+    request_sequence: Option<u64>,
 }
 
 struct PreparationProgressState {
+    started_at: Instant,
+    finished_at: Option<Instant>,
     completed_phases: usize,
+    active_request_sequence: u64,
     phase: String,
     events: VecDeque<(Duration, String)>,
+    scan: Option<ScanStatus>,
+    work: Option<WorkStatus>,
+    route_candidates: Option<RouteCandidateProgress>,
     active: bool,
+}
+
+#[derive(Clone, Copy)]
+struct RouteCandidateProgress {
+    attempted: usize,
+    maximum: usize,
+    rate: Option<RouteCandidateRate>,
+}
+
+#[derive(Clone, Copy)]
+struct RouteCandidateRate {
+    started_at: Instant,
+    starting_attempted: usize,
+}
+
+#[derive(Clone)]
+struct ScanStatus {
+    map: String,
+    stage: ScanStage,
+    completed: usize,
+    total: Option<usize>,
+    stage_rates: [Option<ScanRate>; PREPARATION_SCAN_STAGES],
+    last_logged_fraction: usize,
+    last_logged_at: Instant,
+}
+
+#[derive(Clone, Copy)]
+struct ScanRate {
+    total: Option<usize>,
+    started_at: Instant,
+    starting_completed: usize,
+    last_completed: usize,
+}
+
+#[derive(Clone)]
+struct WorkStatus {
+    map: String,
+    label: String,
+    completed: usize,
+    total: usize,
+    detail: String,
+    rate: Option<ScanRate>,
+    last_logged_fraction: usize,
+    last_logged_at: Instant,
 }
 
 impl PreparationProgress {
     fn new() -> Self {
         let progress = Self {
-            started_at: Instant::now(),
             state: Arc::new(Mutex::new(PreparationProgressState {
+                started_at: Instant::now(),
+                finished_at: None,
                 completed_phases: 0,
+                active_request_sequence: 0,
                 phase: "Starting the saved-world preparation worker".into(),
                 events: VecDeque::new(),
+                scan: None,
+                work: None,
+                route_candidates: None,
                 active: true,
             })),
+            overall_percent: Arc::new(AtomicUsize::new(0)),
+            request_sequence: None,
         };
         progress.record("Starting the saved-world preparation worker");
         progress
     }
 
+    fn for_request(&self, sequence: u64) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+            overall_percent: Arc::clone(&self.overall_percent),
+            request_sequence: Some(sequence),
+        }
+    }
+
+    fn begin_request(&self, sequence: u64, desired_plan: &AtomicU64, phase: &str, event: &str) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        desired_plan.store(sequence, Ordering::Release);
+        state.active_request_sequence = sequence;
+        let requested_phases = 2.min(PREPARATION_PROGRESS_PHASES);
+        if state.active {
+            state.completed_phases = state.completed_phases.max(requested_phases);
+        } else {
+            state.started_at = Instant::now();
+            state.finished_at = None;
+            state.completed_phases = requested_phases;
+            state.events.clear();
+            state.active = true;
+            self.overall_percent.store(0, Ordering::Relaxed);
+        }
+        advance_overall_progress(&self.overall_percent, state.completed_phases, 0);
+        state.phase = bounded_progress_text(phase);
+        state.scan = None;
+        state.work = None;
+        state.route_candidates = None;
+        let elapsed = state.started_at.elapsed();
+        push_preparation_event(&mut state, elapsed, event);
+    }
+
+    fn invalidate_request(&self, desired_plan: &AtomicU64) -> u64 {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let sequence = desired_plan.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        state.active_request_sequence = sequence;
+        sequence
+    }
+
+    fn is_stale_request(&self, state: &PreparationProgressState) -> bool {
+        self.request_sequence
+            .is_some_and(|sequence| sequence != state.active_request_sequence)
+    }
+
     fn phase(&self, completed_phases: usize, phase: &str, event: &str) {
-        let Ok(mut state) = self.state.try_lock() else {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
+        }
+        let requested_phases = completed_phases.min(PREPARATION_PROGRESS_PHASES);
+        if state.active {
+            state.completed_phases = state.completed_phases.max(requested_phases);
+        } else {
+            state.started_at = Instant::now();
+            state.finished_at = None;
+            state.completed_phases = requested_phases;
+            state.events.clear();
+            state.active = true;
+            self.overall_percent.store(0, Ordering::Relaxed);
+        }
+        advance_overall_progress(&self.overall_percent, state.completed_phases, 0);
+        state.phase = bounded_progress_text(phase);
+        state.scan = None;
+        state.work = None;
+        if requested_phases < 3 {
+            state.route_candidates = None;
+        }
+        let elapsed = state.started_at.elapsed();
+        push_preparation_event(&mut state, elapsed, event);
+    }
+
+    fn work(
+        &self,
+        directory: &std::path::Path,
+        label: &str,
+        completed: usize,
+        total: usize,
+        detail: &str,
+    ) {
+        if total == 0 {
+            return;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
+        }
+        state.scan = None;
+        let now = Instant::now();
+        let map = directory.file_name().map_or_else(
+            || "saved world".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let completed = completed.min(total);
+        let same_work = state
+            .work
+            .as_ref()
+            .is_some_and(|work| work.map == map && work.label == label && work.total == total);
+        if !same_work {
+            state.work = Some(WorkStatus {
+                map: map.clone(),
+                label: bounded_progress_text(label),
+                completed,
+                total,
+                detail: bounded_progress_text(detail),
+                rate: Some(ScanRate {
+                    total: Some(total),
+                    started_at: now,
+                    starting_completed: completed,
+                    last_completed: completed,
+                }),
+                last_logged_fraction: 0,
+                last_logged_at: now,
+            });
+        }
+        let phase_fraction = completed.saturating_mul(100) / total;
+        advance_overall_progress(
+            &self.overall_percent,
+            state.completed_phases,
+            phase_fraction,
+        );
+        let event = {
+            let Some(work) = state.work.as_mut() else {
+                return;
+            };
+            work.completed = completed;
+            work.detail = bounded_progress_text(detail);
+            if let Some(rate) = work.rate.as_mut() {
+                rate.last_completed = completed;
+            }
+            let fraction = completed
+                .saturating_mul(100)
+                .checked_div(total)
+                .unwrap_or(0);
+            let log_event = now.duration_since(work.last_logged_at) >= Duration::from_secs(5)
+                || fraction >= work.last_logged_fraction.saturating_add(10)
+                || completed >= total;
+            if log_event {
+                work.last_logged_at = now;
+                work.last_logged_fraction = fraction;
+                Some(format!(
+                    "{} for {map}: {completed}/{total} items ({fraction}%)",
+                    work.label
+                ))
+            } else {
+                None
+            }
+        };
+        if let Some(event) = event {
+            let elapsed = state.started_at.elapsed();
+            push_preparation_event(&mut state, elapsed, &event);
+        }
+    }
+
+    fn scan(&self, directory: &std::path::Path, update: ScanProgress) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
+        }
+        state.work = None;
+        let map = directory.file_name().map_or_else(
+            || "saved world".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let now = Instant::now();
+        let same_scan = state.scan.as_ref().is_some_and(|scan| scan.map == map);
+        if !same_scan {
+            state.scan = Some(ScanStatus {
+                map: map.clone(),
+                stage: update.stage,
+                completed: update.completed,
+                total: update.total,
+                stage_rates: [None; PREPARATION_SCAN_STAGES],
+                last_logged_fraction: 0,
+                last_logged_at: now,
+            });
+        }
+        let completed_phases = state.completed_phases;
+        let Some(scan) = state.scan.as_mut() else {
             return;
         };
-        state.completed_phases = state
-            .completed_phases
-            .max(completed_phases.min(PREPARATION_PROGRESS_PHASES));
-        state.phase = bounded_progress_text(phase);
-        push_preparation_event(&mut state, self.started_at.elapsed(), event);
+        scan.stage = update.stage;
+        scan.completed = update.completed;
+        scan.total = update.total;
+        let local_percent = update
+            .total
+            .filter(|total| *total > 0)
+            .map(|total| {
+                update
+                    .completed
+                    .saturating_mul(100)
+                    .checked_div(total)
+                    .unwrap_or(0)
+                    .min(100)
+            })
+            .or_else(|| {
+                (update.stage == ScanStage::SavedRootEntries).then(|| {
+                    update
+                        .completed
+                        .saturating_mul(100)
+                        .checked_div(super::session_catalog::MAX_DIRECTORY_ENTRIES)
+                        .unwrap_or(0)
+                        .min(99)
+                })
+            })
+            .unwrap_or(0);
+        let phase_fraction =
+            (scan_stage_index(update.stage) * 100 + local_percent) / PREPARATION_SCAN_STAGES;
+        advance_overall_progress(&self.overall_percent, completed_phases, phase_fraction);
+        let stage_rate = &mut scan.stage_rates[scan_stage_index(update.stage)];
+        if stage_rate.map_or(true, |rate| {
+            rate.total != update.total || update.completed < rate.last_completed
+        }) {
+            *stage_rate = Some(ScanRate {
+                total: update.total,
+                started_at: now,
+                starting_completed: update.completed,
+                last_completed: update.completed,
+            });
+        } else if let Some(rate) = stage_rate {
+            rate.last_completed = update.completed;
+        }
+        let fraction = scan.total.filter(|total| *total > 0).map(|total| {
+            update
+                .completed
+                .saturating_mul(100)
+                .checked_div(total)
+                .unwrap_or(0)
+                .min(100)
+        });
+        let log_event = scan.last_logged_at.elapsed() >= Duration::from_secs(5)
+            || fraction.is_some_and(|value| value >= scan.last_logged_fraction + 10)
+            || scan.total.is_some_and(|total| update.completed >= total);
+        if log_event {
+            let event = format!(
+                "{} for {map}: {}",
+                scan_stage_label(update.stage),
+                format_scan_count(update.completed, update.total)
+            );
+            scan.last_logged_at = now;
+            scan.last_logged_fraction = fraction.unwrap_or(scan.last_logged_fraction);
+            let elapsed = state.started_at.elapsed();
+            push_preparation_event(&mut state, elapsed, &event);
+        }
     }
 
     fn record(&self, event: &str) {
-        let Ok(mut state) = self.state.try_lock() else {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
             return;
-        };
-        push_preparation_event(&mut state, self.started_at.elapsed(), event);
+        }
+        let elapsed = state.started_at.elapsed();
+        push_preparation_event(&mut state, elapsed, event);
+    }
+
+    fn route_candidates(&self, attempted: usize, maximum: usize) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
+        }
+        let attempted = attempted.min(maximum);
+        let now = Instant::now();
+        let previous = state.route_candidates;
+        let can_keep_rate = previous
+            .is_some_and(|progress| progress.maximum == maximum && attempted >= progress.attempted);
+        let rate = previous
+            .filter(|_| can_keep_rate)
+            .and_then(|progress| progress.rate)
+            .or_else(|| {
+                (attempted > 0).then_some(RouteCandidateRate {
+                    started_at: now,
+                    starting_attempted: attempted,
+                })
+            });
+        state.route_candidates = (maximum > 0).then_some(RouteCandidateProgress {
+            attempted,
+            maximum,
+            rate,
+        });
+        if maximum > 0 {
+            advance_overall_progress(
+                &self.overall_percent,
+                state.completed_phases,
+                attempted.saturating_mul(100) / maximum,
+            );
+        }
     }
 
     fn finish(&self, event: &str) {
-        self.phase(
-            PREPARATION_PROGRESS_PHASES,
-            "Saved camera route ready",
-            event,
-        );
-        if let Ok(mut state) = self.state.try_lock() {
-            state.active = false;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
         }
+        state.completed_phases = PREPARATION_PROGRESS_PHASES;
+        self.overall_percent.store(100, Ordering::Relaxed);
+        state.phase = "Saved camera route ready".into();
+        state.scan = None;
+        state.work = None;
+        state.route_candidates = None;
+        let elapsed = state.started_at.elapsed();
+        push_preparation_event(&mut state, elapsed, event);
+        state.finished_at = Some(Instant::now());
+        state.active = false;
     }
 
     fn fail(&self, event: &str) {
-        self.record(event);
-        if let Ok(mut state) = self.state.try_lock() {
-            state.active = false;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.is_stale_request(&state) {
+            return;
         }
+        let elapsed = state.started_at.elapsed();
+        push_preparation_event(&mut state, elapsed, event);
+        state.scan = None;
+        state.work = None;
+        state.route_candidates = None;
+        state.finished_at = Some(Instant::now());
+        state.active = false;
     }
 
     fn is_active(&self) -> bool {
@@ -116,31 +490,211 @@ impl PreparationProgress {
     }
 
     fn report(&self) -> String {
-        let elapsed = self.started_at.elapsed();
         let snapshot = match self.state.try_lock() {
             Ok(state) => (
+                state.finished_at.map_or_else(
+                    || state.started_at.elapsed(),
+                    |finished| finished.duration_since(state.started_at),
+                ),
                 state.completed_phases,
                 state.phase.clone(),
                 state.events.iter().cloned().collect::<Vec<_>>(),
+                state.scan.clone(),
+                state.work.clone(),
+                state.route_candidates,
             ),
             Err(_) => {
+                let overall_percent = self.overall_percent.load(Ordering::Relaxed);
                 return format!(
-                    "Saved worlds [{}] phase ?/{PREPARATION_PROGRESS_PHASES}\nNow: Updating preparation details\nElapsed: {}\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot",
-                    ".".repeat(PREPARATION_PROGRESS_PHASES),
-                    format_elapsed(elapsed)
+                    "Saved worlds [{}] estimated overall {overall_percent}% · phase ?/{PREPARATION_PROGRESS_PHASES}\nNow: Updating preparation details\nElapsed: refreshing with preparation state\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot",
+                    progress_bar(overall_percent)
                 );
             }
         };
-        let (completed, phase, events) = snapshot;
-        let bar = format!(
-            "[{}{}]",
-            "#".repeat(completed),
-            ".".repeat(PREPARATION_PROGRESS_PHASES.saturating_sub(completed))
+        let (elapsed, completed, phase, events, scan, work, route_candidates) = snapshot;
+        let overall_percent = self.overall_percent.load(Ordering::Relaxed);
+        let bar = progress_bar(overall_percent);
+        let minimum_progress = scan
+            .as_ref()
+            .is_some_and(|scan| scan.stage == ScanStage::SavedRootEntries && scan.total.is_none());
+        let progress_label = if minimum_progress {
+            format!(
+                "minimum estimated overall {overall_percent}% · phase {completed}/{PREPARATION_PROGRESS_PHASES}"
+            )
+        } else {
+            format!(
+                "estimated overall {overall_percent}% · phase {completed}/{PREPARATION_PROGRESS_PHASES}"
+            )
+        };
+        let (now, eta, stage_remaining) = if let Some(work) = work.as_ref() {
+            let percent = work.completed.saturating_mul(100) / work.total;
+            let measured_eta = measured_work_eta(work, Instant::now());
+            let eta = measured_eta.map_or_else(
+                || {
+                    "unavailable until this stage has a measured rate; later stages are unestimated"
+                        .to_owned()
+                },
+                |(remaining, rate)| {
+                    rate.map_or_else(
+                        || {
+                            format!(
+                                "{} on this stage; later stages are unestimated",
+                                format_remaining(remaining)
+                            )
+                        },
+                        |rate| {
+                            format!(
+                                "about {} for this measured stage ({rate:.0} items/s); later stages are unestimated",
+                                format_remaining(remaining)
+                            )
+                        },
+                    )
+                },
+            );
+            (
+                format!(
+                    "{} for {}: {}/{} items ({percent}%) · {}",
+                    work.label, work.map, work.completed, work.total, work.detail
+                ),
+                eta,
+                measured_eta.map(|(remaining, _)| remaining),
+            )
+        } else if let Some(scan) = scan.as_ref() {
+            let percent = scan
+                .total
+                .filter(|total| *total > 0)
+                .map(|total| {
+                    scan.completed
+                        .saturating_mul(100)
+                        .checked_div(total)
+                        .unwrap_or(0)
+                        .min(100)
+                })
+                .or_else(|| {
+                    (scan.stage == ScanStage::SavedRootEntries).then(|| {
+                        scan.completed
+                            .saturating_mul(100)
+                            .checked_div(super::session_catalog::MAX_DIRECTORY_ENTRIES)
+                            .unwrap_or(0)
+                            .min(99)
+                    })
+                });
+            let count = if scan.stage == ScanStage::SavedRootEntries && scan.total.is_none() {
+                format!(
+                    "{} of at most {} entries",
+                    scan.completed,
+                    super::session_catalog::MAX_DIRECTORY_ENTRIES
+                )
+            } else {
+                format_scan_count(scan.completed, scan.total)
+            };
+            let now = percent.map_or_else(
+                || format!("{} for {}: {count}", scan_stage_label(scan.stage), scan.map),
+                |percent| {
+                    let stage_progress = progress_bar(percent);
+                    if scan.stage == ScanStage::SavedRootEntries && scan.total.is_none() {
+                        format!(
+                            "{} {stage_progress} for {}: {count} (at least {percent}% of the entry ceiling)",
+                            scan_stage_label(scan.stage),
+                            scan.map
+                        )
+                    } else {
+                        format!(
+                            "{} {stage_progress} for {}: {count} ({percent}%)",
+                            scan_stage_label(scan.stage),
+                            scan.map
+                        )
+                    }
+                },
+            );
+            let measured_eta = measured_scan_eta(scan, Instant::now());
+            let eta = measured_eta.map_or_else(
+                || {
+                    if scan.stage == ScanStage::SavedRootEntries && scan.total.is_none() {
+                        "unavailable until this directory ends and its exact entry total is known; later stages are unestimated"
+                            .to_owned()
+                    } else {
+                        "unavailable until this scan has a measured rate; later stages are unestimated"
+                            .to_owned()
+                    }
+                },
+                |(remaining, rate)| {
+                    rate.map_or_else(
+                        || {
+                            format!(
+                                "{} on this scan; later stages are unestimated",
+                                format_remaining(remaining)
+                            )
+                        },
+                        |rate| {
+                            format!(
+                                "about {} for this measured scan ({rate:.0} items/s); later stages are unestimated",
+                                format_remaining(remaining)
+                            )
+                        },
+                    )
+                },
+            );
+            (now, eta, measured_eta.map(|(remaining, _)| remaining))
+        } else {
+            (
+                phase,
+                "unavailable (no measured work rate)".to_owned(),
+                None,
+            )
+        };
+        let overall_total_eta = rough_total_eta(elapsed, overall_percent).map(|remaining| {
+            format!(
+                "rough estimate {} remaining from {overall_percent}% estimated overall progress; save size and route qualification can change this estimate",
+                format_remaining(remaining)
+            )
+        });
+        let total_eta = route_candidates.map_or_else(
+            || match stage_remaining {
+                Some(remaining) => format!(
+                    "incomplete; about {} for the measured stage; later stages have no comparable measured rate",
+                    format_remaining(remaining)
+                ),
+                None => overall_total_eta
+                    .clone()
+                    .unwrap_or_else(|| "unavailable until overall progress is measured".to_owned()),
+            },
+            |candidates| {
+                let remaining_candidates = candidates.maximum.saturating_sub(candidates.attempted);
+                let candidate_note = (remaining_candidates > 0).then(|| {
+                    format!(
+                        "up to {remaining_candidates} route candidates remain without a measured duration"
+                    )
+                });
+                match stage_remaining {
+                    Some(remaining) => format!(
+                        "incomplete; about {} for the measured stage{}",
+                        format_remaining(remaining),
+                        candidate_note.map_or_else(String::new, |note| format!("; {note}"))
+                    ),
+                    None => match (overall_total_eta.clone(), candidate_note) {
+                        (Some(estimate), Some(note)) => format!("{estimate}; {note}"),
+                        (Some(estimate), None) => estimate,
+                        (None, Some(note)) => {
+                            format!("unavailable until a remaining stage has a measured rate; {note}")
+                        }
+                        (None, None) => {
+                            "unavailable until a remaining stage has a measured rate".to_owned()
+                        }
+                    },
+                }
+            },
         );
+        let route_eta = route_candidates
+            .map(|candidates| format_route_candidate_eta(candidates, Instant::now()));
         let mut report = format!(
-            "Saved worlds {bar} phase {completed}/{PREPARATION_PROGRESS_PHASES}\nNow: {phase}\nElapsed: {}\nETA: unavailable (no measured work rate)\nRecent activity:",
+            "Saved worlds {bar} {progress_label}\nNow: {now}\nElapsed: {}\nETA: {eta}\nTotal ETA: {total_eta}",
             format_elapsed(elapsed)
         );
+        if let Some(route_eta) = route_eta {
+            report.push_str(&format!("\nRoute ETA: {route_eta}"));
+        }
+        report.push_str("\nRecent activity:");
         if events.is_empty() {
             report.push_str("\n+00:00 · Waiting for the first preparation stage");
         } else {
@@ -150,6 +704,149 @@ impl PreparationProgress {
         }
         report
     }
+}
+
+fn format_route_candidate_eta(candidates: RouteCandidateProgress, now: Instant) -> String {
+    let completed_candidates = candidates
+        .attempted
+        .saturating_sub(usize::from(candidates.attempted > 0));
+    let remaining = candidates.maximum.saturating_sub(completed_candidates);
+    if remaining == 0 {
+        return "complete".to_owned();
+    }
+    let Some(rate) = candidates.rate else {
+        return "unavailable until one candidate completes".to_owned();
+    };
+    let completed_since_sample = candidates.attempted.saturating_sub(rate.starting_attempted);
+    let elapsed = now.duration_since(rate.started_at);
+    if completed_since_sample == 0 || elapsed < Duration::from_secs(3) {
+        return "unavailable until one candidate completes and establishes a measured rate"
+            .to_owned();
+    }
+    let seconds = remaining as f64 * elapsed.as_secs_f64() / completed_since_sample as f64;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return "unavailable because the measured route rate is invalid".to_owned();
+    }
+    let eta = if seconds >= Duration::MAX.as_secs_f64() {
+        Duration::MAX
+    } else {
+        Duration::from_secs_f64(seconds)
+    };
+    format!(
+        "about {}; based on {completed_since_sample} completed candidate{}; assuming all {remaining} remaining candidate checks still need qualification",
+        format_remaining(eta),
+        if completed_since_sample == 1 { "" } else { "s" }
+    )
+}
+
+fn scan_stage_label(stage: ScanStage) -> &'static str {
+    match stage {
+        ScanStage::SavedRootEntries => "Listing Minecraft saves-root entries",
+        ScanStage::RegionDirectory => "Listing region files",
+        ScanStage::RegionHeaders => "Reading region headers",
+        ScanStage::ChunkSlots => "Indexing chunk slots",
+        ScanStage::CandidateWindows => "Checking saved-world candidate-search work units",
+        ScanStage::ChunkPayloads => "Decoding map chunks",
+    }
+}
+
+fn scan_stage_index(stage: ScanStage) -> usize {
+    match stage {
+        ScanStage::SavedRootEntries => 0,
+        ScanStage::RegionDirectory => 1,
+        ScanStage::RegionHeaders => 2,
+        ScanStage::ChunkSlots => 3,
+        ScanStage::CandidateWindows => 4,
+        ScanStage::ChunkPayloads => 5,
+    }
+}
+
+fn advance_overall_progress(
+    overall_percent: &AtomicUsize,
+    completed_phases: usize,
+    phase_percent: usize,
+) {
+    let completed_phases = completed_phases.min(PREPARATION_PROGRESS_PHASES);
+    let completed_phases = completed_phases.saturating_mul(100);
+    let percent = completed_phases
+        .saturating_add(phase_percent.min(100))
+        .checked_div(PREPARATION_PROGRESS_PHASES)
+        .unwrap_or(0)
+        .min(100);
+    overall_percent.fetch_max(percent, Ordering::Relaxed);
+}
+
+fn progress_bar(percent: usize) -> String {
+    let percent = percent.min(100);
+    let filled = (percent * 12).saturating_add(99) / 100;
+    format!("[{}{}]", "#".repeat(filled), ".".repeat(12 - filled))
+}
+
+fn format_scan_count(completed: usize, total: Option<usize>) -> String {
+    total.map_or_else(
+        || format!("{completed} entries"),
+        |total| format!("{completed}/{total} items"),
+    )
+}
+
+fn measured_scan_eta(scan: &ScanStatus, now: Instant) -> Option<(Duration, Option<f64>)> {
+    let total = scan.total?;
+    let rate = scan.stage_rates[scan_stage_index(scan.stage)]?;
+    if rate.total != scan.total {
+        return None;
+    }
+    let completed = scan.completed.min(total);
+    let worked = completed.checked_sub(rate.starting_completed)?;
+    if completed >= total {
+        return Some((Duration::ZERO, None));
+    }
+    let elapsed = now.duration_since(rate.started_at);
+    if worked == 0 || elapsed < Duration::from_secs(3) {
+        return None;
+    }
+    let rate = worked as f64 / elapsed.as_secs_f64();
+    if !rate.is_finite() || rate <= 0.0 {
+        return None;
+    }
+    let remaining = (total - completed) as f64 / rate;
+    if !remaining.is_finite() || remaining < 0.0 {
+        return None;
+    }
+    let remaining = if remaining >= Duration::MAX.as_secs_f64() {
+        Duration::MAX
+    } else {
+        Duration::from_secs_f64(remaining)
+    };
+    Some((remaining, Some(rate)))
+}
+
+fn measured_work_eta(work: &WorkStatus, now: Instant) -> Option<(Duration, Option<f64>)> {
+    let rate = work.rate.as_ref()?;
+    if rate.total != Some(work.total) {
+        return None;
+    }
+    if work.completed >= work.total {
+        return Some((Duration::ZERO, None));
+    }
+    let worked = work.completed.checked_sub(rate.starting_completed)?;
+    let elapsed = now.duration_since(rate.started_at);
+    if worked == 0 || elapsed < Duration::from_secs(3) {
+        return None;
+    }
+    let rate = worked as f64 / elapsed.as_secs_f64();
+    if !rate.is_finite() || rate <= 0.0 {
+        return None;
+    }
+    let remaining = (work.total - work.completed) as f64 / rate;
+    if !remaining.is_finite() || remaining < 0.0 {
+        return None;
+    }
+    let remaining = if remaining >= Duration::MAX.as_secs_f64() {
+        Duration::MAX
+    } else {
+        Duration::from_secs_f64(remaining)
+    };
+    Some((remaining, Some(rate)))
 }
 
 fn push_preparation_event(state: &mut PreparationProgressState, at: Duration, event: &str) {
@@ -171,6 +868,26 @@ fn format_elapsed(duration: Duration) -> String {
         (seconds / 60) % 60,
         seconds % 60
     )
+}
+
+fn format_remaining(duration: Duration) -> String {
+    let seconds = duration
+        .as_secs()
+        .saturating_add(u64::from(duration.subsec_nanos() > 0));
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn rough_total_eta(elapsed: Duration, overall_percent: usize) -> Option<Duration> {
+    if elapsed < MIN_OVERALL_ETA_SAMPLE
+        || !(MIN_OVERALL_ETA_PROGRESS_PERCENT..100).contains(&overall_percent)
+    {
+        return None;
+    }
+
+    let percent_remaining = u64::try_from(100_usize.saturating_sub(overall_percent)).ok()?;
+    let sampled_percent = u64::try_from(overall_percent).ok()?;
+    let remaining_seconds = elapsed.as_secs().saturating_mul(percent_remaining) / sampled_percent;
+    Some(Duration::from_secs(remaining_seconds))
 }
 
 #[path = "saved_display.rs"]
@@ -258,6 +975,7 @@ struct PlanResponse {
 struct FrameReceipt {
     issued: IssuedView,
     owners: FrameOwners,
+    render_evidence: crate::scene::SavedWorldFrameEvidence,
     accounted_bytes: usize,
     _reservation: Reservation,
 }
@@ -523,6 +1241,7 @@ impl SavedScene {
                         Err(_) => None,
                     };
                     if let Some(request) = request {
+                        let request_progress = worker_progress.for_request(request.sequence);
                         let outcome = prepare_selection(
                             bundle,
                             &request,
@@ -530,7 +1249,7 @@ impl SavedScene {
                             &stop,
                             &desired_plan,
                             external_stop.as_ref(),
-                            &worker_progress,
+                            &request_progress,
                         );
                         if !stop.load(Ordering::Relaxed)
                             && !external_stop
@@ -701,7 +1420,6 @@ impl SavedScene {
             return;
         };
         self.plan_sequence = sequence;
-        self.desired_plan.store(sequence, Ordering::Release);
         *slot = Some(PlanRequest {
             sequence,
             ticket,
@@ -712,8 +1430,9 @@ impl SavedScene {
         });
         self.plan_pending = Some((sequence, size));
         self.status = Some("Selecting a saved camera route…".into());
-        self.progress.phase(
-            2,
+        self.progress.begin_request(
+            sequence,
+            &self.desired_plan,
             "Starting route selection for the current viewport",
             &format!(
                 "Route selection requested for {} by {} cells",
@@ -815,6 +1534,11 @@ impl Scene for SavedScene {
         }
         Some(crate::scene::SavedWorldSource { map, stop })
     }
+
+    fn saved_world_frame_evidence(&self) -> Option<crate::scene::SavedWorldFrameEvidence> {
+        self.receipt.as_ref().map(|receipt| receipt.render_evidence)
+    }
+
     fn readiness(&mut self) -> crate::scene::SceneReadiness {
         use crate::scene::SceneReadiness;
         if self
@@ -918,7 +1642,7 @@ impl Scene for SavedScene {
             self.last_clock = None;
             self.plan_pending = None;
             self.unavailable_size = None;
-            self.desired_plan.fetch_add(1, Ordering::AcqRel);
+            self.progress.invalidate_request(&self.desired_plan);
             self.request_plan(policy, size, scale);
             return;
         }
@@ -1193,6 +1917,8 @@ fn prepare_bundle(
     };
     let cancelled = || stop.load(Ordering::Relaxed) || external();
     let mut reload = false;
+    let mut busy_since = None;
+    let mut next_busy_activity = Instant::now() + PREPARATION_BUSY_ACTIVITY_INTERVAL;
     loop {
         if cancelled() {
             return Err("Saved scene cancelled".into());
@@ -1204,7 +1930,18 @@ fn prepare_bundle(
                 break;
             }
             Gate::Poisoned => return Err("Saved history runtime lock poisoned".into()),
-            Gate::Busy | Gate::Draining => std::thread::sleep(Duration::from_millis(25)),
+            Gate::Busy | Gate::Draining => {
+                let now = Instant::now();
+                let started = *busy_since.get_or_insert(now);
+                if now >= next_busy_activity {
+                    progress.record(&format!(
+                        "Saved history runtime remains busy after {}",
+                        format_elapsed(now.duration_since(started))
+                    ));
+                    next_busy_activity = now + PREPARATION_BUSY_ACTIVITY_INTERVAL;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
         }
     }
     let budget = preparation.budget;
@@ -1227,14 +1964,18 @@ fn prepare_bundle(
         "Scanning saved-world catalogs",
         "Reading saved-world metadata, map indexes, and history records",
     );
+    let mut report_scan = |directory: &std::path::Path, update| {
+        progress.scan(directory, update);
+    };
     let (root, native_jar, catalog) = match source {
         SourceRoot::Path(root) => {
-            let catalog = session_catalog::prepare(
+            let catalog = session_catalog::prepare_with_progress(
                 &root,
                 &storage,
                 generation,
                 pipeline::Limits::default(),
                 &cancelled,
+                &mut report_scan,
             )
             .map_err(|error| error.to_string())?;
             (root, None, catalog)
@@ -1255,7 +1996,7 @@ fn prepare_bundle(
                 )),
                 None => None,
             };
-            let catalog = session_catalog::prepare_repository_pinned(
+            let catalog = session_catalog::prepare_repository_pinned_with_progress(
                 &label,
                 root,
                 selected,
@@ -1263,6 +2004,7 @@ fn prepare_bundle(
                 generation,
                 pipeline::Limits::default(),
                 &cancelled,
+                &mut report_scan,
             )
             .map_err(|error| error.to_string())?;
             (label, Some(native_jar), catalog)
@@ -1468,8 +2210,6 @@ fn prepare_selection(
     // Header-only feasibility and an independent full decoder probe found
     // three 256-block source windows. Neither proves native render admission;
     // each selected route below still requires full projected qualification.
-    const MAX_ROUTE_QUALIFICATIONS: usize = 16;
-    const MAX_SELECTION_WORK: u64 = PLANNER_WORK * MAX_ROUTE_QUALIFICATIONS as u64;
     progress.phase(
         2,
         "Building the viewport's saved-chunk inventory",
@@ -1564,8 +2304,12 @@ fn prepare_selection(
                     Ok(())
                 };
                 verify()?;
-                let inventory = super::index::allocated_chunks_pinned(region, &cancelled)
-                    .map_err(|error| format!("Selected allocation inventory failed: {error}"))?;
+                let inventory = super::index::allocated_chunks_pinned_with_progress(
+                    region,
+                    &cancelled,
+                    &mut |update| progress.scan(&bound.directory, update),
+                )
+                .map_err(|error| format!("Selected allocation inventory failed: {error}"))?;
                 verify()?;
                 inventory
             }
@@ -1576,9 +2320,12 @@ fn prepare_selection(
                 bound
                     .verify(root)
                     .map_err(|error| format!("Saved allocation binding changed: {error}"))?;
-                let inventory =
-                    super::index::allocated_chunks(&bound.directory.join("region"), &cancelled)
-                        .map_err(|error| format!("Saved allocation inventory failed: {error}"))?;
+                let inventory = super::index::allocated_chunks_with_progress(
+                    &bound.directory.join("region"),
+                    &cancelled,
+                    &mut |update| progress.scan(&bound.directory, update),
+                )
+                .map_err(|error| format!("Saved allocation inventory failed: {error}"))?;
                 bound.verify(root).map_err(|error| {
                     format!("Saved allocation binding changed during read: {error}")
                 })?;
@@ -1617,15 +2364,18 @@ fn prepare_selection(
     let mut previous_tier = None;
     let mut selection_passes = 0;
     let mut selection_work_used = 0_u64;
+    let selection_progress_base = std::cell::Cell::new(0_u64);
     let mut selection_limit = None;
     let mut query_limited_tiers = 0;
     let mut failures = Vec::<String>::new();
     let mut attempted = 0;
+    let selection_pass_number = std::cell::Cell::new(0_usize);
     progress.phase(
         3,
         "Surveying camera-route candidates",
         "Starting the finite route survey across qualified saved-map windows",
     );
+    progress.route_candidates(0, MAX_ROUTE_QUALIFICATIONS);
     let mut candidate_eligibility = |source: super::evidence::Source,
                                      line: super::coverage::Line,
                                      focus_y: f64,
@@ -1645,6 +2395,19 @@ fn prepare_selection(
                 super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
             ) => {
                 work.charge(128)?;
+                let pass = selection_pass_number.get().max(1);
+                progress.work(
+                    &bundle.root,
+                    "Checking route coverage",
+                    selection_progress_base
+                        .get()
+                        .saturating_add(work.used())
+                        .min(MAX_SELECTION_WORK) as usize,
+                    MAX_SELECTION_WORK as usize,
+                    &format!(
+                        "Pass {pass} of {MAX_ROUTE_QUALIFICATIONS}: comparing candidate camera views with allocated saved chunks"
+                    ),
+                );
                 return Ok(false);
             }
             Err(error @ super::source_footprint::Error::Asset(_)) => {
@@ -1652,6 +2415,19 @@ fn prepare_selection(
             }
         };
         work.charge(estimate)?;
+        let pass = selection_pass_number.get().max(1);
+        progress.work(
+            &bundle.root,
+            "Checking route coverage",
+            selection_progress_base
+                .get()
+                .saturating_add(work.used())
+                .min(MAX_SELECTION_WORK) as usize,
+            MAX_SELECTION_WORK as usize,
+            &format!(
+                "Pass {pass} of {MAX_ROUTE_QUALIFICATIONS}: comparing candidate camera views with allocated saved chunks"
+            ),
+        );
         let footprint = match super::source_footprint::request(
             line,
             focus_y,
@@ -1696,6 +2472,7 @@ fn prepare_selection(
                     ..request.policy
                 };
                 let mut work = tours::Budget::new(PLANNER_WORK.min(remaining), &cancelled);
+                selection_pass_number.set(selection_passes + 1);
                 // Every selector pass receives ALL maps; attempt count ranks
                 // maps only within the required appearance phase.
                 let selection = tours::select_diverse_excluding_with_eligibility(
@@ -1713,6 +2490,7 @@ fn prepare_selection(
                 );
                 selection_passes += 1;
                 selection_work_used += work.used();
+                selection_progress_base.set(selection_work_used);
                 let selection = match selection {
                     Ok(selection) => selection,
                     Err(tours::Error::Limit("work")) => {
@@ -1764,6 +2542,7 @@ fn prepare_selection(
             |(maximum_length, plan)| {
                 cancel.check().map_err(|error| error.to_string())?;
                 attempted += 1;
+                progress.route_candidates(attempted, MAX_ROUTE_QUALIFICATIONS);
                 let Some(initial_map) = maps.iter().find(|map| map.source() == plan.source())
                 else {
                     return Err("Selected saved route lost its initial map".into());
@@ -1799,8 +2578,19 @@ fn prepare_selection(
                     account: &bundle.budget,
                     cancel,
                     cancelled: &cancelled,
-                    progress: &|event| {
-                        progress.phase(4, "Decoding and projecting the selected route", event)
+                    progress: &|event| progress.record(event),
+                    decode_progress: &|completed, total| {
+                        progress.scan(
+                            &bound.directory,
+                            super::index::ScanProgress {
+                                stage: super::index::ScanStage::ChunkPayloads,
+                                completed,
+                                total: Some(total),
+                            },
+                        )
+                    },
+                    work_progress: &|label, completed, total, detail| {
+                        progress.work(&bound.directory, label, completed, total, detail)
                     },
                 };
                 progress.phase(
@@ -1922,6 +2712,11 @@ fn paint(
     if size != route.viewport || route.scale.to_bits() != scale.to_bits() {
         return Err("Saved frame differs from certified viewport and zoom".into());
     }
+    let tile_source = route
+        .tiles
+        .first()
+        .ok_or_else(|| "Saved route has no prepared native tiles".to_owned())?;
+    let coverage = tile_source.bank().coverage();
     let mut pixels = RasterFrame::new(size, RasterLimits::default(), &bundle.budget, cancel)
         .map_err(|error| error.to_string())?;
     let camera = [look_at[0], look_at[2], route.camera_height];
@@ -1933,8 +2728,11 @@ fn paint(
             || tile.mesh.bank != route.bank_epoch
             || tile.bank().identity() != route.bank_epoch
             || !Arc::ptr_eq(&tile.map, &route.map)
+            || tile.source_profile != tile_source.source_profile
+            || tile.native_archive_sha256 != tile_source.native_archive_sha256
+            || tile.selected_archive_sha256 != tile_source.selected_archive_sha256
         {
-            return Err("Saved tile model and selected bank differ".into());
+            return Err("Saved tile model, source and selected bank differ".into());
         }
         surface_raster::draw_mesh_layer(
             &tile.mesh,
@@ -2005,6 +2803,15 @@ fn paint(
             covered.push(visible);
         }
     }
+    let render_evidence = crate::scene::SavedWorldFrameEvidence {
+        bank_epoch: route.bank_epoch,
+        source_profile: tile_source.source_profile,
+        native_archive_sha256: tile_source.native_archive_sha256,
+        selected_archive_sha256: tile_source.selected_archive_sha256,
+        required_materials: coverage.required_count,
+        required_materials_satisfied: coverage.required_satisfied,
+        visible_pixels: covered.iter().filter(|visible| **visible).count(),
+    };
     composite_selected(&colors, &covered, frame, settings, palette);
     let mut owners = FrameOwners::new(Arc::clone(&route.map));
     for y in 0..size[1] {
@@ -2022,6 +2829,7 @@ fn paint(
     Ok(FrameReceipt {
         issued,
         owners,
+        render_evidence,
         accounted_bytes,
         _reservation: reservation,
     })

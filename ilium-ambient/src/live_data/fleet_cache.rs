@@ -4,7 +4,11 @@ use super::{
     model::{FeedState, Position},
     openseafeed, parse, rate,
 }; // Existing validated adapters.
-use crate::source::{http_get_stoppable, Worker}; // Reuse bounded HTTP and owned threads.
+use crate::{
+    resources::{AmbientResources, WorkerCost},
+    source::{http_get_stoppable, Worker},
+}; // Reuse bounded HTTP and admitted owned threads.
+use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs}; // Existing private file primitives.
 use std::{
     io::{Read, Write},
@@ -54,6 +58,22 @@ impl FleetSource {
             parse::MAX_RESPONSE_BYTES
         }
     } // Do not widen other providers.
+    fn retained_storage_bytes(self) -> usize {
+        // Reserve before transport/decoding. The encoded-body allowance covers
+        // retained string capacities; doubled row storage covers Vec growth,
+        // Position values and per-allocation bookkeeping with bounded slack.
+        let rows = if self == Self::OpenSeaFeed {
+            openseafeed::MAX_RECORDS
+        } else {
+            parse::MAX_ITEMS
+        };
+        self.limit()
+            .saturating_mul(2)
+            .saturating_add(rows.saturating_mul(
+                2 * std::mem::size_of::<Position>() + 4 * std::mem::size_of::<usize>(),
+            ))
+            .saturating_add(1024 * 1024)
+    } // Conservative bounded charge follows the retained immutable batch.
     fn url(self) -> &'static str {
         match self {
             Self::OpenSeaFeed => openseafeed::ENDPOINT,
@@ -72,10 +92,11 @@ pub(super) struct FleetMeta {
     pub counts: openseafeed::FleetCounts, // Disjoint source-row accounting.
     pub filtered: usize,            // Surface reports intentionally omitted by the aircraft parser.
 } // End block.
-#[derive(Debug)] // Immutable source result; its raw vector is separately held by Custody.
+#[derive(Debug)] // Immutable source result and its allocation charge travel together.
 pub(super) struct FleetBatch {
     pub positions: Arc<Vec<Position>>,
     pub meta: FleetMeta,
+    pub _storage: Option<Arc<StorageAdmission>>, // None is limited to unpublished test fixtures.
 } // Geometry identity remains stable on cache hits.
 #[derive(Debug, Default, Clone)] // Small publications can change without cloning position strings.
 pub(super) struct FleetView {
@@ -147,12 +168,25 @@ pub(super) struct FleetFeed {
 } // Scene owns a subscription, not an HTTP worker.
 impl FleetFeed {
     // Scene operations never scan fleets or touch the filesystem.
-    pub fn start(source: FleetSource, seconds: u64) -> Result<Self, String> {
-        // One initializer per process, never one thread per scene.
-        static SERVICE: OnceLock<Result<Service, String>> = OnceLock::new(); // Own the service and cached receipts for the process lifetime.
-        let service = SERVICE.get_or_init(|| Service::start(disk_fetch)); // Initialization only spawns the single bounded owner.
-        let service = service.as_ref().map_err(Clone::clone)?; // Sticky spawn failure prevents a spawn storm.
-        Self::attach(Arc::clone(&service.shared), source, seconds) // Reopening immediately reuses the existing publication.
+    pub fn start(
+        resources: AmbientResources,
+        source: FleetSource,
+        seconds: u64,
+    ) -> Result<Self, String> {
+        // One process owner is admitted once and shared by all scene subscribers.
+        static SERVICE: OnceLock<Mutex<Option<Service>>> = OnceLock::new();
+        let mut service = SERVICE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if service.is_none() {
+            *service = Some(Service::start(resources, disk_fetch)?);
+        } else {
+            ensure_quota_root(service.as_ref().expect("checked above"), &resources)?;
+        } // Failed admission/spawn leaves the slot empty so the scene can retry.
+        let shared = Arc::clone(&service.as_ref().expect("initialized above").shared);
+        drop(service);
+        Self::attach(shared, source, seconds) // Reopening immediately reuses the existing publication.
     } // End block.
     fn attach(shared: Arc<Shared>, source: FleetSource, seconds: u64) -> Result<Self, String> {
         // Also the deterministic test seam.
@@ -247,6 +281,7 @@ impl<T> Custody<T> {
 struct Service {
     shared: Arc<Shared>,
     worker: Option<Worker>,
+    quota_root: QuotaGroup, // A process singleton cannot silently charge a different host ledger.
 } // One owned process-wide worker and no per-source worker queue.
 struct Fetched {
     batch: FleetBatch,
@@ -257,17 +292,25 @@ type FetchResult = Result<Option<Fetched>, String>; // None means an unchanged f
 impl Service {
     // Injection exercises real ownership without any provider calls.
     fn start(
+        resources: AmbientResources,
         mut fetch: impl FnMut(FleetSource, Option<i64>, &AtomicBool) -> FetchResult + Send + 'static,
     ) -> Result<Self, String> {
-        // One serial HTTP/decode owner.
+        let quota_root = resources.finite().quota_group();
+        // Admit the process-wide serial owner before allocating worker state.
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: 16 * 1024 * 1024,
+            })
+            .map_err(|reason| format!("fleet cache worker admission refused: {reason:?}"))?;
         let shared = Arc::new(Shared::default()); // No raw data can exist if spawning fails.
         let state = Arc::clone(&shared); // Worker retains the shared state through final cleanup.
-        let worker = Worker::try_spawn("fleet-cache", move |stop| {
+        let worker = Worker::start_admitted("fleet-cache", admission, move |stop| {
             // Admission stays bounded even during scene churn.
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             ); // Match existing source workers.
-            let mut custody = Custody::<Vec<Position>>::default(); // Sole owner of retirement/destruction rights.
+            let mut custody = Custody::<FleetBatch>::default(); // Sole owner of retirement/destruction rights.
             let mut attempted = [None::<Instant>; 3]; // Monotonic attempt clocks survive subscriber restarts.
             let mut failures = [0_u32; 3]; // Error backoff is separate for each source.
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -301,6 +344,20 @@ impl Service {
                         if entry.interval().is_none() || stop.load(Ordering::Acquire) {
                             continue;
                         } // Recheck demand after clearing the flag.
+                        let storage = match resources
+                            .reserve_storage(source.retained_storage_bytes())
+                        {
+                            Ok(storage) => storage,
+                            Err(error) => {
+                                attempted[index] = Some(Instant::now());
+                                failures[index] = failures[index].saturating_add(1);
+                                let mut next = (*previous).clone();
+                                next.state
+                                    .failed(format!("fleet storage admission refused: {error:?}"));
+                                entry.publish(next);
+                                continue;
+                            }
+                        }; // Bound retained provider data before body capture or decode.
                         let result = fetch(source, previous.state.received_ms, &entry.cancel); // All filesystem, HTTP and decoding stay here.
                         attempted[index] = Some(Instant::now()); // Cooldown follows completed I/O, including failed/cancelled attempts; this is not a receipt timestamp.
                         let mut next = (*previous).clone(); // Failure retains both data and its original receipt.
@@ -308,14 +365,15 @@ impl Service {
                             // No cached hit is stamped with the current clock.
                             Ok(Some(fetched)) if !entry.cancel.load(Ordering::Acquire) => {
                                 // Do not publish cancelled work.
+                                let mut batch = fetched.batch;
+                                batch._storage = Some(storage); // Charge follows every consumer retaining the batch.
+                                let batch = Arc::new(batch);
                                 custody
-                                    .retain(&fetched.batch.positions)
+                                    .retain(&batch)
                                     .expect("capacity checked by sole owner"); // Guard before exposure; no intervening publisher exists.
-                                next.state.received(
-                                    fetched.received_ms,
-                                    fetched.batch.meta.latest_fix_ms,
-                                ); // Preserve genuine network receipt and known fix summary.
-                                next.data = Some(Arc::new(fetched.batch)); // One immutable geometry identity per admitted result.
+                                next.state
+                                    .received(fetched.received_ms, batch.meta.latest_fix_ms); // Preserve genuine network receipt and known fix summary.
+                                next.data = Some(batch); // One immutable geometry identity per admitted result.
                                 next.generation = next
                                     .generation
                                     .checked_add(1)
@@ -353,10 +411,11 @@ impl Service {
                 std::thread::sleep(Duration::from_millis(25));
             } // Keep the owner alive until scene and marker copies are gone.
         })
-        .map_err(|error| format!("could not start fleet cache: {error}"))?; // Spawn failure is visible and sticky in the process registry.
+        .map_err(|error| format!("could not start fleet cache: {error}"))?; // Failed startup leaves the process registry retryable.
         Ok(Self {
             shared,
             worker: Some(worker),
+            quota_root,
         }) // The static service owns the actual join handle.
     } // End block.
 } // End block.
@@ -400,6 +459,7 @@ fn decode(source: FleetSource, bytes: &[u8], stop: &AtomicBool) -> Result<FleetB
                 counts: fleet.counts,
                 ..Default::default()
             },
+            _storage: None,
         }); // Every fix remains unknown.
     } // End block.
     let decoded = if source == FleetSource::Digitraffic {
@@ -432,6 +492,7 @@ fn decode(source: FleetSource, bytes: &[u8], stop: &AtomicBool) -> Result<FleetB
     Ok(FleetBatch {
         positions: Arc::new(decoded.items),
         meta,
+        _storage: None,
     }) // The service guards this Arc before publication.
 } // End block.
 struct RawReceipt {
@@ -638,19 +699,77 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1)); // Broad liveness bound, not performance evidence.
         } // End block.
     } // End block.
+    #[test]
+    fn cache_service_admission_refusal_is_retryable() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let held = resources
+            .reserve_worker(WorkerCost {
+                threads: 16,
+                resident_bytes: 1,
+            })
+            .unwrap();
+        let refused = Service::start(resources.clone(), |_source, _, _| Ok(None));
+        assert!(refused.is_err());
+        drop(held);
+
+        let service = Service::start(resources, |_source, _, _| Ok(None))
+            .expect("service starts after capacity returns");
+        drop(service);
+    }
+
+    #[test]
+    fn fleet_storage_refusal_is_reported_before_provider_fetch() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let calls = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&calls);
+        let service = Service::start(resources.clone(), move |_source, _, _| {
+            counter.fetch_add(1, Ordering::AcqRel);
+            Ok(None)
+        })
+        .unwrap();
+        let quota = resources.finite().quota_group();
+        let snapshot = quota.snapshot();
+        let remaining = snapshot.limits.worker_bytes - snapshot.worker_bytes;
+        let pressure = resources
+            .reserve_storage(remaining.saturating_sub(1))
+            .expect("leave less than one fleet reservation available");
+        let feed =
+            FleetFeed::attach(Arc::clone(&service.shared), FleetSource::OpenSeaFeed, 60).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let view = feed.try_snapshot().unwrap().unwrap();
+            if let Some(error) = &view.state.error {
+                assert!(error.contains("fleet storage admission refused"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "storage refusal was not published"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(calls.load(Ordering::Acquire), 0);
+        drop(pressure);
+        drop(feed);
+        drop(service);
+    }
+
     #[test] // Reopening and a second consumer cannot fabricate another receive event.
     fn subscribers_share_arc_receipt_and_request_floor_across_restart() {
         // Real source worker, injected finite transport only.
         let calls = Arc::new(AtomicU64::new(0));
         let counter = Arc::clone(&calls); // Count actual transport invocations.
-        let service = Service::start(move |source, _, stop| {
-            counter.fetch_add(1, Ordering::AcqRel);
-            Ok(Some(Fetched {
-                batch: decode(source, &body(), stop)?,
-                received_ms: 77,
-                refresh_soon: false,
-            }))
-        })
+        let service = Service::start(
+            crate::resources::test_resources(),
+            move |source, _, stop| {
+                counter.fetch_add(1, Ordering::AcqRel);
+                Ok(Some(Fetched {
+                    batch: decode(source, &body(), stop)?,
+                    received_ms: 77,
+                    refresh_soon: false,
+                }))
+            },
+        )
         .unwrap(); // No filesystem/network dependencies.
         let first =
             FleetFeed::attach(Arc::clone(&service.shared), FleetSource::OpenSeaFeed, 60).unwrap(); // First source demand.
@@ -1010,3 +1129,10 @@ mod repair_regression {
         assert_eq!(std::fs::metadata(path).unwrap().len(), 49);
     }
 }
+fn ensure_quota_root(service: &Service, resources: &AmbientResources) -> Result<(), String> {
+    let requested = resources.finite().quota_group();
+    if !service.quota_root.shares_root(&requested) {
+        return Err("fleet cache belongs to a different execution quota".into());
+    }
+    Ok(())
+} // Multiple scenes must debit the same host-owned process ledger.

@@ -1,5 +1,5 @@
 //! Demand-driven fleet geometry. Presentation never waits for preparation.
-use super::{map, maps::MapKind, model::Position};
+use super::{fleet_cache::FleetBatch, map, maps::MapKind, model::Position};
 use crate::{raster::Raster, source::Worker};
 use std::{
     io,
@@ -30,6 +30,7 @@ pub(super) struct MarkerKey {
 pub(super) struct MarkerRequest {
     pub key: MarkerKey,
     pub positions: Arc<Vec<Position>>,
+    pub _owner: Option<Arc<FleetBatch>>, // Keeps storage admission alive through replacement/retirement.
 }
 
 #[derive(Debug)]
@@ -454,6 +455,7 @@ mod tests {
             positions: Arc::new(vec![
                 Position::new("fixture".into(), 0.0, 0.0, Some(0)).unwrap()
             ]), // Preserve the typed operation.
+            _owner: None,
         }
     }
 

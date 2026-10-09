@@ -1,4 +1,4 @@
-//! Eleven explicit private-test full-pack selectors. Reviews are local research
+//! Eight retained full-pack selectors. Reviews are local research
 //! records, never parsed from a pack's own metadata or claims about permission.
 use super::assets::{
     error::{AssetError, Result},
@@ -27,19 +27,10 @@ pub struct PackProfile {
     pub evidence: &'static str,
 }
 
-pub const FULL_PACKS: [PackProfile; 11] = [
-    PackProfile { id:"jicklus", name:"Jicklus", release:"Java 201", edition:SourceEdition::Java,
-        source_kind:PackSourceKind::Java, author:"Jicklus by Jack", license:"Author personal-use / all-rights-reserved source record",
-        restriction:"Private temporary testing only; no public redistribution", known_missing:"Release-specific modern state/model coverage must be measured",
-        evidence:"pack-research full-pack-profile-catalog; supplied Jicklus release 201" },
-    PackProfile { id:"f8thful", name:"F8thful", release:"Java 2.3.0", edition:SourceEdition::Java,
-        source_kind:PackSourceKind::Java, author:"F8thful authors", license:"All rights reserved source record",
-        restriction:"Private temporary testing only", known_missing:"Release-specific state coverage must be measured",
-        evidence:"pack-research full-pack-profile-catalog; supplied 2.3.0" },
-    PackProfile { id:"whimscape", name:"Whimscape", release:"Java 26.1-26.3_r2", edition:SourceEdition::Java,
-        source_kind:PackSourceKind::Java, author:"Whimscape author", license:"All rights reserved source record",
-        restriction:"Author no-port clause retained; private test only, no distribution", known_missing:"Selected 26.3 coverage requires exact report",
-        evidence:"pack-research full-pack-profile-catalog; supplied 26.1-26.3_r2" },
+// Compatibility identities only: these are never runtime PackProfile records.
+pub(crate) const RETIRED_PACK_IDS: [&str; 3] = ["jicklus", "f8thful", "whimscape"];
+
+pub const FULL_PACKS: [PackProfile; 8] = [
     PackProfile { id:"goodvibes", name:"GoodVibes / Acaitart", release:"VoxelAssets extracted subtree", edition:SourceEdition::ExtractedWorldArt,
         source_kind:PackSourceKind::ExtractedJavaArt, author:"Acaitart", license:"CC BY 4.0 source README",
         restriction:"Credit Acaitart; extracted art is not a ready Java pack", known_missing:"No authored blockstates/models/animation sidecars; explicit compatibility geometry and timing needed",
@@ -102,13 +93,30 @@ pub fn profile(index: usize) -> Result<&'static PackProfile> {
 mod tests {
     use super::*;
     #[test]
-    fn all_eleven_reviews_are_full_pack_private_placeholders_with_distinct_ids() {
+    fn all_eight_reviews_keep_their_evidence_and_exclude_retired_profiles() {
         let mut ids = std::collections::BTreeSet::new();
         for entry in FULL_PACKS {
             let review = entry.review().unwrap();
             assert_eq!(review.phase, AssetPhase::PrivateTestPlaceholder);
             assert!(ids.insert(review.pack));
         }
-        assert_eq!(ids.len(), 11);
+        assert_eq!(ids.len(), 8);
+        assert_eq!(
+            FULL_PACKS.map(|entry| entry.id),
+            [
+                "goodvibes",
+                "programmerart",
+                "textureless",
+                "plasticator",
+                "pixelperfectionce",
+                "faithful32",
+                "faithful64",
+                "antumbra"
+            ]
+        );
+        assert!(FULL_PACKS
+            .iter()
+            .all(|entry| !RETIRED_PACK_IDS.contains(&entry.id)));
+        assert!(profile(FULL_PACKS.len() + 1).is_err());
     }
 }

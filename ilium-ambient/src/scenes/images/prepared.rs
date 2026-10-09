@@ -216,7 +216,7 @@ pub(super) fn bmp(
             Err(reason) => {
                 return Err(fail(format!(
                     "bitmap preparation admission refused: {reason:?}"
-                )))
+                )));
             }
         };
         let Some((source, name)) = original.take() else {
@@ -280,7 +280,7 @@ pub(super) fn bmp(
                 };
             }
             JobPoll::Lost | JobPoll::Taken => {
-                return Err(fail("bitmap preparation owner retired".to_owned()))
+                return Err(fail("bitmap preparation owner retired".to_owned()));
             }
         }
     }

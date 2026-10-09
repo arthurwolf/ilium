@@ -72,13 +72,13 @@ impl<T, const N: usize> Mailbox<T, N> {
                 return Err(Rejected {
                     reason: Refusal::Busy,
                     value,
-                })
+                });
             }
             Err(TryLockError::Poisoned(_)) => {
                 return Err(Rejected {
                     reason: Refusal::Poisoned,
                     value,
-                })
+                });
             }
         };
         let reason = if queue.closed {

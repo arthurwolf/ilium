@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ilium-http = { version = "0.1.0", path = "../ilium-http" }
+ilium-http = { version = "0.1.1", path = "../ilium-http" }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 cosmic-text = "0.14"
 cpal = "0.18.1"

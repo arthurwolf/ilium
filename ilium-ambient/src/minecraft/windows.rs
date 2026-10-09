@@ -48,6 +48,9 @@ pub enum Error {
     Cancelled,
 }
 
+/// Retain a useful progress cadence without reporting every membership check.
+const PROGRESS_REPORTS_PER_SEARCH: usize = 128;
+
 /// Coordinates and recent centers are chunk [x,z]; anchor is a candidate only.
 /// Grid spacing equals window width, so grid windows do not overlap. The anchor
 /// is tried independently to avoid missing small saves between grid centers.
@@ -61,6 +64,20 @@ pub fn search(
     recent: &[[i32; 2]],
     limits: Limits,
     cancelled: &dyn Fn() -> bool,
+) -> Result<Search, Error> {
+    search_with_progress(allocated, anchor, recent, limits, cancelled, &mut |_, _| {})
+}
+
+/// Search bounded candidate windows and report counted work against the fixed
+/// budget. A successful search may use only part of that budget; callers that
+/// display phase completion should close out the phase using `work_used`.
+pub fn search_with_progress(
+    allocated: &BTreeSet<[i32; 2]>,
+    anchor: [i32; 2],
+    recent: &[[i32; 2]],
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, usize),
 ) -> Result<Search, Error> {
     if cancelled() {
         return Err(Error::Cancelled);
@@ -76,11 +93,15 @@ pub fn search(
     {
         return Err(Error::Limits);
     }
+    progress(0, limits.work_units);
     let mut work = Work {
         used: 0,
         limit: limits.work_units,
+        report_interval: limits.work_units.div_ceil(PROGRESS_REPORTS_PER_SEARCH),
+        last_reported: 0,
         exhausted: false,
         cancelled,
+        progress,
     };
     let mut result = Search::default();
     let mut nearest = Vec::new();
@@ -120,6 +141,7 @@ pub fn search(
     result.work_used = work.used;
     result.scan_complete = !work.exhausted;
     result.candidates = interleave(nearest, farthest, limits.candidates);
+    work.report_final();
     Ok(result)
 }
 
@@ -194,8 +216,11 @@ fn distance(left: [i32; 2], right: [i32; 2]) -> i64 {
 struct Work<'a> {
     used: usize,
     limit: usize,
+    report_interval: usize,
+    last_reported: usize,
     exhausted: bool,
     cancelled: &'a dyn Fn() -> bool,
+    progress: &'a mut dyn FnMut(usize, usize),
 }
 impl Work<'_> {
     fn step(&mut self) -> Result<bool, Error> {
@@ -207,7 +232,21 @@ impl Work<'_> {
             return Ok(false);
         }
         self.used += 1;
+        if self.used - self.last_reported >= self.report_interval || self.used == self.limit {
+            self.report_progress();
+        }
         Ok(true)
+    }
+
+    fn report_final(&mut self) {
+        if self.used > self.last_reported {
+            self.report_progress();
+        }
+    }
+
+    fn report_progress(&mut self) {
+        (self.progress)(self.used, self.limit);
+        self.last_reported = self.used;
     }
 }
 

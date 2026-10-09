@@ -22,14 +22,40 @@ pub struct RegionIssue {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScanStage {
+    SavedRootEntries,
+    RegionDirectory,
+    RegionHeaders,
+    ChunkSlots,
+    CandidateWindows,
+    ChunkPayloads,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScanProgress {
+    pub stage: ScanStage,
+    pub completed: usize,
+    pub total: Option<usize>,
+}
+
 pub fn allocated_chunks(
     directory: &Path,
     cancelled: &dyn Fn() -> bool,
+) -> Result<AllocationIndex, region::Error> {
+    allocated_chunks_with_progress(directory, cancelled, &mut |_| {})
+}
+
+pub fn allocated_chunks_with_progress(
+    directory: &Path,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(ScanProgress),
 ) -> Result<AllocationIndex, region::Error> {
     if cancelled() {
         return Err(region::Error::Cancelled);
     }
     let mut regions = BTreeSet::new();
+    let mut directory_entries = 0;
     for (number, entry) in std::fs::read_dir(directory)?.enumerate() {
         if cancelled() {
             return Err(region::Error::Cancelled);
@@ -37,6 +63,12 @@ pub fn allocated_chunks(
         if number >= 16384 {
             return Err(region::Error::Limit("region directory entries"));
         }
+        directory_entries += 1;
+        progress(ScanProgress {
+            stage: ScanStage::RegionDirectory,
+            completed: directory_entries,
+            total: None,
+        });
         let entry = entry?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
@@ -71,8 +103,16 @@ pub fn allocated_chunks(
             return Err(region::Error::Limit("region file count"));
         }
     }
+    progress(ScanProgress {
+        stage: ScanStage::RegionDirectory,
+        completed: directory_entries,
+        total: Some(directory_entries),
+    });
+
     let mut result = AllocationIndex::default();
-    for position in regions {
+    let slot_total = regions.len().saturating_mul(1024);
+    let mut completed_slots = 0;
+    for (region_number, position) in regions.iter().copied().enumerate() {
         let index = match region::read_index(directory, position, cancelled) {
             Ok(index) => index,
             Err(region::Error::Cancelled) => return Err(region::Error::Cancelled),
@@ -84,24 +124,54 @@ pub fn allocated_chunks(
                         message: error.to_string(),
                     });
                 }
+                progress(ScanProgress {
+                    stage: ScanStage::RegionHeaders,
+                    completed: region_number + 1,
+                    total: Some(regions.len()),
+                });
+                completed_slots += 1024;
+                progress(ScanProgress {
+                    stage: ScanStage::ChunkSlots,
+                    completed: completed_slots,
+                    total: Some(slot_total),
+                });
                 continue;
             }
         };
         let origin = position.map(|coordinate| coordinate * 32);
         for (slot, entry) in index.entries.iter().enumerate() {
-            if entry.is_none() {
-                continue;
+            if entry.is_some() {
+                // The checked region multiplication above also leaves 31 cells
+                // before i32::MAX, since the origin is a multiple of 32.
+                result.chunks.insert([
+                    origin[0] + (slot % 32) as i32,
+                    origin[1] + (slot / 32) as i32,
+                ]);
+                if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
+                    return Err(region::Error::Limit("allocated chunk count"));
+                }
             }
-            // The checked region multiplication above also leaves 31 cells
-            // before i32::MAX, since the origin is a multiple of 32.
-            result.chunks.insert([
-                origin[0] + (slot % 32) as i32,
-                origin[1] + (slot / 32) as i32,
-            ]);
-            if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
-                return Err(region::Error::Limit("allocated chunk count"));
+            if (slot + 1) % 256 == 0 || slot + 1 == 1024 {
+                progress(ScanProgress {
+                    stage: ScanStage::ChunkSlots,
+                    completed: completed_slots + slot + 1,
+                    total: Some(slot_total),
+                });
             }
         }
+        completed_slots += 1024;
+        progress(ScanProgress {
+            stage: ScanStage::RegionHeaders,
+            completed: region_number + 1,
+            total: Some(regions.len()),
+        });
+    }
+    if slot_total == 0 {
+        progress(ScanProgress {
+            stage: ScanStage::ChunkSlots,
+            completed: 0,
+            total: Some(0),
+        });
     }
     Ok(result)
 }
@@ -113,11 +183,26 @@ pub fn allocated_chunks_pinned(
     directory: &PinnedDirectory,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<AllocationIndex, region::Error> {
+    allocated_chunks_pinned_with_progress(directory, cancelled, &mut |_| {})
+}
+
+pub fn allocated_chunks_pinned_with_progress(
+    directory: &PinnedDirectory,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(ScanProgress),
+) -> Result<AllocationIndex, region::Error> {
     if cancelled() {
         return Err(region::Error::Cancelled);
     }
     let mut regions = BTreeSet::new();
-    for entry in directory.list_saved_catalog(16_384)? {
+    let entries = directory.list_saved_catalog_with_progress(16_384, &mut |completed, total| {
+        progress(ScanProgress {
+            stage: ScanStage::RegionDirectory,
+            completed,
+            total,
+        });
+    })?;
+    for entry in entries {
         if cancelled() {
             return Err(region::Error::Cancelled);
         }
@@ -151,8 +236,11 @@ pub fn allocated_chunks_pinned(
             return Err(region::Error::Limit("region file count"));
         }
     }
+    let region_total = regions.len();
+    let slot_total = region_total.saturating_mul(1024);
+    let mut completed_slots = 0;
     let mut result = AllocationIndex::default();
-    for position in regions {
+    for (region_number, position) in regions.into_iter().enumerate() {
         if cancelled() {
             return Err(region::Error::Cancelled);
         }
@@ -167,22 +255,52 @@ pub fn allocated_chunks_pinned(
                         message: error.to_string(),
                     });
                 }
+                progress(ScanProgress {
+                    stage: ScanStage::RegionHeaders,
+                    completed: region_number + 1,
+                    total: Some(region_total),
+                });
+                completed_slots += 1024;
+                progress(ScanProgress {
+                    stage: ScanStage::ChunkSlots,
+                    completed: completed_slots,
+                    total: Some(slot_total),
+                });
                 continue;
             }
         };
         let origin = position.map(|coordinate| coordinate * 32);
         for (slot, entry) in index.entries.iter().enumerate() {
-            if entry.is_none() {
-                continue;
+            if entry.is_some() {
+                result.chunks.insert([
+                    origin[0] + (slot % 32) as i32,
+                    origin[1] + (slot / 32) as i32,
+                ]);
+                if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
+                    return Err(region::Error::Limit("allocated chunk count"));
+                }
             }
-            result.chunks.insert([
-                origin[0] + (slot % 32) as i32,
-                origin[1] + (slot / 32) as i32,
-            ]);
-            if result.chunks.len() > MAX_ALLOCATED_CHUNKS {
-                return Err(region::Error::Limit("allocated chunk count"));
+            if (slot + 1) % 256 == 0 || slot + 1 == 1024 {
+                progress(ScanProgress {
+                    stage: ScanStage::ChunkSlots,
+                    completed: completed_slots + slot + 1,
+                    total: Some(slot_total),
+                });
             }
         }
+        completed_slots += 1024;
+        progress(ScanProgress {
+            stage: ScanStage::RegionHeaders,
+            completed: region_number + 1,
+            total: Some(region_total),
+        });
+    }
+    if slot_total == 0 {
+        progress(ScanProgress {
+            stage: ScanStage::ChunkSlots,
+            completed: 0,
+            total: Some(0),
+        });
     }
     Ok(result)
 }
@@ -202,6 +320,40 @@ mod tests {
             bytes,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn reports_region_inventory_and_chunk_slot_counts_during_allocation_scan() {
+        let directory = tempfile::tempdir().unwrap();
+        file(directory.path(), [-2, 1], &[0, 1023]);
+        file(directory.path(), [0, -1], &[31]);
+        std::fs::write(directory.path().join("unrelated.txt"), b"ignored").unwrap();
+        let mut updates = Vec::new();
+
+        let result = allocated_chunks_with_progress(directory.path(), &|| false, &mut |update| {
+            updates.push(update);
+        })
+        .unwrap();
+
+        assert_eq!(result.chunks.len(), 3);
+        let inventory = updates
+            .iter()
+            .filter(|update| update.stage == ScanStage::RegionDirectory)
+            .last()
+            .expect("directory enumeration reports its final measured total");
+        assert_eq!((inventory.completed, inventory.total), (3, Some(3)));
+        let headers = updates
+            .iter()
+            .filter(|update| update.stage == ScanStage::RegionHeaders)
+            .last()
+            .expect("region header reads report their final measured total");
+        assert_eq!((headers.completed, headers.total), (2, Some(2)));
+        let slots = updates
+            .iter()
+            .filter(|update| update.stage == ScanStage::ChunkSlots)
+            .last()
+            .expect("chunk-slot indexing reports its final measured total");
+        assert_eq!((slots.completed, slots.total), (2048, Some(2048)));
     }
 
     #[test]
@@ -329,5 +481,65 @@ mod tests {
         assert_eq!(result.issues.len(), 64);
         assert_eq!(result.issues[0].position, [1, 0]);
         assert_eq!(result.issues[63].position, [64, 0]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_allocation_reports_terminal_slot_count_including_rejected_regions() {
+        use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
+        use std::sync::Arc;
+        let temporary = tempfile::tempdir().unwrap();
+        file(temporary.path(), [0, 0], &[0]);
+        std::fs::write(temporary.path().join("r.1.0.mca"), b"bad").unwrap();
+        let original = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(temporary.path()).unwrap(),
+        ))
+        .unwrap();
+        let mut updates = Vec::new();
+
+        let result = allocated_chunks_pinned_with_progress(&original, &|| false, &mut |update| {
+            updates.push(update);
+        })
+        .unwrap();
+
+        assert_eq!(result.chunks.len(), 1);
+        let terminal = updates
+            .iter()
+            .filter(|update| update.stage == ScanStage::ChunkSlots)
+            .last()
+            .expect("pinned scan reports completed slot work");
+        assert_eq!((terminal.completed, terminal.total), (2048, Some(2048)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_allocation_forwards_live_directory_enumeration_counts() {
+        use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
+        use std::sync::Arc;
+        let temporary = tempfile::tempdir().unwrap();
+        for entry in 0..130 {
+            std::fs::write(temporary.path().join(format!("entry-{entry}")), b"x").unwrap();
+        }
+        let original = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(temporary.path()).unwrap(),
+        ))
+        .unwrap();
+        let mut updates = Vec::new();
+
+        let result = allocated_chunks_pinned_with_progress(&original, &|| false, &mut |update| {
+            updates.push(update);
+        })
+        .unwrap();
+
+        assert!(result.chunks.is_empty());
+        let directory_updates: Vec<_> = updates
+            .iter()
+            .filter(|update| update.stage == ScanStage::RegionDirectory)
+            .map(|update| (update.completed, update.total))
+            .collect();
+        assert_eq!(
+            directory_updates,
+            [(0, None), (64, None), (128, None), (130, Some(130))]
+        );
     }
 }

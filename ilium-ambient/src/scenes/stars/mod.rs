@@ -77,8 +77,8 @@ pub struct StarsScene {
 }
 
 impl StarsScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it, and `Scene::set_palette` delivers later
     // changes. This scene follows it natively: the catalogue star colours (cached,
     // rebuilt on `set_palette`) and every tint are mapped onto the palette by

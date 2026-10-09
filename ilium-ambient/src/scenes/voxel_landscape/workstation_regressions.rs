@@ -986,8 +986,8 @@ fn malformed_selected_model_and_missing_occupied_art_do_not_become_success() {
         )
         .unwrap_err();
     assert!(matches!(error, AssetError::InvalidMetadata(_)));
-    assert!(!geometry_recovery_allowed(&error, false, "whimscape"));
-    assert!(geometry_recovery_allowed(&error, true, "whimscape"));
+    assert!(!geometry_recovery_allowed(&error, false));
+    assert!(geometry_recovery_allowed(&error, true));
     for error in [
         AssetError::Cancelled,
         AssetError::Allocation,
@@ -997,8 +997,8 @@ fn malformed_selected_model_and_missing_occupied_art_do_not_become_success() {
             limit: 1,
         },
     ] {
-        assert!(!geometry_recovery_allowed(&error, true, "jicklus"));
-        assert!(!geometry_recovery_allowed(&error, false, "jicklus"));
+        assert!(!geometry_recovery_allowed(&error, true));
+        assert!(!geometry_recovery_allowed(&error, false));
     }
 }
 
@@ -1516,9 +1516,19 @@ fn write_receipt(root: &Path, name: &str, value: &Value) {
 
 #[test]
 #[ignore = "private primary-only archive import and mesh receipts; no raster acceptance"]
-fn primary_private_import_and_mesh_receipts() {
+fn primary_retained_import_and_mesh_receipts() {
     let input = inventory();
-    let profiles = input["profiles"].as_array().unwrap();
+    let profiles: Vec<_> = input["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|profile| {
+            pack_profiles::FULL_PACKS
+                .iter()
+                .any(|entry| Some(entry.id) == profile["profile"].as_str())
+        })
+        .collect();
+    assert_eq!(profiles.len(), pack_profiles::FULL_PACKS.len());
     let output =
         std::env::var_os("ILIUM_WORKSTATION_RECEIPTS").expect("set a NEW private output directory");
     let output = Path::new(&output);
@@ -1531,8 +1541,9 @@ fn primary_private_import_and_mesh_receipts() {
         Some(
             profiles
                 .iter()
+                .copied()
                 .find(|profile| profile["profile"] == fallback_name)
-                .expect("fallback must be in the captured eleven profiles"),
+                .expect("fallback must be one of the eight retained profiles"),
         )
     };
     let cases = workstation_cases();
@@ -1731,7 +1742,7 @@ fn primary_private_import_and_mesh_receipts() {
     write_receipt(
         output,
         "result.json",
-        &json!({"profiles":11,"workplaces":260,"workstation_cells":300,"generated_states":31,"defects":defects,"native_pixels":"not-run"}),
+        &json!({"profiles":pack_profiles::FULL_PACKS.len(),"workplaces":260,"workstation_cells":300,"generated_states":31,"defects":defects,"native_pixels":"not-run"}),
     );
     assert!(
         defects.is_empty(),

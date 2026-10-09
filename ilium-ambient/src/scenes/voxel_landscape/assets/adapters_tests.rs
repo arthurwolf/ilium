@@ -200,10 +200,25 @@ fn tga_foliage_reaches_the_bank_through_explicit_bedrock_alias_without_native_ja
         missing_animation: MissingAnimation::StaticImage,
     };
     let packs = [pack];
+    let mut progress = Vec::new();
     let output = TextureImporter::new(&packs, Limits::default(), budget.clone())
         .unwrap()
-        .import(&[request], cancel)
+        .import_with_progress(
+            &[request],
+            cancel,
+            &mut |completed, total, resource, loading| {
+                progress.push((completed, total, resource.to_string(), loading));
+            },
+        )
         .unwrap();
+    assert_eq!(
+        progress,
+        [
+            (0, 1, "minecraft:block/fern".into(), true),
+            (1, 1, "minecraft:block/fern".into(), false),
+        ],
+        "texture import should report the current asset and each completed request"
+    );
     assert_eq!(output.bank.len(), 1);
     assert!(!output.bank.coverage().required_textures_satisfied);
     assert_eq!(output.bank.coverage().diagnostic_texture_count, 1);

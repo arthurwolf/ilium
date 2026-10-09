@@ -893,9 +893,14 @@ mod quiet_catalog_tests {
 
         let scene = settings.create_scene(AmbientKind::VoxelLandscape, &environment);
 
-        assert_eq!(
-            scene.status().as_deref(),
-            Some("Saved maps folder must be an absolute path, or blank for automatic discovery")
+        let status = scene
+            .status()
+            .expect("invalid saved-map folder should remain visible in the scene status");
+        assert!(
+            status.starts_with(
+                "Saved maps folder must be an absolute path, or blank for automatic discovery"
+            ),
+            "saved-map validation should remain visible before live preparation details: {status}"
         );
     }
 }

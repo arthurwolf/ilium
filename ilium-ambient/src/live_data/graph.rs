@@ -284,6 +284,7 @@ fn recent_coinbase_graphs() -> &'static std::sync::Mutex<RecentCoinbaseGraphs> {
 pub struct GraphScene {
     retain_on_drop: bool,
     settings: GraphSettings,
+    resources: Option<crate::resources::AmbientResources>,
     poller: Option<Poller<DataSeries>>,
     stream: Option<WikiFeed>,
     snapshot: Arc<Snapshot<DataSeries>>,
@@ -305,15 +306,16 @@ impl Drop for GraphScene {
 }
 
 impl GraphScene {
-    // PALETTE (future plugin contract): `env.palette` is the shared look's current
-    // palette. When animations become plugins, the plugin constructor receives the
+    // PALETTE (native Scene contract): `env.palette` is the shared look's current
+    // palette. A custom native Scene receives the
     // current palette and MUST follow it: scenes with natural colours shift them
     // onto it (`ScenePalette::recolor`/`at`), and `Scene::set_palette` delivers later
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.
-    pub fn new(settings: &GraphSettings, _env: &SceneEnv) -> Self {
+    pub fn new(settings: &GraphSettings, env: &SceneEnv) -> Self {
         let mut scene = Self::without_worker(settings.normalized());
+        scene.resources = Some(env.resources.clone());
         // Only clone a bounded Arc under a nonblocking UI-path lock. Existing
         // history then remains visible while normal admission/refill proceeds.
         let retained = recent_coinbase_graphs()
@@ -332,6 +334,7 @@ impl GraphScene {
         Self {
             retain_on_drop: false,
             settings,
+            resources: None,
             poller: None,
             stream: None,
             snapshot: Arc::new(Snapshot::default()),
@@ -348,7 +351,14 @@ impl GraphScene {
         self.stream = None;
         self.startup_error = None;
         if let Provider::Wikipedia(metric) = self.settings.source().provider {
-            match WikiFeed::start(metric, self.settings.effective_poll_seconds()) {
+            let result = self
+                .resources
+                .as_ref()
+                .ok_or_else(|| "Live Wikipedia admission is unavailable".to_owned())
+                .and_then(|resources| {
+                    WikiFeed::start(resources, metric, self.settings.effective_poll_seconds())
+                });
+            match result {
                 Ok(stream) => self.stream = Some(stream),
                 Err(error) => self.startup_error = Some(error),
             }
