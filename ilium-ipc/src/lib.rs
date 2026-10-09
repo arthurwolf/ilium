@@ -1108,6 +1108,13 @@ mod tests {
                 reasons: vec!["worktree has uncommitted changes".to_string()],
             },
             ServerEvent::SoundPreviewCompleted { succeeded: true },
+            ServerEvent::PaneNodeChanged(Box::new(
+                sample_tree()
+                    .panes()
+                    .next()
+                    .expect("sample tree has a pane")
+                    .clone(),
+            )),
         ]
     }
 
@@ -1322,6 +1329,15 @@ mod tests {
         assert_eq!(
             variant_index(&ServerEvent::SoundPreviewCompleted { succeeded: true }),
             previous_event_tail + 1
+        );
+        let pane_node = sample_tree()
+            .panes()
+            .next()
+            .expect("sample tree has a pane")
+            .clone();
+        assert_eq!(
+            variant_index(&ServerEvent::PaneNodeChanged(Box::new(pane_node))),
+            previous_event_tail + 2
         );
     }
 

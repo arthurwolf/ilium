@@ -1728,6 +1728,8 @@ pub enum TreeError {
     RestructureDuplicateSplitView(NodeId),
     #[error("node {0:?} exhausted its activity revision counter")]
     ActivityRevisionExhausted(NodeId),
+    #[error("pane {0:?} update would change its place in the tree")]
+    PanePlacementChanged(NodeId),
     #[error("restructure plan referenced split view {split_view:?} outside project {project:?}")]
     RestructureSplitViewOutsideProject { split_view: NodeId, project: NodeId },
     #[error(
@@ -3479,6 +3481,24 @@ impl Tree {
         Ok(())
     }
 
+    /// Replaces one pane with an updated copy that keeps its place in the
+    /// tree. A server publishes a change confined to one pane (a new title,
+    /// a presentation revision) with this instead of resending every node;
+    /// anything that moves, adds or removes nodes still needs a full snapshot.
+    pub fn replace_pane_in_place(&mut self, pane: Node) -> Result<(), TreeError> {
+        let existing = self.get(pane.id).ok_or(TreeError::NodeNotFound(pane.id))?;
+        if !matches!(existing.kind, NodeKind::Pane { .. })
+            || !matches!(pane.kind, NodeKind::Pane { .. })
+        {
+            return Err(TreeError::NotAPane(pane.id));
+        }
+        if existing.parent != pane.parent {
+            return Err(TreeError::PanePlacementChanged(pane.id));
+        }
+        self.nodes.insert(pane.id, pane);
+        Ok(())
+    }
+
     /// Unconditionally renames an entry and permanently fixes its complete
     /// presentation bundle, so no automatic titler or restructure overwrites
     /// it. For a pane this also marks its title `UserSpecified`. `short_name` is the short-form alternative
@@ -4613,6 +4633,36 @@ fn project_display_name(path: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replacing_a_pane_in_place_keeps_topology_and_rejects_moves() {
+        use super::*;
+        let mut tree = Tree::new();
+        let project = tree.add_group(ROOT_ID, "project").unwrap();
+        let other = tree.add_group(project, "other").unwrap();
+        let pane = tree
+            .add_pane(project, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        let mut renamed = tree.get(pane).unwrap().clone();
+        renamed.name = "cargo test".to_string();
+        tree.replace_pane_in_place(renamed).unwrap();
+        assert_eq!(tree.get(pane).unwrap().name, "cargo test");
+        assert_eq!(tree.children_of(project).unwrap(), &[other, pane]);
+
+        let mut moved = tree.get(pane).unwrap().clone();
+        moved.parent = Some(other);
+        assert!(matches!(
+            tree.replace_pane_in_place(moved),
+            Err(TreeError::PanePlacementChanged(id)) if id == pane
+        ));
+        assert_eq!(tree.get(pane).unwrap().parent, Some(project));
+        let group = tree.get(other).unwrap().clone();
+        assert!(matches!(
+            tree.replace_pane_in_place(group),
+            Err(TreeError::NotAPane(id)) if id == other
+        ));
+    }
+
     use super::*;
 
     #[test]

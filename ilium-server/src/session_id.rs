@@ -81,6 +81,7 @@ pub fn refresh_for_discovery(system: &mut System, pids: &[Pid]) {
         ProcessesToUpdate::Some(pids),
         false,
         ProcessRefreshKind::nothing()
+            .without_tasks()
             .with_cmd(UpdateKind::Always)
             .with_cwd(UpdateKind::Always),
     );
@@ -144,7 +145,7 @@ fn parser_failure(
         crate::execution::ExecutionError::Rejected(_) => MetadataParseFailure::AdmissionRefused,
         crate::execution::ExecutionError::Cancelled => MetadataParseFailure::Cancelled,
         crate::execution::ExecutionError::Failed(error)
-            if error.kind() == std::io::ErrorKind::Interrupted =>
+            if error.view().kind() == std::io::ErrorKind::Interrupted =>
         {
             MetadataParseFailure::Cancelled
         }

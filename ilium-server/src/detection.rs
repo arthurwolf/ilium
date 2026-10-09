@@ -33,7 +33,7 @@ use tokio::task::JoinHandle;
 use crate::foreground_observation::{self, ProbeRequest};
 use crate::notifications::{self, PendingNotification};
 use crate::pane::{
-    agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
+    AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource, agent_process_key,
 };
 use crate::sounds;
 use crate::state::ServerState;
@@ -56,6 +56,15 @@ const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// screen classification remains one-second responsive; only the expensive
 /// whole-host discovery scan is reused between those ticks.
 const MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE: Duration = Duration::from_secs(5);
+/// Minimum spacing between two whole-host process scans. Forced checks (new
+/// panes, Enter, focus) that arrive faster wait for this spacing instead of
+/// rescanning every process on the machine several times a second.
+const MINIMUM_SYSTEM_REFRESH_SPACING: Duration = Duration::from_millis(750);
+/// Retry delay after a failed detection tick, doubled per consecutive failure.
+/// The failed batch stays due, so a fixed short delay turned one persistent
+/// failure into a tight loop of host scans.
+const TICK_FAILURE_BACKOFF_INITIAL: Duration = Duration::from_millis(250);
+const TICK_FAILURE_BACKOFF_MAXIMUM: Duration = Duration::from_secs(8);
 /// How long after launch a pane started with an explicit command keeps the
 /// focused cadence while no agent has been recognised in it. See
 /// [`is_awaiting_launched_agent`].
@@ -102,6 +111,12 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
 const PROCESS_TABLE_BYTES: usize = 128 * 1024 * 1024;
 const EVIDENCE_INPUT_BYTES: usize = 192 * 1024 * 1024;
 const EVIDENCE_RESULT_BYTES: usize = 64 * 1024 * 1024;
+// Session discovery returns a few argv snapshots per identified agent pane.
+// It runs while the 64 MiB classification evidence is still retained, so the
+// two reservations together must leave room inside the 128 MiB foundation
+// result budget; sizing discovery like evidence made every tick with one
+// undiscovered agent fail admission (`ResultBytes`) and rescan the host.
+const DISCOVERY_RESULT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DUE_PANES: usize = 32;
 const EVIDENCE_DEADLINE: Duration = Duration::from_secs(10);
 struct CachedProcessTable {
@@ -235,8 +250,9 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         system: std::sync::Mutex::new(System::new()),
         _retention: retention,
     });
-    let mut last_system_refresh_at = None;
+    let mut last_system_refresh_at: Option<Instant> = None;
     let mut system_generation = 0_u64;
+    let mut consecutive_tick_failures = 0_u32;
 
     loop {
         // Sleep to the exact nearest pane deadline. New panes and debounced
@@ -259,11 +275,17 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         if !crate::agent_debug::is_any_debug_sink_enabled(&state)
             && !system_refresh_required(&state, last_system_refresh_at, Instant::now()).await
         {
-            if let Err(error) = run_due_panes(&state, &system, system_generation).await {
-                tracing::error!("detection loop: tick failed: {error}");
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
+            let outcome = run_due_panes(&state, &system, system_generation).await;
+            back_off_after_tick(outcome, &mut consecutive_tick_failures).await;
             continue;
+        }
+
+        if let Some(last_refresh_at) = last_system_refresh_at {
+            let spacing_left = MINIMUM_SYSTEM_REFRESH_SPACING
+                .saturating_sub(Instant::now().saturating_duration_since(last_refresh_at));
+            if !spacing_left.is_zero() {
+                tokio::time::sleep(spacing_left).await;
+            }
         }
 
         // Only remembered interpreted launchers need fresh argv on platforms
@@ -325,6 +347,7 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
                             sysinfo::ProcessesToUpdate::Some(&command_refresh_process_ids),
                             true,
                             sysinfo::ProcessRefreshKind::nothing()
+                                .without_tasks()
                                 .with_cmd(sysinfo::UpdateKind::Always),
                         );
                     }
@@ -353,11 +376,49 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
             }
         }
 
-        if let Err(error) = run_due_panes(&state, &system, system_generation).await {
-            tracing::error!("detection loop: tick failed: {error}");
-            tokio::time::sleep(Duration::from_millis(250)).await;
+        let outcome = run_due_panes(&state, &system, system_generation).await;
+        back_off_after_tick(outcome, &mut consecutive_tick_failures).await;
+    }
+}
+
+async fn back_off_after_tick(
+    outcome: Result<(), crate::error::ServerError>,
+    consecutive_failures: &mut u32,
+) {
+    match outcome {
+        Ok(()) => *consecutive_failures = 0,
+        Err(error) => {
+            *consecutive_failures = consecutive_failures.saturating_add(1);
+            let delay = tick_failure_backoff(*consecutive_failures);
+            tracing::error!(
+                consecutive_failures = *consecutive_failures,
+                retry_in_ms = delay.as_millis() as u64,
+                "detection loop: tick failed: {error}"
+            );
+            tokio::time::sleep(delay).await;
         }
     }
+}
+
+/// The panes whose deadline has passed, oldest deadline first (pane ID breaks
+/// ties), capped at one detection batch.
+fn select_due_pane_ids(
+    schedules: impl Iterator<Item = (Instant, NodeId)>,
+    now: Instant,
+    batch_limit: usize,
+) -> Vec<NodeId> {
+    let mut due: Vec<(Instant, NodeId)> =
+        schedules.filter(|(next_due, _)| *next_due <= now).collect();
+    due.sort_unstable_by_key(|(next_due, pane_id)| (*next_due, pane_id.0));
+    due.truncate(batch_limit);
+    due.into_iter().map(|(_, pane_id)| pane_id).collect()
+}
+
+fn tick_failure_backoff(consecutive_failures: u32) -> Duration {
+    let doublings = consecutive_failures.saturating_sub(1).min(16);
+    TICK_FAILURE_BACKOFF_INITIAL
+        .saturating_mul(1_u32 << doublings)
+        .min(TICK_FAILURE_BACKOFF_MAXIMUM)
 }
 
 /// Decides whether a due batch needs a fresh whole-host process snapshot.
@@ -395,10 +456,10 @@ async fn system_refresh_required(
             {
                 return true;
             }
+            // Liveness is one signal-0 syscall per cached agent, so every due
+            // pane is checked. A due set larger than one detection batch is
+            // ordinary at scale and is no reason to rescan the whole host.
             if let Some(identity) = &schedule.cached_identity {
-                if processes.len() == MAX_DUE_PANES {
-                    return true;
-                }
                 processes.push(identity.pid);
             }
         }
@@ -415,7 +476,10 @@ async fn system_refresh_required(
         .run(
             Lane::Io,
             JobCost {
-                input_bytes: 8192,
+                input_bytes: processes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>())
+                    .max(8192),
                 result_bytes: 64,
             },
             move |_| -> Result<bool, std::io::Error> {
@@ -801,7 +865,7 @@ async fn run_due_panes_with_hook(
     // claimed transcript from another due pane's admissible candidates), the
     // starting point for `claimed_session_ids` phase 2 mutates as it
     // resolves each due pane in turn.
-    let (due_panes, claimed_session_ids, ambiguous_session_ids): (
+    let (mut due_panes, claimed_session_ids, ambiguous_session_ids): (
         Vec<DuePane>,
         std::collections::HashMap<String, NodeId>,
         std::collections::HashSet<String>,
@@ -832,18 +896,30 @@ async fn run_due_panes_with_hook(
                     PaneResource::Terminal(_) | PaneResource::Editor { .. } => None,
                 }
             }));
-        let mut due_panes = Vec::with_capacity(panes.len());
-        for (pane_id, resource) in panes.iter() {
-            let PaneResource::Terminal(runtime) = resource else {
+        // Select the batch by deadline, oldest first, before building any
+        // per-pane inputs. Selecting by pane ID made the newest panes wait
+        // until every lower ID went quiet once more than a batch was due.
+        let due_pane_ids = select_due_pane_ids(
+            panes
+                .iter()
+                .filter_map(|(pane_id, resource)| match resource {
+                    PaneResource::Terminal(runtime) => {
+                        Some((runtime.detection_schedule.next_due, *pane_id))
+                    }
+                    PaneResource::Editor { .. } => None,
+                }),
+            now,
+            MAX_DUE_PANES,
+        );
+        let mut due_panes = Vec::with_capacity(due_pane_ids.len());
+        for pane_id in due_pane_ids {
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
                 continue;
             };
-            if runtime.detection_schedule.next_due > now {
-                continue;
-            }
             let shell_observer = matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell)
                 .then(|| runtime.session.shell_observer());
             due_panes.push(DuePane {
-                pane_id: *pane_id,
+                pane_id,
                 input: runtime.session.input_handle(),
                 agent_generation: runtime.agent_generation,
                 title_generation: runtime.title_generation,
@@ -870,8 +946,8 @@ async fn run_due_panes_with_hook(
                     .clone(),
             });
         }
+        // Later phases resolve session claims in pane-ID order.
         due_panes.sort_by_key(|pane| pane.pane_id.0);
-        due_panes.truncate(MAX_DUE_PANES);
         (due_panes, claimed_session_ids, ambiguous_session_ids)
     };
 
@@ -1397,7 +1473,7 @@ async fn run_due_panes_with_hook(
                     .iter()
                     .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
                 {
-                    EVIDENCE_RESULT_BYTES
+                    DISCOVERY_RESULT_BYTES
                 } else {
                     1024 * 1024
                 },
@@ -1496,7 +1572,7 @@ async fn run_due_panes_with_hook(
                         result_bytes = result_bytes.saturating_add(argument.capacity());
                     }
                 }
-                if result_bytes > EVIDENCE_RESULT_BYTES {
+                if result_bytes > DISCOVERY_RESULT_BYTES {
                     return Err(std::io::Error::other(
                         "detection process discovery result exceeds retained admission",
                     ));
@@ -1945,7 +2021,7 @@ async fn run_due_panes_with_hook(
     // one arrives afterward, its forced-due reschedule wins after this lock
     // is released.
     let current_detection_settings = state.agent_detection_settings.read().await;
-    if current_detection_settings.revision != *detection_settings_revision {
+    if current_detection_settings.revision != detection_settings_revision {
         return Ok(());
     }
     let sound_settings = state.sound_settings.read().await.clone();
@@ -2246,7 +2322,7 @@ async fn run_due_panes_with_hook(
             let polled_interval = interval_for(
                 &new_status,
                 runtime.detection_schedule.client_focused,
-                detection_config,
+                &detection_config,
             );
             runtime.detection_schedule.current_interval = if is_awaiting_launched_agent(
                 &runtime.origin,
@@ -2323,7 +2399,7 @@ async fn run_due_panes_with_hook(
                             input: runtime.session.input_handle(),
                             input_gate: Arc::clone(&runtime.input_gate),
                             attempt,
-                            settings_revision: *detection_settings_revision,
+                            settings_revision: detection_settings_revision,
                         });
                     }
                 }
@@ -3684,11 +3760,11 @@ mod tests {
                     input_bytes: std::mem::size_of::<NodeId>(),
                     result_bytes: std::mem::size_of::<(NodeId, Option<bool>)>(),
                 },
-                |context| {
+                |context: ilium_execution::JobContext| {
                     collect_shell_ownership(
                         vec![NodeId(1)],
                         vec![(NodeId(1), ())],
-                        |_| {
+                        |_: ()| {
                             Some(
                                 std::thread::current()
                                     .name()
@@ -3702,6 +3778,133 @@ mod tests {
             .await
             .expect("shell observation job");
         assert_eq!(result.view().as_slice(), &[(NodeId(1), Some(true))]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn duplicate_session_claim_during_evidence_invalidates_the_old_claim() {
+        use crate::state::ServerStateOptions;
+        let directory = tempfile::tempdir().expect("directory");
+        let (sound_requests, _) = crate::sounds::test_channel(1);
+        let state = Arc::new(ServerState::new(ServerStateOptions {
+            session_name: "claim-race-fixture".into(),
+            session_cwd: directory.path().into(),
+            home_dir: directory.path().into(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("test.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        assert!(
+            state
+                .execution
+                .set(crate::execution::ServerExecution::start().expect("bank"))
+                .is_ok()
+        );
+        let group_id = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "claim race")
+            .expect("group");
+        let due_pane = state
+            .tree
+            .write()
+            .await
+            .add_pane(group_id, "due", ilium_core::PaneContentKind::Terminal)
+            .expect("due pane");
+        let other_pane = state
+            .tree
+            .write()
+            .await
+            .add_pane(group_id, "other", ilium_core::PaneContentKind::Terminal)
+            .expect("other pane");
+        let session_id = "11111111-1111-4111-8111-111111111111";
+        let spawn = || {
+            crate::pane::TerminalPaneRuntime::new(
+                ilium_pty::PtySession::spawn(
+                    ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                        .arg("-c")
+                        .arg("exec cat"),
+                )
+                .expect("isolated fixture PTY"),
+                crate::pane::TerminalOrigin::PlainShell,
+                None,
+                Duration::from_secs(1),
+            )
+        };
+        let mut due_runtime = spawn();
+        due_runtime.session_id = Some(session_id.to_owned());
+        due_runtime.session_agent_class = Some(AgentClass::Codex);
+        let mut other_runtime = spawn();
+        other_runtime.detection_schedule.next_due = Instant::now() + Duration::from_secs(60);
+        state.panes.write().await.extend([
+            (due_pane, PaneResource::Terminal(Box::new(due_runtime))),
+            (other_pane, PaneResource::Terminal(Box::new(other_runtime))),
+        ]);
+
+        let owner = state.execution.get().expect("owner");
+        let retention = owner
+            .client
+            .foundation
+            .try_reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: PROCESS_TABLE_BYTES,
+                    result_bytes: 0,
+                },
+            )
+            .expect("cache admission");
+        let process_table = Arc::new(CachedProcessTable {
+            system: std::sync::Mutex::new(System::new()),
+            _retention: retention,
+        });
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            run_due_panes_with_hook(&task_state, &process_table, 0, move || {
+                let _ = started_tx.send(());
+                release_rx.recv().expect("release evidence fixture");
+            })
+            .await
+        });
+        started_rx.await.expect("evidence started");
+
+        // Introduce a duplicate claim only after phase 1 captured the unique
+        // owner and while phase 2 is held outside the registry locks.
+        if let Some(PaneResource::Terminal(runtime)) =
+            state.panes.write().await.get_mut(&other_pane)
+        {
+            runtime.session_id = Some(session_id.to_owned());
+            runtime.session_agent_class = Some(AgentClass::Codex);
+        } else {
+            panic!("non-due terminal fixture disappeared");
+        }
+        release_tx.send(()).expect("release evidence");
+        task.await
+            .expect("coordinator")
+            .expect("detection reconciliation");
+
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&due_pane) else {
+            panic!("due terminal fixture disappeared");
+        };
+        assert_eq!(runtime.session_id, None);
+        drop(panes);
+        for pane_id in [due_pane, other_pane] {
+            if let Some(PaneResource::Terminal(mut runtime)) =
+                state.panes.write().await.remove(&pane_id)
+            {
+                runtime.session.kill().expect("clean fixture PTY");
+            }
+        }
+        owner.request_shutdown();
     }
 
     #[cfg(unix)]
@@ -3724,10 +3927,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("bank"))
-            .is_ok());
+        assert!(
+            state
+                .execution
+                .set(crate::execution::ServerExecution::start().expect("bank"))
+                .is_ok()
+        );
         let group_id = state
             .tree
             .write()
@@ -3841,10 +4046,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("bank"))
-            .is_ok());
+        assert!(
+            state
+                .execution
+                .set(crate::execution::ServerExecution::start().expect("bank"))
+                .is_ok()
+        );
         let group = state
             .tree
             .write()
@@ -4124,12 +4331,14 @@ mod tests {
             })
         ));
         assert_eq!(reused_pid_without_evidence.confirmed_goal_owner, None);
-        assert!(explain_goal_decision(
-            &reused_pid_without_evidence.status,
-            reused_pid_without_evidence.goal_evidence,
-            reused_pid_without_evidence.goal_was_retained,
-        )
-        .starts_with("Unknown —"));
+        assert!(
+            explain_goal_decision(
+                &reused_pid_without_evidence.status,
+                reused_pid_without_evidence.goal_evidence,
+                reused_pid_without_evidence.goal_was_retained,
+            )
+            .starts_with("Unknown —")
+        );
     }
 
     #[test]
@@ -4564,6 +4773,51 @@ mod tests {
             Some(now),
             now + MAXIMUM_STABLE_SYSTEM_SNAPSHOT_AGE,
         ));
+    }
+
+    #[test]
+    fn due_batches_take_the_oldest_deadlines_first() {
+        let now = Instant::now();
+        let schedules = (0..40_u64).map(|index| {
+            // Low pane IDs carry the newest deadlines; one pane is not due.
+            let age = Duration::from_millis(index * 10);
+            let next_due = if index == 0 {
+                now + Duration::from_secs(1)
+            } else {
+                now - age
+            };
+            (next_due, NodeId(100 - index))
+        });
+        let selected = select_due_pane_ids(schedules, now, MAX_DUE_PANES);
+        assert_eq!(selected.len(), MAX_DUE_PANES);
+        assert_eq!(selected[0], NodeId(100 - 39), "oldest deadline first");
+        assert!(
+            !selected.contains(&NodeId(100)),
+            "a pane not yet due is skipped"
+        );
+        assert!(
+            !selected.contains(&NodeId(100 - 1)),
+            "the newest deadlines wait for the next batch, whatever their pane ID"
+        );
+    }
+
+    #[test]
+    fn failed_ticks_back_off_exponentially_up_to_a_ceiling() {
+        assert_eq!(tick_failure_backoff(1), TICK_FAILURE_BACKOFF_INITIAL);
+        assert_eq!(tick_failure_backoff(2), TICK_FAILURE_BACKOFF_INITIAL * 2);
+        assert_eq!(tick_failure_backoff(3), TICK_FAILURE_BACKOFF_INITIAL * 4);
+        assert_eq!(tick_failure_backoff(40), TICK_FAILURE_BACKOFF_MAXIMUM);
+        assert_eq!(tick_failure_backoff(u32::MAX), TICK_FAILURE_BACKOFF_MAXIMUM);
+    }
+
+    #[test]
+    fn discovery_and_evidence_reservations_fit_the_shared_result_budget() {
+        // Both are held at once during a tick; the rest of the server shares
+        // the same foundation budget, so they must leave real headroom.
+        assert!(
+            EVIDENCE_RESULT_BYTES + DISCOVERY_RESULT_BYTES
+                <= crate::execution::GENERAL_RESULT_BYTES * 3 / 4
+        );
     }
 
     #[test]

@@ -7,7 +7,9 @@ use ilium_execution::{
 use ratatui::text::Line;
 const MIB: usize = 1024 * 1024;
 const MAX_NODES: usize = 4096;
-pub(crate) const MAX_PANES: usize = 128;
+/// Sized for sessions with several hundred agents. The capture bound below
+/// scales with this (256 bytes per pane), far inside `MAX_CAPTURE`.
+pub(crate) const MAX_PANES: usize = 1024;
 const MAX_CAPTURE: usize = 8 * MIB;
 const MAX_PANE: usize = 32 * MIB;
 const MAX_OVERLAY: usize = 64 * MIB;
@@ -328,7 +330,11 @@ impl CostTracker {
             }
         }
         let mut budget = MAX_CONCURRENT_STATS_WORKERS.saturating_sub(busy_workers);
-        self.last_requested.retain(|id, _| agent_panes.contains(id));
+        // `agent_panes` arrives sorted (see `App::tick_cost`), so membership
+        // is a binary search instead of a linear scan per tracked pane.
+        debug_assert!(agent_panes.is_sorted());
+        self.last_requested
+            .retain(|id, _| agent_panes.binary_search(id).is_ok());
         let mut due = Vec::with_capacity(budget.min(MAX_CONCURRENT_STATS_WORKERS));
         for id in agent_panes.iter().take(MAX_PANES) {
             if budget == 0 {

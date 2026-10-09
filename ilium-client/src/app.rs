@@ -4192,6 +4192,30 @@ impl App {
         }
     }
 
+    /// Returns visible panes in recovery priority order, keeping the focused
+    /// split member first so its retained terminal output reaches the UI
+    /// before an earlier slot with a larger backlog.
+    pub(crate) fn visible_pane_stream_order(&self) -> [Option<NodeId>; 4] {
+        let slots = self.displayed_pane_slots();
+        let Some(focused_pane_id) = self
+            .focused_pane_id()
+            .filter(|pane_id| slots.contains(&Some(*pane_id)))
+        else {
+            return slots;
+        };
+
+        let mut ordered = [None; 4];
+        ordered[0] = Some(focused_pane_id);
+        let mut next = 1;
+        for pane_id in slots.into_iter().flatten() {
+            if pane_id != focused_pane_id {
+                ordered[next] = Some(pane_id);
+                next += 1;
+            }
+        }
+        ordered
+    }
+
     /// Whether one pane currently owns cells in the right panel. This avoids
     /// allocating the complete displayed-pane list on every PTY output event.
     pub(crate) fn is_pane_displayed(&self, pane_id: NodeId) -> bool {
@@ -15831,6 +15855,12 @@ impl App {
             freeze_waiting_for_approval: self.ui_settings.auto_freeze_waiting_approval,
             freeze_waiting_for_background: self.ui_settings.auto_freeze_waiting_background,
         };
+        // Disabled is the common case; the walk below would only clear the
+        // eligibility clocks, so skip three passes over every pane per tick.
+        if !settings.enabled {
+            self.auto_freeze_since.clear();
+            return false;
+        }
         let pane_ids: Vec<NodeId> = self
             .tree
             .panes()
@@ -24601,6 +24631,39 @@ mod tests {
             .take_outbound_requests()
             .iter()
             .all(|request| !matches!(request, ClientRequest::MouseInput { .. })));
+    }
+
+    #[test]
+    fn visible_pane_stream_order_prioritizes_the_focused_split_member() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        let split = app
+            .tree
+            .create_split_view(
+                group,
+                "Vertical split",
+                SplitOrientation::Vertical,
+                &[first, second],
+            )
+            .unwrap();
+        app.right_panel_target = RightPanelTarget::SplitView {
+            split_id: split,
+            active_pane_id: Some(second),
+        };
+        app.focus = FocusTarget::Pane;
+
+        assert_eq!(
+            app.visible_pane_stream_order(),
+            [Some(second), Some(first), None, None]
+        );
     }
 
     #[test]

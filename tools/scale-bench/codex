@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+"""Synthetic Codex-like agent used by the many-pane scale benchmark.
+
+The file is named `codex` and renames its own kernel process name
+(`/proc/<pid>/comm`) to `codex` with prctl(PR_SET_NAME), so Ilium's detection
+identifies it as a native Codex agent exactly as it would the real CLI,
+without ever launching a real agent or touching any provider state.
+
+Modes (first argument):
+  working  repaint a Codex-style activity screen every 120 ms and append a
+           tool-output line every 600 ms, like a busy agent mid-turn
+  idle     draw an idle Codex screen once and then stay silent
+  timer    idle screen whose goal footer clock changes once per second, like
+           an agent pursuing a goal between turns
+
+`--threads N` starts N sleeping threads so the process carries a realistic
+thread count (real Codex/Claude processes run 10-30 threads), which matters
+because host-wide process scans are proportional to threads, not processes.
+"""
+
+import argparse
+import ctypes
+import sys
+import threading
+import time
+
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def emit(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def idle_screen(footer: str) -> str:
+    return (
+        "\x1b[H\x1b[2J"
+        "• Finished the requested change and verified it.\r\n\r\n"
+        "› Send a message\r\n\r\n"
+        f"{footer}\r\n"
+    )
+
+
+def run_working() -> None:
+    started = time.monotonic()
+    frame = 0
+    line = 0
+    next_line_at = started
+    while True:
+        now = time.monotonic()
+        elapsed = int(now - started)
+        if now >= next_line_at:
+            line += 1
+            next_line_at = now + 0.6
+            emit(f"\x1b[1;1H\x1b[2K  └ cargo check: compiling crate {line % 400} of 400 (synthetic)\r\n")
+        spinner = SPINNER[frame % len(SPINNER)]
+        emit(
+            f"\x1b[20;1H\x1b[2K{spinner} Working ({elapsed}s • esc to interrupt)"
+            "\x1b[22;1H\x1b[2K› Send a message"
+            f"\x1b[24;1H\x1b[2Kgpt-5.6-sol xhigh · workspace · Working · Pursuing goal ({elapsed // 60}m)"
+        )
+        frame += 1
+        time.sleep(0.12)
+
+
+def run_idle() -> None:
+    emit(idle_screen("gpt-5.6-sol xhigh · workspace · Idle"))
+    while True:
+        time.sleep(3600)
+
+
+def run_timer() -> None:
+    started = time.monotonic()
+    while True:
+        elapsed = int(time.monotonic() - started)
+        emit(idle_screen(f"gpt-5.6-sol xhigh · workspace · Idle · Pursuing goal ({elapsed}s)"))
+        time.sleep(1.0)
+
+
+def rename_process() -> None:
+    PR_SET_NAME = 15
+    try:
+        ctypes.CDLL(None).prctl(PR_SET_NAME, b"codex", 0, 0, 0)
+    except OSError:
+        pass
+
+
+def main() -> None:
+    rename_process()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=["working", "idle", "timer"])
+    parser.add_argument("--threads", type=int, default=16)
+    arguments = parser.parse_args()
+    for _ in range(max(0, arguments.threads)):
+        threading.Thread(target=time.sleep, args=(10**9,), daemon=True).start()
+    {"working": run_working, "idle": run_idle, "timer": run_timer}[arguments.mode]()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (KeyboardInterrupt, BrokenPipeError):
+        pass

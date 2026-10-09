@@ -46,21 +46,47 @@ pub fn ordered_children_ranked<'a>(
         return Cow::Borrowed(children);
     }
 
+    // Lowercase each name once per sort instead of twice per comparison: the
+    // sidebar re-sorts every frame, and with hundreds of panes the comparison
+    // allocations dominated the ordering cost.
+    let lowered_names: HashMap<NodeId, String> = if uses_names(tree_order) {
+        children
+            .iter()
+            .filter_map(|id| tree.get(*id).map(|node| (*id, node.name.to_lowercase())))
+            .collect()
+    } else {
+        HashMap::new()
+    };
     let mut ordered = children.to_vec();
     ordered.sort_by(|left_id, right_id| {
-        compare_nodes(tree, *left_id, *right_id, tree_order, cost_ranks)
+        compare_nodes(
+            tree,
+            *left_id,
+            *right_id,
+            tree_order,
+            cost_ranks,
+            &lowered_names,
+        )
     });
     Cow::Owned(ordered)
 }
 
 /// Total comparator for two valid siblings. A missing node sorts last rather
 /// than panicking if a malformed snapshot ever references a stale child id.
+fn uses_names(tree_order: TreeOrder) -> bool {
+    matches!(
+        tree_order,
+        TreeOrder::Type | TreeOrder::NameAscending | TreeOrder::NameDescending
+    )
+}
+
 fn compare_nodes(
     tree: &Tree,
     left_id: NodeId,
     right_id: NodeId,
     tree_order: TreeOrder,
     cost_ranks: &HashMap<NodeId, f64>,
+    lowered_names: &HashMap<NodeId, String>,
 ) -> Ordering {
     let (left, right) = match (tree.get(left_id), tree.get(right_id)) {
         (Some(left), Some(right)) => (left, right),
@@ -75,13 +101,13 @@ fn compare_nodes(
         TreeOrder::Manual => Ordering::Equal,
         TreeOrder::Type => type_rank(left)
             .cmp(&type_rank(right))
-            .then_with(|| compare_names(left, right)),
+            .then_with(|| compare_names(left, right, lowered_names)),
         // Node ids are allocated monotonically and never reused, so the
         // largest id is the youngest node and therefore has the least age.
         TreeOrder::AgeAscending => right.id.cmp(&left.id),
         TreeOrder::AgeDescending => left.id.cmp(&right.id),
-        TreeOrder::NameAscending => compare_names(left, right),
-        TreeOrder::NameDescending => compare_names(right, left),
+        TreeOrder::NameAscending => compare_names(left, right, lowered_names),
+        TreeOrder::NameDescending => compare_names(right, left, lowered_names),
         TreeOrder::CostDescending => {
             let rank = |id: NodeId| cost_ranks.get(&id).copied().unwrap_or(0.0);
             // `sort_by` is stable, so equal spend keeps the manual order.
@@ -92,10 +118,15 @@ fn compare_nodes(
 
 /// Case-insensitive display-name ordering with an id tie-breaker so names
 /// differing only by case still render deterministically.
-fn compare_names(left: &Node, right: &Node) -> Ordering {
-    left.name
-        .to_lowercase()
-        .cmp(&right.name.to_lowercase())
+fn compare_names(left: &Node, right: &Node, lowered_names: &HashMap<NodeId, String>) -> Ordering {
+    let lowered = |node: &Node| {
+        lowered_names.get(&node.id).map_or_else(
+            || Cow::Owned(node.name.to_lowercase()),
+            |name| Cow::Borrowed(name.as_str()),
+        )
+    };
+    lowered(left)
+        .cmp(&lowered(right))
         .then_with(|| left.name.cmp(&right.name))
         .then_with(|| left.id.cmp(&right.id))
 }

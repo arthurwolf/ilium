@@ -1556,10 +1556,16 @@ pub fn refresh(system: &mut System) {
     } else {
         UpdateKind::OnlyIfNotSet
     };
+    // Without `without_tasks`, Linux lists every thread of every process as
+    // its own entry: on a workstation running a hundred agents (10-30 threads
+    // each) that multiplies the host scan several times over, and detection
+    // never needs threads -- agents are identified by their process.
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing().with_cmd(command_line_refresh),
+        ProcessRefreshKind::nothing()
+            .without_tasks()
+            .with_cmd(command_line_refresh),
     );
 }
 

@@ -89,6 +89,7 @@ impl<A: HeapBytes, B: HeapBytes> HeapBytes for (A, B) {
 }
 macro_rules! domain { ($($kind:ty),*)=>{$(impl HeapBytes for $kind { fn heap_bytes(&self)->usize { ilium_core::AllocationSize::heap_bytes(self) } })*}; }
 domain!(
+    ilium_core::Node,
     NodeId,
     NodeActivityRevision,
     Tree,
@@ -788,6 +789,7 @@ impl HeapBytes for ServerEvent {
             Self::SoundPreviewCompleted { succeeded } => {
                 0usize.saturating_add(succeeded.heap_bytes())
             }
+            Self::PaneNodeChanged(node) => 0usize.saturating_add(node.heap_bytes()),
         }
     }
 }

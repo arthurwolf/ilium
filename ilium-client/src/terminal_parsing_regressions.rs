@@ -752,7 +752,7 @@ fn blank_registration_snapshot_does_not_count_as_initial_content() {
     fixture.attach(pane, 4, 30);
 
     let view = &fixture.views[&pane];
-    assert_eq!(view.snapshot.sequence, 0);
+    assert_eq!(view.try_preparation_snapshot().unwrap().sequence, 0);
     assert!(!view.has_initial_display());
 
     fixture.output(pane, 1, b"first terminal output".to_vec(), false);

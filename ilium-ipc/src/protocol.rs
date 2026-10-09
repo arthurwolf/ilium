@@ -1478,4 +1478,10 @@ pub enum ServerEvent {
     /// Result of a requested Sound Studio preview after server-owned playback.
     /// Appended to preserve existing bincode discriminants.
     SoundPreviewCompleted { succeeded: bool },
+    /// One pane changed without moving (a new title, a presentation
+    /// revision). Replaces that node in the client's tree; sending it instead
+    /// of `TreeSnapshot` keeps a title change O(1) on the wire however many
+    /// panes the session holds. Structural changes still send a snapshot.
+    /// Appended to preserve existing bincode discriminants.
+    PaneNodeChanged(Box<ilium_core::Node>),
 }

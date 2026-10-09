@@ -112,7 +112,7 @@ impl ParserMemoryGovernor {
         self.quota.snapshot()
     }
 
-    fn shares_root(&self, other: &Self) -> bool {
+    pub(crate) fn shares_root(&self, other: &Self) -> bool {
         self.quota.shares_root(&other.quota)
     }
 }
@@ -3057,8 +3057,10 @@ mod tests {
                 },
             );
             panes.push((id, view));
-            wait_installed(&parsing, &mut panes);
         }
+        // Admit the full 128-pane registration/output burst before waiting so
+        // this exercises queued parser work instead of serial pane visits.
+        wait_installed(&parsing, &mut panes);
         let original_sources: Vec<_> = panes
             .iter()
             .map(|(_, view)| view.painted_source())

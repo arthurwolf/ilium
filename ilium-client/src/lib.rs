@@ -246,7 +246,7 @@ use tokio::sync::mpsc;
 pub use crate::app::ClientExitReason;
 pub use crate::execution::{bootstrap_process_quota, bootstrap_runtime_admission};
 
-use crate::app::{App, PaneRuntime};
+use crate::app::{App, Mode, PaneRuntime};
 use crate::connection::Connection;
 use crate::error::ClientError;
 use crate::icon_search_workers::IconSearchWorkers;
@@ -422,8 +422,23 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: is_visible,
             }
         }
-        ServerEvent::TerminalReplay { pane_id, .. } => ServerEventDamage {
+        ServerEvent::TerminalReplay { pane_id, .. }
+        | ServerEvent::ScreenUpdate { pane_id, .. } => ServerEventDamage {
             needs_redraw: app.is_pane_displayed(*pane_id),
+            needs_immediate_redraw: false,
+        },
+        // Per-pane state that background panes report continuously. With
+        // hundreds of agents these arrive many times a second; each one used
+        // to force an immediate full redraw, bypassing the output frame cap.
+        // They still redraw, coalesced into the next capped frame.
+        ServerEvent::PaneStatusChanged { .. }
+        | ServerEvent::PaneDetectedStateChanged { .. }
+        | ServerEvent::PaneDetectionEvidenceChanged { .. }
+        | ServerEvent::PaneStateSnapshot { .. }
+        | ServerEvent::PaneLastPromptChanged { .. }
+        | ServerEvent::PaneProgressChanged { .. }
+        | ServerEvent::PaneGitStatusChanged { .. } => ServerEventDamage {
+            needs_redraw: true,
             needs_immediate_redraw: false,
         },
         _ => ServerEventDamage {
@@ -776,7 +791,9 @@ async fn run_inner(
             )))
         })?,
         execution.terminal_storage(),
-        app.terminal_settings.engine_memory_budget_mib,
+        usize::try_from(app.terminal_settings.engine_memory_budget_mib)
+            .unwrap_or(usize::MAX / (1024 * 1024))
+            .saturating_mul(1024 * 1024),
     )
     .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
     let terminal_notification = parsing.notification();
@@ -935,6 +952,12 @@ async fn run_inner(
                 "editor input custody admission: {reason:?}"
             )))
         })?;
+    // These owners cross the interaction future boundary so shutdown can
+    // cancel and collect their accepted work after the UI loop exits.
+    let mut remote_compaction_notification: Option<std::sync::Arc<tokio::sync::Notify>> = None;
+    let mut remote_compaction_workers: Option<
+        crate::remote_compaction_worker::RemoteCompactionWorkers,
+    > = None;
     let result = async {
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
@@ -1055,8 +1078,8 @@ async fn run_inner(
         conversion_client,
         conversion_notification.clone(),
     );
-    let remote_compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
-    let remote_compaction_wake = std::sync::Arc::clone(&remote_compaction_notification);
+    let compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let remote_compaction_wake = std::sync::Arc::clone(&compaction_notification);
     let remote_compaction_client = execution
         .client(ilium_execution::ClientLimits {
             jobs: 1,
@@ -1072,10 +1095,11 @@ async fn run_inner(
         .with_completion_wake(move || {
             remote_compaction_wake.notify_one();
         });
-    let mut remote_compaction_workers = crate::remote_compaction_worker::RemoteCompactionWorkers::new(
+    remote_compaction_notification = Some(std::sync::Arc::clone(&compaction_notification));
+    remote_compaction_workers = Some(crate::remote_compaction_worker::RemoteCompactionWorkers::new(
         remote_compaction_client,
-        remote_compaction_notification.clone(),
-    );
+        std::sync::Arc::clone(&compaction_notification),
+    ));
     let reset_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let reset_wake = std::sync::Arc::clone(&reset_notification);
     let reset_client = execution
@@ -1189,10 +1213,12 @@ async fn run_inner(
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
     let mut last_recorded_surface = None;
-    let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
+    let mut last_streamed_pane_order: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
         if remote_compaction_workers
+            .as_mut()
+            .expect("remote compaction owner is initialized before the event loop")
             .collect(|event| app.apply_remote_compaction_worker_event(event))
         {
             needs_redraw = true;
@@ -1470,8 +1496,12 @@ async fn run_inner(
             server_event = connection.events.recv(), if app.pending_terminal_events.len() < MAX_PENDING_SERVER_EVENTS => {
                 match server_event {
                     Some(event) => {
-                        needs_redraw = true;
-                        let Some(event) = queue_server_event_in_order(&mut app, event) else { continue; };
+                        // Damage comes from the applied batch below; an event
+                        // that changes nothing visible must not cost a frame.
+                        let Some(event) = queue_server_event_in_order(&mut app, event) else {
+                            needs_redraw = true;
+                            continue;
+                        };
                         let damage = apply_server_events(
                             &mut app,
                             &mut connection.events,
@@ -1507,8 +1537,10 @@ async fn run_inner(
                 needs_redraw |= collected;
                 needs_immediate_redraw |= collected;
             }
-            _ = remote_compaction_notification.notified() => {
+            _ = compaction_notification.notified() => {
                 let collected = remote_compaction_workers
+                    .as_mut()
+                    .expect("remote compaction owner is initialized before the event loop")
                     .collect(|event| app.apply_remote_compaction_worker_event(event));
                 needs_redraw |= collected;
                 needs_immediate_redraw |= collected;
@@ -1712,13 +1744,13 @@ async fn run_inner(
         // every turn, but allocate/send a protocol vector only on an actual
         // pane or split transition. The server journal repairs a newly
         // visible pane before its live stream resumes.
-        let streamed_pane_slots = app.displayed_pane_slots();
-        if last_streamed_pane_slots != Some(streamed_pane_slots)
+        let streamed_pane_order = app.visible_pane_stream_order();
+        if last_streamed_pane_order != Some(streamed_pane_order)
             && app.pending_terminal_discards.is_empty()
             && app.queue_request(ilium_ipc::ClientRequest::SetVisiblePanes {
-                pane_ids: streamed_pane_slots.into_iter().flatten().collect(),
+                pane_ids: streamed_pane_order.into_iter().flatten().collect(),
             }) {
-                last_streamed_pane_slots = Some(streamed_pane_slots);
+                last_streamed_pane_order = Some(streamed_pane_order);
         }
 
         if let Some(job) = app.take_pending_conversion_start() {
@@ -1732,10 +1764,17 @@ async fn run_inner(
             conversion_workers.cancel();
         }
         if app.take_pending_remote_compaction_cancel() {
-            remote_compaction_workers.cancel();
+            remote_compaction_workers
+                .as_mut()
+                .expect("remote compaction owner is initialized before the event loop")
+                .cancel();
         }
         if let Some(job) = app.take_pending_remote_compaction_job() {
-            if let Err(event) = remote_compaction_workers.spawn(job) {
+            if let Err(event) = remote_compaction_workers
+                .as_mut()
+                .expect("remote compaction owner is initialized before the event loop")
+                .spawn(job)
+            {
                 app.apply_remote_compaction_worker_event(event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
@@ -2397,7 +2436,9 @@ async fn run_inner(
     app.model_catalog_preparation.close();
     app.close_text_trigger_preview();
     app.close_sound_studio_preview();
-    remote_compaction_workers.cancel();
+    if let Some(workers) = remote_compaction_workers.as_mut() {
+        workers.cancel();
+    }
     // Completed/cancelled receipts retain retirement storage until collected.
     // Reconcile them while the shared owner enforces its physical-exit deadline.
     let gpu_probe_result = match gpu_probe
@@ -2424,16 +2465,27 @@ async fn run_inner(
             _ = text_trigger_preview_notification.notified() => {},
             _ = sound_preview_notification.notified() => {},
             _ = filesystem_admission_notification.notified() => {},
-            _ = remote_compaction_notification.notified() => {
-                remote_compaction_workers.collect(|event| app.apply_remote_compaction_worker_event(event));
+            _ = async {
+                match remote_compaction_notification.as_ref() {
+                    Some(notification) => notification.notified().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(workers) = remote_compaction_workers.as_mut() {
+                    workers.collect(|event| app.apply_remote_compaction_worker_event(event));
+                }
             },
         }
     };
-    remote_compaction_workers.collect(|event| app.apply_remote_compaction_worker_event(event));
-    let remote_compaction_result = if remote_compaction_workers.is_running() {
-        Err(ClientError::TerminalSetup(std::io::Error::other(
-            "remote compaction receipt remained unsettled after execution shutdown",
-        )))
+    let remote_compaction_result = if let Some(workers) = remote_compaction_workers.as_mut() {
+        workers.collect(|event| app.apply_remote_compaction_worker_event(event));
+        if workers.is_running() {
+            Err(ClientError::TerminalSetup(std::io::Error::other(
+                "remote compaction receipt remained unsettled after execution shutdown",
+            )))
+        } else {
+            Ok(())
+        }
     } else {
         Ok(())
     };
@@ -4228,9 +4280,16 @@ where
                                 icon_search_workers,
                                 home_dir,
                             );
-                        } else if crate::keys::requires_key_paste_replay(app) {
+                        } else if crate::keys::requires_bounded_key_paste_replay(app) {
                             app.last_tree_click = None;
-                            let mut replay = crate::paste_cursor::PasteReplay::new(event);
+                            let mut replay = match &app.mode {
+                                Mode::AnimationTextPrompt(..) => {
+                                    crate::paste_cursor::PasteReplay::new_animation_text_prompt(
+                                        event,
+                                    )
+                                }
+                                _ => crate::paste_cursor::PasteReplay::new(event),
+                            };
                             let admission = app
                                 .paste_retirement
                                 .as_ref()

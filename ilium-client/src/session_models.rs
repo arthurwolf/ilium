@@ -182,15 +182,21 @@ impl SessionModelCache {
             .diagnostic
             .as_deref()
     }
+
+    /// Copying every Codex pane's screen text costs one allocation per pane,
+    /// so callers check this before building the screens they would pass to
+    /// `refresh_codex_screen_models`, not after.
+    fn codex_screen_scan_is_due(&self, now: Instant) -> bool {
+        !self
+            .last_codex_screen_scan
+            .is_some_and(|last| now.saturating_duration_since(last) < CODEX_SCREEN_REFRESH)
+    }
     fn refresh_codex_screen_models(
         &mut self,
         screens: BTreeMap<NodeId, (StatsRequest, String)>,
         now: Instant,
     ) -> bool {
-        if self
-            .last_codex_screen_scan
-            .is_some_and(|last| now.saturating_duration_since(last) < CODEX_SCREEN_REFRESH)
-        {
+        if !self.codex_screen_scan_is_due(now) {
             return false;
         }
         self.last_codex_screen_scan = Some(now);
@@ -536,7 +542,7 @@ impl crate::app::App {
             .map(|request| request.project_path.clone())
             .collect::<Vec<_>>();
         let enabled = self.ui_settings.agent_tree_model_icons;
-        let executable = enabled.then(|| std::env::current_exe().ok()).flatten();
+        let executable = enabled.then(current_executable).flatten();
         if let Err(error) = crate::claude_model_statusline::reconcile_app_setting(
             enabled,
             &claude_projects,
@@ -546,12 +552,16 @@ impl crate::app::App {
                 "Claude model capture configuration could not be updated: {error}"
             ));
         }
-        let screens = self.live_codex_screens(&contexts);
+        let screens = self
+            .session_models
+            .codex_screen_scan_is_due(now)
+            .then(|| self.live_codex_screens(&contexts));
         let transcript_changed = self.session_models.tick(contexts, now);
-        transcript_changed
-            | self
-                .session_models
+        let screen_changed = screens.is_some_and(|screens| {
+            self.session_models
                 .refresh_codex_screen_models(screens, now)
+        });
+        transcript_changed | screen_changed
     }
 
     pub(crate) fn current_tree_models(&self) -> std::collections::HashMap<NodeId, String> {
@@ -570,6 +580,15 @@ impl crate::app::App {
             })
             .collect()
     }
+}
+
+/// The running client binary does not move while it runs; resolving it once
+/// keeps the per-tick model reconciliation free of a filesystem call.
+fn current_executable() -> Option<std::path::PathBuf> {
+    static EXECUTABLE: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    EXECUTABLE
+        .get_or_init(|| std::env::current_exe().ok())
+        .clone()
 }
 
 /// Codex's default TUI status line places the selected model first and joins

@@ -882,6 +882,18 @@ fn build_children(
     items
 }
 
+/// Unlabeled stand-ins for a collapsed container's direct children.
+fn collapsed_placeholder_children(tree: &Tree, parent: NodeId) -> Vec<TreeItem<'static, NodeId>> {
+    tree.children_of(parent)
+        .map(|children| {
+            children
+                .iter()
+                .map(|child_id| TreeItem::new_leaf(*child_id, ""))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Builds one `TreeItem` (recursing into children for a Group).
 fn build_item(
     tree: &Tree,
@@ -892,7 +904,16 @@ fn build_item(
     let flash_on = should_flash(node.id, context.recently_created, context.elapsed_ms);
     match &node.kind {
         NodeKind::Container(container) => {
-            let mut children = build_children(tree, node.id, context, identifier_path);
+            // A collapsed container never shows its subtree, so building every
+            // descendant's label each frame made sidebar cost proportional to
+            // all panes instead of the visible rows. One unlabeled leaf per
+            // direct child keeps the expand marker and identifiers; opening the
+            // container rebuilds the real rows on the next frame.
+            let mut children = if context.opened_paths.contains(identifier_path) {
+                build_children(tree, node.id, context, identifier_path)
+            } else {
+                collapsed_placeholder_children(tree, node.id)
+            };
             if let ContainerKind::Project { .. } = &container.kind {
                 if context.chatroom_projects.contains(&node.id) {
                     children.insert(
@@ -2299,6 +2320,10 @@ pub struct TreeItemCache {
     version: Option<u64>,
     tree_order: Option<TreeOrder>,
     cost_epoch: u64,
+    /// Collapsed containers and folders build no subtree, so the items
+    /// depend on which paths are open. A handful of paths; comparing them
+    /// per lookup is far cheaper than a rebuild.
+    opened_paths: HashSet<Vec<NodeId>>,
     items: Vec<TreeItem<'static, NodeId>>,
 }
 
@@ -2341,6 +2366,7 @@ impl TreeItemCache {
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
+            || &self.opened_paths != opened_paths
         {
             // `panel_width` only selects which title text a label carries;
             // hit-testing only needs row structure and node identifiers, so
@@ -2380,6 +2406,7 @@ impl TreeItemCache {
             self.version = Some(version);
             self.tree_order = Some(tree_order);
             self.cost_epoch = cost_epoch;
+            self.opened_paths.clone_from(opened_paths);
         }
         &self.items
     }
@@ -5507,6 +5534,9 @@ mod tests {
         );
         assert!(root_items[0].children()[0].children().is_empty());
 
+        // Collapsed groups build placeholder rows only, so the group itself
+        // must be open for its folder's lazily listed children to appear.
+        opened_paths.insert(vec![group]);
         opened_paths.insert(vec![group, folder]);
         let first_level_items = build_tree_items(
             &tree,
@@ -6283,6 +6313,31 @@ mod tests {
 
         assert_eq!(manual_ids, [zebra, alpha]);
         assert_eq!(alphabetical_ids, [alpha, zebra]);
+    }
+
+    #[test]
+    fn collapsed_groups_build_placeholders_and_opening_one_rebuilds_the_cache() {
+        let mut tree = Tree::new();
+        let project = tree.add_group(ROOT_ID, "project").unwrap();
+        let nested = tree.add_group(project, "nested").unwrap();
+        let pane = tree
+            .add_pane(nested, "pane", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let mut cache = TreeItemCache::default();
+        let mut opened_paths = HashSet::new();
+
+        let collapsed = cache.get_or_build(&tree, 1, TreeOrder::Manual, &opened_paths);
+        let placeholder = &collapsed[0].children()[0];
+        assert_eq!(*placeholder.identifier(), nested);
+        assert!(placeholder.children().is_empty());
+
+        // Same tree version; only the open set changed.
+        opened_paths.insert(vec![project]);
+        opened_paths.insert(vec![project, nested]);
+        let opened = cache.get_or_build(&tree, 1, TreeOrder::Manual, &opened_paths);
+        let nested_item = &opened[0].children()[0];
+        assert_eq!(*nested_item.identifier(), nested);
+        assert_eq!(*nested_item.children()[0].identifier(), pane);
     }
 
     #[test]

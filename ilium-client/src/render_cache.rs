@@ -45,6 +45,20 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             apply_tree_snapshot(app, tree);
             None
         }
+        ServerEvent::PaneNodeChanged(pane) => {
+            // The wire carries one node; locally the update goes through the
+            // same snapshot path so selection, pulses and pruning behave
+            // exactly as they would for a full snapshot of the same tree.
+            let pane_id = pane.id;
+            let mut tree = app.tree.clone();
+            match tree.replace_pane_in_place(*pane) {
+                Ok(()) => apply_tree_snapshot(app, tree),
+                Err(error) => {
+                    tracing::warn!("dropping PaneNodeChanged for pane {pane_id:?}: {error}");
+                }
+            }
+            None
+        }
         ServerEvent::TextTriggersChanged { settings } => {
             app.apply_text_trigger_settings(settings);
             None
@@ -1067,22 +1081,18 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[tokio::test]
-    async fn pane_frozen_event_never_waits_for_snapshot_file_io() {
+    #[test]
+    fn pane_frozen_event_never_waits_for_snapshot_file_io() {
         use std::os::unix::fs::PermissionsExt;
 
         let directory = tempfile::tempdir().unwrap();
         let frozen_directory = directory.path().join("frozen-screens");
         std::fs::create_dir_all(&frozen_directory).unwrap();
-        let mut app = app();
-        app.config_dir = Some(directory.path().to_path_buf());
         let mut tree = ilium_core::Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = tree
             .add_pane(group, "frozen Claude", PaneContentKind::Terminal)
             .unwrap();
-        apply(&mut app, ServerEvent::TreeSnapshot(tree));
-
         let fifo = frozen_directory.join(format!("{}.bin", pane_id.0));
         let status = std::process::Command::new("mkfifo")
             .arg(&fifo)
@@ -1091,7 +1101,12 @@ mod tests {
         assert!(status.success());
         std::fs::set_permissions(&fifo, std::fs::Permissions::from_mode(0o600)).unwrap();
 
-        let mut event = tokio::task::spawn_blocking(move || {
+        let config_directory = directory.path().to_path_buf();
+        let (returned_sender, returned_receiver) = std::sync::mpsc::sync_channel(1);
+        let event_thread = std::thread::spawn(move || {
+            let mut app = app();
+            app.config_dir = Some(config_directory);
+            apply(&mut app, ServerEvent::TreeSnapshot(tree));
             apply(
                 &mut app,
                 ServerEvent::PaneFrozen {
@@ -1099,21 +1114,23 @@ mod tests {
                     result: Ok(()),
                 },
             );
+            let _ = returned_sender.send(());
         });
-        let returned = tokio::time::timeout(std::time::Duration::from_millis(250), &mut event)
-            .await
+        let returned = returned_receiver
+            .recv_timeout(std::time::Duration::from_millis(250))
             .is_ok();
         if !returned {
             let fifo_for_writer = fifo.clone();
-            let writer = tokio::task::spawn_blocking(move || {
-                std::fs::OpenOptions::new()
+            let writer = std::thread::spawn(move || {
+                let file = std::fs::OpenOptions::new()
                     .write(true)
                     .open(fifo_for_writer)
-                    .unwrap()
+                    .unwrap();
+                drop(file);
             });
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), writer).await;
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut event).await;
+            writer.join().unwrap();
         }
+        event_thread.join().unwrap();
         assert!(
             returned,
             "PaneFrozen event handling must not wait for disk IO"
